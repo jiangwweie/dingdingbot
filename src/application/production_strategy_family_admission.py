@@ -12,6 +12,10 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.owner_action_carrier_catalog import (
+    get_owner_action_carrier,
+    supported_owner_action_carrier_ids,
+)
 from src.domain.strategy_family_registry import (
     StrategyFamilyType,
     initial_strategy_family_registry_seed,
@@ -69,7 +73,7 @@ OFFICIAL_ACTION_API_ENDPOINTS = {
     "execute_authorization": "POST /api/brc/owner-trial-flow/authorizations/{authorization_id}/execute",
 }
 
-CURRENT_OFFICIAL_ACTION_CARRIER_IDS = ["MI-001-BNB-LONG"]
+CURRENT_OFFICIAL_ACTION_CARRIER_IDS = supported_owner_action_carrier_ids()
 
 API_BACKED_AUTHORIZATION_ENDPOINTS = {
     "create_admission_request": "POST /api/brc/admissions/requests",
@@ -616,7 +620,7 @@ class ApiBackedAuthorizationFlow(ProductionAdmissionModel):
 
 
 class OfficialActionApiInventory(ProductionAdmissionModel):
-    status: Literal["present_bnb_only"] = "present_bnb_only"
+    status: Literal["present_scoped_carriers"] = "present_scoped_carriers"
     owner_trial_flow_supported_carrier_ids: list[str] = Field(
         default_factory=lambda: list(CURRENT_OFFICIAL_ACTION_CARRIER_IDS)
     )
@@ -769,6 +773,7 @@ class FamilyAdmissionVerdict(ProductionAdmissionModel):
     verdict: Literal[
         "dry_run_only_scope_required",
         "dry_run_only_scope_reviewed",
+        "blocked_backend_final_gate",
         "blocked_scope_required",
         "blocked_candidate_mismatch",
     ]
@@ -1283,14 +1288,17 @@ class ScopedDryRunExample(ProductionAdmissionModel):
     expected_authorization_draft_status: Literal["scope_reviewed_dry_run_only"] = (
         "scope_reviewed_dry_run_only"
     )
-    expected_final_gate_reason: Literal["official_action_api_candidate_not_supported"] = (
-        "official_action_api_candidate_not_supported"
-    )
-    expected_action_api_status: Literal["unsupported_by_current_official_action_api"] = (
-        "unsupported_by_current_official_action_api"
-    )
+    expected_final_gate_reason: Literal[
+        "official_action_api_candidate_not_supported",
+        "backend_final_gate_requires_authorization_and_live_preflight",
+    ] = "official_action_api_candidate_not_supported"
+    expected_action_api_status: Literal[
+        "unsupported_by_current_official_action_api",
+        "supported_by_current_official_action_api_but_not_actionable",
+    ] = "unsupported_by_current_official_action_api"
     expected_eligibility_decision: Literal[
-        "scope_complete_but_candidate_action_api_unsupported"
+        "scope_complete_but_candidate_action_api_unsupported",
+        "scope_complete_but_backend_final_gate_blocked",
     ] = "scope_complete_but_candidate_action_api_unsupported"
     evidence: str
     next_retry_condition: str
@@ -1441,7 +1449,7 @@ class _FamilyConfig(ProductionAdmissionModel):
     family_type: StrategyFamilyType
     family_label: str
     strategy_group: str
-    classification: Literal["dry-run-only", "blocked"]
+    classification: Literal["actionable", "dry-run-only", "blocked"]
     admission_level: str
     risk_disclosure: str
     failure_modes: list[str] = Field(default_factory=list)
@@ -2200,19 +2208,21 @@ def _scoped_dry_run_examples(rows: list[FamilyAdmissionRow]) -> list[ScopedDryRu
     for row in rows:
         if not row.strategy_family_id or not row.carrier_id or not row.supported_symbols:
             continue
+        carrier = get_owner_action_carrier(row.carrier_id)
         owner_scope_query: dict[str, object] = {
             "family": row.family,
             "strategy_family_id": row.strategy_family_id,
             "carrier_id": row.carrier_id,
-            "symbol": row.supported_symbols[0],
-            "side": "long",
-            "quantity": "0.01",
-            "max_notional": "20",
-            "leverage": "1",
+            "symbol": carrier.runtime_symbol if carrier is not None else row.supported_symbols[0],
+            "side": carrier.side if carrier is not None else "long",
+            "quantity": str(carrier.quantity) if carrier is not None else "0.01",
+            "max_notional": str(carrier.max_notional) if carrier is not None else "20",
+            "leverage": str(carrier.leverage) if carrier is not None else "1",
             "max_attempts": 1,
             "protection_mode": "mandatory_tp_sl",
             "review_requirement": "post_action_review_required_before_promotion",
         }
+        action_api_supported = row.action_api_compatibility.compatible
         examples.append(
             ScopedDryRunExample(
                 family=row.family,
@@ -2221,6 +2231,17 @@ def _scoped_dry_run_examples(rows: list[FamilyAdmissionRow]) -> list[ScopedDryRu
                 strategy_group=row.strategy_group,
                 classification=row.classification,
                 owner_scope_query=owner_scope_query,
+                expected_final_gate_reason=(
+                    "backend_final_gate_requires_authorization_and_live_preflight"
+                    if action_api_supported
+                    else "official_action_api_candidate_not_supported"
+                ),
+                expected_action_api_status=row.action_api_compatibility.status,
+                expected_eligibility_decision=(
+                    "scope_complete_but_backend_final_gate_blocked"
+                    if action_api_supported
+                    else "scope_complete_but_candidate_action_api_unsupported"
+                ),
                 evidence=(
                     "Complete bounded Owner-scope query example for read-only contract "
                     f"review of {row.family}; this is not an authorization."
@@ -3039,6 +3060,7 @@ def _final_gate_readiness_matrix(rows: list[FamilyAdmissionRow]) -> list[FinalGa
             if stage.status
             in {
                 "blocked_candidate_action_api_unsupported",
+                "blocked_backend_final_gate",
                 "blocked_scope_incomplete_or_unmatched",
                 "not_created",
                 "not_executed",
@@ -3211,7 +3233,10 @@ def _acceptance_evidence_matrix(
             status="BLOCKED",
             families=families,
             evidence_refs=[
-                "official_action_api_inventory.owner_trial_flow_supported_carrier_ids=MI-001-BNB-LONG",
+                (
+                    "official_action_api_inventory.owner_trial_flow_supported_carrier_ids="
+                    f"{','.join(CURRENT_OFFICIAL_ACTION_CARRIER_IDS)}"
+                ),
                 *[
                     f"{row.family}:{row.action_api_compatibility.status}"
                     for row in rows
@@ -3680,6 +3705,7 @@ def _admission_verdict(
         verdict: Literal[
             "dry_run_only_scope_required",
             "dry_run_only_scope_reviewed",
+            "blocked_backend_final_gate",
             "blocked_scope_required",
             "blocked_candidate_mismatch",
         ] = "dry_run_only_scope_reviewed"
@@ -3690,6 +3716,12 @@ def _admission_verdict(
     elif scope_review.verdict == "candidate_mismatch":
         verdict = "blocked_candidate_mismatch"
         summary = "Candidate remains blocked because supplied scope does not match this family/carrier."
+    elif scope_review.verdict == "complete_dry_run_only" and action_api_compatibility.compatible:
+        verdict = "blocked_backend_final_gate"
+        summary = (
+            "Owner scope is complete and the carrier is supported by the action registry, "
+            "but backend final gate and required action evidence remain blocked."
+        )
     else:
         verdict = "blocked_scope_required"
         summary = "Candidate remains blocked and requires scope/readiness evidence before retry."
@@ -3743,7 +3775,7 @@ def _pre_execution_blocked_review(
     elif not action_api_compatibility.compatible:
         reason = "official_action_api_candidate_not_supported"
     else:
-        reason = "backend_final_gate_not_actionable"
+        reason = final_gate_dry_run.reason
     final_gate_by_code = {item["code"]: item["status"] for item in final_gate_dry_run.gates}
     checks = [
         {
@@ -4231,6 +4263,8 @@ def _chain_stage_states(
     bounded_authorization_status = (
         "blocked_candidate_action_api_unsupported"
         if scope_review.verdict == "complete_dry_run_only" and not action_api_compatibility.compatible
+        else "blocked_backend_final_gate"
+        if scope_review.verdict == "complete_dry_run_only" and action_api_compatibility.compatible
         else "blocked_scope_incomplete_or_unmatched"
     )
     return [
@@ -4318,7 +4352,7 @@ def _final_gate_dry_run(
     reason = (
         "official_action_api_candidate_not_supported"
         if owner_scope_status == "pass" and not action_api_compatible
-        else "backend_final_gate_not_connected_read_only"
+        else "backend_final_gate_requires_authorization_and_live_preflight"
         if owner_scope_status == "pass" and action_api_compatible
         else "production_scope_incomplete"
     )
@@ -4537,6 +4571,15 @@ def _carrier_candidate(
             "backend_final_gate_not_actionable",
         ]
         evidence = "Carrier candidate is present for observation/dry-run review only."
+    elif config.classification == "actionable":
+        status = "registered_metadata_only"
+        blockers = [
+            "backend_final_gate_not_actionable",
+            "complete_owner_scope_required",
+            "pre_action_pg_exchange_evidence_required",
+            "mandatory_tp_sl_plan_required",
+        ]
+        evidence = "Carrier candidate is registered in the official action path but still requires live preflight evidence."
     else:
         status = "registered_metadata_only"
         blockers = [
@@ -4594,7 +4637,7 @@ def _carrier_readiness_report(
         },
         {
             "code": "official_action_api_supported",
-            "status": "block",
+            "status": "pass" if carrier_id in CURRENT_OFFICIAL_ACTION_CARRIER_IDS else "block",
         },
         {
             "code": "backend_actionable",
@@ -4602,10 +4645,11 @@ def _carrier_readiness_report(
         },
     ]
     blockers = [
-        "official_action_api_candidate_not_supported",
         "backend_final_gate_not_actionable",
         "complete_owner_scope_required",
     ]
+    if carrier_id not in CURRENT_OFFICIAL_ACTION_CARRIER_IDS:
+        blockers.insert(0, "official_action_api_candidate_not_supported")
     if carrier_id is None:
         blockers.insert(0, "carrier_candidate_missing")
     return CarrierReadinessReport(
@@ -4863,8 +4907,8 @@ def _family_configs() -> list[_FamilyConfig]:
             family_type=StrategyFamilyType.TREND_FOLLOWING,
             family_label="Trend",
             strategy_group="Major trend continuation / trend following",
-            classification="dry-run-only",
-            admission_level="Observation carrier validation",
+            classification="actionable",
+            admission_level="Owner-confirmed action-capable carrier",
             risk_disclosure=(
                 "Strategy warnings: weak current alpha proof, regime uncertainty, false continuation."
             ),
@@ -4876,12 +4920,13 @@ def _family_configs() -> list[_FamilyConfig]:
             blocker_id="BRC-PROD-ADMIT-20260604-TREND-001",
             blocker_stage="BoundedLiveAuthorization",
             blocker_evidence=(
-                "No complete new Owner scope exists for symbol, side, quantity, max_notional, "
-                "leverage, max_attempts, protection_mode, review_requirement."
+                "Trend carrier is in the official action registry, but no current explicit "
+                "Owner authorization/live preflight evidence is attached to this read model."
             ),
             bridge_method="AuthorizationDraftProposal",
             next_retry_condition=(
-                "Owner provides explicit Trend production scope and backend final gate returns actionable=true."
+                "Owner provides exact Trend scope, acknowledges risk, creates live authorization, "
+                "and backend final gate passes with PG/exchange evidence plus TP/SL readiness."
             ),
         ),
         _FamilyConfig(

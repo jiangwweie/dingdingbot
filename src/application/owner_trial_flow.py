@@ -15,13 +15,18 @@ from typing import Protocol, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.owner_action_carrier_catalog import (
+    BNB_OWNER_ACTION_CARRIER_ID,
+    get_owner_action_carrier,
+    owner_action_warning_rows,
+    required_owner_action_warning_ids,
+)
 from src.application.strategy_trial_architecture_governance import (
     StrategyTrialCarrierView,
-    build_bnb_strategy_trial_architecture_governance,
 )
 
 
-SUPPORTED_OWNER_TRIAL_CARRIER_ID = "MI-001-BNB-LONG"
+SUPPORTED_OWNER_TRIAL_CARRIER_ID = BNB_OWNER_ACTION_CARRIER_ID
 OWNER_TRIAL_FLOW_SOURCE = "owner_console"
 
 
@@ -265,7 +270,7 @@ class OwnerTrialFlowService:
                 or draft_authorization.authorization_id != authorization.authorization_id
             ):
                 draft = None
-        warnings = _warning_rows()
+        warnings = _warning_rows(carrier.carrier_id)
         warning_ids = [str(row["warning_id"]) for row in warnings]
         acknowledged = [
             code
@@ -298,7 +303,7 @@ class OwnerTrialFlowService:
     ) -> OwnerRiskAcknowledgement:
         carrier = _supported_carrier(request.carrier_id)
         requested = _dedupe(request.acknowledged_warning_codes)
-        known = set(_required_warning_ids())
+        known = set(_required_warning_ids(carrier.carrier_id))
         unknown = [code for code in requested if code not in known]
         if unknown:
             raise OwnerTrialFlowError(
@@ -344,7 +349,7 @@ class OwnerTrialFlowService:
             )
         missing = [
             code
-            for code in _required_warning_ids()
+            for code in _required_warning_ids(carrier.carrier_id)
             if code not in acknowledgement.acknowledged_warning_codes
         ]
         if missing:
@@ -433,7 +438,7 @@ class OwnerTrialFlowService:
             )
         missing = [
             code
-            for code in _required_warning_ids()
+            for code in _required_warning_ids(carrier.carrier_id)
             if code not in acknowledgement.acknowledged_warning_codes
         ]
         if missing:
@@ -466,12 +471,13 @@ class OwnerTrialFlowService:
 
 
 def _supported_carrier(carrier_id: str) -> StrategyTrialCarrierView:
-    if carrier_id != SUPPORTED_OWNER_TRIAL_CARRIER_ID:
+    carrier = get_owner_action_carrier(carrier_id)
+    if carrier is None:
         raise OwnerTrialFlowError(
             "unsupported_carrier",
             f"Unsupported owner trial carrier: {carrier_id}",
         )
-    return build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
+    return carrier
 
 
 def _validate_draft_scope(
@@ -518,11 +524,11 @@ def _validate_activation_scope(
         raise OwnerTrialFlowError("symbol_mismatch", "Activation symbol does not match draft.")
     if request.side != draft.side:
         raise OwnerTrialFlowError("side_mismatch", "Activation side does not match draft.")
-    if request.max_notional != draft.max_notional:
+    if not _decimal_scope_equal(request.max_notional, draft.max_notional):
         raise OwnerTrialFlowError("cap_violation", "Activation max notional does not match draft.")
-    if request.quantity != draft.quantity:
+    if not _decimal_scope_equal(request.quantity, draft.quantity):
         raise OwnerTrialFlowError("cap_violation", "Activation quantity does not match draft.")
-    if request.leverage != draft.leverage:
+    if not _decimal_scope_equal(request.leverage, draft.leverage):
         raise OwnerTrialFlowError("cap_violation", "Activation leverage does not match draft.")
     if request.protection_plan_type != draft.protection_plan_type:
         raise OwnerTrialFlowError(
@@ -531,26 +537,16 @@ def _validate_activation_scope(
         )
 
 
-def _required_warning_ids() -> list[str]:
-    return [
-        warning.warning_id
-        for warning in build_bnb_strategy_trial_architecture_governance().owner_review_packet.strategy_warnings
-        if warning.owner_ack_required
-    ]
+def _required_warning_ids(carrier_id: str) -> list[str]:
+    return required_owner_action_warning_ids(carrier_id)
 
 
-def _warning_rows() -> list[dict[str, str | bool]]:
-    return [
-        {
-            "warning_id": warning.warning_id,
-            "severity": warning.severity,
-            "description": warning.description,
-            "owner_ack_required": warning.owner_ack_required,
-            "blocks_after_ack": warning.blocks_after_ack,
-            "classification": "strategy_warning",
-        }
-        for warning in build_bnb_strategy_trial_architecture_governance().owner_review_packet.strategy_warnings
-    ]
+def _warning_rows(carrier_id: str) -> list[dict[str, str | bool]]:
+    return owner_action_warning_rows(carrier_id)
+
+
+def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
+    return abs(Decimal(str(left)) - Decimal(str(right))) <= Decimal("0.000000000001")
 
 
 def _hard_blocker_rows(

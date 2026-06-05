@@ -195,6 +195,20 @@ def _activation_request(**patch):
     return OwnerLiveAuthorizationActivationRequest(**payload)
 
 
+def _trend_activation_request(**patch):
+    payload = {
+        "carrier_id": "TF-001-live-readonly-v0",
+        "symbol": "SOL/USDT:USDT",
+        "side": "long",
+        "max_notional": "20",
+        "quantity": "0.1",
+        "leverage": "1",
+        "protection_plan_type": "single_tp_plus_sl",
+    }
+    payload.update(patch)
+    return OwnerLiveAuthorizationActivationRequest(**payload)
+
+
 def _clear_fact_snapshot(
     *,
     startup_guard_clear: bool = False,
@@ -300,6 +314,75 @@ def _replace_fact(
             for fact in snapshot.facts
         ],
     )
+
+
+def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            current = await service.current(carrier_id="TF-001-live-readonly-v0")
+            assert current.selected_carrier_id == "TF-001-live-readonly-v0"
+            assert current.carrier["symbol"] == "SOL/USDT:USDT"
+            assert current.unacknowledged_warnings
+
+            acknowledgement = await service.create_risk_acknowledgement(
+                OwnerRiskAcknowledgementCreateRequest(
+                    carrier_id="TF-001-live-readonly-v0",
+                    acknowledged_warning_codes=[
+                        str(item["warning_id"]) for item in current.strategy_warnings
+                    ],
+                ),
+                operator_id="owner",
+            )
+            draft = await service.create_authorization_draft(
+                BoundedLiveTrialAuthorizationDraftCreateRequest(
+                    carrier_id="TF-001-live-readonly-v0",
+                    linked_acknowledgement_id=acknowledgement.acknowledgement_id,
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    max_notional="20",
+                    quantity="0.1",
+                    leverage="1",
+                    protection_plan_type="single_tp_plus_sl",
+                ),
+                operator_id="owner",
+            )
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run(
+                BnbLiveExecutionBridgeDryRunRequest(
+                    carrier_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    max_notional="20",
+                    quantity="0.1",
+                    leverage="1",
+                    protection_plan_type="single_tp_plus_sl",
+                ),
+                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+            )
+
+            assert authorization.carrier_id == "TF-001-live-readonly-v0"
+            assert result.final_preflight_result == "passed"
+            assert "unsupported_carrier" not in result.hard_blockers
+            assert result.execution_plan_preview.symbol == "SOL/USDT:USDT"
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
 
 
 def test_risk_acknowledgement_can_be_persisted_to_pg_for_supported_carrier():
@@ -1195,11 +1278,15 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
     asyncio.run(scenario())
 
 
-def test_owner_bounded_execution_registry_v1_only_registers_mi001_bnb_long():
+def test_owner_bounded_execution_registry_registers_scoped_owner_action_carriers():
     registry = default_owner_bounded_execution_registry()
 
-    assert registry.supported_carrier_ids == ["MI-001-BNB-LONG"]
+    assert registry.supported_carrier_ids == [
+        "MI-001-BNB-LONG",
+        "TF-001-live-readonly-v0",
+    ]
     assert registry.get("MI-001-BNB-LONG") is not None
+    assert registry.get("TF-001-live-readonly-v0") is not None
     assert registry.get("TB-BTC-SHORT") is None
 
 

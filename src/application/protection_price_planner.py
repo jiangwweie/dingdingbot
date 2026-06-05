@@ -15,6 +15,10 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.owner_action_carrier_catalog import (
+    BNB_OWNER_ACTION_CARRIER_ID,
+    TREND_OWNER_ACTION_CARRIER_ID,
+)
 from src.application.owner_trial_flow import BoundedLiveTrialAuthorization
 from src.application.protection_order_planner import plan_precision_aware_protection_orders
 
@@ -269,15 +273,25 @@ class ProtectionPlannerService:
 
 
 def default_protection_planner_configs() -> dict[str, ProtectionPlannerConfig]:
-    config = ProtectionPlannerConfig(
-        carrier_id="MI-001-BNB-LONG",
-        symbol="BNB/USDT:USDT",
-        side="long",
-        stop_loss_fraction=Decimal("0.01"),
-        tp_targets_pct=(Decimal("1.0"),),
-        tp_ratios=(Decimal("1.0"),),
-    )
-    return {config.carrier_id: config}
+    configs = [
+        ProtectionPlannerConfig(
+            carrier_id=BNB_OWNER_ACTION_CARRIER_ID,
+            symbol="BNB/USDT:USDT",
+            side="long",
+            stop_loss_fraction=Decimal("0.01"),
+            tp_targets_pct=(Decimal("1.0"),),
+            tp_ratios=(Decimal("1.0"),),
+        ),
+        ProtectionPlannerConfig(
+            carrier_id=TREND_OWNER_ACTION_CARRIER_ID,
+            symbol="SOL/USDT:USDT",
+            side="long",
+            stop_loss_fraction=Decimal("0.01"),
+            tp_targets_pct=(Decimal("1.0"),),
+            tp_ratios=(Decimal("1.0"),),
+        ),
+    ]
+    return {config.carrier_id: config for config in configs}
 
 
 def build_single_tp_sl_plan(

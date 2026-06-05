@@ -16,13 +16,13 @@ def test_production_strategy_family_admission_state_structures_three_families():
     by_family = {item.family: item for item in state.families}
     assert set(by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     assert by_family["Trend"].strategy_family_id == "TF-001-live-readonly-v0"
-    assert by_family["Trend"].classification == "dry-run-only"
+    assert by_family["Trend"].classification == "actionable"
     assert by_family["Trend"].strategy_group_mapping.bridge_method == "StrategyGroupMappingProposal"
     assert by_family["Trend"].strategy_group_mapping.strategy_group == (
         "Major trend continuation / trend following"
     )
-    assert by_family["Trend"].carrier_candidate.status == "observation_candidate_only"
-    assert by_family["Trend"].carrier_readiness_report.status == "observation_ready_not_actionable"
+    assert by_family["Trend"].carrier_candidate.status == "registered_metadata_only"
+    assert by_family["Trend"].carrier_readiness_report.status == "candidate_registered_not_actionable"
     assert by_family["Trend"].observation_bridge.bridge_method == "TrendObservation"
     assert by_family["Trend"].observation_bridge.status == "observation_bridge_only"
     assert by_family["Trend"].risk_disclosure_contract.bridge_method == "RiskDisclosureDraft"
@@ -47,7 +47,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert by_family["Mean reversion"].observation_bridge.bridge_method == "CarrierCandidate"
     assert by_family["Mean reversion"].observation_bridge.status == "candidate_metadata_only"
     assert "liquidity wick" in by_family["Mean reversion"].risk_disclosure_contract.failure_modes
-    assert state.classification_counts == {"dry-run-only": 1, "blocked": 2}
+    assert state.classification_counts == {"actionable": 1, "blocked": 2}
     baseline = state.production_baseline_context
     assert baseline.status == "historical_bnb_context_not_action_permission"
     assert baseline.prior_scoped_carrier_id == "MI-001-BNB-LONG"
@@ -79,7 +79,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert baseline.exchange_write_action is False
     completion_by_family = {item.family: item for item in state.family_completion_matrix}
     assert set(completion_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
-    assert completion_by_family["Trend"].completion_status == "dry_run_only"
+    assert completion_by_family["Trend"].completion_status == "actionable"
     assert completion_by_family["Trend"].strategy_group == (
         "Major trend continuation / trend following"
     )
@@ -101,8 +101,8 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.mutates_pg is False
     risk_control_by_family = {item.family: item for item in state.admission_risk_control_matrix}
     assert set(risk_control_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
-    assert risk_control_by_family["Trend"].admission_level == "Observation carrier validation"
-    assert risk_control_by_family["Trend"].classification == "dry-run-only"
+    assert risk_control_by_family["Trend"].admission_level == "Owner-confirmed action-capable carrier"
+    assert risk_control_by_family["Trend"].classification == "actionable"
     assert risk_control_by_family["Trend"].risk_disclosure_status == "draft_for_owner_review"
     assert risk_control_by_family["Trend"].budget_envelope_status == (
         "scope_incomplete_no_numbers_fabricated"
@@ -112,7 +112,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
         "blocked_scope_incomplete"
     )
     assert risk_control_by_family["Trend"].action_api_status == (
-        "unsupported_by_current_official_action_api"
+        "supported_by_current_official_action_api_but_not_actionable"
     )
     assert risk_control_by_family["Trend"].final_gate_status == "blocked"
     assert risk_control_by_family["Trend"].final_gate_reason == "production_scope_incomplete"
@@ -270,17 +270,15 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.starts_strategy_execution is False
         assert item.places_order is False
         assert item.mutates_pg is False
-    assert len(state.blocker_retry_matrix) == 21
+    assert len(state.blocker_retry_matrix) == 20
     assert set(retry_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     trend_retry_by_id = {item.blocker_id: item for item in retry_by_family["Trend"]}
     assert "BRC-PROD-ADMIT-20260604-TREND-001" in trend_retry_by_id
     assert "BRC-PROD-ADMIT-20260604-TREND-001-SCOPE" in trend_retry_by_id
+    assert "BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API" not in trend_retry_by_id
     assert trend_retry_by_id[
-        "BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API"
-    ].bridge_method == "ActionCandidate"
-    assert "official Owner trial-flow registry supports candidate carrier" in (
-        trend_retry_by_id["BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API"].retry_requires
-    )
+        "BRC-PROD-ADMIT-20260604-TREND-001-FINAL-GATE"
+    ].bridge_method == "FinalGateDryRun"
     assert trend_retry_by_id[
         "BRC-PROD-ADMIT-20260604-TREND-001-PROTECTION"
     ].bridge_method == "ProtectionPlanDraft"
@@ -427,7 +425,9 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.final_gate_reason == "production_scope_incomplete"
         assert item.owner_scope_verdict == "not_provided"
         assert checks["owner_scope_complete"].status == "block"
-        assert checks["official_action_api_candidate_supported"].status == "block"
+        assert checks["official_action_api_candidate_supported"].status == (
+            "pass" if item.family == "Trend" else "block"
+        )
         assert checks["backend_final_gate_actionable"].status == "block"
         assert "BoundedLiveAuthorization" in item.blocking_stages
         assert "ExecutionIntent" in item.blocking_stages
@@ -451,7 +451,11 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.selection_status == "not_selected_for_live_action"
         assert item.reason == "owner_scope_incomplete_or_unmatched"
         assert item.owner_scope_verdict == "not_provided"
-        assert item.action_api_status == "unsupported_by_current_official_action_api"
+        assert item.action_api_status == (
+            "supported_by_current_official_action_api_but_not_actionable"
+            if item.family == "Trend"
+            else "unsupported_by_current_official_action_api"
+        )
         assert item.final_gate_reason == "production_scope_incomplete"
         assert "final_gate_actionable_true" in item.missing_evidence
         assert "execution_intent" in item.missing_evidence
@@ -475,7 +479,9 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.eligibility == "not_eligible"
         assert item.decision == "scope_incomplete_or_unmatched"
         assert checks["owner_scope_complete"].status == "block"
-        assert checks["official_action_api_candidate_supported"].status == "block"
+        assert checks["official_action_api_candidate_supported"].status == (
+            "pass" if item.family == "Trend" else "block"
+        )
         assert checks["backend_final_gate_actionable"].status == "block"
         assert checks["pre_action_pg_snapshot"].status == "required_before_live_action"
         assert checks["pre_action_exchange_snapshot"].status == "required_before_live_action"
@@ -496,9 +502,9 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.mutates_pg is False
     assert state.sprint_acceptance_verdict.status == "in_progress_pass_with_constraint"
     assert state.sprint_acceptance_verdict.completed_family_count == 0
-    assert state.sprint_acceptance_verdict.dry_run_only_family_count == 1
+    assert state.sprint_acceptance_verdict.dry_run_only_family_count == 0
     assert state.sprint_acceptance_verdict.blocked_family_count == 2
-    assert state.sprint_acceptance_verdict.actionable_family_count == 0
+    assert state.sprint_acceptance_verdict.actionable_family_count == 1
     assert state.sprint_acceptance_verdict.live_execution_ready is False
     assert state.sprint_acceptance_verdict.frontend_action_enabled is False
     family_report_by_family = {item.family: item for item in state.family_final_report_matrix}
@@ -763,7 +769,17 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert item.mutates_pg is False
     example_by_family = {item.family: item for item in state.scoped_dry_run_examples}
     assert set(example_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
-    assert example_by_family["Trend"].owner_scope_query["symbol"] == "BTC/USDT:USDT"
+    assert example_by_family["Trend"].owner_scope_query["symbol"] == "SOL/USDT:USDT"
+    assert example_by_family["Trend"].owner_scope_query["quantity"] == "0.1"
+    assert example_by_family["Trend"].expected_final_gate_reason == (
+        "backend_final_gate_requires_authorization_and_live_preflight"
+    )
+    assert example_by_family["Trend"].expected_action_api_status == (
+        "supported_by_current_official_action_api_but_not_actionable"
+    )
+    assert example_by_family["Trend"].expected_eligibility_decision == (
+        "scope_complete_but_backend_final_gate_blocked"
+    )
     assert example_by_family["Volatility expansion"].owner_scope_query["strategy_family_id"] == (
         "VB-001-live-readonly-v0"
     )
@@ -773,13 +789,7 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
     for item in example_by_family.values():
         assert item.expected_scope_verdict == "complete_dry_run_only"
         assert item.expected_authorization_draft_status == "scope_reviewed_dry_run_only"
-        assert item.expected_final_gate_reason == "official_action_api_candidate_not_supported"
-        assert item.expected_action_api_status == "unsupported_by_current_official_action_api"
-        assert item.expected_eligibility_decision == (
-            "scope_complete_but_candidate_action_api_unsupported"
-        )
         assert item.owner_scope_query["side"] == "long"
-        assert item.owner_scope_query["quantity"] == "0.01"
         assert item.owner_scope_query["max_notional"] == "20"
         assert item.owner_scope_query["leverage"] == "1"
         assert item.owner_scope_query["max_attempts"] == 1
@@ -837,10 +847,12 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert item.mutates_pg is False
     assert state.official_action_api_inventory.trading_console_action_api_exposed is False
     assert state.official_action_api_inventory.owner_trial_flow_supported_carrier_ids == [
-        "MI-001-BNB-LONG"
+        "MI-001-BNB-LONG",
+        "TF-001-live-readonly-v0",
     ]
     assert state.official_action_api_inventory.owner_bounded_execution_supported_carrier_ids == [
-        "MI-001-BNB-LONG"
+        "MI-001-BNB-LONG",
+        "TF-001-live-readonly-v0",
     ]
     assert state.audit_chain_gap_report.bridge_method == "AuditChainGapReport"
     assert state.audit_chain_gap_report.live_action_evidence_present is False
@@ -897,12 +909,18 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert row.carrier_readiness_report.places_order is False
         assert row.carrier_readiness_report.mutates_pg is False
         readiness_checks = {check["code"]: check for check in row.carrier_readiness_report.readiness_checks}
-        assert readiness_checks["official_action_api_supported"]["status"] == "block"
+        assert readiness_checks["official_action_api_supported"]["status"] == (
+            "pass" if row.family == "Trend" else "block"
+        )
         assert readiness_checks["backend_actionable"]["status"] == "block"
         assert row.action_candidate.bridge_method == "ActionCandidate"
         assert row.action_candidate.family == row.family
         assert row.action_candidate.carrier_id == row.carrier_id
-        assert row.action_candidate.status == "unsupported_by_current_official_action_api"
+        assert row.action_candidate.status == (
+            "supported_but_backend_not_actionable"
+            if row.family == "Trend"
+            else "unsupported_by_current_official_action_api"
+        )
         assert row.action_candidate.action_allowed is False
         assert row.action_candidate.backend_actionable is False
         assert row.action_candidate.frontend_action_enabled is False
@@ -982,11 +1000,18 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert all(draft.not_submitted is True for draft in row.api_request_drafts)
         assert all(draft.places_order is False for draft in row.api_request_drafts)
         assert all(draft.creates_execution_intent is False for draft in row.api_request_drafts)
-        assert row.action_api_compatibility.compatible is False
-        assert row.action_api_compatibility.status == "unsupported_by_current_official_action_api"
-        assert "candidate_carrier_not_supported_by_owner_trial_flow" in (
-            row.action_api_compatibility.blockers
+        assert row.action_api_compatibility.compatible is (row.family == "Trend")
+        assert row.action_api_compatibility.status == (
+            "supported_by_current_official_action_api_but_not_actionable"
+            if row.family == "Trend"
+            else "unsupported_by_current_official_action_api"
         )
+        if row.family == "Trend":
+            assert row.action_api_compatibility.blockers == []
+        else:
+            assert "candidate_carrier_not_supported_by_owner_trial_flow" in (
+                row.action_api_compatibility.blockers
+            )
         assert row.execution_intent_state == "not_created"
         assert row.entry_state == "not_executed"
         assert row.final_gate_dry_run.creates_execution_intent is False
@@ -1063,8 +1088,8 @@ def test_production_strategy_family_admission_state_exposes_bridge_contracts():
     assert by_bridge_status["TrendObservation"].status == "present"
     assert by_bridge_status["TrendObservation"].families == ["Trend"]
     assert by_bridge_status["StrategyGroupMappingProposal"].status == "present"
-    assert by_bridge_status["CarrierCandidate"].status == "mixed"
-    assert by_bridge_status["CarrierReadinessReport"].status == "mixed"
+    assert by_bridge_status["CarrierCandidate"].status == "present"
+    assert by_bridge_status["CarrierReadinessReport"].status == "present"
     assert by_bridge_status["ActionCandidate"].status == "blocked"
     assert by_bridge_status["RiskDisclosureDraft"].status == "draft"
     assert by_bridge_status["AuthorizationDraftProposal"].status == "draft"
@@ -1090,7 +1115,10 @@ def test_production_strategy_family_admission_state_exposes_bridge_contracts():
     for row in state.families:
         gate_blocker_ids = {item.id for item in row.gate_blocker_records}
         assert f"{row.blocker_record.id}-SCOPE" in gate_blocker_ids
-        assert f"{row.blocker_record.id}-ACTION-API" in gate_blocker_ids
+        if row.family == "Trend":
+            assert f"{row.blocker_record.id}-ACTION-API" not in gate_blocker_ids
+        else:
+            assert f"{row.blocker_record.id}-ACTION-API" in gate_blocker_ids
         assert f"{row.blocker_record.id}-FINAL-GATE" in gate_blocker_ids
         assert f"{row.blocker_record.id}-EVIDENCE" in gate_blocker_ids
         assert f"{row.blocker_record.id}-PROTECTION" in gate_blocker_ids
@@ -1173,9 +1201,9 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
             "family": "Trend",
             "strategy_family_id": "TF-001-live-readonly-v0",
             "carrier_id": "TF-001-live-readonly-v0",
-            "symbol": "BTC/USDT:USDT",
+            "symbol": "SOL/USDT:USDT",
             "side": "long",
-            "quantity": "0.01",
+            "quantity": "0.1",
             "max_notional": "20",
             "leverage": "1",
             "max_attempts": 1,
@@ -1195,10 +1223,14 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     assert trend_risk_control.budget_envelope_status == "scope_complete_dry_run_only"
     assert trend_risk_control.authorization_draft_status == "scope_reviewed_dry_run_only"
     assert trend_risk_control.bounded_live_authorization_status == (
-        "blocked_candidate_action_api_unsupported"
+        "blocked_backend_final_gate"
     )
-    assert trend_risk_control.action_api_status == "unsupported_by_current_official_action_api"
-    assert trend_risk_control.final_gate_reason == "official_action_api_candidate_not_supported"
+    assert trend_risk_control.action_api_status == (
+        "supported_by_current_official_action_api_but_not_actionable"
+    )
+    assert trend_risk_control.final_gate_reason == (
+        "backend_final_gate_requires_authorization_and_live_preflight"
+    )
     assert trend_risk_control.protection_plan_status == "scope_reviewed_draft_only"
     assert trend_risk_control.review_contract_status == "draft_no_action_evidence"
     assert trend_risk_control.audit_chain_status == "gap_open_no_live_action_evidence"
@@ -1215,9 +1247,9 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     assert trend_boundary.required_scope_fields == REQUIRED_OWNER_SCOPE_FIELDS
     assert trend_boundary.provided_scope_fields == REQUIRED_OWNER_SCOPE_FIELDS
     assert trend_boundary.missing_scope_fields == []
-    assert trend_boundary.requested_symbol == "BTC/USDT:USDT"
+    assert trend_boundary.requested_symbol == "SOL/USDT:USDT"
     assert trend_boundary.requested_side == "long"
-    assert trend_boundary.requested_quantity == "0.01"
+    assert trend_boundary.requested_quantity == "0.1"
     assert trend_boundary.requested_max_notional == "20"
     assert trend_boundary.requested_leverage == "1"
     assert trend_boundary.requested_max_attempts == 1
@@ -1244,7 +1276,7 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     assert trend_chain["AuthorizationDraft"].status == "scope_reviewed_dry_run_only"
     assert trend_chain["AuthorizationDraft"].blocker_ids == []
     assert trend_chain["BoundedLiveAuthorization"].status == (
-        "blocked_candidate_action_api_unsupported"
+        "blocked_backend_final_gate"
     )
     assert trend_chain["BoundedLiveAuthorization"].blocker_ids
     assert trend_chain["ExecutionIntent"].status == "not_created"
@@ -1270,7 +1302,7 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
         if item.family == "Trend"
     }
     assert "BRC-PROD-ADMIT-20260604-TREND-001-SCOPE" not in trend_retry_by_id
-    assert "BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API" in trend_retry_by_id
+    assert "BRC-PROD-ADMIT-20260604-TREND-001-ACTION-API" not in trend_retry_by_id
     assert "BRC-PROD-ADMIT-20260604-TREND-001-FINAL-GATE" in trend_retry_by_id
     assert "BRC-PROD-ADMIT-20260604-TREND-001-PROTECTION" in trend_retry_by_id
     assert "BRC-PROD-ADMIT-20260604-TREND-001-REVIEW" in trend_retry_by_id
@@ -1343,11 +1375,13 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     trend_final_gate = final_gate_by_family["Trend"]
     final_gate_checks = {check.code: check for check in trend_final_gate.checks}
     assert trend_final_gate.status == "blocked"
-    assert trend_final_gate.readiness_level == "scope_reviewed_action_api_blocked"
-    assert trend_final_gate.final_gate_reason == "official_action_api_candidate_not_supported"
+    assert trend_final_gate.readiness_level == "scope_reviewed_backend_final_gate_blocked"
+    assert trend_final_gate.final_gate_reason == (
+        "backend_final_gate_requires_authorization_and_live_preflight"
+    )
     assert trend_final_gate.owner_scope_verdict == "complete_dry_run_only"
     assert final_gate_checks["owner_scope_complete"].status == "pass"
-    assert final_gate_checks["official_action_api_candidate_supported"].status == "block"
+    assert final_gate_checks["official_action_api_candidate_supported"].status == "pass"
     assert final_gate_checks["backend_final_gate_actionable"].status == "block"
     assert "BoundedLiveAuthorization" in trend_final_gate.blocking_stages
     assert "ExecutionIntent" in trend_final_gate.blocking_stages
@@ -1365,9 +1399,11 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     trend_decision = decision_by_family["Trend"]
     assert trend_decision.decision == "do_not_execute"
     assert trend_decision.selection_status == "not_selected_for_live_action"
-    assert trend_decision.reason == "official_action_api_candidate_not_supported"
+    assert trend_decision.reason == "backend_final_gate_not_actionable"
     assert trend_decision.owner_scope_verdict == "complete_dry_run_only"
-    assert trend_decision.final_gate_reason == "official_action_api_candidate_not_supported"
+    assert trend_decision.final_gate_reason == (
+        "backend_final_gate_requires_authorization_and_live_preflight"
+    )
     assert "final_gate_actionable_true" in trend_decision.missing_evidence
     assert "execution_intent" in trend_decision.missing_evidence
     assert trend_decision.live_action_taken is False
@@ -1382,10 +1418,10 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     assert trend_decision.mutates_pg is False
     assert trend_decision.exchange_write_action is False
     completion_by_family = {item.family: item for item in state.family_completion_matrix}
-    assert completion_by_family["Trend"].completion_status == "dry_run_only"
+    assert completion_by_family["Trend"].completion_status == "actionable"
     assert "AuthorizationDraft" in completion_by_family["Trend"].completed_stages
     assert completion_by_family["Trend"].blocked_stage_statuses["BoundedLiveAuthorization"] == (
-        "blocked_candidate_action_api_unsupported"
+        "blocked_backend_final_gate"
     )
     assert "scope_review=complete_dry_run_only" in completion_by_family["Trend"].evidence_refs
     assert completion_by_family["Trend"].places_order is False
@@ -1393,9 +1429,9 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     trend_eligibility = eligibility_by_family["Trend"]
     trend_checks = {check.code: check for check in trend_eligibility.checks}
     assert trend_eligibility.eligibility == "not_eligible"
-    assert trend_eligibility.decision == "scope_complete_but_candidate_action_api_unsupported"
+    assert trend_eligibility.decision == "scope_complete_but_backend_final_gate_blocked"
     assert trend_checks["owner_scope_complete"].status == "pass"
-    assert trend_checks["official_action_api_candidate_supported"].status == "block"
+    assert trend_checks["official_action_api_candidate_supported"].status == "pass"
     assert trend_checks["backend_final_gate_actionable"].status == "block"
     assert trend_eligibility.places_order is False
     acceptance_by_item = {item.item: item for item in state.acceptance_evidence_matrix}
@@ -1431,16 +1467,16 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     assert by_bridge_status["FinalGateDryRun"].row_statuses["Trend"] == "blocked"
     assert by_bridge_status["PreExecutionBlockedReview"].row_statuses["Trend"] == "blocked"
     assert by_bridge_status["ActionCandidate"].row_statuses["Trend"] == (
-        "unsupported_by_current_official_action_api"
+        "supported_but_backend_not_actionable"
     )
     assert trend.budget_envelope_draft.status == "scope_complete_dry_run_only"
     assert trend.budget_envelope_draft.bridge_method == "BudgetEnvelopeDraft"
-    assert trend.budget_envelope_draft.scope["symbol"] == "BTC/USDT:USDT"
+    assert trend.budget_envelope_draft.scope["symbol"] == "SOL/USDT:USDT"
     assert trend.budget_envelope_draft.provided_scope_fields == REQUIRED_OWNER_SCOPE_FIELDS
     assert trend.budget_envelope_draft.missing_scope_fields == []
-    assert trend.budget_envelope_draft.symbol == "BTC/USDT:USDT"
+    assert trend.budget_envelope_draft.symbol == "SOL/USDT:USDT"
     assert trend.budget_envelope_draft.side == "long"
-    assert trend.budget_envelope_draft.quantity == "0.01"
+    assert trend.budget_envelope_draft.quantity == "0.1"
     assert trend.budget_envelope_draft.max_notional == "20"
     assert trend.budget_envelope_draft.leverage == "1"
     assert trend.budget_envelope_draft.max_attempts == 1
@@ -1463,12 +1499,12 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     assert trend.budget_envelope_draft.places_order is False
     assert trend.budget_envelope_draft.mutates_pg is False
     assert trend.authorization_draft_proposal.status == "scope_reviewed_dry_run_only"
-    assert trend.authorization_draft_proposal.scope["symbol"] == "BTC/USDT:USDT"
+    assert trend.authorization_draft_proposal.scope["symbol"] == "SOL/USDT:USDT"
     assert trend.authorization_draft_proposal.budget_envelope.max_notional == "20"
-    assert trend.authorization_draft_proposal.budget_envelope.quantity == "0.01"
+    assert trend.authorization_draft_proposal.budget_envelope.quantity == "0.1"
     assert trend.authorization_draft_proposal.budget_envelope.action_allowed is False
     assert trend.protection_plan_draft.status == "scope_reviewed_draft_only"
-    assert trend.protection_plan_draft.scope["symbol"] == "BTC/USDT:USDT"
+    assert trend.protection_plan_draft.scope["symbol"] == "SOL/USDT:USDT"
     assert "complete_matched_owner_scope" not in trend.protection_plan_draft.missing_fields
     assert "take_profit_price" in trend.protection_plan_draft.missing_fields
     assert "stop_loss_price" in trend.protection_plan_draft.missing_fields
@@ -1500,20 +1536,22 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     )
     account_facts = admission_request_draft.payload_template["account_facts_snapshot_json"]
     assert isinstance(account_facts, dict)
-    assert account_facts["owner_scope"]["symbol"] == "BTC/USDT:USDT"
+    assert account_facts["owner_scope"]["symbol"] == "SOL/USDT:USDT"
     assert "evidence_packet_id" in admission_request_draft.unresolved_refs
     assert "pre_action_account_facts_snapshot_ref" in admission_request_draft.unresolved_refs
     assert admission_request_draft.not_submitted is True
     assert admission_request_draft.places_order is False
-    assert trend.final_gate_dry_run.reason == "official_action_api_candidate_not_supported"
+    assert trend.final_gate_dry_run.reason == (
+        "backend_final_gate_requires_authorization_and_live_preflight"
+    )
     assert trend.pre_execution_blocked_review.blocked_reason == (
-        "official_action_api_candidate_not_supported"
+        "backend_final_gate_requires_authorization_and_live_preflight"
     )
     trend_pre_execution_checks = {
         check["code"]: check for check in trend.pre_execution_blocked_review.checks
     }
     assert trend_pre_execution_checks["owner_scope_complete"]["status"] == "pass"
-    assert trend_pre_execution_checks["official_action_api_candidate_supported"]["status"] == "block"
+    assert trend_pre_execution_checks["official_action_api_candidate_supported"]["status"] == "pass"
     assert trend.pre_execution_blocked_review.action_allowed is False
     assert trend.final_gate_dry_run.gates[0] == {
         "code": "owner_scope_complete",
@@ -1525,27 +1563,28 @@ def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     }
     assert trend.final_gate_dry_run.gates[2] == {
         "code": "official_action_api_candidate_supported",
-        "status": "block",
+        "status": "pass",
     }
     assert trend.action_api_compatibility.candidate_carrier_id == "TF-001-live-readonly-v0"
-    assert trend.action_api_compatibility.compatible is False
+    assert trend.action_api_compatibility.compatible is True
     assert trend.action_candidate.candidate_carrier_id == "TF-001-live-readonly-v0"
     assert trend.action_candidate.action_allowed is False
     assert "complete_matched_owner_scope_required" not in trend.action_candidate.blockers
-    assert "candidate_carrier_not_supported_by_owner_trial_flow" in trend.action_candidate.blockers
+    assert "candidate_carrier_not_supported_by_owner_trial_flow" not in trend.action_candidate.blockers
+    assert "backend_final_gate_actionable_true_required" in trend.action_candidate.blockers
     assert trend.admission_verdict is not None
-    assert trend.admission_verdict.verdict == "dry_run_only_scope_reviewed"
+    assert trend.admission_verdict.verdict == "blocked_backend_final_gate"
     assert trend.admission_verdict.may_execute_live is False
     assert "AuthorizationDraft" in trend.admission_verdict.completed_stages
     assert "BoundedLiveAuthorization" in trend.admission_verdict.blocked_stages
     trend_gate_blocker_ids = {item.id for item in trend.gate_blocker_records}
     assert f"{trend.blocker_record.id}-SCOPE" not in trend_gate_blocker_ids
-    assert f"{trend.blocker_record.id}-ACTION-API" in trend_gate_blocker_ids
+    assert f"{trend.blocker_record.id}-ACTION-API" not in trend_gate_blocker_ids
     assert f"{trend.blocker_record.id}-FINAL-GATE" in trend_gate_blocker_ids
     assert f"{trend.blocker_record.id}-EVIDENCE" in trend_gate_blocker_ids
     by_stage = {stage.stage: stage for stage in trend.chain_stage_states}
     assert by_stage["AuthorizationDraft"].status == "scope_reviewed_dry_run_only"
-    assert by_stage["BoundedLiveAuthorization"].status == "blocked_candidate_action_api_unsupported"
+    assert by_stage["BoundedLiveAuthorization"].status == "blocked_backend_final_gate"
     assert by_stage["ExecutionIntent"].status == "not_created"
     assert by_stage["Entry"].status == "not_executed"
     assert by_stage["TP/SL"].status == "draft_required_mandatory_tp_sl"
@@ -1608,7 +1647,10 @@ def test_scoped_dry_run_examples_bind_all_families_without_actions():
         assert row.entry_state == "not_executed"
         gate_blocker_ids = {item.id for item in row.gate_blocker_records}
         assert f"{row.blocker_record.id}-SCOPE" not in gate_blocker_ids
-        assert f"{row.blocker_record.id}-ACTION-API" in gate_blocker_ids
+        if example.family == "Trend":
+            assert f"{row.blocker_record.id}-ACTION-API" not in gate_blocker_ids
+        else:
+            assert f"{row.blocker_record.id}-ACTION-API" in gate_blocker_ids
         assert f"{row.blocker_record.id}-FINAL-GATE" in gate_blocker_ids
         eligibility = next(
             item for item in scoped_state.live_action_eligibility_matrix if item.family == example.family
@@ -1616,7 +1658,9 @@ def test_scoped_dry_run_examples_bind_all_families_without_actions():
         checks = {check.code: check for check in eligibility.checks}
         assert eligibility.decision == example.expected_eligibility_decision
         assert checks["owner_scope_complete"].status == "pass"
-        assert checks["official_action_api_candidate_supported"].status == "block"
+        assert checks["official_action_api_candidate_supported"].status == (
+            "pass" if example.family == "Trend" else "block"
+        )
         assert checks["backend_final_gate_actionable"].status == "block"
         assert eligibility.backend_actionable is False
         assert eligibility.frontend_action_enabled is False

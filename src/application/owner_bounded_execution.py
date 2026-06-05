@@ -1,7 +1,8 @@
 """Owner-operated bounded live-trial execution chain.
 
-This module owns the generic authorization-driven execution boundary. It is
-carrier-generic; v1 registers only the MI-001-BNB-LONG adapter.
+This module owns the generic authorization-driven execution boundary. Adapter
+registration is deliberately narrow and driven by the Owner action-carrier
+catalog.
 """
 
 from __future__ import annotations
@@ -22,6 +23,10 @@ from src.application.bnb_live_execution_bridge import (
     BnbLiveExecutionBridgeDryRunRequest,
     BnbLiveExecutionBridgeDryRunResponse,
     BnbLiveExecutionBridgeDryRunService,
+)
+from src.application.owner_action_carrier_catalog import (
+    get_owner_action_carrier,
+    supported_owner_action_carrier_ids,
 )
 from src.application.owner_trial_flow import BoundedLiveTrialAuthorization
 from src.application.protection_price_planner import (
@@ -283,19 +288,18 @@ class OwnerBoundedExecutionRegistry:
 
 
 @dataclass(frozen=True)
-class Mi001BnbLongExecutionAdapter:
-    """V1 adapter registration for MI-001-BNB-LONG.
+class OwnerCatalogExecutionAdapter:
+    """Adapter for an exact-scope carrier in the Owner action catalog.
 
     The generic Owner-bounded execution service owns authorization, final-gate,
-    duplicate, and persistence checks. This adapter only supplies the v1
-    supported carrier mapping and remains strict about the exact authorized
-    scope.
+    duplicate, and persistence checks. This adapter remains strict about the
+    exact catalog scope and reuses the common one-shot entry plus TP/SL flow.
     """
 
-    carrier_id: str = "MI-001-BNB-LONG"
+    carrier_id: str
 
     def readiness(self, authorization: BoundedLiveTrialAuthorization) -> OwnerBoundedExecutionReadiness:
-        blockers = _v1_scope_blockers(authorization)
+        blockers = _catalog_scope_blockers(authorization)
         return OwnerBoundedExecutionReadiness(
             authorization_id=authorization.authorization_id,
             carrier_id=authorization.carrier_id,
@@ -326,10 +330,10 @@ class Mi001BnbLongExecutionAdapter:
         if readiness.blockers:
             raise OwnerBoundedExecutionError(
                 "adapter_not_executable",
-                "MI-001-BNB-LONG adapter scope is not executable.",
+                "Owner catalog adapter scope is not executable.",
                 readiness.blockers,
             )
-        result = await _execute_mi001_bnb_long(
+        result = await _execute_owner_catalog_one_shot(
             authorization=authorization,
             protection_plan=protection_plan,
             protection_planner_service=protection_planner_service,
@@ -362,10 +366,15 @@ class Mi001BnbLongExecutionAdapter:
 
 
 def default_owner_bounded_execution_registry() -> OwnerBoundedExecutionRegistry:
-    return OwnerBoundedExecutionRegistry([Mi001BnbLongExecutionAdapter()])
+    return OwnerBoundedExecutionRegistry(
+        [
+            OwnerCatalogExecutionAdapter(carrier_id=carrier_id)
+            for carrier_id in supported_owner_action_carrier_ids()
+        ]
+    )
 
 
-async def _execute_mi001_bnb_long(
+async def _execute_owner_catalog_one_shot(
     *,
     authorization: BoundedLiveTrialAuthorization,
     protection_plan: ProtectionPricePlanRecord,
@@ -1112,23 +1121,29 @@ class OwnerBoundedExecutionService:
                 ) from sql_exc
 
 
-def _v1_scope_blockers(authorization: BoundedLiveTrialAuthorization) -> list[str]:
+def _catalog_scope_blockers(authorization: BoundedLiveTrialAuthorization) -> list[str]:
     blockers: list[str] = []
-    if authorization.carrier_id != "MI-001-BNB-LONG":
+    carrier = get_owner_action_carrier(authorization.carrier_id)
+    if carrier is None:
         blockers.append("unsupported_carrier")
-    if authorization.symbol != "BNB/USDT:USDT":
+        return blockers
+    if authorization.symbol != carrier.runtime_symbol:
         blockers.append("symbol_mismatch")
-    if authorization.side != "long":
+    if authorization.side != carrier.side:
         blockers.append("side_mismatch")
-    if Decimal(str(authorization.quantity)) != Decimal("0.01"):
+    if not _decimal_scope_equal(authorization.quantity, carrier.quantity):
         blockers.append("quantity_mismatch")
-    if Decimal(str(authorization.max_notional)) != Decimal("20"):
+    if not _decimal_scope_equal(authorization.max_notional, carrier.max_notional):
         blockers.append("cap_mismatch")
-    if Decimal(str(authorization.leverage)) != Decimal("1"):
+    if not _decimal_scope_equal(authorization.leverage, carrier.leverage):
         blockers.append("leverage_mismatch")
-    if authorization.protection_plan_type != "single_tp_plus_sl":
+    if authorization.protection_plan_type != carrier.protection_plan_type:
         blockers.append("protection_plan_mismatch")
     return blockers
+
+
+def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
+    return abs(Decimal(str(left)) - Decimal(str(right))) <= Decimal("0.000000000001")
 
 
 def _build_execution_intent(

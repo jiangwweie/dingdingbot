@@ -17,13 +17,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.application.owner_action_carrier_catalog import get_owner_action_carrier
 from src.application.owner_trial_flow import (
     OwnerTrialFlowError,
     OwnerTrialFlowService,
     SUPPORTED_OWNER_TRIAL_CARRIER_ID,
-)
-from src.application.strategy_trial_architecture_governance import (
-    build_bnb_strategy_trial_architecture_governance,
 )
 from src.application.strategy_trial_preflight_facts import TrialPreflightFactsSnapshot
 from src.infrastructure.database import get_pg_session_maker
@@ -215,27 +213,29 @@ class BnbLiveExecutionBridgeDryRunService:
         request = request or BnbLiveExecutionBridgeDryRunRequest()
         hard_blockers: list[str] = []
         authorization_hard_blockers_snapshot: list[str] = []
-        carrier = build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
+        carrier = get_owner_action_carrier(request.carrier_id)
         try:
             current = await self._owner_trial_flow_service.current(carrier_id=request.carrier_id)
         except OwnerTrialFlowError as exc:
             hard_blockers.append(exc.code)
             current = None
 
-        if request.carrier_id != SUPPORTED_OWNER_TRIAL_CARRIER_ID:
+        if carrier is None:
             hard_blockers.append("unsupported_carrier")
-        if request.symbol not in {carrier.symbol, carrier.runtime_symbol}:
-            hard_blockers.append("symbol_mismatch")
-        if request.side != carrier.side:
-            hard_blockers.append("side_mismatch")
-        if request.max_notional != carrier.max_notional:
-            hard_blockers.append("cap_mismatch")
-        if request.quantity != carrier.quantity:
-            hard_blockers.append("quantity_mismatch")
-        if request.leverage != carrier.leverage:
-            hard_blockers.append("leverage_mismatch")
-        if request.protection_plan_type != carrier.protection_plan_type:
-            hard_blockers.append("protection_plan_mismatch")
+            carrier = get_owner_action_carrier(SUPPORTED_OWNER_TRIAL_CARRIER_ID)
+        if carrier is not None:
+            if request.symbol not in {carrier.symbol, carrier.runtime_symbol}:
+                hard_blockers.append("symbol_mismatch")
+            if request.side != carrier.side:
+                hard_blockers.append("side_mismatch")
+            if not _decimal_scope_equal(request.max_notional, carrier.max_notional):
+                hard_blockers.append("cap_mismatch")
+            if not _decimal_scope_equal(request.quantity, carrier.quantity):
+                hard_blockers.append("quantity_mismatch")
+            if not _decimal_scope_equal(request.leverage, carrier.leverage):
+                hard_blockers.append("leverage_mismatch")
+            if request.protection_plan_type != carrier.protection_plan_type:
+                hard_blockers.append("protection_plan_mismatch")
 
         authorization = current.live_authorization if current is not None else None
         if authorization is None:
@@ -243,15 +243,18 @@ class BnbLiveExecutionBridgeDryRunService:
         else:
             if authorization.carrier_id != request.carrier_id:
                 hard_blockers.append("authorization_carrier_mismatch")
-            if authorization.symbol not in {request.symbol, carrier.symbol, carrier.runtime_symbol}:
+            carrier_symbols = {request.symbol}
+            if carrier is not None:
+                carrier_symbols.update({carrier.symbol, carrier.runtime_symbol})
+            if authorization.symbol not in carrier_symbols:
                 hard_blockers.append("authorization_symbol_mismatch")
             if authorization.side != request.side:
                 hard_blockers.append("authorization_side_mismatch")
-            if authorization.max_notional != request.max_notional:
+            if not _decimal_scope_equal(authorization.max_notional, request.max_notional):
                 hard_blockers.append("authorization_cap_mismatch")
-            if authorization.quantity != request.quantity:
+            if not _decimal_scope_equal(authorization.quantity, request.quantity):
                 hard_blockers.append("authorization_quantity_mismatch")
-            if authorization.leverage != request.leverage:
+            if not _decimal_scope_equal(authorization.leverage, request.leverage):
                 hard_blockers.append("authorization_leverage_mismatch")
             if authorization.protection_plan_type != request.protection_plan_type:
                 hard_blockers.append("authorization_protection_plan_mismatch")
@@ -293,7 +296,10 @@ class BnbLiveExecutionBridgeDryRunService:
 
         hard_blockers = _dedupe(hard_blockers)
         order_result_logging_available = table_audit.orders and table_audit.brc_execution_results
-        protection_executable = request.protection_plan_type == carrier.protection_plan_type
+        protection_executable = (
+            carrier is not None
+            and request.protection_plan_type == carrier.protection_plan_type
+        )
         exit_cleanup_available = order_result_logging_available and protection_executable
         bridge_status: BridgeStatus = (
             "blocked_before_execution_boundary"
@@ -399,6 +405,10 @@ def _environment_checks(env: Mapping[str, str]) -> dict[str, bool | str]:
         "EXCHANGE_TESTNET": exchange_testnet or "unset",
         "BRC_EXECUTION_PERMISSION_MAX": permission_max or "unset",
     }
+
+
+def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
+    return abs(Decimal(str(left)) - Decimal(str(right))) <= Decimal("0.000000000001")
 
 
 def _fact_checks(
