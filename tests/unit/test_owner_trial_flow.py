@@ -1300,8 +1300,11 @@ def test_trend_owner_trial_flow_api_path_authorizes_and_execute_preflight_blocks
         assert authorization_payload["execution_intent_created"] is False
         assert authorization_payload["order_created"] is False
         payload = execute.json()
-        assert "owner_bounded_execution_blocked" in payload["message"]
-        assert "protection_price_source_missing" in payload["message"]
+        assert payload["code"] == "owner_bounded_execution_blocked"
+        assert payload["error_code"] == "409"
+        assert "protection_price_source_missing" in payload["blockers"]
+        assert payload["execution_intent_created"] is False
+        assert payload["order_created"] is False
 
         async def counts():
             session_maker = service._repository._session_maker
@@ -3064,11 +3067,11 @@ def test_owner_bounded_execution_api_route_blocks_without_intent_or_order(monkey
         assert response.status_code == 409
         payload = response.json()
         assert payload["error_code"] == "409"
-        assert "owner_bounded_execution_blocked" in payload["message"]
-        assert "protection_price_source_missing" in payload["message"]
-        assert "'execution_intent_created': False" in payload["message"]
-        assert "'order_created': False" in payload["message"]
-        assert "'order_permission_granted': False" in payload["message"]
+        assert payload["code"] == "owner_bounded_execution_blocked"
+        assert "protection_price_source_missing" in payload["blockers"]
+        assert payload["execution_intent_created"] is False
+        assert payload["order_created"] is False
+        assert payload["order_permission_granted"] is False
 
         async def counts():
             session_maker = service._repository._session_maker
@@ -3160,8 +3163,8 @@ def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypat
             )
         assert response.status_code == 409
         payload = response.json()
-        assert "protection_price_source_missing" not in payload["message"]
-        assert "entry_order_executor_not_enabled" in payload["message"]
+        assert "protection_price_source_missing" not in payload["blockers"]
+        assert "entry_order_executor_not_enabled" in payload["blockers"]
 
         async def facts():
             session_maker = service._repository._session_maker
@@ -3237,8 +3240,8 @@ def test_owner_bounded_execution_api_route_collects_facts_from_authorization_sco
         assert seen_profiles[0].symbol == "SOL/USDT:USDT"
         assert seen_profiles[0].side == "long"
         payload = response.json()
-        assert "owner_bounded_execution_blocked" in payload["message"]
-        assert "protection_price_source_missing" in payload["message"]
+        assert payload["code"] == "owner_bounded_execution_blocked"
+        assert "protection_price_source_missing" in payload["blockers"]
     finally:
         app.dependency_overrides.pop(require_operator_session, None)
         api_brc_console._owner_trial_flow_service = None
@@ -3310,8 +3313,8 @@ def test_owner_bounded_execution_api_route_converts_unhandled_exception_to_busin
         assert response.status_code == 409
         payload = response.json()
         assert payload["error_code"] == "409"
-        assert "owner_bounded_execution_unhandled_exception" in payload["message"]
-        assert "manual_review_required_before_retry" in payload["message"]
+        assert payload["code"] == "owner_bounded_execution_unhandled_exception"
+        assert "manual_review_required_before_retry" in payload["blockers"]
 
         async def counts():
             session_maker = service._repository._session_maker

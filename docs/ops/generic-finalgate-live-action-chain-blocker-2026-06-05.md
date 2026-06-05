@@ -34,6 +34,14 @@ evidence:
   - PG order evidence after execute attempt: local order 6e6aa77e-6995-4b98-9237-3dcb198a18db status=REJECTED, order_type=MARKET, exchange_order_id=NULL.
   - Authorization remained consumed=false, execution_intent_created=false, order_created=false in authorization metadata; the failed intent/order are audit evidence of the rejected attempt.
   - Post-attempt read-only exchange probe still showed active_position clear and open_order clear for the scoped Trend/SOL path.
+  - Later follow-up with explicit process-local read-only probe overrides again bound real PG/exchange facts and initially blocked only on expired/absent startup_guard clearance.
+  - PG read-only evidence showed Trend authorization auth-f43ecd5901c342deb4b2466c0548ebc4 still live_authorized=true, consumed=false, live_ready=false, execution_intent_created=false, order_created=false, auto_execution_enabled=false, and not expired.
+  - PG read-only evidence showed previous scoped startup_guard clearance clearance-31c76ce42acd4965ad6402115987e80a was expired.
+  - Owner API path created a fresh scoped startup-guard clearance clearance-7beac3de88e14b678f86652d24f6685f; response remained metadata_only=true, runtime_started=false, execution_intent_created=false, order_created=false, order_permission_granted=false, execution_permission_granted=false, exchange_write_api_called=false.
+  - Follow-up Generic FinalGate read-only probe returned result=passed, gateway_binding=ready, hard_blockers=[], owner_trigger_visible=true, owner_trigger_enabled=true; facts clear: active_position, open_order, gks, startup_guard, account_facts, market_metadata, protection_readiness, recording_readiness.
+  - A subsequent official execute endpoint call was made only to verify retry safety after the existing exchange-rejected attempt; it returned 409 before ExecutionIntent/order creation with execution_intent_created=false and order_created=false.
+  - Official execute retry-safety blockers included duplicate_execution_intent_for_authorization and previous_intent_has_order_id; PG read-only evidence after the call still showed exactly one intent and one linked rejected local order for authorization auth-f43ecd5901c342deb4b2466c0548ebc4.
+  - API error handling was tightened so HTTPException dict details remain structured; official execute retry-safety response now exposes code=owner_bounded_execution_blocked, blockers=[...], execution_intent_created=false, and order_created=false at top level instead of stringifying the blocker payload.
 bridge:
   - GenericActionSpec now maps into final-gate dry-run requests.
   - FinalGate now validates ActionSpec-bound fact snapshot scope.
@@ -80,6 +88,32 @@ retry_condition:
   - FinalGate passes again and post-failure PG/exchange facts remain non-conflicting.
 ```
 
+## Existing Failed Attempt Retry-Safety BlockerRecord
+
+```yaml
+id: BR-GF-LIVE-20260605-004
+stage: official_execute_retry_safety
+path: GenericActionSpec -> FinalGate passed -> official API execute retry-safety check
+severity: hard_blocker
+evidence:
+  - Fresh scoped startup_guard clearance clearance-7beac3de88e14b678f86652d24f6685f was created through the official Owner API path and remained metadata_only.
+  - Generic FinalGate read-only probe returned result=passed with hard_blockers=[] for TF-001-live-readonly-v0 after the fresh clearance.
+  - Official execute endpoint was called to verify retry safety against authorization auth-f43ecd5901c342deb4b2466c0548ebc4 after the prior Binance -2015 rejected attempt.
+  - The endpoint returned 409 before ExecutionIntent/order creation.
+  - Blocking evidence included duplicate_execution_intent_for_authorization and previous_intent_has_order_id.
+  - Response safety flags remained execution_intent_created=false and order_created=false.
+  - PG read-only evidence after the call showed exactly one execution_intent for the authorization: intent-76dd2eb6c561447b999d99641a462f19 status=failed failed_reason=F-011 order_id=6e6aa77e-6995-4b98-9237-3dcb198a18db exchange_order_id=NULL.
+  - PG read-only evidence after the call showed exactly one linked local order: 6e6aa77e-6995-4b98-9237-3dcb198a18db status=REJECTED order_type=MARKET exchange_order_id=NULL.
+bridge:
+  - The official execute path is fail-closed after a prior rejected attempt that created local intent/order evidence.
+  - The chain now has replayable proof that FinalGate can pass while retry-safety still prevents duplicate live action on the same authorization.
+  - Official execute blocker responses now preserve structured blocker fields for Owner/API audit.
+retry_condition:
+  - Resolve Binance API key/IP/futures trade permission for the exact bounded action.
+  - Use a fresh Owner authorization or an explicit audited failed-attempt resolution policy before any new execution attempt.
+  - Re-run read-only FinalGate evidence and verify PG/exchange facts remain non-conflicting.
+```
+
 ## Probe Environment Guard BlockerRecord
 
 ```yaml
@@ -104,4 +138,4 @@ retry_condition:
 
 One official bounded execute endpoint attempt was performed after FinalGate passed. Binance rejected the entry order before any exchange order id was returned. Post-attempt read-only evidence showed no active position and no open order for the scoped Trend/SOL path.
 
-No cancel, replace, flatten, retry protection, runtime start, credential change, PG migration, or push was performed in this run.
+No cancel, replace, flatten, retry protection, runtime start, credential change, PG migration, or push was performed in this run. The only PG mutation in the follow-up was metadata-only scoped startup_guard clearance creation through the official Owner API path; it did not grant order/execution permission and did not create intent/order state.

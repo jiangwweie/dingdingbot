@@ -295,9 +295,10 @@ async def health() -> dict[str, Any]:
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_request: Request, exc: HTTPException):
     if isinstance(exc.detail, dict):
-        content = exc.detail
+        content = dict(exc.detail)
         if "error_code" not in content:
-            content = {"error_code": str(exc.status_code), "message": str(exc.detail)}
+            content["error_code"] = str(exc.status_code)
+        content.setdefault("message", str(exc.detail))
     else:
         content = ErrorResponse(error_code=str(exc.status_code), message=str(exc.detail)).model_dump()
     return JSONResponse(status_code=exc.status_code, content=content)
