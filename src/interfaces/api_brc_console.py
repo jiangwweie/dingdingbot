@@ -3942,12 +3942,16 @@ async def execute_owner_bounded_live_trial_authorization(
         None,
     )
     api_module = _api_module()
-    gateway_binding = await _owner_bounded_exchange_gateway_binding(api_module)
+    gateway_binding = await _owner_bounded_exchange_gateway_binding(
+        api_module,
+        permission_max="order_allowed",
+    )
     collector = _strategy_trial_preflight_fact_collector(api_module)
     fact_snapshot = await collector.collect(profile)
     final_gate_service = BnbLiveExecutionBridgeDryRunService(
         owner_trial_flow_service=owner_trial_service,
         session_maker=injected_session_maker,
+        permission_mode="official_execute",
     )
     gateway = gateway_binding.get("gateway")
     protection_planner_service = ProtectionPlannerService(
@@ -4025,7 +4029,11 @@ async def execute_owner_bounded_live_trial_authorization(
         await close_owner_bounded_exchange_gateway()
 
 
-async def _owner_bounded_exchange_gateway_binding(api_module: Any) -> dict[str, Any]:
+async def _owner_bounded_exchange_gateway_binding(
+    api_module: Any,
+    *,
+    permission_max: Literal["read_only", "order_allowed"] = "read_only",
+) -> dict[str, Any]:
     """Return the gateway allowed only for Owner-bounded execution.
 
     This deliberately does not populate the legacy ``_exchange_gateway`` global.
@@ -4036,7 +4044,7 @@ async def _owner_bounded_exchange_gateway_binding(api_module: Any) -> dict[str, 
     if existing is not None:
         return _owner_bounded_gateway_status(existing)
 
-    blockers = _owner_bounded_gateway_env_blockers()
+    blockers = _owner_bounded_gateway_env_blockers(permission_max=permission_max)
     if blockers:
         return {"status": "blocked_env", "gateway": None, "blockers": blockers}
 
@@ -4093,11 +4101,14 @@ def _owner_bounded_gateway_status(gateway: Any) -> dict[str, Any]:
     }
 
 
-def _owner_bounded_gateway_env_blockers() -> list[str]:
+def _owner_bounded_gateway_env_blockers(
+    *,
+    permission_max: Literal["read_only", "order_allowed"] = "read_only",
+) -> list[str]:
     expected = {
         "TRADING_ENV": "live",
         "EXCHANGE_TESTNET": "false",
-        "BRC_EXECUTION_PERMISSION_MAX": "read_only",
+        "BRC_EXECUTION_PERMISSION_MAX": permission_max,
         "RUNTIME_CONTROL_API_ENABLED": "false",
         "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
     }

@@ -42,6 +42,8 @@ evidence:
   - A subsequent official execute endpoint call was made only to verify retry safety after the existing exchange-rejected attempt; it returned 409 before ExecutionIntent/order creation with execution_intent_created=false and order_created=false.
   - Official execute retry-safety blockers included duplicate_execution_intent_for_authorization and previous_intent_has_order_id; PG read-only evidence after the call still showed exactly one intent and one linked rejected local order for authorization auth-f43ecd5901c342deb4b2466c0548ebc4.
   - API error handling was tightened so HTTPException dict details remain structured; official execute retry-safety response now exposes code=owner_bounded_execution_blocked, blockers=[...], execution_intent_created=false, and order_created=false at top level instead of stringifying the blocker payload.
+  - Owner-bounded gateway binding and FinalGate permission checks now separate read-only probe mode from official execute mode: read-only probes still require BRC_EXECUTION_PERMISSION_MAX=read_only, while the official execute endpoint requires/evaluates BRC_EXECUTION_PERMISSION_MAX=order_allowed.
+  - Follow-up official execute retry-safety call with process-local BRC_EXECUTION_PERMISSION_MAX=order_allowed no longer reported global_permission_not_order_allowed; it still returned 409 before state creation because gateway initialization failed and the authorization has a previous failed intent/order.
 bridge:
   - GenericActionSpec now maps into final-gate dry-run requests.
   - FinalGate now validates ActionSpec-bound fact snapshot scope.
@@ -108,6 +110,7 @@ bridge:
   - The official execute path is fail-closed after a prior rejected attempt that created local intent/order evidence.
   - The chain now has replayable proof that FinalGate can pass while retry-safety still prevents duplicate live action on the same authorization.
   - Official execute blocker responses now preserve structured blocker fields for Owner/API audit.
+  - Official execute env semantics no longer conflict with read-only probe semantics.
 retry_condition:
   - Resolve Binance API key/IP/futures trade permission for the exact bounded action.
   - Use a fresh Owner authorization or an explicit audited failed-attempt resolution policy before any new execution attempt.

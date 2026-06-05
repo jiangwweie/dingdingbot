@@ -1207,7 +1207,7 @@ def test_trend_owner_trial_flow_api_path_authorizes_and_execute_preflight_blocks
                 startup_guard_clear=True,
             )
 
-    async def fake_gateway_binding(_api_module):
+    async def fake_gateway_binding(_api_module, **_kwargs):
         return {
             "status": "blocked_test_gateway_absent",
             "gateway": None,
@@ -1220,7 +1220,7 @@ def test_trend_owner_trial_flow_api_path_authorizes_and_execute_preflight_blocks
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
-    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
     monkeypatch.setattr(
         api_brc_console,
         "_strategy_trial_preflight_fact_collector",
@@ -3048,7 +3048,7 @@ def test_owner_bounded_execution_api_route_blocks_without_intent_or_order(monkey
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
-    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
     monkeypatch.setattr(
         api_brc_console,
         "_strategy_trial_preflight_fact_collector",
@@ -3129,13 +3129,13 @@ def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypat
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
-    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
     monkeypatch.setattr(
         api_brc_console,
         "_api_module",
         lambda: SimpleNamespace(),
     )
-    async def fake_gateway_binding(_api_module):
+    async def fake_gateway_binding(_api_module, **_kwargs):
         return {
             "status": "ready_for_test_read_source_only",
             "gateway": FakeReadOnlyGateway(),
@@ -3218,7 +3218,7 @@ def test_owner_bounded_execution_api_route_collects_facts_from_authorization_sco
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
-    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
     monkeypatch.setattr(
         api_brc_console,
         "_strategy_trial_preflight_fact_collector",
@@ -3280,9 +3280,9 @@ def test_owner_bounded_execution_api_route_converts_unhandled_exception_to_busin
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
-    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
 
-    async def fake_gateway_binding(_api_module):
+    async def fake_gateway_binding(_api_module, **_kwargs):
         return {
             "status": "ready_for_test",
             "gateway": object(),
@@ -3377,6 +3377,65 @@ def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
             assert result.execution_plan_preview.flags.execution_intent_created is False
             assert result.execution_plan_preview.flags.order_created is False
             assert result.execution_plan_preview.executable is False
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_gateway_env_modes_separate_read_only_probe_from_execute(monkeypatch):
+    from src.interfaces import api_brc_console
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    assert api_brc_console._owner_bounded_gateway_env_blockers() == []
+    assert api_brc_console._owner_bounded_gateway_env_blockers(permission_max="order_allowed") == [
+        "brc_execution_permission_max_not_order_allowed"
+    ]
+
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    assert api_brc_console._owner_bounded_gateway_env_blockers() == [
+        "brc_execution_permission_max_not_read_only"
+    ]
+    assert api_brc_console._owner_bounded_gateway_env_blockers(permission_max="order_allowed") == []
+
+
+def test_bnb_live_execution_bridge_official_execute_mode_allows_order_permission_env():
+    async def scenario():
+        service, _bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _activation_request(),
+                operator_id="owner",
+            )
+            bridge = BnbLiveExecutionBridgeDryRunService(
+                owner_trial_flow_service=service,
+                session_maker=service._repository._session_maker,
+                env={
+                    "TRADING_ENV": "live",
+                    "EXCHANGE_TESTNET": "false",
+                    "RUNTIME_CONTROL_API_ENABLED": "false",
+                    "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                    "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+                },
+                permission_mode="official_execute",
+            )
+
+            result = await bridge.run(
+                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+            )
+
+            assert result.final_preflight_result == "passed"
+            assert "global_permission_not_order_allowed" not in result.hard_blockers
+            assert result.environment_checks["permission_mode"] == "official_execute"
             assert result.non_permissions["execution_intent_created"] is False
             assert result.non_permissions["order_created"] is False
         finally:

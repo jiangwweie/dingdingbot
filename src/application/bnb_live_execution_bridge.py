@@ -210,10 +210,12 @@ class BnbLiveExecutionBridgeDryRunService:
         owner_trial_flow_service: OwnerTrialFlowService,
         session_maker: async_sessionmaker[AsyncSession] | None = None,
         env: Mapping[str, str] | None = None,
+        permission_mode: Literal["read_only_probe", "official_execute"] = "read_only_probe",
     ) -> None:
         self._owner_trial_flow_service = owner_trial_flow_service
         self._session_maker = session_maker or get_pg_session_maker()
         self._env = env or os.environ
+        self._permission_mode = permission_mode
 
     async def run(
         self,
@@ -289,7 +291,7 @@ class BnbLiveExecutionBridgeDryRunService:
         if current is not None and current.unacknowledged_warnings:
             hard_blockers.append("strategy_warning_acknowledgement_incomplete")
 
-        environment_checks = _environment_checks(self._env)
+        environment_checks = _environment_checks(self._env, permission_mode=self._permission_mode)
         hard_blockers.extend(
             code for code, ok in environment_checks.items() if isinstance(ok, bool) and not ok
         )
@@ -454,22 +456,32 @@ class BnbLiveExecutionBridgeDryRunService:
         )
 
 
-def _environment_checks(env: Mapping[str, str]) -> dict[str, bool | str]:
+def _environment_checks(
+    env: Mapping[str, str],
+    *,
+    permission_mode: Literal["read_only_probe", "official_execute"] = "read_only_probe",
+) -> dict[str, bool | str]:
     trading_env = str(env.get("TRADING_ENV", "")).lower()
     exchange_testnet = str(env.get("EXCHANGE_TESTNET", "")).lower()
     runtime_control = str(env.get("RUNTIME_CONTROL_API_ENABLED", "false")).lower()
     test_injection = str(env.get("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")).lower()
     permission_max = str(env.get("BRC_EXECUTION_PERMISSION_MAX", "read_only")).lower()
+    permission_safe = (
+        permission_max == "order_allowed"
+        if permission_mode == "official_execute"
+        else permission_max != "order_allowed"
+    )
     return {
         "live_environment_valid": trading_env == "live",
         "exchange_testnet_false": exchange_testnet == "false",
         "runtime_control_disabled": runtime_control not in {"1", "true", "yes", "on"},
         "test_signal_injection_disabled": test_injection not in {"1", "true", "yes", "on"},
-        "global_permission_not_order_allowed": permission_max != "order_allowed",
+        "global_permission_not_order_allowed": permission_safe,
         "global_permission_not_execution_intent_allowed": permission_max != "execution_intent_allowed",
         "TRADING_ENV": trading_env or "unset",
         "EXCHANGE_TESTNET": exchange_testnet or "unset",
         "BRC_EXECUTION_PERMISSION_MAX": permission_max or "unset",
+        "permission_mode": permission_mode,
     }
 
 
