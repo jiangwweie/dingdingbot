@@ -538,7 +538,13 @@ class TradingConsoleReadModelService:
             "strategy_family_admission_state",
             snap,
             blockers=blockers,
-            data=state.model_dump(mode="json", exclude={"generated_at_ms"}),
+            data={
+                **state.model_dump(mode="json", exclude={"generated_at_ms"}),
+                "candidate_output": [
+                    item.model_dump(mode="json")
+                    for item in state.trading_console_candidate_output
+                ],
+            },
         )
 
     async def signal_marker_feed(

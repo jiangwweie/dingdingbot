@@ -545,6 +545,30 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
         "MI-001-BNB-LONG",
         "TF-001-live-readonly-v0",
     ]
+    standard = payload["data"]["candidate_pipeline_standard"]
+    assert standard["version"] == "brc_strategy_family_action_candidate_standard_v0_1"
+    levels = {item["level"]: item for item in standard["admission_levels"]}
+    assert set(levels) == {"L0", "L1", "L2", "L3", "L4"}
+    assert levels["L2"]["action_candidate_allowed"] is True
+    assert levels["L2"]["live_action_allowed"] is False
+    assert levels["L3"]["live_action_allowed"] is True
+    assert standard["warning_hard_blocker_policy"]["weak_strategy_evidence_policy"] == (
+        "warning_not_hard_blocker"
+    )
+    assert "weak strategy evidence" in standard["warning_hard_blocker_policy"]["warning_items"]
+    assert "missing Owner execute authorization" in (
+        standard["warning_hard_blocker_policy"]["hard_blockers_for_live_action"]
+    )
+    candidate_output = {item["family"]: item for item in payload["data"]["candidate_output"]}
+    assert candidate_output["Trend"]["admission_level"] == "L3"
+    assert candidate_output["Trend"]["candidate_state"] == "bounded_live_candidate"
+    assert candidate_output["Trend"]["action_registry_supported"] is True
+    assert candidate_output["Trend"]["frontend_action_enabled"] is False
+    assert candidate_output["Trend"]["may_execute_live"] is False
+    assert candidate_output["Volatility expansion"]["admission_level"] == "L2"
+    assert candidate_output["Volatility expansion"]["candidate_state"] == "proposal"
+    assert candidate_output["Mean reversion"]["admission_level"] == "L2"
+    assert candidate_output["Mean reversion"]["candidate_state"] == "proposal"
     assert payload["data"]["api_backed_authorization_flow"]["status"] == (
         "operation_layer_metadata_flow_available"
     )

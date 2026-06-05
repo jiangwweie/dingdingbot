@@ -517,9 +517,38 @@ official action contract exist.
 `authorization_draft_proposal.not_authorization`,
 `authorization_draft_proposal.not_execution_permission`, and
 `authorization_draft_proposal.not_order_permission` must all remain true.
+`candidate_pipeline_standard` records the BRC StrategyFamily to ActionCandidate
+standard. It defines AdmissionLevel `L0` through `L4`, the warning vs hard
+blocker split, the required spec order
+`StrategyFamilySpec -> StrategyGroupSpec -> CarrierSpec -> RiskDisclosureSpec
+-> ReviewTemplate -> ActionCandidateSpec`, and the official action path. It
+must keep `no_action_guarantee.creates_authorization=false`,
+`no_action_guarantee.creates_execution_intent=false`,
+`no_action_guarantee.places_order=false`, `no_action_guarantee.starts_runtime=false`,
+and `no_action_guarantee.mutates_pg=false`.
+`candidate_output` is the concise Trading Console read-only candidate list for
+Owner/UI consumption. Each row includes family, strategy family id, carrier id,
+AdmissionLevel, candidate state, ActionCandidate status, action-registry support,
+warning count, hard-blocker count, and owner decision text. At this revision
+Trend may appear as `L3` / `bounded_live_candidate`; Volatility expansion and
+Mean reversion remain `L2` / `proposal`. All rows must keep
+`frontend_action_enabled=false` and `may_execute_live=false` until the official
+backend final gate and action path return an auditable executable result.
+`strategy_family_specs`, `strategy_group_specs`, `carrier_specs`,
+`risk_disclosure_specs`, `review_templates`, and `action_candidate_specs` expose
+the full standard artifacts for frontend documentation and future generic
+ActionSpec work. Weak strategy evidence, incomplete signal markers,
+fee/funding/slippage gaps, incomplete review UI, and non-core read-model
+degradation are warnings/risk disclosure items, not live-action hard blockers.
+Hard blockers for live action are restricted to missing Owner execute
+authorization, scope mismatch, unreadable/conflicting exposure, unavailable
+TP/SL plan, unavailable intent/order/review/audit recording, runtime/profile/env
+or credential guard blocks, or a carrier that cannot produce a valid
+ActionCandidate.
 `official_action_api_inventory` records the current official BRC action API
-inventory for transition review. At this revision it is BNB-only
-(`MI-001-BNB-LONG`) and `trading_console_action_api_exposed=false`.
+inventory for transition review. At this revision it supports
+`MI-001-BNB-LONG` and exact Trend carrier `TF-001-live-readonly-v0`;
+`trading_console_action_api_exposed=false`.
 `action_api_compatibility.compatible=false` for sprint candidates that are not
 supported by the current Owner trial-flow and bounded-execution registries.
 `action_candidate` is a structured `ActionCandidate` bridge for disabled action

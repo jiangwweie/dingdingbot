@@ -17,6 +17,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert set(by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     assert by_family["Trend"].strategy_family_id == "TF-001-live-readonly-v0"
     assert by_family["Trend"].classification == "actionable"
+    assert by_family["Trend"].admission_level_code == "L3"
     assert by_family["Trend"].strategy_group_mapping.bridge_method == "StrategyGroupMappingProposal"
     assert by_family["Trend"].strategy_group_mapping.strategy_group == (
         "Major trend continuation / trend following"
@@ -29,6 +30,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert "false continuation" in by_family["Trend"].risk_disclosure_contract.failure_modes
     assert by_family["Volatility expansion"].strategy_family_id == "VB-001-live-readonly-v0"
     assert by_family["Volatility expansion"].classification == "blocked"
+    assert by_family["Volatility expansion"].admission_level_code == "L2"
     assert by_family["Volatility expansion"].carrier_readiness_report.status == (
         "candidate_registered_not_actionable"
     )
@@ -40,6 +42,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert "fake breakout" in by_family["Volatility expansion"].risk_disclosure_contract.failure_modes
     assert by_family["Mean reversion"].strategy_family_id == "MR-001-live-readonly-v0"
     assert by_family["Mean reversion"].classification == "blocked"
+    assert by_family["Mean reversion"].admission_level_code == "L2"
     assert by_family["Mean reversion"].carrier_readiness_report.status == (
         "candidate_registered_not_actionable"
     )
@@ -48,6 +51,65 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert by_family["Mean reversion"].observation_bridge.status == "candidate_metadata_only"
     assert "liquidity wick" in by_family["Mean reversion"].risk_disclosure_contract.failure_modes
     assert state.classification_counts == {"actionable": 1, "blocked": 2}
+    levels = {
+        item.level: item for item in state.candidate_pipeline_standard.admission_levels
+    }
+    assert set(levels) == {"L0", "L1", "L2", "L3", "L4"}
+    assert levels["L0"].live_action_allowed is False
+    assert levels["L1"].action_candidate_allowed is False
+    assert levels["L2"].action_candidate_allowed is True
+    assert levels["L2"].live_action_allowed is False
+    assert levels["L3"].live_action_allowed is True
+    assert levels["L4"].autonomy_allowed is True
+    assert levels["L4"].live_action_allowed is False
+    policy = state.candidate_pipeline_standard.warning_hard_blocker_policy
+    assert policy.weak_strategy_evidence_policy == "warning_not_hard_blocker"
+    assert "weak strategy evidence" in policy.warning_items
+    assert "missing Owner execute authorization" in policy.hard_blockers_for_live_action
+    assert "ExecutionIntent" in policy.post_action_acceptance_outputs
+    assert "Review" in policy.post_action_acceptance_outputs
+    assert "Audit" in policy.post_action_acceptance_outputs
+    family_specs = {item.family: item for item in state.strategy_family_specs}
+    assert family_specs["Trend"].admission_level == "L3"
+    assert family_specs["Volatility expansion"].admission_level == "L2"
+    assert family_specs["Mean reversion"].admission_level == "L2"
+    assert family_specs["Trend"].not_alpha_proof is True
+    group_specs = {item.family: item for item in state.strategy_group_specs}
+    assert group_specs["Trend"].selection_output == (
+        "CarrierSpec + RiskDisclosureSpec + ActionCandidateSpec"
+    )
+    carrier_specs = {item.family: item for item in state.carrier_specs}
+    assert carrier_specs["Trend"].action_registry_supported is True
+    assert carrier_specs["Trend"].scope_template["symbol"] == "SOL/USDT:USDT"
+    assert carrier_specs["Trend"].scope_template["quantity"] == "0.1"
+    assert carrier_specs["Volatility expansion"].action_registry_supported is False
+    risk_specs = {item.family: item for item in state.risk_disclosure_specs}
+    assert risk_specs["Trend"].weak_strategy_evidence_is_warning is True
+    assert "weak strategy evidence" in risk_specs["Trend"].hard_blockers_not_included
+    review_templates = {item.family: item for item in state.review_templates}
+    assert review_templates["Trend"].post_action_required is True
+    assert "entry_result" in review_templates["Trend"].required_sections
+    action_specs = {item.family: item for item in state.action_candidate_specs}
+    assert action_specs["Trend"].admission_level == "L3"
+    assert action_specs["Trend"].status == "owner_confirmed_candidate_blocked_final_gate"
+    assert action_specs["Trend"].action_registry_supported is True
+    assert action_specs["Trend"].may_execute_live is False
+    assert action_specs["Volatility expansion"].status == "proposal"
+    assert action_specs["Mean reversion"].status == "proposal"
+    for item in action_specs.values():
+        assert item.creates_authorization is False
+        assert item.creates_execution_intent is False
+        assert item.places_order is False
+        assert item.mutates_pg is False
+        assert "ExecutionIntent" in item.post_action_acceptance_outputs
+        assert "TP/SL" in item.post_action_acceptance_outputs
+    console_output = {item.family: item for item in state.trading_console_candidate_output}
+    assert console_output["Trend"].candidate_state == "bounded_live_candidate"
+    assert console_output["Trend"].action_registry_supported is True
+    assert console_output["Trend"].frontend_action_enabled is False
+    assert console_output["Trend"].may_execute_live is False
+    assert console_output["Volatility expansion"].candidate_state == "proposal"
+    assert console_output["Mean reversion"].candidate_state == "proposal"
     baseline = state.production_baseline_context
     assert baseline.status == "historical_bnb_context_not_action_permission"
     assert baseline.prior_scoped_carrier_id == "MI-001-BNB-LONG"
