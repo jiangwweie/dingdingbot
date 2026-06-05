@@ -3435,6 +3435,57 @@ def test_bnb_final_gate_symbol_variants_cover_profile_and_runtime_symbols():
     ]
 
 
+def test_owner_action_scoped_clearance_resolver_supports_exact_trend_scope():
+    from src.interfaces import api_brc_console
+
+    profile = SimpleNamespace(
+        candidate_id="TF-001-live-readonly-v0",
+        symbol="SOL/USDT:USDT",
+        side="long",
+    )
+
+    carrier = api_brc_console._owner_action_scoped_clearance_carrier(profile)
+
+    assert carrier is not None
+    assert carrier.carrier_id == "TF-001-live-readonly-v0"
+    assert carrier.symbol == "SOL/USDT:USDT"
+
+
+def test_owner_action_scoped_clearance_resolver_fails_closed_for_non_catalog_or_wrong_scope():
+    from src.interfaces import api_brc_console
+
+    assert (
+        api_brc_console._owner_action_scoped_clearance_carrier(
+            SimpleNamespace(
+                candidate_id="VE-001-live-readonly-v0",
+                symbol="SOL/USDT:USDT",
+                side="long",
+            )
+        )
+        is None
+    )
+    assert (
+        api_brc_console._owner_action_scoped_clearance_carrier(
+            SimpleNamespace(
+                candidate_id="TF-001-live-readonly-v0",
+                symbol="ETH/USDT:USDT",
+                side="long",
+            )
+        )
+        is None
+    )
+    assert (
+        api_brc_console._owner_action_scoped_clearance_carrier(
+            SimpleNamespace(
+                candidate_id="TF-001-live-readonly-v0",
+                symbol="SOL/USDT:USDT",
+                side="short",
+            )
+        )
+        is None
+    )
+
+
 def test_bnb_final_gate_scoped_runtime_safety_clearance_reaches_boundary(monkeypatch):
     from src.application.strategy_trial_readiness import build_bnb_strategy_trial_readiness
     from src.interfaces import api_brc_console

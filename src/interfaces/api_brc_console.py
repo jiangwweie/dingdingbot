@@ -62,6 +62,7 @@ from src.application.bnb_live_execution_bridge import (
 from src.application.binance_usdt_futures_account_facts import (
     BinanceUsdtFuturesAccountFactsSource,
 )
+from src.application.owner_action_carrier_catalog import get_owner_action_carrier
 from src.application.owner_trial_flow import (
     BoundedLiveTrialAuthorization,
     BoundedLiveTrialAuthorizationDraft,
@@ -4490,12 +4491,8 @@ async def _read_active_bnb_scoped_runtime_safety_clearance(
 ) -> dict[str, Any] | None:
     if clearance_type not in {"gks", "startup_guard"}:
         return None
-    carrier = build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
-    if str(getattr(profile, "candidate_id", "")) != carrier.carrier_id:
-        return None
-    if str(getattr(profile, "side", "")) != carrier.side:
-        return None
-    if str(getattr(profile, "symbol", "")) not in {carrier.symbol, carrier.runtime_symbol}:
+    carrier = _owner_action_scoped_clearance_carrier(profile)
+    if carrier is None:
         return None
     session_maker = get_pg_session_maker()
     async with session_maker() as session:
@@ -4572,6 +4569,23 @@ async def _read_active_bnb_scoped_runtime_safety_clearance(
         )
         row = result.mappings().first()
         return dict(row) if row is not None else None
+
+
+def _owner_action_scoped_clearance_carrier(profile: Any) -> Any | None:
+    carrier_id = str(
+        getattr(profile, "carrier_id", None)
+        or getattr(profile, "candidate_id", None)
+        or getattr(profile, "strategy_id", None)
+        or ""
+    )
+    carrier = get_owner_action_carrier(carrier_id)
+    if carrier is None:
+        return None
+    if str(getattr(profile, "side", "")) != carrier.side:
+        return None
+    if str(getattr(profile, "symbol", "")) not in {carrier.symbol, carrier.runtime_symbol}:
+        return None
+    return carrier
 
 
 async def _pg_table_exists(session: Any, table_name: str) -> bool:
