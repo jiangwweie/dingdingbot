@@ -1662,6 +1662,71 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert exchange.cancel_calls == 0
 
 
+def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/action-entry-readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_model"] == "action_entry_readiness"
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+    assert payload["no_action_guarantee"]["starts_runtime"] is False
+
+    adapter = payload["data"]["generic_final_gate_adapter_contract"]
+    assert adapter["live_action_policy"] == "fail_closed_until_official_final_gate_passes"
+    assert adapter["may_execute_live"] is False
+    assert adapter["places_order"] is False
+    assert "missing Owner execute authorization" in adapter["hard_blockers_for_live_action"]
+    assert "weak strategy evidence" in adapter["warning_not_blocker"]
+
+    specs = {item["family"]: item for item in payload["data"]["generic_action_specs"]}
+    trend = specs["Trend"]
+    assert trend["carrier_id"] == "TF-001-live-readonly-v0"
+    assert trend["status"] == "valid_blocked_final_gate"
+    assert trend["symbol"] == "SOL/USDT:USDT"
+    assert trend["side"] == "long"
+    assert trend["quantity"] == "0.1"
+    assert trend["max_notional"] == "20"
+    assert trend["leverage"] == "1"
+    assert trend["max_attempts"] == 1
+    assert trend["protection_mode"] == "single_tp_plus_sl"
+    assert trend["may_execute_live"] is False
+    assert trend["frontend_action_enabled"] is False
+    assert trend["places_order"] is False
+    assert specs["Volatility expansion"]["status"] == "proposal_non_action"
+    assert specs["Volatility expansion"]["action_registry_supported"] is False
+    assert specs["Mean reversion"]["status"] == "proposal_non_action"
+    assert specs["Mean reversion"]["action_registry_supported"] is False
+
+    payloads = {
+        item["family"]: item for item in payload["data"]["action_entry_payload_contracts"]
+    }
+    assert payloads["Trend"]["contract_status"] == "ready_for_final_gate_adapter"
+    assert payloads["Trend"]["required_owner_scope"]["symbol"] == "SOL/USDT:USDT"
+    assert payloads["Trend"]["action_allowed"] is False
+
+    action_entry = {
+        item["family"]: item for item in payload["data"]["action_entry_output"]
+    }
+    assert action_entry["Trend"]["action_entry_state"] == (
+        "ready_for_owner_scope_final_gate"
+    )
+    assert action_entry["Trend"]["frontend_action_enabled"] is False
+    assert action_entry["Volatility expansion"]["action_entry_state"] == "proposal_only"
+    assert action_entry["Mean reversion"]["action_entry_state"] == "proposal_only"
+    assert exchange.open_order_calls == []
+    assert exchange.position_calls == []
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
 def test_strategy_family_admission_scoped_dry_run_examples_work_through_api(monkeypatch):
     _configure_auth(monkeypatch)
     exchange = _FakeExchangeGateway()
@@ -2270,6 +2335,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/audit-chain?authorization_id=auth-1",
         "/api/trading-console/carrier-availability",
         "/api/trading-console/strategy-family-admission-state",
+        "/api/trading-console/action-entry-readiness",
         "/api/trading-console/signal-marker-feed",
         "/api/trading-console/api-classification",
     ]

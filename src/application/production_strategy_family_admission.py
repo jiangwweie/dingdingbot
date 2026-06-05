@@ -294,6 +294,139 @@ class TradingConsoleCandidateOutput(ProductionAdmissionModel):
     may_execute_live: Literal[False] = False
 
 
+class GenericActionSpec(ProductionAdmissionModel):
+    family: str
+    strategy_family_id: Optional[str] = None
+    carrier_id: Optional[str] = None
+    admission_level: AdmissionLevelCode
+    status: Literal["valid_blocked_final_gate", "proposal_non_action", "invalid_blocked"]
+    action_registry_supported: bool
+    exact_scope_required: bool = True
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    quantity: Optional[str] = None
+    max_notional: Optional[str] = None
+    leverage: Optional[str] = None
+    max_attempts: Optional[int] = None
+    protection_mode: Optional[str] = None
+    review_requirement: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    hard_blockers: list[str] = Field(default_factory=list)
+    final_gate_adapter_ref: str = "generic_final_gate_adapter_contract"
+    action_entry_payload_ref: Optional[str] = None
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+    creates_authorization: Literal[False] = False
+    creates_execution_intent: Literal[False] = False
+    places_order: Literal[False] = False
+    mutates_pg: Literal[False] = False
+
+
+class ActionEntryPayloadContract(ProductionAdmissionModel):
+    family: str
+    carrier_id: Optional[str] = None
+    payload_id: str
+    contract_status: Literal[
+        "ready_for_final_gate_adapter",
+        "proposal_only",
+        "blocked_invalid_scope",
+    ]
+    official_action_path: list[str] = Field(default_factory=list)
+    required_owner_scope: dict[str, object] = Field(default_factory=dict)
+    required_pre_action_facts: list[str] = Field(default_factory=list)
+    mandatory_protection_mode: str = "single_tp_plus_sl"
+    post_action_acceptance_outputs: list[str] = Field(default_factory=list)
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "starts_runtime": False,
+            "mutates_pg": False,
+        }
+    )
+    action_allowed: Literal[False] = False
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+
+
+class GenericFinalGateAdapterContract(ProductionAdmissionModel):
+    adapter_id: str = "generic_final_gate_adapter_contract"
+    version: str = "brc_generic_action_final_gate_adapter_v0_1"
+    input_contracts: list[str] = Field(
+        default_factory=lambda: [
+            "GenericActionSpec",
+            "OwnerExecuteAuthorization",
+            "PGExposureSnapshot",
+            "ExchangeExposureSnapshot",
+            "ProtectionPlan",
+            "RecordingReadiness",
+            "RuntimeGuardState",
+        ]
+    )
+    required_pre_action_facts: list[str] = Field(
+        default_factory=lambda: [
+            "exact Owner execute authorization",
+            "symbol/side/quantity/max_notional/leverage/max_attempts/protection_mode scope match",
+            "PG and exchange exposure readable and non-conflicting",
+            "valid mandatory TP/SL protection plan",
+            "ExecutionIntent/order/review/audit recording readiness",
+            "runtime/profile/env/credential guards pass",
+        ]
+    )
+    warning_not_blocker: list[str] = Field(
+        default_factory=lambda: [
+            "weak strategy evidence",
+            "incomplete signal markers",
+            "fee/funding/slippage gaps",
+            "incomplete review UI",
+            "non-core read-model degradation",
+        ]
+    )
+    hard_blockers_for_live_action: list[str] = Field(
+        default_factory=lambda: [
+            "missing Owner execute authorization",
+            "scope mismatch",
+            "exposure unreadable or conflicting",
+            "TP/SL plan unavailable",
+            "intent/order/review/audit recording unavailable",
+            "runtime/profile/env/credential guard blocks",
+            "invalid GenericActionSpec",
+        ]
+    )
+    output_contract: str = (
+        "Final gate may return executable=true only through the official bounded "
+        "Owner action path after all hard gates pass and evidence can be recorded."
+    )
+    live_action_policy: str = "fail_closed_until_official_final_gate_passes"
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+    creates_execution_intent: Literal[False] = False
+    places_order: Literal[False] = False
+    mutates_pg: Literal[False] = False
+
+
+class TradingConsoleActionEntryOutput(ProductionAdmissionModel):
+    family: str
+    strategy_family_id: Optional[str] = None
+    carrier_id: Optional[str] = None
+    admission_level: AdmissionLevelCode
+    action_entry_state: Literal[
+        "ready_for_owner_scope_final_gate",
+        "proposal_only",
+        "blocked",
+    ]
+    generic_action_spec_status: str
+    final_gate_adapter_status: Literal["contract_ready_blocked_until_gate_passes"]
+    action_registry_supported: bool
+    required_owner_scope_fields: list[str] = Field(default_factory=list)
+    warning_count: int
+    hard_blocker_count: int
+    owner_decision_text: str
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+
+
 class CandidatePipelineStandard(ProductionAdmissionModel):
     version: str = "brc_strategy_family_action_candidate_standard_v0_1"
     principle: str = (
@@ -341,6 +474,9 @@ class CandidatePipelineStandard(ProductionAdmissionModel):
             "RiskDisclosureSpec",
             "ReviewTemplate",
             "ActionCandidateSpec",
+            "GenericActionSpec",
+            "ActionEntryPayloadContract",
+            "GenericFinalGateAdapterContract",
         ]
     )
     trading_console_output_contract: str = (
@@ -1582,6 +1718,16 @@ class ProductionStrategyFamilyAdmissionState(ProductionAdmissionModel):
     trading_console_candidate_output: list[TradingConsoleCandidateOutput] = Field(
         default_factory=list
     )
+    generic_final_gate_adapter_contract: GenericFinalGateAdapterContract = Field(
+        default_factory=GenericFinalGateAdapterContract
+    )
+    generic_action_specs: list[GenericActionSpec] = Field(default_factory=list)
+    action_entry_payload_contracts: list[ActionEntryPayloadContract] = Field(
+        default_factory=list
+    )
+    trading_console_action_entry_output: list[TradingConsoleActionEntryOutput] = Field(
+        default_factory=list
+    )
     family_completion_matrix: list[FamilyCompletionSummary] = Field(default_factory=list)
     admission_risk_control_matrix: list[AdmissionRiskControlSummary] = Field(default_factory=list)
     production_capital_boundary_matrix: list[ProductionCapitalBoundaryRow] = Field(
@@ -1988,6 +2134,10 @@ def build_production_strategy_family_admission_state(
         review_templates=_review_templates(rows),
         action_candidate_specs=_action_candidate_specs(rows),
         trading_console_candidate_output=_trading_console_candidate_output(rows),
+        generic_final_gate_adapter_contract=_generic_final_gate_adapter_contract(),
+        generic_action_specs=_generic_action_specs(rows),
+        action_entry_payload_contracts=_action_entry_payload_contracts(rows),
+        trading_console_action_entry_output=_trading_console_action_entry_output(rows),
         family_completion_matrix=_family_completion_matrix(rows),
         admission_risk_control_matrix=_admission_risk_control_matrix(rows),
         production_capital_boundary_matrix=_production_capital_boundary_matrix(rows),
@@ -5281,6 +5431,102 @@ def _action_candidate_specs(rows: list[FamilyAdmissionRow]) -> list[ActionCandid
     ]
 
 
+def _generic_final_gate_adapter_contract() -> GenericFinalGateAdapterContract:
+    return GenericFinalGateAdapterContract()
+
+
+def _generic_action_specs(rows: list[FamilyAdmissionRow]) -> list[GenericActionSpec]:
+    specs: list[GenericActionSpec] = []
+    for row in rows:
+        scope_template = _carrier_scope_template(row)
+        status = _generic_action_spec_status(row, scope_template)
+        hard_blockers = list(_row_hard_blockers(row))
+        if status == "invalid_blocked":
+            hard_blockers = _dedupe([*hard_blockers, "invalid GenericActionSpec"])
+        payload_id = f"action-entry:{row.carrier_id or row.family}"
+        specs.append(
+            GenericActionSpec(
+                family=row.family,
+                strategy_family_id=row.strategy_family_id,
+                carrier_id=row.carrier_id,
+                admission_level=row.admission_level_code,
+                status=status,
+                action_registry_supported=row.action_api_compatibility.compatible,
+                symbol=_optional_str(scope_template.get("symbol")),
+                side=_optional_str(scope_template.get("side")),
+                quantity=_optional_str(scope_template.get("quantity")),
+                max_notional=_optional_str(scope_template.get("max_notional")),
+                leverage=_optional_str(scope_template.get("leverage")),
+                max_attempts=_optional_int(scope_template.get("max_attempts")),
+                protection_mode=_optional_str(scope_template.get("protection_mode")),
+                review_requirement=_optional_str(scope_template.get("review_requirement")),
+                warnings=list(row.risk_disclosure_contract.failure_modes),
+                hard_blockers=hard_blockers,
+                action_entry_payload_ref=payload_id,
+            )
+        )
+    return specs
+
+
+def _action_entry_payload_contracts(rows: list[FamilyAdmissionRow]) -> list[ActionEntryPayloadContract]:
+    contracts: list[ActionEntryPayloadContract] = []
+    for row in rows:
+        scope_template = _carrier_scope_template(row)
+        status = _generic_action_spec_status(row, scope_template)
+        contracts.append(
+            ActionEntryPayloadContract(
+                family=row.family,
+                carrier_id=row.carrier_id,
+                payload_id=f"action-entry:{row.carrier_id or row.family}",
+                contract_status=_action_entry_contract_status(status),
+                official_action_path=list(OFFICIAL_ACTION_API_ENDPOINTS.values()),
+                required_owner_scope=dict(scope_template),
+                required_pre_action_facts=[
+                    "exact Owner execute authorization",
+                    "PG and exchange exposure snapshot",
+                    "TP/SL protection plan",
+                    "ExecutionIntent/order/review/audit recording readiness",
+                    "runtime/profile/env/credential guard status",
+                ],
+                mandatory_protection_mode="single_tp_plus_sl",
+                post_action_acceptance_outputs=[
+                    "ExecutionIntent",
+                    "Entry",
+                    "TP/SL",
+                    "Review",
+                    "Audit",
+                ],
+            )
+        )
+    return contracts
+
+
+def _trading_console_action_entry_output(
+    rows: list[FamilyAdmissionRow],
+) -> list[TradingConsoleActionEntryOutput]:
+    output: list[TradingConsoleActionEntryOutput] = []
+    for row in rows:
+        scope_template = _carrier_scope_template(row)
+        generic_status = _generic_action_spec_status(row, scope_template)
+        output.append(
+            TradingConsoleActionEntryOutput(
+                family=row.family,
+                strategy_family_id=row.strategy_family_id,
+                carrier_id=row.carrier_id,
+                admission_level=row.admission_level_code,
+                action_entry_state=_action_entry_state(generic_status),
+                generic_action_spec_status=generic_status,
+                final_gate_adapter_status="contract_ready_blocked_until_gate_passes",
+                action_registry_supported=row.action_api_compatibility.compatible,
+                required_owner_scope_fields=list(REQUIRED_OWNER_SCOPE_FIELDS),
+                warning_count=len(row.risk_disclosure_contract.failure_modes),
+                hard_blocker_count=len(_row_hard_blockers(row)),
+                owner_decision_text=_action_entry_owner_decision_text(row, generic_status),
+            )
+        )
+    return output
+
+
 def _trading_console_candidate_output(rows: list[FamilyAdmissionRow]) -> list[TradingConsoleCandidateOutput]:
     return [
         TradingConsoleCandidateOutput(
@@ -5297,6 +5543,74 @@ def _trading_console_candidate_output(rows: list[FamilyAdmissionRow]) -> list[Tr
         )
         for row in rows
     ]
+
+
+def _generic_action_spec_status(
+    row: FamilyAdmissionRow,
+    scope_template: dict[str, object],
+) -> Literal["valid_blocked_final_gate", "proposal_non_action", "invalid_blocked"]:
+    if row.action_api_compatibility.compatible and _scope_template_complete(scope_template):
+        return "valid_blocked_final_gate"
+    if row.carrier_id is not None and row.admission_level_code in {"L2", "L3"}:
+        return "proposal_non_action"
+    return "invalid_blocked"
+
+
+def _scope_template_complete(scope_template: dict[str, object]) -> bool:
+    required = [
+        "symbol",
+        "side",
+        "quantity",
+        "max_notional",
+        "leverage",
+        "max_attempts",
+        "protection_mode",
+        "review_requirement",
+    ]
+    return all(scope_template.get(field) not in (None, "") for field in required)
+
+
+def _action_entry_contract_status(
+    status: str,
+) -> Literal["ready_for_final_gate_adapter", "proposal_only", "blocked_invalid_scope"]:
+    if status == "valid_blocked_final_gate":
+        return "ready_for_final_gate_adapter"
+    if status == "proposal_non_action":
+        return "proposal_only"
+    return "blocked_invalid_scope"
+
+
+def _action_entry_state(
+    status: str,
+) -> Literal["ready_for_owner_scope_final_gate", "proposal_only", "blocked"]:
+    if status == "valid_blocked_final_gate":
+        return "ready_for_owner_scope_final_gate"
+    if status == "proposal_non_action":
+        return "proposal_only"
+    return "blocked"
+
+
+def _action_entry_owner_decision_text(row: FamilyAdmissionRow, status: str) -> str:
+    if status == "valid_blocked_final_gate":
+        return (
+            "Owner may review exact action-entry payload, but execution remains blocked "
+            "until final gate facts, authorization, protection, review, and audit are ready."
+        )
+    if status == "proposal_non_action":
+        return "Proposal only; this carrier is not action-registry-supported."
+    return f"Blocked until {row.next_retry_condition}"
+
+
+def _optional_str(value: object) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _optional_int(value: object) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    return int(value)
 
 
 def _carrier_scope_template(row: FamilyAdmissionRow) -> dict[str, object]:

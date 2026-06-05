@@ -1257,6 +1257,73 @@ def test_production_strategy_family_admission_state_exposes_bridge_contracts():
         assert row.blocker_record.severity == "hard_blocker"
 
 
+def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries():
+    state = build_production_strategy_family_admission_state(now_ms=1770000000000)
+
+    assert state.generic_final_gate_adapter_contract.live_action_policy == (
+        "fail_closed_until_official_final_gate_passes"
+    )
+    assert state.generic_final_gate_adapter_contract.may_execute_live is False
+    assert state.generic_final_gate_adapter_contract.places_order is False
+    assert "invalid GenericActionSpec" in (
+        state.generic_final_gate_adapter_contract.hard_blockers_for_live_action
+    )
+    assert "weak strategy evidence" in (
+        state.generic_final_gate_adapter_contract.warning_not_blocker
+    )
+
+    specs_by_family = {item.family: item for item in state.generic_action_specs}
+    trend = specs_by_family["Trend"]
+    assert trend.carrier_id == "TF-001-live-readonly-v0"
+    assert trend.status == "valid_blocked_final_gate"
+    assert trend.action_registry_supported is True
+    assert trend.symbol == "SOL/USDT:USDT"
+    assert trend.side == "long"
+    assert trend.quantity == "0.1"
+    assert trend.max_notional == "20"
+    assert trend.leverage == "1"
+    assert trend.max_attempts == 1
+    assert trend.protection_mode == "single_tp_plus_sl"
+    assert trend.may_execute_live is False
+    assert trend.frontend_action_enabled is False
+    assert trend.creates_authorization is False
+    assert trend.creates_execution_intent is False
+    assert trend.places_order is False
+    assert trend.mutates_pg is False
+
+    assert specs_by_family["Volatility expansion"].status == "proposal_non_action"
+    assert specs_by_family["Volatility expansion"].action_registry_supported is False
+    assert specs_by_family["Mean reversion"].status == "proposal_non_action"
+    assert specs_by_family["Mean reversion"].action_registry_supported is False
+
+    payloads_by_family = {
+        item.family: item for item in state.action_entry_payload_contracts
+    }
+    trend_payload = payloads_by_family["Trend"]
+    assert trend_payload.contract_status == "ready_for_final_gate_adapter"
+    assert trend_payload.required_owner_scope["symbol"] == "SOL/USDT:USDT"
+    assert trend_payload.required_owner_scope["quantity"] == "0.1"
+    assert trend_payload.required_owner_scope["max_notional"] == "20"
+    assert trend_payload.required_owner_scope["protection_mode"] == "single_tp_plus_sl"
+    assert trend_payload.action_allowed is False
+    assert trend_payload.may_execute_live is False
+    assert trend_payload.frontend_action_enabled is False
+
+    action_entry_by_family = {
+        item.family: item for item in state.trading_console_action_entry_output
+    }
+    assert action_entry_by_family["Trend"].action_entry_state == (
+        "ready_for_owner_scope_final_gate"
+    )
+    assert action_entry_by_family["Trend"].frontend_action_enabled is False
+    assert action_entry_by_family["Volatility expansion"].action_entry_state == (
+        "proposal_only"
+    )
+    assert action_entry_by_family["Mean reversion"].action_entry_state == (
+        "proposal_only"
+    )
+
+
 def test_complete_owner_scope_is_reviewed_but_not_made_actionable():
     state = build_production_strategy_family_admission_state(
         owner_scope={

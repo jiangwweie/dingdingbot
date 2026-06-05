@@ -547,6 +547,50 @@ class TradingConsoleReadModelService:
             },
         )
 
+    async def action_entry_readiness(
+        self,
+        *,
+        owner_scope: Optional[dict[str, Any]] = None,
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        state = build_production_strategy_family_admission_state(
+            current_authorization_state=snap.authorization_state,
+            owner_scope=owner_scope,
+            now_ms=snap.generated_at_ms,
+        )
+        blockers = [
+            {
+                "code": record.id,
+                "message": record.evidence,
+            }
+            for record in state.blocker_records
+        ]
+        return self._response(
+            "action_entry_readiness",
+            snap,
+            blockers=blockers,
+            data={
+                "generic_final_gate_adapter_contract": (
+                    state.generic_final_gate_adapter_contract.model_dump(mode="json")
+                ),
+                "generic_action_specs": [
+                    item.model_dump(mode="json") for item in state.generic_action_specs
+                ],
+                "action_entry_payload_contracts": [
+                    item.model_dump(mode="json")
+                    for item in state.action_entry_payload_contracts
+                ],
+                "action_entry_output": [
+                    item.model_dump(mode="json")
+                    for item in state.trading_console_action_entry_output
+                ],
+                "candidate_output": [
+                    item.model_dump(mode="json")
+                    for item in state.trading_console_candidate_output
+                ],
+            },
+        )
+
     async def signal_marker_feed(
         self,
         *,
@@ -622,6 +666,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/audit-chain",
                     "GET /api/trading-console/carrier-availability",
                     "GET /api/trading-console/strategy-family-admission-state",
+                    "GET /api/trading-console/action-entry-readiness",
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/api-classification",
                 ],

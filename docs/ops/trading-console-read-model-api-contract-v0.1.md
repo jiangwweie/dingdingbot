@@ -545,6 +545,56 @@ authorization, scope mismatch, unreadable/conflicting exposure, unavailable
 TP/SL plan, unavailable intent/order/review/audit recording, runtime/profile/env
 or credential guard blocks, or a carrier that cannot produce a valid
 ActionCandidate.
+
+### `GET /api/trading-console/action-entry-readiness`
+
+Purpose: read-only bridge from `ActionCandidateSpec` to a generic official
+action-entry contract for Owner review and frontend disabled-state rendering.
+
+Optional query fields are the same read-only Owner scope review fields as
+`strategy-family-admission-state`:
+
+- `family`
+- `strategy_family_id`
+- `carrier_id`
+- `symbol`
+- `side`
+- `quantity`
+- `max_notional`
+- `leverage`
+- `max_attempts`
+- `protection_mode`
+- `review_requirement`
+
+`data` fields:
+
+- `generic_final_gate_adapter_contract`
+- `generic_action_specs`
+- `action_entry_payload_contracts`
+- `action_entry_output`
+- `candidate_output`
+
+`generic_action_specs` is the first-class generic action contract layer. Trend
+may expose `TF-001-live-readonly-v0` as `status=valid_blocked_final_gate` with
+exact scope `SOL/USDT:USDT`, `long`, qty `0.1`, max notional `20`, leverage `1`,
+max attempts `1`, and `protection_mode=single_tp_plus_sl`. Volatility expansion
+and Mean reversion remain `status=proposal_non_action` unless their carriers are
+explicitly added to the official action registry in a later sprint.
+
+`generic_final_gate_adapter_contract` defines the hard live-action gates:
+exact Owner execute authorization, scope match, readable and non-conflicting PG
+and exchange exposure, valid mandatory TP/SL plan, intent/order/review/audit
+recording readiness, and runtime/profile/env/credential guard pass. Weak
+strategy evidence, incomplete signal markers, fee/funding/slippage gaps,
+incomplete review UI, and non-core read-model degradation are warnings, not hard
+blockers.
+
+This endpoint is GET-only and never creates an authorization, execution intent,
+order, protection order, review, runtime start, or PG mutation. Every row in
+`generic_action_specs`, `action_entry_payload_contracts`, and
+`action_entry_output` must keep `frontend_action_enabled=false`,
+`may_execute_live=false`, and write/action flags false until a future official
+final gate returns an auditable executable result.
 `official_action_api_inventory` records the current official BRC action API
 inventory for transition review. At this revision it supports
 `MI-001-BNB-LONG` and exact Trend carrier `TF-001-live-readonly-v0`;

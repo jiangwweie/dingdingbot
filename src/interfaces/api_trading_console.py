@@ -231,6 +231,37 @@ async def strategy_family_admission_state(
     )
 
 
+@router.get("/action-entry-readiness", response_model=TradingConsoleReadModelResponse)
+async def action_entry_readiness(
+    family: Optional[str] = Query(default=None),
+    strategy_family_id: Optional[str] = Query(default=None),
+    carrier_id: Optional[str] = Query(default=None),
+    symbol: Optional[str] = Query(default=None),
+    side: Optional[str] = Query(default=None),
+    quantity: Optional[str] = Query(default=None),
+    max_notional: Optional[str] = Query(default=None),
+    leverage: Optional[str] = Query(default=None),
+    max_attempts: Optional[int] = Query(default=None, ge=1, le=10),
+    protection_mode: Optional[str] = Query(default=None),
+    review_requirement: Optional[str] = Query(default=None),
+) -> TradingConsoleReadModelResponse:
+    return await _service(include_exchange=False).action_entry_readiness(
+        owner_scope={
+            "family": family,
+            "strategy_family_id": strategy_family_id,
+            "carrier_id": carrier_id,
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "max_notional": max_notional,
+            "leverage": leverage,
+            "max_attempts": max_attempts,
+            "protection_mode": protection_mode,
+            "review_requirement": review_requirement,
+        }
+    )
+
+
 @router.get("/signal-marker-feed", response_model=TradingConsoleReadModelResponse)
 async def signal_marker_feed(
     symbol: Optional[str] = Query(default=None),
