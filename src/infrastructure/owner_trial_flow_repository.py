@@ -14,12 +14,14 @@ from src.application.owner_trial_flow import (
     BoundedLiveTrialAuthorizationDraft,
     OwnerRiskAcknowledgement,
     OwnerTrialFlowInfrastructureError,
+    ScopedRuntimeSafetyClearance,
 )
 from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.pg_models import (
     PGBrcBoundedLiveTrialAuthorizationORM,
     PGBrcBoundedLiveTrialAuthorizationDraftORM,
     PGBrcOwnerRiskAcknowledgementORM,
+    PGBrcScopedRuntimeSafetyClearanceORM,
 )
 
 
@@ -285,6 +287,38 @@ class PgOwnerTrialFlowRepository:
         except SQLAlchemyError as exc:
             raise _pg_error(exc) from exc
 
+    async def create_scoped_runtime_safety_clearance(
+        self,
+        clearance: ScopedRuntimeSafetyClearance,
+    ) -> ScopedRuntimeSafetyClearance:
+        row = PGBrcScopedRuntimeSafetyClearanceORM(
+            clearance_id=clearance.clearance_id,
+            clearance_type=clearance.clearance_type,
+            authorization_id=clearance.authorization_id,
+            carrier_id=clearance.carrier_id,
+            symbol=clearance.symbol,
+            side=clearance.side,
+            max_notional=Decimal(str(clearance.max_notional)),
+            quantity=Decimal(str(clearance.quantity)),
+            leverage=Decimal(str(clearance.leverage)),
+            protection_plan_type=clearance.protection_plan_type,
+            status=clearance.status,
+            expires_at_ms=clearance.expires_at_ms,
+            actor=clearance.actor,
+            source=clearance.source,
+            reason=clearance.reason,
+            metadata_json=clearance.model_dump(mode="json"),
+            created_at_ms=clearance.created_at_ms,
+            updated_at_ms=clearance.updated_at_ms,
+        )
+        try:
+            async with self._session_maker() as session:
+                async with session.begin():
+                    session.add(row)
+                return self._to_scoped_clearance(row)
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
     @staticmethod
     def _apply_draft(
         row: PGBrcBoundedLiveTrialAuthorizationDraftORM,
@@ -405,6 +439,38 @@ class PgOwnerTrialFlowRepository:
             updated_at_ms=row.updated_at_ms,
             source="owner_console",
             metadata_only=True,
+        )
+
+    @staticmethod
+    def _to_scoped_clearance(
+        row: PGBrcScopedRuntimeSafetyClearanceORM,
+    ) -> ScopedRuntimeSafetyClearance:
+        return ScopedRuntimeSafetyClearance(
+            clearance_id=row.clearance_id,
+            clearance_type="startup_guard",
+            authorization_id=row.authorization_id,
+            carrier_id=row.carrier_id,
+            strategy_family_id=(row.metadata_json or {}).get("strategy_family_id", row.carrier_id),
+            symbol=row.symbol,
+            side=row.side,
+            max_notional=row.max_notional,
+            quantity=row.quantity,
+            leverage=row.leverage,
+            protection_plan_type="single_tp_plus_sl",
+            status="active",
+            expires_at_ms=row.expires_at_ms,
+            actor=row.actor,
+            source="owner_console",
+            reason=row.reason,
+            created_at_ms=row.created_at_ms,
+            updated_at_ms=row.updated_at_ms,
+            metadata_only=True,
+            runtime_started=False,
+            execution_intent_created=False,
+            order_created=False,
+            order_permission_granted=False,
+            execution_permission_granted=False,
+            exchange_write_api_called=False,
         )
 
 

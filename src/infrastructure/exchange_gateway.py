@@ -1673,8 +1673,12 @@ class ExchangeGateway:
             price_precision = precision.get('price', 2)
             min_notional = Decimal(str(limits.get('cost', {}).get('min', 5)))
 
-            # stepSize（数量步长）
+            # stepSize（数量步长）. Some ccxt Binance futures markets expose the
+            # actionable amount step through precision.amount instead of
+            # limits.amount.step.
             step_size = Decimal(str(limits.get('amount', {}).get('step', 0)))
+            if step_size == Decimal("0"):
+                step_size = Decimal(str(quantity_precision))
 
             return {
                 'min_quantity': min_quantity,

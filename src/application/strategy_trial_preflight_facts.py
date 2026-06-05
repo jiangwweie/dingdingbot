@@ -36,6 +36,9 @@ PreflightFactId = Literal[
     "startup_guard",
     "reconciliation",
     "account_facts",
+    "market_metadata",
+    "protection_readiness",
+    "recording_readiness",
 ]
 
 FactReader = Callable[[StrategyProfile], Awaitable[Any] | Any]
@@ -113,6 +116,9 @@ class TrialPreflightFactCollector:
         startup_guard_reader: Optional[FactReader] = None,
         reconciliation_reader: Optional[FactReader] = None,
         account_facts_reader: Optional[FactReader] = None,
+        market_metadata_reader: Optional[FactReader] = None,
+        protection_readiness_reader: Optional[FactReader] = None,
+        recording_readiness_reader: Optional[FactReader] = None,
     ) -> None:
         self._position_reader = position_reader
         self._open_order_reader = open_order_reader
@@ -120,6 +126,9 @@ class TrialPreflightFactCollector:
         self._startup_guard_reader = startup_guard_reader
         self._reconciliation_reader = reconciliation_reader
         self._account_facts_reader = account_facts_reader
+        self._market_metadata_reader = market_metadata_reader
+        self._protection_readiness_reader = protection_readiness_reader
+        self._recording_readiness_reader = recording_readiness_reader
 
     async def collect(self, profile: StrategyProfile) -> TrialPreflightFactsSnapshot:
         generated_at_ms = _now_ms()
@@ -130,6 +139,9 @@ class TrialPreflightFactCollector:
             await self._collect_startup_guard(profile, generated_at_ms),
             await self._collect_reconciliation(profile, generated_at_ms),
             await self._collect_account_facts(profile, generated_at_ms),
+            await self._collect_market_metadata(profile, generated_at_ms),
+            await self._collect_protection_readiness(profile, generated_at_ms),
+            await self._collect_recording_readiness(profile, generated_at_ms),
         ]
         blockers: list[str] = []
         for fact in facts:
@@ -602,6 +614,178 @@ class TrialPreflightFactCollector:
             evidence=evidence,
             notes=["Fresh read-only account facts are required before rehearsal."],
         )
+
+    async def _collect_market_metadata(
+        self,
+        profile: StrategyProfile,
+        generated_at_ms: int,
+    ) -> TrialPreflightFact:
+        if self._market_metadata_reader is None:
+            return _unavailable(
+                "market_metadata",
+                "market_metadata_required_before_action",
+                generated_at_ms,
+                "no market metadata read-only source was injected",
+            )
+        try:
+            metadata = await _maybe_await(self._market_metadata_reader(profile))
+        except Exception as exc:
+            return _unavailable(
+                "market_metadata",
+                "market_metadata_required_before_action",
+                generated_at_ms,
+                f"market metadata read failed: {type(exc).__name__}",
+            )
+        source = str(_get_value(metadata, "source") or "read_only_market_metadata")
+        min_notional = _get_str(metadata, "min_notional")
+        min_amount = _get_str(metadata, "min_amount") or _get_str(metadata, "min_quantity")
+        amount_step = _get_str(metadata, "amount_step") or _get_str(metadata, "step_size")
+        tick_size = _get_str(metadata, "tick_size")
+        price_precision = _get_str(metadata, "price_precision")
+        evidence = {
+            "symbol": str(_get_value(metadata, "symbol") or profile.symbol),
+            "min_notional": min_notional,
+            "min_amount": min_amount,
+            "amount_step": amount_step,
+            "tick_size": tick_size,
+            "price_precision": price_precision,
+            "read_only_guarantee": _get_bool(metadata, "read_only_guarantee"),
+        }
+        blockers: list[str] = []
+        if evidence["symbol"] != profile.symbol:
+            blockers.append("market_metadata_symbol_mismatch")
+        if min_notional in (None, ""):
+            blockers.append("market_metadata_min_notional_missing")
+        if min_amount in (None, ""):
+            blockers.append("market_metadata_min_amount_missing")
+        if amount_step in (None, ""):
+            blockers.append("market_metadata_amount_step_missing")
+        if tick_size in (None, "") and price_precision in (None, ""):
+            blockers.append("market_metadata_price_precision_missing")
+        if _get_bool(metadata, "read_only_guarantee") is not True:
+            blockers.append("market_metadata_read_only_unverified")
+        if blockers:
+            return TrialPreflightFact(
+                fact_id="market_metadata",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker=blockers[0],
+                blockers=_dedupe(blockers),
+                observed_at_ms=generated_at_ms,
+                evidence=evidence,
+                notes=["Precision and min-notional market metadata are required before action."],
+            )
+        return _clear("market_metadata", generated_at_ms, source, evidence)
+
+    async def _collect_protection_readiness(
+        self,
+        profile: StrategyProfile,
+        generated_at_ms: int,
+    ) -> TrialPreflightFact:
+        if self._protection_readiness_reader is None:
+            return _unavailable(
+                "protection_readiness",
+                "protection_readiness_required_before_action",
+                generated_at_ms,
+                "no protection readiness read-only source was injected",
+            )
+        try:
+            readiness = await _maybe_await(self._protection_readiness_reader(profile))
+        except Exception as exc:
+            return _unavailable(
+                "protection_readiness",
+                "protection_readiness_required_before_action",
+                generated_at_ms,
+                f"protection readiness read failed: {type(exc).__name__}",
+            )
+        source = str(_get_value(readiness, "source") or "read_only_protection_readiness")
+        protection_plan_type = _get_str(readiness, "protection_plan_type")
+        evidence = {
+            "protection_plan_type": protection_plan_type,
+            "tp_ready": _get_bool(readiness, "tp_ready"),
+            "sl_ready": _get_bool(readiness, "sl_ready"),
+            "price_source_ready": _get_bool(readiness, "price_source_ready"),
+            "read_only_guarantee": _get_bool(readiness, "read_only_guarantee"),
+        }
+        blockers: list[str] = []
+        if protection_plan_type != "single_tp_plus_sl":
+            blockers.append("protection_plan_type_unsupported")
+        if evidence["tp_ready"] is not True:
+            blockers.append("take_profit_readiness_missing")
+        if evidence["sl_ready"] is not True:
+            blockers.append("stop_loss_readiness_missing")
+        if evidence["price_source_ready"] is not True:
+            blockers.append("protection_price_source_missing")
+        if evidence["read_only_guarantee"] is not True:
+            blockers.append("protection_readiness_read_only_unverified")
+        if blockers:
+            return TrialPreflightFact(
+                fact_id="protection_readiness",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker=blockers[0],
+                blockers=_dedupe(blockers),
+                observed_at_ms=generated_at_ms,
+                evidence=evidence,
+                notes=["TP/SL readiness must be verified before action."],
+            )
+        return _clear("protection_readiness", generated_at_ms, source, evidence)
+
+    async def _collect_recording_readiness(
+        self,
+        profile: StrategyProfile,
+        generated_at_ms: int,
+    ) -> TrialPreflightFact:
+        if self._recording_readiness_reader is None:
+            return _unavailable(
+                "recording_readiness",
+                "recording_readiness_required_before_action",
+                generated_at_ms,
+                "no recording readiness read-only source was injected",
+            )
+        try:
+            readiness = await _maybe_await(self._recording_readiness_reader(profile))
+        except Exception as exc:
+            return _unavailable(
+                "recording_readiness",
+                "recording_readiness_required_before_action",
+                generated_at_ms,
+                f"recording readiness read failed: {type(exc).__name__}",
+            )
+        source = str(_get_value(readiness, "source") or "read_only_recording_readiness")
+        evidence = {
+            "execution_intents_writable": _get_bool(readiness, "execution_intents_writable"),
+            "orders_writable": _get_bool(readiness, "orders_writable"),
+            "review_writable": _get_bool(readiness, "review_writable"),
+            "audit_writable": _get_bool(readiness, "audit_writable"),
+            "read_only_check": _get_bool(readiness, "read_only_check"),
+        }
+        blockers: list[str] = []
+        if evidence["execution_intents_writable"] is not True:
+            blockers.append("execution_intents_write_unavailable")
+        if evidence["orders_writable"] is not True:
+            blockers.append("orders_write_unavailable")
+        if evidence["review_writable"] is not True:
+            blockers.append("review_write_unavailable")
+        if evidence["audit_writable"] is not True:
+            blockers.append("audit_write_unavailable")
+        if evidence["read_only_check"] is not True:
+            blockers.append("recording_readiness_check_not_read_only")
+        if blockers:
+            return TrialPreflightFact(
+                fact_id="recording_readiness",
+                status="unavailable",
+                source=source,
+                blocking=True,
+                blocker=blockers[0],
+                blockers=_dedupe(blockers),
+                observed_at_ms=generated_at_ms,
+                evidence=evidence,
+                notes=["Intent/order/review/audit write readiness must be verified before action."],
+            )
+        return _clear("recording_readiness", generated_at_ms, source, evidence)
 
 
 def _clear(

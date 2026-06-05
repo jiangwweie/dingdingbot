@@ -16,6 +16,7 @@ from src.application.owner_trial_flow import (
     BoundedLiveTrialAuthorizationDraftCreateRequest,
     OwnerLiveAuthorizationActivationRequest,
     OwnerRiskAcknowledgementCreateRequest,
+    ScopedRuntimeSafetyClearanceCreateRequest,
     OwnerTrialFlowError,
     OwnerTrialFlowService,
 )
@@ -23,6 +24,7 @@ from src.application.bnb_live_execution_bridge import (
     BnbLiveExecutionBridgeDryRunRequest,
     BnbLiveExecutionBridgeDryRunService,
 )
+from src.application.production_strategy_family_admission import GenericActionSpec
 from src.application.owner_bounded_execution import (
     ExchangeGatewayBoundedOrderExecutor,
     OwnerBoundedExecutionError,
@@ -47,6 +49,7 @@ from src.infrastructure.pg_models import (
     PGBrcExecutionResultORM,
     PGBrcOwnerRiskAcknowledgementORM,
     PGBrcProtectionPricePlanORM,
+    PGBrcScopedRuntimeSafetyClearanceORM,
     PGOrderORM,
 )
 from src.infrastructure.pg_protection_price_plan_repository import PgProtectionPricePlanRepository
@@ -105,6 +108,7 @@ async def _service() -> tuple[OwnerTrialFlowService, object]:
         await conn.run_sync(PGBrcOwnerRiskAcknowledgementORM.__table__.create)
         await conn.run_sync(PGBrcBoundedLiveTrialAuthorizationDraftORM.__table__.create)
         await conn.run_sync(PGBrcBoundedLiveTrialAuthorizationORM.__table__.create)
+        await conn.run_sync(PGBrcScopedRuntimeSafetyClearanceORM.__table__.create)
         await conn.run_sync(PGBrcProtectionPricePlanORM.__table__.create)
     return OwnerTrialFlowService(PgOwnerTrialFlowRepository(session_maker)), engine
 
@@ -240,8 +244,32 @@ def _trend_activation_request(**patch):
     return OwnerLiveAuthorizationActivationRequest(**payload)
 
 
+def _trend_generic_action_spec(**patch):
+    payload = {
+        "family": "Trend",
+        "strategy_family_id": "TF-001-live-readonly-v0",
+        "carrier_id": "TF-001-live-readonly-v0",
+        "admission_level": "L3",
+        "status": "valid_blocked_final_gate",
+        "action_registry_supported": True,
+        "symbol": "SOL/USDT:USDT",
+        "side": "long",
+        "quantity": "0.1",
+        "max_notional": "20",
+        "leverage": "1",
+        "max_attempts": 1,
+        "protection_mode": "single_tp_plus_sl",
+        "review_requirement": "post_action_review_required",
+    }
+    payload.update(patch)
+    return GenericActionSpec(**payload)
+
+
 def _clear_fact_snapshot(
     *,
+    candidate_id: str = "MI-001-BNB-LONG",
+    symbol: str = "BNB/USDT:USDT",
+    side: str = "long",
     startup_guard_clear: bool = False,
     startup_guard_armed: bool = True,
     active_position_count: int = 0,
@@ -249,6 +277,19 @@ def _clear_fact_snapshot(
     gks_active: bool = False,
     account_freshness: str = "fresh",
     account_read_only_guarantee: bool = True,
+    market_min_notional: str = "5",
+    market_min_amount: str = "0.01",
+    market_amount_step: str = "0.01",
+    market_tick_size: str = "0.1",
+    market_price_precision: str = "1",
+    market_read_only_guarantee: bool = True,
+    protection_tp_ready: bool = True,
+    protection_sl_ready: bool = True,
+    protection_price_source_ready: bool = True,
+    recording_execution_intents_writable: bool = True,
+    recording_orders_writable: bool = True,
+    recording_review_writable: bool = True,
+    recording_audit_writable: bool = True,
     omit_fact_ids: set[str] | None = None,
 ) -> TrialPreflightFactsSnapshot:
     now = int(time.time() * 1000)
@@ -319,14 +360,58 @@ def _clear_fact_snapshot(
                 "read_only_guarantee": account_read_only_guarantee,
             },
         ),
+        TrialPreflightFact(
+            fact_id="market_metadata",
+            status="clear",
+            source="test_read_only_market_metadata",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={
+                "symbol": symbol,
+                "min_notional": market_min_notional,
+                "min_amount": market_min_amount,
+                "amount_step": market_amount_step,
+                "tick_size": market_tick_size,
+                "price_precision": market_price_precision,
+                "read_only_guarantee": market_read_only_guarantee,
+            },
+        ),
+        TrialPreflightFact(
+            fact_id="protection_readiness",
+            status="clear",
+            source="test_read_only_protection_readiness",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={
+                "protection_plan_type": "single_tp_plus_sl",
+                "tp_ready": protection_tp_ready,
+                "sl_ready": protection_sl_ready,
+                "price_source_ready": protection_price_source_ready,
+                "read_only_guarantee": True,
+            },
+        ),
+        TrialPreflightFact(
+            fact_id="recording_readiness",
+            status="clear",
+            source="test_read_only_recording_readiness",
+            blocking=False,
+            observed_at_ms=now,
+            evidence={
+                "execution_intents_writable": recording_execution_intents_writable,
+                "orders_writable": recording_orders_writable,
+                "review_writable": recording_review_writable,
+                "audit_writable": recording_audit_writable,
+                "read_only_check": True,
+            },
+        ),
     ]
     if omit_fact_ids:
         facts = [fact for fact in facts if fact.fact_id not in omit_fact_ids]
     return TrialPreflightFactsSnapshot(
         generated_at_ms=now,
-        candidate_id="MI-001-BNB-LONG",
-        symbol="BNB/USDT:USDT",
-        side="long",
+        candidate_id=candidate_id,
+        symbol=symbol,
+        side=side,
         facts=facts,
     )
 
@@ -394,7 +479,12 @@ def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_ord
                     leverage="1",
                     protection_plan_type="single_tp_plus_sl",
                 ),
-                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                ),
             )
 
             assert authorization.carrier_id == "TF-001-live-readonly-v0"
@@ -418,7 +508,7 @@ def test_trend_carrier_owner_trial_flow_and_final_gate_are_supported_without_ord
 
 def test_trend_authorization_draft_rejects_exact_scope_mismatches():
     async def scenario():
-        service, engine = await _service()
+        service, _bridge, engine = await _bridge_service()
         try:
             acknowledgement = await _acknowledge_all_trend(service)
             bad_requests = [
@@ -472,6 +562,60 @@ def test_trend_live_authorization_rejects_exact_scope_mismatches():
                         operator_id="owner",
                     )
                 assert excinfo.value.code == code
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_scoped_runtime_safety_clearance_requires_unused_authorization():
+    async def scenario():
+        service, _bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+            clearance = await service.create_scoped_runtime_safety_clearance(
+                authorization.authorization_id,
+                ScopedRuntimeSafetyClearanceCreateRequest(
+                    clearance_type="startup_guard",
+                    reason="unit_scoped_startup_guard",
+                    ttl_ms=60000,
+                ),
+                operator_id="owner",
+            )
+            assert clearance.carrier_id == "TF-001-live-readonly-v0"
+            assert clearance.symbol == "SOL/USDT:USDT"
+            assert clearance.metadata_only is True
+            assert clearance.runtime_started is False
+            assert clearance.execution_intent_created is False
+            assert clearance.order_created is False
+
+            await service._repository.mark_live_authorization_consumed(
+                authorization.authorization_id,
+                occurred_at_ms=int(time.time() * 1000),
+            )
+            with pytest.raises(OwnerTrialFlowError) as excinfo:
+                await service.create_scoped_runtime_safety_clearance(
+                    authorization.authorization_id,
+                    ScopedRuntimeSafetyClearanceCreateRequest(),
+                    operator_id="owner",
+                )
+            assert excinfo.value.code == "authorization_already_consumed"
+
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                clearance_count = await session.scalar(
+                    text("SELECT count(*) FROM brc_scoped_runtime_safety_clearances")
+                )
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert clearance_count == 1
+            assert intent_count == 0
+            assert order_count == 0
         finally:
             await engine.dispose()
 
@@ -1001,6 +1145,16 @@ def test_owner_trial_flow_api_persists_pg_metadata_without_execution_or_order(mo
                 },
             )
             assert authorization.status_code == 200
+
+            clearance = client.post(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization.json()['authorization_id']}/runtime-safety-clearance",
+                json={
+                    "clearance_type": "startup_guard",
+                    "reason": "unit_scoped_startup_guard",
+                    "ttl_ms": 60000,
+                },
+            )
+            assert clearance.status_code == 200
     finally:
         app.dependency_overrides.pop(require_operator_session, None)
         api_brc_console._owner_trial_flow_service = None
@@ -1024,6 +1178,146 @@ def test_owner_trial_flow_api_persists_pg_metadata_without_execution_or_order(mo
     assert auth_payload["execution_intent_created"] is False
     assert auth_payload["order_created"] is False
     assert auth_payload["order_permission_granted"] is False
+    clearance_payload = clearance.json()
+    assert clearance_payload["clearance_type"] == "startup_guard"
+    assert clearance_payload["authorization_id"] == auth_payload["authorization_id"]
+    assert clearance_payload["metadata_only"] is True
+    assert clearance_payload["runtime_started"] is False
+    assert clearance_payload["execution_intent_created"] is False
+    assert clearance_payload["order_created"] is False
+    assert clearance_payload["order_permission_granted"] is False
+    assert clearance_payload["execution_permission_granted"] is False
+    assert clearance_payload["exchange_write_api_called"] is False
+
+
+def test_trend_owner_trial_flow_api_path_authorizes_and_execute_preflight_blocks_without_order(monkeypatch):
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from src.interfaces.operator_auth import OperatorSession, require_operator_session
+
+    seen_profiles = []
+
+    class FakeFactCollector:
+        async def collect(self, strategy_profile):
+            seen_profiles.append(strategy_profile)
+            return _clear_fact_snapshot(
+                candidate_id=strategy_profile.candidate_id,
+                symbol=strategy_profile.symbol,
+                side=strategy_profile.side,
+                startup_guard_clear=True,
+            )
+
+    async def fake_gateway_binding(_api_module):
+        return {
+            "status": "blocked_test_gateway_absent",
+            "gateway": None,
+            "blockers": ["test_gateway_absent"],
+        }
+
+    service, _bridge, engine = asyncio.run(_bridge_service())
+    api_brc_console._owner_trial_flow_service = service
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_trial_preflight_fact_collector",
+        lambda _api_module: FakeFactCollector(),
+    )
+    monkeypatch.setattr(
+        api_brc_console,
+        "_owner_bounded_exchange_gateway_binding",
+        fake_gateway_binding,
+    )
+    app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
+        username="owner",
+        expires_at=int(time.time()) + 3600,
+    )
+
+    try:
+        with TestClient(app) as client:
+            current = client.get(
+                "/api/brc/owner-trial-flow/current",
+                params={"carrier_id": "TF-001-live-readonly-v0"},
+            )
+            assert current.status_code == 200
+            warning_codes = [
+                item["warning_id"]
+                for item in current.json()["strategy_warnings"]
+            ]
+
+            ack = client.post(
+                "/api/brc/owner-trial-flow/risk-acknowledgement",
+                json={
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "acknowledged_warning_codes": warning_codes,
+                },
+            )
+            assert ack.status_code == 200
+
+            draft = client.post(
+                "/api/brc/owner-trial-flow/authorization-draft",
+                json={
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "linked_acknowledgement_id": ack.json()["acknowledgement_id"],
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "max_notional": "20",
+                    "quantity": "0.1",
+                    "leverage": "1",
+                    "protection_plan_type": "single_tp_plus_sl",
+                },
+            )
+            assert draft.status_code == 200
+
+            authorization = client.post(
+                f"/api/brc/owner-trial-flow/authorization-draft/{draft.json()['draft_id']}/activate-live-authorization",
+                json={
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "max_notional": "20",
+                    "quantity": "0.1",
+                    "leverage": "1",
+                    "protection_plan_type": "single_tp_plus_sl",
+                },
+            )
+            assert authorization.status_code == 200
+            authorization_payload = authorization.json()
+
+            execute = client.post(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization_payload['authorization_id']}/execute"
+            )
+            assert execute.status_code == 409
+
+        assert seen_profiles
+        assert seen_profiles[0].candidate_id == "TF-001-live-readonly-v0"
+        assert seen_profiles[0].symbol == "SOL/USDT:USDT"
+        assert seen_profiles[0].side == "long"
+        assert authorization_payload["live_authorized"] is True
+        assert authorization_payload["execution_intent_created"] is False
+        assert authorization_payload["order_created"] is False
+        payload = execute.json()
+        assert "owner_bounded_execution_blocked" in payload["message"]
+        assert "protection_price_source_missing" in payload["message"]
+
+        async def counts():
+            session_maker = service._repository._session_maker
+            async with session_maker() as session:
+                return (
+                    await session.scalar(text("SELECT count(*) FROM execution_intents")),
+                    await session.scalar(text("SELECT count(*) FROM orders")),
+                )
+
+        intent_count, order_count = asyncio.run(counts())
+        assert intent_count == 0
+        assert order_count == 0
+    finally:
+        app.dependency_overrides.pop(require_operator_session, None)
+        api_brc_console._owner_trial_flow_service = None
+        asyncio.run(engine.dispose())
 
 
 def test_owner_trial_flow_pg_repository_does_not_create_execution_intent_or_order():
@@ -1516,6 +1810,9 @@ def test_owner_bounded_execution_blocks_missing_protection_price_source_before_i
                 _activation_request(),
                 operator_id="owner",
             )
+            async with engine.begin() as conn:
+                await conn.execute(text("DROP TABLE brc_execution_results"))
+                await conn.run_sync(PGBrcExecutionResultORM.__table__.create)
 
             with pytest.raises(OwnerBoundedExecutionError) as exc_info:
                 await execute_service.execute_authorization(
@@ -1541,6 +1838,9 @@ def test_owner_bounded_execution_valid_price_snapshot_clears_protection_source_b
     async def scenario():
         service, bridge, engine = await _bridge_service()
         session_maker = service._repository._session_maker
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE brc_execution_results"))
+            await conn.run_sync(lambda sync_conn: PGBrcExecutionResultORM.__table__.create(sync_conn, checkfirst=False))
         protection_repo = PgProtectionPricePlanRepository(session_maker)
         protection_service = ProtectionPlannerService(
             repository=protection_repo,
@@ -1659,6 +1959,9 @@ def test_owner_bounded_execution_fake_gateway_creates_one_intent_entry_tp_sl_and
     async def scenario():
         service, bridge, engine = await _bridge_service()
         session_maker = service._repository._session_maker
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE brc_execution_results"))
+            await conn.run_sync(PGBrcExecutionResultORM.__table__.create)
         protection_repo = PgProtectionPricePlanRepository(session_maker)
         protection_service = ProtectionPlannerService(
             repository=protection_repo,
@@ -1966,6 +2269,9 @@ def test_owner_bounded_execution_failed_entry_is_recorded_without_consuming_auth
     async def scenario():
         service, bridge, engine = await _bridge_service()
         session_maker = service._repository._session_maker
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE brc_execution_results"))
+            await conn.run_sync(PGBrcExecutionResultORM.__table__.create)
         protection_repo = PgProtectionPricePlanRepository(session_maker)
         protection_service = ProtectionPlannerService(
             repository=protection_repo,
@@ -2014,6 +2320,36 @@ def test_owner_bounded_execution_failed_entry_is_recorded_without_consuming_auth
             assert intent_repo.updates[-1].failed_reason == "F-011"
             assert len(order_repo.items) == 1
             assert order_repo.items[0].status == OrderStatus.REJECTED
+            async with session_maker() as session:
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT operation_id, status, failed_reason, audit_refs, review_refs, result_summary "
+                            "FROM brc_execution_results "
+                            "WHERE operation_id = :operation_id"
+                        ),
+                        {
+                            "operation_id": (
+                                f"review-{authorization.authorization_id}-{exc_info.value.execution_intent_id}"
+                            ),
+                        },
+                    )
+                ).mappings().one()
+            audit_refs = row["audit_refs"]
+            review_refs = row["review_refs"]
+            result_summary = row["result_summary"]
+            if isinstance(audit_refs, str):
+                audit_refs = json.loads(audit_refs)
+            if isinstance(review_refs, str):
+                review_refs = json.loads(review_refs)
+            if isinstance(result_summary, str):
+                result_summary = json.loads(result_summary)
+            assert row["status"] == "failed"
+            assert row["failed_reason"] == "entry_order_failed"
+            assert authorization.authorization_id in audit_refs
+            assert exc_info.value.execution_intent_id in audit_refs
+            assert row["operation_id"] in review_refs
+            assert result_summary["protection_status"] == "not_created"
             current = await service.current()
             assert current.live_authorization is not None
             assert current.live_authorization.consumed is False
@@ -2846,6 +3182,69 @@ def test_owner_bounded_execution_api_route_uses_read_only_price_source(monkeypat
         asyncio.run(engine.dispose())
 
 
+def test_owner_bounded_execution_api_route_collects_facts_from_authorization_scope(monkeypatch):
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from src.interfaces.operator_auth import OperatorSession, require_operator_session
+
+    seen_profiles = []
+
+    class FakeFactCollector:
+        async def collect(self, strategy_profile):
+            seen_profiles.append(strategy_profile)
+            return _clear_fact_snapshot(
+                candidate_id=strategy_profile.candidate_id,
+                symbol=strategy_profile.symbol,
+                side=strategy_profile.side,
+                startup_guard_clear=True,
+            )
+
+    async def setup():
+        service, _bridge, engine = await _bridge_service()
+        draft = await _create_valid_trend_draft(service)
+        authorization = await service.activate_live_authorization(
+            draft.draft_id,
+            _trend_activation_request(),
+            operator_id="owner",
+        )
+        return service, engine, authorization.authorization_id
+
+    service, engine, authorization_id = asyncio.run(setup())
+    api_brc_console._owner_trial_flow_service = service
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_trial_preflight_fact_collector",
+        lambda _api_module: FakeFactCollector(),
+    )
+    app.dependency_overrides[require_operator_session] = lambda: OperatorSession(
+        username="owner",
+        expires_at=int(time.time()) + 3600,
+    )
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization_id}/execute"
+            )
+        assert response.status_code == 409
+        assert seen_profiles
+        assert seen_profiles[0].candidate_id == "TF-001-live-readonly-v0"
+        assert seen_profiles[0].symbol == "SOL/USDT:USDT"
+        assert seen_profiles[0].side == "long"
+        payload = response.json()
+        assert "owner_bounded_execution_blocked" in payload["message"]
+        assert "protection_price_source_missing" in payload["message"]
+    finally:
+        app.dependency_overrides.pop(require_operator_session, None)
+        api_brc_console._owner_trial_flow_service = None
+        asyncio.run(engine.dispose())
+
+
 def test_owner_bounded_execution_api_route_converts_unhandled_exception_to_business_status(monkeypatch):
     from src.interfaces import api_brc_console
     from src.interfaces.api import app
@@ -2983,6 +3382,265 @@ def test_bnb_live_execution_bridge_rejects_wrong_scope_and_permission_env():
     asyncio.run(scenario())
 
 
+def test_generic_action_spec_final_gate_consumes_trend_exact_scope_without_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                ),
+            )
+
+            assert result.final_preflight_result == "passed"
+            assert result.carrier_id == "TF-001-live-readonly-v0"
+            assert result.symbol == "SOL/USDT:USDT"
+            assert result.execution_plan_preview.quantity == Decimal("0.1")
+            assert result.execution_plan_preview.max_notional == Decimal("20")
+            assert result.final_gate_read_model.market_metadata.state == "clear"
+            assert result.final_gate_read_model.protection_readiness.state == "clear"
+            assert result.final_gate_read_model.recording_readiness.state == "clear"
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+            async with service._repository._session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_generic_action_spec_final_gate_requires_market_metadata_fact():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    omit_fact_ids={"market_metadata"},
+                ),
+            )
+
+            assert result.final_preflight_result == "blocked"
+            assert "market_metadata_fact_missing" in result.hard_blockers
+            assert result.final_gate_read_model.market_metadata.state == "missing"
+            assert result.execution_plan_preview.status == "preview_unavailable_invalid_scope"
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_generic_action_spec_final_gate_checks_market_min_notional_and_precision():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+
+            below_min_notional = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    market_min_notional="25",
+                ),
+            )
+            assert below_min_notional.final_preflight_result == "blocked"
+            assert "generic_action_spec_below_min_notional" in below_min_notional.hard_blockers
+            assert below_min_notional.non_permissions["execution_intent_created"] is False
+            assert below_min_notional.non_permissions["order_created"] is False
+
+            step_mismatch = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    market_amount_step="0.03",
+                ),
+            )
+            assert step_mismatch.final_preflight_result == "blocked"
+            assert "generic_action_spec_quantity_step_mismatch" in step_mismatch.hard_blockers
+            assert step_mismatch.non_permissions["execution_intent_created"] is False
+            assert step_mismatch.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_generic_action_spec_final_gate_requires_protection_and_recording_readiness():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+
+            missing_protection = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    omit_fact_ids={"protection_readiness"},
+                ),
+            )
+            assert missing_protection.final_preflight_result == "blocked"
+            assert "protection_readiness_fact_missing" in missing_protection.hard_blockers
+            assert missing_protection.non_permissions["execution_intent_created"] is False
+            assert missing_protection.non_permissions["order_created"] is False
+
+            missing_recording = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    omit_fact_ids={"recording_readiness"},
+                ),
+            )
+            assert missing_recording.final_preflight_result == "blocked"
+            assert "recording_readiness_fact_missing" in missing_recording.hard_blockers
+            assert missing_recording.non_permissions["execution_intent_created"] is False
+            assert missing_recording.non_permissions["order_created"] is False
+
+            not_ready = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="TF-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    protection_price_source_ready=False,
+                    recording_audit_writable=False,
+                ),
+            )
+            assert not_ready.final_preflight_result == "blocked"
+            assert "protection_price_source_missing" in not_ready.hard_blockers
+            assert "audit_write_unavailable" in not_ready.hard_blockers
+            assert not_ready.non_permissions["execution_intent_created"] is False
+            assert not_ready.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_generic_action_spec_final_gate_fails_closed_for_wrong_scope_and_fact_binding():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_trend_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _trend_activation_request(),
+                operator_id="owner",
+            )
+
+            wrong_specs = [
+                ("symbol_mismatch", _trend_generic_action_spec(symbol="BNB/USDT:USDT")),
+                ("side_mismatch", _trend_generic_action_spec(side="short")),
+                ("quantity_mismatch", _trend_generic_action_spec(quantity="0.2")),
+                ("cap_mismatch", _trend_generic_action_spec(max_notional="21")),
+                ("leverage_mismatch", _trend_generic_action_spec(leverage="2")),
+            ]
+            for expected_blocker, spec in wrong_specs:
+                result = await bridge.run_action_spec(
+                    spec,
+                    fact_snapshot=_clear_fact_snapshot(
+                        candidate_id="TF-001-live-readonly-v0",
+                        symbol="SOL/USDT:USDT",
+                        side="long",
+                        startup_guard_clear=True,
+                    ),
+                )
+                assert result.final_preflight_result == "blocked"
+                assert expected_blocker in result.hard_blockers
+                assert result.non_permissions["execution_intent_created"] is False
+                assert result.non_permissions["order_created"] is False
+
+            wrong_fact_result = await bridge.run_action_spec(
+                _trend_generic_action_spec(),
+                fact_snapshot=_clear_fact_snapshot(startup_guard_clear=True),
+            )
+            assert wrong_fact_result.final_preflight_result == "blocked"
+            assert "preflight_fact_symbol_mismatch" in wrong_fact_result.hard_blockers
+            assert "preflight_fact_candidate_mismatch" in wrong_fact_result.hard_blockers
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_generic_action_spec_final_gate_fails_closed_for_non_catalog_carrier():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            result = await bridge.run_action_spec(
+                _trend_generic_action_spec(
+                    carrier_id="VE-001-live-readonly-v0",
+                    strategy_family_id="VE-001-live-readonly-v0",
+                    action_registry_supported=True,
+                ),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="VE-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                ),
+            )
+
+            assert result.final_preflight_result == "blocked"
+            assert "unsupported_carrier" in result.hard_blockers
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(monkeypatch):
     from src.interfaces import api_brc_console
     from src.interfaces.api import app
@@ -3030,6 +3688,113 @@ def test_bnb_live_execution_bridge_api_dry_run_does_not_create_intent_or_order(m
         app.dependency_overrides.pop(require_operator_session, None)
         api_brc_console._owner_trial_flow_service = None
         asyncio.run(engine.dispose())
+
+
+def test_preflight_collector_uses_owner_bounded_gateway_for_market_and_protection_readiness(monkeypatch):
+    from src.interfaces import api_brc_console
+
+    class CleanLocalPositionRepo:
+        async def list_active(self, *, symbol=None, limit=20):
+            return []
+
+    class CleanLocalOrderRepo:
+        async def get_open_orders(self, symbol=None):
+            return []
+
+    class ClearGks:
+        def get_state(self):
+            return {"active": False, "source": "test_gks"}
+
+    class ClearStartupGuard:
+        def get_state(self):
+            return {
+                "armed": True,
+                "runtime_started": False,
+                "runtime_safety_context_bound": True,
+                "runtime_state": "scoped_safety_context_bound",
+                "source": "test_startup_guard",
+            }
+
+    class OwnerBoundedReadOnlyGateway:
+        def __init__(self):
+            self.market_info_symbols = []
+            self.place_order_called = False
+
+        async def get_market_info(self, symbol: str):
+            self.market_info_symbols.append(symbol)
+            return {
+                "symbol": symbol,
+                "min_quantity": "0.01",
+                "step_size": Decimal("0"),
+                "quantity_precision": "0.01",
+                "min_notional": "5",
+                "price_precision": "1",
+            }
+
+        async def fetch_ticker_price(self, symbol: str):
+            return Decimal("100")
+
+        async def place_order(self, *_args, **_kwargs):
+            self.place_order_called = True
+            raise AssertionError("preflight collector must not place orders")
+
+    gateway = OwnerBoundedReadOnlyGateway()
+
+    class FakeApiModule:
+        _position_repo = CleanLocalPositionRepo()
+        _order_repo = CleanLocalOrderRepo()
+        _global_kill_switch_service = ClearGks()
+        _startup_trading_guard_service = ClearStartupGuard()
+        _startup_reconciliation_summary = {
+            "status": "clean",
+            "reconciliation_status": "clean",
+            "source": "test_reconciliation",
+        }
+        _owner_bounded_exchange_gateway = gateway
+
+        @staticmethod
+        def _account_getter():
+            return SimpleNamespace(
+                total_balance=Decimal("30.00"),
+                available_balance=Decimal("30.00"),
+                timestamp=int(time.time() * 1000),
+            )
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "true")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+
+    async def scenario():
+        service, _bridge, engine = await _bridge_service()
+        try:
+            profile = api_brc_console._strategy_profile_for_owner_action_scope(
+                carrier_id="TF-001-live-readonly-v0",
+                symbol="SOL/USDT:USDT",
+                side="long",
+            )
+            collector = api_brc_console._strategy_trial_preflight_fact_collector(
+                FakeApiModule(),
+                session_maker=service._repository._session_maker,
+            )
+            snapshot = await collector.collect(profile)
+            facts = snapshot.fact_map()
+
+            assert facts["market_metadata"].status == "clear"
+            assert facts["market_metadata"].source == "bound_exchange_gateway_market_info"
+            assert facts["market_metadata"].evidence["symbol"] == "SOL/USDT:USDT"
+            assert facts["protection_readiness"].status == "clear"
+            assert facts["protection_readiness"].evidence["tp_ready"] is True
+            assert facts["protection_readiness"].evidence["sl_ready"] is True
+            assert facts["protection_readiness"].evidence["price_source_ready"] is True
+            assert facts["recording_readiness"].status == "clear"
+            assert gateway.market_info_symbols == ["SOL/USDT:USDT"]
+            assert gateway.place_order_called is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
 
 
 def test_bnb_final_gate_preflight_reads_live_read_only_account_and_flat_bnb(monkeypatch):

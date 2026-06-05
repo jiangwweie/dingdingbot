@@ -116,6 +116,13 @@ class OwnerLiveAuthorizationActivationRequest(BaseModel):
     owner_id: str | None = None
 
 
+class ScopedRuntimeSafetyClearanceCreateRequest(BaseModel):
+    clearance_type: Literal["startup_guard"] = "startup_guard"
+    reason: str | None = Field(default=None, max_length=512)
+    owner_id: str | None = None
+    ttl_ms: int = Field(default=15 * 60 * 1000, gt=0, le=15 * 60 * 1000)
+
+
 class BoundedLiveTrialAuthorization(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -153,6 +160,34 @@ class BoundedLiveTrialAuthorization(BaseModel):
     updated_at_ms: int
     source: Literal["owner_console"] = OWNER_TRIAL_FLOW_SOURCE
     metadata_only: Literal[True] = True
+
+
+class ScopedRuntimeSafetyClearance(BaseModel):
+    clearance_id: str
+    clearance_type: Literal["startup_guard"]
+    authorization_id: str
+    carrier_id: str
+    strategy_family_id: str
+    symbol: str
+    side: Literal["long", "short"]
+    max_notional: Decimal = Field(gt=Decimal("0"))
+    quantity: Decimal = Field(gt=Decimal("0"))
+    leverage: Decimal = Field(gt=Decimal("0"))
+    protection_plan_type: Literal["single_tp_plus_sl"]
+    status: Literal["active"] = "active"
+    expires_at_ms: int
+    actor: str
+    source: Literal["owner_console"] = OWNER_TRIAL_FLOW_SOURCE
+    reason: str | None = None
+    created_at_ms: int
+    updated_at_ms: int
+    metadata_only: Literal[True] = True
+    runtime_started: Literal[False] = False
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    order_permission_granted: Literal[False] = False
+    execution_permission_granted: Literal[False] = False
+    exchange_write_api_called: Literal[False] = False
 
 
 class OwnerTrialFlowCurrentResponse(BaseModel):
@@ -251,6 +286,12 @@ class OwnerTrialFlowRepository(Protocol):
         *,
         occurred_at_ms: int,
     ) -> BoundedLiveTrialAuthorization:
+        ...
+
+    async def create_scoped_runtime_safety_clearance(
+        self,
+        clearance: ScopedRuntimeSafetyClearance,
+    ) -> ScopedRuntimeSafetyClearance:
         ...
 
 
@@ -469,6 +510,55 @@ class OwnerTrialFlowService:
         )
         return await self._repository.create_live_authorization(authorization)
 
+    async def get_live_authorization(self, authorization_id: str) -> BoundedLiveTrialAuthorization:
+        authorization = await self._repository.get_live_authorization(authorization_id)
+        if authorization is None:
+            raise OwnerTrialFlowError(
+                "authorization_not_found",
+                "Owner live authorization not found.",
+            )
+        return authorization
+
+    async def create_scoped_runtime_safety_clearance(
+        self,
+        authorization_id: str,
+        request: ScopedRuntimeSafetyClearanceCreateRequest,
+        *,
+        operator_id: str = "owner",
+    ) -> ScopedRuntimeSafetyClearance:
+        authorization = await self.get_live_authorization(authorization_id)
+        _validate_clearance_authorization(authorization)
+        carrier = _supported_carrier(authorization.carrier_id)
+        now = _now_ms()
+        expires_at_ms = now + request.ttl_ms
+        if authorization.expires_at_ms is not None:
+            expires_at_ms = min(expires_at_ms, authorization.expires_at_ms)
+        if expires_at_ms <= now:
+            raise OwnerTrialFlowError(
+                "authorization_expired",
+                "Scoped runtime safety clearance requires a non-expired authorization.",
+            )
+        clearance = ScopedRuntimeSafetyClearance(
+            clearance_id=f"clearance-{uuid.uuid4().hex}",
+            clearance_type=request.clearance_type,
+            authorization_id=authorization.authorization_id,
+            carrier_id=authorization.carrier_id,
+            strategy_family_id=authorization.strategy_family_id,
+            symbol=authorization.symbol,
+            side=authorization.side,
+            max_notional=authorization.max_notional,
+            quantity=authorization.quantity,
+            leverage=authorization.leverage,
+            protection_plan_type=authorization.protection_plan_type,
+            expires_at_ms=expires_at_ms,
+            actor=request.owner_id or operator_id,
+            reason=request.reason,
+            created_at_ms=now,
+            updated_at_ms=now,
+        )
+        _validate_clearance_scope(clearance, carrier)
+        return await self._repository.create_scoped_runtime_safety_clearance(clearance)
+
 
 def _supported_carrier(carrier_id: str) -> StrategyTrialCarrierView:
     carrier = get_owner_action_carrier(carrier_id)
@@ -534,6 +624,56 @@ def _validate_activation_scope(
         raise OwnerTrialFlowError(
             "protection_not_executable",
             "Activation protection plan does not match draft.",
+        )
+
+
+def _validate_clearance_authorization(authorization: BoundedLiveTrialAuthorization) -> None:
+    if authorization.consumed:
+        raise OwnerTrialFlowError(
+            "authorization_already_consumed",
+            "Scoped runtime safety clearance requires an unused authorization.",
+        )
+    if authorization.live_authorized is not True:
+        raise OwnerTrialFlowError(
+            "authorization_not_live_authorized",
+            "Scoped runtime safety clearance requires explicit Owner live authorization.",
+        )
+    if authorization.expires_at_ms is not None and authorization.expires_at_ms <= _now_ms():
+        raise OwnerTrialFlowError("authorization_expired", "Authorization has expired.")
+    if (
+        authorization.live_ready
+        or authorization.order_permission_granted
+        or authorization.execution_permission_granted
+        or authorization.execution_intent_created
+        or authorization.order_created
+        or authorization.auto_execution_enabled
+    ):
+        raise OwnerTrialFlowError(
+            "authorization_has_executable_state",
+            "Scoped runtime safety clearance cannot be created from executable authorization state.",
+        )
+
+
+def _validate_clearance_scope(
+    clearance: ScopedRuntimeSafetyClearance,
+    carrier: StrategyTrialCarrierView,
+) -> None:
+    if clearance.carrier_id != carrier.carrier_id:
+        raise OwnerTrialFlowError("clearance_carrier_mismatch", "Clearance carrier does not match catalog.")
+    if clearance.symbol not in {carrier.symbol, carrier.runtime_symbol}:
+        raise OwnerTrialFlowError("symbol_mismatch", "Clearance symbol does not match carrier.")
+    if clearance.side != carrier.side:
+        raise OwnerTrialFlowError("side_mismatch", "Clearance side does not match carrier.")
+    if not _decimal_scope_equal(clearance.max_notional, carrier.max_notional):
+        raise OwnerTrialFlowError("cap_violation", "Clearance max notional does not match carrier scope.")
+    if not _decimal_scope_equal(clearance.quantity, carrier.quantity):
+        raise OwnerTrialFlowError("cap_violation", "Clearance quantity does not match carrier scope.")
+    if not _decimal_scope_equal(clearance.leverage, carrier.leverage):
+        raise OwnerTrialFlowError("cap_violation", "Clearance leverage does not match carrier scope.")
+    if clearance.protection_plan_type != carrier.protection_plan_type:
+        raise OwnerTrialFlowError(
+            "protection_not_executable",
+            "Clearance protection plan does not match carrier protection plan.",
         )
 
 

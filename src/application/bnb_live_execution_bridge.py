@@ -23,6 +23,7 @@ from src.application.owner_trial_flow import (
     OwnerTrialFlowService,
     SUPPORTED_OWNER_TRIAL_CARRIER_ID,
 )
+from src.application.production_strategy_family_admission import GenericActionSpec
 from src.application.strategy_trial_preflight_facts import TrialPreflightFactsSnapshot
 from src.infrastructure.database import get_pg_session_maker
 
@@ -36,6 +37,13 @@ PlanPreviewStatus = Literal[
     "preview_blocked_by_hard_gates",
     "preview_unavailable_invalid_scope",
 ]
+CORE_FINAL_GATE_FACT_IDS = {
+    "active_position",
+    "open_order",
+    "gks",
+    "startup_guard",
+    "account_facts",
+}
 
 
 class BnbLiveExecutionBridgeDryRunRequest(BaseModel):
@@ -136,6 +144,9 @@ class BnbLiveExecutionBridgeFinalGateReadModel(BaseModel):
     startup_guard: BnbLiveExecutionBridgeGateFactState
     gks: BnbLiveExecutionBridgeGateFactState
     account_facts: BnbLiveExecutionBridgeGateFactState
+    market_metadata: BnbLiveExecutionBridgeGateFactState
+    protection_readiness: BnbLiveExecutionBridgeGateFactState
+    recording_readiness: BnbLiveExecutionBridgeGateFactState
     bnb_position: BnbLiveExecutionBridgeGateFactState
     bnb_open_order: BnbLiveExecutionBridgeGateFactState
     persistence_readiness: BnbLiveExecutionBridgePersistenceReadiness
@@ -237,6 +248,8 @@ class BnbLiveExecutionBridgeDryRunService:
             if request.protection_plan_type != carrier.protection_plan_type:
                 hard_blockers.append("protection_plan_mismatch")
 
+        hard_blockers.extend(_fact_snapshot_scope_blockers(request, carrier, fact_snapshot))
+
         authorization = current.live_authorization if current is not None else None
         if authorization is None:
             hard_blockers.append("missing_explicit_owner_live_authorization")
@@ -282,8 +295,9 @@ class BnbLiveExecutionBridgeDryRunService:
         )
 
         fact_checks = _fact_checks(fact_snapshot)
-        for fact in fact_checks.values():
-            hard_blockers.extend(str(code) for code in fact.get("blockers", []))
+        for fact_id, fact in fact_checks.items():
+            if fact_id in CORE_FINAL_GATE_FACT_IDS:
+                hard_blockers.extend(str(code) for code in fact.get("blockers", []))
         hard_blockers.extend(_fact_gate_blockers(fact_checks))
 
         table_audit = await self._audit_tables()
@@ -359,6 +373,58 @@ class BnbLiveExecutionBridgeDryRunService:
             },
         )
 
+    async def run_action_spec(
+        self,
+        action_spec: GenericActionSpec,
+        *,
+        fact_snapshot: TrialPreflightFactsSnapshot | None = None,
+    ) -> BnbLiveExecutionBridgeDryRunResponse:
+        request, spec_blockers = _request_from_generic_action_spec(action_spec)
+        response = await self.run(request, fact_snapshot=fact_snapshot)
+        action_spec_fact_blockers = _generic_action_spec_fact_blockers(
+            action_spec,
+            response.preflight_fact_checks,
+        )
+        blockers = _dedupe([*spec_blockers, *action_spec_fact_blockers])
+        if not blockers:
+            return response
+        hard_blockers = _dedupe([*blockers, *response.hard_blockers])
+        return response.model_copy(
+            update={
+                "bridge_status": "blocked_before_execution_boundary",
+                "final_preflight_result": "blocked",
+                "hard_blockers": hard_blockers,
+                "final_gate_read_model": response.final_gate_read_model.model_copy(
+                    update={
+                        "result": "blocked",
+                        "exact_blockers": hard_blockers,
+                        "execution_boundary_status": "blocked_before_execution_boundary",
+                    }
+                ),
+                "owner_execution_trigger": response.owner_execution_trigger.model_copy(
+                    update={
+                        "visible": False,
+                        "enabled": False,
+                        "status": "hidden_until_final_gate_clear",
+                        "reason": "GenericActionSpec failed final gate validation.",
+                        "blockers": hard_blockers,
+                        "creates_execution_intent_on_click": False,
+                        "creates_order_on_click": False,
+                    }
+                ),
+                "execution_plan_preview": response.execution_plan_preview.model_copy(
+                    update={
+                        "status": (
+                            "preview_unavailable_invalid_scope"
+                            if _has_scope_blocker(hard_blockers)
+                            else "preview_blocked_by_hard_gates"
+                        ),
+                        "exact_blockers": hard_blockers,
+                    }
+                ),
+            }
+        )
+
     async def _audit_tables(self) -> BnbLiveExecutionBridgeTableAudit:
         async with self._session_maker() as session:
             bind = session.get_bind()
@@ -405,6 +471,78 @@ def _environment_checks(env: Mapping[str, str]) -> dict[str, bool | str]:
         "EXCHANGE_TESTNET": exchange_testnet or "unset",
         "BRC_EXECUTION_PERMISSION_MAX": permission_max or "unset",
     }
+
+
+def _request_from_generic_action_spec(
+    action_spec: GenericActionSpec,
+) -> tuple[BnbLiveExecutionBridgeDryRunRequest, list[str]]:
+    blockers: list[str] = []
+    carrier = get_owner_action_carrier(action_spec.carrier_id or "")
+    if action_spec.status != "valid_blocked_final_gate":
+        blockers.append("generic_action_spec_status_not_final_gate_ready")
+    if not action_spec.action_registry_supported:
+        blockers.append("generic_action_spec_not_action_registry_supported")
+    if carrier is None:
+        blockers.append("unsupported_carrier")
+    required_values = {
+        "carrier_id": action_spec.carrier_id,
+        "symbol": action_spec.symbol,
+        "side": action_spec.side,
+        "quantity": action_spec.quantity,
+        "max_notional": action_spec.max_notional,
+        "leverage": action_spec.leverage,
+        "protection_mode": action_spec.protection_mode,
+    }
+    missing = [field for field, value in required_values.items() if value in (None, "")]
+    blockers.extend(f"generic_action_spec_{field}_missing" for field in missing)
+    protection_plan_type = str(action_spec.protection_mode or "single_tp_plus_sl")
+    if protection_plan_type != "single_tp_plus_sl":
+        blockers.append("generic_action_spec_protection_plan_mismatch")
+        protection_plan_type = "single_tp_plus_sl"
+
+    return (
+        BnbLiveExecutionBridgeDryRunRequest(
+            carrier_id=str(action_spec.carrier_id or ""),
+            symbol=str(action_spec.symbol or ""),
+            side=_request_side(action_spec.side),
+            max_notional=_request_decimal(action_spec.max_notional, "0.00000001"),
+            quantity=_request_decimal(action_spec.quantity, "0.00000001"),
+            leverage=_request_decimal(action_spec.leverage, "0.00000001"),
+            protection_plan_type=protection_plan_type,
+        ),
+        _dedupe(blockers),
+    )
+
+
+def _request_side(value: str | None) -> Literal["long", "short"]:
+    return "short" if str(value or "").lower() == "short" else "long"
+
+
+def _request_decimal(value: object, fallback: str) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal(fallback)
+
+
+def _fact_snapshot_scope_blockers(
+    request: BnbLiveExecutionBridgeDryRunRequest,
+    carrier: Any | None,
+    fact_snapshot: TrialPreflightFactsSnapshot | None,
+) -> list[str]:
+    if fact_snapshot is None:
+        return []
+    blockers: list[str] = []
+    symbols = {request.symbol}
+    if carrier is not None:
+        symbols.update({carrier.symbol, carrier.runtime_symbol})
+    if fact_snapshot.symbol not in symbols:
+        blockers.append("preflight_fact_symbol_mismatch")
+    if str(fact_snapshot.side).lower() != request.side:
+        blockers.append("preflight_fact_side_mismatch")
+    if carrier is not None and fact_snapshot.candidate_id != carrier.carrier_id:
+        blockers.append("preflight_fact_candidate_mismatch")
+    return blockers
 
 
 def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
@@ -469,6 +607,9 @@ def _final_gate_read_model(
         startup_guard=startup_guard,
         gks=gks,
         account_facts=_gate_fact_state(fact_checks, "account_facts"),
+        market_metadata=_gate_fact_state(fact_checks, "market_metadata"),
+        protection_readiness=_gate_fact_state(fact_checks, "protection_readiness"),
+        recording_readiness=_gate_fact_state(fact_checks, "recording_readiness"),
         bnb_position=_gate_fact_state(fact_checks, "active_position"),
         bnb_open_order=_gate_fact_state(fact_checks, "open_order"),
         persistence_readiness=BnbLiveExecutionBridgePersistenceReadiness(
@@ -597,8 +738,25 @@ def _has_scope_blocker(hard_blockers: list[str]) -> bool:
         "authorization_quantity_mismatch",
         "authorization_leverage_mismatch",
         "authorization_protection_plan_mismatch",
+        "preflight_fact_symbol_mismatch",
+        "preflight_fact_side_mismatch",
+        "preflight_fact_candidate_mismatch",
+        "generic_action_spec_carrier_id_missing",
+        "generic_action_spec_symbol_missing",
+        "generic_action_spec_side_missing",
+        "generic_action_spec_quantity_missing",
+        "generic_action_spec_max_notional_missing",
+        "generic_action_spec_leverage_missing",
+        "generic_action_spec_protection_mode_missing",
+        "generic_action_spec_protection_plan_mismatch",
+        "generic_action_spec_below_min_notional",
+        "generic_action_spec_below_min_amount",
+        "generic_action_spec_quantity_step_mismatch",
     }
-    return any(blocker in scope_blockers for blocker in hard_blockers)
+    return any(
+        blocker in scope_blockers or blocker.startswith("market_metadata_")
+        for blocker in hard_blockers
+    )
 
 
 def _gate_fact_state(
@@ -736,6 +894,110 @@ def _fact_gate_blockers(fact_checks: dict[str, dict[str, Any]]) -> list[str]:
     return blockers
 
 
+def _generic_action_spec_fact_blockers(
+    action_spec: GenericActionSpec,
+    fact_checks: dict[str, dict[str, Any]],
+) -> list[str]:
+    if "preflight_facts" in fact_checks:
+        return []
+
+    blockers: list[str] = []
+    market_metadata = fact_checks.get("market_metadata")
+    if market_metadata is None:
+        blockers.append("market_metadata_fact_missing")
+    else:
+        blockers.extend(_action_spec_fact_status_blockers(market_metadata, "market_metadata"))
+        evidence = market_metadata.get("evidence") or {}
+
+        metadata_symbol = str(evidence.get("symbol") or "")
+        if metadata_symbol and action_spec.symbol and metadata_symbol != action_spec.symbol:
+            blockers.append("market_metadata_symbol_mismatch")
+        if evidence.get("read_only_guarantee") is not True:
+            blockers.append("market_metadata_read_only_unverified")
+
+        min_notional = _decimal_from_mapping(evidence, "min_notional")
+        min_amount = _decimal_from_mapping(evidence, "min_amount")
+        amount_step = _decimal_from_mapping(evidence, "amount_step")
+        tick_size = _decimal_from_mapping(evidence, "tick_size")
+        price_precision = evidence.get("price_precision")
+        quantity = _decimal_from_value(action_spec.quantity)
+        max_notional = _decimal_from_value(action_spec.max_notional)
+
+        if min_notional is None:
+            blockers.append("market_metadata_min_notional_missing")
+        elif max_notional is not None and max_notional < min_notional:
+            blockers.append("generic_action_spec_below_min_notional")
+
+        if min_amount is None:
+            blockers.append("market_metadata_min_amount_missing")
+        elif quantity is not None and quantity < min_amount:
+            blockers.append("generic_action_spec_below_min_amount")
+
+        if amount_step is None:
+            blockers.append("market_metadata_amount_step_missing")
+        elif (
+            quantity is not None
+            and amount_step > 0
+            and not _decimal_step_aligned(quantity, amount_step)
+        ):
+            blockers.append("generic_action_spec_quantity_step_mismatch")
+
+        if tick_size is None and price_precision in (None, ""):
+            blockers.append("market_metadata_price_precision_missing")
+
+    for fact_id in ["protection_readiness", "recording_readiness"]:
+        fact = fact_checks.get(fact_id)
+        if fact is None:
+            blockers.append(f"{fact_id}_fact_missing")
+            continue
+        blockers.extend(_action_spec_fact_status_blockers(fact, fact_id))
+        if fact_id == "protection_readiness":
+            blockers.extend(_protection_readiness_evidence_blockers(fact))
+        if fact_id == "recording_readiness":
+            blockers.extend(_recording_readiness_evidence_blockers(fact))
+
+    return _dedupe(blockers)
+
+
+def _protection_readiness_evidence_blockers(fact: dict[str, Any]) -> list[str]:
+    evidence = fact.get("evidence") or {}
+    blockers: list[str] = []
+    if evidence.get("protection_plan_type") != "single_tp_plus_sl":
+        blockers.append("protection_plan_type_unsupported")
+    if evidence.get("tp_ready") is not True:
+        blockers.append("take_profit_readiness_missing")
+    if evidence.get("sl_ready") is not True:
+        blockers.append("stop_loss_readiness_missing")
+    if evidence.get("price_source_ready") is not True:
+        blockers.append("protection_price_source_missing")
+    if evidence.get("read_only_guarantee") is not True:
+        blockers.append("protection_readiness_read_only_unverified")
+    return blockers
+
+
+def _recording_readiness_evidence_blockers(fact: dict[str, Any]) -> list[str]:
+    evidence = fact.get("evidence") or {}
+    blockers: list[str] = []
+    if evidence.get("execution_intents_writable") is not True:
+        blockers.append("execution_intents_write_unavailable")
+    if evidence.get("orders_writable") is not True:
+        blockers.append("orders_write_unavailable")
+    if evidence.get("review_writable") is not True:
+        blockers.append("review_write_unavailable")
+    if evidence.get("audit_writable") is not True:
+        blockers.append("audit_write_unavailable")
+    if evidence.get("read_only_check") is not True:
+        blockers.append("recording_readiness_check_not_read_only")
+    return blockers
+
+
+def _action_spec_fact_status_blockers(fact: dict[str, Any], fact_id: str) -> list[str]:
+    blockers = [str(code) for code in fact.get("blockers", [])]
+    if blockers:
+        return blockers
+    return _status_blockers(fact, fact_id)
+
+
 def _status_blockers(fact: dict[str, Any], fact_id: str) -> list[str]:
     if fact.get("status") == "clear":
         return []
@@ -764,6 +1026,25 @@ def _bool_evidence(fact: dict[str, Any], key: str) -> bool | None:
     evidence = fact.get("evidence") or {}
     value = evidence.get(key)
     return value if isinstance(value, bool) else None
+
+
+def _decimal_from_mapping(evidence: Mapping[str, Any], key: str) -> Decimal | None:
+    return _decimal_from_value(evidence.get(key))
+
+
+def _decimal_from_value(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        decimal = Decimal(str(value))
+    except Exception:
+        return None
+    return decimal if decimal > 0 else None
+
+
+def _decimal_step_aligned(value: Decimal, step: Decimal) -> bool:
+    units = value / step
+    return abs(units - units.to_integral_value()) <= Decimal("0.000000000001")
 
 
 def _dedupe(values: list[str]) -> list[str]:

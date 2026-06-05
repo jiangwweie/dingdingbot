@@ -20,7 +20,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.bnb_live_execution_bridge import (
-    BnbLiveExecutionBridgeDryRunRequest,
     BnbLiveExecutionBridgeDryRunResponse,
     BnbLiveExecutionBridgeDryRunService,
 )
@@ -29,6 +28,7 @@ from src.application.owner_action_carrier_catalog import (
     supported_owner_action_carrier_ids,
 )
 from src.application.owner_trial_flow import BoundedLiveTrialAuthorization
+from src.application.production_strategy_family_admission import GenericActionSpec
 from src.application.protection_price_planner import (
     ProtectionExchangeFilters,
     ProtectionPlannerService,
@@ -371,6 +371,34 @@ def default_owner_bounded_execution_registry() -> OwnerBoundedExecutionRegistry:
             OwnerCatalogExecutionAdapter(carrier_id=carrier_id)
             for carrier_id in supported_owner_action_carrier_ids()
         ]
+    )
+
+
+def _generic_action_spec_from_authorization(
+    authorization: BoundedLiveTrialAuthorization,
+) -> GenericActionSpec:
+    carrier = get_owner_action_carrier(authorization.carrier_id)
+    return GenericActionSpec(
+        family=(carrier.strategy_family if carrier is not None else authorization.carrier_id),
+        strategy_family_id=(carrier.strategy_id if carrier is not None else authorization.strategy_family_id),
+        carrier_id=authorization.carrier_id,
+        admission_level="L3",
+        status=(
+            "valid_blocked_final_gate"
+            if carrier is not None
+            else "invalid_blocked"
+        ),
+        action_registry_supported=carrier is not None,
+        symbol=authorization.symbol,
+        side=authorization.side,
+        quantity=str(authorization.quantity),
+        max_notional=str(authorization.max_notional),
+        leverage=str(authorization.leverage),
+        max_attempts=1,
+        protection_mode=authorization.protection_plan_type,
+        review_requirement="post_action_review_required",
+        hard_blockers=[] if carrier is not None else ["unsupported_carrier"],
+        action_entry_payload_ref=f"action-entry:{authorization.carrier_id}",
     )
 
 
@@ -761,16 +789,8 @@ class OwnerBoundedExecutionService:
         *,
         fact_snapshot: TrialPreflightFactsSnapshot | None = None,
     ) -> BnbLiveExecutionBridgeDryRunResponse:
-        return await self._final_gate_service.run(
-            BnbLiveExecutionBridgeDryRunRequest(
-                carrier_id=authorization.carrier_id,
-                symbol=authorization.symbol,
-                side=authorization.side,
-                max_notional=authorization.max_notional,
-                quantity=authorization.quantity,
-                leverage=authorization.leverage,
-                protection_plan_type=authorization.protection_plan_type,
-            ),
+        return await self._final_gate_service.run_action_spec(
+            _generic_action_spec_from_authorization(authorization),
             fact_snapshot=fact_snapshot,
         )
 
@@ -1068,7 +1088,7 @@ class OwnerBoundedExecutionService:
                             f"""
                             INSERT INTO brc_execution_results (
                                 operation_id, preflight_id, status, rechecked,
-                                recheck_result, adapter_result, result_summary,
+                                recheck_result, adapter_result, failed_reason, result_summary,
                                 audit_refs, campaign_refs, review_refs,
                                 final_state_snapshot, occurred_at_ms
                             )
@@ -1076,6 +1096,7 @@ class OwnerBoundedExecutionService:
                                 :operation_id, :preflight_id, :status, :rechecked,
                                 CAST(:recheck_result AS {json_cast}),
                                 CAST(:adapter_result AS {json_cast}),
+                                :failed_reason,
                                 CAST(:result_summary AS {json_cast}),
                                 CAST(:audit_refs AS {json_cast}),
                                 CAST(:campaign_refs AS {json_cast}),
@@ -1092,6 +1113,7 @@ class OwnerBoundedExecutionService:
                             "rechecked": True,
                             "recheck_result": json.dumps(final_gate.model_dump(mode="json")),
                             "adapter_result": json.dumps(adapter_result),
+                            "failed_reason": exc.code,
                             "result_summary": json.dumps({
                                 "authorization_id": authorization.authorization_id,
                                 "execution_intent_id": exc.execution_intent_id,

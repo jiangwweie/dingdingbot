@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import inspect
 import time
 from decimal import Decimal
 from typing import Any, Literal, Mapping, Optional
@@ -74,6 +75,8 @@ from src.application.owner_trial_flow import (
     OwnerTrialFlowError,
     OwnerTrialFlowInfrastructureError,
     OwnerTrialFlowService,
+    ScopedRuntimeSafetyClearance,
+    ScopedRuntimeSafetyClearanceCreateRequest,
 )
 from src.application.owner_bounded_execution import (
     ExchangeGatewayBoundedOrderExecutor,
@@ -87,6 +90,7 @@ from src.application.protection_price_planner import (
     ProtectionPlannerService,
 )
 from src.application.strategy_trial_readiness import (
+    StrategyProfile,
     StrategyTrialReadinessResponse,
     build_bnb_strategy_trial_readiness,
 )
@@ -3858,19 +3862,51 @@ async def activate_owner_trial_flow_live_authorization(
 async def dry_run_bnb_live_execution_bridge(
     body: BnbLiveExecutionBridgeDryRunRequest | None = None,
 ) -> BnbLiveExecutionBridgeDryRunResponse:
-    """Dry-run the BNB Owner authorization to execution-boundary bridge.
+    """Dry-run an Owner authorization to execution-boundary bridge.
 
     This endpoint is read-only with respect to execution: it does not create an
     execution intent, create an order, grant permissions, start runtime, or call
     exchange write APIs.
     """
-    profile_readiness = build_bnb_strategy_trial_readiness()
+    request = body or BnbLiveExecutionBridgeDryRunRequest()
+    profile = _strategy_profile_for_owner_action_scope(
+        carrier_id=request.carrier_id,
+        symbol=request.symbol,
+        side=request.side,
+    )
     collector = _strategy_trial_preflight_fact_collector(_api_module())
-    fact_snapshot = await collector.collect(profile_readiness.strategy_profile)
+    fact_snapshot = await collector.collect(profile)
     service = BnbLiveExecutionBridgeDryRunService(
         owner_trial_flow_service=_owner_trial_flow_service_instance(),
     )
-    return await service.run(body, fact_snapshot=fact_snapshot)
+    return await service.run(request, fact_snapshot=fact_snapshot)
+
+
+@router.post(
+    "/owner-trial-flow/authorizations/{authorization_id}/runtime-safety-clearance",
+    response_model=ScopedRuntimeSafetyClearance,
+)
+async def create_owner_trial_flow_runtime_safety_clearance(
+    authorization_id: str,
+    body: ScopedRuntimeSafetyClearanceCreateRequest,
+    session: OperatorSessionDependency,
+) -> ScopedRuntimeSafetyClearance:
+    """Persist scoped startup-guard clearance metadata for one authorization.
+
+    This records only bounded runtime-safety metadata. It never starts runtime,
+    creates an execution intent, creates an order, grants execution/order
+    permission, or calls exchange write APIs.
+    """
+    try:
+        return await _owner_trial_flow_service_instance().create_scoped_runtime_safety_clearance(
+            authorization_id,
+            body,
+            operator_id=session.username,
+        )
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
 
 
 @router.post(
@@ -3888,21 +3924,31 @@ async def execute_owner_bounded_live_trial_authorization(
     carrier execution registry. It must fail before ExecutionIntent/order
     creation whenever any readiness blocker remains.
     """
-    profile_readiness = build_bnb_strategy_trial_readiness()
-    collector = _strategy_trial_preflight_fact_collector(_api_module())
-    fact_snapshot = await collector.collect(profile_readiness.strategy_profile)
     owner_trial_service = _owner_trial_flow_service_instance()
+    try:
+        authorization = await owner_trial_service.get_live_authorization(authorization_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+    profile = _strategy_profile_for_owner_action_scope(
+        carrier_id=authorization.carrier_id,
+        symbol=authorization.symbol,
+        side=authorization.side,
+    )
     injected_session_maker = getattr(
         getattr(owner_trial_service, "_repository", None),
         "_session_maker",
         None,
     )
+    api_module = _api_module()
+    gateway_binding = await _owner_bounded_exchange_gateway_binding(api_module)
+    collector = _strategy_trial_preflight_fact_collector(api_module)
+    fact_snapshot = await collector.collect(profile)
     final_gate_service = BnbLiveExecutionBridgeDryRunService(
         owner_trial_flow_service=owner_trial_service,
         session_maker=injected_session_maker,
     )
-    api_module = _api_module()
-    gateway_binding = await _owner_bounded_exchange_gateway_binding(api_module)
     gateway = gateway_binding.get("gateway")
     protection_planner_service = ProtectionPlannerService(
         repository=PgProtectionPricePlanRepository(injected_session_maker),
@@ -3975,6 +4021,8 @@ async def execute_owner_bounded_live_trial_authorization(
                 "order_permission_granted": False,
             },
         ) from exc
+    finally:
+        await close_owner_bounded_exchange_gateway()
 
 
 async def _owner_bounded_exchange_gateway_binding(api_module: Any) -> dict[str, Any]:
@@ -4175,7 +4223,11 @@ def _multi_carrier_budget_authorization_infrastructure_http_error(
     )
 
 
-def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightFactCollector:
+def _strategy_trial_preflight_fact_collector(
+    api_module: Any,
+    *,
+    session_maker: Any | None = None,
+) -> TrialPreflightFactCollector:
     if not _bnb_final_gate_live_read_env_status()["safe"]:
         return TrialPreflightFactCollector(
             position_reader=_local_preflight_position_reader(api_module),
@@ -4184,6 +4236,9 @@ def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightF
             startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
             reconciliation_reader=_local_preflight_reconciliation_reader(api_module),
             account_facts_reader=_runtime_cached_account_facts_reader(api_module),
+            market_metadata_reader=_preflight_market_metadata_reader(api_module),
+            protection_readiness_reader=_preflight_protection_readiness_reader(api_module),
+            recording_readiness_reader=_preflight_recording_readiness_reader(session_maker),
         )
 
     bnb_live_facts = _BnbFinalGateLiveReadOnlyFacts(api_module)
@@ -4194,6 +4249,35 @@ def _strategy_trial_preflight_fact_collector(api_module: Any) -> TrialPreflightF
         startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
         reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module, bnb_live_facts),
         account_facts_reader=_bnb_preflight_account_facts_reader(api_module, bnb_live_facts),
+        market_metadata_reader=_preflight_market_metadata_reader(api_module),
+        protection_readiness_reader=_preflight_protection_readiness_reader(api_module),
+        recording_readiness_reader=_preflight_recording_readiness_reader(session_maker),
+    )
+
+
+def _strategy_profile_for_owner_action_scope(
+    *,
+    carrier_id: str,
+    symbol: str,
+    side: str,
+) -> StrategyProfile:
+    carrier = get_owner_action_carrier(carrier_id)
+    if carrier is None:
+        return StrategyProfile(
+            strategy_group="unknown",
+            strategy_id=carrier_id,
+            candidate_id=carrier_id,
+            symbol=symbol,
+            side=side,
+            execution_mode="owner_confirm_each_entry",
+        )
+    return StrategyProfile(
+        strategy_group=carrier.strategy_family,
+        strategy_id=carrier.strategy_id,
+        candidate_id=carrier.carrier_id,
+        symbol=symbol,
+        side=side,
+        execution_mode="owner_confirm_each_entry",
     )
 
 
@@ -4229,6 +4313,144 @@ def _local_preflight_reconciliation_reader(api_module: Any):
         return summary
 
     return _read
+
+
+def _preflight_market_metadata_reader(api_module: Any):
+    async def _read(profile):
+        gateway = (
+            getattr(api_module, "_owner_bounded_exchange_gateway", None)
+            or getattr(api_module, "_exchange_gateway", None)
+        )
+        if gateway is not None and callable(getattr(gateway, "get_market_info", None)):
+            info = gateway.get_market_info(str(profile.symbol))
+            if inspect.isawaitable(info):
+                info = await info
+            return _market_metadata_payload(
+                info,
+                symbol=str(profile.symbol),
+                source="bound_exchange_gateway_market_info",
+            )
+
+        env_status = _bnb_final_gate_live_read_env_status()
+        if env_status["safe"] is not True:
+            raise RuntimeError("market_metadata_read_only_env_not_safe")
+
+        client_info = _bnb_final_gate_read_only_client(api_module)
+        client = client_info.get("client")
+        if client is None or not callable(getattr(client, "get_market_info", None)):
+            raise RuntimeError(
+                str(client_info.get("reason") or "market_metadata_source_unavailable")
+            )
+
+        should_close = bool(client_info.get("close_after_read"))
+        try:
+            info = client.get_market_info(str(profile.symbol))
+            if inspect.isawaitable(info):
+                info = await info
+            return _market_metadata_payload(
+                info,
+                symbol=str(profile.symbol),
+                source=str(client_info.get("source") or "live_read_only_market_info"),
+            )
+        finally:
+            if should_close and hasattr(client, "close"):
+                await client.close()
+
+    return _read
+
+
+def _preflight_protection_readiness_reader(api_module: Any):
+    async def _read(profile):
+        carrier = get_owner_action_carrier(str(profile.candidate_id))
+        gateway = (
+            getattr(api_module, "_owner_bounded_exchange_gateway", None)
+            or getattr(api_module, "_exchange_gateway", None)
+        )
+        fetch_price_ready = callable(getattr(gateway, "fetch_ticker_price", None))
+        market_info_ready = callable(getattr(gateway, "get_market_info", None))
+        return {
+            "source": "owner_bounded_gateway_method_check",
+            "protection_plan_type": (
+                carrier.protection_plan_type
+                if carrier is not None
+                else "unsupported"
+            ),
+            "tp_ready": carrier is not None and carrier.protection_plan_type == "single_tp_plus_sl",
+            "sl_ready": carrier is not None and carrier.protection_plan_type == "single_tp_plus_sl",
+            "price_source_ready": fetch_price_ready and market_info_ready,
+            "read_only_guarantee": True,
+        }
+
+    return _read
+
+
+def _preflight_recording_readiness_reader(session_maker: Any | None = None):
+    async def _read(_profile):
+        maker = session_maker or get_pg_session_maker()
+        async with maker() as session:
+            execution_intent_columns = await _read_table_columns(session, "execution_intents")
+            order_columns = await _read_table_columns(session, "orders")
+            result_columns = await _read_table_columns(session, "brc_execution_results")
+        minimal_result_table = result_columns == {"operation_id", "status"}
+        full_result_table = bool(
+            {"operation_id", "status", "review_refs", "audit_refs"} <= result_columns
+        )
+        return {
+            "source": "pg_table_column_readiness",
+            "execution_intents_writable": bool(
+                {"id", "status", "authorization_id"} <= execution_intent_columns
+            ),
+            "orders_writable": bool(order_columns),
+            "review_writable": minimal_result_table or full_result_table,
+            "audit_writable": minimal_result_table or full_result_table,
+            "read_only_check": True,
+        }
+
+    return _read
+
+
+async def _read_table_columns(session: Any, table_name: str) -> set[str]:
+    bind = session.get_bind()
+    dialect_name = bind.dialect.name if bind is not None else ""
+    if dialect_name == "sqlite":
+        rows = await session.execute(text(f"PRAGMA table_info({table_name})"))
+        return {str(row[1]) for row in rows.fetchall()}
+    table_exists = await session.scalar(
+        text("SELECT to_regclass(:name)"),
+        {"name": f"public.{table_name}"},
+    )
+    if table_exists is None:
+        return set()
+    rows = await session.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+            """
+        ),
+        {"table_name": table_name},
+    )
+    return {str(row[0]) for row in rows.fetchall()}
+
+
+def _market_metadata_payload(
+    info: Mapping[str, Any],
+    *,
+    symbol: str,
+    source: str,
+) -> dict[str, Any]:
+    return {
+        "symbol": str(info.get("symbol") or symbol),
+        "source": source,
+        "min_quantity": info.get("min_quantity") or info.get("min_amount"),
+        "step_size": info.get("step_size") or info.get("amount_step") or info.get("quantity_precision"),
+        "min_notional": info.get("min_notional"),
+        "tick_size": info.get("tick_size") or info.get("tickSize"),
+        "price_precision": info.get("price_precision"),
+        "read_only_guarantee": True,
+    }
 
 
 def _runtime_cached_account_facts_reader(api_module: Any):
@@ -4836,6 +5058,11 @@ class _GatewayBnbReadOnlyClient:
         except TypeError:
             return list(await self._gateway.fetch_open_orders(symbol=symbol, params=params or {}))
 
+    async def get_market_info(self, symbol: str) -> dict[str, Any]:
+        if not hasattr(self._gateway, "get_market_info"):
+            raise RuntimeError("gateway_market_info_reader_unavailable")
+        return dict(await self._gateway.get_market_info(symbol))
+
     async def close(self) -> None:
         return None
 
@@ -4889,6 +5116,21 @@ class _CcxtBnbFinalGateReadOnlyClient:
 
     async def close(self) -> None:
         await self._exchange.close()
+
+    async def get_market_info(self, symbol: str) -> dict[str, Any]:
+        await self._exchange.load_markets()
+        market = self._exchange.market(symbol)
+        limits = market.get("limits") or {}
+        amount_limits = limits.get("amount") or {}
+        cost_limits = limits.get("cost") or {}
+        precision = market.get("precision") or {}
+        return {
+            "symbol": symbol,
+            "min_quantity": amount_limits.get("min"),
+            "step_size": precision.get("amount"),
+            "min_notional": cost_limits.get("min"),
+            "price_precision": precision.get("price"),
+        }
 
 
 def _bnb_final_gate_read_only_client(api_module: Any) -> dict[str, Any]:
