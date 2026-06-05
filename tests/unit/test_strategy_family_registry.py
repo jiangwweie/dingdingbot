@@ -36,18 +36,38 @@ def test_initial_seed_registers_tf_001_as_active_observation_candidate():
     assert SignalType.WOULD_CANCEL not in tf.allowed_signal_types
 
 
-def test_initial_seed_registers_vb_and_cpm_as_hypothesis_only():
+def test_initial_seed_registers_vb_cpm_and_mr_as_hypothesis_only():
     seed = initial_strategy_family_registry_seed(now_ms=1770000000000)
     by_id = {item.family_id: item for item in seed.families}
 
     assert by_id["VB-001-live-readonly-v0"].status == StrategyFamilyStatus.REGISTERED_HYPOTHESIS_ONLY
     assert by_id["VB-001-live-readonly-v0"].alpha_claim is False
     assert by_id["VB-001-live-readonly-v0"].carrier_validation is False
+    assert by_id["VB-001-live-readonly-v0"].family_type == StrategyFamilyType.VOLATILITY_BREAKOUT
 
     assert by_id["CPM-RO-001"].status == StrategyFamilyStatus.REGISTERED_HYPOTHESIS_ONLY
     assert by_id["CPM-RO-001"].alpha_claim is False
     assert by_id["CPM-RO-001"].carrier_validation is False
     assert "Historical performance is not current alpha proof" in by_id["CPM-RO-001"].notes
+
+    assert by_id["MR-001-live-readonly-v0"].status == StrategyFamilyStatus.REGISTERED_HYPOTHESIS_ONLY
+    assert by_id["MR-001-live-readonly-v0"].family_type == StrategyFamilyType.MEAN_REVERSION
+    assert by_id["MR-001-live-readonly-v0"].alpha_claim is False
+    assert by_id["MR-001-live-readonly-v0"].carrier_validation is False
+    assert "no order authority" in by_id["MR-001-live-readonly-v0"].notes
+
+
+def test_initial_seed_covers_production_admission_sprint_family_types():
+    seed = initial_strategy_family_registry_seed(now_ms=1770000000000)
+    family_types = {item.family_type for item in seed.families}
+    playbooks_by_family_id = {item.family_id: item for item in seed.playbooks}
+
+    assert StrategyFamilyType.TREND_FOLLOWING in family_types
+    assert StrategyFamilyType.VOLATILITY_BREAKOUT in family_types
+    assert StrategyFamilyType.MEAN_REVERSION in family_types
+    assert "TF-001-live-readonly-v0" in playbooks_by_family_id
+    assert "VB-001-live-readonly-v0" in playbooks_by_family_id
+    assert "MR-001-live-readonly-v0" in playbooks_by_family_id
 
 
 @pytest.mark.parametrize(

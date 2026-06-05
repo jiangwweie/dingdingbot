@@ -34,6 +34,7 @@ class StrategyFamilyStatus(str, Enum):
 class StrategyFamilyType(str, Enum):
     TREND_FOLLOWING = "trend_following"
     VOLATILITY_BREAKOUT = "volatility_breakout"
+    MEAN_REVERSION = "mean_reversion"
     PULLBACK_CONTINUATION = "pullback_continuation"
     EVENT_DRIVEN_DISCRETIONARY = "event_driven_discretionary"
     FUNDING_OI_DISLOCATION = "funding_oi_dislocation"
@@ -319,7 +320,86 @@ def initial_strategy_family_registry_seed(*, now_ms: int) -> StrategyFamilyRegis
         updated_at_ms=now_ms,
     )
 
+    mr_family = StrategyFamilyMetadata(
+        family_id="MR-001-live-readonly-v0",
+        family_name="Range Mean Reversion Read-only Observation",
+        family_type=StrategyFamilyType.MEAN_REVERSION,
+        status=StrategyFamilyStatus.REGISTERED_HYPOTHESIS_ONLY,
+        version_id="MR-001-live-readonly-v0",
+        hypothesis=(
+            "In bounded range regimes, statistically stretched moves back toward "
+            "accepted value may produce observable mean-reversion evidence."
+        ),
+        alpha_claim=False,
+        carrier_validation=False,
+        supported_symbols=["BTC/USDT:USDT", "ETH/USDT:USDT"],
+        primary_timeframe="1h",
+        context_timeframes=["4h", "1d"],
+        input_requirements=[
+            "range regime context",
+            "deviation from accepted value",
+            "ATR or volatility proxy",
+            "volume and liquidity sanity",
+            "read-only account facts",
+            "reconciliation status",
+        ],
+        allowed_signal_types=[
+            SignalType.NO_ACTION,
+            SignalType.WOULD_ENTER,
+            SignalType.INVALID,
+        ],
+        reason_code_taxonomy={
+            "range_context_absent": "Market is not in a bounded range context.",
+            "mean_reversion_context": "Price is stretched inside a bounded range context.",
+            "trend_break_risk": "Trend continuation risk overrides reversion setup.",
+            "invalid_data_quality": "Required input evidence is missing or stale.",
+        },
+        review_metrics=[
+            "range_context_precision",
+            "snapback_follow_through",
+            "trend_break_failure_rate",
+            "invalidation_hit_rate",
+            "evidence_completeness_score",
+        ],
+        known_failure_modes=[
+            "catching falling knife",
+            "range break becomes trend continuation",
+            "liquidity wick beyond invalidation",
+            "late reversion after stop",
+        ],
+        evidence_requirements=list(_TF_EVIDENCE_REQUIREMENTS),
+        notes=(
+            "Hypothesis-only mean-reversion candidate. No live scope, no evaluator "
+            "activation, and no order authority."
+        ),
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
+    mr_playbook = StrategyFamilyPlaybookMetadata(
+        playbook_id="MR-001-live-readonly-v0",
+        family_id=mr_family.family_id,
+        version_id=mr_family.version_id,
+        playbook_name="MR-001 Range Mean Reversion Read-only Hypothesis v0",
+        playbook_status=StrategyFamilyStatus.REGISTERED_HYPOTHESIS_ONLY,
+        symbol_universe=list(mr_family.supported_symbols),
+        primary_timeframe=mr_family.primary_timeframe,
+        context_timeframes=list(mr_family.context_timeframes),
+        allowed_signal_types=list(mr_family.allowed_signal_types),
+        review_windows=["4h", "24h", "72h"],
+        review_metrics=list(mr_family.review_metrics),
+        input_requirements=list(mr_family.input_requirements),
+        evidence_requirements=list(mr_family.evidence_requirements),
+        parameter_profile={
+            "profile_kind": "metadata_only",
+            "activation": "not_active",
+            "range_context_required": True,
+        },
+        notes="Do not activate in runner and do not infer execution permission.",
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
+
     return StrategyFamilyRegistrySeed(
-        families=[tf_family, vb_family, cpm_family],
-        playbooks=[tf_playbook, vb_playbook, cpm_playbook],
+        families=[tf_family, vb_family, cpm_family, mr_family],
+        playbooks=[tf_playbook, vb_playbook, cpm_playbook, mr_playbook],
     )

@@ -19,6 +19,10 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from src.application.production_strategy_family_admission import (
+    build_production_strategy_family_admission_state,
+)
+
 
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
@@ -501,6 +505,42 @@ class TradingConsoleReadModelService:
             },
         )
 
+    async def strategy_family_admission_state(
+        self,
+        *,
+        owner_scope: Optional[dict[str, Any]] = None,
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        state = build_production_strategy_family_admission_state(
+            current_authorization_state=snap.authorization_state,
+            owner_scope=owner_scope,
+            now_ms=snap.generated_at_ms,
+        )
+        blockers = [
+            {
+                "code": record.id,
+                "message": record.evidence,
+            }
+            for record in state.blocker_records
+        ]
+        if state.scope_review.verdict != "complete_dry_run_only":
+            blockers.insert(
+                0,
+                {
+                    "code": "production_scope_incomplete",
+                    "message": (
+                        "No candidate has complete symbol/side/quantity/max_notional/"
+                        "leverage/max_attempts/protection_mode/review_requirement scope."
+                    ),
+                },
+            )
+        return self._response(
+            "strategy_family_admission_state",
+            snap,
+            blockers=blockers,
+            data=state.model_dump(mode="json", exclude={"generated_at_ms"}),
+        )
+
     async def signal_marker_feed(
         self,
         *,
@@ -575,6 +615,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/review-state",
                     "GET /api/trading-console/audit-chain",
                     "GET /api/trading-console/carrier-availability",
+                    "GET /api/trading-console/strategy-family-admission-state",
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/api-classification",
                 ],

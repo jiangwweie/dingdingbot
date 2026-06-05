@@ -74,17 +74,17 @@ Commands:
 python3 -m compileall -q src scripts tests/unit/test_trading_console_readmodels.py
 python3 -m pytest -q tests/unit/test_trading_console_readmodels.py
 python3 -m pytest -q tests/unit/test_brc_console_api_surface.py
-python3 -m pytest -q tests/unit/test_owner_trial_flow.py::test_bnb_final_gate_fallback_facts_do_not_bypass_unsafe_live_environment
+python3 -m pytest -q tests/unit/test_owner_trial_flow.py -k "bnb_final_gate or final_gate_fallback"
 python3 -m pytest -q tests/unit/test_trading_console_readmodels.py tests/unit/test_brc_console_api_surface.py
 git diff --check
 ```
 
 Results:
 
-- `tests/unit/test_trading_console_readmodels.py`: 9 passed
+- `tests/unit/test_trading_console_readmodels.py`: 10 passed
 - `tests/unit/test_brc_console_api_surface.py`: 33 passed
-- `tests/unit/test_owner_trial_flow.py::test_bnb_final_gate_fallback_facts_do_not_bypass_unsafe_live_environment`:
-  1 passed
+- `tests/unit/test_owner_trial_flow.py -k "bnb_final_gate or final_gate_fallback"`:
+  11 passed
 - compileall: passed
 - diff check: passed
 
