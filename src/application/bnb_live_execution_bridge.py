@@ -147,6 +147,8 @@ class BnbLiveExecutionBridgeFinalGateReadModel(BaseModel):
     market_metadata: BnbLiveExecutionBridgeGateFactState
     protection_readiness: BnbLiveExecutionBridgeGateFactState
     recording_readiness: BnbLiveExecutionBridgeGateFactState
+    active_position: BnbLiveExecutionBridgeGateFactState
+    open_order: BnbLiveExecutionBridgeGateFactState
     bnb_position: BnbLiveExecutionBridgeGateFactState
     bnb_open_order: BnbLiveExecutionBridgeGateFactState
     persistence_readiness: BnbLiveExecutionBridgePersistenceReadiness
@@ -181,6 +183,9 @@ class BnbLiveExecutionBridgeDryRunResponse(BaseModel):
     generated_from: Literal["bnb_live_execution_bridge_dry_run_v1"] = (
         "bnb_live_execution_bridge_dry_run_v1"
     )
+    final_gate_input_kind: Literal["legacy_request", "generic_action_spec"] = "legacy_request"
+    generic_action_spec_status: str | None = None
+    generic_action_spec_action_registry_supported: bool | None = None
     generated_at_ms: int
     carrier_id: str
     symbol: str
@@ -387,12 +392,18 @@ class BnbLiveExecutionBridgeDryRunService:
             action_spec,
             response.preflight_fact_checks,
         )
+        action_spec_provenance = {
+            "final_gate_input_kind": "generic_action_spec",
+            "generic_action_spec_status": action_spec.status,
+            "generic_action_spec_action_registry_supported": action_spec.action_registry_supported,
+        }
         blockers = _dedupe([*spec_blockers, *action_spec_fact_blockers])
         if not blockers:
-            return response
+            return response.model_copy(update=action_spec_provenance)
         hard_blockers = _dedupe([*blockers, *response.hard_blockers])
         return response.model_copy(
             update={
+                **action_spec_provenance,
                 "bridge_status": "blocked_before_execution_boundary",
                 "final_preflight_result": "blocked",
                 "hard_blockers": hard_blockers,
@@ -503,14 +514,23 @@ def _request_from_generic_action_spec(
         "quantity": action_spec.quantity,
         "max_notional": action_spec.max_notional,
         "leverage": action_spec.leverage,
+        "max_attempts": action_spec.max_attempts,
         "protection_mode": action_spec.protection_mode,
+        "review_requirement": action_spec.review_requirement,
     }
     missing = [field for field, value in required_values.items() if value in (None, "")]
     blockers.extend(f"generic_action_spec_{field}_missing" for field in missing)
+    if action_spec.max_attempts is not None and action_spec.max_attempts != 1:
+        blockers.append("generic_action_spec_max_attempts_mismatch")
     protection_plan_type = str(action_spec.protection_mode or "single_tp_plus_sl")
     if protection_plan_type != "single_tp_plus_sl":
         blockers.append("generic_action_spec_protection_plan_mismatch")
         protection_plan_type = "single_tp_plus_sl"
+    if (
+        action_spec.review_requirement not in (None, "")
+        and action_spec.review_requirement != "post_action_review_required"
+    ):
+        blockers.append("generic_action_spec_review_requirement_mismatch")
 
     return (
         BnbLiveExecutionBridgeDryRunRequest(
@@ -612,6 +632,8 @@ def _final_gate_read_model(
 ) -> BnbLiveExecutionBridgeFinalGateReadModel:
     startup_guard = _gate_fact_state(fact_checks, "startup_guard")
     gks = _gate_fact_state(fact_checks, "gks")
+    active_position = _gate_fact_state(fact_checks, "active_position")
+    open_order = _gate_fact_state(fact_checks, "open_order")
     return BnbLiveExecutionBridgeFinalGateReadModel(
         result="blocked" if hard_blockers else "passed",
         exact_blockers=hard_blockers,
@@ -622,8 +644,10 @@ def _final_gate_read_model(
         market_metadata=_gate_fact_state(fact_checks, "market_metadata"),
         protection_readiness=_gate_fact_state(fact_checks, "protection_readiness"),
         recording_readiness=_gate_fact_state(fact_checks, "recording_readiness"),
-        bnb_position=_gate_fact_state(fact_checks, "active_position"),
-        bnb_open_order=_gate_fact_state(fact_checks, "open_order"),
+        active_position=active_position,
+        open_order=open_order,
+        bnb_position=active_position,
+        bnb_open_order=open_order,
         persistence_readiness=BnbLiveExecutionBridgePersistenceReadiness(
             execution_intents=table_audit.execution_intents,
             orders=table_audit.orders,
@@ -659,8 +683,9 @@ def _execution_plan_preview(
         entry_order=BnbExecutionPlanEntryOrderPreview(
             order_type="market",
             intended_behavior=(
-                "one-shot BNB entry only after explicit Owner authorization and final hard gates; "
-                "this preview creates no execution intent or order"
+                f"one-shot {request.carrier_id} entry for {request.symbol} only after explicit "
+                "Owner authorization and final hard gates; this preview creates no execution "
+                "intent or order"
             ),
             quantity=request.quantity,
             max_notional=request.max_notional,
@@ -724,8 +749,9 @@ def _owner_execution_trigger_read_model(
         status="ready_for_owner_click",
         endpoint=endpoint,
         reason=(
-            "Owner can click this button to create one scoped ExecutionIntent, submit one real BNB "
-            "entry order, and attach one TP plus one SL after the final hard gate is rechecked."
+            f"Owner can click this button to create one scoped ExecutionIntent, submit one real "
+            f"{request.carrier_id} entry order for {request.symbol}, and attach one TP plus one "
+            "SL after the final hard gate is rechecked."
         ),
         blockers=[],
         creates_execution_intent_on_click=True,
@@ -759,8 +785,12 @@ def _has_scope_blocker(hard_blockers: list[str]) -> bool:
         "generic_action_spec_quantity_missing",
         "generic_action_spec_max_notional_missing",
         "generic_action_spec_leverage_missing",
+        "generic_action_spec_max_attempts_missing",
         "generic_action_spec_protection_mode_missing",
+        "generic_action_spec_review_requirement_missing",
+        "generic_action_spec_max_attempts_mismatch",
         "generic_action_spec_protection_plan_mismatch",
+        "generic_action_spec_review_requirement_mismatch",
         "generic_action_spec_below_min_notional",
         "generic_action_spec_below_min_amount",
         "generic_action_spec_quantity_step_mismatch",
@@ -957,7 +987,7 @@ def _generic_action_spec_fact_blockers(
         if tick_size is None and price_precision in (None, ""):
             blockers.append("market_metadata_price_precision_missing")
 
-    for fact_id in ["protection_readiness", "recording_readiness"]:
+    for fact_id in ["reconciliation", "protection_readiness", "recording_readiness"]:
         fact = fact_checks.get(fact_id)
         if fact is None:
             blockers.append(f"{fact_id}_fact_missing")
@@ -998,6 +1028,8 @@ def _recording_readiness_evidence_blockers(fact: dict[str, Any]) -> list[str]:
         blockers.append("review_write_unavailable")
     if evidence.get("audit_writable") is not True:
         blockers.append("audit_write_unavailable")
+    if evidence.get("result_envelope_writable") is not True:
+        blockers.append("execution_result_envelope_write_unavailable")
     if evidence.get("read_only_check") is not True:
         blockers.append("recording_readiness_check_not_read_only")
     return blockers

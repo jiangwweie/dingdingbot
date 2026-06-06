@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import inspect
+import re
 import time
 from decimal import Decimal
 from typing import Any, Literal, Mapping, Optional
@@ -81,9 +82,12 @@ from src.application.owner_trial_flow import (
 from src.application.owner_bounded_execution import (
     ExchangeGatewayBoundedOrderExecutor,
     OwnerBoundedExecutionError,
+    OwnerBoundedExecutionReadiness,
     OwnerBoundedExecutionResponse,
+    OwnerBoundedExecutionState,
     OwnerBoundedExecutionService,
 )
+from src.application.exchange_credential_preflight import run_exchange_credential_preflight
 from src.application.position_projection_service import PositionProjectionService
 from src.application.protection_price_planner import (
     ExchangeGatewayProtectionPriceSource,
@@ -3909,6 +3913,217 @@ async def create_owner_trial_flow_runtime_safety_clearance(
         raise _owner_trial_flow_http_error(exc) from exc
 
 
+@router.get(
+    "/owner-trial-flow/authorizations/{authorization_id}/execute-readiness",
+    response_model=OwnerBoundedExecutionReadiness,
+)
+async def get_owner_bounded_live_trial_execute_readiness(
+    authorization_id: str,
+) -> OwnerBoundedExecutionReadiness:
+    """Return retry/execution readiness for an Owner authorization.
+
+    This is a read-only safety view. It checks authorization state, prior
+    ExecutionIntent/order linkage, and carrier adapter support only. It never
+    creates authorizations, execution intents, orders, runtime transitions, or
+    exchange calls.
+    """
+    owner_trial_service = _owner_trial_flow_service_instance()
+    injected_session_maker = getattr(
+        getattr(owner_trial_service, "_repository", None),
+        "_session_maker",
+        None,
+    )
+    readiness_service = OwnerBoundedExecutionService(
+        final_gate_service=BnbLiveExecutionBridgeDryRunService(
+            owner_trial_flow_service=owner_trial_service,
+            session_maker=injected_session_maker,
+        ),
+        session_maker=injected_session_maker,
+    )
+    try:
+        return await readiness_service.readiness(authorization_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+    except OwnerBoundedExecutionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "blockers": exc.blockers,
+                "execution_intent_created": exc.execution_intent_created,
+                "order_created": exc.order_created,
+                "order_permission_granted": exc.order_permission_granted,
+            },
+        ) from exc
+
+
+@router.get(
+    "/owner-trial-flow/authorizations/{authorization_id}/execution-state",
+    response_model=OwnerBoundedExecutionState,
+)
+async def get_owner_bounded_live_trial_execution_state(
+    authorization_id: str,
+) -> OwnerBoundedExecutionState:
+    """Return read-only PG evidence for an Owner authorization execution state.
+
+    This exposes prior ExecutionIntent, local order, and result-envelope
+    summaries so retry decisions are auditable. It does not create, mutate, or
+    hide execution evidence and it does not call exchange APIs.
+    """
+    owner_trial_service = _owner_trial_flow_service_instance()
+    injected_session_maker = getattr(
+        getattr(owner_trial_service, "_repository", None),
+        "_session_maker",
+        None,
+    )
+    state_service = OwnerBoundedExecutionService(
+        final_gate_service=BnbLiveExecutionBridgeDryRunService(
+            owner_trial_flow_service=owner_trial_service,
+            session_maker=injected_session_maker,
+        ),
+        session_maker=injected_session_maker,
+    )
+    try:
+        return await state_service.execution_state(authorization_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+    except OwnerBoundedExecutionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "blockers": exc.blockers,
+                "execution_intent_created": exc.execution_intent_created,
+                "order_created": exc.order_created,
+                "order_permission_granted": exc.order_permission_granted,
+            },
+        ) from exc
+
+
+@router.get("/owner-trial-flow/authorizations/{authorization_id}/final-gate-dry-run")
+async def get_owner_bounded_live_trial_final_gate_dry_run(
+    authorization_id: str,
+    run: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Return an authorization-scoped final-gate dry-run plan/result.
+
+    ``run=false`` returns the replay plan only. ``run=true`` collects read-only
+    facts and reruns final gate for the current authorization scope. The route
+    never creates execution intents, orders, runtime transitions, or exchange
+    write calls.
+    """
+    owner_trial_service = _owner_trial_flow_service_instance()
+    try:
+        authorization = await owner_trial_service.get_live_authorization(authorization_id)
+        current = await owner_trial_service.current(carrier_id=authorization.carrier_id)
+    except OwnerTrialFlowInfrastructureError as exc:
+        raise _owner_trial_flow_infrastructure_http_error(exc) from exc
+    except OwnerTrialFlowError as exc:
+        raise _owner_trial_flow_http_error(exc) from exc
+    current_authorization_id = (
+        current.live_authorization.authorization_id
+        if current.live_authorization is not None
+        else None
+    )
+    carrier = get_owner_action_carrier(authorization.carrier_id)
+    scope_symbol = carrier.runtime_symbol if carrier is not None else authorization.symbol
+    scope_side = carrier.side if carrier is not None else authorization.side
+    scope_quantity = carrier.quantity if carrier is not None else authorization.quantity
+    scope_max_notional = carrier.max_notional if carrier is not None else authorization.max_notional
+    scope_leverage = carrier.leverage if carrier is not None else authorization.leverage
+    scope_protection_plan_type = (
+        carrier.protection_plan_type
+        if carrier is not None
+        else authorization.protection_plan_type
+    )
+    request = BnbLiveExecutionBridgeDryRunRequest(
+        carrier_id=authorization.carrier_id,
+        symbol=scope_symbol,
+        side=scope_side,
+        max_notional=scope_max_notional,
+        quantity=scope_quantity,
+        leverage=scope_leverage,
+        protection_plan_type=scope_protection_plan_type,
+    )
+    base_payload: dict[str, Any] = {
+        "mode": "run" if run else "dry_run",
+        "authorization_id": authorization.authorization_id,
+        "carrier_id": authorization.carrier_id,
+        "symbol": scope_symbol,
+        "side": scope_side,
+        "quantity": str(scope_quantity),
+        "max_notional": str(scope_max_notional),
+        "leverage": str(scope_leverage),
+        "protection_plan_type": scope_protection_plan_type,
+        "current_authorization_id": current_authorization_id,
+        "safety": {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "creates_order": False,
+            "starts_runtime": False,
+            "exchange_write_api_called": False,
+        },
+    }
+    if current_authorization_id != authorization.authorization_id:
+        return {
+            **base_payload,
+            "result": "blocked",
+            "blockers": ["authorization_not_current_for_carrier"],
+        }
+    if not run:
+        return {
+            **base_payload,
+            "result": "dry_run",
+            "blockers": [],
+        }
+
+    api_module = _api_module()
+    gateway_binding = await _owner_bounded_exchange_gateway_binding(
+        api_module,
+        permission_max="order_allowed",
+    )
+    try:
+        injected_session_maker = getattr(
+            getattr(owner_trial_service, "_repository", None),
+            "_session_maker",
+            None,
+        )
+        profile = _strategy_profile_for_owner_action_scope(
+            carrier_id=authorization.carrier_id,
+            symbol=authorization.symbol,
+            side=authorization.side,
+        )
+        collector = _strategy_trial_preflight_fact_collector(
+            api_module,
+            session_maker=injected_session_maker,
+            allow_order_permission_for_read_only_facts=True,
+        )
+        fact_snapshot = await collector.collect(profile)
+        final_gate = await BnbLiveExecutionBridgeDryRunService(
+            owner_trial_flow_service=owner_trial_service,
+            session_maker=injected_session_maker,
+            permission_mode="official_execute",
+        ).run(request, fact_snapshot=fact_snapshot)
+        return {
+            **base_payload,
+            "result": final_gate.final_preflight_result,
+            "gateway_binding": {
+                "status": gateway_binding.get("status"),
+                "blockers": gateway_binding.get("blockers", []),
+                "gateway_type": gateway_binding.get("gateway_type"),
+            },
+            "final_gate": final_gate.model_dump(mode="json"),
+        }
+    finally:
+        await close_owner_bounded_exchange_gateway()
+
+
 @router.post(
     "/owner-trial-flow/authorizations/{authorization_id}/execute",
     response_model=OwnerBoundedExecutionResponse,
@@ -3946,7 +4161,10 @@ async def execute_owner_bounded_live_trial_authorization(
         api_module,
         permission_max="order_allowed",
     )
-    collector = _strategy_trial_preflight_fact_collector(api_module)
+    collector = _strategy_trial_preflight_fact_collector(
+        api_module,
+        allow_order_permission_for_read_only_facts=True,
+    )
     fact_snapshot = await collector.collect(profile)
     final_gate_service = BnbLiveExecutionBridgeDryRunService(
         owner_trial_flow_service=owner_trial_service,
@@ -4027,6 +4245,26 @@ async def execute_owner_bounded_live_trial_authorization(
         ) from exc
     finally:
         await close_owner_bounded_exchange_gateway()
+
+
+@router.get("/owner-trial-flow/exchange-credential-preflight")
+async def get_owner_trial_flow_exchange_credential_preflight(
+    run: bool = Query(default=False),
+    symbol: str = Query(default="SOL/USDT:USDT"),
+) -> dict[str, Any]:
+    """Secret-safe server-side exchange credential preflight.
+
+    ``run=false`` is a dry-run plan. ``run=true`` performs read-only Binance
+    credential/account/symbol checks only. It never creates authorizations,
+    execution intents, orders, runtime transitions, cancels, flattens, or retry
+    actions, and it never returns secret values or raw exchange messages.
+    """
+    return await run_exchange_credential_preflight(
+        env=os.environ,
+        gateway_factory=ExchangeGateway,
+        symbol=symbol,
+        run=run,
+    )
 
 
 async def _owner_bounded_exchange_gateway_binding(
@@ -4244,8 +4482,11 @@ def _strategy_trial_preflight_fact_collector(
     api_module: Any,
     *,
     session_maker: Any | None = None,
+    allow_order_permission_for_read_only_facts: bool = False,
 ) -> TrialPreflightFactCollector:
-    if not _bnb_final_gate_live_read_env_status()["safe"]:
+    if not _bnb_final_gate_live_read_env_status(
+        allow_order_permission=allow_order_permission_for_read_only_facts,
+    )["safe"]:
         return TrialPreflightFactCollector(
             position_reader=_local_preflight_position_reader(api_module),
             open_order_reader=_local_preflight_open_order_reader(api_module),
@@ -4253,12 +4494,18 @@ def _strategy_trial_preflight_fact_collector(
             startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
             reconciliation_reader=_local_preflight_reconciliation_reader(api_module),
             account_facts_reader=_runtime_cached_account_facts_reader(api_module),
-            market_metadata_reader=_preflight_market_metadata_reader(api_module),
+            market_metadata_reader=_preflight_market_metadata_reader(
+                api_module,
+                allow_order_permission=allow_order_permission_for_read_only_facts,
+            ),
             protection_readiness_reader=_preflight_protection_readiness_reader(api_module),
             recording_readiness_reader=_preflight_recording_readiness_reader(session_maker),
         )
 
-    bnb_live_facts = _BnbFinalGateLiveReadOnlyFacts(api_module)
+    bnb_live_facts = _BnbFinalGateLiveReadOnlyFacts(
+        api_module,
+        allow_order_permission=allow_order_permission_for_read_only_facts,
+    )
     return TrialPreflightFactCollector(
         position_reader=_bnb_preflight_position_reader(api_module, bnb_live_facts),
         open_order_reader=_bnb_preflight_open_order_reader(api_module, bnb_live_facts),
@@ -4266,7 +4513,10 @@ def _strategy_trial_preflight_fact_collector(
         startup_guard_reader=_bnb_preflight_startup_guard_reader(api_module),
         reconciliation_reader=_bnb_preflight_reconciliation_reader(api_module, bnb_live_facts),
         account_facts_reader=_bnb_preflight_account_facts_reader(api_module, bnb_live_facts),
-        market_metadata_reader=_preflight_market_metadata_reader(api_module),
+        market_metadata_reader=_preflight_market_metadata_reader(
+            api_module,
+            allow_order_permission=allow_order_permission_for_read_only_facts,
+        ),
         protection_readiness_reader=_preflight_protection_readiness_reader(api_module),
         recording_readiness_reader=_preflight_recording_readiness_reader(session_maker),
     )
@@ -4332,7 +4582,11 @@ def _local_preflight_reconciliation_reader(api_module: Any):
     return _read
 
 
-def _preflight_market_metadata_reader(api_module: Any):
+def _preflight_market_metadata_reader(
+    api_module: Any,
+    *,
+    allow_order_permission: bool = False,
+):
     async def _read(profile):
         gateway = (
             getattr(api_module, "_owner_bounded_exchange_gateway", None)
@@ -4348,7 +4602,9 @@ def _preflight_market_metadata_reader(api_module: Any):
                 source="bound_exchange_gateway_market_info",
             )
 
-        env_status = _bnb_final_gate_live_read_env_status()
+        env_status = _bnb_final_gate_live_read_env_status(
+            allow_order_permission=allow_order_permission,
+        )
         if env_status["safe"] is not True:
             raise RuntimeError("market_metadata_read_only_env_not_safe")
 
@@ -4408,18 +4664,69 @@ def _preflight_recording_readiness_reader(session_maker: Any | None = None):
             execution_intent_columns = await _read_table_columns(session, "execution_intents")
             order_columns = await _read_table_columns(session, "orders")
             result_columns = await _read_table_columns(session, "brc_execution_results")
-        minimal_result_table = result_columns == {"operation_id", "status"}
-        full_result_table = bool(
-            {"operation_id", "status", "review_refs", "audit_refs"} <= result_columns
+        required_result_envelope_columns = {
+            "operation_id",
+            "status",
+            "rechecked",
+            "recheck_result",
+            "adapter_result",
+            "result_summary",
+            "audit_refs",
+            "review_refs",
+            "final_state_snapshot",
+        }
+        required_execution_intent_columns = {
+            "id",
+            "signal_id",
+            "symbol",
+            "status",
+            "authorization_id",
+            "order_id",
+            "exchange_order_id",
+            "blocked_reason",
+            "blocked_message",
+            "failed_reason",
+            "signal_payload",
+            "strategy_payload",
+            "created_at",
+            "updated_at",
+        }
+        required_order_columns = {
+            "id",
+            "signal_id",
+            "symbol",
+            "direction",
+            "order_type",
+            "order_role",
+            "status",
+            "price",
+            "trigger_price",
+            "requested_qty",
+            "filled_qty",
+            "average_exec_price",
+            "reduce_only",
+            "exchange_reduce_only_param_sent",
+            "exchange_reduce_only_omit_reason",
+            "parent_order_id",
+            "oco_group_id",
+            "exit_reason",
+            "exchange_order_id",
+            "filled_at",
+            "created_at",
+            "updated_at",
+        }
+        result_envelope_writable = bool(required_result_envelope_columns <= result_columns)
+        execution_intents_writable = bool(
+            required_execution_intent_columns <= execution_intent_columns
         )
+        orders_writable = bool(required_order_columns <= order_columns)
         return {
             "source": "pg_table_column_readiness",
-            "execution_intents_writable": bool(
-                {"id", "status", "authorization_id"} <= execution_intent_columns
-            ),
-            "orders_writable": bool(order_columns),
-            "review_writable": minimal_result_table or full_result_table,
-            "audit_writable": minimal_result_table or full_result_table,
+            "execution_intents_writable": execution_intents_writable,
+            "orders_writable": orders_writable,
+            "review_writable": result_envelope_writable,
+            "audit_writable": result_envelope_writable,
+            "result_envelope_writable": result_envelope_writable,
             "read_only_check": True,
         }
 
@@ -4900,10 +5207,15 @@ def _bnb_preflight_reconciliation_reader(api_module: Any, bnb_live_facts: Any):
                     "historical_closed_orders",
                     0,
                 ),
+                "pg_active_position_count": pg_counts["pg_bnb_active_positions"],
+                "pg_open_order_count": pg_counts["pg_bnb_open_orders"],
                 "pg_bnb_active_position_count": pg_counts["pg_bnb_active_positions"],
                 "pg_bnb_open_order_count": pg_counts["pg_bnb_open_orders"],
+                "exchange_active_position_count": exchange_position_count,
+                "exchange_open_order_count": exchange_open_order_count,
                 "exchange_bnb_active_position_count": exchange_position_count,
                 "exchange_bnb_open_order_count": exchange_open_order_count,
+                "scoped_symbol": str(profile.symbol),
                 "read_only": True,
             }
 
@@ -4950,6 +5262,7 @@ def _bnb_preflight_account_facts_reader(api_module: Any, bnb_live_facts: Any):
             "external_call_performed": bool(account.get("external_call_performed")),
             "real_account_api_called_by_endpoint": bool(account.get("external_call_performed")),
             "reconciliation_status": account.get("reconciliation_status") or "unknown",
+            "reason": facts.get("reason"),
         }
 
     return _read
@@ -4962,8 +5275,9 @@ class _BnbFinalGateLiveReadOnlyFacts:
     exposes no order, cancel, runtime, permission, or execution methods.
     """
 
-    def __init__(self, api_module: Any) -> None:
+    def __init__(self, api_module: Any, *, allow_order_permission: bool = False) -> None:
         self._api_module = api_module
+        self._allow_order_permission = allow_order_permission
         self._cache: dict[str, Any] | None = None
 
     async def read(self, profile: Any) -> dict[str, Any]:
@@ -4974,7 +5288,9 @@ class _BnbFinalGateLiveReadOnlyFacts:
 
     async def _read(self, profile: Any) -> dict[str, Any]:
         generated_at_ms = int(time.time() * 1000)
-        env_status = _bnb_final_gate_live_read_env_status()
+        env_status = _bnb_final_gate_live_read_env_status(
+            allow_order_permission=self._allow_order_permission,
+        )
         if env_status["safe"] is not True:
             return _bnb_live_read_unavailable(
                 generated_at_ms=generated_at_ms,
@@ -5040,6 +5356,12 @@ class _BnbFinalGateLiveReadOnlyFacts:
                 "errors": errors,
                 "env_status": env_status,
             }
+        except Exception as exc:
+            return _bnb_live_read_unavailable(
+                generated_at_ms=generated_at_ms,
+                reason=_bnb_live_read_exchange_error_reason(exc),
+                env_status=env_status,
+            )
         finally:
             if should_close and hasattr(client, "close"):
                 await client.close()
@@ -5183,16 +5505,22 @@ def _bnb_final_gate_read_only_client(api_module: Any) -> dict[str, Any]:
     }
 
 
-def _bnb_final_gate_live_read_env_status() -> dict[str, Any]:
+def _bnb_final_gate_live_read_env_status(
+    *,
+    allow_order_permission: bool = False,
+) -> dict[str, Any]:
     trading_env = os.environ.get("TRADING_ENV", "").strip().lower()
     exchange_testnet = os.environ.get("EXCHANGE_TESTNET", "").strip().lower()
     permission_max = os.environ.get("BRC_EXECUTION_PERMISSION_MAX", "read_only").strip().lower()
     runtime_control = os.environ.get("RUNTIME_CONTROL_API_ENABLED", "false").strip().lower()
     test_injection = os.environ.get("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false").strip().lower()
+    permission_safe = permission_max == "read_only" or (
+        allow_order_permission and permission_max == "order_allowed"
+    )
     safe = (
         trading_env == "live"
         and exchange_testnet == "false"
-        and permission_max == "read_only"
+        and permission_safe
         and runtime_control not in {"1", "true", "yes", "on"}
         and test_injection not in {"1", "true", "yes", "on"}
     )
@@ -5201,6 +5529,9 @@ def _bnb_final_gate_live_read_env_status() -> dict[str, Any]:
         "trading_env_live": trading_env == "live",
         "exchange_testnet_false": exchange_testnet == "false",
         "permission_read_only": permission_max == "read_only",
+        "permission_order_allowed_for_read_only_facts": (
+            allow_order_permission and permission_max == "order_allowed"
+        ),
         "runtime_control_disabled": runtime_control not in {"1", "true", "yes", "on"},
         "test_signal_injection_disabled": test_injection not in {"1", "true", "yes", "on"},
     }
@@ -5235,6 +5566,24 @@ def _bnb_live_read_unavailable(
         "errors": [reason],
         "env_status": env_status,
     }
+
+
+def _bnb_live_read_exchange_error_reason(exc: Exception) -> str:
+    error_type = type(exc).__name__
+    error_code = _exchange_error_code_from_message(str(exc))
+    if error_code:
+        return f"exchange_read_failed:{error_type}:exchange_error_code:{error_code}"
+    return f"exchange_read_failed:{error_type}"
+
+
+def _exchange_error_code_from_message(message: str) -> str | None:
+    match = re.search(r'"code"\s*:\s*(-?\d+)', message)
+    if match:
+        return match.group(1)
+    match = re.search(r"\bcode\s*[=:]\s*(-?\d+)", message, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
 
 
 async def _call_fetch_positions(client: Any, symbol: str) -> list[Any]:

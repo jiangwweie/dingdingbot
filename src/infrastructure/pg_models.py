@@ -135,8 +135,14 @@ class PGExecutionIntentORM(PGCoreBase):
     blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     blocked_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    signal_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    strategy_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    signal_payload: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+    )
+    strategy_payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
 

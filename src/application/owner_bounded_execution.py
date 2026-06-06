@@ -108,6 +108,30 @@ class OwnerBoundedExecutionReadiness(BaseModel):
     order_permission_granted: bool = False
 
 
+class OwnerBoundedExecutionState(BaseModel):
+    authorization_id: str
+    carrier_id: str | None = None
+    retry_allowed: bool = False
+    retry_reason: str | None = None
+    retry_blockers: list[str] = Field(default_factory=list)
+    execution_intent_count: int = 0
+    local_order_count: int = 0
+    result_count: int = 0
+    execution_intents: list[dict[str, object]] = Field(default_factory=list)
+    local_orders: list[dict[str, object]] = Field(default_factory=list)
+    execution_results: list[dict[str, object]] = Field(default_factory=list)
+    safety: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "creates_order": False,
+            "starts_runtime": False,
+            "calls_exchange": False,
+            "mutates_pg": False,
+        }
+    )
+
+
 class OwnerBoundedExecutionResponse(BaseModel):
     generated_from: str = "owner_bounded_execution_v1"
     authorization_id: str
@@ -198,7 +222,7 @@ class ExchangeGatewayBoundedOrderExecutor:
             symbol=authorization.symbol,
             order_type="market",
             side="buy" if authorization.side == "long" else "sell",
-            amount=authorization.quantity,
+            amount=_catalog_authorized_quantity(authorization),
             position_side=_position_side_for_authorization(authorization),
             client_order_id=client_order_id,
         )
@@ -667,6 +691,43 @@ class OwnerBoundedExecutionService:
             }
         )
 
+    async def execution_state(self, authorization_id: str) -> OwnerBoundedExecutionState:
+        authorization = await self._load_authorization(authorization_id)
+        retry_classification = await self._execution_intent_retry_classification(
+            authorization.authorization_id,
+        )
+        async with self._session_maker() as session:
+            intents = await self._execution_intent_rows(session, authorization.authorization_id)
+            local_orders = await self._local_order_rows_for_intents(session, intents)
+            results = await self._execution_result_rows_for_authorization(
+                session,
+                authorization.authorization_id,
+            )
+        retry_blockers: list[str] = []
+        if not bool(retry_classification.get("retry_allowed")):
+            retry_blockers.append("duplicate_execution_intent_for_authorization")
+            reason = retry_classification.get("reason")
+            if reason and reason != "no_previous_intent":
+                retry_blockers.append(str(reason))
+            retry_blockers.extend(
+                str(item)
+                for item in retry_classification.get("blocking_reasons", [])  # type: ignore[union-attr]
+                if str(item) not in retry_blockers
+            )
+        return OwnerBoundedExecutionState(
+            authorization_id=authorization.authorization_id,
+            carrier_id=authorization.carrier_id,
+            retry_allowed=bool(retry_classification.get("retry_allowed")),
+            retry_reason=str(retry_classification.get("reason") or ""),
+            retry_blockers=_dedupe(retry_blockers),
+            execution_intent_count=len(intents),
+            local_order_count=len(local_orders),
+            result_count=len(results),
+            execution_intents=intents,
+            local_orders=local_orders,
+            execution_results=results,
+        )
+
     async def execute_authorization(
         self,
         authorization_id: str,
@@ -834,6 +895,167 @@ class OwnerBoundedExecutionService:
             except SQLAlchemyError:
                 return "execution_intents_authorization_link_unavailable"
         return "ready"
+
+    async def _execution_intent_rows(
+        self,
+        session: AsyncSession,
+        authorization_id: str,
+    ) -> list[dict[str, object]]:
+        columns = await _table_columns(session, "execution_intents")
+        if not columns:
+            return []
+        selectable = [
+            column
+            for column in [
+                "id",
+                "signal_id",
+                "symbol",
+                "status",
+                "authorization_id",
+                "order_id",
+                "exchange_order_id",
+                "failed_reason",
+                "created_at",
+                "updated_at",
+            ]
+            if column in columns
+        ]
+        if not selectable:
+            return []
+        order_clause = " ORDER BY created_at DESC" if "created_at" in columns else ""
+        rows = (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT {", ".join(selectable)}
+                    FROM execution_intents
+                    WHERE authorization_id = :authorization_id
+                    {order_clause}
+                    """
+                ),
+                {"authorization_id": authorization_id},
+            )
+        ).mappings().all()
+        result: list[dict[str, object]] = []
+        for row in rows:
+            item = {key: row.get(key) for key in selectable}
+            signal_id = str(row.get("signal_id") or "")
+            item["local_order_count_for_signal"] = (
+                await _local_order_count_for_signal(session, signal_id)
+                if signal_id
+                else 0
+            )
+            result.append(item)
+        return result
+
+    async def _local_order_rows_for_intents(
+        self,
+        session: AsyncSession,
+        intents: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        columns = await _table_columns(session, "orders")
+        if not columns:
+            return []
+        selectable = [
+            column
+            for column in [
+                "id",
+                "signal_id",
+                "symbol",
+                "status",
+                "order_type",
+                "exchange_order_id",
+                "created_at",
+                "updated_at",
+            ]
+            if column in columns
+        ]
+        if not selectable:
+            return []
+        order_ids = {
+            str(intent.get("order_id"))
+            for intent in intents
+            if intent.get("order_id")
+        }
+        signal_ids = {
+            str(intent.get("signal_id"))
+            for intent in intents
+            if intent.get("signal_id")
+        }
+        filters: list[str] = []
+        params: dict[str, object] = {}
+        if order_ids and "id" in columns:
+            placeholders: list[str] = []
+            for index, value in enumerate(sorted(order_ids)):
+                key = f"order_id_{index}"
+                placeholders.append(f":{key}")
+                params[key] = value
+            filters.append(f"id IN ({', '.join(placeholders)})")
+        if signal_ids and "signal_id" in columns:
+            placeholders = []
+            for index, value in enumerate(sorted(signal_ids)):
+                key = f"signal_id_{index}"
+                placeholders.append(f":{key}")
+                params[key] = value
+            filters.append(f"signal_id IN ({', '.join(placeholders)})")
+        if not filters:
+            return []
+        rows = (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT {", ".join(selectable)}
+                    FROM orders
+                    WHERE {" OR ".join(filters)}
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+        return [{key: row.get(key) for key in selectable} for row in rows]
+
+    async def _execution_result_rows_for_authorization(
+        self,
+        session: AsyncSession,
+        authorization_id: str,
+    ) -> list[dict[str, object]]:
+        columns = await _table_columns(session, "brc_execution_results")
+        if not columns:
+            return []
+        selectable = [
+            column
+            for column in [
+                "operation_id",
+                "status",
+                "failed_reason",
+                "preflight_id",
+                "occurred_at_ms",
+            ]
+            if column in columns
+        ]
+        if not selectable:
+            return []
+        filters = ["operation_id LIKE :operation_like"]
+        params: dict[str, object] = {"operation_like": f"%{authorization_id}%"}
+        if "audit_refs" in columns:
+            filters.append("CAST(audit_refs AS TEXT) LIKE :authorization_like")
+            params["authorization_like"] = f"%{authorization_id}%"
+        if "result_summary" in columns:
+            filters.append("CAST(result_summary AS TEXT) LIKE :authorization_like")
+            params["authorization_like"] = f"%{authorization_id}%"
+        rows = (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT {", ".join(selectable)}
+                    FROM brc_execution_results
+                    WHERE {" OR ".join(filters)}
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+        return [{key: row.get(key) for key in selectable} for row in rows]
 
     async def _has_execution_intent_for_authorization(self, authorization_id: str) -> bool:
         async with self._session_maker() as session:
@@ -1168,6 +1390,13 @@ def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
     return abs(Decimal(str(left)) - Decimal(str(right))) <= Decimal("0.000000000001")
 
 
+def _catalog_authorized_quantity(authorization: BoundedLiveTrialAuthorization) -> Decimal:
+    carrier = get_owner_action_carrier(authorization.carrier_id)
+    if carrier is not None and _decimal_scope_equal(authorization.quantity, carrier.quantity):
+        return carrier.quantity
+    return authorization.quantity
+
+
 def _build_execution_intent(
     authorization: BoundedLiveTrialAuthorization,
     protection_plan: ProtectionPricePlanRecord,
@@ -1180,7 +1409,7 @@ def _build_execution_intent(
         direction=_direction_for_authorization(authorization),
         entry_price=entry_price,
         suggested_stop_loss=protection_plan.sl_price or entry_price,
-        suggested_position_size=authorization.quantity,
+        suggested_position_size=_catalog_authorized_quantity(authorization),
         current_leverage=int(authorization.leverage),
         tags=[
             {"name": "carrier_id", "value": authorization.carrier_id},

@@ -128,6 +128,36 @@ async def test_valid_price_snapshot_persists_pre_entry_plan_with_rounding():
 
 
 @pytest.mark.asyncio
+async def test_quantity_storage_noise_is_normalized_before_step_validation():
+    repo = MemoryProtectionPlanRepository()
+    service = ProtectionPlannerService(
+        repository=repo,
+        price_source=StaticProtectionPriceSource(
+            reference_price=Decimal("100.12"),
+            filters=_filters(
+                min_amount=Decimal("0.1"),
+                amount_step=Decimal("0.1"),
+                tick_size=Decimal("0.01"),
+            ),
+        ),
+    )
+
+    plan = await service.ensure_pre_entry_plan(
+        _authorization(
+            carrier_id="TF-001-live-readonly-v0",
+            strategy_family_id="TF-001-live-readonly-v0",
+            symbol="SOL/USDT:USDT",
+            quantity=Decimal("0.100000000000000006"),
+        )
+    )
+
+    assert plan.status == "valid"
+    assert plan.quantity == Decimal("0.1")
+    assert plan.tp_quantity == Decimal("0.1")
+    assert plan.sl_quantity == Decimal("0.1")
+
+
+@pytest.mark.asyncio
 async def test_exchange_price_source_accepts_tick_size_style_price_precision():
     repo = MemoryProtectionPlanRepository()
     gateway = FakeReadOnlyGateway(price_precision=Decimal("0.01"))

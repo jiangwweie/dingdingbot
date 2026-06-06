@@ -317,8 +317,12 @@ def build_single_tp_sl_plan(
             filters=filters,
             source_ref=source_ref,
         )
+    entry_quantity = _normalize_quantity_storage_noise(
+        authorization.quantity,
+        filters.amount_step,
+    )
     quantity_plan = plan_precision_aware_protection_orders(
-        entry_quantity=authorization.quantity,
+        entry_quantity=entry_quantity,
         entry_price=base_price,
         min_amount=filters.min_amount,
         amount_step=filters.amount_step,
@@ -363,7 +367,7 @@ def build_single_tp_sl_plan(
         price_source_type=price_source_type,
         reference_price=base_price if phase == "pre_entry_reference" else None,
         fill_price=base_price if phase == "post_entry_fill" else None,
-        quantity=authorization.quantity,
+        quantity=entry_quantity,
         tp_price=tp_price,
         sl_price=sl_price,
         tp_quantity=quantity_plan.planned_tp_quantities[0],
@@ -382,6 +386,23 @@ def build_single_tp_sl_plan(
         computed_at_ms=_now_ms(),
         source_ref=source_ref,
     )
+
+
+def _normalize_quantity_storage_noise(quantity: Decimal, amount_step: Decimal | None) -> Decimal:
+    if amount_step is None or amount_step <= 0:
+        return quantity
+    places = _decimal_places(amount_step)
+    quant = Decimal("1").scaleb(-places)
+    rounded = quantity.quantize(quant)
+    tolerance = Decimal("1").scaleb(-(places + 12))
+    if abs(quantity - rounded) <= tolerance:
+        return rounded
+    return quantity
+
+
+def _decimal_places(step: Decimal) -> int:
+    exponent = step.normalize().as_tuple().exponent
+    return abs(exponent) if exponent < 0 else 0
 
 
 def _blocked_plan(

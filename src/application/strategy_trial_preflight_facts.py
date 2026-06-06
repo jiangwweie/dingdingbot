@@ -575,6 +575,7 @@ class TrialPreflightFactCollector:
             "reconciliation_status": reconciliation_status,
             "external_call_performed": _get_bool(facts, "external_call_performed"),
             "read_only_guarantee": _get_bool(facts, "read_only_guarantee"),
+            "reason": _get_str(facts, "reason"),
         }
         if (freshness == "fresh" or ready is True) and equity_available and margin_available:
             return _clear(
@@ -760,6 +761,7 @@ class TrialPreflightFactCollector:
             "orders_writable": _get_bool(readiness, "orders_writable"),
             "review_writable": _get_bool(readiness, "review_writable"),
             "audit_writable": _get_bool(readiness, "audit_writable"),
+            "result_envelope_writable": _get_bool(readiness, "result_envelope_writable"),
             "read_only_check": _get_bool(readiness, "read_only_check"),
         }
         blockers: list[str] = []
@@ -771,6 +773,8 @@ class TrialPreflightFactCollector:
             blockers.append("review_write_unavailable")
         if evidence["audit_writable"] is not True:
             blockers.append("audit_write_unavailable")
+        if evidence["result_envelope_writable"] is not True:
+            blockers.append("execution_result_envelope_write_unavailable")
         if evidence["read_only_check"] is not True:
             blockers.append("recording_readiness_check_not_read_only")
         if blockers:
@@ -818,6 +822,7 @@ def _unavailable(
         blocker=blocker,
         blockers=[blocker],
         observed_at_ms=observed_at_ms,
+        evidence={"reason": note},
         notes=[note],
     )
 
@@ -939,10 +944,15 @@ def _reconciliation_evidence(
         "retry_classification",
         "pg_orders_count",
         "pg_historical_closed_orders_count",
+        "pg_active_position_count",
+        "pg_open_order_count",
         "pg_bnb_active_position_count",
         "pg_bnb_open_order_count",
+        "exchange_active_position_count",
+        "exchange_open_order_count",
         "exchange_bnb_active_position_count",
         "exchange_bnb_open_order_count",
+        "scoped_symbol",
         "read_only",
     ]:
         value = _get_value(summary, key)
