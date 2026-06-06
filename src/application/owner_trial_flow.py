@@ -117,7 +117,7 @@ class OwnerLiveAuthorizationActivationRequest(BaseModel):
 
 
 class ScopedRuntimeSafetyClearanceCreateRequest(BaseModel):
-    clearance_type: Literal["startup_guard"] = "startup_guard"
+    clearance_type: Literal["gks", "startup_guard"] = "startup_guard"
     reason: str | None = Field(default=None, max_length=512)
     owner_id: str | None = None
     ttl_ms: int = Field(default=15 * 60 * 1000, gt=0, le=15 * 60 * 1000)
@@ -164,7 +164,7 @@ class BoundedLiveTrialAuthorization(BaseModel):
 
 class ScopedRuntimeSafetyClearance(BaseModel):
     clearance_id: str
-    clearance_type: Literal["startup_guard"]
+    clearance_type: Literal["gks", "startup_guard"]
     authorization_id: str
     carrier_id: str
     strategy_family_id: str

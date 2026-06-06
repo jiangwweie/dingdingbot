@@ -447,7 +447,7 @@ class PgOwnerTrialFlowRepository:
     ) -> ScopedRuntimeSafetyClearance:
         return ScopedRuntimeSafetyClearance(
             clearance_id=row.clearance_id,
-            clearance_type="startup_guard",
+            clearance_type=row.clearance_type,
             authorization_id=row.authorization_id,
             carrier_id=row.carrier_id,
             strategy_family_id=(row.metadata_json or {}).get("strategy_family_id", row.carrier_id),

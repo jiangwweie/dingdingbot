@@ -711,11 +711,26 @@ def test_scoped_runtime_safety_clearance_requires_unused_authorization():
                 operator_id="owner",
             )
             assert clearance.carrier_id == "TF-001-live-readonly-v0"
+            assert clearance.clearance_type == "startup_guard"
             assert clearance.symbol == "SOL/USDT:USDT"
             assert clearance.metadata_only is True
             assert clearance.runtime_started is False
             assert clearance.execution_intent_created is False
             assert clearance.order_created is False
+
+            gks_clearance = await service.create_scoped_runtime_safety_clearance(
+                authorization.authorization_id,
+                ScopedRuntimeSafetyClearanceCreateRequest(
+                    clearance_type="gks",
+                    reason="unit_scoped_gks",
+                    ttl_ms=60000,
+                ),
+                operator_id="owner",
+            )
+            assert gks_clearance.clearance_type == "gks"
+            assert gks_clearance.carrier_id == "TF-001-live-readonly-v0"
+            assert gks_clearance.symbol == "SOL/USDT:USDT"
+            assert gks_clearance.metadata_only is True
 
             await service._repository.mark_live_authorization_consumed(
                 authorization.authorization_id,
@@ -736,7 +751,7 @@ def test_scoped_runtime_safety_clearance_requires_unused_authorization():
                 )
                 intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
                 order_count = await session.scalar(text("SELECT count(*) FROM orders"))
-            assert clearance_count == 1
+            assert clearance_count == 2
             assert intent_count == 0
             assert order_count == 0
         finally:
