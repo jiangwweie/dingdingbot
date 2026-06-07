@@ -17,6 +17,10 @@ BNB = "BNB/USDT:USDT"
 
 
 def _configure_auth(monkeypatch):
+    # Importing the API composition root loads local dotenv files with override=True.
+    # Keep test credentials authoritative even when an individual test imports app later.
+    import src.interfaces.api  # noqa: F401
+
     monkeypatch.setenv("BRC_OPERATOR_USERNAME", "owner")
     monkeypatch.setenv("BRC_OPERATOR_PASSWORD_HASH", create_password_hash("pw"))
     monkeypatch.setenv("BRC_OPERATOR_TOTP_SECRET", "JBSWY3DPEHPK3PXP")
@@ -1678,6 +1682,16 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert payload["no_action_guarantee"]["starts_runtime"] is False
+    assert payload["data"]["owner_market_input"] == {
+        "regime": "not_selected",
+        "mapped_family": None,
+        "symbol_preference": None,
+        "side": None,
+        "risk_tier": "not_selected",
+        "note": None,
+        "source": "owner_input_query",
+        "persisted": False,
+    }
 
     adapter = payload["data"]["generic_final_gate_adapter_contract"]
     assert adapter["live_action_policy"] == "fail_closed_until_official_final_gate_passes"
@@ -1721,6 +1735,91 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert action_entry["Trend"]["frontend_action_enabled"] is False
     assert action_entry["Volatility expansion"]["action_entry_state"] == "proposal_only"
     assert action_entry["Mean reversion"]["action_entry_state"] == "proposal_only"
+
+    selected = payload["data"]["selected_candidate"]
+    assert selected["family"] == "Trend"
+    assert selected["carrier_id"] == "TF-001-live-readonly-v0"
+    assert selected["scope_review"]["verdict"] == "not_checked"
+    risk_review = payload["data"]["risk_review"]
+    assert risk_review["weak_strategy_evidence_policy"] == "warning_not_hard_blocker"
+    assert "weak strategy evidence" in risk_review["warnings"]
+    authorization_path = payload["data"]["authorization_draft_path"]
+    assert authorization_path["status"] == "readiness_only_no_draft_created"
+    assert authorization_path["official_service_path_available"] is True
+    assert authorization_path["creates_authorization"] is False
+    assert authorization_path["creates_execution_intent"] is False
+    final_gate = payload["data"]["final_gate_result"]
+    assert final_gate["status"] == "blocked_until_official_final_gate_passes"
+    assert final_gate["may_execute_live"] is False
+    assert final_gate["frontend_action_enabled"] is False
+    action_state = payload["data"]["action_state"]
+    assert action_state["enabled"] is False
+    assert action_state["may_execute_live"] is False
+    assert action_state["frontend_action_enabled"] is False
+    assert action_state["places_order"] is False
+    assert action_state["mutates_pg"] is False
+    post_action_state = payload["data"]["post_action_state"]
+    assert post_action_state["retry_safety"] == (
+        "consumed_authorization_or_completed_intent_blocks_duplicate_execution"
+    )
+    assert exchange.open_order_calls == []
+    assert exchange.position_calls == []
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_action_entry_readiness_accepts_owner_market_input_without_actions(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    query = {
+        "market_regime": "trend",
+        "symbol_preference": "SOL/USDT:USDT",
+        "side": "long",
+        "risk_tier": "low",
+        "note": "Owner sees a small trend continuation setup.",
+        "family": "Trend",
+        "strategy_family_id": "TF-001-live-readonly-v0",
+        "carrier_id": "TF-001-live-readonly-v0",
+        "symbol": "SOL/USDT:USDT",
+        "quantity": "0.1",
+        "max_notional": "20",
+        "leverage": "1",
+        "max_attempts": "1",
+        "protection_mode": "single_tp_plus_sl",
+        "review_requirement": "post_action_review_required",
+    }
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/action-entry-readiness", params=query)
+
+    assert response.status_code == 200
+    payload = response.json()
+    market_input = payload["data"]["owner_market_input"]
+    assert market_input["regime"] == "trend"
+    assert market_input["mapped_family"] == "Trend"
+    assert market_input["symbol_preference"] == "SOL/USDT:USDT"
+    assert market_input["side"] == "long"
+    assert market_input["risk_tier"] == "low"
+    assert market_input["note"] == "Owner sees a small trend continuation setup."
+    assert market_input["persisted"] is False
+
+    selected = payload["data"]["selected_candidate"]
+    assert selected["family"] == "Trend"
+    assert selected["carrier_id"] == "TF-001-live-readonly-v0"
+    assert selected["scope_review"]["verdict"] == "matched"
+    assert selected["scope_review"]["mismatches"] == []
+    action_state = payload["data"]["action_state"]
+    assert action_state["enabled"] is False
+    assert action_state["backend_actionable_only"] is True
+    assert action_state["places_order"] is False
+    assert payload["data"]["authorization_draft_path"]["creates_authorization"] is False
+    assert payload["data"]["final_gate_result"]["frontend_action_enabled"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
     assert exchange.place_calls == 0

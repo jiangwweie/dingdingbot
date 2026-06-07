@@ -233,6 +233,10 @@ async def strategy_family_admission_state(
 
 @router.get("/action-entry-readiness", response_model=TradingConsoleReadModelResponse)
 async def action_entry_readiness(
+    market_regime: Optional[str] = Query(default=None),
+    symbol_preference: Optional[str] = Query(default=None),
+    risk_tier: Optional[str] = Query(default=None),
+    note: Optional[str] = Query(default=None),
     family: Optional[str] = Query(default=None),
     strategy_family_id: Optional[str] = Query(default=None),
     carrier_id: Optional[str] = Query(default=None),
@@ -258,7 +262,14 @@ async def action_entry_readiness(
             "max_attempts": max_attempts,
             "protection_mode": protection_mode,
             "review_requirement": review_requirement,
-        }
+        },
+        market_input={
+            "regime": market_regime,
+            "symbol_preference": symbol_preference,
+            "side": side,
+            "risk_tier": risk_tier,
+            "note": note,
+        },
     )
 
 

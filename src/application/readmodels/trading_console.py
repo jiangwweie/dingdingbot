@@ -551,8 +551,10 @@ class TradingConsoleReadModelService:
         self,
         *,
         owner_scope: Optional[dict[str, Any]] = None,
+        market_input: Optional[dict[str, Any]] = None,
     ) -> TradingConsoleReadModelResponse:
         snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        normalized_market_input = _normalize_action_entry_market_input(market_input)
         state = build_production_strategy_family_admission_state(
             current_authorization_state=snap.authorization_state,
             owner_scope=owner_scope,
@@ -565,29 +567,58 @@ class TradingConsoleReadModelService:
             }
             for record in state.blocker_records
         ]
+        candidate_output = [
+            item.model_dump(mode="json")
+            for item in state.trading_console_candidate_output
+        ]
+        generic_action_specs = [
+            item.model_dump(mode="json") for item in state.generic_action_specs
+        ]
+        payload_contracts = [
+            item.model_dump(mode="json")
+            for item in state.action_entry_payload_contracts
+        ]
+        action_entry_output = [
+            item.model_dump(mode="json")
+            for item in state.trading_console_action_entry_output
+        ]
+        selected_candidate = _select_action_entry_candidate(
+            market_input=normalized_market_input,
+            owner_scope=owner_scope or {},
+            candidate_output=candidate_output,
+            generic_action_specs=generic_action_specs,
+            payload_contracts=payload_contracts,
+            action_entry_output=action_entry_output,
+        )
         return self._response(
             "action_entry_readiness",
             snap,
             blockers=blockers,
             data={
+                "owner_market_input": normalized_market_input,
+                "selected_candidate": selected_candidate,
+                "risk_review": _action_entry_risk_review(
+                    selected_candidate=selected_candidate,
+                    adapter_contract=state.generic_final_gate_adapter_contract.model_dump(mode="json"),
+                    blockers=blockers,
+                ),
+                "authorization_draft_path": _action_entry_authorization_draft_path(
+                    selected_candidate=selected_candidate,
+                    state_dump=state.model_dump(mode="json", exclude={"generated_at_ms"}),
+                ),
+                "final_gate_result": _action_entry_final_gate_result(
+                    selected_candidate=selected_candidate,
+                    blockers=blockers,
+                ),
+                "action_state": _action_entry_action_state(selected_candidate),
+                "post_action_state": _action_entry_post_action_state(snap),
                 "generic_final_gate_adapter_contract": (
                     state.generic_final_gate_adapter_contract.model_dump(mode="json")
                 ),
-                "generic_action_specs": [
-                    item.model_dump(mode="json") for item in state.generic_action_specs
-                ],
-                "action_entry_payload_contracts": [
-                    item.model_dump(mode="json")
-                    for item in state.action_entry_payload_contracts
-                ],
-                "action_entry_output": [
-                    item.model_dump(mode="json")
-                    for item in state.trading_console_action_entry_output
-                ],
-                "candidate_output": [
-                    item.model_dump(mode="json")
-                    for item in state.trading_console_candidate_output
-                ],
+                "generic_action_specs": generic_action_specs,
+                "action_entry_payload_contracts": payload_contracts,
+                "action_entry_output": action_entry_output,
+                "candidate_output": candidate_output,
             },
         )
 
@@ -1536,6 +1567,320 @@ def _authorization_future_action_slots() -> dict[str, str]:
         "void_authorization": "deferred_not_implemented",
         "cancel_authorization": "deferred_not_implemented",
     }
+
+
+def _normalize_action_entry_market_input(value: Optional[dict[str, Any]]) -> dict[str, Any]:
+    value = value or {}
+    regime = _normalized_market_regime(value.get("regime"))
+    side = _optional_nonempty_str(value.get("side"))
+    symbol_preference = _optional_nonempty_str(value.get("symbol_preference"))
+    risk_tier = _normalized_risk_tier(value.get("risk_tier"))
+    note = _optional_nonempty_str(value.get("note"))
+    if note is not None and len(note) > 500:
+        note = f"{note[:500]}..."
+    return {
+        "regime": regime,
+        "mapped_family": _market_regime_family(regime),
+        "symbol_preference": symbol_preference,
+        "side": side,
+        "risk_tier": risk_tier,
+        "note": note,
+        "source": "owner_input_query",
+        "persisted": False,
+    }
+
+
+def _normalized_market_regime(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "trend": "trend",
+        "trending": "trend",
+        "volatility": "volatility_expansion",
+        "volatility_expansion": "volatility_expansion",
+        "vol_expansion": "volatility_expansion",
+        "mean_reversion": "mean_reversion",
+        "meanreversion": "mean_reversion",
+        "range": "mean_reversion",
+    }
+    return aliases.get(normalized, "not_selected")
+
+
+def _normalized_risk_tier(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"low", "medium", "high"}:
+        return normalized
+    return "not_selected"
+
+
+def _market_regime_family(regime: str) -> Optional[str]:
+    return {
+        "trend": "Trend",
+        "volatility_expansion": "Volatility expansion",
+        "mean_reversion": "Mean reversion",
+    }.get(regime)
+
+
+def _optional_nonempty_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _select_action_entry_candidate(
+    *,
+    market_input: dict[str, Any],
+    owner_scope: dict[str, Any],
+    candidate_output: list[dict[str, Any]],
+    generic_action_specs: list[dict[str, Any]],
+    payload_contracts: list[dict[str, Any]],
+    action_entry_output: list[dict[str, Any]],
+) -> dict[str, Any]:
+    family = _optional_nonempty_str(owner_scope.get("family")) or market_input.get("mapped_family")
+    carrier_id = _optional_nonempty_str(owner_scope.get("carrier_id"))
+    selected_family = family or "Trend"
+
+    def match(item: dict[str, Any]) -> bool:
+        if carrier_id and item.get("carrier_id") == carrier_id:
+            return True
+        return bool(selected_family and item.get("family") == selected_family)
+
+    candidate = _first_match(candidate_output, match) or _first_match(candidate_output, lambda item: item.get("family") == "Trend") or {}
+    if candidate.get("family"):
+        selected_family = str(candidate["family"])
+    if candidate.get("carrier_id"):
+        carrier_id = str(candidate["carrier_id"])
+
+    def selected_match(item: dict[str, Any]) -> bool:
+        if carrier_id and item.get("carrier_id") == carrier_id:
+            return True
+        return bool(selected_family and item.get("family") == selected_family)
+
+    action_spec = _first_match(generic_action_specs, selected_match) or {}
+    payload_contract = _first_match(payload_contracts, selected_match) or {}
+    action_entry = _first_match(action_entry_output, selected_match) or {}
+    required_scope = dict(payload_contract.get("required_owner_scope") or {})
+    return {
+        "family": selected_family,
+        "strategy_family_id": (
+            candidate.get("strategy_family_id")
+            or action_spec.get("strategy_family_id")
+            or action_entry.get("strategy_family_id")
+        ),
+        "carrier_id": carrier_id,
+        "candidate": candidate,
+        "generic_action_spec": action_spec,
+        "payload_contract": payload_contract,
+        "action_entry": action_entry,
+        "scope_review": _action_entry_scope_review(
+            owner_scope=owner_scope,
+            required_scope=required_scope,
+        ),
+    }
+
+
+def _first_match(items: list[dict[str, Any]], predicate: Any) -> Optional[dict[str, Any]]:
+    for item in items:
+        if predicate(item):
+            return item
+    return None
+
+
+def _action_entry_scope_review(
+    *,
+    owner_scope: dict[str, Any],
+    required_scope: dict[str, Any],
+) -> dict[str, Any]:
+    required_fields = [
+        "symbol",
+        "side",
+        "quantity",
+        "max_notional",
+        "leverage",
+        "max_attempts",
+        "protection_mode",
+        "review_requirement",
+    ]
+    provided = {
+        key: owner_scope.get(key)
+        for key in required_fields
+        if owner_scope.get(key) not in (None, "")
+    }
+    missing = [key for key in required_fields if required_scope.get(key) in (None, "")]
+    if not provided:
+        verdict = "not_checked"
+        mismatches: list[dict[str, Any]] = []
+    else:
+        mismatches = [
+            {
+                "field": key,
+                "expected": required_scope.get(key),
+                "provided": owner_scope.get(key),
+            }
+            for key in required_fields
+            if required_scope.get(key) not in (None, "")
+            and owner_scope.get(key) not in (None, "")
+            and str(owner_scope.get(key)) != str(required_scope.get(key))
+        ]
+        verdict = "matched" if not mismatches and not missing else "mismatch"
+    return {
+        "verdict": verdict,
+        "required_scope": required_scope,
+        "provided_scope": provided,
+        "missing_required_template_fields": missing,
+        "mismatches": mismatches,
+    }
+
+
+def _action_entry_risk_review(
+    *,
+    selected_candidate: dict[str, Any],
+    adapter_contract: dict[str, Any],
+    blockers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    action_spec = dict(selected_candidate.get("generic_action_spec") or {})
+    warnings = _dedupe_strings(
+        [
+            *[str(item) for item in action_spec.get("warnings") or []],
+            *[str(item) for item in adapter_contract.get("warning_not_blocker") or []],
+        ]
+    )
+    hard_blockers = _dedupe_strings(
+        [
+            *[str(item) for item in action_spec.get("hard_blockers") or []],
+            *[str(item.get("code") or item.get("message")) for item in blockers],
+        ]
+    )
+    return {
+        "warning_policy": "warnings_require_owner_review_but_do_not_enable_action",
+        "weak_strategy_evidence_policy": "warning_not_hard_blocker",
+        "warnings": warnings,
+        "hard_blockers": hard_blockers,
+        "warning_count": len(warnings),
+        "hard_blocker_count": len(hard_blockers),
+    }
+
+
+def _action_entry_authorization_draft_path(
+    *,
+    selected_candidate: dict[str, Any],
+    state_dump: dict[str, Any],
+) -> dict[str, Any]:
+    flow = dict(state_dump.get("api_backed_authorization_flow") or {})
+    action_entry = dict(selected_candidate.get("action_entry") or {})
+    return {
+        "status": "readiness_only_no_draft_created",
+        "official_service_path_available": bool(flow.get("operation_steps")),
+        "trading_console_direct_action_api": bool(flow.get("trading_console_direct_action_api")),
+        "creates_authorization": False,
+        "creates_execution_intent": False,
+        "places_order": False,
+        "required_owner_scope_fields": action_entry.get("required_owner_scope_fields") or [],
+        "operation_steps": flow.get("operation_steps") or [],
+        "note": "Authorization draft creation is not performed by this read model.",
+    }
+
+
+def _action_entry_final_gate_result(
+    *,
+    selected_candidate: dict[str, Any],
+    blockers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    action_entry = dict(selected_candidate.get("action_entry") or {})
+    action_state = action_entry.get("action_entry_state")
+    if action_state == "ready_for_owner_scope_final_gate":
+        status = "blocked_until_official_final_gate_passes"
+    elif action_state == "proposal_only":
+        status = "proposal_only"
+    else:
+        status = "blocked"
+    return {
+        "status": status,
+        "adapter_status": action_entry.get("final_gate_adapter_status"),
+        "blocker_ids": [item.get("code") for item in blockers if item.get("code")],
+        "retry_conditions": [
+            action_entry.get("owner_decision_text") or "Provide exact Owner scope and rerun final gate.",
+        ],
+        "evidence_status": "pre_action_evidence_required",
+        "may_execute_live": False,
+        "frontend_action_enabled": False,
+    }
+
+
+def _action_entry_action_state(selected_candidate: dict[str, Any]) -> dict[str, Any]:
+    action_spec = dict(selected_candidate.get("generic_action_spec") or {})
+    action_entry = dict(selected_candidate.get("action_entry") or {})
+    backend_actionable = (
+        action_spec.get("may_execute_live") is True
+        and action_spec.get("frontend_action_enabled") is True
+        and action_entry.get("may_execute_live") is True
+        and action_entry.get("frontend_action_enabled") is True
+    )
+    return {
+        "action_slot": "bounded_execute",
+        "enabled": backend_actionable,
+        "label": "有界实盘执行",
+        "disabled_reason": None if backend_actionable else _action_entry_disabled_reason(action_entry, action_spec),
+        "backend_actionable_only": True,
+        "may_execute_live": False,
+        "frontend_action_enabled": False,
+        "creates_authorization": False,
+        "creates_execution_intent": False,
+        "places_order": False,
+        "mutates_pg": False,
+    }
+
+
+def _action_entry_disabled_reason(action_entry: dict[str, Any], action_spec: dict[str, Any]) -> str:
+    if action_entry.get("action_entry_state") == "proposal_only":
+        return "该候选仍是提案状态，后端未开放行动能力。"
+    if action_spec.get("status") == "valid_blocked_final_gate":
+        return "需要 Owner 授权、最终门禁、保护计划和审计证据全部通过。"
+    return "当前候选不可行动。"
+
+
+def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, Any]:
+    entry_orders = [
+        item for item in snap.pg_orders
+        if str(item.get("order_role") or "").lower() in {"entry", "entry_limit", "entry_market"}
+    ]
+    protection_orders = [
+        item for item in snap.pg_orders
+        if str(item.get("order_role") or "").upper() in PROTECTION_ROLES
+    ]
+    completed_intents = [
+        item for item in snap.pg_intents
+        if str(item.get("status") or "").lower() == "completed"
+    ]
+    return {
+        "status": "available" if (snap.pg_intents or snap.pg_orders or snap.review_records or snap.audit_events) else "empty",
+        "intent_count": len(snap.pg_intents),
+        "completed_intent_count": len(completed_intents),
+        "entry_order_count": len(entry_orders),
+        "protection_order_count": len(protection_orders),
+        "review_count": len(snap.review_records),
+        "audit_event_count": len(snap.audit_events),
+        "retry_safety": "consumed_authorization_or_completed_intent_blocks_duplicate_execution",
+        "summary": {
+            "intents": snap.pg_intents[:5],
+            "entry_orders": entry_orders[:5],
+            "tp_sl_orders": protection_orders[:5],
+            "reviews": snap.review_records[:5],
+            "audit_events": snap.audit_events[:5],
+        },
+    }
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = value.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _order_item(order: Any) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Users, List, Box, ShieldCheck, PlayCircle, Activity, History, Server, LineChart, Moon, Sun, Menu, ShieldAlert, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, List, Box, ShieldCheck, PlayCircle, Activity, History, Server, LineChart, Moon, Sun, Menu, ShieldAlert, LogOut, Target } from 'lucide-react';
 import { Badge, DataStatusLine, FreshnessBadge, ReadModelErrorPanel } from './ui';
 import { useReadModel } from '@/lib/tradingConsoleApi';
 import { useAuth } from '@/lib/auth';
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { name: '行动对象', path: '/carrier', icon: Box },
   { name: '有界实盘授权', path: '/authorization', icon: ShieldCheck },
   { name: '实盘执行控制', path: '/execution', icon: PlayCircle },
+  { name: '行动入口', path: '/action-entry', icon: Target },
   { name: '异常恢复', path: '/recovery', icon: Activity },
   { name: '实盘复盘', path: '/review', icon: History },
   { name: '技术审计', path: '/audit', icon: Server },

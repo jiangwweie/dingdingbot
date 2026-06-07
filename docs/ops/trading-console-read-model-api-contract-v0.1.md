@@ -551,8 +551,13 @@ ActionCandidate.
 Purpose: read-only bridge from `ActionCandidateSpec` to a generic official
 action-entry contract for Owner review and frontend disabled-state rendering.
 
-Optional query fields are the same read-only Owner scope review fields as
-`strategy-family-admission-state`:
+Optional query fields include Owner market input and the same read-only Owner
+scope review fields as `strategy-family-admission-state`:
+
+- `market_regime`
+- `symbol_preference`
+- `risk_tier`
+- `note`
 
 - `family`
 - `strategy_family_id`
@@ -568,11 +573,41 @@ Optional query fields are the same read-only Owner scope review fields as
 
 `data` fields:
 
+- `owner_market_input`
+- `selected_candidate`
+- `risk_review`
+- `authorization_draft_path`
+- `final_gate_result`
+- `action_state`
+- `post_action_state`
 - `generic_final_gate_adapter_contract`
 - `generic_action_specs`
 - `action_entry_payload_contracts`
 - `action_entry_output`
 - `candidate_output`
+
+`owner_market_input` is normalized from query parameters only and must keep
+`persisted=false`. It does not create an Owner authorization, execution intent,
+or PG record. `selected_candidate` resolves the current candidate from
+`candidate_output`, `generic_action_specs`, `action_entry_payload_contracts`,
+and `action_entry_output`, and includes `scope_review` for exact Owner scope
+matching.
+
+`risk_review` separates warnings from hard blockers. Weak strategy evidence
+remains `warning_not_hard_blocker`. `authorization_draft_path` exposes whether
+an official service path exists for a future draft but must keep
+`creates_authorization=false`, `creates_execution_intent=false`, and
+`places_order=false`. `final_gate_result` exposes pass/block/proposal status,
+blocker ids, retry conditions, and evidence status while keeping
+`may_execute_live=false` and `frontend_action_enabled=false` in this read-only
+revision.
+
+`action_state` is the frontend action-slot contract. The action slot may render
+as enabled only when backend returned actionability flags are true; current v1
+readiness responses keep `enabled=false`, `may_execute_live=false`,
+`frontend_action_enabled=false`, `places_order=false`, and `mutates_pg=false`.
+`post_action_state` summarizes existing intent, entry, TP/SL, review, and audit
+facts when present; it must not fabricate missing post-action evidence.
 
 `generic_action_specs` is the first-class generic action contract layer. Trend
 may expose `TF-001-live-readonly-v0` as `status=valid_blocked_final_gate` with

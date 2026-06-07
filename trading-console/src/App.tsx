@@ -13,6 +13,7 @@ import ProtectionHealth from './pages/ProtectionHealth';
 import CarrierShelf from './pages/CarrierShelf';
 import AuthorizationState from './pages/AuthorizationState';
 import ExecutionControl from './pages/ExecutionControl';
+import ActionEntry from './pages/ActionEntry';
 import RecoveryState from './pages/RecoveryState';
 import ReviewState from './pages/ReviewState';
 import AuditChain from './pages/AuditChain';
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="carrier" element={<CarrierShelf />} />
             <Route path="authorization" element={<AuthorizationState />} />
             <Route path="execution" element={<ExecutionControl />} />
+            <Route path="action-entry" element={<ActionEntry />} />
             <Route path="recovery" element={<RecoveryState />} />
             <Route path="review" element={<ReviewState />} />
             <Route path="audit" element={<AuditChain />} />
