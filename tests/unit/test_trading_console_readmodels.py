@@ -60,6 +60,14 @@ class _FakeStartupGuard:
         return True
 
 
+class _FakeAccountSnapshot:
+    total_balance = Decimal("1000")
+    available_balance = Decimal("800")
+    unrealized_pnl = Decimal("0")
+    timestamp = 1780496665000
+    positions = []
+
+
 class _FakeOrder:
     def __init__(
         self,
@@ -273,12 +281,19 @@ class _FakeExchangeGateway:
         raise AssertionError("trading-console read models must not cancel orders")
 
 
-def _patch_deps(monkeypatch, *, exchange=None, position_repo=None, order_repo=None):
+def _patch_deps(
+    monkeypatch,
+    *,
+    exchange=None,
+    position_repo=None,
+    order_repo=None,
+    account_snapshot=None,
+):
     from src.interfaces import api as api_module
 
     monkeypatch.setattr(api_module, "get_runtime_context", lambda: object())
     monkeypatch.setattr(api_module, "_runtime_config_provider", _config_provider())
-    monkeypatch.setattr(api_module, "_account_getter", lambda: None)
+    monkeypatch.setattr(api_module, "_account_getter", lambda: account_snapshot)
     monkeypatch.setattr(api_module, "_exchange_gateway", exchange)
     monkeypatch.setattr(
         api_module,
@@ -1687,11 +1702,17 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
         "mapped_family": None,
         "symbol_preference": None,
         "side": None,
-        "risk_tier": "not_selected",
+        "risk_tier": "tiny",
         "note": None,
         "source": "owner_input_query",
         "persisted": False,
     }
+    budget = payload["data"]["budget_recommendation"]
+    assert budget["risk_tier"]["tier"] == "tiny"
+    assert budget["budget_envelope"]["status"] == "degraded_missing_account_facts"
+    assert budget["budgeted_autonomy_enabled"] is False
+    assert budget["action_allowed"] is False
+    assert budget["no_action_guarantee"]["places_order"] is False
 
     adapter = payload["data"]["generic_final_gate_adapter_contract"]
     assert adapter["live_action_policy"] == "fail_closed_until_official_final_gate_passes"
@@ -1711,6 +1732,9 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert trend["leverage"] == "1"
     assert trend["max_attempts"] == 1
     assert trend["protection_mode"] == "single_tp_plus_sl"
+    assert trend["budget_envelope_ref"] == "budget-envelope:read-only-recommendation"
+    assert trend["sizing_source"] == "budget_envelope_recommendation"
+    assert trend["budget_owner_confirmation_required"] is True
     assert trend["may_execute_live"] is False
     assert trend["frontend_action_enabled"] is False
     assert trend["places_order"] is False
@@ -1842,6 +1866,7 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
         "market_input",
         "candidate_selection",
         "risk_disclosure",
+        "budget_envelope",
         "authorization_draft",
         "final_gate",
         "action_state",
@@ -1849,6 +1874,7 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     }
     assert steps["market_input"]["status"] == "ready"
     assert steps["candidate_selection"]["summary"] == "MR-001-live-readonly-v0"
+    assert steps["budget_envelope"]["status"] == "blocked"
     assert steps["action_state"]["status"] == "blocked"
     assert flow["timeline"]["entry_order_count"] == 1
     assert flow["timeline"]["protection_order_count"] == 2
@@ -1868,7 +1894,7 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
         "market_regime": "trend",
         "symbol_preference": "SOL/USDT:USDT",
         "side": "long",
-        "risk_tier": "low",
+        "risk_tier": "small",
         "note": "Owner sees a small trend continuation setup.",
         "family": "Trend",
         "strategy_family_id": "TF-001-live-readonly-v0",
@@ -1893,7 +1919,7 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
     assert market_input["mapped_family"] == "Trend"
     assert market_input["symbol_preference"] == "SOL/USDT:USDT"
     assert market_input["side"] == "long"
-    assert market_input["risk_tier"] == "low"
+    assert market_input["risk_tier"] == "small"
     assert market_input["note"] == "Owner sees a small trend continuation setup."
     assert market_input["persisted"] is False
 
@@ -1912,6 +1938,103 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
     assert payload["no_action_guarantee"]["mutates_pg"] is False
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_budget_recommendation_degrades_without_account_facts(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/budget-recommendation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_model"] == "budget_recommendation"
+    data = payload["data"]
+    assert data["account_capacity"]["status"] == "degraded"
+    assert data["account_capacity"]["account_equity"] is None
+    assert data["budget_envelope"]["status"] == "degraded_missing_account_facts"
+    assert "account_equity" in data["missing_facts"]
+    assert "fresh_account_facts" in data["missing_facts"]
+    blocker_ids = {item["id"] for item in data["blockers"]}
+    assert "BUDGET-ACCOUNT-CAPACITY-ACCOUNT-FACTS" in blocker_ids
+    assert "BUDGET-ACCOUNT-CAPACITY-FRESHNESS" in blocker_ids
+    assert data["budgeted_autonomy_enabled"] is False
+    assert data["grants_trading_permission"] is False
+    assert data["may_execute_live"] is False
+    assert data["frontend_action_enabled"] is False
+    assert data["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert exchange.open_order_calls == []
+    assert exchange.position_calls == []
+    assert exchange.account_snapshot_calls == 0
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_budget_recommendation_uses_fresh_read_only_account_capacity(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        account_snapshot=_FakeAccountSnapshot(),
+        order_repo=_FakeOrderRepo([]),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/budget-recommendation",
+            params={"include_exchange": "true", "risk_tier": "tiny"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    capacity = data["account_capacity"]
+    assert capacity["status"] == "available"
+    assert capacity["account_equity"] == "1000"
+    assert capacity["available_balance"] == "800"
+    assert capacity["max_usable_notional"] == "150"
+    envelope = data["budget_envelope"]
+    assert envelope["status"] == "available"
+    assert envelope["total_budget"] == "20"
+    assert envelope["max_notional_per_action"] == "20"
+    assert envelope["max_daily_loss"] == "1"
+    assert envelope["max_active_positions"] == 1
+    assert envelope["max_attempts"] == 1
+    assert envelope["max_leverage"] == "1"
+    assert envelope["allowed_symbols"] == ["SOL/USDT:USDT", "ETH/USDT:USDT"]
+    assert envelope["allowed_sides"] == ["long"]
+    assert envelope["not_authorization"] is True
+    assert envelope["grants_trading_permission"] is False
+    assert envelope["action_allowed"] is False
+    examples = {item["proposal_kind"]: item for item in data["examples"]}
+    assert set(examples) == {"trend_sol", "mean_reversion_eth", "volatility_proposal"}
+    trend = examples["trend_sol"]["action_candidate_sizing"]
+    assert trend["family"] == "Trend"
+    assert trend["symbol"] == "SOL/USDT:USDT"
+    assert trend["recommended_max_notional"] == "20"
+    assert trend["owner_confirmation_required"] is True
+    assert trend["action_allowed"] is False
+    mr = examples["mean_reversion_eth"]["generic_action_spec_sizing"]
+    assert mr["family"] == "Mean reversion"
+    assert mr["symbol"] == "ETH/USDT:USDT"
+    assert mr["max_notional"] == "20"
+    assert mr["owner_confirmation_required"] is True
+    assert mr["places_order"] is False
+    assert data["owner_confirmation_requirement"]
+    assert data["action_allowed"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert exchange.position_calls == [BNB]
+    assert exchange.open_order_calls == [(BNB, None), (BNB, {"stop": True})]
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 
@@ -2526,6 +2649,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/strategy-family-admission-state",
         "/api/trading-console/action-entry-readiness",
         "/api/trading-console/owner-action-flow",
+        "/api/trading-console/budget-recommendation",
         "/api/trading-console/signal-marker-feed",
         "/api/trading-console/api-classification",
     ]

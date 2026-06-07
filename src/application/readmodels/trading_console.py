@@ -19,6 +19,11 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from src.application.budget_recommendation import (
+    apply_budget_envelope_to_action_candidates,
+    apply_budget_envelope_to_generic_action_specs,
+    build_budget_recommendation,
+)
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
@@ -589,6 +594,38 @@ class TradingConsoleReadModelService:
             data=data,
         )
 
+    async def budget_recommendation(
+        self,
+        *,
+        include_exchange: bool = False,
+        risk_tier: str = "tiny",
+        custom: Optional[dict[str, Any]] = None,
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(symbol=None, include_exchange=include_exchange)
+        budget = self._budget_recommendation_payload(
+            snap=snap,
+            risk_tier=risk_tier,
+            custom=custom,
+        )
+        blockers = [
+            {
+                "code": item.get("id"),
+                "message": item.get("evidence"),
+                "stage": item.get("stage"),
+                "path": item.get("path"),
+                "severity": item.get("severity"),
+                "bridge": item.get("bridge"),
+                "retry_condition": item.get("retry_condition"),
+            }
+            for item in budget.get("blockers", [])
+        ]
+        return self._response(
+            "budget_recommendation",
+            snap,
+            blockers=blockers,
+            data=budget,
+        )
+
     def _action_entry_readiness_data(
         self,
         *,
@@ -616,6 +653,16 @@ class TradingConsoleReadModelService:
         generic_action_specs = [
             item.model_dump(mode="json") for item in state.generic_action_specs
         ]
+        budget = self._budget_recommendation_payload(
+            snap=snap,
+            risk_tier=normalized_market_input.get("risk_tier") or "tiny",
+        )
+        envelope = dict(budget.get("budget_envelope") or {})
+        candidate_output = apply_budget_envelope_to_action_candidates(candidate_output, envelope)
+        generic_action_specs = apply_budget_envelope_to_generic_action_specs(
+            generic_action_specs,
+            envelope,
+        )
         payload_contracts = [
             item.model_dump(mode="json")
             for item in state.action_entry_payload_contracts
@@ -634,6 +681,7 @@ class TradingConsoleReadModelService:
         )
         return {
             "owner_market_input": normalized_market_input,
+            "budget_recommendation": budget,
             "selected_candidate": selected_candidate,
             "risk_review": _action_entry_risk_review(
                 selected_candidate=selected_candidate,
@@ -658,6 +706,23 @@ class TradingConsoleReadModelService:
             "action_entry_output": action_entry_output,
             "candidate_output": candidate_output,
         }, blockers
+
+    def _budget_recommendation_payload(
+        self,
+        *,
+        snap: TradingConsoleSnapshot,
+        risk_tier: str = "tiny",
+        custom: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        budget = build_budget_recommendation(
+            account_summary=snap.account_snapshot_summary,
+            positions=self._merge_positions_for_risk(snap),
+            open_orders=self._classify_orders(snap),
+            freshness=self._freshness(snap),
+            risk_tier=risk_tier,
+            custom=custom,
+        )
+        return budget.model_dump(mode="json")
 
     async def signal_marker_feed(
         self,
@@ -735,6 +800,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/carrier-availability",
                     "GET /api/trading-console/strategy-family-admission-state",
                     "GET /api/trading-console/action-entry-readiness",
+                    "GET /api/trading-console/budget-recommendation",
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/api-classification",
                 ],
@@ -1644,9 +1710,15 @@ def _normalized_market_regime(value: Any) -> str:
 
 def _normalized_risk_tier(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in {"low", "medium", "high"}:
-        return normalized
-    return "not_selected"
+    aliases = {
+        "low": "tiny",
+        "micro": "tiny",
+        "tiny": "tiny",
+        "small": "small",
+        "medium": "small",
+        "custom": "custom",
+    }
+    return aliases.get(normalized, "tiny")
 
 
 def _market_regime_family(regime: str) -> Optional[str]:
@@ -1910,6 +1982,8 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
 
 def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
     market_input = dict(data.get("owner_market_input") or {})
+    budget = dict(data.get("budget_recommendation") or {})
+    envelope = dict(budget.get("budget_envelope") or {})
     selected_candidate = dict(data.get("selected_candidate") or {})
     risk_review = dict(data.get("risk_review") or {})
     authorization_path = dict(data.get("authorization_draft_path") or {})
@@ -1937,6 +2011,15 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "summary": (
                 f"{risk_review.get('warning_count', 0)} warnings / "
                 f"{risk_review.get('hard_blocker_count', 0)} hard blockers"
+            ),
+        },
+        {
+            "step": "budget_envelope",
+            "label": "Budget envelope",
+            "status": "ready" if envelope.get("status") == "available" else "blocked",
+            "summary": (
+                f"{envelope.get('max_notional_per_action') or 'no'} max notional per action; "
+                "Owner confirmation still required"
             ),
         },
         {

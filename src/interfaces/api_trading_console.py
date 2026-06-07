@@ -315,6 +315,33 @@ async def owner_action_flow(
     )
 
 
+@router.get("/budget-recommendation", response_model=TradingConsoleReadModelResponse)
+async def budget_recommendation(
+    include_exchange: bool = Query(default=False),
+    risk_tier: str = Query(default="tiny"),
+    custom_total_budget: Optional[str] = Query(default=None),
+    custom_max_notional_per_action: Optional[str] = Query(default=None),
+    custom_max_daily_loss: Optional[str] = Query(default=None),
+    custom_capacity_fraction: Optional[str] = Query(default=None),
+    custom_max_active_positions: Optional[int] = Query(default=None, ge=1, le=3),
+    custom_max_attempts: Optional[int] = Query(default=None, ge=1, le=3),
+    custom_max_leverage: Optional[str] = Query(default=None),
+) -> TradingConsoleReadModelResponse:
+    return await _service(include_exchange=include_exchange).budget_recommendation(
+        include_exchange=include_exchange,
+        risk_tier=risk_tier,
+        custom={
+            "total_budget": custom_total_budget,
+            "max_notional_per_action": custom_max_notional_per_action,
+            "max_daily_loss": custom_max_daily_loss,
+            "capacity_fraction": custom_capacity_fraction,
+            "max_active_positions": custom_max_active_positions,
+            "max_attempts": custom_max_attempts,
+            "max_leverage": custom_max_leverage,
+        },
+    )
+
+
 @router.get("/signal-marker-feed", response_model=TradingConsoleReadModelResponse)
 async def signal_marker_feed(
     symbol: Optional[str] = Query(default=None),
