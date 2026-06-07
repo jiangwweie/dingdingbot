@@ -5,10 +5,10 @@
 PASS_WITH_CONSTRAINT.
 
 Owner Action Flow v1 was pushed and deployed to Tokyo through a clean release.
-The authenticated browser smoke remains blocked by absence of a reusable
-authenticated Operator browser session in this Codex context; API route presence,
-auth guard behavior, service health, deployed asset content, and no-exposure
-checks were verified.
+Authenticated browser smoke was completed after Owner opened an authenticated
+Operator session. API route presence, auth guard behavior, service health,
+deployed asset content, no-exposure checks, and Owner-facing page rendering were
+verified.
 
 ## Git
 
@@ -47,6 +47,30 @@ HTTP / route checks:
 - OpenAPI contains `/api/trading-console/owner-action-flow`
 - unauthenticated `GET /api/trading-console/owner-action-flow`: `401`
   `Operator login required`
+
+Authenticated browser smoke:
+
+- Chrome tab: `http://43.133.176.150/action-entry`
+- Authenticated Operator indicator: `登录：jiangwei`
+- Page title: `Owner Action Flow`
+- Header state: `只读`, `环境：实盘只读`, `部分同步`
+- Candidate cards visible:
+  - `TF-001-live-readonly-v0` - Registry supported
+  - `VB-001-live-readonly-v0` - Registry unsupported
+  - `MR-001-live-readonly-v0` - Registry unsupported
+- Mean Reversion proposal selection rendered:
+  - regime: `mean_reversion`
+  - carrier: `MR-001-live-readonly-v0`
+  - symbol: `ETH/USDT:USDT`
+  - side: `long`
+  - quantity: `0.01`
+  - max notional: `20`
+  - leverage: `1`
+  - protection: `single_tp_plus_sl`
+- Action state: disabled, `proposal_only`; no enabled execute,
+  authorization-create, cancel, flatten, or retry action was present.
+- Post-action evidence summary was visible with historical intent, entry,
+  TP/SL, review, and audit sections.
 
 ## No-Exposure Evidence
 
@@ -90,17 +114,9 @@ Tokyo release:
 
 ## Blocker Record
 
-```json
-{
-  "id": "TC-OWNER-ACTION-FLOW-AUTH-BROWSER-SMOKE-20260607",
-  "stage": "AuthenticatedBrowserSmoke",
-  "path": "Trading Console /action-entry -> authenticated Operator session",
-  "evidence": "No reusable authenticated Operator browser session was available in this Codex context. Deployed route and unauthenticated auth guard were verified.",
-  "severity": "blocker_for_browser_smoke_only",
-  "bridge": "API route presence, nginx route, deployed JS label, auth guard, and no-exposure evidence were verified.",
-  "retry_condition": "Open an authenticated Operator browser session against Tokyo and verify /action-entry renders Owner Action Flow with no unsafe action enabled."
-}
-```
+No active blocker remains for Owner Action Flow v1 authenticated browser smoke.
+The earlier authenticated-session blocker was cleared after Owner logged in and
+the deployed `/action-entry` page was verified in Chrome.
 
 ## Safety Proof
 

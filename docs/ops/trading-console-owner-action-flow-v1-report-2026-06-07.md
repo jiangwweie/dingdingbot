@@ -63,17 +63,21 @@ permission.
 
 ## Blocker Records
 
-```json
-{
-  "id": "TC-OWNER-ACTION-FLOW-AUTH-BROWSER-SMOKE-20260607",
-  "stage": "AuthenticatedBrowserSmoke",
-  "path": "Trading Console /action-entry -> authenticated Operator session",
-  "evidence": "No reusable authenticated Operator browser session was available in this Codex context.",
-  "severity": "blocker_for_browser_smoke_only",
-  "bridge": "Backend API/TestClient verification and unauthenticated route checks remain available; authenticated UI smoke should be retried with an active Operator session.",
-  "retry_condition": "Owner provides or opens an authenticated Operator browser session for the deployed Trading Console, then verify /action-entry renders Owner Action Flow and no unsafe action is enabled."
-}
-```
+No active blocker remains for Owner Action Flow v1 authenticated browser smoke.
+Owner opened an authenticated Operator browser session and the deployed
+`/action-entry` page was verified in Chrome:
+
+- login indicator: `登录：jiangwei`
+- `Owner Action Flow` visible
+- read-only/live-readonly header visible
+- Trend, Volatility Expansion, and Mean Reversion candidate cards visible
+- Mean Reversion proposal rendered with `MR-001-live-readonly-v0`,
+  `ETH/USDT:USDT`, `long`, quantity `0.01`, max notional `20`, leverage `1`,
+  and `single_tp_plus_sl`
+- bounded live execute action remained disabled in proposal-only state
+- no enabled execute, authorization-create, cancel, flatten, or retry action was
+  present
+- post-action evidence summary was visible
 
 ## Verification
 
