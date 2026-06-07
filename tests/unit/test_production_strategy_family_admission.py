@@ -84,9 +84,16 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert carrier_specs["Trend"].scope_template["quantity"] == "0.1"
     assert carrier_specs["Volatility expansion"].action_registry_supported is False
     assert carrier_specs["Mean reversion"].action_registry_supported is False
+    assert carrier_specs["Mean reversion"].proposal_role == "range_candidate"
+    assert carrier_specs["Mean reversion"].market_regime == "mean_reversion"
     assert carrier_specs["Mean reversion"].scope_template["symbol"] == "ETH/USDT:USDT"
     assert carrier_specs["Mean reversion"].scope_template["quantity"] == "0.01"
     assert carrier_specs["Mean reversion"].scope_template["max_notional"] == "20"
+    assert carrier_specs["Mean reversion"].default_example["carrier_id"] == "MR-001-live-readonly-v0"
+    assert carrier_specs["Mean reversion"].protection_template["mode"] == "single_tp_plus_sl"
+    assert carrier_specs["Mean reversion"].review_template_ref == (
+        "review-template:MR-001-live-readonly-v0"
+    )
     risk_specs = {item.family: item for item in state.risk_disclosure_specs}
     assert risk_specs["Trend"].weak_strategy_evidence_is_warning is True
     assert "weak strategy evidence" in risk_specs["Trend"].hard_blockers_not_included
@@ -1300,6 +1307,8 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     mean_reversion = specs_by_family["Mean reversion"]
     assert mean_reversion.status == "proposal_non_action"
     assert mean_reversion.action_registry_supported is False
+    assert mean_reversion.proposal_role == "range_candidate"
+    assert mean_reversion.market_regime == "mean_reversion"
     assert mean_reversion.symbol == "ETH/USDT:USDT"
     assert mean_reversion.side == "long"
     assert mean_reversion.quantity == "0.01"
@@ -1307,6 +1316,10 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert mean_reversion.leverage == "1"
     assert mean_reversion.max_attempts == 1
     assert mean_reversion.protection_mode == "single_tp_plus_sl"
+    assert mean_reversion.protection_template["mode"] == "single_tp_plus_sl"
+    assert mean_reversion.review_template["template_id"] == (
+        "review-template:MR-001-live-readonly-v0"
+    )
     assert mean_reversion.may_execute_live is False
     assert mean_reversion.frontend_action_enabled is False
     assert mean_reversion.places_order is False

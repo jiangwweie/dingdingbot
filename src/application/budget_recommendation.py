@@ -404,6 +404,7 @@ def apply_budget_envelope_to_generic_action_specs(
         item = dict(spec)
         item["budget_envelope_ref"] = envelope_payload.get("envelope_id")
         item["sizing_source"] = "budget_envelope_recommendation"
+        item["recommended_quantity"] = item.get("quantity")
         item["recommended_max_notional"] = envelope_payload.get("max_notional_per_action")
         item["recommended_total_budget"] = envelope_payload.get("total_budget")
         item["budget_owner_confirmation_required"] = True

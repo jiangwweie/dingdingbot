@@ -1704,6 +1704,11 @@ def _normalized_market_regime(value: Any) -> str:
         "mean_reversion": "mean_reversion",
         "meanreversion": "mean_reversion",
         "range": "mean_reversion",
+        "ranging": "mean_reversion",
+        "range_bound": "mean_reversion",
+        "sideways": "mean_reversion",
+        "震荡": "mean_reversion",
+        "区间": "mean_reversion",
     }
     return aliases.get(normalized, "not_selected")
 
@@ -1930,7 +1935,8 @@ def _action_entry_action_state(selected_candidate: dict[str, Any]) -> dict[str, 
         "enabled": backend_actionable,
         "label": "有界实盘执行",
         "disabled_reason": None if backend_actionable else _action_entry_disabled_reason(action_entry, action_spec),
-        "backend_actionable_only": True,
+        "backend_actionable": backend_actionable,
+        "backend_actionable_only": backend_actionable,
         "may_execute_live": False,
         "frontend_action_enabled": False,
         "creates_authorization": False,
@@ -1984,13 +1990,29 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
     market_input = dict(data.get("owner_market_input") or {})
     budget = dict(data.get("budget_recommendation") or {})
     envelope = dict(budget.get("budget_envelope") or {})
+    account_capacity = dict(budget.get("account_capacity") or {})
     selected_candidate = dict(data.get("selected_candidate") or {})
+    selected_spec = dict(selected_candidate.get("generic_action_spec") or {})
     risk_review = dict(data.get("risk_review") or {})
     authorization_path = dict(data.get("authorization_draft_path") or {})
     final_gate = dict(data.get("final_gate_result") or {})
     action_state = dict(data.get("action_state") or {})
     post_action = dict(data.get("post_action_state") or {})
+    candidate_output = [
+        dict(item) for item in data.get("candidate_output") or []
+        if isinstance(item, dict)
+    ]
+    generic_specs = [
+        dict(item) for item in data.get("generic_action_specs") or []
+        if isinstance(item, dict)
+    ]
     action_enabled = action_state.get("enabled") is True
+    budget_status = envelope.get("status") or "not_available"
+    budget_ready = budget_status == "available"
+    candidate_choices = _owner_action_candidate_choices(
+        candidate_output=candidate_output,
+        generic_specs=generic_specs,
+    )
     steps = [
         {
             "step": "market_input",
@@ -2002,7 +2024,10 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "step": "candidate_selection",
             "label": "Candidate selection",
             "status": "ready" if selected_candidate.get("carrier_id") else "pending",
-            "summary": selected_candidate.get("carrier_id") or "No candidate selected.",
+            "summary": (
+                f"{selected_candidate.get('carrier_id') or 'No candidate selected.'}"
+                f" / {selected_spec.get('proposal_role') or 'unknown'}"
+            ),
         },
         {
             "step": "risk_disclosure",
@@ -2016,7 +2041,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         {
             "step": "budget_envelope",
             "label": "Budget envelope",
-            "status": "ready" if envelope.get("status") == "available" else "blocked",
+            "status": "ready" if budget_ready else "blocked",
             "summary": (
                 f"{envelope.get('max_notional_per_action') or 'no'} max notional per action; "
                 "Owner confirmation still required"
@@ -2065,6 +2090,60 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         "status": "actionable" if action_enabled else "not_actionable",
         "unsafe_action_enabled": False,
         "flow_steps": steps,
+        "market_selection": {
+            "selected_regime": market_input.get("regime"),
+            "mapped_family": market_input.get("mapped_family"),
+            "selectable_regimes": [
+                {"regime": "trend", "label": "趋势", "family": "Trend"},
+                {"regime": "mean_reversion", "label": "区间/震荡", "family": "Mean reversion"},
+                {"regime": "volatility_expansion", "label": "波动扩张", "family": "Volatility expansion"},
+            ],
+            "candidate_choices": candidate_choices,
+            "range_candidate": _first_match(
+                candidate_choices,
+                lambda item: item.get("proposal_role") == "range_candidate",
+            ),
+        },
+        "budget_summary": {
+            "status": budget_status,
+            "account_capacity_status": account_capacity.get("status"),
+            "account_equity": account_capacity.get("account_equity"),
+            "available_balance": account_capacity.get("available_balance"),
+            "max_usable_notional": account_capacity.get("max_usable_notional"),
+            "recommended_total_budget": envelope.get("total_budget"),
+            "recommended_max_notional_per_action": envelope.get("max_notional_per_action"),
+            "recommended_max_daily_loss": envelope.get("max_daily_loss"),
+            "recommended_max_attempts": envelope.get("max_attempts"),
+            "recommended_leverage": envelope.get("max_leverage"),
+            "missing_facts": list(budget.get("missing_facts") or []),
+            "warnings": list(budget.get("warnings") or []),
+            "hard_blockers": [
+                item for item in budget.get("blockers") or []
+                if isinstance(item, dict) and item.get("severity") == "hard_blocker"
+            ],
+            "owner_confirmation_required": True,
+            "action_allowed": False,
+        },
+        "selected_action_proposal": {
+            "family": selected_candidate.get("family"),
+            "carrier_id": selected_candidate.get("carrier_id"),
+            "proposal_role": selected_spec.get("proposal_role"),
+            "market_regime": selected_spec.get("market_regime"),
+            "symbol": selected_spec.get("symbol"),
+            "side": selected_spec.get("side"),
+            "recommended_quantity": selected_spec.get("recommended_quantity"),
+            "recommended_max_notional": selected_spec.get("recommended_max_notional"),
+            "max_notional": selected_spec.get("max_notional"),
+            "leverage": selected_spec.get("leverage"),
+            "max_attempts": selected_spec.get("max_attempts"),
+            "protection_template": selected_spec.get("protection_template") or {},
+            "review_template": selected_spec.get("review_template") or {},
+            "warnings": list(selected_spec.get("warnings") or []),
+            "hard_blockers": list(selected_spec.get("hard_blockers") or []),
+            "backend_actionable": action_state.get("backend_actionable") is True,
+            "frontend_action_enabled": action_state.get("frontend_action_enabled") is True,
+            "places_order": False,
+        },
         "timeline": {
             "intent_count": post_action.get("intent_count", 0),
             "entry_order_count": post_action.get("entry_order_count", 0),
@@ -2074,6 +2153,44 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "retry_safety": post_action.get("retry_safety"),
         },
     }
+
+
+def _owner_action_candidate_choices(
+    *,
+    candidate_output: list[dict[str, Any]],
+    generic_specs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    choices: list[dict[str, Any]] = []
+    for candidate in candidate_output:
+        carrier_id = candidate.get("carrier_id")
+        family = candidate.get("family")
+        spec = (
+            _first_match(generic_specs, lambda item: carrier_id and item.get("carrier_id") == carrier_id)
+            or _first_match(generic_specs, lambda item: family and item.get("family") == family)
+            or {}
+        )
+        choices.append(
+            {
+                "family": family,
+                "carrier_id": carrier_id,
+                "proposal_role": spec.get("proposal_role") or "unknown",
+                "market_regime": spec.get("market_regime"),
+                "candidate_state": candidate.get("candidate_state"),
+                "action_candidate_status": candidate.get("action_candidate_status"),
+                "generic_action_spec_status": spec.get("status"),
+                "symbol": spec.get("symbol"),
+                "side": spec.get("side"),
+                "recommended_quantity": spec.get("recommended_quantity"),
+                "recommended_max_notional": spec.get("recommended_max_notional"),
+                "budget_recommendation_status": spec.get("budget_recommendation_status"),
+                "warning_count": candidate.get("warning_count", 0),
+                "hard_blocker_count": candidate.get("hard_blocker_count", 0),
+                "backend_actionable": False,
+                "frontend_action_enabled": False,
+                "places_order": False,
+            }
+        )
+    return choices
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:

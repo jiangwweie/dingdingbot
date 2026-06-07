@@ -231,9 +231,14 @@ class CarrierSpec(ProductionAdmissionModel):
     carrier_id: Optional[str] = None
     admission_level: AdmissionLevelCode
     status: str
+    proposal_role: Literal["trend_candidate", "range_candidate", "volatility_candidate", "unknown"] = "unknown"
+    market_regime: Optional[str] = None
     supported_symbols: list[str] = Field(default_factory=list)
     supported_sides: list[str] = Field(default_factory=list)
     scope_template: dict[str, object] = Field(default_factory=dict)
+    default_example: dict[str, object] = Field(default_factory=dict)
+    protection_template: dict[str, object] = Field(default_factory=dict)
+    review_template_ref: Optional[str] = None
     action_registry_supported: bool = False
     can_produce_action_candidate: bool = False
     blockers: list[str] = Field(default_factory=list)
@@ -301,6 +306,9 @@ class GenericActionSpec(ProductionAdmissionModel):
     admission_level: AdmissionLevelCode
     status: Literal["valid_blocked_final_gate", "proposal_non_action", "invalid_blocked"]
     action_registry_supported: bool
+    proposal_role: Literal["trend_candidate", "range_candidate", "volatility_candidate", "unknown"] = "unknown"
+    market_regime: Optional[str] = None
+    action_candidate_ref: Optional[str] = None
     exact_scope_required: bool = True
     symbol: Optional[str] = None
     side: Optional[str] = None
@@ -310,6 +318,15 @@ class GenericActionSpec(ProductionAdmissionModel):
     max_attempts: Optional[int] = None
     protection_mode: Optional[str] = None
     review_requirement: Optional[str] = None
+    budget_envelope_ref: Optional[str] = None
+    sizing_source: Optional[str] = None
+    recommended_quantity: Optional[str] = None
+    recommended_max_notional: Optional[str] = None
+    recommended_total_budget: Optional[str] = None
+    budget_owner_confirmation_required: bool = True
+    budget_recommendation_status: Optional[str] = None
+    protection_template: dict[str, object] = Field(default_factory=dict)
+    review_template: dict[str, object] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     hard_blockers: list[str] = Field(default_factory=list)
     final_gate_adapter_ref: str = "generic_final_gate_adapter_contract"
@@ -5360,9 +5377,14 @@ def _carrier_specs(rows: list[FamilyAdmissionRow]) -> list[CarrierSpec]:
             carrier_id=row.carrier_id,
             admission_level=row.admission_level_code,
             status=row.carrier_candidate.status,
+            proposal_role=_proposal_role(row),
+            market_regime=_market_regime_for_family(row.family),
             supported_symbols=list(row.supported_symbols),
             supported_sides=["long"] if row.family in {"Trend", "Volatility expansion", "Mean reversion"} else [],
             scope_template=_carrier_scope_template(row),
+            default_example=_carrier_default_example(row),
+            protection_template=_protection_template(row),
+            review_template_ref=f"review-template:{row.carrier_id or row.family}",
             action_registry_supported=row.action_api_compatibility.compatible,
             can_produce_action_candidate=row.action_candidate.candidate_carrier_id is not None,
             blockers=list(row.carrier_candidate.blockers),
@@ -5452,6 +5474,9 @@ def _generic_action_specs(rows: list[FamilyAdmissionRow]) -> list[GenericActionS
                 admission_level=row.admission_level_code,
                 status=status,
                 action_registry_supported=row.action_api_compatibility.compatible,
+                proposal_role=_proposal_role(row),
+                market_regime=_market_regime_for_family(row.family),
+                action_candidate_ref=f"action-candidate:{row.carrier_id or row.family}",
                 symbol=_optional_str(scope_template.get("symbol")),
                 side=_optional_str(scope_template.get("side")),
                 quantity=_optional_str(scope_template.get("quantity")),
@@ -5460,6 +5485,8 @@ def _generic_action_specs(rows: list[FamilyAdmissionRow]) -> list[GenericActionS
                 max_attempts=_optional_int(scope_template.get("max_attempts")),
                 protection_mode=_optional_str(scope_template.get("protection_mode")),
                 review_requirement=_optional_str(scope_template.get("review_requirement")),
+                protection_template=_protection_template(row),
+                review_template=_review_template_payload(row),
                 warnings=list(row.risk_disclosure_contract.failure_modes),
                 hard_blockers=hard_blockers,
                 action_entry_payload_ref=payload_id,
@@ -5645,6 +5672,80 @@ def _carrier_scope_template(row: FamilyAdmissionRow) -> dict[str, object]:
         "max_attempts": 1,
         "protection_mode": "single_tp_plus_sl",
         "review_requirement": "post_action_review_required",
+    }
+
+
+def _proposal_role(
+    row: FamilyAdmissionRow,
+) -> Literal["trend_candidate", "range_candidate", "volatility_candidate", "unknown"]:
+    if row.family == "Trend":
+        return "trend_candidate"
+    if row.family == "Mean reversion":
+        return "range_candidate"
+    if row.family == "Volatility expansion":
+        return "volatility_candidate"
+    return "unknown"
+
+
+def _market_regime_for_family(family: str) -> Optional[str]:
+    return {
+        "Trend": "trend",
+        "Mean reversion": "mean_reversion",
+        "Volatility expansion": "volatility_expansion",
+    }.get(family)
+
+
+def _carrier_default_example(row: FamilyAdmissionRow) -> dict[str, object]:
+    scope_template = _carrier_scope_template(row)
+    return {
+        "strategy_family_id": row.strategy_family_id,
+        "carrier_id": row.carrier_id,
+        "symbol": scope_template.get("symbol"),
+        "side": scope_template.get("side"),
+        "quantity": scope_template.get("quantity"),
+        "max_notional": scope_template.get("max_notional"),
+        "leverage": scope_template.get("leverage"),
+        "max_attempts": scope_template.get("max_attempts"),
+        "protection_mode": scope_template.get("protection_mode"),
+        "review_requirement": scope_template.get("review_requirement"),
+        "may_execute_live": False,
+        "places_order": False,
+    }
+
+
+def _protection_template(row: FamilyAdmissionRow) -> dict[str, object]:
+    return {
+        "template_id": f"protection-template:{row.carrier_id or row.family}",
+        "mode": "single_tp_plus_sl",
+        "mandatory": True,
+        "requires_owner_confirmation": True,
+        "hard_blockers": [
+            "TP/SL plan unavailable",
+            "protection price source unavailable",
+            "reduce-only protection recording unavailable",
+        ],
+        "may_execute_live": False,
+        "places_order": False,
+    }
+
+
+def _review_template_payload(row: FamilyAdmissionRow) -> dict[str, object]:
+    return {
+        "template_id": f"review-template:{row.carrier_id or row.family}",
+        "metrics": list(row.review_contract.metrics),
+        "required_sections": [
+            "entry_result",
+            "tp_sl_result",
+            "pnl_summary",
+            "protection_outcome",
+            "failure_mode_notes",
+            "next_iteration_decision",
+        ],
+        "pre_action_evidence_required": [
+            "recording path available",
+            "audit path available",
+        ],
+        "post_action_required": True,
     }
 
 

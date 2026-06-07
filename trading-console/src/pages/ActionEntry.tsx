@@ -26,7 +26,7 @@ const INITIAL_INPUT: ActionEntryInput = {
   market_regime: 'trend',
   symbol_preference: 'SOL/USDT:USDT',
   side: 'long',
-  risk_tier: 'low',
+  risk_tier: 'tiny',
   note: '',
   family: 'Trend',
   strategy_family_id: 'TF-001-live-readonly-v0',
@@ -43,13 +43,20 @@ const INITIAL_INPUT: ActionEntryInput = {
 const regimeLabel: Record<string, string> = {
   trend: '趋势',
   volatility_expansion: '波动扩张',
-  mean_reversion: '均值回归',
+  mean_reversion: '区间/震荡',
 };
 
 const riskTierLabel: Record<string, string> = {
-  low: '低',
-  medium: '中',
-  high: '高',
+  tiny: 'Tiny',
+  small: 'Small',
+  custom: 'Custom',
+};
+
+const proposalRoleLabel: Record<string, string> = {
+  trend_candidate: '趋势候选',
+  range_candidate: '区间/震荡候选',
+  volatility_candidate: '波动候选',
+  unknown: '候选',
 };
 
 function actionEntryStateLabel(value?: string): string {
@@ -142,6 +149,7 @@ export default function ActionEntry() {
 
   const pageData = envelope?.data || {};
   const candidateOutput = asArray<any>(pageData.candidate_output);
+  const genericSpecs = asArray<any>(pageData.generic_action_specs);
   const payloadContracts = asArray<any>(pageData.action_entry_payload_contracts);
   const selected = pageData.selected_candidate || {};
   const selectedAction = selected.action_entry || {};
@@ -160,6 +168,12 @@ export default function ActionEntry() {
   const postAuditEvents = asArray<any>(postSummary.audit_events);
   const ownerActionFlow = pageData.owner_action_flow || {};
   const flowSteps = asArray<any>(ownerActionFlow.flow_steps);
+  const budgetRecommendation = pageData.budget_recommendation || {};
+  const budgetSummary = ownerActionFlow.budget_summary || {};
+  const candidateChoices = asArray<any>(ownerActionFlow.market_selection?.candidate_choices);
+  const selectedProposal = ownerActionFlow.selected_action_proposal || {};
+  const budgetMissingFacts = asArray<string>(budgetSummary.missing_facts);
+  const budgetHardBlockers = asArray<any>(budgetSummary.hard_blockers);
   const summaryMood = actionState.enabled === true
     ? 'ok'
     : finalGate.status === 'proposal_only'
@@ -173,6 +187,9 @@ export default function ActionEntry() {
   const selectCandidate = (candidate: any) => {
     const family = String(candidate.family || '');
     const carrierId = String(candidate.carrier_id || '');
+    const spec = genericSpecs.find((item) => (
+      (carrierId && item.carrier_id === carrierId) || item.family === family
+    )) || {};
     const payloadContract = payloadContracts.find((item) => (
       (carrierId && item.carrier_id === carrierId) || item.family === family
     ));
@@ -183,15 +200,15 @@ export default function ActionEntry() {
       family,
       strategy_family_id: String(candidate.strategy_family_id || carrierId),
       carrier_id: carrierId,
-      symbol_preference: String(requiredScope.symbol || current.symbol_preference),
-      symbol: String(requiredScope.symbol || ''),
-      side: String(requiredScope.side || 'long'),
-      quantity: String(requiredScope.quantity || ''),
-      max_notional: String(requiredScope.max_notional || ''),
-      leverage: String(requiredScope.leverage || '1'),
-      max_attempts: String(requiredScope.max_attempts || '1'),
-      protection_mode: String(requiredScope.protection_mode || 'single_tp_plus_sl'),
-      review_requirement: String(requiredScope.review_requirement || 'post_action_review_required'),
+      symbol_preference: String(requiredScope.symbol || spec.symbol || current.symbol_preference),
+      symbol: String(requiredScope.symbol || spec.symbol || ''),
+      side: String(requiredScope.side || spec.side || 'long'),
+      quantity: String(spec.recommended_quantity || requiredScope.quantity || spec.quantity || ''),
+      max_notional: String(spec.recommended_max_notional || requiredScope.max_notional || spec.max_notional || ''),
+      leverage: String(requiredScope.leverage || spec.leverage || '1'),
+      max_attempts: String(requiredScope.max_attempts || spec.max_attempts || '1'),
+      protection_mode: String(requiredScope.protection_mode || spec.protection_mode || 'single_tp_plus_sl'),
+      review_requirement: String(requiredScope.review_requirement || spec.review_requirement || 'post_action_review_required'),
     }));
   };
 
@@ -260,7 +277,7 @@ export default function ActionEntry() {
               <select value={draftInput.market_regime} onChange={(event) => updateField('market_regime', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
                 <option value="trend">趋势</option>
                 <option value="volatility_expansion">波动扩张</option>
-                <option value="mean_reversion">均值回归</option>
+                <option value="mean_reversion">区间/震荡</option>
               </select>
             </label>
             <label className="space-y-1 text-sm">
@@ -277,9 +294,9 @@ export default function ActionEntry() {
             <label className="space-y-1 text-sm">
               <span className="text-xs font-medium text-slate-500">风险层级</span>
               <select value={draftInput.risk_tier} onChange={(event) => updateField('risk_tier', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
+                <option value="tiny">Tiny</option>
+                <option value="small">Small</option>
+                <option value="custom">Custom</option>
               </select>
             </label>
             <label className="space-y-1 text-sm">
@@ -314,6 +331,55 @@ export default function ActionEntry() {
         </form>
       </Card>
 
+      <Card className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-medium">Budget Envelope</h2>
+            <div className="mt-1 text-xs text-slate-500">
+              {displayValue(budgetSummary.account_capacity_status, displayValue(budgetRecommendation.account_capacity?.status, 'not_available'))}
+            </div>
+          </div>
+          <Badge variant={budgetSummary.status === 'available' ? 'normal' : 'danger'}>
+            {displayValue(budgetSummary.status, budgetRecommendation.budget_envelope?.status || 'not_available')}
+          </Badge>
+        </div>
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Account</div>
+            <div className="font-mono">{displayValue(budgetSummary.account_equity, '暂无')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Capacity</div>
+            <div className="font-mono">{displayValue(budgetSummary.max_usable_notional, '暂无')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Max notional</div>
+            <div className="font-mono">{displayValue(budgetSummary.recommended_max_notional_per_action, '暂无')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Leverage</div>
+            <div className="font-mono">{displayValue(budgetSummary.recommended_leverage, '1')}</div>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <EvidenceList
+            title="Missing facts"
+            items={budgetMissingFacts}
+            emptyText="暂无缺失事实"
+            describe={(item) => ({ primary: String(item), secondary: 'Budget recommendation degraded until refreshed.' })}
+          />
+          <EvidenceList
+            title="Budget hard blockers"
+            items={budgetHardBlockers}
+            emptyText="暂无预算硬阻断"
+            describe={(item) => ({
+              primary: firstDisplayValue(item, ['id', 'stage']),
+              secondary: firstDisplayValue(item, ['evidence', 'retry_condition']),
+            })}
+          />
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {candidateOutput.map((candidate) => (
           <Card key={`${candidate.family}-${candidate.carrier_id || 'proposal'}`} className="p-4">
@@ -323,7 +389,7 @@ export default function ActionEntry() {
                 <div className="text-xs text-slate-500 mt-1">{displayValue(candidate.carrier_id, '暂无 Carrier')}</div>
               </div>
               <Badge variant={candidate.candidate_state === 'bounded_live_candidate' ? 'warning' : 'caution'}>
-                {candidate.candidate_state === 'bounded_live_candidate' ? '候选' : '提案'}
+                {proposalRoleLabel[String(candidateChoices.find((item) => item.carrier_id === candidate.carrier_id)?.proposal_role || 'unknown')]}
               </Badge>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
@@ -331,6 +397,8 @@ export default function ActionEntry() {
               <div>警告：{candidate.warning_count}</div>
               <div>阻断：{candidate.hard_blocker_count}</div>
               <div>Registry：{candidate.action_registry_supported ? '支持' : '未支持'}</div>
+              <div>Max：{displayValue(candidate.recommended_sizing?.max_notional_per_action, '暂无')}</div>
+              <div>预算：{displayValue(candidate.recommended_sizing?.status, '暂无')}</div>
             </div>
             <button
               type="button"
@@ -358,6 +426,8 @@ export default function ActionEntry() {
             <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">方向：{sideLabel(selectedSpec.side || draftInput.side)}</div>
             <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">数量：{displayValue(selectedSpec.quantity || draftInput.quantity, '暂无')}</div>
             <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">风险：{riskTierLabel[pageData.owner_market_input?.risk_tier] || '未选择'}</div>
+            <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">推荐 Max：{displayValue(selectedProposal.recommended_max_notional || selectedSpec.recommended_max_notional, '暂无')}</div>
+            <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">提案：{proposalRoleLabel[selectedProposal.proposal_role] || '候选'}</div>
           </div>
           <div className="mt-4 text-sm">
             范围核验：

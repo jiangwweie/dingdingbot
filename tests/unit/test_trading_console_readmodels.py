@@ -1742,11 +1742,19 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert specs["Volatility expansion"]["action_registry_supported"] is False
     assert specs["Mean reversion"]["status"] == "proposal_non_action"
     assert specs["Mean reversion"]["action_registry_supported"] is False
+    assert specs["Mean reversion"]["proposal_role"] == "range_candidate"
+    assert specs["Mean reversion"]["market_regime"] == "mean_reversion"
     assert specs["Mean reversion"]["symbol"] == "ETH/USDT:USDT"
     assert specs["Mean reversion"]["side"] == "long"
     assert specs["Mean reversion"]["quantity"] == "0.01"
     assert specs["Mean reversion"]["max_notional"] == "20"
+    assert specs["Mean reversion"]["recommended_quantity"] == "0.01"
+    assert specs["Mean reversion"]["recommended_max_notional"] is None
     assert specs["Mean reversion"]["protection_mode"] == "single_tp_plus_sl"
+    assert specs["Mean reversion"]["protection_template"]["mode"] == "single_tp_plus_sl"
+    assert specs["Mean reversion"]["review_template"]["template_id"] == (
+        "review-template:MR-001-live-readonly-v0"
+    )
     assert specs["Mean reversion"]["may_execute_live"] is False
     assert specs["Mean reversion"]["frontend_action_enabled"] is False
     assert specs["Mean reversion"]["places_order"] is False
@@ -1856,11 +1864,36 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert selected["generic_action_spec"]["action_registry_supported"] is False
     assert selected["generic_action_spec"]["symbol"] == "ETH/USDT:USDT"
     assert data["action_state"]["enabled"] is False
+    assert data["action_state"]["backend_actionable"] is False
     assert data["action_state"]["frontend_action_enabled"] is False
     assert data["action_state"]["places_order"] is False
     flow = data["owner_action_flow"]
     assert flow["status"] == "not_actionable"
     assert flow["unsafe_action_enabled"] is False
+    assert flow["budget_summary"]["status"] == "degraded_missing_account_facts"
+    assert flow["budget_summary"]["account_capacity_status"] == "degraded"
+    assert "account_equity" in flow["budget_summary"]["missing_facts"]
+    assert flow["budget_summary"]["action_allowed"] is False
+    assert flow["market_selection"]["selected_regime"] == "mean_reversion"
+    assert flow["market_selection"]["mapped_family"] == "Mean reversion"
+    assert flow["market_selection"]["range_candidate"]["carrier_id"] == (
+        "MR-001-live-readonly-v0"
+    )
+    choices = {item["proposal_role"]: item for item in flow["market_selection"]["candidate_choices"]}
+    assert choices["range_candidate"]["family"] == "Mean reversion"
+    assert choices["range_candidate"]["recommended_quantity"] == "0.01"
+    proposal = flow["selected_action_proposal"]
+    assert proposal["proposal_role"] == "range_candidate"
+    assert proposal["market_regime"] == "mean_reversion"
+    assert proposal["recommended_quantity"] == "0.01"
+    assert proposal["recommended_max_notional"] is None
+    assert proposal["protection_template"]["mode"] == "single_tp_plus_sl"
+    assert proposal["review_template"]["template_id"] == (
+        "review-template:MR-001-live-readonly-v0"
+    )
+    assert proposal["backend_actionable"] is False
+    assert proposal["frontend_action_enabled"] is False
+    assert proposal["places_order"] is False
     steps = {item["step"]: item for item in flow["flow_steps"]}
     assert set(steps) == {
         "market_input",
@@ -1873,7 +1906,9 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
         "post_action_evidence",
     }
     assert steps["market_input"]["status"] == "ready"
-    assert steps["candidate_selection"]["summary"] == "MR-001-live-readonly-v0"
+    assert steps["candidate_selection"]["summary"] == (
+        "MR-001-live-readonly-v0 / range_candidate"
+    )
     assert steps["budget_envelope"]["status"] == "blocked"
     assert steps["action_state"]["status"] == "blocked"
     assert flow["timeline"]["entry_order_count"] == 1
@@ -1930,7 +1965,8 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
     assert selected["scope_review"]["mismatches"] == []
     action_state = payload["data"]["action_state"]
     assert action_state["enabled"] is False
-    assert action_state["backend_actionable_only"] is True
+    assert action_state["backend_actionable"] is False
+    assert action_state["backend_actionable_only"] is False
     assert action_state["places_order"] is False
     assert payload["data"]["authorization_draft_path"]["creates_authorization"] is False
     assert payload["data"]["final_gate_result"]["frontend_action_enabled"] is False
