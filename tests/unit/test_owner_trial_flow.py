@@ -210,6 +210,20 @@ async def _acknowledge_all_trend(service: OwnerTrialFlowService):
     )
 
 
+async def _acknowledge_all_mr_btc(service: OwnerTrialFlowService):
+    current = await service.current(carrier_id="MR-001-BTC-live-readonly-v0")
+    return await service.create_risk_acknowledgement(
+        OwnerRiskAcknowledgementCreateRequest(
+            carrier_id="MR-001-BTC-live-readonly-v0",
+            acknowledged_warning_codes=[
+                str(item["warning_id"])
+                for item in current.strategy_warnings
+            ],
+        ),
+        operator_id="owner",
+    )
+
+
 async def _create_valid_draft(service: OwnerTrialFlowService):
     acknowledgement = await _acknowledge_all(service)
     return await service.create_authorization_draft(
@@ -244,6 +258,23 @@ async def _create_valid_trend_draft(service: OwnerTrialFlowService):
     )
 
 
+async def _create_valid_mr_btc_draft(service: OwnerTrialFlowService):
+    acknowledgement = await _acknowledge_all_mr_btc(service)
+    return await service.create_authorization_draft(
+        BoundedLiveTrialAuthorizationDraftCreateRequest(
+            carrier_id="MR-001-BTC-live-readonly-v0",
+            linked_acknowledgement_id=acknowledgement.acknowledgement_id,
+            symbol="BTC/USDT:USDT",
+            side="long",
+            max_notional="20",
+            quantity="0.001",
+            leverage="1",
+            protection_plan_type="single_tp_plus_sl",
+        ),
+        operator_id="owner",
+    )
+
+
 def _activation_request(**patch):
     payload = {
         "carrier_id": "MI-001-BNB-LONG",
@@ -265,6 +296,20 @@ def _trend_activation_request(**patch):
         "side": "long",
         "max_notional": "20",
         "quantity": "0.1",
+        "leverage": "1",
+        "protection_plan_type": "single_tp_plus_sl",
+    }
+    payload.update(patch)
+    return OwnerLiveAuthorizationActivationRequest(**payload)
+
+
+def _mr_btc_activation_request(**patch):
+    payload = {
+        "carrier_id": "MR-001-BTC-live-readonly-v0",
+        "symbol": "BTC/USDT:USDT",
+        "side": "long",
+        "max_notional": "20",
+        "quantity": "0.001",
         "leverage": "1",
         "protection_plan_type": "single_tp_plus_sl",
     }
@@ -2040,12 +2085,16 @@ def test_bnb_live_execution_bridge_reaches_dry_run_boundary_without_executable_s
 def test_owner_bounded_execution_registry_registers_scoped_owner_action_carriers():
     registry = default_owner_bounded_execution_registry()
 
-    assert registry.supported_carrier_ids == [
+    assert set(registry.supported_carrier_ids) == {
         "MI-001-BNB-LONG",
         "TF-001-live-readonly-v0",
-    ]
+        "MR-001-live-readonly-v0",
+        "MR-001-BTC-live-readonly-v0",
+    }
     assert registry.get("MI-001-BNB-LONG") is not None
     assert registry.get("TF-001-live-readonly-v0") is not None
+    assert registry.get("MR-001-live-readonly-v0") is not None
+    assert registry.get("MR-001-BTC-live-readonly-v0") is not None
     assert registry.get("TB-BTC-SHORT") is None
 
 
@@ -4825,6 +4874,61 @@ def test_generic_action_spec_final_gate_consumes_trend_exact_scope_without_order
     asyncio.run(scenario())
 
 
+def test_generic_action_spec_final_gate_consumes_mr_btc_exact_scope_without_order():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        try:
+            draft = await _create_valid_mr_btc_draft(service)
+            await service.activate_live_authorization(
+                draft.draft_id,
+                _mr_btc_activation_request(),
+                operator_id="owner",
+            )
+
+            result = await bridge.run_action_spec(
+                _trend_generic_action_spec(
+                    family="Mean reversion",
+                    strategy_family_id="MR-001-live-readonly-v0",
+                    carrier_id="MR-001-BTC-live-readonly-v0",
+                    admission_level="L2",
+                    status="valid_blocked_final_gate",
+                    action_registry_supported=True,
+                    symbol="BTC/USDT:USDT",
+                    quantity="0.001",
+                    max_notional="20",
+                    leverage="1",
+                ),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="MR-001-BTC-live-readonly-v0",
+                    symbol="BTC/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                    market_min_amount="0.001",
+                    market_amount_step="0.001",
+                ),
+            )
+
+            assert result.final_preflight_result == "passed"
+            assert result.final_gate_input_kind == "generic_action_spec"
+            assert result.generic_action_spec_status == "valid_blocked_final_gate"
+            assert result.generic_action_spec_action_registry_supported is True
+            assert result.carrier_id == "MR-001-BTC-live-readonly-v0"
+            assert result.symbol == "BTC/USDT:USDT"
+            assert result.execution_plan_preview.quantity == Decimal("0.001")
+            assert result.execution_plan_preview.max_notional == Decimal("20")
+            assert result.non_permissions["execution_intent_created"] is False
+            assert result.non_permissions["order_created"] is False
+            async with service._repository._session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_generic_action_spec_final_gate_requires_market_metadata_fact():
     async def scenario():
         service, bridge, engine = await _bridge_service()
@@ -5097,11 +5201,11 @@ def test_generic_action_spec_final_gate_fails_closed_for_non_catalog_carrier():
     asyncio.run(scenario())
 
 
-def test_generic_action_spec_final_gate_keeps_volatility_and_mean_reversion_non_action():
+def test_generic_action_spec_final_gate_keeps_volatility_non_action_and_mr_wrong_scope_blocked():
     async def scenario():
         service, bridge, engine = await _bridge_service()
         try:
-            proposal_specs = [
+            volatility = await bridge.run_action_spec(
                 _trend_generic_action_spec(
                     family="Volatility expansion",
                     strategy_family_id="VB-001-live-readonly-v0",
@@ -5110,33 +5214,48 @@ def test_generic_action_spec_final_gate_keeps_volatility_and_mean_reversion_non_
                     status="proposal_non_action",
                     action_registry_supported=False,
                 ),
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="VB-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                ),
+            )
+
+            assert volatility.final_preflight_result == "blocked"
+            assert "generic_action_spec_status_not_final_gate_ready" in volatility.hard_blockers
+            assert "generic_action_spec_not_action_registry_supported" in volatility.hard_blockers
+            assert "unsupported_carrier" in volatility.hard_blockers
+            assert volatility.non_permissions["execution_intent_created"] is False
+            assert volatility.non_permissions["order_created"] is False
+            assert volatility.owner_execution_trigger.enabled is False
+
+            mr_wrong_scope = await bridge.run_action_spec(
                 _trend_generic_action_spec(
                     family="Mean reversion",
                     strategy_family_id="MR-001-live-readonly-v0",
                     carrier_id="MR-001-live-readonly-v0",
                     admission_level="L2",
-                    status="proposal_non_action",
-                    action_registry_supported=False,
+                    status="valid_blocked_final_gate",
+                    action_registry_supported=True,
+                    symbol="SOL/USDT:USDT",
+                    quantity="0.1",
                 ),
-            ]
-            for spec in proposal_specs:
-                result = await bridge.run_action_spec(
-                    spec,
-                    fact_snapshot=_clear_fact_snapshot(
-                        candidate_id=spec.carrier_id,
-                        symbol="SOL/USDT:USDT",
-                        side="long",
-                        startup_guard_clear=True,
-                    ),
-                )
+                fact_snapshot=_clear_fact_snapshot(
+                    candidate_id="MR-001-live-readonly-v0",
+                    symbol="SOL/USDT:USDT",
+                    side="long",
+                    startup_guard_clear=True,
+                ),
+            )
 
-                assert result.final_preflight_result == "blocked"
-                assert "generic_action_spec_status_not_final_gate_ready" in result.hard_blockers
-                assert "generic_action_spec_not_action_registry_supported" in result.hard_blockers
-                assert "unsupported_carrier" in result.hard_blockers
-                assert result.non_permissions["execution_intent_created"] is False
-                assert result.non_permissions["order_created"] is False
-                assert result.owner_execution_trigger.enabled is False
+            assert mr_wrong_scope.final_preflight_result == "blocked"
+            assert "symbol_mismatch" in mr_wrong_scope.hard_blockers
+            assert "quantity_mismatch" in mr_wrong_scope.hard_blockers
+            assert "missing_explicit_owner_live_authorization" in mr_wrong_scope.hard_blockers
+            assert mr_wrong_scope.non_permissions["execution_intent_created"] is False
+            assert mr_wrong_scope.non_permissions["order_created"] is False
+            assert mr_wrong_scope.owner_execution_trigger.enabled is False
         finally:
             await engine.dispose()
 

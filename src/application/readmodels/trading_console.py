@@ -24,6 +24,7 @@ from src.application.budget_recommendation import (
     apply_budget_envelope_to_generic_action_specs,
     build_budget_recommendation,
 )
+from src.application.owner_action_carrier_catalog import owner_action_carrier_id_for_symbol
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
@@ -1851,6 +1852,12 @@ def _apply_owner_selection_to_generic_action_specs(
         }
         if selected_symbol is not None:
             item["symbol"] = selected_symbol
+            mapped_carrier_id = owner_action_carrier_id_for_symbol(
+                _optional_nonempty_str(item.get("carrier_id")),
+                selected_symbol,
+            )
+            if mapped_carrier_id:
+                item["carrier_id"] = mapped_carrier_id
         if selected_side is not None:
             item["side"] = selected_side
         if selected_quantity is not None:
@@ -2414,7 +2421,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         },
         "selected_action_proposal": {
             "family": selected_candidate.get("family"),
-            "carrier_id": selected_candidate.get("carrier_id"),
+            "carrier_id": selected_spec.get("carrier_id") or selected_candidate.get("carrier_id"),
             "owner_selection_status": owner_budget_selection.get("status"),
             "owner_selected_scope": dict(selected_spec.get("owner_selected_scope") or {}),
             "proposal_role": selected_spec.get("proposal_role"),

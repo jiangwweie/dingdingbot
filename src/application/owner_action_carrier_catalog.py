@@ -19,14 +19,31 @@ from src.application.strategy_trial_architecture_governance import (
 
 BNB_OWNER_ACTION_CARRIER_ID = "MI-001-BNB-LONG"
 TREND_OWNER_ACTION_CARRIER_ID = "TF-001-live-readonly-v0"
+MR_OWNER_ACTION_CARRIER_ID = "MR-001-live-readonly-v0"
+MR_BTC_OWNER_ACTION_CARRIER_ID = "MR-001-BTC-live-readonly-v0"
 SUPPORTED_OWNER_ACTION_CARRIER_IDS = [
     BNB_OWNER_ACTION_CARRIER_ID,
     TREND_OWNER_ACTION_CARRIER_ID,
+    MR_OWNER_ACTION_CARRIER_ID,
+    MR_BTC_OWNER_ACTION_CARRIER_ID,
 ]
+
+MR_OWNER_ACTION_SYMBOL_CARRIER_IDS = {
+    "ETH/USDT:USDT": MR_OWNER_ACTION_CARRIER_ID,
+    "BTC/USDT:USDT": MR_BTC_OWNER_ACTION_CARRIER_ID,
+}
 
 
 def supported_owner_action_carrier_ids() -> list[str]:
     return list(SUPPORTED_OWNER_ACTION_CARRIER_IDS)
+
+
+def owner_action_carrier_id_for_symbol(carrier_id: str | None, symbol: str | None) -> str | None:
+    if carrier_id not in {MR_OWNER_ACTION_CARRIER_ID, MR_BTC_OWNER_ACTION_CARRIER_ID}:
+        return carrier_id
+    if symbol is None:
+        return carrier_id
+    return MR_OWNER_ACTION_SYMBOL_CARRIER_IDS.get(str(symbol), carrier_id)
 
 
 def get_owner_action_carrier(carrier_id: str) -> StrategyTrialCarrierView | None:
@@ -34,6 +51,18 @@ def get_owner_action_carrier(carrier_id: str) -> StrategyTrialCarrierView | None
         return build_bnb_strategy_trial_architecture_governance().owner_review_packet.carrier
     if carrier_id == TREND_OWNER_ACTION_CARRIER_ID:
         return _trend_carrier()
+    if carrier_id == MR_OWNER_ACTION_CARRIER_ID:
+        return _mr_carrier(
+            carrier_id=MR_OWNER_ACTION_CARRIER_ID,
+            symbol="ETH/USDT:USDT",
+            quantity=Decimal("0.01"),
+        )
+    if carrier_id == MR_BTC_OWNER_ACTION_CARRIER_ID:
+        return _mr_carrier(
+            carrier_id=MR_BTC_OWNER_ACTION_CARRIER_ID,
+            symbol="BTC/USDT:USDT",
+            quantity=Decimal("0.001"),
+        )
     return None
 
 
@@ -42,6 +71,8 @@ def owner_action_risk_warnings(carrier_id: str) -> list[StrategyTrialRiskWarning
         return list(build_bnb_strategy_trial_architecture_governance().owner_review_packet.strategy_warnings)
     if carrier_id == TREND_OWNER_ACTION_CARRIER_ID:
         return _trend_warnings()
+    if carrier_id in {MR_OWNER_ACTION_CARRIER_ID, MR_BTC_OWNER_ACTION_CARRIER_ID}:
+        return _mr_warnings()
     return []
 
 
@@ -109,6 +140,58 @@ def _trend_warnings() -> list[StrategyTrialRiskWarning]:
             description=(
                 "The Trend carrier has limited production action history; this is a "
                 "risk disclosure and not a hard blocker after Owner acknowledgement."
+            ),
+        ),
+    ]
+
+
+def _mr_carrier(
+    *,
+    carrier_id: str,
+    symbol: str,
+    quantity: Decimal,
+) -> StrategyTrialCarrierView:
+    return StrategyTrialCarrierView(
+        carrier_id=carrier_id,
+        strategy_family="Mean reversion",
+        strategy_id="MR-001-live-readonly-v0",
+        candidate_id=carrier_id,
+        symbol=symbol,
+        runtime_symbol=symbol,
+        side="long",
+        execution_mode="owner_confirm_each_entry",
+        quantity=quantity,
+        max_notional=Decimal("20"),
+        leverage=Decimal("1"),
+        max_leverage_allowed=Decimal("1"),
+        protection_plan_type="single_tp_plus_sl",
+    )
+
+
+def _mr_warnings() -> list[StrategyTrialRiskWarning]:
+    return [
+        StrategyTrialRiskWarning(
+            warning_id="mr_owner_range_view_not_alpha_proof",
+            severity="warning",
+            description=(
+                "Owner range input is a bounded market view and not proof that the "
+                "Mean reversion carrier has profitable live edge."
+            ),
+        ),
+        StrategyTrialRiskWarning(
+            warning_id="mr_trend_continuation_against_entry_risk",
+            severity="warning",
+            description=(
+                "Mean reversion entries can fail if a strong trend continues; exact "
+                "scope and mandatory TP/SL protection are required."
+            ),
+        ),
+        StrategyTrialRiskWarning(
+            warning_id="mr_liquidity_wick_and_slippage_risk",
+            severity="warning",
+            description=(
+                "Range reversals around liquidity wicks can slip through the intended "
+                "entry and protection levels."
             ),
         ),
     ]

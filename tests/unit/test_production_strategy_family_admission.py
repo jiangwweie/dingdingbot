@@ -83,7 +83,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert carrier_specs["Trend"].scope_template["symbol"] == "SOL/USDT:USDT"
     assert carrier_specs["Trend"].scope_template["quantity"] == "0.1"
     assert carrier_specs["Volatility expansion"].action_registry_supported is False
-    assert carrier_specs["Mean reversion"].action_registry_supported is False
+    assert carrier_specs["Mean reversion"].action_registry_supported is True
     assert carrier_specs["Mean reversion"].proposal_role == "range_candidate"
     assert carrier_specs["Mean reversion"].market_regime == "mean_reversion"
     assert carrier_specs["Mean reversion"].scope_template["symbol"] == "ETH/USDT:USDT"
@@ -343,7 +343,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.starts_strategy_execution is False
         assert item.places_order is False
         assert item.mutates_pg is False
-    assert len(state.blocker_retry_matrix) == 20
+    assert len(state.blocker_retry_matrix) == 19
     assert set(retry_by_family) == {"Trend", "Volatility expansion", "Mean reversion"}
     trend_retry_by_id = {item.blocker_id: item for item in retry_by_family["Trend"]}
     assert "BRC-PROD-ADMIT-20260604-TREND-001" in trend_retry_by_id
@@ -499,7 +499,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.owner_scope_verdict == "not_provided"
         assert checks["owner_scope_complete"].status == "block"
         assert checks["official_action_api_candidate_supported"].status == (
-            "pass" if item.family == "Trend" else "block"
+            "pass" if item.family in {"Trend", "Mean reversion"} else "block"
         )
         assert checks["backend_final_gate_actionable"].status == "block"
         assert "BoundedLiveAuthorization" in item.blocking_stages
@@ -526,7 +526,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.owner_scope_verdict == "not_provided"
         assert item.action_api_status == (
             "supported_by_current_official_action_api_but_not_actionable"
-            if item.family == "Trend"
+            if item.family in {"Trend", "Mean reversion"}
             else "unsupported_by_current_official_action_api"
         )
         assert item.final_gate_reason == "production_scope_incomplete"
@@ -553,7 +553,7 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.decision == "scope_incomplete_or_unmatched"
         assert checks["owner_scope_complete"].status == "block"
         assert checks["official_action_api_candidate_supported"].status == (
-            "pass" if item.family == "Trend" else "block"
+            "pass" if item.family in {"Trend", "Mean reversion"} else "block"
         )
         assert checks["backend_final_gate_actionable"].status == "block"
         assert checks["pre_action_pg_snapshot"].status == "required_before_live_action"
@@ -922,10 +922,14 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
     assert state.official_action_api_inventory.owner_trial_flow_supported_carrier_ids == [
         "MI-001-BNB-LONG",
         "TF-001-live-readonly-v0",
+        "MR-001-live-readonly-v0",
+        "MR-001-BTC-live-readonly-v0",
     ]
     assert state.official_action_api_inventory.owner_bounded_execution_supported_carrier_ids == [
         "MI-001-BNB-LONG",
         "TF-001-live-readonly-v0",
+        "MR-001-live-readonly-v0",
+        "MR-001-BTC-live-readonly-v0",
     ]
     assert state.audit_chain_gap_report.bridge_method == "AuditChainGapReport"
     assert state.audit_chain_gap_report.live_action_evidence_present is False
@@ -983,7 +987,7 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert row.carrier_readiness_report.mutates_pg is False
         readiness_checks = {check["code"]: check for check in row.carrier_readiness_report.readiness_checks}
         assert readiness_checks["official_action_api_supported"]["status"] == (
-            "pass" if row.family == "Trend" else "block"
+            "pass" if row.family in {"Trend", "Mean reversion"} else "block"
         )
         assert readiness_checks["backend_actionable"]["status"] == "block"
         assert row.action_candidate.bridge_method == "ActionCandidate"
@@ -991,7 +995,7 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert row.action_candidate.carrier_id == row.carrier_id
         assert row.action_candidate.status == (
             "supported_but_backend_not_actionable"
-            if row.family == "Trend"
+            if row.family in {"Trend", "Mean reversion"}
             else "unsupported_by_current_official_action_api"
         )
         assert row.action_candidate.action_allowed is False
@@ -1073,13 +1077,15 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert all(draft.not_submitted is True for draft in row.api_request_drafts)
         assert all(draft.places_order is False for draft in row.api_request_drafts)
         assert all(draft.creates_execution_intent is False for draft in row.api_request_drafts)
-        assert row.action_api_compatibility.compatible is (row.family == "Trend")
+        assert row.action_api_compatibility.compatible is (
+            row.family in {"Trend", "Mean reversion"}
+        )
         assert row.action_api_compatibility.status == (
             "supported_by_current_official_action_api_but_not_actionable"
-            if row.family == "Trend"
+            if row.family in {"Trend", "Mean reversion"}
             else "unsupported_by_current_official_action_api"
         )
-        if row.family == "Trend":
+        if row.family in {"Trend", "Mean reversion"}:
             assert row.action_api_compatibility.blockers == []
         else:
             assert "candidate_carrier_not_supported_by_owner_trial_flow" in (
@@ -1188,7 +1194,7 @@ def test_production_strategy_family_admission_state_exposes_bridge_contracts():
     for row in state.families:
         gate_blocker_ids = {item.id for item in row.gate_blocker_records}
         assert f"{row.blocker_record.id}-SCOPE" in gate_blocker_ids
-        if row.family == "Trend":
+        if row.family in {"Trend", "Mean reversion"}:
             assert f"{row.blocker_record.id}-ACTION-API" not in gate_blocker_ids
         else:
             assert f"{row.blocker_record.id}-ACTION-API" in gate_blocker_ids
@@ -1311,8 +1317,8 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert specs_by_family["Volatility expansion"].status == "proposal_non_action"
     assert specs_by_family["Volatility expansion"].action_registry_supported is False
     mean_reversion = specs_by_family["Mean reversion"]
-    assert mean_reversion.status == "proposal_non_action"
-    assert mean_reversion.action_registry_supported is False
+    assert mean_reversion.status == "valid_blocked_final_gate"
+    assert mean_reversion.action_registry_supported is True
     assert mean_reversion.proposal_role == "range_candidate"
     assert mean_reversion.market_regime == "mean_reversion"
     assert mean_reversion.supported_symbols == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
@@ -1345,7 +1351,7 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert trend_payload.may_execute_live is False
     assert trend_payload.frontend_action_enabled is False
     mr_payload = payloads_by_family["Mean reversion"]
-    assert mr_payload.contract_status == "proposal_only"
+    assert mr_payload.contract_status == "ready_for_final_gate_adapter"
     assert mr_payload.required_owner_scope["symbol"] == "ETH/USDT:USDT"
     assert mr_payload.required_owner_scope["quantity"] == "0.01"
     assert mr_payload.required_owner_scope["max_notional"] == "20"
@@ -1365,7 +1371,7 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
         "proposal_only"
     )
     assert action_entry_by_family["Mean reversion"].action_entry_state == (
-        "proposal_only"
+        "ready_for_owner_scope_final_gate"
     )
 
 
@@ -1821,7 +1827,7 @@ def test_scoped_dry_run_examples_bind_all_families_without_actions():
         assert row.entry_state == "not_executed"
         gate_blocker_ids = {item.id for item in row.gate_blocker_records}
         assert f"{row.blocker_record.id}-SCOPE" not in gate_blocker_ids
-        if example.family == "Trend":
+        if example.family in {"Trend", "Mean reversion"}:
             assert f"{row.blocker_record.id}-ACTION-API" not in gate_blocker_ids
         else:
             assert f"{row.blocker_record.id}-ACTION-API" in gate_blocker_ids
@@ -1833,7 +1839,7 @@ def test_scoped_dry_run_examples_bind_all_families_without_actions():
         assert eligibility.decision == example.expected_eligibility_decision
         assert checks["owner_scope_complete"].status == "pass"
         assert checks["official_action_api_candidate_supported"].status == (
-            "pass" if example.family == "Trend" else "block"
+            "pass" if example.family in {"Trend", "Mean reversion"} else "block"
         )
         assert checks["backend_final_gate_actionable"].status == "block"
         assert eligibility.backend_actionable is False
