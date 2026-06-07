@@ -310,6 +310,8 @@ class GenericActionSpec(ProductionAdmissionModel):
     market_regime: Optional[str] = None
     action_candidate_ref: Optional[str] = None
     exact_scope_required: bool = True
+    supported_symbols: list[str] = Field(default_factory=list)
+    supported_sides: list[str] = Field(default_factory=list)
     symbol: Optional[str] = None
     side: Optional[str] = None
     quantity: Optional[str] = None
@@ -5380,7 +5382,7 @@ def _carrier_specs(rows: list[FamilyAdmissionRow]) -> list[CarrierSpec]:
             proposal_role=_proposal_role(row),
             market_regime=_market_regime_for_family(row.family),
             supported_symbols=list(row.supported_symbols),
-            supported_sides=["long"] if row.family in {"Trend", "Volatility expansion", "Mean reversion"} else [],
+            supported_sides=_supported_sides_for_family(row.family),
             scope_template=_carrier_scope_template(row),
             default_example=_carrier_default_example(row),
             protection_template=_protection_template(row),
@@ -5477,6 +5479,8 @@ def _generic_action_specs(rows: list[FamilyAdmissionRow]) -> list[GenericActionS
                 proposal_role=_proposal_role(row),
                 market_regime=_market_regime_for_family(row.family),
                 action_candidate_ref=f"action-candidate:{row.carrier_id or row.family}",
+                supported_symbols=list(row.supported_symbols),
+                supported_sides=_supported_sides_for_family(row.family),
                 symbol=_optional_str(scope_template.get("symbol")),
                 side=_optional_str(scope_template.get("side")),
                 quantity=_optional_str(scope_template.get("quantity")),
@@ -5673,6 +5677,10 @@ def _carrier_scope_template(row: FamilyAdmissionRow) -> dict[str, object]:
         "protection_mode": "single_tp_plus_sl",
         "review_requirement": "post_action_review_required",
     }
+
+
+def _supported_sides_for_family(family: str) -> list[str]:
+    return ["long"] if family in {"Trend", "Volatility expansion", "Mean reversion"} else []
 
 
 def _proposal_role(

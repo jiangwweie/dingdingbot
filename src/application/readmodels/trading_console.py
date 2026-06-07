@@ -600,12 +600,14 @@ class TradingConsoleReadModelService:
         include_exchange: bool = False,
         risk_tier: str = "tiny",
         custom: Optional[dict[str, Any]] = None,
+        owner_selection: Optional[dict[str, Any]] = None,
     ) -> TradingConsoleReadModelResponse:
         snap = await self.snapshot(symbol=None, include_exchange=include_exchange)
         budget = self._budget_recommendation_payload(
             snap=snap,
             risk_tier=risk_tier,
             custom=custom,
+            owner_selection=owner_selection,
         )
         blockers = [
             {
@@ -656,12 +658,26 @@ class TradingConsoleReadModelService:
         budget = self._budget_recommendation_payload(
             snap=snap,
             risk_tier=normalized_market_input.get("risk_tier") or "tiny",
+            owner_selection=_owner_budget_selection_from(
+                owner_scope=owner_scope or {},
+                market_input=normalized_market_input,
+            ),
         )
         envelope = dict(budget.get("budget_envelope") or {})
         candidate_output = apply_budget_envelope_to_action_candidates(candidate_output, envelope)
         generic_action_specs = apply_budget_envelope_to_generic_action_specs(
             generic_action_specs,
             envelope,
+        )
+        owner_selection = dict(budget.get("owner_selection") or {})
+        generic_action_specs = _apply_owner_selection_to_generic_action_specs(
+            specs=generic_action_specs,
+            owner_selection=owner_selection,
+            envelope=envelope,
+        )
+        candidate_output = _apply_owner_selection_to_action_candidates(
+            candidates=candidate_output,
+            generic_specs=generic_action_specs,
         )
         payload_contracts = [
             item.model_dump(mode="json")
@@ -713,6 +729,7 @@ class TradingConsoleReadModelService:
         snap: TradingConsoleSnapshot,
         risk_tier: str = "tiny",
         custom: Optional[dict[str, Any]] = None,
+        owner_selection: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         budget = build_budget_recommendation(
             account_summary=snap.account_snapshot_summary,
@@ -721,6 +738,7 @@ class TradingConsoleReadModelService:
             freshness=self._freshness(snap),
             risk_tier=risk_tier,
             custom=custom,
+            owner_selection=owner_selection,
         )
         return budget.model_dump(mode="json")
 
@@ -1741,6 +1759,243 @@ def _optional_nonempty_str(value: Any) -> Optional[str]:
     return text or None
 
 
+def _owner_budget_selection_from(
+    *,
+    owner_scope: dict[str, Any],
+    market_input: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "family": owner_scope.get("family") or market_input.get("mapped_family"),
+        "carrier_id": owner_scope.get("carrier_id"),
+        "symbol": owner_scope.get("symbol"),
+        "symbol_preference": market_input.get("symbol_preference"),
+        "side": owner_scope.get("side") or market_input.get("side"),
+        "quantity": owner_scope.get("quantity"),
+        "max_notional": owner_scope.get("max_notional"),
+        "leverage": owner_scope.get("leverage"),
+        "max_attempts": owner_scope.get("max_attempts"),
+        "protection_mode": owner_scope.get("protection_mode"),
+        "review_requirement": owner_scope.get("review_requirement"),
+    }
+
+
+def _apply_owner_selection_to_generic_action_specs(
+    *,
+    specs: list[dict[str, Any]],
+    owner_selection: dict[str, Any],
+    envelope: dict[str, Any],
+) -> list[dict[str, Any]]:
+    selected_symbol = _normalized_action_symbol(
+        owner_selection.get("selected_symbol")
+        or owner_selection.get("symbol")
+        or owner_selection.get("symbol_preference")
+    )
+    selected_side = _normalized_action_side(owner_selection.get("selected_side") or owner_selection.get("side"))
+    selected_quantity = _optional_nonempty_str(
+        owner_selection.get("selected_quantity") or owner_selection.get("quantity")
+    )
+    selected_max_notional = _optional_nonempty_str(
+        owner_selection.get("selected_max_notional") or owner_selection.get("max_notional")
+    )
+    selected_leverage = _optional_nonempty_str(
+        owner_selection.get("selected_leverage") or owner_selection.get("leverage")
+    )
+    selected_max_attempts = _optional_int_value(
+        owner_selection.get("selected_max_attempts") or owner_selection.get("max_attempts")
+    )
+    selected_protection_mode = _optional_nonempty_str(
+        owner_selection.get("selected_protection_mode") or owner_selection.get("protection_mode")
+    )
+    selected_review_requirement = _optional_nonempty_str(
+        owner_selection.get("selected_review_requirement") or owner_selection.get("review_requirement")
+    )
+    has_owner_values = any(
+        value is not None
+        for value in [
+            selected_symbol,
+            selected_side,
+            selected_quantity,
+            selected_max_notional,
+            selected_leverage,
+            selected_max_attempts,
+            selected_protection_mode,
+            selected_review_requirement,
+        ]
+    )
+    if not has_owner_values:
+        return specs
+    selected_family = _optional_nonempty_str(owner_selection.get("family"))
+    selected_carrier_id = _optional_nonempty_str(owner_selection.get("carrier_id"))
+    result: list[dict[str, Any]] = []
+    for spec in specs:
+        item = dict(spec)
+        applies_to_spec = (
+            bool(selected_carrier_id and item.get("carrier_id") == selected_carrier_id)
+            or bool(selected_family and item.get("family") == selected_family)
+            or not selected_family and not selected_carrier_id
+        )
+        if not applies_to_spec:
+            result.append(item)
+            continue
+        hard_blockers = [str(value) for value in item.get("hard_blockers") or []]
+        warnings = [str(value) for value in item.get("warnings") or []]
+        owner_scope = {
+            "symbol": selected_symbol,
+            "side": selected_side,
+            "quantity": selected_quantity,
+            "max_notional": selected_max_notional,
+            "leverage": selected_leverage,
+            "max_attempts": selected_max_attempts,
+            "protection_mode": selected_protection_mode,
+            "review_requirement": selected_review_requirement,
+        }
+        if selected_symbol is not None:
+            item["symbol"] = selected_symbol
+        if selected_side is not None:
+            item["side"] = selected_side
+        if selected_quantity is not None:
+            item["quantity"] = selected_quantity
+            item["recommended_quantity"] = selected_quantity
+        if selected_max_notional is not None:
+            item["max_notional"] = selected_max_notional
+            item["recommended_max_notional"] = selected_max_notional
+        if selected_leverage is not None:
+            item["leverage"] = selected_leverage
+        if selected_max_attempts is not None:
+            item["max_attempts"] = selected_max_attempts
+        if selected_protection_mode is not None:
+            item["protection_mode"] = selected_protection_mode
+        if selected_review_requirement is not None:
+            item["review_requirement"] = selected_review_requirement
+
+        supported_symbols = [str(value) for value in item.get("supported_symbols") or []]
+        supported_sides = [str(value).lower() for value in item.get("supported_sides") or []]
+        if selected_symbol and supported_symbols and selected_symbol not in supported_symbols:
+            hard_blockers.append("owner_symbol_not_supported_by_carrier")
+        if selected_side and supported_sides and selected_side not in supported_sides:
+            hard_blockers.append("owner_side_not_supported_by_carrier")
+        envelope_max_notional = _decimal_or_none(envelope.get("max_notional_per_action"))
+        owner_max_notional = _decimal_or_none(selected_max_notional)
+        if (
+            owner_max_notional is not None
+            and envelope_max_notional is not None
+            and owner_max_notional > envelope_max_notional
+        ):
+            hard_blockers.append("owner_max_notional_exceeds_budget_envelope")
+        envelope_leverage = _decimal_or_none(envelope.get("max_leverage"))
+        owner_leverage = _decimal_or_none(selected_leverage)
+        if (
+            owner_leverage is not None
+            and envelope_leverage is not None
+            and owner_leverage > envelope_leverage
+        ):
+            hard_blockers.append("owner_leverage_exceeds_budget_envelope")
+        envelope_max_attempts = _optional_int_value(envelope.get("max_attempts"))
+        if (
+            selected_max_attempts is not None
+            and envelope_max_attempts is not None
+            and selected_max_attempts > envelope_max_attempts
+        ):
+            hard_blockers.append("owner_max_attempts_exceeds_budget_envelope")
+        if selected_protection_mode and selected_protection_mode != "single_tp_plus_sl":
+            hard_blockers.append("owner_protection_mode_not_supported")
+        if not selected_quantity:
+            warnings.append("owner_quantity_missing")
+        if not selected_max_notional:
+            warnings.append("owner_max_notional_missing")
+        item["owner_selected_scope"] = {
+            key: value for key, value in owner_scope.items() if value not in (None, "")
+        }
+        item["owner_selection_status"] = owner_selection.get("status") or "not_provided"
+        item["warnings"] = _dedupe_strings(warnings)
+        item["hard_blockers"] = _dedupe_strings(hard_blockers)
+        item["backend_actionable"] = False
+        item["frontend_action_enabled"] = False
+        item["places_order"] = False
+        result.append(item)
+    return result
+
+
+def _apply_owner_selection_to_action_candidates(
+    *,
+    candidates: list[dict[str, Any]],
+    generic_specs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for candidate in candidates:
+        item = dict(candidate)
+        carrier_id = item.get("carrier_id")
+        family = item.get("family")
+        spec = (
+            _first_match(generic_specs, lambda value: carrier_id and value.get("carrier_id") == carrier_id)
+            or _first_match(generic_specs, lambda value: family and value.get("family") == family)
+            or {}
+        )
+        sizing = dict(item.get("recommended_sizing") or {})
+        sizing["owner_selected_scope"] = dict(spec.get("owner_selected_scope") or {})
+        sizing["owner_selection_status"] = spec.get("owner_selection_status")
+        sizing["hard_blockers"] = list(spec.get("hard_blockers") or [])
+        sizing["warnings"] = list(spec.get("warnings") or [])
+        sizing["action_allowed"] = False
+        item["recommended_sizing"] = sizing
+        item["frontend_action_enabled"] = False
+        item["may_execute_live"] = False
+        result.append(item)
+    return result
+
+
+def _normalized_action_symbol(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    if not text:
+        return None
+    aliases = {
+        "BTC": "BTC/USDT:USDT",
+        "BTCUSDT": "BTC/USDT:USDT",
+        "BTC/USDT": "BTC/USDT:USDT",
+        "ETH": "ETH/USDT:USDT",
+        "ETHUSDT": "ETH/USDT:USDT",
+        "ETH/USDT": "ETH/USDT:USDT",
+        "SOL": "SOL/USDT:USDT",
+        "SOLUSDT": "SOL/USDT:USDT",
+        "SOL/USDT": "SOL/USDT:USDT",
+        "BNB": "BNB/USDT:USDT",
+        "BNBUSDT": "BNB/USDT:USDT",
+        "BNB/USDT": "BNB/USDT:USDT",
+    }
+    return aliases.get(text, text)
+
+
+def _normalized_action_side(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"buy", "long"}:
+        return "long"
+    if text in {"sell", "short"}:
+        return "short"
+    return text or None
+
+
+def _optional_int_value(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _decimal_or_none(value: Any) -> Optional[Decimal]:
+    if value in (None, "", "not_available"):
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
 def _select_action_entry_candidate(
     *,
     market_input: dict[str, Any],
@@ -1774,6 +2029,18 @@ def _select_action_entry_candidate(
     payload_contract = _first_match(payload_contracts, selected_match) or {}
     action_entry = _first_match(action_entry_output, selected_match) or {}
     required_scope = dict(payload_contract.get("required_owner_scope") or {})
+    for field in [
+        "symbol",
+        "side",
+        "quantity",
+        "max_notional",
+        "leverage",
+        "max_attempts",
+        "protection_mode",
+        "review_requirement",
+    ]:
+        if action_spec.get(field) not in (None, ""):
+            required_scope[field] = action_spec.get(field)
     return {
         "family": selected_family,
         "strategy_family_id": (
@@ -1991,6 +2258,11 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
     budget = dict(data.get("budget_recommendation") or {})
     envelope = dict(budget.get("budget_envelope") or {})
     account_capacity = dict(budget.get("account_capacity") or {})
+    owner_budget_selection = dict(budget.get("owner_selection") or {})
+    recommended_symbols = [
+        dict(item) for item in budget.get("recommended_symbols") or []
+        if isinstance(item, dict)
+    ]
     selected_candidate = dict(data.get("selected_candidate") or {})
     selected_spec = dict(selected_candidate.get("generic_action_spec") or {})
     risk_review = dict(data.get("risk_review") or {})
@@ -2099,6 +2371,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
                 {"regime": "volatility_expansion", "label": "波动扩张", "family": "Volatility expansion"},
             ],
             "candidate_choices": candidate_choices,
+            "recommended_symbols": recommended_symbols,
             "range_candidate": _first_match(
                 candidate_choices,
                 lambda item: item.get("proposal_role") == "range_candidate",
@@ -2106,6 +2379,16 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         },
         "budget_summary": {
             "status": budget_status,
+            "owner_selection_status": owner_budget_selection.get("status"),
+            "selected_symbol": owner_budget_selection.get("selected_symbol"),
+            "selected_side": owner_budget_selection.get("selected_side"),
+            "selected_quantity": owner_budget_selection.get("selected_quantity"),
+            "selected_max_notional": owner_budget_selection.get("selected_max_notional"),
+            "selected_leverage": owner_budget_selection.get("selected_leverage"),
+            "selected_max_attempts": owner_budget_selection.get("selected_max_attempts"),
+            "selected_protection_mode": owner_budget_selection.get("selected_protection_mode"),
+            "selected_review_requirement": owner_budget_selection.get("selected_review_requirement"),
+            "recommended_symbols": recommended_symbols,
             "account_capacity_status": account_capacity.get("status"),
             "account_equity": account_capacity.get("account_equity"),
             "available_balance": account_capacity.get("available_balance"),
@@ -2121,25 +2404,40 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
                 item for item in budget.get("blockers") or []
                 if isinstance(item, dict) and item.get("severity") == "hard_blocker"
             ],
+            "retry_conditions": [
+                item.get("retry_condition")
+                for item in budget.get("blockers") or []
+                if isinstance(item, dict) and item.get("retry_condition")
+            ],
             "owner_confirmation_required": True,
             "action_allowed": False,
         },
         "selected_action_proposal": {
             "family": selected_candidate.get("family"),
             "carrier_id": selected_candidate.get("carrier_id"),
+            "owner_selection_status": owner_budget_selection.get("status"),
+            "owner_selected_scope": dict(selected_spec.get("owner_selected_scope") or {}),
             "proposal_role": selected_spec.get("proposal_role"),
             "market_regime": selected_spec.get("market_regime"),
             "symbol": selected_spec.get("symbol"),
             "side": selected_spec.get("side"),
+            "quantity": selected_spec.get("quantity"),
             "recommended_quantity": selected_spec.get("recommended_quantity"),
             "recommended_max_notional": selected_spec.get("recommended_max_notional"),
             "max_notional": selected_spec.get("max_notional"),
             "leverage": selected_spec.get("leverage"),
             "max_attempts": selected_spec.get("max_attempts"),
+            "protection_mode": selected_spec.get("protection_mode"),
+            "review_requirement": selected_spec.get("review_requirement"),
             "protection_template": selected_spec.get("protection_template") or {},
             "review_template": selected_spec.get("review_template") or {},
             "warnings": list(selected_spec.get("warnings") or []),
             "hard_blockers": list(selected_spec.get("hard_blockers") or []),
+            "retry_conditions": [
+                item.get("retry_condition")
+                for item in budget.get("blockers") or []
+                if isinstance(item, dict) and item.get("retry_condition")
+            ],
             "backend_actionable": action_state.get("backend_actionable") is True,
             "frontend_action_enabled": action_state.get("frontend_action_enabled") is True,
             "places_order": False,
@@ -2178,11 +2476,17 @@ def _owner_action_candidate_choices(
                 "candidate_state": candidate.get("candidate_state"),
                 "action_candidate_status": candidate.get("action_candidate_status"),
                 "generic_action_spec_status": spec.get("status"),
+                "supported_symbols": list(spec.get("supported_symbols") or []),
+                "supported_sides": list(spec.get("supported_sides") or []),
                 "symbol": spec.get("symbol"),
                 "side": spec.get("side"),
+                "owner_selected_scope": dict(spec.get("owner_selected_scope") or {}),
                 "recommended_quantity": spec.get("recommended_quantity"),
                 "recommended_max_notional": spec.get("recommended_max_notional"),
                 "budget_recommendation_status": spec.get("budget_recommendation_status"),
+                "owner_selection_status": spec.get("owner_selection_status"),
+                "warnings": list(spec.get("warnings") or []),
+                "hard_blockers": list(spec.get("hard_blockers") or []),
                 "warning_count": candidate.get("warning_count", 0),
                 "hard_blocker_count": candidate.get("hard_blocker_count", 0),
                 "backend_actionable": False,

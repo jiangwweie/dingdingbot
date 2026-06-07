@@ -40,6 +40,8 @@ const INITIAL_INPUT: ActionEntryInput = {
   review_requirement: 'post_action_review_required',
 };
 
+const SYMBOL_OPTIONS = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'BNB/USDT:USDT'];
+
 const regimeLabel: Record<string, string> = {
   trend: '趋势',
   volatility_expansion: '波动扩张',
@@ -171,6 +173,7 @@ export default function ActionEntry() {
   const budgetRecommendation = pageData.budget_recommendation || {};
   const budgetSummary = ownerActionFlow.budget_summary || {};
   const candidateChoices = asArray<any>(ownerActionFlow.market_selection?.candidate_choices);
+  const recommendedSymbols = asArray<any>(ownerActionFlow.market_selection?.recommended_symbols || budgetSummary.recommended_symbols || budgetRecommendation.recommended_symbols);
   const selectedProposal = ownerActionFlow.selected_action_proposal || {};
   const budgetMissingFacts = asArray<string>(budgetSummary.missing_facts);
   const budgetHardBlockers = asArray<any>(budgetSummary.hard_blockers);
@@ -182,6 +185,10 @@ export default function ActionEntry() {
 
   const updateField = (field: keyof ActionEntryInput, value: string) => {
     setDraftInput((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateSymbol = (value: string) => {
+    setDraftInput((current) => ({ ...current, symbol: value, symbol_preference: value }));
   };
 
   const selectCandidate = (candidate: any) => {
@@ -281,8 +288,12 @@ export default function ActionEntry() {
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              <span className="text-xs font-medium text-slate-500">标的偏好</span>
-              <input value={draftInput.symbol_preference} onChange={(event) => updateField('symbol_preference', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
+              <span className="text-xs font-medium text-slate-500">标的</span>
+              <select value={draftInput.symbol || draftInput.symbol_preference} onChange={(event) => updateSymbol(event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                {SYMBOL_OPTIONS.map((symbol) => (
+                  <option key={symbol} value={symbol}>{symbol}</option>
+                ))}
+              </select>
             </label>
             <label className="space-y-1 text-sm">
               <span className="text-xs font-medium text-slate-500">方向</span>
@@ -305,7 +316,7 @@ export default function ActionEntry() {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <label className="space-y-1 text-sm">
               <span className="text-xs font-medium text-slate-500">Carrier</span>
               <input value={draftInput.carrier_id} onChange={(event) => updateField('carrier_id', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
@@ -319,8 +330,20 @@ export default function ActionEntry() {
               <input value={draftInput.leverage} onChange={(event) => updateField('leverage', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
             </label>
             <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-slate-500">尝试次数</span>
+              <input value={draftInput.max_attempts} onChange={(event) => updateField('max_attempts', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
+            </label>
+            <label className="space-y-1 text-sm">
               <span className="text-xs font-medium text-slate-500">保护模式</span>
-              <input value={draftInput.protection_mode} onChange={(event) => updateField('protection_mode', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
+              <select value={draftInput.protection_mode} onChange={(event) => updateField('protection_mode', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                <option value="single_tp_plus_sl">single_tp_plus_sl</option>
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-slate-500">复盘要求</span>
+              <select value={draftInput.review_requirement} onChange={(event) => updateField('review_requirement', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                <option value="post_action_review_required">post_action_review_required</option>
+              </select>
             </label>
           </div>
 
@@ -359,6 +382,46 @@ export default function ActionEntry() {
           <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
             <div className="text-xs text-slate-500">Leverage</div>
             <div className="font-mono">{displayValue(budgetSummary.recommended_leverage, '1')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Owner symbol</div>
+            <div className="font-mono">{displayValue(budgetSummary.selected_symbol, draftInput.symbol || '暂无')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Owner max</div>
+            <div className="font-mono">{displayValue(budgetSummary.selected_max_notional, draftInput.max_notional || '暂无')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Owner qty</div>
+            <div className="font-mono">{displayValue(budgetSummary.selected_quantity, draftInput.quantity || '暂无')}</div>
+          </div>
+          <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+            <div className="text-xs text-slate-500">Owner selection</div>
+            <div className="font-mono">{displayValue(budgetSummary.owner_selection_status, 'not_provided')}</div>
+          </div>
+        </div>
+        <div className="mt-4">
+          <h3 className="text-xs font-semibold text-slate-500">Recommended symbols</h3>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-4 gap-2">
+            {recommendedSymbols.map((item) => (
+              <button
+                key={item.symbol}
+                type="button"
+                onClick={() => updateSymbol(String(item.symbol || ''))}
+                className="rounded-md border border-slate-200 p-3 text-left text-sm hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{displayValue(item.symbol, '暂无')}</span>
+                  <Badge variant={item.status === 'blocked' ? 'danger' : item.status === 'warning' ? 'caution' : 'normal'}>
+                    {displayValue(item.status, 'selectable')}
+                  </Badge>
+                </div>
+                <div className="mt-2 line-clamp-2 text-xs text-slate-500">{displayValue(item.reason, 'Owner 可选择后进入预算核验。')}</div>
+                <div className="mt-2 text-xs text-slate-500">
+                  W {asArray(item.warnings).length} / B {asArray(item.blockers).length}
+                </div>
+              </button>
+            ))}
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -399,6 +462,7 @@ export default function ActionEntry() {
               <div>Registry：{candidate.action_registry_supported ? '支持' : '未支持'}</div>
               <div>Max：{displayValue(candidate.recommended_sizing?.max_notional_per_action, '暂无')}</div>
               <div>预算：{displayValue(candidate.recommended_sizing?.status, '暂无')}</div>
+              <div className="col-span-2">支持标的：{displayValue(candidateChoices.find((item) => item.carrier_id === candidate.carrier_id)?.supported_symbols?.join(', '), '暂无')}</div>
             </div>
             <button
               type="button"

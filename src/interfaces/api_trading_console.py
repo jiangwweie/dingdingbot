@@ -319,6 +319,15 @@ async def owner_action_flow(
 async def budget_recommendation(
     include_exchange: bool = Query(default=False),
     risk_tier: str = Query(default="tiny"),
+    symbol_preference: Optional[str] = Query(default=None),
+    symbol: Optional[str] = Query(default=None),
+    side: Optional[str] = Query(default=None),
+    quantity: Optional[str] = Query(default=None),
+    max_notional: Optional[str] = Query(default=None),
+    leverage: Optional[str] = Query(default=None),
+    max_attempts: Optional[int] = Query(default=None, ge=1, le=10),
+    protection_mode: Optional[str] = Query(default=None),
+    review_requirement: Optional[str] = Query(default=None),
     custom_total_budget: Optional[str] = Query(default=None),
     custom_max_notional_per_action: Optional[str] = Query(default=None),
     custom_max_daily_loss: Optional[str] = Query(default=None),
@@ -338,6 +347,17 @@ async def budget_recommendation(
             "max_active_positions": custom_max_active_positions,
             "max_attempts": custom_max_attempts,
             "max_leverage": custom_max_leverage,
+        },
+        owner_selection={
+            "symbol": symbol,
+            "symbol_preference": symbol_preference,
+            "side": side,
+            "quantity": quantity,
+            "max_notional": max_notional,
+            "leverage": leverage,
+            "max_attempts": max_attempts,
+            "protection_mode": protection_mode,
+            "review_requirement": review_requirement,
         },
     )
 

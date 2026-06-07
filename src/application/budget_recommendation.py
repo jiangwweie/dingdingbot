@@ -8,10 +8,21 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-DEFAULT_ALLOWED_SYMBOLS = ["SOL/USDT:USDT", "ETH/USDT:USDT"]
+DEFAULT_ALLOWED_SYMBOLS = [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "BNB/USDT:USDT",
+]
 DEFAULT_ALLOWED_SIDES = ["long"]
 DEFAULT_REVIEW_REQUIREMENT = "owner_confirmation_required_before_final_gate"
 DEFAULT_PROTECTION_MODE = "single_tp_plus_sl"
+DEFAULT_SYMBOL_REASONS = {
+    "BTC/USDT:USDT": "highest-liquidity benchmark symbol for cautious Owner review",
+    "ETH/USDT:USDT": "default mean-reversion/range example with broad liquidity",
+    "SOL/USDT:USDT": "current trend carrier example; higher volatility requires tighter Owner review",
+    "BNB/USDT:USDT": "historical BNB action-account context; not a default MR carrier unless supported",
+}
 
 
 class BudgetRecommendationModel(BaseModel):
@@ -89,6 +100,40 @@ class BudgetEnvelope(BudgetRecommendationModel):
     mutates_pg: Literal[False] = False
 
 
+class SymbolRecommendation(BudgetRecommendationModel):
+    symbol: str
+    status: Literal["recommended", "selectable", "warning", "blocked"]
+    suitability: Literal["default_example", "suitable", "conditional", "blocked"]
+    reason: str
+    owner_preferred: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    blockers: list[BlockerRecord] = Field(default_factory=list)
+    action_allowed: Literal[False] = False
+    grants_trading_permission: Literal[False] = False
+
+
+class OwnerBudgetSelection(BudgetRecommendationModel):
+    status: Literal[
+        "not_provided",
+        "within_recommendation",
+        "warning_owner_review_required",
+        "blocked_by_budget_policy",
+    ]
+    selected_symbol: Optional[str] = None
+    selected_side: Optional[str] = None
+    selected_quantity: Optional[str] = None
+    selected_max_notional: Optional[str] = None
+    selected_leverage: Optional[str] = None
+    selected_max_attempts: Optional[int] = None
+    selected_protection_mode: Optional[str] = None
+    selected_review_requirement: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    blockers: list[BlockerRecord] = Field(default_factory=list)
+    owner_confirmation_required: Literal[True] = True
+    action_allowed: Literal[False] = False
+    grants_trading_permission: Literal[False] = False
+
+
 class BudgetedActionSizing(BudgetRecommendationModel):
     family: str
     strategy_family_id: str
@@ -129,6 +174,8 @@ class BudgetRecommendation(BudgetRecommendationModel):
     account_capacity: AccountCapacity
     risk_tier: RiskTier
     budget_envelope: BudgetEnvelope
+    recommended_symbols: list[SymbolRecommendation]
+    owner_selection: OwnerBudgetSelection
     examples: list[BudgetRecommendationExample]
     missing_facts: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -161,6 +208,7 @@ def build_budget_recommendation(
     allowed_symbols: Optional[list[str]] = None,
     allowed_sides: Optional[list[str]] = None,
     custom: Optional[dict[str, Any]] = None,
+    owner_selection: Optional[dict[str, Any]] = None,
 ) -> BudgetRecommendation:
     symbols = list(allowed_symbols or DEFAULT_ALLOWED_SYMBOLS)
     sides = list(allowed_sides or DEFAULT_ALLOWED_SIDES)
@@ -177,14 +225,31 @@ def build_budget_recommendation(
         custom=custom or {},
     )
     envelope = build_budget_envelope(capacity=capacity, risk_tier=tier)
+    symbol_recommendations = build_symbol_recommendations(
+        allowed_symbols=symbols,
+        owner_symbol=(
+            (owner_selection or {}).get("symbol")
+            or (owner_selection or {}).get("symbol_preference")
+        ),
+    )
+    owner_budget_selection = build_owner_budget_selection(
+        envelope=envelope,
+        owner_selection=owner_selection or {},
+    )
     examples = _budget_examples(envelope=envelope)
-    blockers = _dedupe_blockers([*capacity.blockers, *envelope.blockers])
-    warnings = _dedupe([*capacity.warnings, *envelope.warnings])
+    blockers = _dedupe_blockers(
+        [*capacity.blockers, *envelope.blockers, *owner_budget_selection.blockers]
+    )
+    warnings = _dedupe(
+        [*capacity.warnings, *envelope.warnings, *owner_budget_selection.warnings]
+    )
     missing_facts = _missing_account_facts(capacity)
     return BudgetRecommendation(
         account_capacity=capacity,
         risk_tier=tier,
         budget_envelope=envelope,
+        recommended_symbols=symbol_recommendations,
+        owner_selection=owner_budget_selection,
         examples=examples,
         missing_facts=missing_facts,
         warnings=warnings,
@@ -193,6 +258,182 @@ def build_budget_recommendation(
             "Owner must confirm exact symbol, side, quantity, max_notional, leverage, "
             "max_attempts, protection mode, and review requirement before any final gate."
         ),
+    )
+
+
+def build_symbol_recommendations(
+    *,
+    allowed_symbols: list[str],
+    owner_symbol: Optional[Any] = None,
+) -> list[SymbolRecommendation]:
+    normalized_owner_symbol = _normalize_symbol(owner_symbol)
+    recommendations: list[SymbolRecommendation] = []
+    for symbol in DEFAULT_ALLOWED_SYMBOLS:
+        blockers: list[BlockerRecord] = []
+        warnings: list[str] = []
+        if symbol not in allowed_symbols:
+            blockers.append(
+                BlockerRecord(
+                    id=f"BUDGET-SYMBOL-{_symbol_code(symbol)}-NOT-ALLOWED",
+                    stage="SymbolRecommendation",
+                    path="TradingConsole -> BudgetEnvelope -> SymbolRecommendation",
+                    evidence=f"{symbol} is outside the current budget allowed_symbols list.",
+                    severity="hard_blocker",
+                    bridge="blocked_symbol_recommendation",
+                    retry_condition="Owner selects a symbol in BudgetEnvelope.allowed_symbols or updates allowed scope through governance.",
+                )
+            )
+        if symbol in {"SOL/USDT:USDT", "BNB/USDT:USDT"}:
+            warnings.append("higher idiosyncratic risk; Owner review required before any final gate")
+        status: Literal["recommended", "selectable", "warning", "blocked"]
+        suitability: Literal["default_example", "suitable", "conditional", "blocked"]
+        if blockers:
+            status = "blocked"
+            suitability = "blocked"
+        elif symbol == "ETH/USDT:USDT":
+            status = "recommended"
+            suitability = "default_example"
+        elif warnings:
+            status = "warning"
+            suitability = "conditional"
+        else:
+            status = "selectable"
+            suitability = "suitable"
+        recommendations.append(
+            SymbolRecommendation(
+                symbol=symbol,
+                status=status,
+                suitability=suitability,
+                reason=DEFAULT_SYMBOL_REASONS.get(symbol, "Owner-selectable symbol for review."),
+                owner_preferred=normalized_owner_symbol == symbol,
+                warnings=warnings,
+                blockers=blockers,
+            )
+        )
+    return recommendations
+
+
+def build_owner_budget_selection(
+    *,
+    envelope: BudgetEnvelope,
+    owner_selection: dict[str, Any],
+) -> OwnerBudgetSelection:
+    selected_symbol = _normalize_symbol(
+        owner_selection.get("symbol") or owner_selection.get("symbol_preference")
+    )
+    selected_side = _normalize_side(owner_selection.get("side"))
+    selected_quantity = _format_optional_decimal(_decimal(owner_selection.get("quantity")))
+    selected_max_notional = _money(_decimal(owner_selection.get("max_notional")))
+    selected_leverage = _format_optional_decimal(_decimal(owner_selection.get("leverage")))
+    selected_max_attempts = _optional_int(owner_selection.get("max_attempts"))
+    selected_protection_mode = _optional_text(owner_selection.get("protection_mode"))
+    selected_review_requirement = _optional_text(owner_selection.get("review_requirement"))
+    has_selection = any(
+        value is not None
+        for value in [
+            selected_symbol,
+            selected_side,
+            selected_quantity,
+            selected_max_notional,
+            selected_leverage,
+            selected_max_attempts,
+            selected_protection_mode,
+            selected_review_requirement,
+        ]
+    )
+    if not has_selection:
+        return OwnerBudgetSelection(status="not_provided")
+    blockers: list[BlockerRecord] = []
+    warnings: list[str] = []
+    if selected_symbol and selected_symbol not in envelope.allowed_symbols:
+        blockers.append(
+            _owner_selection_blocker(
+                blocker_id="BUDGET-OWNER-SELECTION-SYMBOL",
+                evidence=f"Owner selected {selected_symbol}, outside BudgetEnvelope.allowed_symbols.",
+                retry_condition="Choose a BudgetEnvelope.allowed_symbols value or update budget policy through governance.",
+            )
+        )
+    if selected_side and selected_side not in envelope.allowed_sides:
+        blockers.append(
+            _owner_selection_blocker(
+                blocker_id="BUDGET-OWNER-SELECTION-SIDE",
+                evidence=f"Owner selected {selected_side}, outside BudgetEnvelope.allowed_sides.",
+                retry_condition="Choose an allowed side or update budget policy through governance.",
+            )
+        )
+    envelope_max_notional = _decimal(envelope.max_notional_per_action)
+    owner_max_notional = _decimal(selected_max_notional)
+    if (
+        owner_max_notional is not None
+        and envelope_max_notional is not None
+        and owner_max_notional > envelope_max_notional
+    ):
+        blockers.append(
+            _owner_selection_blocker(
+                blocker_id="BUDGET-OWNER-SELECTION-MAX-NOTIONAL",
+                evidence=(
+                    f"Owner selected max_notional {selected_max_notional}, above "
+                    f"BudgetEnvelope.max_notional_per_action {envelope.max_notional_per_action}."
+                ),
+                retry_condition="Lower max_notional or regenerate a valid BudgetEnvelope after fresh account facts.",
+            )
+        )
+    owner_leverage = _decimal(selected_leverage)
+    envelope_leverage = _decimal(envelope.max_leverage)
+    if owner_leverage is not None and envelope_leverage is not None and owner_leverage > envelope_leverage:
+        blockers.append(
+            _owner_selection_blocker(
+                blocker_id="BUDGET-OWNER-SELECTION-LEVERAGE",
+                evidence=f"Owner selected leverage {selected_leverage}, above BudgetEnvelope.max_leverage {envelope.max_leverage}.",
+                retry_condition="Lower leverage or update risk tier through governance.",
+            )
+        )
+    if selected_max_attempts is not None and selected_max_attempts > envelope.max_attempts:
+        blockers.append(
+            _owner_selection_blocker(
+                blocker_id="BUDGET-OWNER-SELECTION-MAX-ATTEMPTS",
+                evidence=(
+                    f"Owner selected max_attempts {selected_max_attempts}, above "
+                    f"BudgetEnvelope.max_attempts {envelope.max_attempts}."
+                ),
+                retry_condition="Lower max_attempts or update risk tier through governance.",
+            )
+        )
+    if selected_protection_mode and selected_protection_mode != DEFAULT_PROTECTION_MODE:
+        blockers.append(
+            _owner_selection_blocker(
+                blocker_id="BUDGET-OWNER-SELECTION-PROTECTION",
+                evidence=f"Owner selected protection_mode {selected_protection_mode}; current template requires {DEFAULT_PROTECTION_MODE}.",
+                retry_condition="Use single_tp_plus_sl or add a reviewed protection template.",
+            )
+        )
+    if selected_max_notional is None:
+        warnings.append("Owner max_notional is not selected; FinalGate must fail closed before any action.")
+    if selected_quantity is None:
+        warnings.append("Owner quantity is not selected; FinalGate must fail closed before any action.")
+    if blockers:
+        status: Literal[
+            "not_provided",
+            "within_recommendation",
+            "warning_owner_review_required",
+            "blocked_by_budget_policy",
+        ] = "blocked_by_budget_policy"
+    elif warnings:
+        status = "warning_owner_review_required"
+    else:
+        status = "within_recommendation"
+    return OwnerBudgetSelection(
+        status=status,
+        selected_symbol=selected_symbol,
+        selected_side=selected_side,
+        selected_quantity=selected_quantity,
+        selected_max_notional=selected_max_notional,
+        selected_leverage=selected_leverage,
+        selected_max_attempts=selected_max_attempts,
+        selected_protection_mode=selected_protection_mode,
+        selected_review_requirement=selected_review_requirement,
+        warnings=warnings,
+        blockers=blockers,
     )
 
 
@@ -571,6 +812,12 @@ def _decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
+def _format_optional_decimal(value: Optional[Decimal]) -> Optional[str]:
+    if value is None:
+        return None
+    return _format_decimal(value)
+
+
 def _money(value: Optional[Decimal]) -> Optional[str]:
     if value is None:
         return None
@@ -580,6 +827,77 @@ def _money(value: Optional[Decimal]) -> Optional[str]:
 def _format_decimal(value: Decimal) -> str:
     text = format(value.normalize(), "f")
     return "0" if text == "-0" else text
+
+
+def _normalize_symbol(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    if not text:
+        return None
+    aliases = {
+        "BTC": "BTC/USDT:USDT",
+        "BTCUSDT": "BTC/USDT:USDT",
+        "BTC/USDT": "BTC/USDT:USDT",
+        "ETH": "ETH/USDT:USDT",
+        "ETHUSDT": "ETH/USDT:USDT",
+        "ETH/USDT": "ETH/USDT:USDT",
+        "SOL": "SOL/USDT:USDT",
+        "SOLUSDT": "SOL/USDT:USDT",
+        "SOL/USDT": "SOL/USDT:USDT",
+        "BNB": "BNB/USDT:USDT",
+        "BNBUSDT": "BNB/USDT:USDT",
+        "BNB/USDT": "BNB/USDT:USDT",
+    }
+    return aliases.get(text, text)
+
+
+def _symbol_code(symbol: str) -> str:
+    return symbol.split("/", maxsplit=1)[0].replace(":", "_").replace("-", "_")
+
+
+def _normalize_side(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"long", "buy"}:
+        return "long"
+    if text in {"short", "sell"}:
+        return "short"
+    return text or None
+
+
+def _optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _owner_selection_blocker(
+    *,
+    blocker_id: str,
+    evidence: str,
+    retry_condition: str,
+) -> BlockerRecord:
+    return BlockerRecord(
+        id=blocker_id,
+        stage="OwnerBudgetSelection",
+        path="TradingConsole -> OwnerSelection -> BudgetEnvelope",
+        evidence=evidence,
+        severity="hard_blocker",
+        bridge="owner_selection_budget_policy_validation",
+        retry_condition=retry_condition,
+    )
 
 
 def _dedupe(items: list[str]) -> list[str]:

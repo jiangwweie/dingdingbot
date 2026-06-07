@@ -1710,6 +1710,13 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     budget = payload["data"]["budget_recommendation"]
     assert budget["risk_tier"]["tier"] == "tiny"
     assert budget["budget_envelope"]["status"] == "degraded_missing_account_facts"
+    assert [item["symbol"] for item in budget["recommended_symbols"]] == [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+        "BNB/USDT:USDT",
+    ]
+    assert budget["owner_selection"]["status"] == "not_provided"
     assert budget["budgeted_autonomy_enabled"] is False
     assert budget["action_allowed"] is False
     assert budget["no_action_guarantee"]["places_order"] is False
@@ -1872,6 +1879,15 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert flow["unsafe_action_enabled"] is False
     assert flow["budget_summary"]["status"] == "degraded_missing_account_facts"
     assert flow["budget_summary"]["account_capacity_status"] == "degraded"
+    assert flow["budget_summary"]["owner_selection_status"] == "within_recommendation"
+    assert flow["budget_summary"]["selected_symbol"] == "ETH/USDT:USDT"
+    assert flow["budget_summary"]["selected_max_notional"] == "20"
+    assert [item["symbol"] for item in flow["budget_summary"]["recommended_symbols"]] == [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+        "BNB/USDT:USDT",
+    ]
     assert "account_equity" in flow["budget_summary"]["missing_facts"]
     assert flow["budget_summary"]["action_allowed"] is False
     assert flow["market_selection"]["selected_regime"] == "mean_reversion"
@@ -1885,8 +1901,10 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     proposal = flow["selected_action_proposal"]
     assert proposal["proposal_role"] == "range_candidate"
     assert proposal["market_regime"] == "mean_reversion"
+    assert proposal["owner_selection_status"] == "within_recommendation"
+    assert proposal["owner_selected_scope"]["symbol"] == "ETH/USDT:USDT"
     assert proposal["recommended_quantity"] == "0.01"
-    assert proposal["recommended_max_notional"] is None
+    assert proposal["recommended_max_notional"] == "20"
     assert proposal["protection_template"]["mode"] == "single_tp_plus_sl"
     assert proposal["review_template"]["template_id"] == (
         "review-template:MR-001-live-readonly-v0"
@@ -1915,6 +1933,99 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert flow["timeline"]["protection_order_count"] == 2
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_allows_mr_btc_owner_selection_without_actions(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "market_regime": "mean_reversion",
+                "family": "Mean reversion",
+                "strategy_family_id": "MR-001-live-readonly-v0",
+                "carrier_id": "MR-001-live-readonly-v0",
+                "symbol": "BTC/USDT:USDT",
+                "side": "long",
+                "quantity": "0.001",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    selected = data["selected_candidate"]
+    assert selected["family"] == "Mean reversion"
+    assert selected["scope_review"]["verdict"] == "matched"
+    assert selected["generic_action_spec"]["symbol"] == "BTC/USDT:USDT"
+    assert selected["generic_action_spec"]["recommended_quantity"] == "0.001"
+    assert selected["generic_action_spec"]["recommended_max_notional"] == "20"
+    flow = data["owner_action_flow"]
+    assert flow["market_selection"]["range_candidate"]["carrier_id"] == (
+        "MR-001-live-readonly-v0"
+    )
+    proposal = flow["selected_action_proposal"]
+    assert proposal["symbol"] == "BTC/USDT:USDT"
+    assert proposal["proposal_role"] == "range_candidate"
+    assert proposal["owner_selected_scope"]["symbol"] == "BTC/USDT:USDT"
+    assert proposal["backend_actionable"] is False
+    assert proposal["frontend_action_enabled"] is False
+    assert proposal["places_order"] is False
+    assert data["action_state"]["enabled"] is False
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_blocks_mr_symbol_outside_carrier_bounds(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "market_regime": "mean_reversion",
+                "family": "Mean reversion",
+                "strategy_family_id": "MR-001-live-readonly-v0",
+                "carrier_id": "MR-001-live-readonly-v0",
+                "symbol": "SOL/USDT:USDT",
+                "side": "long",
+                "quantity": "0.1",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    selected_spec = data["selected_candidate"]["generic_action_spec"]
+    assert selected_spec["symbol"] == "SOL/USDT:USDT"
+    assert "owner_symbol_not_supported_by_carrier" in selected_spec["hard_blockers"]
+    proposal = data["owner_action_flow"]["selected_action_proposal"]
+    assert proposal["symbol"] == "SOL/USDT:USDT"
+    assert "owner_symbol_not_supported_by_carrier" in proposal["hard_blockers"]
+    assert proposal["frontend_action_enabled"] is False
+    assert proposal["places_order"] is False
+    assert data["action_state"]["enabled"] is False
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 
@@ -1995,6 +2106,13 @@ def test_budget_recommendation_degrades_without_account_facts(monkeypatch):
     assert data["account_capacity"]["status"] == "degraded"
     assert data["account_capacity"]["account_equity"] is None
     assert data["budget_envelope"]["status"] == "degraded_missing_account_facts"
+    assert [item["symbol"] for item in data["recommended_symbols"]] == [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+        "BNB/USDT:USDT",
+    ]
+    assert data["owner_selection"]["status"] == "not_provided"
     assert "account_equity" in data["missing_facts"]
     assert "fresh_account_facts" in data["missing_facts"]
     blocker_ids = {item["id"] for item in data["blockers"]}
@@ -2047,7 +2165,12 @@ def test_budget_recommendation_uses_fresh_read_only_account_capacity(monkeypatch
     assert envelope["max_active_positions"] == 1
     assert envelope["max_attempts"] == 1
     assert envelope["max_leverage"] == "1"
-    assert envelope["allowed_symbols"] == ["SOL/USDT:USDT", "ETH/USDT:USDT"]
+    assert envelope["allowed_symbols"] == [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+        "BNB/USDT:USDT",
+    ]
     assert envelope["allowed_sides"] == ["long"]
     assert envelope["not_authorization"] is True
     assert envelope["grants_trading_permission"] is False

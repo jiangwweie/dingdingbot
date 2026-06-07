@@ -1288,6 +1288,12 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert trend.carrier_id == "TF-001-live-readonly-v0"
     assert trend.status == "valid_blocked_final_gate"
     assert trend.action_registry_supported is True
+    assert trend.supported_symbols == [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT",
+        "SOL/USDT:USDT",
+    ]
+    assert trend.supported_sides == ["long"]
     assert trend.symbol == "SOL/USDT:USDT"
     assert trend.side == "long"
     assert trend.quantity == "0.1"
@@ -1309,6 +1315,8 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert mean_reversion.action_registry_supported is False
     assert mean_reversion.proposal_role == "range_candidate"
     assert mean_reversion.market_regime == "mean_reversion"
+    assert mean_reversion.supported_symbols == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+    assert mean_reversion.supported_sides == ["long"]
     assert mean_reversion.symbol == "ETH/USDT:USDT"
     assert mean_reversion.side == "long"
     assert mean_reversion.quantity == "0.01"
