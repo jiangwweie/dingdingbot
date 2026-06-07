@@ -83,6 +83,10 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert carrier_specs["Trend"].scope_template["symbol"] == "SOL/USDT:USDT"
     assert carrier_specs["Trend"].scope_template["quantity"] == "0.1"
     assert carrier_specs["Volatility expansion"].action_registry_supported is False
+    assert carrier_specs["Mean reversion"].action_registry_supported is False
+    assert carrier_specs["Mean reversion"].scope_template["symbol"] == "ETH/USDT:USDT"
+    assert carrier_specs["Mean reversion"].scope_template["quantity"] == "0.01"
+    assert carrier_specs["Mean reversion"].scope_template["max_notional"] == "20"
     risk_specs = {item.family: item for item in state.risk_disclosure_specs}
     assert risk_specs["Trend"].weak_strategy_evidence_is_warning is True
     assert "weak strategy evidence" in risk_specs["Trend"].hard_blockers_not_included
@@ -1293,8 +1297,19 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
 
     assert specs_by_family["Volatility expansion"].status == "proposal_non_action"
     assert specs_by_family["Volatility expansion"].action_registry_supported is False
-    assert specs_by_family["Mean reversion"].status == "proposal_non_action"
-    assert specs_by_family["Mean reversion"].action_registry_supported is False
+    mean_reversion = specs_by_family["Mean reversion"]
+    assert mean_reversion.status == "proposal_non_action"
+    assert mean_reversion.action_registry_supported is False
+    assert mean_reversion.symbol == "ETH/USDT:USDT"
+    assert mean_reversion.side == "long"
+    assert mean_reversion.quantity == "0.01"
+    assert mean_reversion.max_notional == "20"
+    assert mean_reversion.leverage == "1"
+    assert mean_reversion.max_attempts == 1
+    assert mean_reversion.protection_mode == "single_tp_plus_sl"
+    assert mean_reversion.may_execute_live is False
+    assert mean_reversion.frontend_action_enabled is False
+    assert mean_reversion.places_order is False
 
     payloads_by_family = {
         item.family: item for item in state.action_entry_payload_contracts
@@ -1308,6 +1323,15 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert trend_payload.action_allowed is False
     assert trend_payload.may_execute_live is False
     assert trend_payload.frontend_action_enabled is False
+    mr_payload = payloads_by_family["Mean reversion"]
+    assert mr_payload.contract_status == "proposal_only"
+    assert mr_payload.required_owner_scope["symbol"] == "ETH/USDT:USDT"
+    assert mr_payload.required_owner_scope["quantity"] == "0.01"
+    assert mr_payload.required_owner_scope["max_notional"] == "20"
+    assert mr_payload.required_owner_scope["protection_mode"] == "single_tp_plus_sl"
+    assert mr_payload.action_allowed is False
+    assert mr_payload.may_execute_live is False
+    assert mr_payload.frontend_action_enabled is False
 
     action_entry_by_family = {
         item.family: item for item in state.trading_console_action_entry_output

@@ -554,6 +554,48 @@ class TradingConsoleReadModelService:
         market_input: Optional[dict[str, Any]] = None,
     ) -> TradingConsoleReadModelResponse:
         snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        data, blockers = self._action_entry_readiness_data(
+            snap=snap,
+            owner_scope=owner_scope,
+            market_input=market_input,
+        )
+        return self._response(
+            "action_entry_readiness",
+            snap,
+            blockers=blockers,
+            data=data,
+        )
+
+    async def owner_action_flow(
+        self,
+        *,
+        owner_scope: Optional[dict[str, Any]] = None,
+        market_input: Optional[dict[str, Any]] = None,
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        data, blockers = self._action_entry_readiness_data(
+            snap=snap,
+            owner_scope=owner_scope,
+            market_input=market_input,
+        )
+        data = {
+            **data,
+            "owner_action_flow": _owner_action_flow(data),
+        }
+        return self._response(
+            "owner_action_flow",
+            snap,
+            blockers=blockers,
+            data=data,
+        )
+
+    def _action_entry_readiness_data(
+        self,
+        *,
+        snap: TradingConsoleSnapshot,
+        owner_scope: Optional[dict[str, Any]] = None,
+        market_input: Optional[dict[str, Any]] = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         normalized_market_input = _normalize_action_entry_market_input(market_input)
         state = build_production_strategy_family_admission_state(
             current_authorization_state=snap.authorization_state,
@@ -590,37 +632,32 @@ class TradingConsoleReadModelService:
             payload_contracts=payload_contracts,
             action_entry_output=action_entry_output,
         )
-        return self._response(
-            "action_entry_readiness",
-            snap,
-            blockers=blockers,
-            data={
-                "owner_market_input": normalized_market_input,
-                "selected_candidate": selected_candidate,
-                "risk_review": _action_entry_risk_review(
-                    selected_candidate=selected_candidate,
-                    adapter_contract=state.generic_final_gate_adapter_contract.model_dump(mode="json"),
-                    blockers=blockers,
-                ),
-                "authorization_draft_path": _action_entry_authorization_draft_path(
-                    selected_candidate=selected_candidate,
-                    state_dump=state.model_dump(mode="json", exclude={"generated_at_ms"}),
-                ),
-                "final_gate_result": _action_entry_final_gate_result(
-                    selected_candidate=selected_candidate,
-                    blockers=blockers,
-                ),
-                "action_state": _action_entry_action_state(selected_candidate),
-                "post_action_state": _action_entry_post_action_state(snap),
-                "generic_final_gate_adapter_contract": (
-                    state.generic_final_gate_adapter_contract.model_dump(mode="json")
-                ),
-                "generic_action_specs": generic_action_specs,
-                "action_entry_payload_contracts": payload_contracts,
-                "action_entry_output": action_entry_output,
-                "candidate_output": candidate_output,
-            },
-        )
+        return {
+            "owner_market_input": normalized_market_input,
+            "selected_candidate": selected_candidate,
+            "risk_review": _action_entry_risk_review(
+                selected_candidate=selected_candidate,
+                adapter_contract=state.generic_final_gate_adapter_contract.model_dump(mode="json"),
+                blockers=blockers,
+            ),
+            "authorization_draft_path": _action_entry_authorization_draft_path(
+                selected_candidate=selected_candidate,
+                state_dump=state.model_dump(mode="json", exclude={"generated_at_ms"}),
+            ),
+            "final_gate_result": _action_entry_final_gate_result(
+                selected_candidate=selected_candidate,
+                blockers=blockers,
+            ),
+            "action_state": _action_entry_action_state(selected_candidate),
+            "post_action_state": _action_entry_post_action_state(snap),
+            "generic_final_gate_adapter_contract": (
+                state.generic_final_gate_adapter_contract.model_dump(mode="json")
+            ),
+            "generic_action_specs": generic_action_specs,
+            "action_entry_payload_contracts": payload_contracts,
+            "action_entry_output": action_entry_output,
+            "candidate_output": candidate_output,
+        }, blockers
 
     async def signal_marker_feed(
         self,
@@ -1867,6 +1904,91 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
             "tp_sl_orders": protection_orders[:5],
             "reviews": snap.review_records[:5],
             "audit_events": snap.audit_events[:5],
+        },
+    }
+
+
+def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
+    market_input = dict(data.get("owner_market_input") or {})
+    selected_candidate = dict(data.get("selected_candidate") or {})
+    risk_review = dict(data.get("risk_review") or {})
+    authorization_path = dict(data.get("authorization_draft_path") or {})
+    final_gate = dict(data.get("final_gate_result") or {})
+    action_state = dict(data.get("action_state") or {})
+    post_action = dict(data.get("post_action_state") or {})
+    action_enabled = action_state.get("enabled") is True
+    steps = [
+        {
+            "step": "market_input",
+            "label": "Owner market input",
+            "status": "ready" if market_input.get("regime") != "not_selected" else "pending",
+            "summary": market_input.get("mapped_family") or "No market regime selected.",
+        },
+        {
+            "step": "candidate_selection",
+            "label": "Candidate selection",
+            "status": "ready" if selected_candidate.get("carrier_id") else "pending",
+            "summary": selected_candidate.get("carrier_id") or "No candidate selected.",
+        },
+        {
+            "step": "risk_disclosure",
+            "label": "Risk disclosure",
+            "status": "blocked" if risk_review.get("hard_blocker_count", 0) else "warning",
+            "summary": (
+                f"{risk_review.get('warning_count', 0)} warnings / "
+                f"{risk_review.get('hard_blocker_count', 0)} hard blockers"
+            ),
+        },
+        {
+            "step": "authorization_draft",
+            "label": "Authorization draft readiness",
+            "status": (
+                "ready"
+                if authorization_path.get("official_service_path_available")
+                else "blocked"
+            ),
+            "summary": authorization_path.get("status") or "Authorization draft status unavailable.",
+        },
+        {
+            "step": "final_gate",
+            "label": "Final-gate result",
+            "status": "blocked" if final_gate.get("may_execute_live") is not True else "ready",
+            "summary": final_gate.get("status") or "Final gate not checked.",
+        },
+        {
+            "step": "action_state",
+            "label": "Action state",
+            "status": "ready" if action_enabled else "blocked",
+            "summary": (
+                action_state.get("label")
+                if action_enabled
+                else action_state.get("disabled_reason") or "Action disabled."
+            ),
+        },
+        {
+            "step": "post_action_evidence",
+            "label": "Post-action timeline / evidence",
+            "status": post_action.get("status") or "empty",
+            "summary": (
+                f"{post_action.get('intent_count', 0)} intents / "
+                f"{post_action.get('entry_order_count', 0)} entries / "
+                f"{post_action.get('protection_order_count', 0)} TP-SL / "
+                f"{post_action.get('review_count', 0)} reviews / "
+                f"{post_action.get('audit_event_count', 0)} audit events"
+            ),
+        },
+    ]
+    return {
+        "status": "actionable" if action_enabled else "not_actionable",
+        "unsafe_action_enabled": False,
+        "flow_steps": steps,
+        "timeline": {
+            "intent_count": post_action.get("intent_count", 0),
+            "entry_order_count": post_action.get("entry_order_count", 0),
+            "protection_order_count": post_action.get("protection_order_count", 0),
+            "review_count": post_action.get("review_count", 0),
+            "audit_event_count": post_action.get("audit_event_count", 0),
+            "retry_safety": post_action.get("retry_safety"),
         },
     }
 

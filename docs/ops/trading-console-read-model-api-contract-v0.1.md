@@ -612,9 +612,14 @@ facts when present; it must not fabricate missing post-action evidence.
 `generic_action_specs` is the first-class generic action contract layer. Trend
 may expose `TF-001-live-readonly-v0` as `status=valid_blocked_final_gate` with
 exact scope `SOL/USDT:USDT`, `long`, qty `0.1`, max notional `20`, leverage `1`,
-max attempts `1`, and `protection_mode=single_tp_plus_sl`. Volatility expansion
-and Mean reversion remain `status=proposal_non_action` unless their carriers are
-explicitly added to the official action registry in a later sprint.
+max attempts `1`, and `protection_mode=single_tp_plus_sl`. Mean reversion may
+expose `MR-001-live-readonly-v0` as a complete proposal template with exact
+scope `ETH/USDT:USDT`, `long`, qty `0.01`, max notional `20`, leverage `1`, max
+attempts `1`, and `protection_mode=single_tp_plus_sl`, but it must remain
+`status=proposal_non_action`, `action_registry_supported=false`, and
+`frontend_action_enabled=false` unless explicitly added to the official action
+registry in a later sprint. Volatility expansion remains a proposal/non-action
+candidate unless advanced later.
 
 `generic_final_gate_adapter_contract` defines the hard live-action gates:
 exact Owner execute authorization, scope match, readable and non-conflicting PG
@@ -750,6 +755,31 @@ reporting artifact only and must keep `live_actions_taken=false`,
 `runtime_started=false`, `pg_mutation=false`, `exchange_write_action=false`,
 `credentials_changed=false`, `deploy_performed=false`, and
 `push_performed=false`.
+
+### `GET /api/trading-console/owner-action-flow`
+
+Purpose: Owner-facing read-only superset of `action-entry-readiness` for the
+Console action-flow page. It keeps the same query fields as
+`action-entry-readiness` and returns the same underlying action-entry data plus
+`data.owner_action_flow`.
+
+`data.owner_action_flow` fields:
+
+- `status`: `actionable` only if backend action-state flags are true; otherwise
+  `not_actionable`.
+- `unsafe_action_enabled`: must remain `false` unless a future backend
+  executable state is explicitly returned through the official path.
+- `flow_steps`: structured stages for `market_input`, `candidate_selection`,
+  `risk_disclosure`, `authorization_draft`, `final_gate`, `action_state`, and
+  `post_action_evidence`.
+- `timeline`: compact post-action evidence counts for intents, entry orders,
+  TP/SL orders, review, audit events, and retry safety.
+
+This endpoint is GET-only. It does not create Owner market input,
+authorization drafts, execution intents, orders, reviews, audit events, runtime
+starts, or PG mutations. The frontend may use it as the primary Action Entry /
+Owner Action Flow truth source because it is a superset of the existing
+readiness contract.
 
 ### `GET /api/trading-console/signal-marker-feed`
 

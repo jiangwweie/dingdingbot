@@ -1718,6 +1718,14 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert specs["Volatility expansion"]["action_registry_supported"] is False
     assert specs["Mean reversion"]["status"] == "proposal_non_action"
     assert specs["Mean reversion"]["action_registry_supported"] is False
+    assert specs["Mean reversion"]["symbol"] == "ETH/USDT:USDT"
+    assert specs["Mean reversion"]["side"] == "long"
+    assert specs["Mean reversion"]["quantity"] == "0.01"
+    assert specs["Mean reversion"]["max_notional"] == "20"
+    assert specs["Mean reversion"]["protection_mode"] == "single_tp_plus_sl"
+    assert specs["Mean reversion"]["may_execute_live"] is False
+    assert specs["Mean reversion"]["frontend_action_enabled"] is False
+    assert specs["Mean reversion"]["places_order"] is False
 
     payloads = {
         item["family"]: item for item in payload["data"]["action_entry_payload_contracts"]
@@ -1725,6 +1733,10 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert payloads["Trend"]["contract_status"] == "ready_for_final_gate_adapter"
     assert payloads["Trend"]["required_owner_scope"]["symbol"] == "SOL/USDT:USDT"
     assert payloads["Trend"]["action_allowed"] is False
+    assert payloads["Mean reversion"]["contract_status"] == "proposal_only"
+    assert payloads["Mean reversion"]["required_owner_scope"]["symbol"] == "ETH/USDT:USDT"
+    assert payloads["Mean reversion"]["required_owner_scope"]["quantity"] == "0.01"
+    assert payloads["Mean reversion"]["action_allowed"] is False
 
     action_entry = {
         item["family"]: item for item in payload["data"]["action_entry_output"]
@@ -1773,6 +1785,73 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     } == {"tp-1", "sl-1"}
     assert post_action_state["summary"]["reviews"][0]["review_id"] == "review-1"
     assert post_action_state["summary"]["audit_events"][0]["event_type"] == "ORDER_CONFIRMED"
+    assert exchange.open_order_calls == []
+    assert exchange.position_calls == []
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "market_regime": "mean_reversion",
+                "family": "Mean reversion",
+                "strategy_family_id": "MR-001-live-readonly-v0",
+                "carrier_id": "MR-001-live-readonly-v0",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+                "quantity": "0.01",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_model"] == "owner_action_flow"
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+    data = payload["data"]
+    assert data["owner_market_input"]["mapped_family"] == "Mean reversion"
+    selected = data["selected_candidate"]
+    assert selected["family"] == "Mean reversion"
+    assert selected["carrier_id"] == "MR-001-live-readonly-v0"
+    assert selected["scope_review"]["verdict"] == "matched"
+    assert selected["generic_action_spec"]["status"] == "proposal_non_action"
+    assert selected["generic_action_spec"]["action_registry_supported"] is False
+    assert selected["generic_action_spec"]["symbol"] == "ETH/USDT:USDT"
+    assert data["action_state"]["enabled"] is False
+    assert data["action_state"]["frontend_action_enabled"] is False
+    assert data["action_state"]["places_order"] is False
+    flow = data["owner_action_flow"]
+    assert flow["status"] == "not_actionable"
+    assert flow["unsafe_action_enabled"] is False
+    steps = {item["step"]: item for item in flow["flow_steps"]}
+    assert set(steps) == {
+        "market_input",
+        "candidate_selection",
+        "risk_disclosure",
+        "authorization_draft",
+        "final_gate",
+        "action_state",
+        "post_action_evidence",
+    }
+    assert steps["market_input"]["status"] == "ready"
+    assert steps["candidate_selection"]["summary"] == "MR-001-live-readonly-v0"
+    assert steps["action_state"]["status"] == "blocked"
+    assert flow["timeline"]["entry_order_count"] == 1
+    assert flow["timeline"]["protection_order_count"] == 2
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
     assert exchange.place_calls == 0
@@ -2446,6 +2525,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/carrier-availability",
         "/api/trading-console/strategy-family-admission-state",
         "/api/trading-console/action-entry-readiness",
+        "/api/trading-console/owner-action-flow",
         "/api/trading-console/signal-marker-feed",
         "/api/trading-console/api-classification",
     ]

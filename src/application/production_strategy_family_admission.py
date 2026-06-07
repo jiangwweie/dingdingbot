@@ -5625,6 +5625,17 @@ def _carrier_scope_template(row: FamilyAdmissionRow) -> dict[str, object]:
             "protection_mode": "single_tp_plus_sl",
             "review_requirement": "post_action_review_required",
         }
+    if row.carrier_id == "MR-001-live-readonly-v0":
+        return {
+            "symbol": "ETH/USDT:USDT",
+            "side": "long",
+            "quantity": "0.01",
+            "max_notional": "20",
+            "leverage": "1",
+            "max_attempts": 1,
+            "protection_mode": "single_tp_plus_sl",
+            "review_requirement": "post_action_review_required",
+        }
     return {
         "symbol": row.supported_symbols[0] if row.supported_symbols else None,
         "side": "long",

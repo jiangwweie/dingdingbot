@@ -71,13 +71,26 @@ function queryFromInput(input: ActionEntryInput): string {
   for (const [key, value] of Object.entries(input)) {
     if (value !== '') params.set(key, value);
   }
-  return `/api/trading-console/action-entry-readiness?${params.toString()}`;
+  return `/api/trading-console/owner-action-flow?${params.toString()}`;
 }
 
 function variantForActionState(value?: string) {
   if (value === 'ready_for_owner_scope_final_gate') return 'warning' as const;
   if (value === 'proposal_only') return 'caution' as const;
   return 'danger' as const;
+}
+
+function variantForFlowStep(value?: string) {
+  if (value === 'ready' || value === 'available') return 'normal' as const;
+  if (value === 'warning' || value === 'pending' || value === 'empty') return 'caution' as const;
+  return 'danger' as const;
+}
+
+function regimeForFamily(family: string, fallback: string): string {
+  if (family === 'Trend') return 'trend';
+  if (family === 'Volatility expansion') return 'volatility_expansion';
+  if (family === 'Mean reversion') return 'mean_reversion';
+  return fallback;
 }
 
 function firstDisplayValue(item: any, keys: string[], fallback = '暂无'): string {
@@ -129,6 +142,7 @@ export default function ActionEntry() {
 
   const pageData = envelope?.data || {};
   const candidateOutput = asArray<any>(pageData.candidate_output);
+  const payloadContracts = asArray<any>(pageData.action_entry_payload_contracts);
   const selected = pageData.selected_candidate || {};
   const selectedAction = selected.action_entry || {};
   const selectedSpec = selected.generic_action_spec || {};
@@ -144,6 +158,8 @@ export default function ActionEntry() {
   const postProtectionOrders = asArray<any>(postSummary.tp_sl_orders);
   const postReviews = asArray<any>(postSummary.reviews);
   const postAuditEvents = asArray<any>(postSummary.audit_events);
+  const ownerActionFlow = pageData.owner_action_flow || {};
+  const flowSteps = asArray<any>(ownerActionFlow.flow_steps);
   const summaryMood = actionState.enabled === true
     ? 'ok'
     : finalGate.status === 'proposal_only'
@@ -157,34 +173,25 @@ export default function ActionEntry() {
   const selectCandidate = (candidate: any) => {
     const family = String(candidate.family || '');
     const carrierId = String(candidate.carrier_id || '');
-    if (family === 'Trend') {
-      setDraftInput((current) => ({
-        ...current,
-        market_regime: 'trend',
-        family,
-        strategy_family_id: String(candidate.strategy_family_id || carrierId || 'TF-001-live-readonly-v0'),
-        carrier_id: carrierId || 'TF-001-live-readonly-v0',
-        symbol_preference: 'SOL/USDT:USDT',
-        symbol: 'SOL/USDT:USDT',
-        side: 'long',
-        quantity: '0.1',
-        max_notional: '20',
-        leverage: '1',
-        max_attempts: '1',
-        protection_mode: 'single_tp_plus_sl',
-        review_requirement: 'post_action_review_required',
-      }));
-      return;
-    }
+    const payloadContract = payloadContracts.find((item) => (
+      (carrierId && item.carrier_id === carrierId) || item.family === family
+    ));
+    const requiredScope = payloadContract?.required_owner_scope || {};
     setDraftInput((current) => ({
       ...current,
-      market_regime: family === 'Volatility expansion' ? 'volatility_expansion' : family === 'Mean reversion' ? 'mean_reversion' : current.market_regime,
+      market_regime: regimeForFamily(family, current.market_regime),
       family,
       strategy_family_id: String(candidate.strategy_family_id || carrierId),
       carrier_id: carrierId,
-      symbol: '',
-      quantity: '',
-      max_notional: '',
+      symbol_preference: String(requiredScope.symbol || current.symbol_preference),
+      symbol: String(requiredScope.symbol || ''),
+      side: String(requiredScope.side || 'long'),
+      quantity: String(requiredScope.quantity || ''),
+      max_notional: String(requiredScope.max_notional || ''),
+      leverage: String(requiredScope.leverage || '1'),
+      max_attempts: String(requiredScope.max_attempts || '1'),
+      protection_mode: String(requiredScope.protection_mode || 'single_tp_plus_sl'),
+      review_requirement: String(requiredScope.review_requirement || 'post_action_review_required'),
     }));
   };
 
@@ -192,7 +199,7 @@ export default function ActionEntry() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <PageHeader title="行动入口" subtitle="从行情判断进入候选选择、风险复核、授权草案路径和最终门禁状态。" status={envelope?.freshness_status}>
+      <PageHeader title="Owner Action Flow" subtitle="从行情判断进入候选选择、风险复核、授权草案路径、最终门禁和行动状态。" status={envelope?.freshness_status}>
         <Badge variant="muted">只读入口</Badge>
       </PageHeader>
 
@@ -203,6 +210,28 @@ export default function ActionEntry() {
       />
 
       <EnvelopeStatus envelope={envelope} error={error} />
+
+      <Card className="p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-medium">行动流</h2>
+          <Badge variant={ownerActionFlow.status === 'actionable' ? 'normal' : 'caution'}>
+            {ownerActionFlow.status === 'actionable' ? '可行动' : '不可直接执行'}
+          </Badge>
+        </div>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-7 gap-2">
+          {flowSteps.map((step) => (
+            <div key={step.step} className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+              <div className="flex items-center justify-between gap-2">
+                <div className="truncate text-xs font-medium text-slate-500">{displayValue(step.label, '步骤')}</div>
+                <Badge variant={variantForFlowStep(step.status)}>{displayValue(step.status, '未知')}</Badge>
+              </div>
+              <div className="mt-2 line-clamp-2 text-xs text-slate-600 dark:text-slate-400">
+                {displayValue(step.summary, '暂无')}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Card className="p-5">
         <form
