@@ -50,6 +50,8 @@ flags explicitly return actionable state.
   count, and retry conditions.
 - Action state renders a disabled action slot unless backend returns actionable
   flags.
+- Post-action state shows intent, Entry, TP/SL, review, and audit summaries
+  when those facts exist.
 - Raw/Debug payload is behind the existing technical disclosure pattern.
 
 ## Safety Proof

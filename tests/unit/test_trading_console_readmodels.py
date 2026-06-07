@@ -1762,6 +1762,17 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert post_action_state["retry_safety"] == (
         "consumed_authorization_or_completed_intent_blocks_duplicate_execution"
     )
+    assert post_action_state["status"] == "available"
+    assert post_action_state["entry_order_count"] == 1
+    assert post_action_state["protection_order_count"] == 2
+    assert post_action_state["review_count"] == 1
+    assert post_action_state["audit_event_count"] == 1
+    assert post_action_state["summary"]["entry_orders"][0]["order_id"] == "entry-1"
+    assert {
+        item["order_id"] for item in post_action_state["summary"]["tp_sl_orders"]
+    } == {"tp-1", "sl-1"}
+    assert post_action_state["summary"]["reviews"][0]["review_id"] == "review-1"
+    assert post_action_state["summary"]["audit_events"][0]["event_type"] == "ORDER_CONFIRMED"
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
     assert exchange.place_calls == 0

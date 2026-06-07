@@ -80,6 +80,47 @@ function variantForActionState(value?: string) {
   return 'danger' as const;
 }
 
+function firstDisplayValue(item: any, keys: string[], fallback = '暂无'): string {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value !== undefined && value !== null && value !== '') return String(value);
+  }
+  return fallback;
+}
+
+function EvidenceList({
+  title,
+  items,
+  emptyText,
+  describe,
+}: {
+  title: string;
+  items: any[];
+  emptyText: string;
+  describe: (item: any) => { primary: string; secondary: string };
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+      <h3 className="text-xs font-semibold text-slate-500">{title}</h3>
+      {items.length === 0 ? (
+        <div className="mt-2 text-sm text-slate-500">{emptyText}</div>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {items.slice(0, 3).map((item, index) => {
+            const row = describe(item);
+            return (
+              <div key={index} className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">
+                <div className="truncate text-sm font-medium">{row.primary}</div>
+                <div className="mt-1 truncate text-xs text-slate-500">{row.secondary}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ActionEntry() {
   const [draftInput, setDraftInput] = useState<ActionEntryInput>(INITIAL_INPUT);
   const [committedInput, setCommittedInput] = useState<ActionEntryInput>(INITIAL_INPUT);
@@ -97,6 +138,12 @@ export default function ActionEntry() {
   const actionState = pageData.action_state || {};
   const authorizationPath = pageData.authorization_draft_path || {};
   const postAction = pageData.post_action_state || {};
+  const postSummary = postAction.summary || {};
+  const postIntents = asArray<any>(postSummary.intents);
+  const postEntryOrders = asArray<any>(postSummary.entry_orders);
+  const postProtectionOrders = asArray<any>(postSummary.tp_sl_orders);
+  const postReviews = asArray<any>(postSummary.reviews);
+  const postAuditEvents = asArray<any>(postSummary.audit_events);
   const summaryMood = actionState.enabled === true
     ? 'ok'
     : finalGate.status === 'proposal_only'
@@ -376,6 +423,53 @@ export default function ActionEntry() {
           <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">审计：{postAction.audit_event_count || 0}</div>
         </div>
         <p className="mt-3 text-xs text-slate-500">重复执行安全：{displayValue(postAction.retry_safety, '无法确认')}</p>
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <EvidenceList
+            title="执行意图"
+            items={postIntents}
+            emptyText="暂无执行意图"
+            describe={(item) => ({
+              primary: firstDisplayValue(item, ['intent_id', 'id', 'authorization_id']),
+              secondary: `状态 ${firstDisplayValue(item, ['status'])} · ${firstDisplayValue(item, ['symbol', 'carrier_id'])}`,
+            })}
+          />
+          <EvidenceList
+            title="Entry"
+            items={postEntryOrders}
+            emptyText="暂无 Entry 订单"
+            describe={(item) => ({
+              primary: `${firstDisplayValue(item, ['order_id', 'id'])} · ${firstDisplayValue(item, ['status'])}`,
+              secondary: `Ex ${firstDisplayValue(item, ['exchange_order_id'])} · 数量 ${firstDisplayValue(item, ['requested_qty', 'quantity'])} / ${firstDisplayValue(item, ['filled_qty'])}`,
+            })}
+          />
+          <EvidenceList
+            title="TP/SL"
+            items={postProtectionOrders}
+            emptyText="暂无 TP/SL 保护单"
+            describe={(item) => ({
+              primary: `${firstDisplayValue(item, ['role', 'order_role'])} · ${firstDisplayValue(item, ['status'])}`,
+              secondary: `Ex ${firstDisplayValue(item, ['exchange_order_id'])} · 价格 ${firstDisplayValue(item, ['trigger_price', 'price'])}`,
+            })}
+          />
+          <EvidenceList
+            title="复盘"
+            items={postReviews}
+            emptyText="暂无复盘记录"
+            describe={(item) => ({
+              primary: firstDisplayValue(item, ['review_id', 'id']),
+              secondary: `结果 ${firstDisplayValue(item, ['decision', 'status'])} · ${firstDisplayValue(item, ['campaign_id', 'authorization_id'])}`,
+            })}
+          />
+          <EvidenceList
+            title="审计"
+            items={postAuditEvents}
+            emptyText="暂无审计事件"
+            describe={(item) => ({
+              primary: firstDisplayValue(item, ['event_type', 'type']),
+              secondary: `订单 ${firstDisplayValue(item, ['order_id'])} · ${firstDisplayValue(item, ['created_at', 'created_at_ms'])}`,
+            })}
+          />
+        </div>
       </Card>
 
       <TechnicalDetails title="Raw / Debug：Action Entry 只读响应">
