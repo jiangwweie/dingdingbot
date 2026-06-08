@@ -246,9 +246,15 @@ class BnbLiveExecutionBridgeDryRunService:
                 hard_blockers.append("symbol_mismatch")
             if request.side != carrier.side:
                 hard_blockers.append("side_mismatch")
-            if not _decimal_scope_equal(request.max_notional, carrier.max_notional):
+            if _carrier_uses_notional_sizing(carrier):
+                if request.max_notional > carrier.max_notional:
+                    hard_blockers.append("cap_mismatch")
+            elif not _decimal_scope_equal(request.max_notional, carrier.max_notional):
                 hard_blockers.append("cap_mismatch")
-            if not _decimal_scope_equal(request.quantity, carrier.quantity):
+            if (
+                not _carrier_uses_notional_sizing(carrier)
+                and not _decimal_scope_equal(request.quantity, carrier.quantity)
+            ):
                 hard_blockers.append("quantity_mismatch")
             if not _decimal_scope_equal(request.leverage, carrier.leverage):
                 hard_blockers.append("leverage_mismatch")
@@ -579,6 +585,10 @@ def _fact_snapshot_scope_blockers(
 
 def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
     return abs(Decimal(str(left)) - Decimal(str(right))) <= Decimal("0.000000000001")
+
+
+def _carrier_uses_notional_sizing(carrier: Any) -> bool:
+    return getattr(carrier, "sizing_mode", "fixed_quantity") == "notional_derived"
 
 
 def _fact_checks(

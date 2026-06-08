@@ -150,6 +150,8 @@ def _mr_carrier(
     carrier_id: str,
     symbol: str,
     quantity: Decimal,
+    max_notional: Decimal = Decimal("25"),
+    target_notional_usdt: Decimal = Decimal("22"),
 ) -> StrategyTrialCarrierView:
     return StrategyTrialCarrierView(
         carrier_id=carrier_id,
@@ -161,10 +163,12 @@ def _mr_carrier(
         side="long",
         execution_mode="owner_confirm_each_entry",
         quantity=quantity,
-        max_notional=Decimal("20"),
+        max_notional=max_notional,
         leverage=Decimal("1"),
         max_leverage_allowed=Decimal("1"),
         protection_plan_type="single_tp_plus_sl",
+        sizing_mode="notional_derived",
+        target_notional_usdt=target_notional_usdt,
     )
 
 

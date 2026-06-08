@@ -24,6 +24,11 @@ from src.application.budget_recommendation import (
     apply_budget_envelope_to_generic_action_specs,
     build_budget_recommendation,
 )
+from src.application.notional_sizing import (
+    ContractMarketRules,
+    compute_notional_sizing,
+    validate_fixed_quantity_scope,
+)
 from src.application.owner_action_carrier_catalog import owner_action_carrier_id_for_symbol
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
@@ -656,13 +661,14 @@ class TradingConsoleReadModelService:
         generic_action_specs = [
             item.model_dump(mode="json") for item in state.generic_action_specs
         ]
+        raw_owner_selection = _owner_budget_selection_from(
+            owner_scope=owner_scope or {},
+            market_input=normalized_market_input,
+        )
         budget = self._budget_recommendation_payload(
             snap=snap,
             risk_tier=normalized_market_input.get("risk_tier") or "tiny",
-            owner_selection=_owner_budget_selection_from(
-                owner_scope=owner_scope or {},
-                market_input=normalized_market_input,
-            ),
+            owner_selection=raw_owner_selection,
         )
         envelope = dict(budget.get("budget_envelope") or {})
         candidate_output = apply_budget_envelope_to_action_candidates(candidate_output, envelope)
@@ -670,7 +676,10 @@ class TradingConsoleReadModelService:
             generic_action_specs,
             envelope,
         )
-        owner_selection = dict(budget.get("owner_selection") or {})
+        owner_selection = {
+            **raw_owner_selection,
+            **dict(budget.get("owner_selection") or {}),
+        }
         generic_action_specs = _apply_owner_selection_to_generic_action_specs(
             specs=generic_action_specs,
             owner_selection=owner_selection,
@@ -1772,6 +1781,12 @@ def _owner_budget_selection_from(
         "symbol_preference": market_input.get("symbol_preference"),
         "side": owner_scope.get("side") or market_input.get("side"),
         "quantity": owner_scope.get("quantity"),
+        "target_notional_usdt": owner_scope.get("target_notional_usdt"),
+        "current_price": owner_scope.get("current_price"),
+        "min_notional": owner_scope.get("min_notional"),
+        "min_qty": owner_scope.get("min_qty"),
+        "qty_step": owner_scope.get("qty_step"),
+        "price_tick": owner_scope.get("price_tick"),
         "max_notional": owner_scope.get("max_notional"),
         "leverage": owner_scope.get("leverage"),
         "max_attempts": owner_scope.get("max_attempts"),
@@ -1795,6 +1810,10 @@ def _apply_owner_selection_to_generic_action_specs(
     selected_quantity = _optional_nonempty_str(
         owner_selection.get("selected_quantity") or owner_selection.get("quantity")
     )
+    selected_target_notional = _optional_nonempty_str(
+        owner_selection.get("selected_target_notional_usdt")
+        or owner_selection.get("target_notional_usdt")
+    )
     selected_max_notional = _optional_nonempty_str(
         owner_selection.get("selected_max_notional") or owner_selection.get("max_notional")
     )
@@ -1816,6 +1835,7 @@ def _apply_owner_selection_to_generic_action_specs(
             selected_symbol,
             selected_side,
             selected_quantity,
+            selected_target_notional,
             selected_max_notional,
             selected_leverage,
             selected_max_attempts,
@@ -1838,12 +1858,16 @@ def _apply_owner_selection_to_generic_action_specs(
         if not applies_to_spec:
             result.append(item)
             continue
-        hard_blockers = [str(value) for value in item.get("hard_blockers") or []]
+        catalog_hard_blockers = [
+            str(value) for value in item.get("hard_blockers") or []
+        ]
+        selection_hard_blockers: list[str] = []
         warnings = [str(value) for value in item.get("warnings") or []]
         owner_scope = {
             "symbol": selected_symbol,
             "side": selected_side,
             "quantity": selected_quantity,
+            "target_notional_usdt": selected_target_notional,
             "max_notional": selected_max_notional,
             "leverage": selected_leverage,
             "max_attempts": selected_max_attempts,
@@ -1860,9 +1884,12 @@ def _apply_owner_selection_to_generic_action_specs(
                 item["carrier_id"] = mapped_carrier_id
         if selected_side is not None:
             item["side"] = selected_side
+        sizing_mode = _optional_nonempty_str(item.get("sizing_mode")) or "fixed_quantity"
         if selected_quantity is not None:
             item["quantity"] = selected_quantity
             item["recommended_quantity"] = selected_quantity
+        if selected_target_notional is not None:
+            item["target_notional_usdt"] = selected_target_notional
         if selected_max_notional is not None:
             item["max_notional"] = selected_max_notional
             item["recommended_max_notional"] = selected_max_notional
@@ -1878,9 +1905,9 @@ def _apply_owner_selection_to_generic_action_specs(
         supported_symbols = [str(value) for value in item.get("supported_symbols") or []]
         supported_sides = [str(value).lower() for value in item.get("supported_sides") or []]
         if selected_symbol and supported_symbols and selected_symbol not in supported_symbols:
-            hard_blockers.append("owner_symbol_not_supported_by_carrier")
+            selection_hard_blockers.append("owner_symbol_not_supported_by_carrier")
         if selected_side and supported_sides and selected_side not in supported_sides:
-            hard_blockers.append("owner_side_not_supported_by_carrier")
+            selection_hard_blockers.append("owner_side_not_supported_by_carrier")
         envelope_max_notional = _decimal_or_none(envelope.get("max_notional_per_action"))
         owner_max_notional = _decimal_or_none(selected_max_notional)
         if (
@@ -1888,7 +1915,7 @@ def _apply_owner_selection_to_generic_action_specs(
             and envelope_max_notional is not None
             and owner_max_notional > envelope_max_notional
         ):
-            hard_blockers.append("owner_max_notional_exceeds_budget_envelope")
+            selection_hard_blockers.append("owner_max_notional_exceeds_budget_envelope")
         envelope_leverage = _decimal_or_none(envelope.get("max_leverage"))
         owner_leverage = _decimal_or_none(selected_leverage)
         if (
@@ -1896,17 +1923,64 @@ def _apply_owner_selection_to_generic_action_specs(
             and envelope_leverage is not None
             and owner_leverage > envelope_leverage
         ):
-            hard_blockers.append("owner_leverage_exceeds_budget_envelope")
+            selection_hard_blockers.append("owner_leverage_exceeds_budget_envelope")
         envelope_max_attempts = _optional_int_value(envelope.get("max_attempts"))
         if (
             selected_max_attempts is not None
             and envelope_max_attempts is not None
             and selected_max_attempts > envelope_max_attempts
         ):
-            hard_blockers.append("owner_max_attempts_exceeds_budget_envelope")
+            selection_hard_blockers.append("owner_max_attempts_exceeds_budget_envelope")
         if selected_protection_mode and selected_protection_mode != "single_tp_plus_sl":
-            hard_blockers.append("owner_protection_mode_not_supported")
-        if not selected_quantity:
+            selection_hard_blockers.append("owner_protection_mode_not_supported")
+        market_rules = _market_rules_from_owner_selection(owner_selection, selected_symbol or item.get("symbol"))
+        if sizing_mode == "notional_derived" and not selected_target_notional:
+            selection_hard_blockers.append(
+                "target_notional_required_for_notional_sized_carrier"
+            )
+        if selected_target_notional and market_rules is not None:
+            try:
+                sizing = compute_notional_sizing(
+                    symbol=str(selected_symbol or item.get("symbol") or ""),
+                    side=_normalized_action_side(selected_side or item.get("side")) or "long",
+                    target_notional_usdt=Decimal(selected_target_notional),
+                    max_notional_usdt=owner_max_notional,
+                    market_rules=market_rules,
+                )
+                item["quantity"] = str(sizing.computed_quantity)
+                item["computed_quantity"] = str(sizing.computed_quantity)
+                item["recommended_quantity"] = str(sizing.computed_quantity)
+                item["estimated_notional_usdt"] = str(sizing.estimated_notional_usdt)
+                item["suggested_minimum_notional_usdt"] = str(sizing.suggested_minimum_notional_usdt)
+                item["suggested_quantity"] = str(sizing.suggested_quantity)
+                item["market_rule_snapshot"] = sizing.market_rule_snapshot.model_dump(mode="json")
+                item["validation_result"] = sizing.validation.model_dump(mode="json")
+                warnings.extend(sizing.warnings)
+                selection_hard_blockers.extend(sizing.blockers)
+            except Exception:
+                selection_hard_blockers.append("notional_sizing_failed")
+        elif selected_quantity and market_rules is not None:
+            try:
+                sizing = validate_fixed_quantity_scope(
+                    symbol=str(selected_symbol or item.get("symbol") or ""),
+                    side=_normalized_action_side(selected_side or item.get("side")) or "long",
+                    quantity=Decimal(selected_quantity),
+                    max_notional_usdt=owner_max_notional,
+                    market_rules=market_rules,
+                )
+                item["computed_quantity"] = str(sizing.computed_quantity)
+                item["estimated_notional_usdt"] = str(sizing.estimated_notional_usdt)
+                item["suggested_minimum_notional_usdt"] = str(sizing.suggested_minimum_notional_usdt)
+                item["suggested_quantity"] = str(sizing.suggested_quantity)
+                item["market_rule_snapshot"] = sizing.market_rule_snapshot.model_dump(mode="json")
+                item["validation_result"] = sizing.validation.model_dump(mode="json")
+                warnings.extend(sizing.warnings)
+                selection_hard_blockers.extend(sizing.blockers)
+            except Exception:
+                selection_hard_blockers.append("quantity_market_rule_validation_failed")
+        elif selected_target_notional:
+            selection_hard_blockers.append("market_rules_missing_for_notional_sizing")
+        if not item.get("quantity"):
             warnings.append("owner_quantity_missing")
         if not selected_max_notional:
             warnings.append("owner_max_notional_missing")
@@ -1915,7 +1989,30 @@ def _apply_owner_selection_to_generic_action_specs(
         }
         item["owner_selection_status"] = owner_selection.get("status") or "not_provided"
         item["warnings"] = _dedupe_strings(warnings)
-        item["hard_blockers"] = _dedupe_strings(hard_blockers)
+        item["hard_blockers"] = _dedupe_strings(
+            [*catalog_hard_blockers, *selection_hard_blockers]
+        )
+        if (
+            item.get("action_registry_supported") is True
+            and not selection_hard_blockers
+            and all(
+                item.get(field) not in (None, "")
+                for field in [
+                    "carrier_id",
+                    "symbol",
+                    "side",
+                    "quantity",
+                    "max_notional",
+                    "leverage",
+                    "max_attempts",
+                    "protection_mode",
+                    "review_requirement",
+                ]
+            )
+        ):
+            item["status"] = "valid_blocked_final_gate"
+        elif selection_hard_blockers:
+            item["status"] = "invalid_blocked"
         item["backend_actionable"] = False
         item["frontend_action_enabled"] = False
         item["places_order"] = False
@@ -2001,6 +2098,36 @@ def _decimal_or_none(value: Any) -> Optional[Decimal]:
         return Decimal(str(value))
     except Exception:
         return None
+
+
+def _market_rules_from_owner_selection(
+    owner_selection: dict[str, Any],
+    symbol: Any,
+) -> ContractMarketRules | None:
+    selected_symbol = _optional_nonempty_str(symbol)
+    current_price = _decimal_or_none(owner_selection.get("current_price"))
+    min_notional = _decimal_or_none(owner_selection.get("min_notional"))
+    min_qty = _decimal_or_none(owner_selection.get("min_qty"))
+    qty_step = _decimal_or_none(owner_selection.get("qty_step"))
+    price_tick = _decimal_or_none(owner_selection.get("price_tick"))
+    if (
+        selected_symbol is None
+        or current_price is None
+        or min_notional is None
+        or min_qty is None
+        or qty_step is None
+    ):
+        return None
+    return ContractMarketRules(
+        symbol=selected_symbol,
+        min_notional=min_notional,
+        min_qty=min_qty,
+        qty_step=qty_step,
+        price_tick=price_tick,
+        current_price=current_price,
+        freshness="fresh",
+        source="owner_action_flow_market_rule_input",
+    )
 
 
 def _select_action_entry_candidate(
@@ -2390,6 +2517,8 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "selected_symbol": owner_budget_selection.get("selected_symbol"),
             "selected_side": owner_budget_selection.get("selected_side"),
             "selected_quantity": owner_budget_selection.get("selected_quantity"),
+            "selected_target_notional_usdt": owner_budget_selection.get("target_notional_usdt")
+            or owner_budget_selection.get("selected_target_notional_usdt"),
             "selected_max_notional": owner_budget_selection.get("selected_max_notional"),
             "selected_leverage": owner_budget_selection.get("selected_leverage"),
             "selected_max_attempts": owner_budget_selection.get("selected_max_attempts"),
@@ -2424,11 +2553,20 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "carrier_id": selected_spec.get("carrier_id") or selected_candidate.get("carrier_id"),
             "owner_selection_status": owner_budget_selection.get("status"),
             "owner_selected_scope": dict(selected_spec.get("owner_selected_scope") or {}),
+            "status": selected_spec.get("status"),
             "proposal_role": selected_spec.get("proposal_role"),
             "market_regime": selected_spec.get("market_regime"),
+            "sizing_mode": selected_spec.get("sizing_mode"),
             "symbol": selected_spec.get("symbol"),
             "side": selected_spec.get("side"),
             "quantity": selected_spec.get("quantity"),
+            "target_notional_usdt": selected_spec.get("target_notional_usdt"),
+            "computed_quantity": selected_spec.get("computed_quantity"),
+            "estimated_notional_usdt": selected_spec.get("estimated_notional_usdt"),
+            "market_rule_snapshot": selected_spec.get("market_rule_snapshot") or {},
+            "validation_result": selected_spec.get("validation_result") or {},
+            "suggested_minimum_notional_usdt": selected_spec.get("suggested_minimum_notional_usdt"),
+            "suggested_quantity": selected_spec.get("suggested_quantity"),
             "recommended_quantity": selected_spec.get("recommended_quantity"),
             "recommended_max_notional": selected_spec.get("recommended_max_notional"),
             "max_notional": selected_spec.get("max_notional"),
@@ -2488,6 +2626,13 @@ def _owner_action_candidate_choices(
                 "symbol": spec.get("symbol"),
                 "side": spec.get("side"),
                 "owner_selected_scope": dict(spec.get("owner_selected_scope") or {}),
+                "target_notional_usdt": spec.get("target_notional_usdt"),
+                "computed_quantity": spec.get("computed_quantity"),
+                "estimated_notional_usdt": spec.get("estimated_notional_usdt"),
+                "market_rule_snapshot": spec.get("market_rule_snapshot") or {},
+                "validation_result": spec.get("validation_result") or {},
+                "suggested_minimum_notional_usdt": spec.get("suggested_minimum_notional_usdt"),
+                "suggested_quantity": spec.get("suggested_quantity"),
                 "recommended_quantity": spec.get("recommended_quantity"),
                 "recommended_max_notional": spec.get("recommended_max_notional"),
                 "budget_recommendation_status": spec.get("budget_recommendation_status"),

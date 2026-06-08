@@ -1749,15 +1749,17 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert trend["places_order"] is False
     assert specs["Volatility expansion"]["status"] == "proposal_non_action"
     assert specs["Volatility expansion"]["action_registry_supported"] is False
-    assert specs["Mean reversion"]["status"] == "valid_blocked_final_gate"
+    assert specs["Mean reversion"]["status"] == "proposal_non_action"
     assert specs["Mean reversion"]["action_registry_supported"] is True
     assert specs["Mean reversion"]["proposal_role"] == "range_candidate"
     assert specs["Mean reversion"]["market_regime"] == "mean_reversion"
     assert specs["Mean reversion"]["symbol"] == "ETH/USDT:USDT"
     assert specs["Mean reversion"]["side"] == "long"
-    assert specs["Mean reversion"]["quantity"] == "0.01"
-    assert specs["Mean reversion"]["max_notional"] == "20"
-    assert specs["Mean reversion"]["recommended_quantity"] == "0.01"
+    assert specs["Mean reversion"]["quantity"] is None
+    assert specs["Mean reversion"]["target_notional_usdt"] == "22"
+    assert specs["Mean reversion"]["computed_quantity"] is None
+    assert specs["Mean reversion"]["max_notional"] == "25"
+    assert specs["Mean reversion"]["recommended_quantity"] is None
     assert specs["Mean reversion"]["recommended_max_notional"] is None
     assert specs["Mean reversion"]["protection_mode"] == "single_tp_plus_sl"
     assert specs["Mean reversion"]["protection_template"]["mode"] == "single_tp_plus_sl"
@@ -1774,9 +1776,10 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert payloads["Trend"]["contract_status"] == "ready_for_final_gate_adapter"
     assert payloads["Trend"]["required_owner_scope"]["symbol"] == "SOL/USDT:USDT"
     assert payloads["Trend"]["action_allowed"] is False
-    assert payloads["Mean reversion"]["contract_status"] == "ready_for_final_gate_adapter"
+    assert payloads["Mean reversion"]["contract_status"] == "proposal_only"
     assert payloads["Mean reversion"]["required_owner_scope"]["symbol"] == "ETH/USDT:USDT"
-    assert payloads["Mean reversion"]["required_owner_scope"]["quantity"] == "0.01"
+    assert payloads["Mean reversion"]["required_owner_scope"]["quantity"] is None
+    assert payloads["Mean reversion"]["required_owner_scope"]["target_notional_usdt"] == "22"
     assert payloads["Mean reversion"]["action_allowed"] is False
 
     action_entry = {
@@ -1787,9 +1790,7 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     )
     assert action_entry["Trend"]["frontend_action_enabled"] is False
     assert action_entry["Volatility expansion"]["action_entry_state"] == "proposal_only"
-    assert action_entry["Mean reversion"]["action_entry_state"] == (
-        "ready_for_owner_scope_final_gate"
-    )
+    assert action_entry["Mean reversion"]["action_entry_state"] == "proposal_only"
 
     selected = payload["data"]["selected_candidate"]
     assert selected["family"] == "Trend"
@@ -1834,6 +1835,55 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert exchange.cancel_calls == 0
 
 
+def test_owner_action_flow_computes_mr_eth_quantity_from_target_notional(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "market_regime": "range",
+                "carrier_id": "MR-001-live-readonly-v0",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+                "target_notional_usdt": "22",
+                "current_price": "1681.64",
+                "min_notional": "20",
+                "min_qty": "0.001",
+                "qty_step": "0.001",
+                "price_tick": "0.01",
+                "max_notional": "25",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    proposal = payload["data"]["owner_action_flow"]["selected_action_proposal"]
+    assert proposal["carrier_id"] == "MR-001-live-readonly-v0"
+    assert proposal["proposal_role"] == "range_candidate"
+    assert proposal["target_notional_usdt"] == "22"
+    assert proposal["computed_quantity"] == "0.014"
+    assert proposal["quantity"] == "0.014"
+    assert proposal["estimated_notional_usdt"] == "23.54296"
+    assert proposal["status"] == "valid_blocked_final_gate"
+    assert proposal["market_rule_snapshot"]["min_notional"] == "20"
+    assert proposal["validation_result"]["entry_notional_valid"] is True
+    assert proposal["validation_result"]["protection_notional_valid"] is True
+    assert "computed_notional_exceeds_owner_max_notional" not in proposal["hard_blockers"]
+    assert "computed_protection_notional_below_min_notional" not in proposal["hard_blockers"]
+    assert proposal["backend_actionable"] is False
+    assert proposal["frontend_action_enabled"] is False
+    assert proposal["places_order"] is False
+
+
 def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypatch):
     _configure_auth(monkeypatch)
     exchange = _FakeExchangeGateway()
@@ -1871,9 +1921,13 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert selected["family"] == "Mean reversion"
     assert selected["carrier_id"] == "MR-001-live-readonly-v0"
     assert selected["scope_review"]["verdict"] == "matched"
-    assert selected["generic_action_spec"]["status"] == "valid_blocked_final_gate"
+    assert selected["generic_action_spec"]["status"] == "invalid_blocked"
     assert selected["generic_action_spec"]["action_registry_supported"] is True
     assert selected["generic_action_spec"]["symbol"] == "ETH/USDT:USDT"
+    assert (
+        "target_notional_required_for_notional_sized_carrier"
+        in selected["generic_action_spec"]["hard_blockers"]
+    )
     assert data["action_state"]["enabled"] is False
     assert data["action_state"]["backend_actionable"] is False
     assert data["action_state"]["frontend_action_enabled"] is False

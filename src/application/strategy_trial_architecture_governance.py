@@ -50,6 +50,8 @@ class StrategyTrialCarrierView(BaseModel):
     leverage: Decimal = Field(gt=Decimal("0"))
     max_leverage_allowed: Decimal = Field(gt=Decimal("0"))
     protection_plan_type: Literal["single_tp_plus_sl"]
+    sizing_mode: Literal["fixed_quantity", "notional_derived"] = "fixed_quantity"
+    target_notional_usdt: Decimal | None = None
     strategy_family_order_authority: Literal[False] = False
     carrier_is_order_authority: Literal[False] = False
     live_ready: Literal[False] = False

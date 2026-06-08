@@ -33,6 +33,7 @@ class StrategyProfile(BaseModel):
     candidate_id: str
     symbol: str
     side: str
+    authorization_id: str | None = None
     execution_mode: Literal["observe_only", "owner_confirm_each_entry", "auto_within_budget"]
     auto_within_budget: Literal[False] = False
     owner_confirm_each_entry: Literal[True] = True

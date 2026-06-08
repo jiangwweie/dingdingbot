@@ -122,6 +122,7 @@ class OwnerBudgetSelection(BudgetRecommendationModel):
     selected_symbol: Optional[str] = None
     selected_side: Optional[str] = None
     selected_quantity: Optional[str] = None
+    selected_target_notional_usdt: Optional[str] = None
     selected_max_notional: Optional[str] = None
     selected_leverage: Optional[str] = None
     selected_max_attempts: Optional[int] = None
@@ -323,6 +324,7 @@ def build_owner_budget_selection(
     )
     selected_side = _normalize_side(owner_selection.get("side"))
     selected_quantity = _format_optional_decimal(_decimal(owner_selection.get("quantity")))
+    selected_target_notional = _money(_decimal(owner_selection.get("target_notional_usdt")))
     selected_max_notional = _money(_decimal(owner_selection.get("max_notional")))
     selected_leverage = _format_optional_decimal(_decimal(owner_selection.get("leverage")))
     selected_max_attempts = _optional_int(owner_selection.get("max_attempts"))
@@ -334,6 +336,7 @@ def build_owner_budget_selection(
             selected_symbol,
             selected_side,
             selected_quantity,
+            selected_target_notional,
             selected_max_notional,
             selected_leverage,
             selected_max_attempts,
@@ -409,8 +412,8 @@ def build_owner_budget_selection(
         )
     if selected_max_notional is None:
         warnings.append("Owner max_notional is not selected; FinalGate must fail closed before any action.")
-    if selected_quantity is None:
-        warnings.append("Owner quantity is not selected; FinalGate must fail closed before any action.")
+    if selected_quantity is None and selected_target_notional is None:
+        warnings.append("Owner quantity or target_notional_usdt is not selected; FinalGate must fail closed before any action.")
     if blockers:
         status: Literal[
             "not_provided",
@@ -427,6 +430,7 @@ def build_owner_budget_selection(
         selected_symbol=selected_symbol,
         selected_side=selected_side,
         selected_quantity=selected_quantity,
+        selected_target_notional_usdt=selected_target_notional,
         selected_max_notional=selected_max_notional,
         selected_leverage=selected_leverage,
         selected_max_attempts=selected_max_attempts,

@@ -87,8 +87,9 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert carrier_specs["Mean reversion"].proposal_role == "range_candidate"
     assert carrier_specs["Mean reversion"].market_regime == "mean_reversion"
     assert carrier_specs["Mean reversion"].scope_template["symbol"] == "ETH/USDT:USDT"
-    assert carrier_specs["Mean reversion"].scope_template["quantity"] == "0.01"
-    assert carrier_specs["Mean reversion"].scope_template["max_notional"] == "20"
+    assert carrier_specs["Mean reversion"].scope_template["quantity"] is None
+    assert carrier_specs["Mean reversion"].scope_template["target_notional_usdt"] == "22"
+    assert carrier_specs["Mean reversion"].scope_template["max_notional"] == "25"
     assert carrier_specs["Mean reversion"].default_example["carrier_id"] == "MR-001-live-readonly-v0"
     assert carrier_specs["Mean reversion"].protection_template["mode"] == "single_tp_plus_sl"
     assert carrier_specs["Mean reversion"].review_template_ref == (
@@ -863,7 +864,10 @@ def test_production_strategy_family_admission_state_preserves_no_action_boundary
         assert item.expected_scope_verdict == "complete_dry_run_only"
         assert item.expected_authorization_draft_status == "scope_reviewed_dry_run_only"
         assert item.owner_scope_query["side"] == "long"
-        assert item.owner_scope_query["max_notional"] == "20"
+        if item.family == "Mean reversion":
+            assert item.owner_scope_query["max_notional"] == "25"
+        else:
+            assert item.owner_scope_query["max_notional"] == "20"
         assert item.owner_scope_query["leverage"] == "1"
         assert item.owner_scope_query["max_attempts"] == 1
         assert item.owner_scope_query["protection_mode"] == "mandatory_tp_sl"
@@ -1317,7 +1321,7 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert specs_by_family["Volatility expansion"].status == "proposal_non_action"
     assert specs_by_family["Volatility expansion"].action_registry_supported is False
     mean_reversion = specs_by_family["Mean reversion"]
-    assert mean_reversion.status == "valid_blocked_final_gate"
+    assert mean_reversion.status == "proposal_non_action"
     assert mean_reversion.action_registry_supported is True
     assert mean_reversion.proposal_role == "range_candidate"
     assert mean_reversion.market_regime == "mean_reversion"
@@ -1325,8 +1329,10 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert mean_reversion.supported_sides == ["long"]
     assert mean_reversion.symbol == "ETH/USDT:USDT"
     assert mean_reversion.side == "long"
-    assert mean_reversion.quantity == "0.01"
-    assert mean_reversion.max_notional == "20"
+    assert mean_reversion.quantity is None
+    assert mean_reversion.target_notional_usdt == "22"
+    assert mean_reversion.computed_quantity is None
+    assert mean_reversion.max_notional == "25"
     assert mean_reversion.leverage == "1"
     assert mean_reversion.max_attempts == 1
     assert mean_reversion.protection_mode == "single_tp_plus_sl"
@@ -1351,10 +1357,11 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert trend_payload.may_execute_live is False
     assert trend_payload.frontend_action_enabled is False
     mr_payload = payloads_by_family["Mean reversion"]
-    assert mr_payload.contract_status == "ready_for_final_gate_adapter"
+    assert mr_payload.contract_status == "proposal_only"
     assert mr_payload.required_owner_scope["symbol"] == "ETH/USDT:USDT"
-    assert mr_payload.required_owner_scope["quantity"] == "0.01"
-    assert mr_payload.required_owner_scope["max_notional"] == "20"
+    assert mr_payload.required_owner_scope["quantity"] is None
+    assert mr_payload.required_owner_scope["target_notional_usdt"] == "22"
+    assert mr_payload.required_owner_scope["max_notional"] == "25"
     assert mr_payload.required_owner_scope["protection_mode"] == "single_tp_plus_sl"
     assert mr_payload.action_allowed is False
     assert mr_payload.may_execute_live is False
@@ -1370,9 +1377,7 @@ def test_generic_action_spec_and_action_entry_contract_preserve_safe_boundaries(
     assert action_entry_by_family["Volatility expansion"].action_entry_state == (
         "proposal_only"
     )
-    assert action_entry_by_family["Mean reversion"].action_entry_state == (
-        "ready_for_owner_scope_final_gate"
-    )
+    assert action_entry_by_family["Mean reversion"].action_entry_state == "proposal_only"
 
 
 def test_complete_owner_scope_is_reviewed_but_not_made_actionable():

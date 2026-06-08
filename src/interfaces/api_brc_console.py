@@ -4034,8 +4034,20 @@ async def get_owner_bounded_live_trial_final_gate_dry_run(
     carrier = get_owner_action_carrier(authorization.carrier_id)
     scope_symbol = carrier.runtime_symbol if carrier is not None else authorization.symbol
     scope_side = carrier.side if carrier is not None else authorization.side
-    scope_quantity = carrier.quantity if carrier is not None else authorization.quantity
-    scope_max_notional = carrier.max_notional if carrier is not None else authorization.max_notional
+    use_authorized_sizing = (
+        carrier is not None
+        and getattr(carrier, "sizing_mode", "fixed_quantity") == "notional_derived"
+    )
+    scope_quantity = (
+        authorization.quantity
+        if use_authorized_sizing
+        else carrier.quantity if carrier is not None else authorization.quantity
+    )
+    scope_max_notional = (
+        authorization.max_notional
+        if use_authorized_sizing
+        else carrier.max_notional if carrier is not None else authorization.max_notional
+    )
     scope_leverage = carrier.leverage if carrier is not None else authorization.leverage
     scope_protection_plan_type = (
         carrier.protection_plan_type
@@ -4098,6 +4110,7 @@ async def get_owner_bounded_live_trial_final_gate_dry_run(
             carrier_id=authorization.carrier_id,
             symbol=authorization.symbol,
             side=authorization.side,
+            authorization_id=authorization.authorization_id,
         )
         collector = _strategy_trial_preflight_fact_collector(
             api_module,
@@ -4527,6 +4540,7 @@ def _strategy_profile_for_owner_action_scope(
     carrier_id: str,
     symbol: str,
     side: str,
+    authorization_id: str | None = None,
 ) -> StrategyProfile:
     carrier = get_owner_action_carrier(carrier_id)
     if carrier is None:
@@ -4536,6 +4550,7 @@ def _strategy_profile_for_owner_action_scope(
             candidate_id=carrier_id,
             symbol=symbol,
             side=side,
+            authorization_id=authorization_id,
             execution_mode="owner_confirm_each_entry",
         )
     return StrategyProfile(
@@ -4544,6 +4559,7 @@ def _strategy_profile_for_owner_action_scope(
         candidate_id=carrier.carrier_id,
         symbol=symbol,
         side=side,
+        authorization_id=authorization_id,
         execution_mode="owner_confirm_each_entry",
     )
 
@@ -5071,11 +5087,10 @@ async def _read_active_bnb_scoped_runtime_safety_clearance(
                 WHERE c.clearance_type = :clearance_type
                   AND c.status = 'active'
                   AND c.expires_at_ms > :now_ms
-                  AND a.carrier_id = :carrier_id
-                  AND a.symbol IN (:symbol, :runtime_symbol)
+	                  AND a.carrier_id = :carrier_id
+	                  AND (:authorization_id IS NULL OR a.authorization_id = :authorization_id)
+	                  AND a.symbol IN (:symbol, :runtime_symbol)
                   AND a.side = :side
-                  AND a.max_notional = :max_notional
-                  AND a.quantity = :quantity
                   AND a.leverage = :leverage
                   AND a.protection_plan_type = :protection_plan_type
                   AND a.single_use = :true_value
@@ -5101,12 +5116,11 @@ async def _read_active_bnb_scoped_runtime_safety_clearance(
             {
                 "clearance_type": clearance_type,
                 "now_ms": now_ms,
-                "carrier_id": carrier.carrier_id,
-                "symbol": carrier.symbol,
+	                "carrier_id": carrier.carrier_id,
+	                "authorization_id": getattr(profile, "authorization_id", None),
+	                "symbol": carrier.symbol,
                 "runtime_symbol": carrier.runtime_symbol,
                 "side": carrier.side,
-                "max_notional": carrier.max_notional,
-                "quantity": carrier.quantity,
                 "leverage": carrier.leverage,
                 "protection_plan_type": carrier.protection_plan_type,
                 "true_value": True,

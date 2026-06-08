@@ -2143,6 +2143,79 @@ def test_owner_bounded_execution_registry_registers_scoped_owner_action_carriers
     assert registry.get("TB-BTC-SHORT") is None
 
 
+def test_owner_trial_flow_accepts_notional_derived_mr_eth_computed_scope():
+    async def scenario():
+        service, _, engine = await _bridge_service()
+        try:
+            acknowledgement = await _acknowledge_all_mr_eth(service)
+            draft = await service.create_authorization_draft(
+                BoundedLiveTrialAuthorizationDraftCreateRequest(
+                    carrier_id="MR-001-live-readonly-v0",
+                    linked_acknowledgement_id=acknowledgement.acknowledgement_id,
+                    symbol="ETH/USDT:USDT",
+                    side="long",
+                    max_notional="25",
+                    quantity="0.014",
+                    leverage="1",
+                    protection_plan_type="single_tp_plus_sl",
+                ),
+                operator_id="owner",
+            )
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _mr_eth_activation_request(max_notional="25", quantity="0.014"),
+                operator_id="owner",
+            )
+            clearance = await service.create_scoped_runtime_safety_clearance(
+                authorization.authorization_id,
+                ScopedRuntimeSafetyClearanceCreateRequest(
+                    clearance_type="startup_guard",
+                    reason="test exact MR/ETH notional-derived scope",
+                    owner_id="owner",
+                ),
+                operator_id="owner",
+            )
+
+            assert authorization.max_notional == Decimal("25")
+            assert authorization.quantity == Decimal("0.014")
+            assert clearance.max_notional == Decimal("25")
+            assert clearance.quantity == Decimal("0.014")
+            assert clearance.exchange_write_api_called is False
+            assert clearance.execution_intent_created is False
+            assert clearance.order_created is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_trial_flow_blocks_notional_derived_mr_eth_above_carrier_cap():
+    async def scenario():
+        service, _, engine = await _bridge_service()
+        try:
+            acknowledgement = await _acknowledge_all_mr_eth(service)
+            with pytest.raises(OwnerTrialFlowError) as exc_info:
+                await service.create_authorization_draft(
+                    BoundedLiveTrialAuthorizationDraftCreateRequest(
+                        carrier_id="MR-001-live-readonly-v0",
+                        linked_acknowledgement_id=acknowledgement.acknowledgement_id,
+                        symbol="ETH/USDT:USDT",
+                        side="long",
+                        max_notional="25.01",
+                        quantity="0.014",
+                        leverage="1",
+                        protection_plan_type="single_tp_plus_sl",
+                    ),
+                    operator_id="owner",
+                )
+
+            assert exc_info.value.code == "cap_violation"
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_owner_bounded_execution_blocks_missing_protection_price_source_before_intent_or_order():
     async def scenario():
         service, bridge, engine = await _bridge_service()
@@ -5426,7 +5499,6 @@ def test_generic_action_spec_final_gate_keeps_volatility_non_action_and_mr_wrong
 
             assert mr_wrong_scope.final_preflight_result == "blocked"
             assert "symbol_mismatch" in mr_wrong_scope.hard_blockers
-            assert "quantity_mismatch" in mr_wrong_scope.hard_blockers
             assert "missing_explicit_owner_live_authorization" in mr_wrong_scope.hard_blockers
             assert mr_wrong_scope.non_permissions["execution_intent_created"] is False
             assert mr_wrong_scope.non_permissions["order_created"] is False

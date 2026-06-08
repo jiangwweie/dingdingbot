@@ -308,6 +308,7 @@ class GenericActionSpec(ProductionAdmissionModel):
     action_registry_supported: bool
     proposal_role: Literal["trend_candidate", "range_candidate", "volatility_candidate", "unknown"] = "unknown"
     market_regime: Optional[str] = None
+    sizing_mode: Literal["fixed_quantity", "notional_derived"] = "fixed_quantity"
     action_candidate_ref: Optional[str] = None
     exact_scope_required: bool = True
     supported_symbols: list[str] = Field(default_factory=list)
@@ -315,6 +316,13 @@ class GenericActionSpec(ProductionAdmissionModel):
     symbol: Optional[str] = None
     side: Optional[str] = None
     quantity: Optional[str] = None
+    target_notional_usdt: Optional[str] = None
+    computed_quantity: Optional[str] = None
+    estimated_notional_usdt: Optional[str] = None
+    market_rule_snapshot: dict[str, object] = Field(default_factory=dict)
+    validation_result: dict[str, object] = Field(default_factory=dict)
+    suggested_minimum_notional_usdt: Optional[str] = None
+    suggested_quantity: Optional[str] = None
     max_notional: Optional[str] = None
     leverage: Optional[str] = None
     max_attempts: Optional[int] = None
@@ -774,6 +782,12 @@ class BudgetEnvelopeDraft(ProductionAdmissionModel):
     symbol: Optional[str] = None
     side: Optional[str] = None
     quantity: Optional[str] = None
+    target_notional_usdt: Optional[str] = None
+    current_price: Optional[str] = None
+    min_notional: Optional[str] = None
+    min_qty: Optional[str] = None
+    qty_step: Optional[str] = None
+    price_tick: Optional[str] = None
     max_notional: Optional[str] = None
     leverage: Optional[str] = None
     max_attempts: Optional[int] = None
@@ -1454,6 +1468,12 @@ class OwnerScopeDraft(ProductionAdmissionModel):
     symbol: Optional[str] = None
     side: Optional[str] = None
     quantity: Optional[str] = None
+    target_notional_usdt: Optional[str] = None
+    current_price: Optional[str] = None
+    min_notional: Optional[str] = None
+    min_qty: Optional[str] = None
+    qty_step: Optional[str] = None
+    price_tick: Optional[str] = None
     max_notional: Optional[str] = None
     leverage: Optional[str] = None
     max_attempts: Optional[int] = None
@@ -5478,12 +5498,20 @@ def _generic_action_specs(rows: list[FamilyAdmissionRow]) -> list[GenericActionS
                 action_registry_supported=row.action_api_compatibility.compatible,
                 proposal_role=_proposal_role(row),
                 market_regime=_market_regime_for_family(row.family),
+                sizing_mode=_optional_str(scope_template.get("sizing_mode")) or "fixed_quantity",
                 action_candidate_ref=f"action-candidate:{row.carrier_id or row.family}",
                 supported_symbols=list(row.supported_symbols),
                 supported_sides=_supported_sides_for_family(row.family),
                 symbol=_optional_str(scope_template.get("symbol")),
                 side=_optional_str(scope_template.get("side")),
                 quantity=_optional_str(scope_template.get("quantity")),
+                target_notional_usdt=_optional_str(scope_template.get("target_notional_usdt")),
+                computed_quantity=_optional_str(scope_template.get("computed_quantity")),
+                estimated_notional_usdt=_optional_str(scope_template.get("estimated_notional_usdt")),
+                market_rule_snapshot=dict(scope_template.get("market_rule_snapshot") or {}),
+                validation_result=dict(scope_template.get("validation_result") or {}),
+                suggested_minimum_notional_usdt=_optional_str(scope_template.get("suggested_minimum_notional_usdt")),
+                suggested_quantity=_optional_str(scope_template.get("suggested_quantity")),
                 max_notional=_optional_str(scope_template.get("max_notional")),
                 leverage=_optional_str(scope_template.get("leverage")),
                 max_attempts=_optional_int(scope_template.get("max_attempts")),
@@ -5649,6 +5677,7 @@ def _carrier_scope_template(row: FamilyAdmissionRow) -> dict[str, object]:
         return {
             "symbol": "SOL/USDT:USDT",
             "side": "long",
+            "sizing_mode": "fixed_quantity",
             "quantity": "0.1",
             "max_notional": "20",
             "leverage": "1",
@@ -5660,8 +5689,12 @@ def _carrier_scope_template(row: FamilyAdmissionRow) -> dict[str, object]:
         return {
             "symbol": "ETH/USDT:USDT",
             "side": "long",
-            "quantity": "0.01",
-            "max_notional": "20",
+            "sizing_mode": "notional_derived",
+            "quantity": None,
+            "target_notional_usdt": "22",
+            "computed_quantity": None,
+            "estimated_notional_usdt": None,
+            "max_notional": "25",
             "leverage": "1",
             "max_attempts": 1,
             "protection_mode": "single_tp_plus_sl",
@@ -5711,6 +5744,9 @@ def _carrier_default_example(row: FamilyAdmissionRow) -> dict[str, object]:
         "symbol": scope_template.get("symbol"),
         "side": scope_template.get("side"),
         "quantity": scope_template.get("quantity"),
+        "target_notional_usdt": scope_template.get("target_notional_usdt"),
+        "computed_quantity": scope_template.get("computed_quantity"),
+        "estimated_notional_usdt": scope_template.get("estimated_notional_usdt"),
         "max_notional": scope_template.get("max_notional"),
         "leverage": scope_template.get("leverage"),
         "max_attempts": scope_template.get("max_attempts"),

@@ -578,9 +578,15 @@ def _validate_draft_scope(
         raise OwnerTrialFlowError("symbol_mismatch", "Draft symbol does not match carrier.")
     if request.side != carrier.side:
         raise OwnerTrialFlowError("side_mismatch", "Draft side does not match carrier.")
-    if not _decimal_scope_equal(request.max_notional, carrier.max_notional):
+    if _carrier_uses_notional_sizing(carrier):
+        if request.max_notional > carrier.max_notional:
+            raise OwnerTrialFlowError("cap_violation", "Draft max notional exceeds carrier cap.")
+    elif not _decimal_scope_equal(request.max_notional, carrier.max_notional):
         raise OwnerTrialFlowError("cap_violation", "Draft max notional does not match carrier scope.")
-    if not _decimal_scope_equal(request.quantity, carrier.quantity):
+    if (
+        not _carrier_uses_notional_sizing(carrier)
+        and not _decimal_scope_equal(request.quantity, carrier.quantity)
+    ):
         raise OwnerTrialFlowError("cap_violation", "Draft quantity does not match carrier scope.")
     if not _decimal_scope_equal(request.leverage, carrier.leverage):
         raise OwnerTrialFlowError("cap_violation", "Draft leverage does not match carrier scope.")
@@ -664,9 +670,15 @@ def _validate_clearance_scope(
         raise OwnerTrialFlowError("symbol_mismatch", "Clearance symbol does not match carrier.")
     if clearance.side != carrier.side:
         raise OwnerTrialFlowError("side_mismatch", "Clearance side does not match carrier.")
-    if not _decimal_scope_equal(clearance.max_notional, carrier.max_notional):
+    if _carrier_uses_notional_sizing(carrier):
+        if clearance.max_notional > carrier.max_notional:
+            raise OwnerTrialFlowError("cap_violation", "Clearance max notional exceeds carrier cap.")
+    elif not _decimal_scope_equal(clearance.max_notional, carrier.max_notional):
         raise OwnerTrialFlowError("cap_violation", "Clearance max notional does not match carrier scope.")
-    if not _decimal_scope_equal(clearance.quantity, carrier.quantity):
+    if (
+        not _carrier_uses_notional_sizing(carrier)
+        and not _decimal_scope_equal(clearance.quantity, carrier.quantity)
+    ):
         raise OwnerTrialFlowError("cap_violation", "Clearance quantity does not match carrier scope.")
     if not _decimal_scope_equal(clearance.leverage, carrier.leverage):
         raise OwnerTrialFlowError("cap_violation", "Clearance leverage does not match carrier scope.")
@@ -687,6 +699,10 @@ def _warning_rows(carrier_id: str) -> list[dict[str, str | bool]]:
 
 def _decimal_scope_equal(left: Decimal, right: Decimal) -> bool:
     return abs(Decimal(str(left)) - Decimal(str(right))) <= Decimal("0.000000000001")
+
+
+def _carrier_uses_notional_sizing(carrier: StrategyTrialCarrierView) -> bool:
+    return getattr(carrier, "sizing_mode", "fixed_quantity") == "notional_derived"
 
 
 def _hard_blocker_rows(
@@ -717,7 +733,7 @@ def _hard_blocker_rows(
 
 
 def _carrier_summary(carrier: StrategyTrialCarrierView) -> dict[str, str | bool]:
-    return {
+    summary: dict[str, str | bool] = {
         "carrier_id": carrier.carrier_id,
         "strategy_family_id": carrier.strategy_id,
         "strategy_id": carrier.strategy_id,
@@ -728,11 +744,15 @@ def _carrier_summary(carrier: StrategyTrialCarrierView) -> dict[str, str | bool]
         "execution_mode": carrier.execution_mode,
         "max_notional": str(carrier.max_notional),
         "quantity": str(carrier.quantity),
+        "sizing_mode": carrier.sizing_mode,
         "leverage": str(carrier.leverage),
         "protection_plan_type": carrier.protection_plan_type,
         "live_ready": False,
         "order_permission_granted": False,
     }
+    if carrier.target_notional_usdt is not None:
+        summary["target_notional_usdt"] = str(carrier.target_notional_usdt)
+    return summary
 
 
 def _dedupe(values: list[str]) -> list[str]:

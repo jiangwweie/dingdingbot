@@ -1375,9 +1375,15 @@ def _catalog_scope_blockers(authorization: BoundedLiveTrialAuthorization) -> lis
         blockers.append("symbol_mismatch")
     if authorization.side != carrier.side:
         blockers.append("side_mismatch")
-    if not _decimal_scope_equal(authorization.quantity, carrier.quantity):
+    if (
+        getattr(carrier, "sizing_mode", "fixed_quantity") != "notional_derived"
+        and not _decimal_scope_equal(authorization.quantity, carrier.quantity)
+    ):
         blockers.append("quantity_mismatch")
-    if not _decimal_scope_equal(authorization.max_notional, carrier.max_notional):
+    if getattr(carrier, "sizing_mode", "fixed_quantity") == "notional_derived":
+        if authorization.max_notional > carrier.max_notional:
+            blockers.append("cap_mismatch")
+    elif not _decimal_scope_equal(authorization.max_notional, carrier.max_notional):
         blockers.append("cap_mismatch")
     if not _decimal_scope_equal(authorization.leverage, carrier.leverage):
         blockers.append("leverage_mismatch")
