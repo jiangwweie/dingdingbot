@@ -3264,13 +3264,18 @@ def _day_start_ms(day_key: str) -> int:
 
 
 def _budgeted_autonomy_candidate_from_spec(spec: dict[str, Any]) -> BudgetedAutonomyCandidateInput:
+    status = str(spec.get("status") or "invalid_blocked")
+    hard_blockers = _budgeted_autonomy_candidate_blockers_for_selection(
+        status=status,
+        hard_blockers=list(spec.get("hard_blockers") or []),
+    )
     return BudgetedAutonomyCandidateInput(
         candidate_id=str(spec.get("action_candidate_ref") or spec.get("carrier_id") or "unknown"),
         family=str(spec.get("family") or "unknown"),
         carrier_id=str(spec.get("carrier_id") or "unknown"),
         symbol=str(spec.get("symbol") or (spec.get("supported_symbols") or ["unknown"])[0]),
         side=_normalize_side(spec.get("side")),
-        status=str(spec.get("status") or "invalid_blocked"),
+        status=status,
         action_registry_supported=bool(spec.get("action_registry_supported")),
         proposal_role=str(spec.get("proposal_role") or "unknown"),
         quantity=_decimal_from_any(spec.get("quantity") or spec.get("computed_quantity")),
@@ -3282,7 +3287,32 @@ def _budgeted_autonomy_candidate_from_spec(spec: dict[str, Any]) -> BudgetedAuto
         protection_mode=spec.get("protection_mode"),
         review_requirement=spec.get("review_requirement"),
         warnings=list(spec.get("warnings") or []),
-        hard_blockers=list(spec.get("hard_blockers") or []),
+        hard_blockers=hard_blockers,
+    )
+
+
+def _budgeted_autonomy_candidate_blockers_for_selection(
+    *,
+    status: str,
+    hard_blockers: list[Any],
+) -> list[str]:
+    blockers = [str(item) for item in hard_blockers]
+    if status != "valid_blocked_final_gate":
+        return blockers
+    return [
+        item
+        for item in blockers
+        if not _final_gate_readiness_marker(item)
+    ]
+
+
+def _final_gate_readiness_marker(value: str) -> bool:
+    normalized = value.upper()
+    return (
+        normalized.endswith("-SCOPE")
+        or normalized.endswith("-FINAL-GATE")
+        or normalized.endswith("-EVIDENCE")
+        or normalized.endswith("-PROTECTION")
     )
 
 

@@ -2114,6 +2114,9 @@ def test_owner_action_flow_accepts_owner_approved_custom_budget_envelope(monkeyp
     assert flow["budgeted_autonomy_v01"]["policy"]["daily_attempts"]["source"] == (
         "trading_console_selected_symbol_pg_intents_owner_budget_window"
     )
+    assert flow["budgeted_autonomy_v01"]["selected_candidate"]["status"] == (
+        "eligible_for_final_gate"
+    )
     assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
     assert flow["budgeted_autonomy_v01"]["places_order"] is False
 
