@@ -522,16 +522,19 @@ def get_signal_pipeline() -> Optional[SignalPipeline]:
 def _signal_executor_for_brc_permission(
     execution_orchestrator: Optional[ExecutionOrchestrator],
     permission: ExecutionPermission,
+    *,
+    allow_legacy_signal_execution: bool = False,
 ):
     if execution_orchestrator is None:
         return None
-    if permission >= ExecutionPermission.ORDER_ALLOWED:
+    if permission >= ExecutionPermission.ORDER_ALLOWED and allow_legacy_signal_execution:
         return execution_orchestrator.execute_signal
     logger.warning(
         "SignalPipeline signal_executor disabled by BRC execution permission: "
-        "permission=%s required=order_allowed. BRC read-only/intent-recording modes "
-        "must not bind signal-to-order execution.",
+        "permission=%s required=order_allowed allow_legacy_signal_execution=%s. "
+        "Owner-bounded order capability must not bind generic signal-to-order execution.",
         permission.value_name,
+        allow_legacy_signal_execution,
     )
     return None
 

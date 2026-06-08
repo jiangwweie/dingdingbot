@@ -171,6 +171,80 @@ def test_run_exchange_credential_preflight_fake_gateway_passes_without_secrets()
     assert "server-secret" not in repr(result)
 
 
+def test_run_exchange_credential_preflight_accepts_mr_eth_exact_scope_without_secrets():
+    calls: list[tuple[str, object]] = []
+
+    class FakeRestExchange:
+        symbols = ["ETH/USDT:USDT"]
+
+        async def sapi_get_account_apirestrictions(self):
+            return {
+                "enableReading": True,
+                "enableFutures": True,
+                "enableWithdrawals": False,
+                "ipRestrict": True,
+            }
+
+        async def fetch_balance(self, params):
+            assert params == {"type": "future"}
+            return {"total": {"USDT": "25"}}
+
+    class FakeGateway:
+        def __init__(self, **kwargs):
+            assert kwargs["api_key"] == "server-key"
+            assert kwargs["api_secret"] == "server-secret"
+            self.rest_exchange = FakeRestExchange()
+
+        async def initialize(self):
+            return None
+
+        async def fetch_positions(self, *, symbol=None):
+            calls.append(("positions", symbol))
+            return []
+
+        async def fetch_open_orders(self, symbol, params=None):
+            calls.append(("open_orders", (symbol, params)))
+            return []
+
+        async def get_market_info(self, symbol):
+            calls.append(("market_info", symbol))
+            return {
+                "min_quantity": "0.001",
+                "step_size": "0.001",
+                "min_notional": "20",
+                "price_precision": 2,
+            }
+
+        async def close(self):
+            return None
+
+    result = asyncio.run(
+        run_exchange_credential_preflight(
+            env={
+                "TRADING_ENV": "live",
+                "EXCHANGE_TESTNET": "false",
+                "RUNTIME_CONTROL_API_ENABLED": "false",
+                "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "EXCHANGE_NAME": "binance",
+                "EXCHANGE_API_KEY": "server-key",
+                "EXCHANGE_API_SECRET": "server-secret",
+            },
+            gateway_factory=FakeGateway,
+            symbol="ETH/USDT:USDT",
+            run=True,
+        )
+    )
+
+    assert result["result"] == "passed"
+    assert result["hard_blockers"] == []
+    assert ("positions", "ETH/USDT:USDT") in calls
+    assert ("open_orders", ("ETH/USDT:USDT", None)) in calls
+    assert ("open_orders", ("ETH/USDT:USDT", {"stop": True})) in calls
+    assert ("market_info", "ETH/USDT:USDT") in calls
+    assert "server-key" not in repr(result)
+    assert "server-secret" not in repr(result)
+
+
 def test_run_exchange_credential_preflight_blocks_withdrawal_permission():
     class FakeRestExchange:
         symbols = ["SOL/USDT:USDT"]
@@ -337,7 +411,7 @@ def test_run_exchange_credential_preflight_fail_fast_on_futures_account_failure(
     ]
 
 
-def test_run_exchange_credential_preflight_blocks_non_trend_symbol_before_gateway():
+def test_run_exchange_credential_preflight_blocks_unsupported_symbol_before_gateway():
     class GatewayMustNotConstruct:
         def __init__(self, **_kwargs):
             raise AssertionError("gateway must not be constructed for unsupported symbol")
@@ -354,7 +428,7 @@ def test_run_exchange_credential_preflight_blocks_non_trend_symbol_before_gatewa
                 "EXCHANGE_API_SECRET": "server-secret",
             },
             gateway_factory=GatewayMustNotConstruct,
-            symbol="ETH/USDT:USDT",
+            symbol="BTC/USDT:USDT",
             run=True,
         )
     )

@@ -69,11 +69,11 @@ class EnvironmentRuntimeConfig(BaseModel):
             )
         if (
             self.trading_env.strip().lower() == "live"
-            and self.brc_execution_permission_max > ExecutionPermission.INTENT_RECORDING
+            and self.brc_execution_permission_max == ExecutionPermission.EXECUTION_INTENT_ALLOWED
         ):
             raise ValueError(
-                "TRADING_ENV=live cannot use BRC_EXECUTION_PERMISSION_MAX above intent_recording; "
-                "live execution scope must come from PG-backed Owner authorization"
+                "TRADING_ENV=live cannot use generic execution_intent_allowed; live execution "
+                "scope must come from PG-backed Owner authorization and FinalGate"
             )
         return self
 

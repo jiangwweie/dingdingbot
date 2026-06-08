@@ -236,9 +236,9 @@ def validate_pg_core_configuration(env: Optional[Mapping[str, str]] = None) -> N
         )
 
     permission_max = _env_value(source, "BRC_EXECUTION_PERMISSION_MAX", "read_only").lower()
-    if live_like and permission_max in {"execution_intent_allowed", "order_allowed"}:
+    if live_like and permission_max == "execution_intent_allowed":
         raise ValueError(
-            "production/live 环境不得通过 BRC_EXECUTION_PERMISSION_MAX 全局授予 execution/order 权限"
+            "production/live 环境不得通过 BRC_EXECUTION_PERMISSION_MAX 全局授予 execution intent 权限"
         )
 
     if live_like and _env_value(source, "RUNTIME_PROFILE"):

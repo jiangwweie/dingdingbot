@@ -42,14 +42,27 @@ def test_validate_pg_core_configuration_rejects_non_postgres_backend():
         validate_pg_core_configuration(_valid_env(CORE_ORDER_BACKEND="sqlite"))
 
 
-def test_validate_pg_core_configuration_rejects_live_global_order_permission():
-    with pytest.raises(ValueError, match="全局授予 execution/order 权限"):
+def test_validate_pg_core_configuration_accepts_live_order_capable_ceiling():
+    validate_pg_core_configuration(
+        _valid_env(
+            APP_ENV="production",
+            TRADING_ENV="live",
+            EXCHANGE_TESTNET="false",
+            BRC_EXECUTION_PERMISSION_MAX="order_allowed",
+            RUNTIME_CONTROL_API_ENABLED="false",
+            RUNTIME_TEST_SIGNAL_INJECTION_ENABLED="false",
+        )
+    )
+
+
+def test_validate_pg_core_configuration_rejects_live_generic_execution_intent_permission():
+    with pytest.raises(ValueError, match="全局授予 execution intent 权限"):
         validate_pg_core_configuration(
             _valid_env(
                 APP_ENV="production",
                 TRADING_ENV="live",
                 EXCHANGE_TESTNET="false",
-                BRC_EXECUTION_PERMISSION_MAX="order_allowed",
+                BRC_EXECUTION_PERMISSION_MAX="execution_intent_allowed",
             )
         )
 
@@ -82,11 +95,10 @@ def test_production_template_is_conservative_and_non_secret():
     text = (REPO_ROOT / ".env.production.example").read_text()
 
     assert "TRADING_ENV=live" in text
-    assert "BRC_EXECUTION_PERMISSION_MAX=read_only" in text
+    assert "BRC_EXECUTION_PERMISSION_MAX=order_allowed" in text
     assert "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false" in text
     assert "RUNTIME_CONTROL_API_ENABLED=false" in text
     assert "RUNTIME_PROFILE=" not in text
-    assert "order_allowed" not in text
     assert "BINANCE_SECRET_KEY" not in text
     assert "<set_on_server>" in text
 

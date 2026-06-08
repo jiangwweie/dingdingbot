@@ -11,6 +11,12 @@ CANONICAL_KEY_ENV = "EXCHANGE_API_KEY"
 CANONICAL_SECRET_ENV = "EXCHANGE_API_SECRET"
 BINANCE_ALIAS_KEY_ENV = "BINANCE_API_KEY"
 BINANCE_ALIAS_SECRET_ENV = "BINANCE_SECRET_KEY"
+SUPPORTED_PREFLIGHT_SYMBOLS = frozenset(
+    {
+        "SOL/USDT:USDT",
+        "ETH/USDT:USDT",
+    }
+)
 
 
 def exchange_credential_env_status(env: Mapping[str, str]) -> dict[str, Any]:
@@ -170,7 +176,7 @@ async def run_exchange_credential_preflight(
     }
     if not run:
         return result
-    if symbol != "SOL/USDT:USDT":
+    if symbol not in SUPPORTED_PREFLIGHT_SYMBOLS:
         result["result"] = "blocked"
         result["hard_blockers"] = ["unsupported_preflight_symbol"]
         return result

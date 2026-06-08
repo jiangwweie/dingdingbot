@@ -22,7 +22,7 @@ Production and Tokyo pre-live should expose only these groups:
 | PostgreSQL | `PG_DATABASE_URL` | server secret / DSN |
 | Console auth | `BRC_OPERATOR_USERNAME`, `BRC_OPERATOR_PASSWORD_HASH`, `BRC_OPERATOR_TOTP_SECRET`, `BRC_OPERATOR_SESSION_SECRET`, `BRC_OPERATOR_SESSION_TTL_SECONDS` | server secret values |
 | Exchange access | `EXCHANGE_NAME`, `EXCHANGE_API_KEY`, `EXCHANGE_API_SECRET` | server secret values; no duplicate Binance aliases |
-| Global safety cap | `BRC_EXECUTION_PERMISSION_MAX` | production defaults to `read_only`; live order authority is not global |
+| Global safety cap | `BRC_EXECUTION_PERMISSION_MAX` | production may be `order_allowed` only as a capability ceiling; live order authority is scoped by Owner authorization and FinalGate |
 | Optional LLM | `BRC_LLM_ENABLED`, optional LLM endpoint/model/key | disabled by default |
 | Service binding | `BACKEND_PORT`, `API_HOST` | host binding only |
 
@@ -38,7 +38,7 @@ Production and Tokyo pre-live should expose only these groups:
 | `CORE_ORDER_BACKEND` | `database.py`, `runtime_config.py` | no | persistence backend | `postgres` | mainline all modes | fixed to `postgres` |
 | `CORE_POSITION_BACKEND` | `database.py`, `runtime_config.py` | no | persistence backend | `postgres` | mainline all modes | fixed to `postgres` |
 | `RUNTIME_PROFILE` | `main.py`, `api_console_runtime.py`, scripts | no | selects dev/testnet profile | unset in live/prelive | dev/testnet only | remove from live operator responsibility |
-| `BRC_EXECUTION_PERMISSION_MAX` | `execution_permission.py`, `runtime_config.py`, `api_brc_console.py` | no | caps action depth | `read_only` | all | live/prelive fixed to `read_only` or at most `intent_recording` by explicit review |
+| `BRC_EXECUTION_PERMISSION_MAX` | `execution_permission.py`, `runtime_config.py`, `api_brc_console.py` | no | caps action depth | `read_only` | all | live/prelive may use `order_allowed` only as an official gated execution capability ceiling |
 | `RUNTIME_CONTROL_API_ENABLED` | `api_console_runtime.py`, `api_brc_console.py`, tests/scripts | no | exposes mutation/control endpoints | `false` | dev/testnet only by default | remove from production operator responsibility |
 | `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED` | `api_console_runtime.py`, `api_brc_console.py`, tests/scripts | no | enables test signal injection | `false` | dev/testnet only | remove from production operator responsibility |
 | `EXCHANGE_NAME` | `runtime_config.py` | no | exchange adapter selection | `binance` | all | keep |
@@ -63,7 +63,8 @@ Production and Tokyo pre-live should expose only these groups:
 - Startup PG validation rejects non-PG core backends.
 - Production/live validation rejects `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=true`.
 - Production/live validation rejects `RUNTIME_CONTROL_API_ENABLED=true`.
-- Production/live validation rejects `BRC_EXECUTION_PERMISSION_MAX=execution_intent_allowed` or `order_allowed`.
+- Production/live validation rejects `BRC_EXECUTION_PERMISSION_MAX=execution_intent_allowed`.
+- Production/live may use `BRC_EXECUTION_PERMISSION_MAX=order_allowed` only with `RUNTIME_CONTROL_API_ENABLED=false` and `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false`; it remains a capability ceiling and not trade authorization.
 - Production/live validation rejects `RUNTIME_PROFILE` as a live executable scope selector.
 
 ## Runtime Profile Governance
@@ -90,7 +91,13 @@ Current hard pre-live gap:
 
 It is not an authorization.
 
-In production/live it must not globally grant `execution_intent_allowed` or `order_allowed`.
+In production/live it must not globally grant generic `execution_intent_allowed`.
+
+In production/live, `order_allowed` means only that the official Owner-bounded
+execute endpoint can bind an order-capable gateway after exact Owner
+authorization and FinalGate. It does not bind the generic SignalPipeline
+executor, start runtime actions, or authorize any symbol/side/size outside the
+PG-backed bounded authorization.
 
 Future live trial authority must be scoped to a PG-backed `BoundedLiveTrialAuthorization`.
 

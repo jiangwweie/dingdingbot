@@ -111,13 +111,29 @@ def test_main_signal_executor_is_none_below_order_allowed(permission):
     assert _signal_executor_for_brc_permission(orchestrator, permission) is None
 
 
-def test_main_signal_executor_binds_when_order_allowed():
+def test_main_signal_executor_stays_disabled_by_default_when_order_allowed():
     async def _execute_signal():
         return None
 
     orchestrator = SimpleNamespace(execute_signal=_execute_signal)
 
-    assert _signal_executor_for_brc_permission(orchestrator, ExecutionPermission.ORDER_ALLOWED) is _execute_signal
+    assert _signal_executor_for_brc_permission(orchestrator, ExecutionPermission.ORDER_ALLOWED) is None
+
+
+def test_main_signal_executor_requires_explicit_legacy_opt_in_when_order_allowed():
+    async def _execute_signal():
+        return None
+
+    orchestrator = SimpleNamespace(execute_signal=_execute_signal)
+
+    assert (
+        _signal_executor_for_brc_permission(
+            orchestrator,
+            ExecutionPermission.ORDER_ALLOWED,
+            allow_legacy_signal_execution=True,
+        )
+        is _execute_signal
+    )
 
 
 @pytest.mark.asyncio

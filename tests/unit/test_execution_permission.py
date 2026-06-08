@@ -231,7 +231,7 @@ def test_runtime_config_rejects_non_postgres_mainline_storage_backend():
         raise AssertionError("expected non-postgres mainline backend to be rejected")
 
 
-def test_live_runtime_config_rejects_global_order_permission_env():
+def test_live_runtime_config_accepts_order_capable_ceiling_env():
     resolver = RuntimeConfigResolver(
         profile_repository=object(),
         env={
@@ -249,9 +249,32 @@ def test_live_runtime_config_rejects_global_order_permission_env():
         },
     )
 
+    resolved = resolver._resolve_environment()
+
+    assert resolved.brc_execution_permission_max == ExecutionPermission.ORDER_ALLOWED
+
+
+def test_live_runtime_config_rejects_generic_execution_intent_allowed_env():
+    resolver = RuntimeConfigResolver(
+        profile_repository=object(),
+        env={
+            "PG_DATABASE_URL": "postgresql://example",
+            "CORE_EXECUTION_INTENT_BACKEND": "postgres",
+            "CORE_ORDER_BACKEND": "postgres",
+            "CORE_POSITION_BACKEND": "postgres",
+            "TRADING_ENV": "live",
+            "EXCHANGE_NAME": "binance",
+            "EXCHANGE_TESTNET": "false",
+            "BRC_EXECUTION_PERMISSION_MAX": "execution_intent_allowed",
+            "EXCHANGE_API_KEY": "key",
+            "EXCHANGE_API_SECRET": "secret",
+            "FEISHU_WEBHOOK_URL": "https://example.invalid/hook",
+        },
+    )
+
     try:
         resolver._resolve_environment()
     except ValueError as exc:
-        assert "TRADING_ENV=live cannot use BRC_EXECUTION_PERMISSION_MAX above intent_recording" in str(exc)
+        assert "TRADING_ENV=live cannot use generic execution_intent_allowed" in str(exc)
     else:
-        raise AssertionError("expected live global order permission to be rejected")
+        raise AssertionError("expected live generic execution intent permission to be rejected")
