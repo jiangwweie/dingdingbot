@@ -2859,6 +2859,9 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert capital["action_allowed"] is False
     assert proposal["capital_selection"]["action_allowed"] is False
     protection_review = flow["protection_review_readiness"]
+    assert protection_review["status"] == "blocked_for_execution_review_available"
+    assert protection_review["current_review_ready"] is True
+    assert protection_review["execution_protection_draft_status"] == "blocked"
     assert protection_review["review_status"] == "pending_open"
     assert protection_review["current_tp_sl_status"] == "protected_open"
     assert protection_review["frontend_action_enabled"] is False

@@ -3739,6 +3739,7 @@ def _owner_action_protection_review_readiness(
 ) -> dict[str, Any]:
     protection_template = dict(selected_spec.get("protection_template") or {})
     review_template = dict(selected_spec.get("review_template") or {})
+    protection_template_blockers = list(protection_template.get("hard_blockers") or [])
     ledger = dict(post_action.get("review_ledger") or {})
     tp_sl = dict(ledger.get("tp_sl_result") or {})
     review_decision = dict(ledger.get("review_decision") or {})
@@ -3748,9 +3749,23 @@ def _owner_action_protection_review_readiness(
         "pending",
         "revise",
     }
+    execution_template_blocked = bool(protection_template_blockers) or int(
+        risk_review.get("hard_blocker_count", 0) or 0
+    ) > 0
     return {
-        "status": "ready_for_review" if protection_ready and review_ready else "incomplete",
+        "status": (
+            "blocked_for_execution_review_available"
+            if protection_ready and review_ready and execution_template_blocked
+            else "ready_for_review"
+            if protection_ready and review_ready
+            else "incomplete"
+        ),
+        "current_review_ready": review_ready,
+        "execution_protection_draft_status": (
+            "blocked" if execution_template_blocked else "ready"
+        ),
         "protection_template": protection_template,
+        "protection_template_hard_blockers": protection_template_blockers,
         "review_template": review_template,
         "current_tp_sl_status": tp_sl.get("status"),
         "current_open_protection_order_count": tp_sl.get("open_protection_order_count"),
