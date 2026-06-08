@@ -502,6 +502,7 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
     position_repo = getattr(api_module, "_position_repo", None)
     execution_intent_repo = getattr(api_module, "_execution_intent_repo", None)
     execution_recovery_repo = getattr(api_module, "_execution_recovery_repo", None)
+    live_lifecycle_review_repo = getattr(api_module, "_live_lifecycle_review_repo", None)
     if order_repo is None:
         order_repo = _cached_pg_repo(api_module, "_trading_console_pg_order_repo", _build_pg_order_repo)
     if position_repo is None:
@@ -510,6 +511,8 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         execution_intent_repo = _cached_pg_repo(api_module, "_trading_console_pg_execution_intent_repo", _build_pg_execution_intent_repo)
     if execution_recovery_repo is None:
         execution_recovery_repo = _cached_pg_repo(api_module, "_trading_console_pg_execution_recovery_repo", _build_pg_execution_recovery_repo)
+    if live_lifecycle_review_repo is None:
+        live_lifecycle_review_repo = _cached_pg_repo(api_module, "_trading_console_pg_live_lifecycle_review_repo", _build_pg_live_lifecycle_review_repo)
 
     return TradingConsoleDependencies(
         runtime_bound=bool(api_module.get_runtime_context() is not None),
@@ -526,6 +529,7 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         audit_logger=getattr(api_module, "_audit_logger", None),
         signal_repo=getattr(api_module, "_signal_repo", None),
         brc_campaign_service=getattr(api_module, "_brc_campaign_service", None),
+        live_lifecycle_review_repo=live_lifecycle_review_repo,
         owner_trial_flow_service=_owner_trial_flow_service(),
         campaign_state_service=getattr(api_module, "_campaign_state_service", None),
         multi_carrier_budget_authorization_service=_multi_carrier_budget_authorization_service(),
@@ -570,6 +574,12 @@ def _build_pg_execution_recovery_repo() -> Any:
     from src.infrastructure.pg_execution_recovery_repository import PgExecutionRecoveryRepository
 
     return PgExecutionRecoveryRepository()
+
+
+def _build_pg_live_lifecycle_review_repo() -> Any:
+    from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
+
+    return PgLiveLifecycleReviewRepository()
 
 
 def _owner_trial_flow_service() -> Optional[Any]:

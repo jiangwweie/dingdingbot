@@ -97,6 +97,7 @@ class TradingConsoleDependencies:
     audit_logger: Optional[Any] = None
     signal_repo: Optional[Any] = None
     brc_campaign_service: Optional[Any] = None
+    live_lifecycle_review_repo: Optional[Any] = None
     owner_trial_flow_service: Optional[Any] = None
     campaign_state_service: Optional[Any] = None
     multi_carrier_budget_authorization_service: Optional[Any] = None
@@ -121,6 +122,7 @@ class TradingConsoleSnapshot:
     recovery_tasks: list[dict[str, Any]]
     audit_events: list[dict[str, Any]]
     review_records: list[dict[str, Any]]
+    live_lifecycle_reviews: list[dict[str, Any]]
     signal_records: list[dict[str, Any]]
     authorization_state: dict[str, Any]
     runtime_control_state: dict[str, Any]
@@ -161,6 +163,11 @@ class TradingConsoleReadModelService:
         recovery_tasks = await self._read_recovery_tasks(unavailable=unavailable)
         audit_events = await self._read_audit_events(limit=limit, unavailable=unavailable)
         review_records = await self._read_reviews(limit=limit, unavailable=unavailable)
+        live_lifecycle_reviews = await self._read_live_lifecycle_reviews(
+            symbol=symbol,
+            limit=limit,
+            unavailable=unavailable,
+        )
         signal_records = await self._read_signals(symbol=symbol, limit=limit, unavailable=unavailable)
         authorization_state = await self._read_authorization_state(
             carrier_id=DEFAULT_CARRIER_ID,
@@ -199,6 +206,7 @@ class TradingConsoleReadModelService:
             recovery_tasks=recovery_tasks,
             audit_events=audit_events,
             review_records=review_records,
+            live_lifecycle_reviews=live_lifecycle_reviews,
             signal_records=signal_records,
             authorization_state=authorization_state,
             runtime_control_state=runtime_control_state,
@@ -438,6 +446,7 @@ class TradingConsoleReadModelService:
             snap,
             data={
                 "reviews": snap.review_records,
+                "live_lifecycle_reviews": snap.live_lifecycle_reviews,
                 "filled_order_facts": filled_orders,
                 "positions": snap.pg_positions,
                 "unavailable_fields": {
@@ -655,7 +664,11 @@ class TradingConsoleReadModelService:
         protection = self._protection_summary(snap)
         positions = self._merge_positions_for_risk(snap)
         consistency = self._consistency_summary(snap)
-        review = _cockpit_review_summary(post_action=post_action, reviews=snap.review_records)
+        review = _cockpit_review_summary(
+            post_action=post_action,
+            reviews=snap.review_records,
+            live_lifecycle_reviews=snap.live_lifecycle_reviews,
+        )
         recovery = _cockpit_recovery_summary(
             snap=snap,
             classified_orders=self._classify_orders(snap),
@@ -1394,6 +1407,25 @@ class TradingConsoleReadModelService:
             return [_plain_dict(item) for item in await service.list_review_decisions(limit=limit)]
         except Exception as exc:
             unavailable.append({"source": "review_state", "code": "read_failed", "error": str(exc)})
+            return []
+
+    async def _read_live_lifecycle_reviews(
+        self,
+        *,
+        symbol: Optional[str],
+        limit: int,
+        unavailable: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        repo = self._deps.live_lifecycle_review_repo
+        if repo is None or not hasattr(repo, "list"):
+            unavailable.append({"source": "live_lifecycle_reviews", "code": "repo_unavailable"})
+            return []
+        try:
+            return [_plain_dict(item) for item in await repo.list(symbol=symbol, limit=limit)]
+        except Exception as exc:
+            unavailable.append(
+                {"source": "live_lifecycle_reviews", "code": "read_failed", "error": str(exc)}
+            )
             return []
 
     async def _read_signals(
@@ -2854,16 +2886,20 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         item for item in snap.pg_intents
         if str(item.get("status") or "").lower() == "completed"
     ]
+    active_signal_ids = _active_position_signal_ids(snap)
+    lifecycle_entry_orders = _orders_for_active_lifecycle(entry_orders, active_signal_ids)
+    lifecycle_protection_orders = _orders_for_active_lifecycle(protection_orders, active_signal_ids)
     day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     exchange_state = _post_action_exchange_state(
         snap=snap,
-        entry_orders=entry_orders,
-        protection_orders=protection_orders,
+        entry_orders=lifecycle_entry_orders,
+        protection_orders=lifecycle_protection_orders,
     )
     review_ledger = _post_action_review_ledger(
-        entry_orders=entry_orders,
-        protection_orders=protection_orders,
+        entry_orders=lifecycle_entry_orders,
+        protection_orders=lifecycle_protection_orders,
         reviews=snap.review_records,
+        live_lifecycle_reviews=snap.live_lifecycle_reviews,
     )
     next_attempt_gate = _post_action_next_attempt_gate(
         snap=snap,
@@ -2881,9 +2917,13 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         "daily_attempt_day_key": day_key,
         "entry_order_count": len(entry_orders),
         "protection_order_count": len(protection_orders),
+        "current_lifecycle_signal_ids": sorted(active_signal_ids),
+        "current_lifecycle_entry_order_count": len(lifecycle_entry_orders),
+        "current_lifecycle_protection_order_count": len(lifecycle_protection_orders),
         "active_position_count": len(snap.pg_positions),
         "open_order_count": len(snap.pg_open_orders),
         "review_count": len(snap.review_records),
+        "live_lifecycle_review_count": len(snap.live_lifecycle_reviews),
         "audit_event_count": len(snap.audit_events),
         "retry_safety": "consumed_authorization_or_completed_intent_blocks_duplicate_execution",
         "exchange_state": exchange_state,
@@ -2893,12 +2933,34 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
             "intents": snap.pg_intents[:5],
             "entry_orders": entry_orders[:5],
             "tp_sl_orders": protection_orders[:5],
+            "current_lifecycle_entry_orders": lifecycle_entry_orders[:5],
+            "current_lifecycle_tp_sl_orders": lifecycle_protection_orders[:5],
             "active_positions": snap.pg_positions[:5],
             "open_orders": snap.pg_open_orders[:5],
             "reviews": snap.review_records[:5],
+            "live_lifecycle_reviews": snap.live_lifecycle_reviews[:5],
             "audit_events": snap.audit_events[:5],
         },
     }
+
+
+def _active_position_signal_ids(snap: TradingConsoleSnapshot) -> set[str]:
+    signal_ids: set[str] = set()
+    for position in snap.pg_positions:
+        signal_id = position.get("signal_id")
+        if signal_id is not None and str(signal_id):
+            signal_ids.add(str(signal_id))
+    return signal_ids
+
+
+def _orders_for_active_lifecycle(
+    orders: list[dict[str, Any]],
+    active_signal_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not active_signal_ids:
+        return orders
+    scoped = [item for item in orders if str(item.get("signal_id") or "") in active_signal_ids]
+    return scoped if scoped else orders
 
 
 def _post_action_exchange_state(
@@ -2966,8 +3028,10 @@ def _post_action_review_ledger(
     entry_orders: list[dict[str, Any]],
     protection_orders: list[dict[str, Any]],
     reviews: list[dict[str, Any]],
+    live_lifecycle_reviews: list[dict[str, Any]],
 ) -> dict[str, Any]:
     entry_order = entry_orders[0] if entry_orders else None
+    latest_live_lifecycle_review = live_lifecycle_reviews[0] if live_lifecycle_reviews else None
     exit_orders = [
         item for item in protection_orders
         if str(item.get("status") or "").upper() in {"FILLED", "CLOSED"}
@@ -3026,6 +3090,10 @@ def _post_action_review_ledger(
             "status": (
                 "revise"
                 if lifecycle_status == "closed_external_exchange_flat_unresolved"
+                else "pending_open_recorded"
+                if latest_live_lifecycle_review and lifecycle_status == "protected_open_from_pg_orders"
+                else "pending_open_missing"
+                if lifecycle_status == "protected_open_from_pg_orders"
                 else "pending" if reviews else "not_recorded"
             ),
             "allowed_values": ["promote", "revise", "park"],
@@ -3035,7 +3103,18 @@ def _post_action_review_ledger(
                 if lifecycle_status == "closed_external_exchange_flat_unresolved"
                 else {}
             ),
+            **(
+                {
+                    "source": "brc_live_lifecycle_reviews",
+                    "review_id": latest_live_lifecycle_review.get("review_id"),
+                    "review_status": latest_live_lifecycle_review.get("review_status"),
+                    "lifecycle_status": latest_live_lifecycle_review.get("lifecycle_status"),
+                }
+                if latest_live_lifecycle_review and lifecycle_status == "protected_open_from_pg_orders"
+                else {}
+            ),
         },
+        "live_lifecycle_review": latest_live_lifecycle_review or {},
         "warnings": [
             "fee_not_available",
             "funding_not_available",
@@ -4399,9 +4478,11 @@ def _cockpit_review_summary(
     *,
     post_action: dict[str, Any],
     reviews: list[dict[str, Any]],
+    live_lifecycle_reviews: list[dict[str, Any]],
 ) -> dict[str, Any]:
     ledger = dict(post_action.get("review_ledger") or {})
     latest = reviews[0] if reviews else None
+    latest_live = live_lifecycle_reviews[0] if live_lifecycle_reviews else None
     lifecycle = ledger.get("lifecycle_status") or "not_available"
     decision = dict(ledger.get("review_decision") or {})
     review_required = bool(
@@ -4423,6 +4504,8 @@ def _cockpit_review_summary(
         "review_required_before_next_action": review_required,
         "latest_review": latest or {},
         "review_count": len(reviews),
+        "latest_live_lifecycle_review": latest_live or {},
+        "live_lifecycle_review_count": len(live_lifecycle_reviews),
         "allowed_outcomes": ["promote", "revise", "park", "pending"],
     }
 

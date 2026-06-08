@@ -229,6 +229,39 @@ class _FakeBrcService:
         ]
 
 
+class _FakeLiveLifecycleReviewRepo:
+    async def list(self, *, authorization_id=None, symbol=None, limit=50):
+        return [
+            SimpleNamespace(
+                review_id="live-review-auth-1-pending-open",
+                authorization_id="auth-1",
+                carrier_id="MR-001-live-readonly-v0",
+                strategy_family_id="MR-001",
+                symbol=symbol or BNB,
+                side="long",
+                quantity="0.01",
+                max_notional="25",
+                leverage="1",
+                max_attempts=1,
+                protection_mode="single_tp_plus_sl",
+                review_requirement="post_action_review_required",
+                lifecycle_status="protected_open",
+                review_status="pending_open",
+                final_gate_result="passed",
+                protection_status="matched_tp_sl",
+                hard_gates_passed=True,
+                evidence_refs=["/tmp/evidence.json"],
+                metadata={"source": "unit-test"},
+                places_order=False,
+                mutates_exchange=False,
+                grants_trading_permission=False,
+                frontend_action_enabled=False,
+                created_at_ms=1780496664000,
+                updated_at_ms=1780496664000,
+            )
+        ]
+
+
 class _FakeSignalRepo:
     async def get_signals(self, symbol=None, limit=100):
         return {
@@ -413,6 +446,7 @@ def _patch_deps(
     monkeypatch.setattr(api_module, "_audit_logger", _FakeAuditLogger())
     monkeypatch.setattr(api_module, "_signal_repo", _FakeSignalRepo())
     monkeypatch.setattr(api_module, "_brc_campaign_service", _FakeBrcService())
+    monkeypatch.setattr(api_module, "_live_lifecycle_review_repo", _FakeLiveLifecycleReviewRepo(), raising=False)
     monkeypatch.setattr(
         api_module,
         "_owner_trial_flow_service",
@@ -756,6 +790,51 @@ def test_protection_health_counts_current_scope_active_protection_only(monkeypat
     assert len(data["current_scope_active_protection"]) == 2
     assert {item["order_id"] for item in data["current_scope_active_protection"]} == {"tp-1", "sl-1"}
     assert {item["order_id"] for item in data["historical_protection_orders"]} >= {"tp-old", "sl-old"}
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_post_action_scopes_review_ledger_to_active_signal(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    order_repo = _FakeOrderRepo(
+        [
+            _FakeOrder("entry-1", "ENTRY", "current-entry", parent_order_id=None, status="FILLED"),
+            _FakeOrder("tp-1", "TP1", "current-tp", parent_order_id="entry-1", status="OPEN"),
+            _FakeOrder("sl-1", "SL", "current-sl", parent_order_id="entry-1", status="OPEN"),
+            _FakeOrder("entry-old", "ENTRY", "old-entry", parent_order_id=None, status="FILLED"),
+            _FakeOrder("tp-old", "TP1", "old-tp", parent_order_id="entry-old", status="FILLED"),
+            _FakeOrder("sl-old", "SL", "old-sl", parent_order_id="entry-old", status="CANCELED"),
+        ]
+    )
+    order_repo.orders[-3].signal_id = "signal-old"
+    order_repo.orders[-2].signal_id = "signal-old"
+    order_repo.orders[-1].signal_id = "signal-old"
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        position_repo=_FakeActivePositionRepo(),
+        order_repo=order_repo,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-action-flow")
+
+    assert response.status_code == 200
+    post_action = response.json()["data"]["post_action_state"]
+    ledger = post_action["review_ledger"]
+    assert post_action["entry_order_count"] == 2
+    assert post_action["protection_order_count"] == 4
+    assert post_action["current_lifecycle_entry_order_count"] == 1
+    assert post_action["current_lifecycle_protection_order_count"] == 2
+    assert ledger["lifecycle_status"] == "protected_open_from_pg_orders"
+    assert ledger["exit"]["status"] == "not_available"
+    assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
+    assert ledger["review_decision"]["status"] == "pending_open_recorded"
+    assert post_action["next_attempt_gate"]["gate"] == "current_lifecycle_open_protected"
+    assert post_action["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is False
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 
@@ -2193,13 +2272,19 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert post_action_state["status"] == "available"
     assert post_action_state["entry_order_count"] == 1
     assert post_action_state["protection_order_count"] == 2
+    assert post_action_state["current_lifecycle_entry_order_count"] == 1
+    assert post_action_state["current_lifecycle_protection_order_count"] == 2
     assert post_action_state["review_count"] == 1
+    assert post_action_state["live_lifecycle_review_count"] == 1
     assert post_action_state["audit_event_count"] == 1
     assert post_action_state["summary"]["entry_orders"][0]["order_id"] == "entry-1"
     assert {
         item["order_id"] for item in post_action_state["summary"]["tp_sl_orders"]
     } == {"tp-1", "sl-1"}
     assert post_action_state["summary"]["reviews"][0]["review_id"] == "review-1"
+    assert post_action_state["summary"]["live_lifecycle_reviews"][0]["review_id"] == (
+        "live-review-auth-1-pending-open"
+    )
     assert post_action_state["summary"]["audit_events"][0]["event_type"] == "ORDER_CONFIRMED"
     ledger = post_action_state["review_ledger"]
     assert ledger["ledger_version"] == "owner_bounded_review_ledger_v0"
@@ -2214,6 +2299,8 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert ledger["costs"]["slippage"]["status"] == "not_available"
     assert ledger["tp_sl_result"]["status"] == "protected_open"
     assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
+    assert ledger["review_decision"]["status"] == "pending_open_recorded"
+    assert ledger["review_decision"]["source"] == "brc_live_lifecycle_reviews"
     assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
     assert ledger["hard_blockers"] == []
     assert exchange.open_order_calls == []

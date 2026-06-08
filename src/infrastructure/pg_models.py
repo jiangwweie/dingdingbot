@@ -753,6 +753,102 @@ class PGBrcReviewDecisionORM(PGCoreBase):
     )
 
 
+class PGBrcLiveLifecycleReviewORM(PGCoreBase):
+    """Persisted live bounded-action lifecycle review ledger.
+
+    This table is deliberately separate from ``brc_review_decisions`` because
+    that legacy BRC campaign review path is testnet-only by design.
+    """
+
+    __tablename__ = "brc_live_lifecycle_reviews"
+
+    review_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    authorization_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    carrier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(64), nullable=False)
+    side: Mapped[str] = mapped_column(String(16), nullable=False)
+    quantity: Mapped[str] = mapped_column(String(64), nullable=False)
+    max_notional: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    leverage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    max_attempts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    protection_mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    review_requirement: Mapped[str] = mapped_column(String(128), nullable=False)
+    lifecycle_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    final_gate_result: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    protection_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    execution_intent_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    entry_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    entry_exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tp_order_ids: Mapped[list] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list)
+    tp_exchange_order_ids: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    sl_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    sl_exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tp_price: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    sl_trigger: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    owner_risk_acceptance: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    hard_gates_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    evidence_refs: Mapped[list] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    action_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    creates_authorization: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    creates_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    places_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mutates_exchange: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    grants_trading_permission: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    frontend_action_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="codex")
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint("side IN ('long', 'short')", name="ck_brc_live_lifecycle_reviews_side"),
+        CheckConstraint(
+            "lifecycle_status IN ('pending_open', 'protected_open', 'closed_reviewed', 'recovery_required')",
+            name="ck_brc_live_lifecycle_reviews_lifecycle_status",
+        ),
+        CheckConstraint(
+            "review_status IN ('pending_open', 'closed_reviewed', 'recovery_required')",
+            name="ck_brc_live_lifecycle_reviews_review_status",
+        ),
+        CheckConstraint("action_allowed = false", name="ck_brc_live_lifecycle_reviews_no_action"),
+        CheckConstraint(
+            "creates_authorization = false",
+            name="ck_brc_live_lifecycle_reviews_no_authorization",
+        ),
+        CheckConstraint(
+            "creates_execution_intent = false",
+            name="ck_brc_live_lifecycle_reviews_no_intent",
+        ),
+        CheckConstraint("places_order = false", name="ck_brc_live_lifecycle_reviews_no_order"),
+        CheckConstraint(
+            "mutates_exchange = false",
+            name="ck_brc_live_lifecycle_reviews_no_exchange_write",
+        ),
+        CheckConstraint(
+            "grants_trading_permission = false",
+            name="ck_brc_live_lifecycle_reviews_no_permission",
+        ),
+        CheckConstraint(
+            "frontend_action_enabled = false",
+            name="ck_brc_live_lifecycle_reviews_no_frontend_action",
+        ),
+        Index("idx_brc_live_lifecycle_reviews_auth_time", "authorization_id", "created_at_ms"),
+        Index("idx_brc_live_lifecycle_reviews_symbol_time", "symbol", "created_at_ms"),
+        Index("idx_brc_live_lifecycle_reviews_status_time", "review_status", "created_at_ms"),
+    )
+
+
 class PGBrcLlmIntentORM(PGCoreBase):
     """Persisted normalized BRC LLM intent ledger."""
 

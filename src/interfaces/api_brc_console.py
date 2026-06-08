@@ -133,8 +133,10 @@ from src.domain.brc_admission import (
     TrialEnv,
     TrialStage,
 )
+from src.domain.live_lifecycle_review import BrcLiveLifecycleReviewRecord
 from src.interfaces.operator_auth import OperatorSessionDependency, require_operator_session
 from src.interfaces import api_console_runtime as runtime
+from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
 
 
 router = APIRouter(
@@ -154,6 +156,65 @@ workflow_router = APIRouter(
     tags=["BRC LLM Workflows"],
     dependencies=[Depends(require_operator_session)],
 )
+
+
+class BrcLiveLifecyclePendingOpenReviewRequest(BaseModel):
+    review_id: Optional[str] = Field(default=None, max_length=128)
+    authorization_id: str = Field(max_length=128)
+    carrier_id: str = Field(max_length=128)
+    strategy_family_id: Optional[str] = Field(default=None, max_length=128)
+    symbol: str = Field(max_length=64)
+    side: Literal["long", "short"]
+    quantity: str = Field(max_length=64)
+    max_notional: Optional[str] = Field(default=None, max_length=64)
+    leverage: Optional[str] = Field(default=None, max_length=32)
+    max_attempts: Optional[int] = Field(default=None, ge=1, le=10)
+    protection_mode: str = Field(default="single_tp_plus_sl", max_length=64)
+    review_requirement: str = Field(default="post_action_review_required", max_length=128)
+    final_gate_result: Optional[str] = Field(default=None, max_length=64)
+    protection_status: Optional[str] = Field(default=None, max_length=64)
+    execution_intent_id: Optional[str] = Field(default=None, max_length=128)
+    entry_order_id: Optional[str] = Field(default=None, max_length=128)
+    entry_exchange_order_id: Optional[str] = Field(default=None, max_length=128)
+    tp_order_ids: list[str] = Field(default_factory=list)
+    tp_exchange_order_ids: list[str] = Field(default_factory=list)
+    sl_order_id: Optional[str] = Field(default=None, max_length=128)
+    sl_exchange_order_id: Optional[str] = Field(default=None, max_length=128)
+    tp_price: Optional[str] = Field(default=None, max_length=64)
+    sl_trigger: Optional[str] = Field(default=None, max_length=64)
+    owner_risk_acceptance: Optional[str] = Field(default=None, max_length=128)
+    hard_gates_passed: bool = False
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_by: str = Field(default="codex", max_length=128)
+
+
+class BrcLiveLifecycleReviewResponse(BaseModel):
+    review: dict[str, Any]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "mutates_exchange": False,
+            "grants_trading_permission": False,
+            "frontend_action_enabled": False,
+        }
+    )
+
+
+class BrcLiveLifecycleReviewListResponse(BaseModel):
+    reviews: list[dict[str, Any]]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "mutates_exchange": False,
+            "grants_trading_permission": False,
+            "frontend_action_enabled": False,
+        }
+    )
 
 dev_testnet_router = APIRouter(
     prefix="/api/dev/testnet/brc",
@@ -6471,6 +6532,101 @@ async def get_review_packet(request: Request) -> runtime.BrcReviewPacketResponse
 @router.get("/next-eligibility", response_model=runtime.BrcNextEligibilityResponse)
 async def get_next_eligibility(request: Request) -> runtime.BrcNextEligibilityResponse:
     return await runtime.get_brc_next_eligibility(request)
+
+
+def _live_lifecycle_review_repository() -> PgLiveLifecycleReviewRepository:
+    return PgLiveLifecycleReviewRepository()
+
+
+def _default_live_lifecycle_review_id(authorization_id: str, status: str) -> str:
+    safe_auth = re.sub(r"[^A-Za-z0-9_.:-]+", "-", authorization_id).strip("-")
+    return f"live-review-{safe_auth}-{status}"
+
+
+@router.post(
+    "/live-lifecycle-reviews/pending-open",
+    response_model=BrcLiveLifecycleReviewResponse,
+)
+async def create_live_lifecycle_pending_open_review(
+    body: BrcLiveLifecyclePendingOpenReviewRequest,
+) -> BrcLiveLifecycleReviewResponse:
+    now_ms = int(time.time() * 1000)
+    record = BrcLiveLifecycleReviewRecord(
+        review_id=body.review_id
+        or _default_live_lifecycle_review_id(body.authorization_id, "pending-open"),
+        authorization_id=body.authorization_id,
+        carrier_id=body.carrier_id,
+        strategy_family_id=body.strategy_family_id,
+        symbol=body.symbol,
+        side=body.side,
+        quantity=body.quantity,
+        max_notional=body.max_notional,
+        leverage=body.leverage,
+        max_attempts=body.max_attempts,
+        protection_mode=body.protection_mode,
+        review_requirement=body.review_requirement,
+        lifecycle_status="protected_open",
+        review_status="pending_open",
+        final_gate_result=body.final_gate_result,
+        protection_status=body.protection_status,
+        execution_intent_id=body.execution_intent_id,
+        entry_order_id=body.entry_order_id,
+        entry_exchange_order_id=body.entry_exchange_order_id,
+        tp_order_ids=body.tp_order_ids,
+        tp_exchange_order_ids=body.tp_exchange_order_ids,
+        sl_order_id=body.sl_order_id,
+        sl_exchange_order_id=body.sl_exchange_order_id,
+        tp_price=body.tp_price,
+        sl_trigger=body.sl_trigger,
+        owner_risk_acceptance=body.owner_risk_acceptance,
+        hard_gates_passed=body.hard_gates_passed,
+        evidence_refs=body.evidence_refs,
+        metadata={
+            **body.metadata,
+            "ledger_write_path": "official_api_brc_live_lifecycle_reviews_pending_open",
+            "no_action_guarantee": True,
+        },
+        created_by=body.created_by,
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
+    repo = _live_lifecycle_review_repository()
+    await repo.initialize()
+    saved = await repo.append(record)
+    return BrcLiveLifecycleReviewResponse(review=saved.model_dump(mode="json"))
+
+
+@router.get(
+    "/live-lifecycle-reviews/latest",
+    response_model=BrcLiveLifecycleReviewResponse,
+)
+async def get_latest_live_lifecycle_review(
+    authorization_id: Optional[str] = Query(default=None, max_length=128),
+    symbol: Optional[str] = Query(default=None, max_length=64),
+) -> BrcLiveLifecycleReviewResponse:
+    repo = _live_lifecycle_review_repository()
+    await repo.initialize()
+    review = await repo.get_latest(authorization_id=authorization_id, symbol=symbol)
+    if review is None:
+        raise HTTPException(status_code=404, detail="live_lifecycle_review_not_found")
+    return BrcLiveLifecycleReviewResponse(review=review.model_dump(mode="json"))
+
+
+@router.get(
+    "/live-lifecycle-reviews",
+    response_model=BrcLiveLifecycleReviewListResponse,
+)
+async def list_live_lifecycle_reviews(
+    authorization_id: Optional[str] = Query(default=None, max_length=128),
+    symbol: Optional[str] = Query(default=None, max_length=64),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> BrcLiveLifecycleReviewListResponse:
+    repo = _live_lifecycle_review_repository()
+    await repo.initialize()
+    reviews = await repo.list(authorization_id=authorization_id, symbol=symbol, limit=limit)
+    return BrcLiveLifecycleReviewListResponse(
+        reviews=[item.model_dump(mode="json") for item in reviews]
+    )
 
 
 @router.post("/review-decisions", response_model=runtime.BrcReviewDecisionResponse)
