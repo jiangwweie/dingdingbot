@@ -7,7 +7,7 @@ import { useReadModel } from '@/lib/tradingConsoleApi';
 import { useAuth } from '@/lib/auth';
 
 const NAV_ITEMS = [
-  { name: '首页', path: '/', icon: LayoutDashboard },
+  { name: 'Cockpit', path: '/', icon: LayoutDashboard },
   { name: '账户总览', path: '/account', icon: Users },
   { name: '订单台账', path: '/ledger', icon: List },
   { name: '保护健康', path: '/protection', icon: ShieldAlert },
@@ -25,8 +25,9 @@ export function AppShell() {
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { session, logout } = useAuth();
-  const { envelope: envData, error } = useReadModel<any>('/api/trading-console/dashboard-state?include_exchange=true');
-  const environment = envData?.data?.environment || {};
+  const { envelope: envData, error } = useReadModel<any>('/api/trading-console/operations-cockpit?include_exchange=true');
+  const environment = envData?.data?.evidence?.environment || {};
+  const overall = envData?.data?.overall_status || {};
   const updatedAt = envData?.generated_at_ms ? new Date(envData.generated_at_ms).toLocaleTimeString() : '未知';
   const envLabel = environment.trading_env === 'testnet'
     ? '测试'
@@ -120,6 +121,7 @@ export function AppShell() {
           <Badge variant="muted">只读</Badge>
           <span className="text-slate-600 dark:text-slate-300">环境：{envLabel}</span>
           {envData?.freshness_status && <FreshnessBadge status={envData.freshness_status} />}
+          {overall.status && <span className="font-semibold text-slate-700 dark:text-slate-200">状态：{overall.label || overall.status}</span>}
           {envData?.blockers?.length > 0 && <span className="font-semibold text-red-600 dark:text-red-400">存在阻断项</span>}
           {error && <span className="font-semibold text-red-600 dark:text-red-400">当前内容暂不可用</span>}
           <div className="ml-auto flex items-center gap-3 text-slate-500">

@@ -103,6 +103,17 @@ async def dashboard_state(
     )
 
 
+@router.get("/operations-cockpit", response_model=TradingConsoleReadModelResponse)
+async def operations_cockpit(
+    symbol: Optional[str] = Query(default=None),
+    include_exchange: bool = Query(default=True),
+) -> TradingConsoleReadModelResponse:
+    return await _service(include_exchange=include_exchange).operations_cockpit(
+        symbol=symbol,
+        include_exchange=include_exchange,
+    )
+
+
 @router.get("/account-risk", response_model=TradingConsoleReadModelResponse)
 async def account_risk(
     symbol: Optional[str] = Query(default=None),

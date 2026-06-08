@@ -1,7 +1,7 @@
 # CLAUDE.md - Dingdingbot Claude Operating Guide
 
-Last updated: 2026-06-01
-Current phase: BRC fast small-capital live trial system
+Last updated: 2026-06-08
+Current phase: BRC productized bounded-live operations system
 
 ## Role
 
@@ -17,6 +17,7 @@ System goals are capability goals. Annual return and max drawdown numbers are in
 
 Before starting work, read:
 
+- `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md` — current product and execution-model canon
 - `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — current project baseline
 - `docs/ops/agent-current-brc-baseline.md` — current agent execution baseline
 - `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts
@@ -30,6 +31,33 @@ Before starting work, read:
 - Any ADR referenced by the task card
 
 Do not use archived files as active instructions unless the task explicitly asks for historical context.
+
+## Current Product Direction
+
+The current system is an Owner-facing productized bounded-live operations
+system. Do not treat Trading Console or Owner Console as only a read-only
+dashboard, PG/read-model browser, research dashboard, enum/status display, or
+documentation surface.
+
+The current product path is:
+
+```text
+StrategyFamily / Carrier
+-> ActionCandidate
+-> Owner risk understanding
+-> Owner authorization or BudgetEnvelope authorization
+-> ActionSpec
+-> FinalGate
+-> Operation Layer
+-> official bounded live action
+-> active position / TP/SL protection monitoring
+-> Review Ledger
+```
+
+Older read-only documents are scope-limited to the specific namespace, report,
+or handoff they describe. They do not globally prohibit scoped console/API,
+PG, deployment, or exchange-readiness work when Codex provides an allowed task
+card and the hard safety gates remain intact.
 
 ## Planning And Memory
 

@@ -620,6 +620,130 @@ class TradingConsoleReadModelService:
             data=data,
         )
 
+    async def operations_cockpit(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        include_exchange: bool = False,
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(symbol=symbol, include_exchange=include_exchange)
+        action_data, action_blockers = self._action_entry_readiness_data(
+            snap=snap,
+            owner_scope={"symbol": symbol} if symbol else None,
+            market_input=None,
+            custom_budget=None,
+        )
+        owner_flow = action_data.get("owner_action_flow") or {}
+        budget_summary = owner_flow.get("budget_summary") or {}
+        selected_proposal = owner_flow.get("selected_action_proposal") or {}
+        post_action = action_data.get("post_action_state") or {}
+        protection = self._protection_summary(snap)
+        positions = self._merge_positions_for_risk(snap)
+        consistency = self._consistency_summary(snap)
+        review = _cockpit_review_summary(post_action=post_action, reviews=snap.review_records)
+        recovery = _cockpit_recovery_summary(
+            snap=snap,
+            classified_orders=self._classify_orders(snap),
+            consistency=consistency,
+        )
+        budget = _cockpit_budget_summary(
+            owner_flow=owner_flow,
+            budget_summary=budget_summary,
+            budget_recommendation=action_data.get("budget_recommendation") or {},
+            post_action=post_action,
+        )
+        active_position = _cockpit_active_position(
+            positions=positions,
+            protection=protection,
+            snap=snap,
+        )
+        autonomy = _cockpit_autonomy_summary(
+            owner_flow=owner_flow,
+            authorization=snap.authorization_state,
+            protection=protection,
+            active_position=active_position,
+            recovery=recovery,
+            review=review,
+            budget=budget,
+        )
+        blockers = _cockpit_blockers(
+            snap=snap,
+            action_blockers=action_blockers,
+            protection=protection,
+            recovery=recovery,
+            review=review,
+            budget=budget,
+            active_position=active_position,
+        )
+        overall = _cockpit_overall_status(
+            snap=snap,
+            autonomy=autonomy,
+            active_position=active_position,
+            protection=protection,
+            recovery=recovery,
+            review=review,
+            budget=budget,
+            blockers=blockers,
+        )
+        controls = _cockpit_controls(
+            overall=overall,
+            recovery=recovery,
+            review=review,
+            budget=budget,
+            active_position=active_position,
+        )
+        return self._response(
+            "operations_cockpit",
+            snap,
+            blockers=[
+                {
+                    "code": item["code"],
+                    "message": item["what"],
+                    "affected_area": item["area"],
+                }
+                for item in blockers
+                if item.get("severity") in {"hard_blocker", "recovery_required"}
+            ],
+            data={
+                "overall_status": overall,
+                "primary_message": overall["message"],
+                "primary_next_action": overall["primary_next_action"],
+                "autonomy": autonomy,
+                "budget": budget,
+                "active_position": active_position,
+                "protection": _cockpit_protection_summary(protection),
+                "candidate": _cockpit_candidate_summary(
+                    selected_proposal=selected_proposal,
+                    owner_flow=owner_flow,
+                    action_data=action_data,
+                ),
+                "blockers": blockers,
+                "warnings": _cockpit_warnings(snap),
+                "recovery": recovery,
+                "review": review,
+                "controls": controls,
+                "freshness": self._freshness(snap),
+                "evidence": {
+                    "environment": snap.environment,
+                    "guards": snap.guards,
+                    "consistency": consistency,
+                    "authorization": snap.authorization_state,
+                    "budgeted_autonomy_loop": owner_flow.get("budgeted_autonomy_loop") or {},
+                    "budgeted_autonomy_v01": owner_flow.get("budgeted_autonomy_v01") or {},
+                    "post_action_state": post_action,
+                    "source_policy": "read_only_pg_exchange_aggregation",
+                    "raw_debug_sections_available": [
+                        "dashboard-state",
+                        "order-ledger",
+                        "protection-health",
+                        "recovery-exception-state",
+                        "review-state",
+                        "audit-chain",
+                    ],
+                },
+            },
+        )
+
     async def budget_recommendation(
         self,
         *,
@@ -877,6 +1001,7 @@ class TradingConsoleReadModelService:
             freshness_status="fresh",
             data={
                 "trading_console_v1_allowed": [
+                    "GET /api/trading-console/operations-cockpit",
                     "GET /api/trading-console/dashboard-state",
                     "GET /api/trading-console/account-risk",
                     "GET /api/trading-console/order-ledger",
@@ -3344,6 +3469,778 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return result
 
 
+def _cockpit_overall_status(
+    *,
+    snap: TradingConsoleSnapshot,
+    autonomy: dict[str, Any],
+    active_position: dict[str, Any],
+    protection: dict[str, Any],
+    recovery: dict[str, Any],
+    review: dict[str, Any],
+    budget: dict[str, Any],
+    blockers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    hard_blockers = [item for item in blockers if item.get("severity") == "hard_blocker"]
+    recovery_required = recovery.get("required") is True
+    if recovery_required:
+        status = "recovery_required"
+        message = recovery.get("summary") or "Recovery or cleanup is required before any new action."
+    elif active_position.get("exists"):
+        status = "active_position"
+        if protection.get("status") == "protected":
+            message = f"System is waiting for the current {active_position.get('symbol') or ''} position to close."
+        else:
+            message = "Active position is present and protection is not fully confirmed."
+    elif review.get("review_required_before_next_action"):
+        status = "review_required"
+        message = "Review is required before the next budgeted action."
+    elif autonomy.get("state") in {"paused", "revoked"}:
+        status = autonomy["state"]
+        message = autonomy.get("message") or "Autonomy is not active."
+    elif hard_blockers:
+        status = "blocked"
+        message = hard_blockers[0].get("what") or "Trading is blocked by current safety state."
+    elif snap.warnings or snap.unavailable or budget.get("freshness_status") in {"degraded", "not_live_connected"}:
+        status = "warning"
+        message = "System is safe to inspect, but some operating facts are incomplete or stale."
+    else:
+        status = "safe"
+        message = "No active position or recovery issue is visible in the current cockpit read."
+    return {
+        "status": status,
+        "label": _status_label(status),
+        "message": message,
+        "primary_next_action": _primary_next_action(
+            status=status,
+            autonomy=autonomy,
+            active_position=active_position,
+            recovery=recovery,
+            review=review,
+            budget=budget,
+            blockers=blockers,
+        ),
+        "safe_to_open_console": True,
+        "live_ready": False,
+        "source": "operations_cockpit_read_model",
+    }
+
+
+def _primary_next_action(
+    *,
+    status: str,
+    autonomy: dict[str, Any],
+    active_position: dict[str, Any],
+    recovery: dict[str, Any],
+    review: dict[str, Any],
+    budget: dict[str, Any],
+    blockers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if recovery.get("required"):
+        return {
+            "action_id": "view_recovery",
+            "label": "查看恢复建议",
+            "enabled": True,
+            "route": "/recovery",
+            "confirmation_required": False,
+            "owner_action_required": bool(recovery.get("owner_action_required")),
+            "system_action_available": False,
+            "reason": recovery.get("next_safe_action") or "Recovery state needs inspection.",
+        }
+    if active_position.get("exists"):
+        route = "/protection" if active_position.get("protection_status") != "protected" else "/ledger"
+        return {
+            "action_id": "monitor_position",
+            "label": "查看仓位和保护",
+            "enabled": True,
+            "route": route,
+            "confirmation_required": False,
+            "owner_action_required": active_position.get("protection_status") != "protected",
+            "system_action_available": False,
+            "reason": "Wait for TP/SL close evidence; reconcile if protection is incomplete.",
+        }
+    if review.get("review_required_before_next_action"):
+        return {
+            "action_id": "open_review",
+            "label": "打开复盘",
+            "enabled": True,
+            "route": "/review",
+            "confirmation_required": False,
+            "owner_action_required": True,
+            "system_action_available": False,
+            "reason": "A closed or unresolved action needs Owner review before another attempt.",
+        }
+    hard_blockers = [item for item in blockers if item.get("severity") == "hard_blocker"]
+    if hard_blockers:
+        item = hard_blockers[0]
+        return {
+            "action_id": "inspect_blocker",
+            "label": "查看阻断原因",
+            "enabled": True,
+            "route": item.get("route") or "/execution",
+            "confirmation_required": False,
+            "owner_action_required": bool(item.get("owner_action_required")),
+            "system_action_available": bool(item.get("system_action_available")),
+            "reason": item.get("clears_when") or item.get("why_matters"),
+        }
+    if budget.get("another_action_allowed") is True and autonomy.get("state") in {"budget_available", "candidate_selected"}:
+        return {
+            "action_id": "review_candidate",
+            "label": "查看候选和预算",
+            "enabled": True,
+            "route": "/action-entry",
+            "confirmation_required": False,
+            "owner_action_required": True,
+            "system_action_available": False,
+            "reason": "Budget appears available, but official Owner confirmation and FinalGate are still required.",
+        }
+    return {
+        "action_id": "refresh_status",
+        "label": "刷新状态",
+        "enabled": True,
+        "route": "/",
+        "confirmation_required": False,
+        "owner_action_required": False,
+        "system_action_available": True,
+        "reason": autonomy.get("retry_condition") or "Refresh current PG/exchange facts.",
+    }
+
+
+def _cockpit_autonomy_summary(
+    *,
+    owner_flow: dict[str, Any],
+    authorization: dict[str, Any],
+    protection: dict[str, Any],
+    active_position: dict[str, Any],
+    recovery: dict[str, Any],
+    review: dict[str, Any],
+    budget: dict[str, Any],
+) -> dict[str, Any]:
+    v01 = dict(owner_flow.get("budgeted_autonomy_v01") or {})
+    base = dict(v01.get("base_loop") or {})
+    policy = dict(v01.get("policy") or {})
+    outcome = str(v01.get("outcome") or base.get("outcome") or "blocked_with_retry_condition")
+    if recovery.get("required"):
+        state = "recovery_required"
+    elif authorization.get("is_cancelled"):
+        state = "revoked"
+    elif policy.get("pause_state") == "paused":
+        state = "paused"
+    elif policy.get("revoked") is True:
+        state = "revoked"
+    elif active_position.get("exists"):
+        state = "waiting_position_close"
+    elif review.get("review_required_before_next_action"):
+        state = "closed_review_pending"
+    elif outcome == "closed_reviewed":
+        state = "closed_reviewed"
+    elif owner_flow.get("selected_action_proposal"):
+        state = "candidate_selected"
+    elif budget.get("another_action_allowed"):
+        state = "budget_available"
+    else:
+        state = "blocked_with_retry_condition"
+    return {
+        "state": state,
+        "label": _autonomy_label(state),
+        "message": _autonomy_message(
+            state=state,
+            active_position=active_position,
+            protection=protection,
+            budget=budget,
+            authorization=authorization,
+        ),
+        "loop_outcome": outcome,
+        "active_loop": bool(base.get("active_loop")),
+        "retry_condition": v01.get("retry_condition") or base.get("retry_condition"),
+        "authorization_status": authorization.get("status"),
+        "authorization_actionable": bool(authorization.get("is_actionable")),
+        "auto_execution_enabled": False,
+        "backend_actionable": False,
+        "frontend_action_enabled": False,
+        "may_execute_live": False,
+        "policy": policy,
+    }
+
+
+def _cockpit_budget_summary(
+    *,
+    owner_flow: dict[str, Any],
+    budget_summary: dict[str, Any],
+    budget_recommendation: dict[str, Any],
+    post_action: dict[str, Any],
+) -> dict[str, Any]:
+    envelope = dict(budget_recommendation.get("budget_envelope") or {})
+    policy = dict((owner_flow.get("budgeted_autonomy_v01") or {}).get("policy") or {})
+    policy_budget = dict(policy.get("budget") or {})
+    attempts = dict(policy.get("daily_attempts") or {})
+    max_attempts = _optional_int_value(
+        attempts.get("allowed")
+        or budget_summary.get("recommended_max_attempts")
+        or envelope.get("max_attempts")
+    )
+    attempts_used = _optional_int_value(attempts.get("used"))
+    if attempts_used is None:
+        attempts_used = sum(
+            int(value)
+            for value in (post_action.get("completed_intents_today_by_symbol") or {}).values()
+            if isinstance(value, int)
+        )
+    remaining_attempts = (
+        max(max_attempts - attempts_used, 0)
+        if max_attempts is not None
+        else None
+    )
+    remaining_budget = (
+        policy_budget.get("remaining_notional")
+        or envelope.get("max_notional_per_action")
+        or budget_summary.get("recommended_max_notional_per_action")
+    )
+    total_budget = envelope.get("total_budget") or budget_summary.get("recommended_total_budget")
+    per_action = envelope.get("max_notional_per_action") or budget_summary.get("recommended_max_notional_per_action")
+    status = envelope.get("status") or budget_summary.get("status") or "not_available"
+    paused = policy.get("pause_state") == "paused"
+    revoked = policy.get("revoked") is True
+    another_action_allowed = bool(
+        status == "available"
+        and not paused
+        and not revoked
+        and (remaining_attempts is None or remaining_attempts > 0)
+    )
+    return {
+        "status": status,
+        "label": _budget_label(status),
+        "authorized_scope": {
+            "symbols": envelope.get("allowed_symbols") or [],
+            "sides": envelope.get("allowed_sides") or [],
+            "max_leverage": envelope.get("max_leverage"),
+            "review_requirement": envelope.get("review_requirement"),
+            "protection_mode": "single_tp_plus_sl",
+        },
+        "total_budget": total_budget,
+        "per_action_max_notional": per_action,
+        "used_budget": policy_budget.get("used_notional") or "0",
+        "remaining_budget": remaining_budget,
+        "daily_attempts_used": attempts_used,
+        "daily_max_attempts": max_attempts,
+        "daily_attempts_remaining": remaining_attempts,
+        "another_action_allowed": another_action_allowed,
+        "paused": paused,
+        "revoked": revoked,
+        "last_budget_update_time": None,
+        "freshness_status": (budget_recommendation.get("account_capacity") or {}).get("freshness", {}).get("freshness_status"),
+        "not_authorization": envelope.get("not_authorization", True),
+        "action_allowed": False,
+        "grants_trading_permission": False,
+    }
+
+
+def _cockpit_active_position(
+    *,
+    positions: list[dict[str, Any]],
+    protection: dict[str, Any],
+    snap: TradingConsoleSnapshot,
+) -> dict[str, Any]:
+    active = [
+        item for item in positions
+        if item.get("is_closed") is not True and item.get("quantity") not in {None, "", "0", "0.0", "0E-18"}
+    ]
+    selected = _first_match(active, lambda item: item.get("source") == "exchange") or (active[0] if active else None)
+    if selected is None:
+        return {
+            "exists": False,
+            "status": "none",
+            "message": "No active position is visible in PG or exchange reads.",
+            "pg_position_count": len(snap.pg_positions),
+            "exchange_position_count": len(snap.exchange.get("positions", [])),
+            "protection_status": protection.get("status"),
+            "last_refreshed_at": _iso_ms(snap.generated_at_ms),
+        }
+    entry = selected.get("entry_price")
+    quantity = selected.get("quantity")
+    notional = _position_notional(entry, quantity)
+    return {
+        "exists": True,
+        "status": "open",
+        "source": selected.get("source"),
+        "symbol": selected.get("symbol"),
+        "side": selected.get("side"),
+        "entry_price": entry,
+        "quantity": quantity,
+        "notional": notional,
+        "leverage": selected.get("leverage"),
+        "current_mark_price": selected.get("mark_price"),
+        "unrealized_pnl": selected.get("unrealized_pnl"),
+        "realized_pnl": selected.get("realized_pnl"),
+        "pg_exchange_consistency": "matched" if snap.pg_positions and snap.exchange.get("positions") else "not_fully_verified",
+        "protection_status": protection.get("status"),
+        "last_refreshed_at": _iso_ms(snap.generated_at_ms),
+        "raw_position": selected,
+    }
+
+
+def _cockpit_protection_summary(protection: dict[str, Any]) -> dict[str, Any]:
+    status = protection.get("status") or "unknown"
+    tp_count = int(protection.get("tp_count") or 0)
+    sl_count = int(protection.get("sl_count") or 0)
+    return {
+        "status": status,
+        "label": _protection_label(status),
+        "completeness": (
+            "complete" if status == "protected"
+            else "partial" if status == "partially_protected"
+            else "missing" if status == "unprotected"
+            else "orphan_suspected" if status == "orphaned"
+            else "unknown"
+        ),
+        "tp_status": "present" if tp_count > 0 else "not_found",
+        "sl_status": "present" if sl_count > 0 else "not_found",
+        "tp_count": tp_count,
+        "sl_count": sl_count,
+        "active_position_count": protection.get("active_position_count") or 0,
+        "orphan_protection_count": len(protection.get("orphan_protection_orders") or []),
+        "actions_exposed": protection.get("actions_exposed") or [],
+        "deferred_actions": protection.get("deferred_actions") or [],
+    }
+
+
+def _cockpit_candidate_summary(
+    *,
+    selected_proposal: dict[str, Any],
+    owner_flow: dict[str, Any],
+    action_data: dict[str, Any],
+) -> dict[str, Any]:
+    market = dict(owner_flow.get("market_selection") or {})
+    choices = [dict(item) for item in market.get("candidate_choices") or [] if isinstance(item, dict)]
+    selected_carrier = selected_proposal.get("carrier_id")
+    return {
+        "selected": {
+            "family": selected_proposal.get("family"),
+            "carrier_id": selected_carrier,
+            "symbol": selected_proposal.get("symbol"),
+            "side": selected_proposal.get("side"),
+            "reason_selected": selected_proposal.get("proposal_role") or market.get("mapped_family"),
+            "warnings": selected_proposal.get("warnings") or [],
+            "hard_blockers": selected_proposal.get("hard_blockers") or [],
+            "frontend_action_enabled": False,
+        },
+        "skipped_candidates": [
+            {
+                "family": item.get("family"),
+                "carrier_id": item.get("carrier_id"),
+                "reason": (
+                    "selected"
+                    if item.get("carrier_id") == selected_carrier
+                    else item.get("generic_action_spec_status") or item.get("candidate_state")
+                ),
+                "warnings": item.get("warnings") or [],
+                "hard_blockers": item.get("hard_blockers") or [],
+            }
+            for item in choices
+            if item.get("carrier_id") != selected_carrier
+        ],
+        "market_selection": market,
+        "next_action_recommendation": (action_data.get("final_gate_result") or {}).get("status"),
+    }
+
+
+def _cockpit_recovery_summary(
+    *,
+    snap: TradingConsoleSnapshot,
+    classified_orders: list[dict[str, Any]],
+    consistency: dict[str, Any],
+) -> dict[str, Any]:
+    mismatch_orders = [
+        item for item in classified_orders
+        if item.get("classification") in {"pg_only", "exchange_only", "mismatch", "orphan_protection"}
+    ]
+    startup = snap.environment.get("startup_reconciliation") or snap.guards.get("startup_reconciliation")
+    required = bool(mismatch_orders or snap.recovery_tasks)
+    if required:
+        summary = "Recovery is required because local and exchange/order evidence is not clean."
+    elif snap.unavailable:
+        summary = "Recovery state cannot be fully confirmed because some sources are unavailable."
+    else:
+        summary = "No active recovery issue is visible."
+    return {
+        "required": required,
+        "summary": summary,
+        "manual_action_required": required,
+        "owner_action_required": required,
+        "system_action_available": False,
+        "next_safe_action": (
+            "Run or inspect official reconciliation before any new entry."
+            if required
+            else "Refresh status if facts look stale."
+        ),
+        "recovery_tasks": snap.recovery_tasks,
+        "mismatches": mismatch_orders,
+        "recovery_task_counts": _count_by(snap.recovery_tasks, "status"),
+        "consistency_status": consistency.get("status"),
+        "startup_reconciliation": startup or "not_available",
+        "detectable_states": {
+            "pg_exchange_drift": bool(mismatch_orders),
+            "orphan_protection_suspected": any(item.get("classification") == "orphan_protection" for item in mismatch_orders),
+            "failed_execute": any(str(item.get("status") or "").lower() == "failed" for item in snap.pg_intents),
+            "failed_protection_placement": any("protection" in str(item.get("code") or "") for item in snap.warnings),
+            "external_flat": any(item.get("classification") == "orphan_protection" for item in mismatch_orders),
+            "stale_account_facts": any(item.get("source") in {"account_snapshot", "exchange"} for item in snap.unavailable),
+            "pending_migration_mismatch": False,
+            "runtime_server_version_drift": "not_checked",
+        },
+    }
+
+
+def _cockpit_review_summary(
+    *,
+    post_action: dict[str, Any],
+    reviews: list[dict[str, Any]],
+) -> dict[str, Any]:
+    ledger = dict(post_action.get("review_ledger") or {})
+    latest = reviews[0] if reviews else None
+    lifecycle = ledger.get("lifecycle_status") or "not_available"
+    decision = dict(ledger.get("review_decision") or {})
+    review_required = bool(
+        decision.get("requires_owner_review") is True
+        and decision.get("status") in {"pending", "not_recorded"}
+        and lifecycle not in {"not_started_or_unknown", "protected_open_from_pg_orders"}
+    )
+    return {
+        "pending_review_count": 1 if review_required else 0,
+        "latest_closed_trade": {
+            "status": lifecycle,
+            "entry": ledger.get("entry") or {},
+            "exit": ledger.get("exit") or {},
+            "tp_sl_result": ledger.get("tp_sl_result") or {},
+            "rough_realized_pnl": ledger.get("realized_pnl") or {"status": "not_available"},
+            "holding_time": "not_available",
+            "strategy_outcome": ledger.get("strategy_outcome") or "pending",
+        },
+        "review_required_before_next_action": review_required,
+        "latest_review": latest or {},
+        "review_count": len(reviews),
+        "allowed_outcomes": ["promote", "revise", "park", "pending"],
+    }
+
+
+def _cockpit_blockers(
+    *,
+    snap: TradingConsoleSnapshot,
+    action_blockers: list[dict[str, Any]],
+    protection: dict[str, Any],
+    recovery: dict[str, Any],
+    review: dict[str, Any],
+    budget: dict[str, Any],
+    active_position: dict[str, Any],
+) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    if recovery.get("required"):
+        blockers.append(_cockpit_blocker(
+            code="recovery_required",
+            area="recovery",
+            what="Cannot open a new position because recovery or cleanup is required.",
+            why="PG/exchange/order evidence must agree before another bounded action.",
+            severity="recovery_required",
+            clears_when=recovery.get("next_safe_action") or "Reconciliation confirms a clean state.",
+            owner_action_required=True,
+            system_action_available=False,
+            route="/recovery",
+            evidence_source="recovery_exception_state",
+        ))
+    if active_position.get("exists"):
+        blockers.append(_cockpit_blocker(
+            code="active_position_open",
+            area="position",
+            what=f"Cannot open a new position because current {active_position.get('symbol') or ''} position is still open.",
+            why="The budgeted loop is single-position by default.",
+            severity="hard_blocker",
+            clears_when="Position closes with PG/exchange evidence and review state is updated.",
+            owner_action_required=False,
+            system_action_available=False,
+            route="/ledger",
+            evidence_source=active_position.get("source") or "position_read_model",
+        ))
+    if protection.get("status") in {"orphaned", "partially_protected", "unprotected"}:
+        blockers.append(_cockpit_blocker(
+            code=f"protection_{protection.get('status')}",
+            area="protection",
+            what=f"Cannot confirm protection because protection status is {protection.get('status')}.",
+            why="New entries must remain blocked when TP/SL coverage is missing or mismatched.",
+            severity="hard_blocker",
+            clears_when="Protection health shows TP and SL matched to the active position, or reconciliation clears stale protection.",
+            owner_action_required=True,
+            system_action_available=False,
+            route="/protection",
+            evidence_source="protection_health",
+        ))
+    if review.get("review_required_before_next_action"):
+        blockers.append(_cockpit_blocker(
+            code="review_required_before_next_action",
+            area="review",
+            what="Owner review is required before the next budgeted attempt.",
+            why="Closed or unresolved trade outcomes must be reviewed before another attempt.",
+            severity="hard_blocker",
+            clears_when="Review ledger records promote, revise, or park for the latest closed action.",
+            owner_action_required=True,
+            system_action_available=False,
+            route="/review",
+            evidence_source="review_state",
+        ))
+    if budget.get("another_action_allowed") is not True:
+        blockers.append(_cockpit_blocker(
+            code="budget_not_actionable",
+            area="budget",
+            what="Cannot confirm another budgeted action under the current budget envelope.",
+            why="Budget, attempts, freshness, pause, and revoke state must allow another action.",
+            severity="hard_blocker" if budget.get("status") != "available" else "warning",
+            clears_when="Budget envelope is available, not paused/revoked, and attempts remain.",
+            owner_action_required=True,
+            system_action_available=False,
+            route="/action-entry",
+            evidence_source="budget_recommendation",
+        ))
+    for item in action_blockers:
+        blockers.append(_cockpit_blocker(
+            code=str(item.get("code") or "action_entry_blocker"),
+            area="candidate",
+            what=str(item.get("message") or "Candidate is blocked."),
+            why="Candidate cannot reach official FinalGate until this clears.",
+            severity="hard_blocker",
+            clears_when="Complete Owner scope, authorization, and official preflight evidence.",
+            owner_action_required=True,
+            system_action_available=False,
+            route="/action-entry",
+            evidence_source="action_entry_readiness",
+        ))
+    if snap.unavailable:
+        blockers.append(_cockpit_blocker(
+            code="freshness_degraded",
+            area="freshness",
+            what="Some cockpit facts are unavailable or stale.",
+            why="The Owner cannot rely on missing state for live-affecting decisions.",
+            severity="warning",
+            clears_when="Refresh status and restore the unavailable source.",
+            owner_action_required=False,
+            system_action_available=True,
+            route="/",
+            evidence_source="freshness",
+        ))
+    return blockers
+
+
+def _cockpit_blocker(
+    *,
+    code: str,
+    area: str,
+    what: str,
+    why: str,
+    severity: str,
+    clears_when: str,
+    owner_action_required: bool,
+    system_action_available: bool,
+    route: str,
+    evidence_source: str,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "area": area,
+        "what": what,
+        "why_matters": why,
+        "severity": severity,
+        "retryable": True,
+        "clears_when": clears_when,
+        "owner_action_required": owner_action_required,
+        "system_action_available": system_action_available,
+        "route": route,
+        "evidence_source": evidence_source,
+    }
+
+
+def _cockpit_warnings(snap: TradingConsoleSnapshot) -> list[dict[str, Any]]:
+    return [
+        {
+            "code": item.get("code") or "warning",
+            "message": item.get("message") or item.get("error") or "Warning needs review.",
+            "severity": item.get("severity") or "warning",
+            "source": "trading_console_snapshot",
+        }
+        for item in snap.warnings
+    ]
+
+
+def _cockpit_controls(
+    *,
+    overall: dict[str, Any],
+    recovery: dict[str, Any],
+    review: dict[str, Any],
+    budget: dict[str, Any],
+    active_position: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "control_id": "refresh_status",
+            "label": "刷新状态",
+            "enabled": True,
+            "kind": "frontend_refresh",
+            "route": "/",
+            "confirmation_required": False,
+            "disabled_reason": None,
+            "post_action_result": "Cockpit reloads PG/exchange read models.",
+        },
+        {
+            "control_id": "reconcile_now",
+            "label": "读取交易所并核对",
+            "enabled": True,
+            "kind": "read_model_refresh",
+            "route": "/recovery",
+            "confirmation_required": False,
+            "disabled_reason": None,
+            "post_action_result": "Refreshes cockpit with include_exchange=true; it does not mutate PG.",
+        },
+        {
+            "control_id": "pause_autonomy",
+            "label": "预检暂停自治",
+            "enabled": True,
+            "kind": "operation_layer_preflight",
+            "operation_type": "enter_pause",
+            "preflight_endpoint": "POST /api/brc/operations/preflight",
+            "confirm_endpoint": "POST /api/brc/operations/{operation_id}/confirm",
+            "confirmation_required": True,
+            "disabled_reason": None,
+            "scope": {"active_position": active_position.get("symbol"), "budget_status": budget.get("status")},
+            "risk_impact": "Runs Operation Layer preflight for enter_pause. Confirming stops new strategy actions; it does not close positions, cancel orders, place orders, withdraw, or transfer.",
+            "post_action_result": "Operation Layer records the runtime pause transition or a safe blocked/noop result.",
+        },
+        {
+            "control_id": "revoke_budget",
+            "label": "撤销预算",
+            "enabled": False,
+            "kind": "not_wired",
+            "confirmation_required": True,
+            "disabled_reason": "No persisted budget-revoke action API is wired to the current BudgetEnvelope read model.",
+            "scope": budget.get("authorized_scope"),
+            "risk_impact": "Would block future budgeted entries only; would not alter existing exchange exposure.",
+        },
+        {
+            "control_id": "view_recovery_recommendation",
+            "label": "查看恢复建议",
+            "enabled": True,
+            "kind": "navigate",
+            "route": "/recovery",
+            "confirmation_required": False,
+            "disabled_reason": None,
+            "owner_action_required": bool(recovery.get("owner_action_required")),
+        },
+        {
+            "control_id": "open_review_item",
+            "label": "打开复盘",
+            "enabled": True,
+            "kind": "navigate",
+            "route": "/review",
+            "confirmation_required": False,
+            "disabled_reason": None,
+            "owner_action_required": bool(review.get("review_required_before_next_action")),
+        },
+        {
+            "control_id": "view_evidence",
+            "label": "查看证据",
+            "enabled": True,
+            "kind": "expand_details",
+            "route": None,
+            "confirmation_required": False,
+            "disabled_reason": None,
+            "current_status": overall.get("status"),
+        },
+    ]
+
+
+def _position_notional(entry: Any, quantity: Any) -> Optional[str]:
+    price = _decimal_from_any(entry)
+    qty = _decimal_from_any(quantity)
+    if price is None or qty is None:
+        return None
+    return str(abs(price * qty))
+
+
+def _status_label(value: str) -> str:
+    return {
+        "safe": "Safe",
+        "warning": "Warning",
+        "blocked": "Blocked",
+        "paused": "Paused",
+        "active_position": "Active Position",
+        "review_required": "Review Required",
+        "recovery_required": "Recovery Required",
+        "revoked": "Revoked",
+    }.get(value, value)
+
+
+def _autonomy_label(value: str) -> str:
+    return {
+        "idle": "Idle",
+        "budget_available": "Budget available",
+        "candidate_selected": "Candidate selected",
+        "final_gate_checking": "FinalGate checking",
+        "waiting_position_close": "Waiting for position close",
+        "closed_review_pending": "Closed, review pending",
+        "closed_reviewed": "Closed and reviewed",
+        "blocked_with_retry_condition": "Blocked with retry condition",
+        "paused": "Paused",
+        "revoked": "Revoked",
+        "recovery_required": "Recovery required",
+    }.get(value, value)
+
+
+def _autonomy_message(
+    *,
+    state: str,
+    active_position: dict[str, Any],
+    protection: dict[str, Any],
+    budget: dict[str, Any],
+    authorization: dict[str, Any],
+) -> str:
+    if state == "waiting_position_close":
+        return "Autonomy is waiting for the active position to close via TP/SL or verified exit."
+    if state == "recovery_required":
+        return "Autonomy is blocked until recovery or reconciliation clears."
+    if state == "closed_review_pending":
+        return "Autonomy is waiting for Owner review before another attempt."
+    if state == "budget_available":
+        return "Budget appears available, but Owner confirmation and FinalGate remain required."
+    if state == "candidate_selected":
+        return "A candidate is selected for review; execution remains disabled in this read model."
+    if state == "paused":
+        return "Autonomy is paused. Budget may still exist but no new action should start."
+    if state == "revoked":
+        return "Budget or authorization is revoked."
+    if authorization.get("blocking_reason"):
+        return f"Autonomy is blocked by authorization: {authorization.get('blocking_reason')}."
+    if budget.get("status") != "available":
+        return "Autonomy is blocked because budget is not currently actionable."
+    if protection.get("status") not in {"protected", "unknown"} and active_position.get("exists"):
+        return "Autonomy is blocked because protection is not complete."
+    return "Autonomy is not executing; current state is read-only."
+
+
+def _budget_label(value: str) -> str:
+    return {
+        "available": "Budget available",
+        "degraded_missing_account_facts": "Budget degraded: missing account facts",
+        "blocked_no_capacity": "Budget blocked: no capacity",
+        "not_available": "Budget not available",
+    }.get(str(value), str(value))
+
+
+def _protection_label(value: str) -> str:
+    return {
+        "protected": "Protected",
+        "partially_protected": "Partially protected",
+        "unprotected": "Protection missing",
+        "unknown": "Protection unknown",
+        "orphaned": "Orphan protection suspected",
+        "not_available": "Protection not available",
+    }.get(str(value), str(value))
+
+
 def _order_item(order: Any) -> dict[str, Any]:
     status = _enum_value(getattr(order, "status", None))
     order_type = _enum_value(getattr(order, "order_type", getattr(order, "type", None)))
@@ -3403,6 +4300,30 @@ def _exchange_order_item(order: Any, *, source: str) -> dict[str, Any]:
 
 
 def _position_item(position: Any, *, source: str) -> dict[str, Any]:
+    if isinstance(position, dict):
+        info = position.get("info") if isinstance(position.get("info"), dict) else {}
+        return {
+            "position_id": str(position.get("id") or position.get("position_id") or info.get("positionId") or "unknown"),
+            "signal_id": position.get("signal_id"),
+            "symbol": position.get("symbol") or info.get("symbol"),
+            "side": _enum_value(position.get("side") or position.get("direction") or info.get("positionSide")),
+            "quantity": _scalar(
+                position.get("current_qty")
+                or position.get("quantity")
+                or position.get("contracts")
+                or position.get("size")
+                or info.get("positionAmt")
+            ),
+            "entry_price": _scalar(position.get("entry_price") or position.get("entryPrice") or info.get("entryPrice")),
+            "mark_price": _scalar(position.get("mark_price") or position.get("markPrice") or info.get("markPrice")),
+            "unrealized_pnl": _scalar(position.get("unrealized_pnl") or position.get("unrealizedPnl") or info.get("unRealizedProfit")),
+            "realized_pnl": _scalar(position.get("realized_pnl") or position.get("realizedPnl")),
+            "leverage": _scalar(position.get("leverage") or info.get("leverage")),
+            "margin_mode": position.get("margin_mode") or position.get("marginMode") or info.get("marginType"),
+            "is_closed": position.get("is_closed"),
+            "updated_at": position.get("updated_at") or position.get("timestamp"),
+            "source": source,
+        }
     return {
         "position_id": str(getattr(position, "id", getattr(position, "position_id", "unknown"))),
         "signal_id": getattr(position, "signal_id", None),

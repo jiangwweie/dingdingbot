@@ -1,7 +1,7 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-06-01
-Current phase: BRC fast small-capital live trial system
+Last updated: 2026-06-08
+Current phase: BRC productized bounded-live operations system
 
 ## Current Document Authority
 
@@ -40,6 +40,7 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 
 **Current canon (start here)**:
 
+- `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 - `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
 - `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
 - `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
@@ -59,6 +60,47 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 Archived pre-reset material lives under:
 
 - `archive/2026-04-29-pre-live-safe-replan/`
+
+## Current Product Direction
+
+The current target is an Owner-facing productized bounded-live trading
+operations system for fast small-capital trial-and-review Campaigns.
+
+Do not interpret Trading Console or Owner Console as merely:
+
+- a read-only dashboard;
+- a PG/read-model browser;
+- a research dashboard;
+- a passive status or enum display;
+- a documentation surface.
+
+The console is the Owner's operating surface for understanding system state,
+reviewing `ActionCandidate` records, seeing budget availability, seeing blockers
+and recovery conditions, authorizing bounded live actions through the official
+path, checking `FinalGate`, monitoring active position/protection, pausing or
+revoking autonomy or budget, reviewing completed trades, and feeding Review
+Ledger outcomes into promote / revise / park decisions.
+
+Current product chain:
+
+```text
+StrategyFamily / Carrier
+-> ActionCandidate
+-> Owner risk understanding
+-> Owner authorization or BudgetEnvelope authorization
+-> ActionSpec
+-> FinalGate
+-> Operation Layer
+-> official bounded live action
+-> active position / TP/SL protection monitoring
+-> close / TP / SL
+-> Review Ledger
+-> promote / revise / park
+```
+
+Read-only documents remain valid only for the specific namespace, report, or
+handoff they describe. They must not be generalized into "the product is
+read-only" or "no PG mutation/deployment/exchange access is allowed."
 
 ## Planning And Memory
 

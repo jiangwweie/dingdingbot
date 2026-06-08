@@ -2,16 +2,19 @@
 title: PROJECT_BASELINE_CURRENT
 status: CURRENT_CANON
 authority: owner-correction + current-position-rebuild
-last_verified: 2026-06-01
+last_verified: 2026-06-08
 supersedes:
   - docs/ops/knowledge-pack/PROJECT_OVERVIEW.md
 source_of_truth:
+  - docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md
   - docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md
   - docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md
   - docs/ops/project-roadmap-v2.md (2026-05-29 amendment, line 540+)
   - docs/ops/agent-current-brc-baseline.md
   - docs/adr/0009-non-real-live-execution-authorization-boundary.md
   - docs/adr/0012-bounded-risk-campaign-system.md
+  - docs/ops/trading-console-owner-action-flow-v1-deploy-governance-report-2026-06-07.md
+  - docs/ops/mr-eth-review-ledger-budgeted-autonomy-v0-design-2026-06-08.md
 ---
 
 # PROJECT_BASELINE_CURRENT.md
@@ -23,24 +26,37 @@ Supersedes all prior knowledge-pack documents for project positioning and capabi
 
 ## 1. Current definition
 
-Bounded Risk Campaign (BRC) fast small-capital live trial system.
+Bounded Risk Campaign (BRC) productized bounded-live operations system for fast
+small-capital trial-and-review Campaigns.
 
-Source: Owner 2026-06-01 instruction governance baseline.
+Source: Owner 2026-06-08 product direction correction and Owner 2026-06-01
+instruction governance baseline.
 
 The old positioning "BRC Reset / Opportunity Structure Discovery v0" and the
 intermediate "research-only signal detection" framing are **no longer the
 formal current positioning**. They are historical or scope-limited to research
 tasks.
 
+The older "Trading Console is read-only" framing is also **not the product
+model**. Read-only contracts remain valid for the specific read-model
+namespace/report they describe, but the current console target is the Owner's
+bounded-live operating surface.
+
 The current core chain is:
 
 ```
-StrategyFamily
--> Carrier
--> Owner risk acknowledgement
--> BoundedLiveTrialAuthorization
--> hard safety gates
--> entry / protection / record / exit / review
+StrategyFamily / Carrier
+-> ActionCandidate
+-> Owner risk understanding
+-> Owner authorization or BudgetEnvelope authorization
+-> ActionSpec
+-> FinalGate
+-> Operation Layer
+-> official bounded live action
+-> active position / TP/SL protection monitoring
+-> close / TP / SL
+-> Review Ledger
+-> promote / revise / park
 ```
 
 Hard boundaries:
@@ -49,6 +65,8 @@ Hard boundaries:
 - no real live trading / real-funds order placement without separate explicit Owner authorization
 - no strategy self-elevation
 - no bypass around Operation Layer
+- no FinalGate bypass
+- no unscoped symbol / side / leverage / notional expansion
 - no withdrawal / transfer
 
 ---
@@ -57,11 +75,14 @@ Hard boundaries:
 
 ```
 BRC governance framework exists.
-Strategy-family / carrier chain is active.
-BNB first carrier has advanced through live observation, strategy trial
-readiness, preflight facts, controlled testnet carrier path, and protected
-testnet same-path rehearsal.
-Real live / real-funds authorization remains the hard boundary.
+Strategy-family / carrier -> ActionCandidate chain is active.
+Owner Action Flow v1 is deployed on Tokyo with runtime-bound health and
+live_ready=false.
+BNB first carrier has completed bounded live closeout/recovery evidence.
+MR/ETH has tracked protected-open bounded-live evidence in the Review Ledger
+design note.
+Generic live action remains bounded by exact Owner/BudgetEnvelope scope,
+FinalGate, Operation Layer, TP/SL protection, and Review Ledger.
 ```
 
 Sub-phase breakdown:
@@ -69,14 +90,16 @@ Sub-phase breakdown:
 | Sub-phase | Status |
 |---|---|
 | BRC governance framework (campaign lifecycle + state machine + operation layer) | Implemented, testnet verified |
-| Owner Console v0 (5 P0 pages) | Implemented |
+| Owner Console / Trading Console product surface | Owner Action Flow v1 deployed to Tokyo; action enablement remains backend-gated |
 | Admission Gate Phase 1-17 | Metadata operations complete |
 | TF-001 Carrier Full-chain Smoke | Passed |
 | Broad OHLCV Smoke Screen (BRC-R5-003) | Completed, 3 candidates selected |
 | Cost/baseline enrichment for candidates | Completed for the initial broad-smoke candidates; outcomes remain evidence/warnings, not automatic promotion |
 | Account equity mapping | Cached AccountSnapshot mapping available for readiness inputs |
 | BNB StrategyTrialReadiness / controlled testnet carrier | Implemented, tested, and exercised through protected testnet same-path rehearsal |
-| Signal-to-trade conversion | Live/real-funds conversion remains Owner-authorized only |
+| Generic action entry / Owner Action Flow | Implemented as product-facing read model/action-flow surface; real action requires official backend actionability |
+| BudgetEnvelope / Budgeted Autonomy | BudgetEnvelope recommendation exists; Budgeted Autonomy v0 remains design-only and not direct trade permission |
+| Signal-to-trade conversion | Only official bounded action paths may execute; no uncontrolled signal-to-order path |
 
 ---
 
@@ -99,6 +122,11 @@ Sub-phase breakdown:
 | CF-013 | GKS (Global Kill Switch) is fail-closed by design |
 | CF-014 | Execution permission system gates action depth (READ_ONLY / SIGNAL_ONLY / INTENT_RECORDING / EXECUTION_INTENT_ALLOWED / ORDER_ALLOWED) |
 | CF-015 | CPM-1 (ETH Pinbar Pullback) is PAUSED (OOS negative) |
+| CF-016 | Current product model is productized bounded-live operations; Trading Console is not merely a read-only dashboard |
+| CF-017 | Tokyo Owner Action Flow v1 deploy report records runtime-bound service health with `live_ready=false` |
+| CF-018 | MR/ETH Review Ledger note records a protected-open bounded-live ETH position with TP and SL present as of its collected evidence |
+| CF-019 | Budgeted Autonomy v0 is design-only and not direct trade permission |
+| CF-020 | Read-only endpoint/report guarantees are artifact-scoped and must not be generalized into product-wide no-action policy |
 
 ---
 
@@ -106,7 +134,8 @@ Sub-phase breakdown:
 
 | Blocker | Impact | Status |
 |---|---|---|
-| live / real-funds authorization missing | Real live order placement must not proceed | Hard blocker until explicit Owner live authorization |
+| generic live / real-funds authorization missing | Generic live order placement must not proceed | Hard blocker unless an exact Owner or BudgetEnvelope-scoped authorization exists and FinalGate passes |
+| active/protected position or PG/exchange uncertainty | New live entry must not proceed if exposure/protection facts are conflicting, stale, or unknown | Scope-specific hard blocker until reconciled |
 | strategy evidence weakness / incomplete observation | Must be disclosed and acknowledged | Warning after Owner acknowledgement, not a hard blocker |
 | 022-027 migrations not integrated | Historical research tables unavailable if trial depends on them | P1 Owner decision |
 
@@ -133,12 +162,12 @@ These **must not be described as integrated capabilities**.
 
 | Capability | Status | Why |
 |---|---|---|
-| Live automated strategy execution | DISABLED | Real live / real-funds action requires separate explicit Owner authorization |
+| Live automated strategy execution | DISABLED | Real live / real-funds action requires exact Owner/BudgetEnvelope scope, FinalGate, Operation Layer, and explicit enablement |
 | uncontrolled signal-to-order | FORBIDDEN | Strategy self-elevation and Operation Layer bypass are prohibited |
 | trial intent / readiness paths | PARTIAL | Evidence and readiness paths exist, but live conversion remains gated |
 | account_equity read | AVAILABLE WHEN CACHED | `wallet_equity` / `account_equity` and `available_margin` map from cached AccountSnapshot when present |
-| Production deployment | NOT AVAILABLE | Local runtime only, no cloud/daemon infrastructure |
-| Scheduler / daemon | NOT AVAILABLE | Process-local only in `src/main.py` |
+| Owner Console deployment | AVAILABLE WITH CONSTRAINT | Tokyo deployment reports show runtime-bound Owner Console with `live_ready=false`; deployment is not live authorization |
+| Scheduler / daemon autonomy | NOT ENABLED | No general autonomous live scheduler; Budgeted Autonomy v0 remains design-only |
 
 ---
 
@@ -164,7 +193,10 @@ These **must not be described as integrated capabilities**.
 | Priority | Action | Type | Safety |
 |---|---|---|---|
 | P0 | Preserve hard live / real-funds authorization boundary | governance | hard stop without explicit Owner live authorization |
+| P0 | Preserve productized bounded-live operating model | product / architecture | console is Owner action surface, not passive dashboard |
+| P0 | Keep official action path unified | architecture | ActionSpec -> FinalGate -> Operation Layer -> protection -> Review |
 | P0 | Continue testnet/dev/readiness/profile-scoped repair when blockers are bounded | engineering | no real funds |
+| P0 | Surface Review Ledger and recovery facts | product safety | no hidden drift or missing protection |
 | P1 | Decide whether 022-027 and untracked files should be committed | Owner decision | — |
 
 ---
@@ -180,6 +212,8 @@ These **must not be described as integrated capabilities**.
 | "Historical Signal Evaluation pending verification" | Same | Not integrated |
 | "account_equity is unavailable" | cached AccountSnapshot mapping was added after this claim | account_equity / wallet_equity and available_margin are available when the runtime cached snapshot exists |
 | "testnet requires Owner authorization" | 2026-06-01 Owner baseline supersedes blanket testnet authorization stops | testnet/dev/readiness work proceeds via scoped verification and safety gates |
+| "Trading Console is a read-only product" | Owner 2026-06-08 product correction | read-model namespaces can be read-only, but the console product is the Owner bounded-live operating surface |
+| "Production deployment is unavailable" | 2026-06-07 deploy governance reports | Tokyo Owner Console deployment exists with `runtime_bound=true`, `live_ready=false`, and no generic live authorization |
 
 ---
 
@@ -187,13 +221,14 @@ These **must not be described as integrated capabilities**.
 
 For new AI assistants joining this project:
 
-1. **This file** (`PROJECT_BASELINE_CURRENT.md`) — project definition and current state
-2. `CURRENT_FACT_REGISTRY.md` — verified facts, blockers, prohibited actions
-3. `CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
-4. `DOCUMENT_GOVERNANCE.md` — how to read and trust project documents
-5. `CURRENT_POSITION_REBUILD.md` — detailed position analysis
-6. `TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
-7. `DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
+1. `CURRENT_PRODUCT_OPERATING_MODEL.md` — current product and execution model
+2. **This file** (`PROJECT_BASELINE_CURRENT.md`) — project definition and current state
+3. `CURRENT_FACT_REGISTRY.md` — verified facts, blockers, prohibited actions
+4. `CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
+5. `DOCUMENT_GOVERNANCE.md` — how to read and trust project documents
+6. `CURRENT_POSITION_REBUILD.md` — detailed historical position analysis
+7. `TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+8. `DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
 
 Then for deeper context:
 

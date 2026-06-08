@@ -491,6 +491,46 @@ def test_exchange_flat_pg_open_protection_state_blocks_without_actions(monkeypat
     assert exchange.cancel_calls == 0
 
 
+def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/operations-cockpit?include_exchange=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_model"] == "operations_cockpit"
+    assert payload["live_ready"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["cancels_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+    data = payload["data"]
+    assert data["overall_status"]["status"] == "recovery_required"
+    assert data["primary_next_action"]["action_id"] == "view_recovery"
+    assert data["autonomy"]["state"] == "recovery_required"
+    assert data["recovery"]["required"] is True
+    assert data["protection"]["status"] == "orphaned"
+    assert data["budget"]["action_allowed"] is False
+    assert data["budget"]["grants_trading_permission"] is False
+    controls = {item["control_id"]: item for item in data["controls"]}
+    assert controls["refresh_status"]["enabled"] is True
+    assert controls["reconcile_now"]["enabled"] is True
+    assert controls["pause_autonomy"]["enabled"] is True
+    assert controls["pause_autonomy"]["operation_type"] == "enter_pause"
+    assert controls["pause_autonomy"]["preflight_endpoint"] == "POST /api/brc/operations/preflight"
+    assert controls["pause_autonomy"]["confirm_endpoint"] == "POST /api/brc/operations/{operation_id}/confirm"
+    assert controls["pause_autonomy"]["confirmation_required"] is True
+    assert controls["pause_autonomy"]["disabled_reason"] is None
+    assert controls["revoke_budget"]["enabled"] is False
+    assert any(item["area"] == "recovery" for item in data["blockers"])
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
 def test_protection_health_counts_current_scope_active_protection_only(monkeypatch):
     _configure_auth(monkeypatch)
     exchange = _FakeExchangeGateway(
@@ -3384,6 +3424,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
     from src.interfaces.api import app
 
     endpoints = [
+        "/api/trading-console/operations-cockpit",
         "/api/trading-console/dashboard-state",
         "/api/trading-console/account-risk",
         "/api/trading-console/order-ledger",

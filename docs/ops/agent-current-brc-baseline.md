@@ -1,34 +1,56 @@
 # Agent Current BRC Baseline
 
-Last updated: 2026-06-01
+Last updated: 2026-06-08
 Status: CURRENT_AGENT_BASELINE
 
 This file is the current agent-facing baseline for Codex, Claude, skills,
 handoff templates, and prompt libraries. It overrides older instruction text
-that frames the project as research-only, read-only, signal-detection-only, or
-permanently barred from execution/testnet paths.
+that frames the project as research-only, read-only, signal-detection-only, a
+passive dashboard, or permanently barred from execution/testnet paths.
+
+Primary product-model canon:
+
+- `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 
 ## Project Objective
 
-The project is a BRC fast small-capital live trial system.
+The project is a BRC productized bounded-live operations system for fast
+small-capital trial-and-review Campaigns.
 
 It is not:
 
 - a long-term automated profit system;
 - a research-only signal detector;
+- a read-only console;
+- a PG/read-model browser;
+- a passive status dashboard;
 - an infinite readiness gate system;
 - a generic uncontrolled trading terminal.
 
 Current core chain:
 
 ```text
-StrategyFamily
--> Carrier
--> Owner risk acknowledgement
--> BoundedLiveTrialAuthorization
--> hard safety gates
--> entry / protection / record / exit / review
+StrategyFamily / Carrier
+-> ActionCandidate
+-> Owner risk understanding
+-> Owner authorization or BudgetEnvelope authorization
+-> ActionSpec
+-> FinalGate
+-> Operation Layer
+-> official bounded live action
+-> active position / TP/SL protection monitoring
+-> close / TP / SL
+-> Review Ledger
+-> promote / revise / park
 ```
+
+Trading Console / Owner Console must be interpreted as the Owner's operating
+surface for state understanding, ActionCandidate review, budget availability,
+blockers/recovery, bounded authorization, FinalGate evidence, active
+position/protection monitoring, pause/revoke controls, completed-trade review,
+and Review Ledger learning. Read-only documents are scope-limited to the
+specific endpoint set, report, or handoff they describe; they do not define the
+whole product as read-only.
 
 ## Authorization Boundary
 
@@ -92,6 +114,31 @@ not hard-block after acknowledgement:
 - observation sample low;
 - regime uncertain;
 - historical fragility.
+
+## Execution Model
+
+Execution work should converge on:
+
+```text
+StrategyFamilySpec
+-> CarrierSpec
+-> ActionCandidate
+-> ActionSpec
+-> FinalGate
+-> Operation Layer
+-> official execute
+-> protection
+-> Review
+```
+
+Do not create custom execution paths per strategy. `FinalGate` is a hard
+execution gate, not a research-proof gate. It should verify exact
+authorization, environment/account/symbol/side/quantity/notional/leverage,
+budget, attempts, exposure conflicts, fresh account and reconciliation facts,
+market rules, protection plan, GKS/runtime guard state, and Operation Layer
+use. Imperfect evidence, incomplete fee/funding/slippage accounting, or
+unsophisticated Review analytics are warnings unless they directly affect live
+safety.
 
 ## Worker Output Rule
 
