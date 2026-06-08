@@ -2,6 +2,32 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-08 (BRC ActionSpec FinalGate Adapter Contract Sprint)
+
+- Added a strategy-independent, non-live
+  `ActionSpecFinalGateAdapterService` boundary for ActionCandidate input,
+  normalized ActionSpec draft validation, FinalGate preview/status output,
+  warning/hard-blocker classification, and explicit no-action guarantees.
+- Integrated adapter results into the product backbone and Trading Console
+  action-entry readiness payload as backend-provided contract data. BNB,
+  Trend/SOL, MR/ETH, and Volatility now pass through the same adapter surface:
+  BNB is dry-run/historical, Trend needs Owner authorization, MR needs
+  BudgetEnvelope authorization, and Volatility remains proposal-only.
+- Preserved execution boundaries: official FinalGate remains the execution
+  gate; this sprint does not create authorization, execution intent, order
+  placement/cancel/close, PG mutation, exchange write, runtime start, profile
+  change, credential change, or deployment.
+- Verification passed:
+  - `python3 -m pytest -q tests/unit/test_action_spec_final_gate_adapter.py`
+  - `python3 -m pytest -q tests/unit/test_production_strategy_family_admission.py tests/unit/test_trading_console_readmodels.py tests/unit/test_brc_operation_layer.py::test_runtime_state_operations_execute_or_degrade_safely tests/unit/test_brc_operation_layer.py::test_runtime_transition_unavailable_when_adapter_missing tests/unit/test_brc_operation_layer.py::test_revoke_budget_preflight_and_confirmation_persist_effective_state tests/unit/test_brc_operation_layer.py::test_revoke_budget_repeated_confirm_is_idempotent_noop tests/unit/test_brc_operation_layer.py::test_revoke_budget_blocks_when_no_current_budget_authorization`
+  - `python3 -m pytest -q tests/unit/test_brc_console_api_surface.py`
+  - `python3 -m py_compile src/application/action_spec_final_gate_adapter.py src/application/production_strategy_family_admission.py src/application/readmodels/trading_console.py`
+  - `python3 -m alembic heads`
+  - temporary clean SQLite `alembic upgrade head`
+  - `git diff --check`
+- Migration status: no migration added; Alembic remains at single head `043`.
+  Frontend was not touched, so frontend lint/build was not run.
+
 ## 2026-06-08 (BRC Product Backbone Acceptance Pass)
 
 - Performed local integration acceptance on the product backbone introduced in

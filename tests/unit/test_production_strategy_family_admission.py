@@ -1995,6 +1995,38 @@ def test_product_backbone_represents_bnb_trend_mr_and_volatility_samples():
         assert item.may_execute_live is False
         assert item.frontend_action_enabled is False
 
+    adapter_results = {item.candidate_id: item for item in state.final_gate_adapter_results}
+    assert set(adapter_results) >= {
+        "action-candidate:MI-001-BNB-LONG",
+        "action-candidate:TF-001-live-readonly-v0",
+        "action-candidate:MR-001-live-readonly-v0",
+        "action-candidate:VB-001-live-readonly-v0",
+    }
+    assert adapter_results[
+        "action-candidate:MI-001-BNB-LONG"
+    ].final_gate_preview.status == "dry_run_only"
+    assert adapter_results[
+        "action-candidate:TF-001-live-readonly-v0"
+    ].final_gate_preview.status == "needs_owner_authorization"
+    assert adapter_results[
+        "action-candidate:MR-001-live-readonly-v0"
+    ].final_gate_preview.status == "needs_budget_authorization"
+    assert adapter_results[
+        "action-candidate:MR-001-live-readonly-v0"
+    ].final_gate_preview.budget_required is True
+    assert adapter_results[
+        "action-candidate:MR-001-live-readonly-v0"
+    ].action_spec.target_notional_usdt == "22"
+    assert adapter_results[
+        "action-candidate:VB-001-live-readonly-v0"
+    ].final_gate_preview.status == "proposal_only"
+    for item in adapter_results.values():
+        assert item.final_gate_is_execution_gate is True
+        assert item.strategy_independent is True
+        assert item.no_action_guarantee["places_order"] is False
+        assert item.action_spec.may_execute_live is False
+        assert item.final_gate_preview.frontend_action_enabled is False
+
     protection = {item.family: item for item in state.protection_templates}
     assert set(protection) == {"Trend", "Volatility expansion", "Mean reversion"}
     assert protection["Trend"].mode == "single_tp_plus_sl"

@@ -14,6 +14,13 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.action_spec_final_gate_adapter import (
+    ActionCandidateAdapterInput,
+    ActionSpecDraftInput,
+    ActionSpecFinalGateAdapterResult,
+    ActionSpecFinalGateAdapterService,
+    FinalGateFactInput,
+)
 from src.application.owner_action_carrier_catalog import (
     get_owner_action_carrier,
     supported_owner_action_carrier_ids,
@@ -1968,6 +1975,7 @@ class ProductionStrategyFamilyAdmissionState(ProductionAdmissionModel):
     hard_blocker_records: list[BlockerRecord] = Field(default_factory=list)
     candidate_actionability: list[CandidateActionability] = Field(default_factory=list)
     final_gate_preview_inputs: list[FinalGatePreviewInputModel] = Field(default_factory=list)
+    final_gate_adapter_results: list[ActionSpecFinalGateAdapterResult] = Field(default_factory=list)
     product_backbone: ProductBackboneReadModel = Field(default_factory=ProductBackboneReadModel)
     trading_console_candidate_action_read_model: TradingConsoleCandidateActionReadModel = Field(
         default_factory=TradingConsoleCandidateActionReadModel
@@ -2395,6 +2403,7 @@ def build_production_strategy_family_admission_state(
         hard_blocker_records=blocker_records,
         candidate_actionability=_candidate_actionability(rows),
         final_gate_preview_inputs=_final_gate_preview_inputs(rows),
+        final_gate_adapter_results=_final_gate_adapter_results(rows),
         product_backbone=_product_backbone(rows),
         trading_console_candidate_action_read_model=TradingConsoleCandidateActionReadModel(),
         action_candidate_specs=_action_candidate_specs(rows),
@@ -5772,6 +5781,102 @@ def _candidate_actionability(rows: list[FamilyAdmissionRow]) -> list[CandidateAc
             )
         )
     return actionability
+
+
+def _final_gate_adapter_results(
+    rows: list[FamilyAdmissionRow],
+) -> list[ActionSpecFinalGateAdapterResult]:
+    adapter = ActionSpecFinalGateAdapterService()
+    results = [_bnb_final_gate_adapter_result(adapter)]
+    for row, action_spec in zip(rows, _generic_action_specs(rows)):
+        spec_payload = action_spec.model_dump(mode="json")
+        spec_payload["action_spec_id"] = f"action-spec:{row.carrier_id or row.family}"
+        if row.family == "Mean reversion" and row.carrier_id:
+            spec_payload["budget_envelope_ref"] = f"budget-envelope:{row.carrier_id}"
+            spec_payload["status"] = "valid_blocked_final_gate"
+        results.append(
+            adapter.adapt(
+                candidate=ActionCandidateAdapterInput(
+                    candidate_id=f"action-candidate:{row.carrier_id or row.family}",
+                    family=row.family,
+                    strategy_family_id=row.strategy_family_id,
+                    carrier_id=row.carrier_id,
+                    admission_level=row.admission_level_code,
+                    candidate_status=row.action_candidate.status,
+                    action_registry_supported=row.action_api_compatibility.compatible,
+                    proposal_role=_proposal_role(row),
+                    warnings=list(row.risk_disclosure_contract.failure_modes),
+                    hard_blockers=_row_hard_blockers(row),
+                    evidence=[
+                        row.strategy_group_mapping.evidence,
+                        row.carrier_candidate.evidence,
+                    ],
+                ),
+                action_spec=ActionSpecDraftInput.model_validate(spec_payload),
+                facts=FinalGateFactInput(),
+            )
+        )
+    return results
+
+
+def _bnb_final_gate_adapter_result(
+    adapter: ActionSpecFinalGateAdapterService,
+) -> ActionSpecFinalGateAdapterResult:
+    candidate_id = "action-candidate:MI-001-BNB-LONG"
+    return adapter.adapt(
+        candidate=ActionCandidateAdapterInput(
+            candidate_id=candidate_id,
+            family="BNB manual bounded live proof",
+            strategy_family_id="MI-001",
+            carrier_id="MI-001-BNB-LONG",
+            admission_level="L0",
+            candidate_status="historical_proof_not_current_authorization",
+            action_registry_supported=True,
+            proposal_role="historical_regression_sample",
+            dry_run_only=True,
+            warnings=[],
+            hard_blockers=[
+                "fresh Owner authorization required",
+                "fresh PG/exchange validation required",
+                "FinalGate pass required",
+            ],
+            evidence=["historical BNB execute/close proof only"],
+        ),
+        action_spec=ActionSpecDraftInput(
+            action_spec_id="action-spec:MI-001-BNB-LONG",
+            status="historical_proof_not_current_authorization",
+            family="BNB manual bounded live proof",
+            strategy_family_id="MI-001",
+            carrier_id="MI-001-BNB-LONG",
+            admission_level="L0",
+            action_registry_supported=True,
+            proposal_role="historical_regression_sample",
+            symbol="BNB/USDT:USDT",
+            side="long",
+            quantity="0.01",
+            max_notional="20",
+            leverage="1",
+            max_attempts=1,
+            protection_mode="single_tp_plus_sl",
+            review_requirement="post_action_review_required",
+            protection_template={
+                "template_id": "protection-template:MI-001-BNB-LONG",
+                "mode": "single_tp_plus_sl",
+                "mandatory": True,
+                "hard_blockers": ["fresh protection price plan required"],
+            },
+            review_template={
+                "template_id": "review-template:MI-001-BNB-LONG",
+                "post_action_required": True,
+            },
+            hard_blockers=[
+                "fresh Owner authorization required",
+                "fresh PG/exchange validation required",
+                "FinalGate pass required",
+            ],
+        ),
+        facts=FinalGateFactInput(),
+    )
 
 
 def _final_gate_preview_inputs(rows: list[FamilyAdmissionRow]) -> list[FinalGatePreviewInputModel]:

@@ -877,6 +877,9 @@ class TradingConsoleReadModelService:
         final_gate_preview_inputs = [
             item.model_dump(mode="json") for item in state.final_gate_preview_inputs
         ]
+        final_gate_adapter_results = [
+            item.model_dump(mode="json") for item in state.final_gate_adapter_results
+        ]
         protection_templates = [
             item.model_dump(mode="json") for item in state.protection_templates
         ]
@@ -913,6 +916,7 @@ class TradingConsoleReadModelService:
             "product_backbone": product_backbone,
             "candidate_actionability": candidate_actionability,
             "final_gate_preview_inputs": final_gate_preview_inputs,
+            "final_gate_adapter_results": final_gate_adapter_results,
             "protection_templates": protection_templates,
             "warning_records": [
                 item.model_dump(mode="json") for item in state.warning_records
