@@ -5087,9 +5087,12 @@ async def _read_active_bnb_scoped_runtime_safety_clearance(
                 WHERE c.clearance_type = :clearance_type
                   AND c.status = 'active'
                   AND c.expires_at_ms > :now_ms
-	                  AND a.carrier_id = :carrier_id
-	                  AND (:authorization_id IS NULL OR a.authorization_id = :authorization_id)
-	                  AND a.symbol IN (:symbol, :runtime_symbol)
+                  AND a.carrier_id = :carrier_id
+                  AND (
+                    CAST(:authorization_id AS text) IS NULL
+                    OR a.authorization_id = CAST(:authorization_id AS text)
+                  )
+                  AND a.symbol IN (:symbol, :runtime_symbol)
                   AND a.side = :side
                   AND a.leverage = :leverage
                   AND a.protection_plan_type = :protection_plan_type
