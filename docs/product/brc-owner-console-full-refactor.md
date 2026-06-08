@@ -2,6 +2,12 @@ Current implementation-state note:
 
 - `docs/product/brc-owner-console-current-state.md`
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This refactor spec predates the current productized bounded-live operations
+> correction. Use `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
+> as the product boundary. Reuse this document only as historical design input.
+
 下面是可直接保存到项目中的规格书内容。建议路径：
 
 ```text

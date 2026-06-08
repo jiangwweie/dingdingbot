@@ -1,19 +1,20 @@
 > [!IMPORTANT]
+> **Current product operating model**: `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 > **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
 > **Current fact registry**: `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
 > **Current readiness blockers**: `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
 > **Document governance rules**: `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
 >
 > This README was originally written for an earlier "fully automated trading system" phase.
-> Current project positioning (Owner 2026-05-29): **BRC fast trial-and-review research system for small risk-capital Campaigns**.
-> Do not read old wording about "automated execution" or "信号监控、执行与回测平台" as current capability.
+> Current project positioning (Owner 2026-06-08): **BRC productized bounded-live operations system** for fast small-capital trial-and-review Campaigns.
+> Do not read old wording about "automated execution", "read-only console", or "信号监控、执行与回测平台" as current capability or product boundary.
 
 ---
 
-# BRC Fast Trial-and-Review Research System
+# BRC Productized Bounded-Live Operations System
 
-**Bounded Risk Campaign (BRC) fast trial-and-review research system** for small risk-capital Campaigns.
-Isolated risk capital → playbook → bounded attempts → hard risk envelope.
+**Bounded Risk Campaign (BRC) productized bounded-live operations system** for fast small-capital trial-and-review Campaigns.
+StrategyFamily / Carrier -> ActionCandidate -> Owner/BudgetEnvelope authorization -> FinalGate -> Operation Layer -> protection -> Review Ledger.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
@@ -21,31 +22,32 @@ Isolated risk capital → playbook → bounded attempts → hard risk envelope.
 
 ---
 
-## Current Status (2026-05-29)
+## Current Status (2026-06-08)
 
-- Broad OHLCV screening completed
-- 3 trial candidates pending cost/baseline enrichment
-- Pre-trial readiness blocked by `account_equity` (wallet_equity / available_margin = not_available)
-- Real live trading: **NO** — prohibited by ADR-0009 unless Owner explicitly authorizes
-- Automated strategy execution: **NO** — `auto_execution_enabled=False`, `auto_within_budget_enabled=False`
-- signal-to-order: **NO**
-- signal-to-intent: **PARTIAL** (furthest state: `signal_evaluated_no_intent`)
-- Tracked migrations: 001-021 (current schema); 022-027 untracked and not integrated
+- Trading Console / Owner Console product direction: Owner operations surface, not merely a read-only dashboard
+- Owner Action Flow v1 deployed to Tokyo with `runtime_bound=true` and `live_ready=false`
+- BNB bounded-live closeout/recovery evidence is tracked
+- MR/ETH Review Ledger note records protected-open bounded-live ETH evidence with TP and SL present
+- BudgetEnvelope recommendation exists; Budgeted Autonomy v0 remains design-only and is not direct trade permission
+- Real live / real-funds action: only through exact Owner or BudgetEnvelope scope, `FinalGate`, Operation Layer, TP/SL protection, and Review Ledger
+- Automated strategy execution: disabled; no uncontrolled signal-to-order path
+- Tracked/untracked rule: untracked files must never be described as integrated capabilities
 
 ## Start Here
 
-1. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
-2. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
-3. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
-4. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
-5. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — detailed position analysis with evidence
-6. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+1. `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md` — current product and execution model
+2. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
+3. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
+4. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks current bounded-live action readiness
+5. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
+6. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — historical detailed position analysis with evidence
+7. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
 
 ---
 
 ## 🎯 核心原则
 
-**Research-Only Boundary** — 本系统当前为研究和有限风险资本试验平台。安全边界：无 Owner 明确授权不执行真实交易，自动化执行禁用，API 密钥仅开交易权限、严禁提现权限。
+**Bounded-Live Safety Boundary** — 本系统当前是 Owner-facing bounded-live operations 系统，不是只读面板，也不是全自动交易系统。真实资金动作必须有精确 Owner/BudgetEnvelope 授权、FinalGate、Operation Layer、TP/SL 保护和 Review Ledger；严禁提现/转账、绕过门禁、策略自提升、无预算或无范围实盘动作。
 
 ---
 
@@ -119,8 +121,8 @@ python tests/backtest.py
 
 ## 📦 项目结构
 
-> **注意**: 以下目录结构包含历史遗留的 execution/order 模块。当前 BRC 研究系统不执行真实交易。
-> `auto_execution_enabled=False`, `auto_within_budget_enabled=False`。
+> **注意**: 以下目录结构包含历史遗留的 execution/order 模块。当前 BRC 产品只允许通过官方 ActionSpec / FinalGate / Operation Layer 路径执行有界动作。
+> 读到旧的 execution/order 代码或 read-model 文档时，不要推导出通用 live 授权或全自动执行能力。
 
 ```
 dingdingbot/
@@ -283,7 +285,7 @@ pytest tests/unit/test_strategy_engine.py -v
 1. **API Key 权限**：仅开启交易权限，**严禁提现权限**，系统启动时自动校验
 2. **敏感信息脱敏**：所有日志中的 API Key、Secret、Webhook URL 自动脱敏
 3. **仓位限额控制**：单笔最大损失、每日最大回撤限制
-4. **紧急停止开关**：异常情况自动平仓退出
+4. **紧急停止开关**：GKS / runtime guard fail-closed；不等同于无条件自动平仓承诺
 
 ---
 
@@ -338,12 +340,13 @@ pytest tests/unit/test_strategy_engine.py -v
 - RuntimeConfigResolver + runtime_profiles 配置真源
 - Sim-1 模拟盘观察部署
 
-### 🎯 当前阶段：BRC Fast Trial-and-Review Research
+### 🎯 当前阶段：BRC Productized Bounded-Live Operations
 
-- 历史回测研究与 Campaign 候选评估
-- Pre-trial readiness blocked by account_equity
-- 策略研究与运行治理
-- Real live trading prohibited unless Owner explicitly authorizes
+- Owner-facing Trading Console / Action Flow
+- ActionCandidate -> ActionSpec -> FinalGate -> Operation Layer 主线
+- BudgetEnvelope 建议与 Review Ledger
+- 有界实盘动作必须精确授权、强门禁、保护完整、可复盘
+- Budgeted Autonomy v0 仍为 design-only，未授予自动执行
 
 ---
 
@@ -353,4 +356,4 @@ pytest tests/unit/test_strategy_engine.py -v
 
 ---
 
-*本项目为 BRC fast trial-and-review research system，Real live trading prohibited unless Owner explicitly authorizes. 不构成任何投资建议。*
+*本项目为 BRC productized bounded-live operations system。任何真实资金动作都必须精确授权并通过 FinalGate / Operation Layer；不构成任何投资建议。*

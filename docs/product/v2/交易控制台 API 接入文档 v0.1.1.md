@@ -1,5 +1,12 @@
 # 交易控制台 API 接入文档 v0.1
 
+> [!IMPORTANT]
+> 2026-06-08 当前产品口径覆盖说明：
+> 本文档是 Gate 2 `/api/trading-console/*` read-model 接入规范，不再代表完整交易控制台产品边界。
+> 当前权威产品模型见 `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`。
+> 旧文中的“禁止接入真实 action API”只适用于本 Gate 2 read-model 版本；
+> 当前产品允许在官方后端 actionability、FinalGate、Operation Layer、保护和 Review 路径齐备时设计有界动作流。
+
 ## 0. 文档状态
 
 - 产品名：交易控制台
@@ -7,8 +14,8 @@
 - 文档类型：前端 API 接入文档
 - 适用对象：AI Studio 前端工程、前端接入审计、主控验收
 - 唯一事实源：`/api/trading-console/*`
-- 本阶段接口性质：只读 read model
-- 本阶段禁止接入：真实 action API
+- 本文档接口性质：历史 Gate 2 只读 read model
+- 本文档禁止接入：真实 action API；此限制不代表当前完整产品边界
 
 ------
 
@@ -956,7 +963,7 @@ Gate 2 阶段不可接入：
 本阶段前端目标是：
 
 ```text
-只读交易控制台
+Gate 2 read-model 交易控制台
 + 风险状态清晰
 + 订单事实可见
 + 授权执行链路可见

@@ -1,5 +1,12 @@
 # 交易控制台页面结构与 UI 设计规范 v0.1
 
+> [!IMPORTANT]
+> 2026-06-08 当前产品口径覆盖说明：
+> 本文档是 Gate 2 read-model / 只读前端 UI 规划材料，不再代表完整交易控制台产品边界。
+> 当前权威产品模型见 `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`。
+> Console 是 Owner bounded-live operations surface；动作按钮只有在官方后端 actionability、
+> FinalGate、Operation Layer、保护和 Review 路径齐备时才可启用。
+
 ## 0. 文档状态
 
 - 产品名：交易控制台
@@ -7,7 +14,7 @@
 - 文档类型：页面结构与 UI 设计规范
 - 适用对象：AI Studio 前端工程、前端设计、接入审计
 - 唯一事实源：`/api/trading-console/*`
-- 当前版本性质：只读版交易控制台
+- 当前版本性质：历史 Gate 2 read-model 只读前端规划；不代表当前完整产品边界
 - Gate 3 能力：只允许预设 UI slot，不允许接入真实 action API
 
 ------
@@ -285,7 +292,7 @@ unavailable
 文案：
 
 ```text
-当前为只读交易控制台。页面不会下单、撤单、平仓、重试保护或修改 PG 状态。
+当前为 Gate 2 read-model 版本。页面不会下单、撤单、平仓、重试保护或修改 PG 状态。
 ```
 
 ------

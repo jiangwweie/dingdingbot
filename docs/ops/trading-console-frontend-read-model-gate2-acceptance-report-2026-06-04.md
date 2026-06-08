@@ -2,6 +2,12 @@
 
 Date: 2026-06-04
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This report verifies a Gate 2 read-model frontend. It must not be generalized
+> into a product-wide read-only boundary. Current product authority is
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+
 Verdict: PASS_WITH_CONSTRAINT
 
 ## Scope

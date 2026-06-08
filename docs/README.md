@@ -1,4 +1,5 @@
 > [!IMPORTANT]
+> **Current product operating model**: `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 > **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
 > **Current agent baseline**: `docs/ops/agent-current-brc-baseline.md`
 > **Current fact registry**: `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
@@ -6,26 +7,27 @@
 > **Document governance rules**: `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
 >
 > Older docs may be historical, superseded, or research-only. Use the governance rules to determine authority.
-> Project definition (Owner 2026-06-01): "BRC fast small-capital live trial system".
+> Project definition (Owner 2026-06-08): "BRC productized bounded-live operations system".
 
 ---
 
 # Docs Index
 
-Last updated: 2026-06-01
+Last updated: 2026-06-08
 
 ## Current Baseline (start here)
 
 Read the current baseline documents first:
 
-1. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
-2. `docs/ops/agent-current-brc-baseline.md` — current agent/task execution boundary
-3. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
-4. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
-5. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
-6. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — detailed position analysis with evidence
-7. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
-8. `docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
+1. `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md` — product and execution model; Console is Owner operations surface, not merely read-only dashboard
+2. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
+3. `docs/ops/agent-current-brc-baseline.md` — current agent/task execution boundary
+4. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
+5. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks current bounded-live action readiness
+6. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
+7. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — historical detailed position analysis with evidence
+8. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+9. `docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
 
 ## Historical Mainline (superseded)
 
@@ -50,7 +52,7 @@ Previous reading list:
 
 The short chain is:
 
-`small-capital risk control -> opportunity detection -> human arm/pause -> strategy contract -> trade intent -> risk order plan -> execution lifecycle -> position/campaign/profit-protection control`
+`StrategyFamily / Carrier -> ActionCandidate -> Owner risk understanding -> Owner/BudgetEnvelope authorization -> ActionSpec -> FinalGate -> Operation Layer -> bounded live action -> protection -> Review Ledger`
 
 ## Active Research Context
 
@@ -65,7 +67,9 @@ authorize real live trading, real-funds orders, real API key changes, live
 account permission changes, withdrawal, transfer, leverage expansion, sizing
 advice, or direct research-to-real-order wiring. Research-only/read-only labels
 are scope-limited to those documents and do not globally prohibit controlled
-testnet/dev/readiness work under `agent-current-brc-baseline.md`.
+testnet/dev/readiness work under `agent-current-brc-baseline.md`. They also do
+not define Trading Console as a read-only product; current Console product
+direction is governed by `CURRENT_PRODUCT_OPERATING_MODEL.md`.
 
 ## Runtime Safety Context
 

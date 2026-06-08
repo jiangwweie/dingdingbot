@@ -2,6 +2,15 @@
 
 Date: 2026-06-04
 
+> [!IMPORTANT]
+> 2026-06-08 current-product scope note:
+> This document defines the read-only `/api/trading-console/*` read-model
+> namespace only. It must not be read as "Trading Console is a read-only
+> product." The current product model is governed by
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`: Owner-facing
+> bounded-live operations through `ActionCandidate -> ActionSpec -> FinalGate
+> -> Operation Layer -> protection -> Review Ledger`.
+
 Namespace: `/api/trading-console/*`
 
 Mode: operator-authenticated, read-only backend aggregation. No endpoint in this

@@ -26,6 +26,7 @@ Plan-with-files remains required, but it is program-scoped.
 For Live-safe v1, use:
 
 - `docs/ops/project-roadmap-v2.md`
+- `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 - `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/live-safe-v1-task-board.md`
@@ -62,9 +63,16 @@ Do not write fixed annual return or max drawdown numbers as system constraints. 
 ## Scope Framing
 
 Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority.
+Treat `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md` as the
+current product and execution-model authority.
 Treat `docs/ops/agent-current-brc-baseline.md` as the current worker execution
 boundary. Older research-only/read-only instructions are scope-limited unless
 the active task itself is research-only or read-only.
+
+Trading Console / Owner Console is an Owner operations surface, not merely a
+read-only dashboard or PG/read-model browser. Read-only endpoint/report labels
+must stay scoped to those artifacts and must not be generalized into a
+product-wide no-action policy.
 
 Default rule:
 

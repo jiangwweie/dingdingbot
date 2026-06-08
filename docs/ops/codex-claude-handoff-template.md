@@ -1,6 +1,6 @@
 # Codex-Claude Handoff Template
 
-Last updated: 2026-06-01
+Last updated: 2026-06-08
 
 ## Purpose
 
@@ -20,6 +20,7 @@ The user should not need to remember or recreate handoff wording. Codex should g
 Current execution boundary:
 
 - read `docs/ops/agent-current-brc-baseline.md`;
+- read `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`;
 - real live trading / real-funds order placement requires separate explicit
   Owner authorization;
 - testnet/dev/readiness/controlled rehearsal/profile-scoped cleanup work does
@@ -60,6 +61,7 @@ Use this when starting or resuming a task:
 ```markdown
 Read:
 - AGENTS.md
+- docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md
 - docs/ops/agent-current-brc-baseline.md
 - docs/ops/live-safe-v1-program.md
 - docs/ops/live-safe-v1-task-board.md
@@ -112,6 +114,8 @@ Why this worker task exists and how it fits the Codex-owned plan.
 - Current program: Live-safe v1
 - Codex owns architecture and merge readiness.
 - Claude owns only this bounded implementation/test task.
+- Current product model is Owner-facing bounded-live operations; Trading Console is not merely a read-only dashboard.
+- Read-only endpoint/report labels are artifact-scoped and do not globally prohibit scoped console/API/PG/deployment work.
 - Return/drawdown numbers are evaluation dimensions, not hard constraints.
 - Real live / real-funds order placement requires separate explicit Owner authorization.
 - Testnet/dev/readiness/profile-scoped cleanup does not require additional Owner authorization when the task card allows it.

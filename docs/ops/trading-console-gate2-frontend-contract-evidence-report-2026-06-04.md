@@ -2,6 +2,12 @@
 
 Date: 2026-06-04
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This is historical evidence for the Gate 2 read-model frontend contract. It
+> does not define the current Trading Console product as read-only. Current
+> product authority is `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+
 Scope: `/api/trading-console/*` read-model frontend-contract acceptance.
 
 Decision: Gate 2 can pass for read-only frontend documentation and AI Studio

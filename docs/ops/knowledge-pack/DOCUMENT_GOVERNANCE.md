@@ -2,8 +2,9 @@
 title: DOCUMENT_GOVERNANCE
 status: CURRENT_CANON
 authority: owner-correction + docs-governance-pass1
-last_verified: 2026-05-29
+last_verified: 2026-06-08
 source_of_truth:
+  - docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md
   - docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md
   - docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md
 ---
@@ -79,6 +80,11 @@ These distinctions must be maintained in all project documentation:
 | trial_candidate = strategy-ready | trial_candidate != strategy-ready |
 | account facts read = account_equity available | account facts != account_equity |
 | broad smoke score = deployment worthy | broad smoke score != deployment worthy |
+| read-model namespace = product boundary | read-model namespace != product boundary |
+| read-only report = read-only console product | read-only report != read-only console product |
+| warning = hard blocker | warning != hard blocker |
+| BudgetEnvelope = authorization | BudgetEnvelope != authorization unless explicitly approved |
+| deployment = live authorization | deployment != live authorization |
 
 ---
 
@@ -150,6 +156,32 @@ When updating project documentation:
 3. **Never describe untracked files as integrated capabilities.**
 4. **Never describe testnet verification as production readiness.**
 5. **Never describe metadata operations as runtime execution.**
-6. **Always cite evidence** (file path, commit hash, report path, or Owner statement).
-7. **Always date your updates.**
-8. **When in doubt, create a new document rather than editing an old one.**
+6. **Never generalize a read-only endpoint/report into a read-only product boundary.**
+7. **Never describe deployment or runtime-bound health as live trading authorization.**
+8. **Always cite evidence** (file path, commit hash, report path, or Owner statement).
+9. **Always date your updates.**
+10. **When in doubt, create a new document rather than editing an old one.**
+
+---
+
+## 9. Read-Only Scope Policy
+
+`read-only` must always be read with its local scope:
+
+- a read-only endpoint remains read-only;
+- a read-only smoke or report remains a no-action evidence artifact;
+- a read-only handoff remains a historical handoff for that gate.
+
+Those labels must not be expanded into:
+
+- the project is research-only;
+- Trading Console is only a dashboard;
+- Owner Console must not include action flows;
+- PG mutation is globally prohibited;
+- deployment is globally prohibited;
+- exchange access is globally prohibited.
+
+The current product model is defined by
+`CURRENT_PRODUCT_OPERATING_MODEL.md`: bounded live operations through exact
+Owner/BudgetEnvelope scope, `FinalGate`, Operation Layer, protection, and Review
+Ledger.

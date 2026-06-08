@@ -9,6 +9,11 @@ authorization wording is superseded by `docs/ops/agent-current-brc-baseline.md`
 and the 2026-06-01 amendment to ADR-0009. Use current tracked code, current
 verified reports, and the agent baseline for execution/testnet behavior.
 
+2026-06-08 product note: its "fast trial-and-review research system" wording is
+historical baseline context. Current product authority is
+`docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`: BRC productized
+bounded-live operations system, with Trading Console as Owner operations surface.
+
 ---
 
 ## 1. Owner 纠正

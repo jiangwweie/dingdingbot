@@ -1,5 +1,11 @@
 # Trading Console Owner Action Flow v1 Deploy Governance Report - 2026-06-07
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This deploy report verifies Owner Action Flow v1's disabled action state for
+> that release. It does not define the whole product as read-only. Current
+> product authority is `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+
 ## Verdict
 
 PASS_WITH_CONSTRAINT.

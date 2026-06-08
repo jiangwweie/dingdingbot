@@ -1,8 +1,9 @@
 > [!IMPORTANT]
 > This roadmap contains both historical labels and later Owner amendments.
+> For the current product model, read `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
 > For the current project baseline, read `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`.
-> Current active target (Owner 2026-05-29): "fast trial-and-review research system for small risk-capital Campaigns".
-> The 2026-05-29 Owner amendment is at line 540+ of this file.
+> Current active target (Owner 2026-06-08): BRC productized bounded-live operations system.
+> The 2026-05-29 Owner amendment remains historical baseline context; the 2026-06-08 amendment below supersedes read-only/research-only product interpretations.
 
 ---
 
@@ -587,6 +588,29 @@ does not define the current research priority.
 
 Live-safe Foundation is preserved as a runtime safety foundation. It no longer
 defines research priority. Runtime and research remain isolated.
+
+2026-06-08 Owner-facing amendment:
+
+The project has advanced from a research-only or read-only-console framing to
+an Owner-facing productized bounded-live operations system for fast
+small-capital trial-and-review Campaigns.
+
+The current product chain is:
+
+`StrategyFamily / Carrier -> ActionCandidate -> Owner risk understanding -> Owner/BudgetEnvelope authorization -> ActionSpec -> FinalGate -> Operation Layer -> official bounded live action -> protection -> Review Ledger -> promote / revise / park`
+
+Trading Console / Owner Console must be interpreted as the Owner's operating
+surface, not merely a read-only dashboard, PG/read-model browser, research
+dashboard, enum display, or documentation page. Read-only documents remain
+valid only for the specific namespace, report, or handoff they describe; they
+must not be generalized into a product-wide no-action policy.
+
+Execution hard gates are few and strict: exact authorization, `BudgetEnvelope`
+where applicable, fresh account/exposure facts, symbol/side/quantity/notional/
+leverage correctness, active-position conflict, open-order conflict, TP/SL or
+protection requirement, environment/runtime guard, Operation Layer path, and
+`FinalGate` pass. Strategy evidence weakness is usually a warning/risk
+disclosure item, not a hard blocker after Owner acknowledgement.
 
 The active tracks are:
 

@@ -1,5 +1,12 @@
 # BRC Owner Console v2 需求文档
 
+> [!IMPORTANT]
+> 2026-06-08 当前产品口径覆盖说明：
+> 本文档是早期 Owner Console v2 需求稿。当前权威产品模型见
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`。
+> Console 现在是 Owner bounded-live operations surface，不是单纯只读观察台；
+> 动作必须通过官方授权、FinalGate、Operation Layer、保护和 Review 路径。
+
 ## 1. 背景
 
 当前 Owner Console 已完成一轮功能性验证，但界面形态存在明显问题：

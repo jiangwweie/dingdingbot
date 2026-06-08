@@ -1,10 +1,16 @@
 # Trading Console Action Entry v1 Report - 2026-06-07
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This report records Action Entry v1's disabled/read-only action state at the
+> time of that task. It is not the current product ceiling. Current product
+> authority is `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+
 ## Verdict
 
 PASS_WITH_CONSTRAINT
 
-Trading Console now has a read-only Action Entry v1 path from Owner market
+Trading Console now has an Action Entry v1 read-model path from Owner market
 input to candidate selection, risk review, authorization draft path visibility,
 final-gate status, disabled action state, and post-action evidence summary.
 

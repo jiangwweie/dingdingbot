@@ -1,5 +1,11 @@
 # 交易控制台 Gate 2 前端合同验收清单 v0.1
 
+> [!IMPORTANT]
+> 2026-06-08 范围说明：
+> 本清单是 Gate 2 read-model / 前端只读接入验收材料，不是当前交易控制台产品边界。
+> 当前产品口径见 `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`：
+> Console 是 Owner bounded-live operations surface，不是单纯只读面板。
+
 ## 0. 目的
 
 本清单由前端窗口产出，交给主控窗口判断当前 `/api/trading-console/*` read model 是否已达到“前端文档可启动 / AI Studio 只读版工程可规划”的 Gate 2 标准。
@@ -564,7 +570,7 @@ Gate 2 通过后，前端窗口输出：
 
 AI Studio 工程范围：
 
-* 只读交易控制台
+* Gate 2 read-model 交易控制台
 * 首页 / 账户总览 / 订单台账 / 授权状态 / 执行控制状态 / 异常恢复 / 复盘 / 审计
 * Gate 3 操作组件预设
 * disabled / deferred 状态

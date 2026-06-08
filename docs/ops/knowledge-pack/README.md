@@ -1,6 +1,6 @@
 # Knowledge Pack Index
 
-Last updated: 2026-05-29
+Last updated: 2026-06-08
 Status: CURRENT_CANON index
 
 ---
@@ -11,12 +11,13 @@ These documents are the authoritative source for the project's current state:
 
 | # | Document | Purpose |
 |---|---|---|
-| 1 | [`PROJECT_BASELINE_CURRENT.md`](PROJECT_BASELINE_CURRENT.md) | Project definition, current stage, confirmed facts, blockers, prohibited actions |
-| 2 | [`CURRENT_FACT_REGISTRY.md`](CURRENT_FACT_REGISTRY.md) | Verified facts, not-integrated components, disabled capabilities, deprecated claims |
-| 3 | [`CURRENT_READINESS_BLOCKERS.md`](CURRENT_READINESS_BLOCKERS.md) | What blocks bounded live trial readiness |
-| 4 | [`DOCUMENT_GOVERNANCE.md`](DOCUMENT_GOVERNANCE.md) | How to read and trust project documents; authority rules; capability wording rules |
-| 5 | [`CURRENT_POSITION_REBUILD.md`](CURRENT_POSITION_REBUILD.md) | Detailed position analysis with evidence; Owner correction documented |
-| 6 | [`TRUTH_REBUILD_PASS1.md`](TRUTH_REBUILD_PASS1.md) | Which old knowledge-pack claims are stale and why |
+| 1 | [`CURRENT_PRODUCT_OPERATING_MODEL.md`](CURRENT_PRODUCT_OPERATING_MODEL.md) | Current product and execution model; Trading Console is Owner operations surface, not merely read-only dashboard |
+| 2 | [`PROJECT_BASELINE_CURRENT.md`](PROJECT_BASELINE_CURRENT.md) | Project definition, current stage, confirmed facts, blockers, prohibited actions |
+| 3 | [`CURRENT_FACT_REGISTRY.md`](CURRENT_FACT_REGISTRY.md) | Verified facts, not-integrated components, disabled capabilities, deprecated claims |
+| 4 | [`CURRENT_READINESS_BLOCKERS.md`](CURRENT_READINESS_BLOCKERS.md) | What blocks a new bounded live action or Owner operations flow |
+| 5 | [`DOCUMENT_GOVERNANCE.md`](DOCUMENT_GOVERNANCE.md) | How to read and trust project documents; authority rules; capability wording rules |
+| 6 | [`CURRENT_POSITION_REBUILD.md`](CURRENT_POSITION_REBUILD.md) | Historical detailed position analysis with evidence; Owner correction documented |
+| 7 | [`TRUTH_REBUILD_PASS1.md`](TRUTH_REBUILD_PASS1.md) | Which old knowledge-pack claims are stale and why |
 
 ## Governance and audit
 
@@ -38,14 +39,15 @@ See `docs/archive/2026-05-29-knowledge-pack-v0/README_DEPRECATED.md` for details
 
 ## Read order for new AI assistants
 
-1. `PROJECT_BASELINE_CURRENT.md` — project definition and current state
-2. `CURRENT_FACT_REGISTRY.md` — verified facts, blockers, prohibited actions
-3. `CURRENT_READINESS_BLOCKERS.md` — what blocks trial readiness
-4. `DOCUMENT_GOVERNANCE.md` — how to read and trust project documents
-5. `CURRENT_POSITION_REBUILD.md` — detailed position analysis
-6. `TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
-7. `DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
-8. `PASS1_5_AUDIT_REPORT.md` — Pass 1 audit verification
+1. `CURRENT_PRODUCT_OPERATING_MODEL.md` — current product and execution model
+2. `PROJECT_BASELINE_CURRENT.md` — project definition and current state
+3. `CURRENT_FACT_REGISTRY.md` — verified facts, blockers, prohibited actions
+4. `CURRENT_READINESS_BLOCKERS.md` — what blocks current bounded live action readiness
+5. `DOCUMENT_GOVERNANCE.md` — how to read and trust project documents
+6. `CURRENT_POSITION_REBUILD.md` — historical detailed position analysis
+7. `TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
+8. `DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
+9. `PASS1_5_AUDIT_REPORT.md` — Pass 1 audit verification
 
 Then for deeper context:
 

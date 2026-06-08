@@ -162,9 +162,11 @@ Mean Reversion remains proposal-only:
 - Live PG version drift observed in earlier readiness work remains outside this
   sprint unless separately migrated.
 
-## Next Recommended Task
+## Remaining Generic ActionSpec Gap
 
-Build `GenericActionSpec` plus a generic FinalGate adapter that consumes
-`ActionCandidateSpec` and produces an auditable official action-entry payload for
-Trading Console, while preserving Owner authorization, hard gates, TP/SL,
-PG/review/audit recording, and exchange evidence requirements.
+The remaining gap is a `GenericActionSpec` plus a generic FinalGate adapter
+that consumes `ActionCandidateSpec` and produces an auditable official
+action-entry payload for Trading Console, while preserving Owner authorization,
+hard gates, TP/SL, PG/review/audit recording, and exchange evidence
+requirements. This is gap context only; sequencing remains with the project
+controller.

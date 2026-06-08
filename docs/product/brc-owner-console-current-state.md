@@ -2,6 +2,14 @@
 
 Last validated: 2026-05-27
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This is a 2026-05-27 implementation-state snapshot. Its `live_execution`
+> forbidden/unavailable wording is superseded as a current product boundary by
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`. Current live
+> actions still require exact authorization, FinalGate, Operation Layer,
+> protection, and Review; this note remains historical implementation context.
+
 This document records the current BRC Owner Console operating surface after the
 Operation Layer, account facts read model, fixed testnet rehearsal
 operationization, emergency runtime stop, and emergency flatten dry-run slices.

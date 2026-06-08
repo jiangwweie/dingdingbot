@@ -205,7 +205,7 @@ These **must not be described as integrated capabilities**.
 
 | Old claim | Why superseded | Current truth |
 |---|---|---|
-| "BRC Reset / Opportunity Structure Discovery v0" | Owner 2026-05-29 explicit correction | "fast trial-and-review research system for small risk-capital Campaigns" |
+| "BRC Reset / Opportunity Structure Discovery v0" | Owner 2026-05-29 correction, then Owner 2026-06-08 product correction | "BRC productized bounded-live operations system" |
 | "27 Alembic migrations (001-027)" | Only 001-021 are git-tracked | 21 tracked + 6 untracked (not integrated) |
 | "Strategy Family Registry PG chain pending verification" | Untracked files, no tracked imports | Not integrated |
 | "Historical Research Sampling pending verification" | Same | Not integrated |

@@ -2,14 +2,21 @@
 
 Date: 2026-06-04
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This is a historical Gate 2 read-model handoff report. Its "read-only Trading
+> Console" wording applies to the Gate 2 frontend/read-model scope only and is
+> superseded as a product boundary by
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+
 Scope: Gate 2 frontend handoff for `/api/trading-console/*` read-model
 contracts.
 
 Decision: **PASS_WITH_CONSTRAINT**.
 
-Frontend documentation may start for the read-only Trading Console. The
+Frontend documentation may start for the Gate 2 read-model frontend. The
 constraints in this report must be carried into the product documentation, API
-integration documentation, UI/page specification, and AI Studio read-only
+integration documentation, UI/page specification, and AI Studio read-model
 frontend prompt package.
 
 ## Handoff Package
@@ -119,6 +126,6 @@ Results:
 
 Gate 2 result: **PASS_WITH_CONSTRAINT**.
 
-The frontend window may start formal read-only Trading Console documentation
+The frontend window may start formal Gate 2 read-model frontend documentation
 and AI Studio planning, provided it carries forward all constraints listed
 above.

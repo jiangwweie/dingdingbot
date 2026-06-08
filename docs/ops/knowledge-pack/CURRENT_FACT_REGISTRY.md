@@ -2,13 +2,16 @@
 title: CURRENT_FACT_REGISTRY
 status: CURRENT_CANON
 authority: current-position-rebuild + tracked-code-state
-last_verified: 2026-06-01
+last_verified: 2026-06-08
 supersedes:
   - docs/ops/knowledge-pack/FACT_REGISTRY.md
 source_of_truth:
+  - docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md
   - docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md
   - docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md
   - tracked code verification (git status, git log, code reads)
+  - docs/ops/trading-console-owner-action-flow-v1-deploy-governance-report-2026-06-07.md
+  - docs/ops/mr-eth-review-ledger-budgeted-autonomy-v0-design-2026-06-08.md
 ---
 
 # CURRENT_FACT_REGISTRY.md
@@ -22,8 +25,9 @@ Supersedes the old `FACT_REGISTRY.md` which contains known stale claims.
 
 | ID | Fact | Evidence | Confidence |
 |---|---|---|---|
-| CF-001 | Project target is "fast trial-and-review research system for small risk-capital Campaigns" | Owner 2026-05-29 amendment in `project-roadmap-v2.md` line 540+ | HIGH |
-| CF-022 | Current agent baseline is "BRC fast small-capital live trial system"; it is not research-only or signal-detection-only | Owner 2026-06-01 instruction governance baseline | HIGH |
+| CF-001 | The 2026-05-29 target was "fast trial-and-review research system for small risk-capital Campaigns"; this remains historical baseline context but is no longer the most complete product wording | Owner 2026-05-29 amendment in `project-roadmap-v2.md` line 540+ | HIGH |
+| CF-022 | Current agent baseline has advanced to "BRC productized bounded-live operations system"; it is not research-only, signal-detection-only, or read-only-console-only | Owner 2026-06-08 direction correction | HIGH |
+| CF-024 | Current product model is Owner-facing productized bounded-live operations; Trading Console is not merely a read-only dashboard or PG/read-model browser | Owner 2026-06-08 direction correction; `CURRENT_PRODUCT_OPERATING_MODEL.md` | HIGH |
 | CF-002 | BRC governance framework is implemented and testnet verified | Commit history + task board | HIGH |
 | CF-003 | Real live trading / real-funds order placement is prohibited unless Owner separately authorizes that live action | ADR-0009 as amended 2026-06-01 | HIGH |
 | CF-004 | Testnet/dev/readiness/controlled rehearsal work may proceed through scoped verification and hard safety gates without additional testnet authorization | Owner 2026-06-01 instruction governance baseline | HIGH |
@@ -45,6 +49,9 @@ Supersedes the old `FACT_REGISTRY.md` which contains known stale claims.
 | CF-018 | Withdrawal is Owner-external behavior, not a system capability | Task board + progress log | HIGH |
 | CF-019 | Operator authentication uses TOTP + password | `src/interfaces/operator_auth.py` | HIGH |
 | CF-020 | 13 ADRs (0001-0013) are tracked and stable | `docs/adr/` | HIGH |
+| CF-025 | Owner Action Flow v1 has been pushed/deployed to Tokyo with runtime-bound service health and `live_ready=false` | `trading-console-owner-action-flow-v1-deploy-governance-report-2026-06-07.md` | HIGH |
+| CF-026 | The MR/ETH Review Ledger note records protected-open bounded-live ETH evidence with TP and SL present, and records that Budgeted Autonomy v0 is design-only | `mr-eth-review-ledger-budgeted-autonomy-v0-design-2026-06-08.md` | HIGH |
+| CF-027 | Read-only Trading Console endpoint contracts are artifact-scoped; they do not make the whole product read-only | Owner 2026-06-08 direction correction; `CURRENT_PRODUCT_OPERATING_MODEL.md` | HIGH |
 
 ---
 
@@ -54,8 +61,9 @@ Supersedes the old `FACT_REGISTRY.md` which contains known stale claims.
 |---|---|---|---|
 | BLK-001 | ~~`account_equity` unavailable~~ | **RESOLVED when cached AccountSnapshot exists** — Owner Console maps cached `total_balance` / `available_balance` to account equity / available margin | `_cached_account_equity_snapshot()` and account equity readiness report |
 | BLK-002 | ~~3 trial candidates lack cost/baseline enrichment~~ | **RESOLVED** — enrichment completed 2026-05-30. No candidate passes: BNB needs data, SOL needs dedup/MAE filter, ETH parked | `cost_baseline_enrichment.md` |
-| BLK-003 | signal-to-intent conversion not implemented | Cannot convert evaluated signals to trade intents | Furthest state: `signal_evaluated_no_intent`; no auto conversion |
+| BLK-003 | uncontrolled signal-to-intent/order conversion not implemented | This blocks any generic signal-to-order path, but not scoped official action paths | No uncontrolled auto conversion; current product path must use ActionCandidate -> ActionSpec -> FinalGate -> Operation Layer |
 | BLK-004 | 022-027 migrations not integrated | Historical research tables unavailable if trial requires them | Untracked files, no tracked imports |
+| BLK-005 | active exposure or PG/exchange/protection uncertainty | New live entry is blocked if exposure, open orders, protection, or reconciliation facts are stale, conflicting, or unknown | Current product safety boundary |
 
 ---
 
@@ -86,7 +94,8 @@ Supersedes the old `FACT_REGISTRY.md` which contains known stale claims.
 | DC-003 | signal-to-intent | PARTIAL | `signal_evaluated_no_intent` is the furthest state; no automatic signal-to-intent conversion |
 | DC-004 | account_equity read | AVAILABLE WHEN CACHED | cached AccountSnapshot mapping exposes account_equity / wallet_equity / available_margin when present |
 | DC-005 | `trial_started` | NEVER SET | Only READ in service code (line 2807+), never SET to True |
-| DC-006 | Production deployment | NOT AVAILABLE | Local runtime only, no cloud/daemon |
+| DC-006 | Owner Console deployment | AVAILABLE WITH CONSTRAINT | Tokyo deployment exists and reports `runtime_bound=true`, `live_ready=false`; deployment is not generic live authorization |
+| DC-007 | Budgeted Autonomy v0 | DESIGN ONLY | Not direct trade permission; no auto-execution grant |
 
 ---
 
@@ -111,14 +120,16 @@ Supersedes the old `FACT_REGISTRY.md` which contains known stale claims.
 
 | Old claim (old ID) | Why deprecated | Current truth |
 |---|---|---|
-| "BRC Reset / Opportunity Structure Discovery v0" (F-001) | Owner 2026-05-29 explicit rejection | "fast trial-and-review research system for small risk-capital Campaigns" |
+| "BRC Reset / Opportunity Structure Discovery v0" (F-001) | Owner 2026-05-29 rejection, then Owner 2026-06-08 product correction | "BRC productized bounded-live operations system" |
+| "Trading Console is read-only product" | Owner 2026-06-08 explicit correction | Specific read-model endpoints may be read-only; product target is bounded-live Owner operations |
 | "27 Alembic migrations (001-027)" (F-011) | Only 001-021 are git-tracked | 21 tracked + 6 untracked (not integrated) |
 | "Strategy Family Registry PG chain 待确认" (UF-001) | Untracked files, no tracked imports | NOT INTEGRATED |
-| "exchange + PG dual path for account facts" (UF-002) | `account_service.py` only has exchange path; equity = not_available | account_equity unavailable |
+| "account_equity is unavailable" (older UF-002 reading) | cached AccountSnapshot mapping was added after that claim | account_equity / wallet_equity / available_margin are available when cached AccountSnapshot exists |
 | "Historical OHLCV import tool 待确认" (UF-003) | Untracked script, no evidence of execution | NOT INTEGRATED |
 | "Historical Research Sampling 待确认" (UF-005) | Untracked service, no tracked imports | NOT INTEGRATED |
 | "Historical Signal Evaluation 待确认" (UF-006) | Untracked service, no tracked imports | NOT INTEGRATED |
 | "21 visible untracked docs" (multiple) | Historical snapshot; current untracked count is 60+ files | See NI-001 through NI-011 |
+| "Production deployment is unavailable" | 2026-06-07 deploy governance reports | Tokyo Owner Console deployment exists with `runtime_bound=true`, `live_ready=false` |
 
 ---
 
@@ -129,8 +140,9 @@ Supersedes the old `FACT_REGISTRY.md` which contains known stale claims.
 | SB-001 | Real live trading | PROHIBITED unless Owner explicitly authorizes |
 | SB-002 | Testnet operations | Available for controlled scenarios through scoped verification and hard safety gates; no additional testnet authorization required by default |
 | SB-003 | LLM role | Advisory only; cannot write, trade, or confirm |
-| SB-004 | Execution gating | 4-level permission system; live without exchange_live facts caps at intent_recording |
+| SB-004 | Execution gating | Permission system gates action depth; live without exchange_live facts caps at intent_recording |
 | SB-005 | Research-runtime isolation | Research outputs cannot modify runtime profiles or trigger strategy promotion |
 | SB-006 | Tracked-only rule | Untracked files must never be described as integrated capabilities |
 | SB-007 | GKS | Fail-closed by design |
 | SB-008 | Default safety posture | `TRADING_ENV=simulation`, `EXCHANGE_TESTNET=true`, GKS fail-closed |
+| SB-009 | Product action path | Bounded live action must use exact Owner/BudgetEnvelope scope, FinalGate, Operation Layer, TP/SL protection, and Review Ledger |

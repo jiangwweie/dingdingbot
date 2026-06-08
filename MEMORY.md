@@ -1,8 +1,9 @@
 # 个人量化项目 - 记忆索引
 
 > [!IMPORTANT]
+> **Current product operating model**: `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 > **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
-> **Current positioning** (Owner 2026-05-29): BRC fast trial-and-review research system for small risk-capital Campaigns.
+> **Current positioning** (Owner 2026-06-08): BRC productized bounded-live operations system for fast small-capital trial-and-review Campaigns.
 > **Docs governance commit**: `3df699b` — establishes current canon and archives stale knowledge-pack v0.
 >
 > The memory entries below are from an earlier project phase (v3 migration / Phase 1-2, updated 2026-03-30).

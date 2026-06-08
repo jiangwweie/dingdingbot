@@ -3,6 +3,14 @@
 **Date:** 2026-06-03
 **Mode:** Read-only — no code changes, no migrations, no mutations
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This document is a historical read-only capability discovery snapshot. Its
+> old dashboard/action-hiding findings are superseded as product direction by
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+> Current Console direction is Owner-facing bounded-live operations through
+> official authorization, `FinalGate`, Operation Layer, protection, and Review.
+
 ---
 
 ## 1. Current Frontend Page Inventory
@@ -201,7 +209,7 @@
 | Existing APIs | `readiness()`, `accountFacts()`, `runtime/safety`, `runtime/overview`, `runtime/health` |
 | Missing APIs | None — current APIs cover dashboard needs |
 | Unavailable fields | Data freshness timestamp, stale-state timeout |
-| Actions to hide | All — dashboard should be read-only |
+| Actions to hide | Historical finding — superseded by current product model; actions require official backend wiring and safety gates |
 | Safety concerns | Account facts may be stale if exchange is unreachable |
 
 ### Account & Orders
@@ -241,7 +249,7 @@
 | Existing APIs | `Reconciliation` service (internal); `list_protection_health_blocks()` (internal) |
 | Missing APIs | **No frontend-facing recovery endpoints** — cancel stale orders, flatten position, retry protection, mark review required |
 | Unavailable fields | Recovery history, exception queue |
-| Actions to hide | All recovery actions — no safe endpoints |
+| Actions to hide | Historical finding — show unavailable actions unless official recovery endpoint and gates exist |
 | Safety concerns | **Critical gap** — if protection order fails, no UI path to recover |
 
 ### Review

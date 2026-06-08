@@ -1,11 +1,17 @@
 # Trading Console Owner Action Flow v1 Report - 2026-06-07
 
+> [!IMPORTANT]
+> 2026-06-08 scope note:
+> This report records Owner Action Flow v1's disabled/read-only state at the
+> time of that task. It is not the current product ceiling. Current product
+> authority is `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.
+
 ## Verdict
 
 PASS_WITH_CONSTRAINT.
 
-Trading Console Action Entry was advanced into a read-only Owner Action Flow
-surface. The flow now carries Owner market input, candidate selection, risk
+Trading Console Action Entry was advanced into an Owner Action Flow
+read-model surface. The flow now carries Owner market input, candidate selection, risk
 disclosure, authorization draft readiness, final-gate readiness, disabled action
 state, and post-action evidence summary in one Owner-facing read model.
 

@@ -1,5 +1,12 @@
 # BRC Owner Console v2 设计文档
 
+> [!IMPORTANT]
+> 2026-06-08 当前产品口径覆盖说明：
+> 本文档是早期 Owner Console v2 设计稿。当前权威产品模型见
+> `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`。
+> Console 现在是 Owner bounded-live operations surface；旧文中的只读观察措辞
+> 只能按当时页面/版本范围理解。
+
 ## 1. 设计目标
 
 Owner Console v2 的设计目标是把旧的“后端状态说明页”重构为：
