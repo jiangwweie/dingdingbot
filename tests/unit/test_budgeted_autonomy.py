@@ -96,6 +96,45 @@ def test_protected_open_position_is_budgeted_loop_outcome_and_blocks_new_candida
     assert evaluation.mutates_pg is False
 
 
+def test_pg_exchange_mismatch_blocks_with_cleanup_retry_condition():
+    evaluation = evaluate_budgeted_autonomy_loop(
+        authorization=_authorization(),
+        positions=[
+            BudgetedAutonomyPositionEvidence(
+                carrier_id="MR-001-live-readonly-v0",
+                symbol="ETH/USDT:USDT",
+                side="long",
+                quantity=Decimal("0.014"),
+                exchange_position_present=False,
+                exchange_verified_flat=True,
+                pg_position_count=1,
+                open_tp_count=1,
+                open_sl_count=1,
+                pg_open_order_count=2,
+                retry_allowed=False,
+                review_recorded=True,
+                audit_recorded=True,
+            )
+        ],
+        candidates=[_candidate()],
+        review_ledger={"lifecycle_status": "protected_open_from_pg_orders"},
+        now_ms=1780496665000,
+    )
+
+    assert evaluation.outcome == "blocked_with_retry_condition"
+    assert evaluation.active_loop is True
+    assert evaluation.selected_candidate is None
+    assert evaluation.blocked_candidates[0].blockers[0].id == (
+        "BUDGETED-AUTONOMY-PG-EXCHANGE-MISMATCH"
+    )
+    assert evaluation.retry_condition == (
+        "Run official reconciliation/review cleanup so PG position, orders, "
+        "review ledger, and exchange evidence agree."
+    )
+    assert evaluation.action_allowed is False
+    assert evaluation.places_order is False
+
+
 def test_flat_candidate_is_selected_only_for_official_final_gate_retry():
     evaluation = evaluate_budgeted_autonomy_loop(
         authorization=_authorization(),

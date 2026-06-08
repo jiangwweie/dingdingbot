@@ -299,6 +299,7 @@ async def action_entry_readiness(
 
 @router.get("/owner-action-flow", response_model=TradingConsoleReadModelResponse)
 async def owner_action_flow(
+    include_exchange: bool = Query(default=False),
     market_regime: Optional[str] = Query(default=None),
     symbol_preference: Optional[str] = Query(default=None),
     risk_tier: Optional[str] = Query(default=None),
@@ -321,7 +322,7 @@ async def owner_action_flow(
     protection_mode: Optional[str] = Query(default=None),
     review_requirement: Optional[str] = Query(default=None),
 ) -> TradingConsoleReadModelResponse:
-    return await _service(include_exchange=False).owner_action_flow(
+    return await _service(include_exchange=include_exchange).owner_action_flow(
         owner_scope={
             "family": family,
             "strategy_family_id": strategy_family_id,
@@ -348,6 +349,7 @@ async def owner_action_flow(
             "risk_tier": risk_tier,
             "note": note,
         },
+        include_exchange=include_exchange,
     )
 
 

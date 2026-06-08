@@ -569,8 +569,12 @@ class TradingConsoleReadModelService:
         *,
         owner_scope: Optional[dict[str, Any]] = None,
         market_input: Optional[dict[str, Any]] = None,
+        include_exchange: bool = False,
     ) -> TradingConsoleReadModelResponse:
-        snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        snap = await self.snapshot(
+            symbol=_action_entry_snapshot_symbol(owner_scope),
+            include_exchange=include_exchange,
+        )
         data, blockers = self._action_entry_readiness_data(
             snap=snap,
             owner_scope=owner_scope,
@@ -588,8 +592,12 @@ class TradingConsoleReadModelService:
         *,
         owner_scope: Optional[dict[str, Any]] = None,
         market_input: Optional[dict[str, Any]] = None,
+        include_exchange: bool = False,
     ) -> TradingConsoleReadModelResponse:
-        snap = await self.snapshot(symbol=DEFAULT_SYMBOL, include_exchange=False)
+        snap = await self.snapshot(
+            symbol=_action_entry_snapshot_symbol(owner_scope),
+            include_exchange=include_exchange,
+        )
         data, blockers = self._action_entry_readiness_data(
             snap=snap,
             owner_scope=owner_scope,
@@ -1727,6 +1735,12 @@ def _normalize_action_entry_market_input(value: Optional[dict[str, Any]]) -> dic
     }
 
 
+def _action_entry_snapshot_symbol(owner_scope: Optional[dict[str, Any]]) -> str:
+    if isinstance(owner_scope, dict) and owner_scope.get("symbol"):
+        return str(owner_scope["symbol"])
+    return DEFAULT_SYMBOL
+
+
 def _normalized_market_regime(value: Any) -> str:
     normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     aliases = {
@@ -2374,6 +2388,11 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         item for item in snap.pg_intents
         if str(item.get("status") or "").lower() == "completed"
     ]
+    exchange_state = _post_action_exchange_state(
+        snap=snap,
+        entry_orders=entry_orders,
+        protection_orders=protection_orders,
+    )
     return {
         "status": "available" if (snap.pg_intents or snap.pg_orders or snap.review_records or snap.audit_events) else "empty",
         "intent_count": len(snap.pg_intents),
@@ -2383,6 +2402,7 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         "review_count": len(snap.review_records),
         "audit_event_count": len(snap.audit_events),
         "retry_safety": "consumed_authorization_or_completed_intent_blocks_duplicate_execution",
+        "exchange_state": exchange_state,
         "review_ledger": _post_action_review_ledger(
             entry_orders=entry_orders,
             protection_orders=protection_orders,
@@ -2395,6 +2415,66 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
             "reviews": snap.review_records[:5],
             "audit_events": snap.audit_events[:5],
         },
+    }
+
+
+def _post_action_exchange_state(
+    *,
+    snap: TradingConsoleSnapshot,
+    entry_orders: list[dict[str, Any]],
+    protection_orders: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not snap.include_exchange:
+        return {
+            "status": "not_checked",
+            "included": False,
+            "exchange_position_count": 0,
+            "exchange_open_protection_count": 0,
+            "pg_entry_order_count": len(entry_orders),
+            "pg_open_protection_count": len(protection_orders),
+            "cleanup_required": False,
+        }
+    exchange_positions = [
+        item for item in snap.exchange.get("positions", [])
+        if item.get("symbol") in set(snap.symbols)
+    ]
+    exchange_protection_orders = [
+        item for item in snap.exchange.get("open_orders", [])
+        if item.get("symbol") in set(snap.symbols)
+        and (_truthy(item.get("reduce_only")) or item.get("source") == "exchange_stop")
+    ]
+    pg_open_protection = [
+        item for item in protection_orders
+        if str(item.get("status") or "").upper() in OPEN_ORDER_STATUSES
+    ]
+    cleanup_required = bool(
+        entry_orders
+        and pg_open_protection
+        and not exchange_positions
+        and not exchange_protection_orders
+    )
+    if cleanup_required:
+        status = "pg_open_exchange_flat_cleanup_needed"
+    elif exchange_positions and exchange_protection_orders:
+        status = "protected_open_on_exchange"
+    elif exchange_positions:
+        status = "exchange_position_unprotected_or_partially_protected"
+    else:
+        status = "exchange_flat"
+    return {
+        "status": status,
+        "included": True,
+        "exchange_position_count": len(exchange_positions),
+        "exchange_open_protection_count": len(exchange_protection_orders),
+        "pg_entry_order_count": len(entry_orders),
+        "pg_open_protection_count": len(pg_open_protection),
+        "cleanup_required": cleanup_required,
+        "exchange_error": snap.exchange.get("exchange_error"),
+        "retry_condition": (
+            "Run official reconciliation/review cleanup so PG and exchange evidence agree."
+            if cleanup_required
+            else None
+        ),
     }
 
 
@@ -2820,6 +2900,7 @@ def _budgeted_autonomy_loop_projection(
         protection_mode="single_tp_plus_sl",
     )
     review_ledger = dict(post_action.get("review_ledger") or {})
+    exchange_state = dict(post_action.get("exchange_state") or {})
     entry = dict(review_ledger.get("entry") or {})
     tp_sl = dict(review_ledger.get("tp_sl_result") or {})
     positions: list[BudgetedAutonomyPositionEvidence] = []
@@ -2837,7 +2918,12 @@ def _budgeted_autonomy_loop_projection(
                 side=_normalize_side(selected_spec.get("side")),
                 quantity=_decimal_from_any(entry.get("quantity")),
                 entry_price=_decimal_from_any(entry.get("average_price")),
-                exchange_position_present=False,
+                exchange_position_present=(
+                    int(exchange_state.get("exchange_position_count") or 0) > 0
+                ),
+                exchange_verified_flat=(
+                    exchange_state.get("status") == "pg_open_exchange_flat_cleanup_needed"
+                ),
                 pg_position_count=1,
                 open_tp_count=1 if open_protection_order_count > 0 else 0,
                 open_sl_count=1 if open_protection_order_count > 1 else 0,

@@ -62,6 +62,7 @@ class BudgetedAutonomyPositionEvidence(BudgetedAutonomyModel):
     unrealized_pnl: Decimal | None = None
     entry_price: Decimal | None = None
     exchange_position_present: bool = False
+    exchange_verified_flat: bool = False
     pg_position_count: int = Field(ge=0, default=0)
     open_tp_count: int = Field(ge=0, default=0)
     open_sl_count: int = Field(ge=0, default=0)
@@ -172,6 +173,48 @@ def evaluate_budgeted_autonomy_loop(
     blocked_candidates: list[BudgetedAutonomyCandidateDecision] = []
 
     if active_count:
+        mismatched_positions = [
+            item for item in active_positions
+            if item.exchange_verified_flat and item.pg_position_count > 0
+        ]
+        if mismatched_positions:
+            mismatch_blocker = _blocker(
+                blocker_id="BUDGETED-AUTONOMY-PG-EXCHANGE-MISMATCH",
+                stage="BudgetedAutonomy",
+                path="BudgetEnvelope -> PGPosition -> ExchangeEvidence",
+                evidence=(
+                    "PG still records active position/protection, but exchange "
+                    "read-only evidence shows no active position and no open protection."
+                ),
+                severity="hard_blocker",
+                bridge="Keep all new actions disabled while reconciliation/review cleanup is pending.",
+                retry_condition=(
+                    "Run official reconciliation/review cleanup so PG position, orders, "
+                    "review ledger, and exchange evidence agree."
+                ),
+            )
+            for candidate in candidates:
+                blocked_candidates.append(
+                    _candidate_decision(
+                        authorization,
+                        candidate,
+                        blockers=[mismatch_blocker],
+                        extra_warnings=["pg_exchange_cleanup_needed_blocks_new_action"],
+                    )
+                )
+            return BudgetedAutonomyLoopEvaluation(
+                outcome="blocked_with_retry_condition",
+                active_loop=True,
+                active_position_count=active_count,
+                budget_authorization_id=authorization.budget_authorization_id,
+                blocked_candidates=blocked_candidates,
+                active_positions=active_positions,
+                budget_envelope_summary=_budget_summary(authorization),
+                review_ledger=ledger,
+                warnings=["pg_exchange_cleanup_needed"],
+                hard_blockers=[*base_blockers, mismatch_blocker],
+                retry_condition=mismatch_blocker.retry_condition,
+            )
         candidate_blocker = _blocker(
             blocker_id="BUDGETED-AUTONOMY-ACTIVE-POSITION",
             stage="BudgetedAutonomy",
