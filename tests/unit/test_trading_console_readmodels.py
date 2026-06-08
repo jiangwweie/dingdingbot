@@ -2723,6 +2723,14 @@ def test_owner_action_flow_computes_mr_eth_quantity_from_target_notional(monkeyp
     assert proposal["validation_result"]["protection_notional_valid"] is True
     assert "computed_notional_exceeds_owner_max_notional" not in proposal["hard_blockers"]
     assert "computed_protection_notional_below_min_notional" not in proposal["hard_blockers"]
+    capital = payload["data"]["owner_action_flow"]["capital_selection"]
+    assert capital["status"] == "ready_for_review"
+    assert capital["computed_quantity"] == "0.014"
+    assert capital["estimated_notional_usdt"] == "23.54296"
+    assert capital["market_rule_snapshot"]["qty_step"] == "0.001"
+    assert capital["validation_result"]["entry_notional_valid"] is True
+    assert capital["silent_quantity_repair_allowed"] is False
+    assert capital["places_order"] is False
     assert proposal["backend_actionable"] is False
     assert proposal["frontend_action_enabled"] is False
     assert proposal["places_order"] is False
@@ -2796,10 +2804,22 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     flow = data["owner_action_flow"]
     assert flow["next_attempt_gate"]["status"] == "blocked"
     assert flow["next_attempt_gate"]["gate"] == "current_lifecycle_open_protected"
+    assert flow["next_attempt_gate"]["lifecycle_classification"] == "still_open_protected"
+    assert flow["next_attempt_gate"]["disabled_reason"].startswith("Current lifecycle is still open")
+    assert flow["next_attempt_gate"]["required_next_step"] == (
+        "wait_for_current_tp_or_sl_then_reconcile_and_review"
+    )
+    assert flow["next_attempt_gate"]["blocking_scope"]["current_lifecycle_blocks_new_entry"] is True
     assert flow["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is False
     assert flow["next_attempt_gate"]["frontend_action_enabled"] is False
+    assert flow["disabled_reason"] == flow["next_attempt_gate"]["disabled_reason"]
     assert flow["status"] == "not_actionable"
     assert flow["unsafe_action_enabled"] is False
+    lifecycle_monitoring = flow["lifecycle_monitoring"]
+    assert lifecycle_monitoring["status"] == "still_open_protected"
+    assert lifecycle_monitoring["next_attempt_gate"] == "current_lifecycle_open_protected"
+    assert lifecycle_monitoring["review_status"] == "pending_open"
+    assert lifecycle_monitoring["action_allowed"] is False
     assert flow["budget_summary"]["status"] == "degraded_missing_account_facts"
     assert flow["budget_summary"]["account_capacity_status"] == "degraded"
     assert flow["budget_summary"]["owner_selection_status"] == "within_recommendation"
@@ -2832,6 +2852,17 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert proposal["review_template"]["template_id"] == (
         "review-template:MR-001-live-readonly-v0"
     )
+    capital = flow["capital_selection"]
+    assert capital["selected_symbol"] == "ETH/USDT:USDT"
+    assert capital["selected_max_notional"] == "20"
+    assert capital["silent_quantity_repair_allowed"] is False
+    assert capital["action_allowed"] is False
+    assert proposal["capital_selection"]["action_allowed"] is False
+    protection_review = flow["protection_review_readiness"]
+    assert protection_review["review_status"] == "pending_open"
+    assert protection_review["current_tp_sl_status"] == "protected_open"
+    assert protection_review["frontend_action_enabled"] is False
+    assert proposal["protection_review_readiness"]["places_order"] is False
     assert proposal["backend_actionable"] is False
     assert proposal["frontend_action_enabled"] is False
     assert proposal["places_order"] is False

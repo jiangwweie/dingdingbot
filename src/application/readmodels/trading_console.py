@@ -3185,11 +3185,15 @@ def _post_action_next_attempt_gate(
             and (not snap.include_exchange or exchange_open_protection_count)
         ):
             lifecycle_gate = "current_lifecycle_open_protected"
+            lifecycle_classification = "still_open_protected"
             warnings.append("current_position_or_protection_open_no_next_attempt")
             retry_condition = "Wait for the current scoped lifecycle to close, then reconcile PG/exchange and complete review."
+            disabled_reason = "Current lifecycle is still open and protected; next bounded-live attempt is blocked until close and review."
         else:
             lifecycle_gate = "position_order_conflict_requires_recovery"
+            lifecycle_classification = "inconsistent_requires_recovery"
             retry_condition = "Resolve active position/open order/protection conflict through official recovery before any new attempt."
+            disabled_reason = "Position/order/protection facts are inconsistent; recovery is required before any new attempt."
             blockers.append(
                 {
                     "id": "NEXT-ATTEMPT-POSITION-ORDER-CONFLICT",
@@ -3212,12 +3216,22 @@ def _post_action_next_attempt_gate(
         "not_started_or_unknown",
     }:
         lifecycle_gate = "clear_for_next_preflight"
+        lifecycle_classification = (
+            "external_flat"
+            if lifecycle_status == "closed_external_exchange_flat_unresolved"
+            else "closed_reviewed"
+            if lifecycle_status == "closed_from_pg_exit_order"
+            else "no_current_lifecycle"
+        )
         retry_condition = "Create fresh Owner/Budget authorization and rerun official FinalGate for exactly one scoped attempt."
+        disabled_reason = None
         if lifecycle_status == "closed_external_exchange_flat_unresolved":
             warnings.append("prior_external_flat_cleanup_reviewed")
     else:
         lifecycle_gate = "review_state_incomplete"
+        lifecycle_classification = "review_required"
         retry_condition = "Complete or classify post-action Review Ledger before next bounded-live attempt."
+        disabled_reason = "Review Ledger is incomplete; complete or classify review before next bounded-live attempt."
         blockers.append(
             {
                 "id": "NEXT-ATTEMPT-REVIEW-STATE-INCOMPLETE",
@@ -3233,6 +3247,11 @@ def _post_action_next_attempt_gate(
     return {
         "gate": lifecycle_gate,
         "status": "blocked" if blocked else "clear_for_preflight",
+        "disabled_reason": disabled_reason if blocked else None,
+        "backend_owned_state": True,
+        "frontend_must_not_infer": True,
+        "lifecycle_classification": lifecycle_classification,
+        "current_lifecycle_status": lifecycle_status,
         "next_attempt_allowed_by_lifecycle": not blocked,
         "action_allowed": False,
         "may_execute_live": False,
@@ -3246,6 +3265,24 @@ def _post_action_next_attempt_gate(
         "warnings": warnings,
         "blockers": blockers,
         "retry_condition": retry_condition,
+        "required_next_step": (
+            "wait_for_current_tp_or_sl_then_reconcile_and_review"
+            if lifecycle_gate == "current_lifecycle_open_protected"
+            else "official_recovery_required"
+            if lifecycle_gate == "position_order_conflict_requires_recovery"
+            else "complete_review_ledger"
+            if lifecycle_gate == "review_state_incomplete"
+            else "owner_decision_and_final_gate"
+        ),
+        "blocking_scope": {
+            "single_position_policy": True,
+            "current_lifecycle_blocks_new_entry": lifecycle_gate == "current_lifecycle_open_protected",
+            "allows_new_entry": False,
+            "allows_cancel_active_protection": False,
+            "allowed_exchange_write": (
+                "residual_sibling_protection_cancel_only_after_exchange_flat"
+            ),
+        },
     }
 
 
@@ -3352,6 +3389,17 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         selected_spec=selected_spec,
         generic_specs=generic_specs,
         post_action=post_action,
+    )
+    lifecycle_monitoring = _owner_action_lifecycle_monitoring(post_action)
+    capital_selection = _owner_action_capital_selection(
+        envelope=envelope,
+        owner_budget_selection=owner_budget_selection,
+        selected_spec=selected_spec,
+    )
+    protection_review = _owner_action_protection_review_readiness(
+        selected_spec=selected_spec,
+        post_action=post_action,
+        risk_review=risk_review,
     )
     steps = [
         {
@@ -3461,6 +3509,15 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         "budgeted_autonomy_loop": budgeted_autonomy_loop,
         "budgeted_autonomy_v01": budgeted_autonomy_v01,
         "next_attempt_gate": next_attempt_gate,
+        "lifecycle_monitoring": lifecycle_monitoring,
+        "capital_selection": capital_selection,
+        "protection_review_readiness": protection_review,
+        "disabled_reason": (
+            next_attempt_gate.get("disabled_reason")
+            or action_state.get("disabled_reason")
+            or final_gate.get("status")
+            or "Action is disabled by backend state."
+        ),
         "budget_summary": {
             "status": budget_status,
             "owner_selection_status": owner_budget_selection.get("status"),
@@ -3533,6 +3590,8 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
                 for item in budget.get("blockers") or []
                 if isinstance(item, dict) and item.get("retry_condition")
             ],
+            "capital_selection": capital_selection,
+            "protection_review_readiness": protection_review,
             "backend_actionable": action_state.get("backend_actionable") is True,
             "frontend_action_enabled": action_state.get("frontend_action_enabled") is True,
             "places_order": False,
@@ -3579,6 +3638,132 @@ def _apply_owner_approved_budget_window(
         "mutates_pg": False,
     }
     return result
+
+
+def _owner_action_lifecycle_monitoring(post_action: dict[str, Any]) -> dict[str, Any]:
+    gate = dict(post_action.get("next_attempt_gate") or {})
+    ledger = dict(post_action.get("review_ledger") or {})
+    review_decision = dict(ledger.get("review_decision") or {})
+    exchange_state = dict(post_action.get("exchange_state") or {})
+    return {
+        "status": gate.get("lifecycle_classification") or "unknown_fail_closed",
+        "backend_owned_state": True,
+        "current_lifecycle_authorization_ids": list(
+            post_action.get("current_lifecycle_authorization_ids") or []
+        ),
+        "current_lifecycle_signal_ids": list(post_action.get("current_lifecycle_signal_ids") or []),
+        "pg_active_position_count": gate.get("pg_active_position_count"),
+        "pg_open_order_count": gate.get("pg_open_order_count"),
+        "exchange_position_count": gate.get("exchange_position_count"),
+        "exchange_open_protection_count": gate.get("exchange_open_protection_count"),
+        "exchange_state": exchange_state.get("status"),
+        "review_status": review_decision.get("review_status") or review_decision.get("status"),
+        "review_id": review_decision.get("review_id"),
+        "next_attempt_status": gate.get("status"),
+        "next_attempt_gate": gate.get("gate"),
+        "disabled_reason": gate.get("disabled_reason"),
+        "retry_condition": gate.get("retry_condition"),
+        "action_allowed": False,
+        "frontend_action_enabled": False,
+        "places_order": False,
+    }
+
+
+def _owner_action_capital_selection(
+    *,
+    envelope: dict[str, Any],
+    owner_budget_selection: dict[str, Any],
+    selected_spec: dict[str, Any],
+) -> dict[str, Any]:
+    validation = dict(selected_spec.get("validation_result") or {})
+    hard_blockers = list(selected_spec.get("hard_blockers") or [])
+    capital_blockers = [
+        item for item in hard_blockers
+        if any(
+            token in str(item)
+            for token in [
+                "notional",
+                "quantity",
+                "qty",
+                "leverage",
+                "max_attempts",
+                "market_rule",
+                "protection_notional",
+            ]
+        )
+    ]
+    warnings = list(selected_spec.get("warnings") or [])
+    has_quantity = selected_spec.get("quantity") not in (None, "")
+    has_max_notional = selected_spec.get("max_notional") not in (None, "")
+    has_leverage = selected_spec.get("leverage") not in (None, "")
+    validation_failed = bool(capital_blockers) or validation.get("status") == "invalid"
+    return {
+        "status": (
+            "blocked"
+            if validation_failed
+            else "ready_for_review"
+            if has_quantity and has_max_notional and has_leverage
+            else "incomplete"
+        ),
+        "owner_selection_status": owner_budget_selection.get("status"),
+        "selected_symbol": selected_spec.get("symbol"),
+        "selected_side": selected_spec.get("side"),
+        "selected_quantity": selected_spec.get("quantity"),
+        "target_notional_usdt": selected_spec.get("target_notional_usdt"),
+        "computed_quantity": selected_spec.get("computed_quantity"),
+        "estimated_notional_usdt": selected_spec.get("estimated_notional_usdt"),
+        "selected_max_notional": selected_spec.get("max_notional"),
+        "selected_leverage": selected_spec.get("leverage"),
+        "budget_max_notional_per_action": envelope.get("max_notional_per_action"),
+        "budget_max_leverage": envelope.get("max_leverage"),
+        "market_rule_snapshot": selected_spec.get("market_rule_snapshot") or {},
+        "validation_result": validation,
+        "warnings": warnings,
+        "hard_blockers": capital_blockers,
+        "non_capital_hard_blockers": [
+            item for item in hard_blockers if item not in capital_blockers
+        ],
+        "owner_disclosure_required": True,
+        "silent_quantity_repair_allowed": False,
+        "action_allowed": False,
+        "frontend_action_enabled": False,
+        "places_order": False,
+    }
+
+
+def _owner_action_protection_review_readiness(
+    *,
+    selected_spec: dict[str, Any],
+    post_action: dict[str, Any],
+    risk_review: dict[str, Any],
+) -> dict[str, Any]:
+    protection_template = dict(selected_spec.get("protection_template") or {})
+    review_template = dict(selected_spec.get("review_template") or {})
+    ledger = dict(post_action.get("review_ledger") or {})
+    tp_sl = dict(ledger.get("tp_sl_result") or {})
+    review_decision = dict(ledger.get("review_decision") or {})
+    protection_ready = bool(protection_template) and selected_spec.get("protection_mode") == "single_tp_plus_sl"
+    review_ready = bool(review_template) and review_decision.get("status") in {
+        "pending_open_recorded",
+        "pending",
+        "revise",
+    }
+    return {
+        "status": "ready_for_review" if protection_ready and review_ready else "incomplete",
+        "protection_template": protection_template,
+        "review_template": review_template,
+        "current_tp_sl_status": tp_sl.get("status"),
+        "current_open_protection_order_count": tp_sl.get("open_protection_order_count"),
+        "review_status": review_decision.get("review_status") or review_decision.get("status"),
+        "review_id": review_decision.get("review_id"),
+        "owner_risk_acceptance_status": risk_review.get("owner_risk_acceptance_status"),
+        "owner_risk_acceptance_recorded": risk_review.get("owner_risk_acceptance_recorded") is True,
+        "warning_count": risk_review.get("warning_count", 0),
+        "hard_blocker_count": risk_review.get("hard_blocker_count", 0),
+        "action_allowed": False,
+        "frontend_action_enabled": False,
+        "places_order": False,
+    }
 
 
 def _owner_action_candidate_choices(
