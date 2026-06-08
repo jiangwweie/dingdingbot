@@ -176,11 +176,17 @@ class _FakeActivePositionRepo:
 
 
 class _FakeIntentRepo:
+    def __init__(self, intents=None):
+        self.intents = [] if intents is None else list(intents)
+
     async def list(self):
-        return []
+        return self.intents
 
     async def list_unfinished(self):
-        return []
+        return [
+            item for item in self.intents
+            if str(getattr(item, "status", "")).lower() not in {"completed", "failed", "canceled"}
+        ]
 
 
 class _FakeRecoveryRepo:
@@ -320,6 +326,7 @@ def _patch_deps(
     position_repo=None,
     order_repo=None,
     account_snapshot=None,
+    intent_repo=None,
 ):
     from src.interfaces import api as api_module
 
@@ -340,7 +347,7 @@ def _patch_deps(
         ),
     )
     monkeypatch.setattr(api_module, "_position_repo", position_repo or _FakePositionRepo())
-    monkeypatch.setattr(api_module, "_execution_intent_repo", _FakeIntentRepo())
+    monkeypatch.setattr(api_module, "_execution_intent_repo", intent_repo or _FakeIntentRepo())
     monkeypatch.setattr(api_module, "_execution_recovery_repo", _FakeRecoveryRepo())
     monkeypatch.setattr(api_module, "_audit_logger", _FakeAuditLogger())
     monkeypatch.setattr(api_module, "_signal_repo", _FakeSignalRepo())
@@ -1880,6 +1887,139 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert exchange.position_calls == []
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(normal_orders=[], stop_orders=[])
+    closed_orders = [
+        _FakeOrder(
+            "entry-closed",
+            "ENTRY",
+            "entry-exchange-1",
+            parent_order_id=None,
+            status="FILLED",
+            symbol="SOL/USDT:USDT",
+        ),
+        _FakeOrder(
+            "tp-closed",
+            "TP1",
+            "tp-exchange-1",
+            status="FILLED",
+            symbol="SOL/USDT:USDT",
+        ),
+        _FakeOrder(
+            "sl-closed",
+            "SL",
+            "sl-exchange-1",
+            status="CANCELED",
+            symbol="SOL/USDT:USDT",
+        ),
+    ]
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        order_repo=_FakeOrderRepo(closed_orders),
+        account_snapshot=_FakeAccountSnapshot(),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "include_exchange": "true",
+                "market_regime": "trend",
+                "family": "Trend",
+                "strategy_family_id": "TF-001-live-readonly-v0",
+                "carrier_id": "TF-001-live-readonly-v0",
+                "symbol": "SOL/USDT:USDT",
+                "side": "long",
+                "quantity": "0.1",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    flow = response.json()["data"]["owner_action_flow"]
+    assert flow["budget_summary"]["status"] == "available"
+    assert flow["budget_summary"]["account_capacity_status"] == "available"
+    assert flow["budget_summary"]["max_usable_notional"] == "150"
+    assert "open orders reduce recommended usable budget" not in flow["budget_summary"]["warnings"]
+    assert flow["budgeted_autonomy_v01"]["policy"]["daily_attempts"]["used"] == 0
+    assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
+    assert flow["budgeted_autonomy_v01"]["places_order"] is False
+
+
+def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(normal_orders=[], stop_orders=[])
+    prior_day_ms = int(time.time() * 1000) - 2 * 24 * 60 * 60 * 1000
+    intent_repo = _FakeIntentRepo(
+        [
+            SimpleNamespace(
+                id="intent-prior-day",
+                signal_id="signal-prior-day",
+                symbol="SOL/USDT:USDT",
+                status="completed",
+                order_id="entry-prior-day",
+                authorization_id="auth-prior-day",
+                exchange_order_id="exchange-prior-day",
+                blocked_reason=None,
+                blocked_message=None,
+                failed_reason=None,
+                created_at=prior_day_ms,
+                updated_at=prior_day_ms,
+            )
+        ]
+    )
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        order_repo=_FakeOrderRepo([]),
+        intent_repo=intent_repo,
+        account_snapshot=_FakeAccountSnapshot(),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "include_exchange": "true",
+                "market_regime": "trend",
+                "family": "Trend",
+                "strategy_family_id": "TF-001-live-readonly-v0",
+                "carrier_id": "TF-001-live-readonly-v0",
+                "symbol": "SOL/USDT:USDT",
+                "side": "long",
+                "quantity": "0.1",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    v01 = response.json()["data"]["owner_action_flow"]["budgeted_autonomy_v01"]
+    assert v01["policy"]["daily_attempts"]["used"] == 0
+    assert v01["policy"]["daily_attempts"]["remaining"] == 1
+    assert v01["policy"]["daily_attempts"]["source"] == (
+        "trading_console_selected_symbol_pg_intents_current_utc_day"
+    )
+    assert "BUDGETED-AUTONOMY-V01-DAILY-ATTEMPTS-EXHAUSTED" not in {
+        item["id"] for item in v01["hard_blockers"]
+    }
+    assert v01["frontend_action_enabled"] is False
+    assert v01["places_order"] is False
 
 
 def test_owner_action_flow_computes_mr_eth_quantity_from_target_notional(monkeypatch):

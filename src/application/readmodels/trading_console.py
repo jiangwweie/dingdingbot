@@ -762,13 +762,51 @@ class TradingConsoleReadModelService:
         budget = build_budget_recommendation(
             account_summary=snap.account_snapshot_summary,
             positions=self._merge_positions_for_risk(snap),
-            open_orders=self._classify_orders(snap),
-            freshness=self._freshness(snap),
+            open_orders=self._open_orders_for_budget(snap),
+            freshness=self._budget_freshness(snap),
             risk_tier=risk_tier,
             custom=custom,
             owner_selection=owner_selection,
         )
         return budget.model_dump(mode="json")
+
+    def _open_orders_for_budget(self, snap: TradingConsoleSnapshot) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in self._classify_orders(snap)
+            if str(item.get("status")) in OPEN_ORDER_STATUSES
+        ]
+
+    def _budget_freshness(self, snap: TradingConsoleSnapshot) -> dict[str, Any]:
+        exchange = snap.exchange
+        status = "fresh"
+        budget_sources = {"orders", "open_orders", "positions", "account_snapshot", "exchange"}
+        budget_unavailable = [
+            item
+            for item in snap.unavailable
+            if str(item.get("source") or "") in budget_sources
+        ]
+        if budget_unavailable or exchange.get("exchange_error"):
+            status = "degraded"
+        if snap.warnings:
+            status = "warning" if status == "fresh" else "degraded"
+        if not snap.include_exchange:
+            status = "not_live_connected"
+        return {
+            "last_updated_at": _iso_ms(snap.generated_at_ms),
+            "exchange_snapshot_at": (
+                _iso_ms(exchange.get("exchange_snapshot_at"))
+                if exchange.get("exchange_snapshot_at")
+                else None
+            ),
+            "freshness_status": status,
+            "exchange_error": exchange.get("exchange_error"),
+            "ignored_unavailable_sources": [
+                item.get("source")
+                for item in snap.unavailable
+                if str(item.get("source") or "") not in budget_sources
+            ],
+        }
 
     async def signal_marker_feed(
         self,
@@ -2392,6 +2430,7 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         item for item in snap.pg_intents
         if str(item.get("status") or "").lower() == "completed"
     ]
+    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     exchange_state = _post_action_exchange_state(
         snap=snap,
         entry_orders=entry_orders,
@@ -2401,6 +2440,11 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         "status": "available" if (snap.pg_intents or snap.pg_orders or snap.review_records or snap.audit_events) else "empty",
         "intent_count": len(snap.pg_intents),
         "completed_intent_count": len(completed_intents),
+        "completed_intents_today_by_symbol": _completed_intent_counts_by_symbol_today(
+            intents=snap.pg_intents,
+            day_key=day_key,
+        ),
+        "daily_attempt_day_key": day_key,
         "entry_order_count": len(entry_orders),
         "protection_order_count": len(protection_orders),
         "review_count": len(snap.review_records),
@@ -3067,13 +3111,19 @@ def _budgeted_autonomy_v01_projection(
                 audit_recorded=bool(post_action.get("audit_event_count")),
             )
         )
+    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    daily_attempts_used = _completed_intents_for_scope_today(
+        post_action=post_action,
+        symbol=selected_spec.get("symbol"),
+        day_key=day_key,
+    )
     daily_state = BudgetedAutonomyDailyState(
-        day_key=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        attempts_used=int(post_action.get("completed_intent_count") or 0),
+        day_key=day_key,
+        attempts_used=daily_attempts_used,
         attempts_allowed=max_attempts,
         budget_used_notional=Decimal("0"),
         realized_loss=Decimal("0"),
-        source="trading_console_current_scope_pg_intents",
+        source="trading_console_selected_symbol_pg_intents_current_utc_day",
     )
     candidates = [
         _budgeted_autonomy_candidate_from_spec(item)
@@ -3088,6 +3138,63 @@ def _budgeted_autonomy_v01_projection(
         review_ledger=review_ledger,
     )
     return evaluation.model_dump(mode="json")
+
+
+def _completed_intents_for_scope_today(
+    *,
+    post_action: dict[str, Any],
+    symbol: Any,
+    day_key: str,
+) -> int:
+    selected_symbol = str(symbol or "")
+    counts = dict(post_action.get("completed_intents_today_by_symbol") or {})
+    if selected_symbol:
+        parsed_count = _optional_int_value(counts.get(selected_symbol))
+        if parsed_count is not None:
+            return parsed_count
+    elif counts:
+        return sum(_optional_int_value(item) or 0 for item in counts.values())
+    day_start_ms = _day_start_ms(day_key)
+    summary = dict(post_action.get("summary") or {})
+    intents = [
+        dict(item)
+        for item in summary.get("intents") or []
+        if isinstance(item, dict)
+    ]
+    count = 0
+    for item in intents:
+        if str(item.get("status") or "").lower() != "completed":
+            continue
+        if selected_symbol and str(item.get("symbol") or "") != selected_symbol:
+            continue
+        created_at = _optional_int_value(item.get("created_at"))
+        if created_at is None or created_at < day_start_ms:
+            continue
+        count += 1
+    return count
+
+
+def _completed_intent_counts_by_symbol_today(
+    *,
+    intents: list[dict[str, Any]],
+    day_key: str,
+) -> dict[str, int]:
+    day_start_ms = _day_start_ms(day_key)
+    counts: dict[str, int] = {}
+    for item in intents:
+        if str(item.get("status") or "").lower() != "completed":
+            continue
+        created_at = _optional_int_value(item.get("created_at"))
+        if created_at is None or created_at < day_start_ms:
+            continue
+        symbol = str(item.get("symbol") or "unknown")
+        counts[symbol] = counts.get(symbol, 0) + 1
+    return counts
+
+
+def _day_start_ms(day_key: str) -> int:
+    parsed = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
 
 
 def _budgeted_autonomy_candidate_from_spec(spec: dict[str, Any]) -> BudgetedAutonomyCandidateInput:
