@@ -2377,6 +2377,11 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         "review_count": len(snap.review_records),
         "audit_event_count": len(snap.audit_events),
         "retry_safety": "consumed_authorization_or_completed_intent_blocks_duplicate_execution",
+        "review_ledger": _post_action_review_ledger(
+            entry_orders=entry_orders,
+            protection_orders=protection_orders,
+            reviews=snap.review_records,
+        ),
         "summary": {
             "intents": snap.pg_intents[:5],
             "entry_orders": entry_orders[:5],
@@ -2384,6 +2389,114 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
             "reviews": snap.review_records[:5],
             "audit_events": snap.audit_events[:5],
         },
+    }
+
+
+def _post_action_review_ledger(
+    *,
+    entry_orders: list[dict[str, Any]],
+    protection_orders: list[dict[str, Any]],
+    reviews: list[dict[str, Any]],
+) -> dict[str, Any]:
+    entry_order = entry_orders[0] if entry_orders else None
+    exit_orders = [
+        item for item in protection_orders
+        if str(item.get("status") or "").upper() in {"FILLED", "CLOSED"}
+    ]
+    open_protection_orders = [
+        item for item in protection_orders
+        if str(item.get("status") or "").upper() in {"OPEN", "SUBMITTED", "NEW"}
+    ]
+    entry_filled = str((entry_order or {}).get("status") or "").upper() in {"FILLED", "CLOSED"}
+    if exit_orders:
+        lifecycle_status = "closed_from_pg_exit_order"
+        tp_sl_status = "tp_or_sl_filled"
+    elif entry_filled and open_protection_orders:
+        lifecycle_status = "protected_open_from_pg_orders"
+        tp_sl_status = "protected_open"
+    elif entry_filled:
+        lifecycle_status = "entry_filled_protection_state_incomplete"
+        tp_sl_status = "protection_state_incomplete"
+    else:
+        lifecycle_status = "not_started_or_unknown"
+        tp_sl_status = "not_available"
+    return {
+        "ledger_version": "owner_bounded_review_ledger_v0",
+        "lifecycle_status": lifecycle_status,
+        "entry": _post_action_order_ledger_entry(entry_order),
+        "exit": _post_action_exit_ledger_entry(exit_orders),
+        "realized_pnl": _post_action_not_available("position_not_closed"),
+        "unrealized_pnl": _post_action_not_available("trading_console_default_read_model_does_not_call_exchange"),
+        "costs": {
+            "fees": _post_action_not_available("fee_fetch_not_integrated"),
+            "funding": _post_action_not_available("funding_fetch_not_integrated"),
+            "slippage": _post_action_not_available("entry_quote_snapshot_not_available"),
+            "total_cost": _post_action_not_available("cost_components_not_available"),
+        },
+        "tp_sl_result": {
+            "status": tp_sl_status,
+            "protection_order_count": len(protection_orders),
+            "open_protection_order_count": len(open_protection_orders),
+        },
+        "strategy_outcome": (
+            "pending_closed_trade_review"
+            if lifecycle_status == "closed_from_pg_exit_order"
+            else "pending_post_action_review"
+        ),
+        "review_decision": {
+            "status": "pending" if reviews else "not_recorded",
+            "allowed_values": ["promote", "revise", "park"],
+            "requires_owner_review": True,
+        },
+        "warnings": [
+            "fee_not_available",
+            "funding_not_available",
+            "slippage_not_available",
+        ],
+        "hard_blockers": [],
+    }
+
+
+def _post_action_order_ledger_entry(order: dict[str, Any] | None) -> dict[str, Any]:
+    if order is None:
+        return {"status": "not_available", "reason": "entry_order_not_recorded"}
+    return {
+        "status": str(order.get("status") or "unknown").lower(),
+        "order_id": order.get("order_id"),
+        "exchange_order_id": order.get("exchange_order_id"),
+        "quantity": order.get("filled_qty") or order.get("requested_qty"),
+        "requested_quantity": order.get("requested_qty"),
+        "average_price": order.get("average_exec_price"),
+        "created_at_ms": order.get("created_at"),
+    }
+
+
+def _post_action_exit_ledger_entry(exit_orders: list[dict[str, Any]]) -> dict[str, Any]:
+    if not exit_orders:
+        return {
+            "status": "not_available",
+            "reason": "no_exit_fill_recorded",
+            "hard_blocker": False,
+        }
+    order = exit_orders[-1]
+    return {
+        "status": str(order.get("status") or "unknown").lower(),
+        "order_id": order.get("order_id"),
+        "exchange_order_id": order.get("exchange_order_id"),
+        "order_role": order.get("order_role"),
+        "quantity": order.get("filled_qty") or order.get("requested_qty"),
+        "average_price": order.get("average_exec_price") or order.get("price"),
+        "created_at_ms": order.get("created_at"),
+    }
+
+
+def _post_action_not_available(reason: str) -> dict[str, Any]:
+    return {
+        "status": "not_available",
+        "value": None,
+        "asset": "USDT",
+        "reason": reason,
+        "hard_blocker": False,
     }
 
 

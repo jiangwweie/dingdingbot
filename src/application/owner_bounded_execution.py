@@ -120,6 +120,7 @@ class OwnerBoundedExecutionState(BaseModel):
     execution_intents: list[dict[str, object]] = Field(default_factory=list)
     local_orders: list[dict[str, object]] = Field(default_factory=list)
     execution_results: list[dict[str, object]] = Field(default_factory=list)
+    review_ledger: dict[str, object] = Field(default_factory=dict)
     safety: dict[str, bool] = Field(
         default_factory=lambda: {
             "creates_authorization": False,
@@ -726,6 +727,11 @@ class OwnerBoundedExecutionService:
             execution_intents=intents,
             local_orders=local_orders,
             execution_results=results,
+            review_ledger=_build_owner_bounded_review_ledger(
+                authorization=authorization,
+                local_orders=local_orders,
+                execution_results=results,
+            ),
         )
 
     async def execute_authorization(
@@ -965,6 +971,13 @@ class OwnerBoundedExecutionService:
                 "status",
                 "order_type",
                 "exchange_order_id",
+                "order_role",
+                "requested_qty",
+                "filled_qty",
+                "average_exec_price",
+                "reduce_only",
+                "price",
+                "trigger_price",
                 "created_at",
                 "updated_at",
             ]
@@ -1227,6 +1240,11 @@ class OwnerBoundedExecutionService:
                                 "entry_order_id": result.entry_order_id,
                                 "tp_order_ids": result.tp_order_ids,
                                 "sl_order_id": result.sl_order_id,
+                                "review_ledger": _build_owner_bounded_result_review_ledger(
+                                    authorization=authorization,
+                                    result=result,
+                                    final_gate=final_gate,
+                                ),
                             }),
                             "audit_refs": json.dumps([authorization.authorization_id, result.execution_intent_id]),
                             "campaign_refs": json.dumps([]),
@@ -1343,6 +1361,11 @@ class OwnerBoundedExecutionService:
                                 "tp_order_ids": exc.tp_order_ids,
                                 "sl_order_id": exc.sl_order_id,
                                 "protection_status": exc.protection_status,
+                                "review_ledger": _build_owner_bounded_failure_review_ledger(
+                                    authorization=authorization,
+                                    exc=exc,
+                                    final_gate=final_gate,
+                                ),
                             }),
                             "audit_refs": json.dumps([authorization.authorization_id, exc.execution_intent_id]),
                             "campaign_refs": json.dumps([]),
@@ -1622,6 +1645,299 @@ def _failed_reason_is_pre_order(reason: str) -> bool:
             "position side mismatch",
         ]
     )
+
+
+def _build_owner_bounded_result_review_ledger(
+    *,
+    authorization: BoundedLiveTrialAuthorization,
+    result: OwnerBoundedExecutionResponse,
+    final_gate: BnbLiveExecutionBridgeDryRunResponse,
+) -> dict[str, object]:
+    return {
+        "ledger_version": "owner_bounded_review_ledger_v0",
+        "authorization_id": authorization.authorization_id,
+        "carrier_id": authorization.carrier_id,
+        "symbol": authorization.symbol,
+        "side": authorization.side,
+        "entry": {
+            "status": "filled_or_submitted",
+            "order_id": result.entry_order_id,
+            "exchange_order_id": result.entry_exchange_order_id,
+            "quantity": str(authorization.quantity),
+            "max_notional": str(authorization.max_notional),
+        },
+        "exit": _not_available_field("exit_not_recorded_at_entry_execution_time"),
+        "realized_pnl": _not_available_field("position_not_closed"),
+        "unrealized_pnl": _not_available_field("exchange_mark_price_read_required"),
+        "costs": _cost_ledger_not_available(),
+        "holding_time": _not_available_field("position_lifecycle_still_open"),
+        "tp_sl_result": {
+            "status": result.protection_status or "not_available",
+            "tp_order_ids": list(result.tp_order_ids),
+            "sl_order_id": result.sl_order_id,
+        },
+        "strategy_outcome": "pending_post_action_review",
+        "review_decision": {
+            "status": "pending",
+            "allowed_values": ["promote", "revise", "park"],
+            "requires_owner_review": True,
+        },
+        "warnings": [
+            "fee_not_available",
+            "funding_not_available",
+            "slippage_not_available",
+        ],
+        "hard_blockers": [],
+        "final_gate_result": final_gate.final_preflight_result,
+    }
+
+
+def _build_owner_bounded_failure_review_ledger(
+    *,
+    authorization: BoundedLiveTrialAuthorization,
+    exc: OwnerBoundedExecutionError,
+    final_gate: BnbLiveExecutionBridgeDryRunResponse,
+) -> dict[str, object]:
+    return {
+        "ledger_version": "owner_bounded_review_ledger_v0",
+        "authorization_id": authorization.authorization_id,
+        "carrier_id": authorization.carrier_id,
+        "symbol": authorization.symbol,
+        "side": authorization.side,
+        "entry": {
+            "status": "failed_or_partial",
+            "order_id": exc.entry_order_id,
+            "exchange_order_id": exc.entry_exchange_order_id,
+            "quantity": str(authorization.quantity),
+            "max_notional": str(authorization.max_notional),
+        },
+        "exit": _not_available_field("execution_failed_before_complete_lifecycle"),
+        "realized_pnl": _not_available_field("execution_failed_before_close"),
+        "unrealized_pnl": _not_available_field("execution_failed_or_exchange_read_required"),
+        "costs": _cost_ledger_not_available(),
+        "holding_time": _not_available_field("execution_failed_before_complete_lifecycle"),
+        "tp_sl_result": {
+            "status": exc.protection_status or "not_available",
+            "tp_order_ids": list(exc.tp_order_ids),
+            "sl_order_id": exc.sl_order_id,
+        },
+        "strategy_outcome": "failed_requires_owner_review",
+        "review_decision": {
+            "status": "pending",
+            "allowed_values": ["revise", "park"],
+            "requires_owner_review": True,
+        },
+        "warnings": [
+            "fee_not_available",
+            "funding_not_available",
+            "slippage_not_available",
+        ],
+        "hard_blockers": list(exc.blockers),
+        "final_gate_result": final_gate.final_preflight_result,
+    }
+
+
+def _build_owner_bounded_review_ledger(
+    *,
+    authorization: BoundedLiveTrialAuthorization,
+    local_orders: list[dict[str, object]],
+    execution_results: list[dict[str, object]],
+) -> dict[str, object]:
+    entry_order = _first_order_by_role(local_orders, "ENTRY")
+    protection_orders = [
+        order for order in local_orders if str(order.get("order_role") or "").upper() in {"TP1", "SL"}
+    ]
+    exit_orders = [
+        order
+        for order in protection_orders
+        if str(order.get("status") or "").upper() in {"FILLED", "CLOSED"}
+    ]
+    entry_filled = str((entry_order or {}).get("status") or "").upper() in {"FILLED", "CLOSED"}
+    protection_open = bool(protection_orders) and all(
+        str(order.get("status") or "").upper() in {"OPEN", "SUBMITTED", "NEW"}
+        for order in protection_orders
+    )
+    if exit_orders:
+        lifecycle_status = "closed_from_pg_exit_order"
+        tp_sl_result = "tp_or_sl_filled"
+    elif entry_filled and protection_open:
+        lifecycle_status = "protected_open_from_pg_orders"
+        tp_sl_result = "protected_open"
+    elif entry_filled:
+        lifecycle_status = "entry_filled_protection_state_incomplete"
+        tp_sl_result = "protection_state_incomplete"
+    else:
+        lifecycle_status = "not_started_or_unknown"
+        tp_sl_result = "not_available"
+
+    realized = _realized_pnl_from_orders(entry_order, exit_orders)
+    return {
+        "ledger_version": "owner_bounded_review_ledger_v0",
+        "authorization_id": authorization.authorization_id,
+        "carrier_id": authorization.carrier_id,
+        "symbol": authorization.symbol,
+        "side": authorization.side,
+        "lifecycle_status": lifecycle_status,
+        "entry": _order_ledger_entry(entry_order),
+        "exit": _exit_ledger_entry(exit_orders),
+        "realized_pnl": realized,
+        "unrealized_pnl": _not_available_field("execution_state_endpoint_does_not_call_exchange"),
+        "costs": _cost_ledger_not_available(),
+        "holding_time": _holding_time_ledger(entry_order, exit_orders),
+        "tp_sl_result": {
+            "status": tp_sl_result,
+            "protection_order_count": len(protection_orders),
+            "open_protection_order_count": sum(
+                1
+                for order in protection_orders
+                if str(order.get("status") or "").upper() in {"OPEN", "SUBMITTED", "NEW"}
+            ),
+        },
+        "strategy_outcome": "pending_post_action_review"
+        if lifecycle_status != "closed_from_pg_exit_order"
+        else "pending_closed_trade_review",
+        "review_decision": {
+            "status": "pending",
+            "allowed_values": ["promote", "revise", "park"],
+            "requires_owner_review": True,
+        },
+        "result_records": len(execution_results),
+        "warnings": [
+            "fee_not_available",
+            "funding_not_available",
+            "slippage_not_available",
+        ],
+        "hard_blockers": [],
+    }
+
+
+def _cost_ledger_not_available() -> dict[str, object]:
+    return {
+        "fees": _not_available_field("fee_fetch_not_integrated"),
+        "funding": _not_available_field("funding_fetch_not_integrated"),
+        "slippage": _not_available_field("entry_quote_snapshot_not_available"),
+        "total_cost": _not_available_field("cost_components_not_available"),
+    }
+
+
+def _not_available_field(reason: str) -> dict[str, object]:
+    return {
+        "status": "not_available",
+        "value": None,
+        "asset": "USDT",
+        "reason": reason,
+        "hard_blocker": False,
+    }
+
+
+def _first_order_by_role(
+    orders: list[dict[str, object]],
+    role: str,
+) -> dict[str, object] | None:
+    for order in orders:
+        if str(order.get("order_role") or "").upper() == role:
+            return order
+    return None
+
+
+def _order_ledger_entry(order: dict[str, object] | None) -> dict[str, object]:
+    if order is None:
+        return {"status": "not_available", "reason": "entry_order_not_recorded"}
+    return {
+        "status": str(order.get("status") or "unknown").lower(),
+        "order_id": order.get("id"),
+        "exchange_order_id": order.get("exchange_order_id"),
+        "quantity": _decimal_str(order.get("filled_qty") or order.get("requested_qty")),
+        "requested_quantity": _decimal_str(order.get("requested_qty")),
+        "average_price": _decimal_str(order.get("average_exec_price")),
+        "created_at_ms": order.get("created_at"),
+    }
+
+
+def _exit_ledger_entry(exit_orders: list[dict[str, object]]) -> dict[str, object]:
+    if not exit_orders:
+        return {
+            "status": "not_available",
+            "reason": "no_exit_fill_recorded",
+            "hard_blocker": False,
+        }
+    order = exit_orders[-1]
+    return {
+        "status": str(order.get("status") or "unknown").lower(),
+        "order_id": order.get("id"),
+        "exchange_order_id": order.get("exchange_order_id"),
+        "order_role": order.get("order_role"),
+        "quantity": _decimal_str(order.get("filled_qty") or order.get("requested_qty")),
+        "average_price": _decimal_str(order.get("average_exec_price") or order.get("price")),
+        "created_at_ms": order.get("created_at"),
+    }
+
+
+def _realized_pnl_from_orders(
+    entry_order: dict[str, object] | None,
+    exit_orders: list[dict[str, object]],
+) -> dict[str, object]:
+    if entry_order is None or not exit_orders:
+        return _not_available_field("position_not_closed")
+    entry_price = _decimal_or_none(entry_order.get("average_exec_price"))
+    exit_order = exit_orders[-1]
+    exit_price = _decimal_or_none(exit_order.get("average_exec_price") or exit_order.get("price"))
+    quantity = _decimal_or_none(exit_order.get("filled_qty") or entry_order.get("filled_qty"))
+    if entry_price is None or exit_price is None or quantity is None:
+        return _not_available_field("entry_or_exit_price_missing")
+    value = (exit_price - entry_price) * quantity
+    return {
+        "status": "estimated_from_pg_orders_before_costs",
+        "value": str(value),
+        "asset": "USDT",
+        "costs_included": False,
+        "hard_blocker": False,
+    }
+
+
+def _holding_time_ledger(
+    entry_order: dict[str, object] | None,
+    exit_orders: list[dict[str, object]],
+) -> dict[str, object]:
+    entry_created = _int_or_none((entry_order or {}).get("created_at"))
+    if entry_created is None:
+        return _not_available_field("entry_timestamp_missing")
+    if exit_orders:
+        exit_created = _int_or_none(exit_orders[-1].get("created_at"))
+        if exit_created is not None:
+            return {
+                "status": "closed",
+                "value_ms": max(0, exit_created - entry_created),
+                "hard_blocker": False,
+            }
+    return {
+        "status": "in_progress",
+        "value_ms": max(0, _now_ms() - entry_created),
+        "hard_blocker": False,
+    }
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _decimal_str(value: object) -> str | None:
+    decimal_value = _decimal_or_none(value)
+    return str(decimal_value) if decimal_value is not None else None
+
+
+def _int_or_none(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
 
 
 def _dedupe(values: list[str]) -> list[str]:

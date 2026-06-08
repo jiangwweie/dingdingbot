@@ -1829,6 +1829,21 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     } == {"tp-1", "sl-1"}
     assert post_action_state["summary"]["reviews"][0]["review_id"] == "review-1"
     assert post_action_state["summary"]["audit_events"][0]["event_type"] == "ORDER_CONFIRMED"
+    ledger = post_action_state["review_ledger"]
+    assert ledger["ledger_version"] == "owner_bounded_review_ledger_v0"
+    assert ledger["lifecycle_status"] == "protected_open_from_pg_orders"
+    assert ledger["entry"]["status"] == "filled"
+    assert ledger["entry"]["order_id"] == "entry-1"
+    assert ledger["exit"]["status"] == "not_available"
+    assert ledger["realized_pnl"]["status"] == "not_available"
+    assert ledger["unrealized_pnl"]["status"] == "not_available"
+    assert ledger["costs"]["fees"]["status"] == "not_available"
+    assert ledger["costs"]["funding"]["status"] == "not_available"
+    assert ledger["costs"]["slippage"]["status"] == "not_available"
+    assert ledger["tp_sl_result"]["status"] == "protected_open"
+    assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
+    assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
+    assert ledger["hard_blockers"] == []
     assert exchange.open_order_calls == []
     assert exchange.position_calls == []
     assert exchange.place_calls == 0

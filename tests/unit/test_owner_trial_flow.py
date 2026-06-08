@@ -590,13 +590,24 @@ def _assert_success_execution_result_envelope(
     assert adapter_result["entry_order_id"] == payload["entry_order_id"]
     assert adapter_result["tp_order_ids"] == payload["tp_order_ids"]
     assert adapter_result["sl_order_id"] == payload["sl_order_id"]
-    assert result_summary == {
-        "authorization_id": authorization_id,
-        "execution_intent_id": payload["execution_intent_id"],
-        "entry_order_id": payload["entry_order_id"],
-        "tp_order_ids": payload["tp_order_ids"],
-        "sl_order_id": payload["sl_order_id"],
-    }
+    assert result_summary["authorization_id"] == authorization_id
+    assert result_summary["execution_intent_id"] == payload["execution_intent_id"]
+    assert result_summary["entry_order_id"] == payload["entry_order_id"]
+    assert result_summary["tp_order_ids"] == payload["tp_order_ids"]
+    assert result_summary["sl_order_id"] == payload["sl_order_id"]
+    ledger = result_summary["review_ledger"]
+    assert ledger["ledger_version"] == "owner_bounded_review_ledger_v0"
+    assert ledger["authorization_id"] == authorization_id
+    assert ledger["entry"]["order_id"] == payload["entry_order_id"]
+    assert ledger["exit"]["status"] == "not_available"
+    assert ledger["realized_pnl"]["status"] == "not_available"
+    assert ledger["unrealized_pnl"]["status"] == "not_available"
+    assert ledger["costs"]["fees"]["status"] == "not_available"
+    assert ledger["costs"]["funding"]["status"] == "not_available"
+    assert ledger["costs"]["slippage"]["status"] == "not_available"
+    assert ledger["tp_sl_result"]["status"] == "protected"
+    assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
+    assert ledger["hard_blockers"] == []
     assert audit_refs == [authorization_id, payload["execution_intent_id"]]
     assert review_refs == [payload["review_record_id"]]
     assert final_state == {"consumed": True}
@@ -638,6 +649,11 @@ def _assert_failure_execution_result_envelope(
     assert result_summary["tp_order_ids"] == error.tp_order_ids
     assert result_summary["sl_order_id"] == error.sl_order_id
     assert result_summary["protection_status"] == protection_status
+    ledger = result_summary["review_ledger"]
+    assert ledger["ledger_version"] == "owner_bounded_review_ledger_v0"
+    assert ledger["strategy_outcome"] == "failed_requires_owner_review"
+    assert ledger["costs"]["fees"]["status"] == "not_available"
+    assert ledger["review_decision"]["allowed_values"] == ["revise", "park"]
     assert audit_refs == [authorization_id, error.execution_intent_id]
     assert review_refs == [row["operation_id"]]
     assert final_state["consumed"] is False
@@ -4101,7 +4117,11 @@ def test_owner_bounded_execution_api_route_trend_fake_gateway_executes_full_chai
             response = client.post(
                 f"/api/brc/owner-trial-flow/authorizations/{authorization_id}/execute"
             )
+            execution_state = client.get(
+                f"/api/brc/owner-trial-flow/authorizations/{authorization_id}/execution-state"
+            )
         assert response.status_code == 200
+        assert execution_state.status_code == 200
         payload = response.json()
         assert payload["carrier_id"] == "TF-001-live-readonly-v0"
         assert payload["status"] == "executed"
@@ -4124,6 +4144,25 @@ def test_owner_bounded_execution_api_route_trend_fake_gateway_executes_full_chai
             Decimal("0.1"),
             Decimal("0.1"),
         ]
+        state_payload = execution_state.json()
+        assert state_payload["retry_allowed"] is False
+        assert "duplicate_execution_intent_for_authorization" in state_payload["retry_blockers"]
+        ledger = state_payload["review_ledger"]
+        assert ledger["ledger_version"] == "owner_bounded_review_ledger_v0"
+        assert ledger["lifecycle_status"] == "protected_open_from_pg_orders"
+        assert ledger["entry"]["status"] == "filled"
+        assert ledger["entry"]["quantity"] == "0.1"
+        assert ledger["exit"]["status"] == "not_available"
+        assert ledger["realized_pnl"]["status"] == "not_available"
+        assert ledger["unrealized_pnl"]["status"] == "not_available"
+        assert ledger["costs"]["fees"]["status"] == "not_available"
+        assert ledger["costs"]["funding"]["status"] == "not_available"
+        assert ledger["costs"]["slippage"]["status"] == "not_available"
+        assert ledger["holding_time"]["status"] == "in_progress"
+        assert ledger["tp_sl_result"]["status"] == "protected_open"
+        assert ledger["tp_sl_result"]["open_protection_order_count"] == 2
+        assert ledger["strategy_outcome"] == "pending_post_action_review"
+        assert ledger["review_decision"]["allowed_values"] == ["promote", "revise", "park"]
 
         async def persisted_state():
             session_maker = service._repository._session_maker
