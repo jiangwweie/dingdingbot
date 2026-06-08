@@ -16,6 +16,34 @@ from src.interfaces.operator_auth import create_password_hash
 BNB = "BNB/USDT:USDT"
 
 
+def test_trading_console_live_read_only_exchange_env_allows_order_allowed_ceiling(monkeypatch):
+    from src.interfaces.api_trading_console import _live_read_only_exchange_env_safe
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("EXCHANGE_API_" + "KEY", "masked-key")
+    monkeypatch.setenv("EXCHANGE_API_" + "SEC" + "RET", "masked-value")
+
+    assert _live_read_only_exchange_env_safe() is True
+
+
+def test_trading_console_live_read_only_exchange_env_blocks_runtime_control(monkeypatch):
+    from src.interfaces.api_trading_console import _live_read_only_exchange_env_safe
+
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "true")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("EXCHANGE_API_" + "KEY", "masked-key")
+    monkeypatch.setenv("EXCHANGE_API_" + "SEC" + "RET", "masked-value")
+
+    assert _live_read_only_exchange_env_safe() is False
+
+
 def _configure_auth(monkeypatch):
     # Importing the API composition root loads local dotenv files with override=True.
     # Keep test credentials authoritative even when an individual test imports app later.

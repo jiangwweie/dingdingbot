@@ -80,10 +80,11 @@ class _TradingConsoleLiveReadOnlyGateway:
 
 
 def _live_read_only_exchange_env_safe() -> bool:
+    permission_max = os.environ.get("BRC_EXECUTION_PERMISSION_MAX", "").strip().lower()
     return (
         os.environ.get("TRADING_ENV") == "live"
         and os.environ.get("EXCHANGE_TESTNET", "").lower() == "false"
-        and os.environ.get("BRC_EXECUTION_PERMISSION_MAX") == "read_only"
+        and permission_max in {"read_only", "order_allowed"}
         and os.environ.get("RUNTIME_CONTROL_API_ENABLED", "").lower() == "false"
         and os.environ.get("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "").lower() == "false"
         and bool(os.environ.get("EXCHANGE_API_KEY"))
