@@ -1081,8 +1081,8 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert "BoundedLiveAuthorization" in completion_by_family["Trend"]["blocked_stages"]
     assert "ActionCandidate" in completion_by_family["Trend"]["bridge_methods"]
     assert "FinalGateDryRun" in completion_by_family["Trend"]["bridge_methods"]
-    assert completion_by_family["Volatility expansion"]["completion_status"] == "blocked"
-    assert completion_by_family["Mean reversion"]["completion_status"] == "blocked"
+    assert completion_by_family["Volatility expansion"]["completion_status"] == "dry_run_only"
+    assert completion_by_family["Mean reversion"]["completion_status"] == "dry_run_only"
     for item in completion_by_family.values():
         assert item["blocker_ids"]
         assert item["next_retry_conditions"]
@@ -1676,7 +1676,7 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert bridge_statuses["TrendObservation"]["status"] == "present"
     assert bridge_statuses["TrendObservation"]["families"] == ["Trend"]
     assert bridge_statuses["StrategyGroupMappingProposal"]["status"] == "present"
-    assert bridge_statuses["CarrierCandidate"]["status"] == "present"
+    assert bridge_statuses["CarrierCandidate"]["status"] == "mixed"
     assert bridge_statuses["ActionCandidate"]["status"] == "blocked"
     assert bridge_statuses["BudgetEnvelopeDraft"]["status"] == "draft"
     assert bridge_statuses["FinalGateDryRun"]["status"] == "blocked"
@@ -1712,18 +1712,18 @@ def test_strategy_family_admission_state_maps_three_production_families_without_
     assert by_family["Trend"]["risk_disclosure_contract"]["bridge_method"] == "RiskDisclosureDraft"
     assert "false continuation" in by_family["Trend"]["risk_disclosure_contract"]["failure_modes"]
     assert by_family["Volatility expansion"]["strategy_family_id"] == "VB-001-live-readonly-v0"
-    assert by_family["Volatility expansion"]["classification"] == "blocked"
+    assert by_family["Volatility expansion"]["classification"] == "dry-run-only"
     assert by_family["Volatility expansion"]["carrier_readiness_report"]["status"] == (
-        "candidate_registered_not_actionable"
+        "observation_ready_not_actionable"
     )
     assert by_family["Volatility expansion"]["carrier_candidate"]["status"] == (
-        "registered_metadata_only"
+        "observation_candidate_only"
     )
     assert by_family["Volatility expansion"]["observation_bridge"]["bridge_method"] == (
         "CarrierReadinessReport"
     )
     assert by_family["Mean reversion"]["strategy_family_id"] == "MR-001-live-readonly-v0"
-    assert by_family["Mean reversion"]["classification"] == "blocked"
+    assert by_family["Mean reversion"]["classification"] == "dry-run-only"
     assert by_family["Mean reversion"]["observation_bridge"]["bridge_method"] == "CarrierCandidate"
     assert "liquidity wick" in by_family["Mean reversion"]["risk_disclosure_contract"]["failure_modes"]
     for item in by_family.values():

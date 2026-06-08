@@ -29,34 +29,43 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert by_family["Trend"].risk_disclosure_contract.bridge_method == "RiskDisclosureDraft"
     assert "false continuation" in by_family["Trend"].risk_disclosure_contract.failure_modes
     assert by_family["Volatility expansion"].strategy_family_id == "VB-001-live-readonly-v0"
-    assert by_family["Volatility expansion"].classification == "blocked"
+    assert by_family["Volatility expansion"].classification == "dry-run-only"
     assert by_family["Volatility expansion"].admission_level_code == "L2"
-    assert by_family["Volatility expansion"].carrier_readiness_report.status == (
-        "candidate_registered_not_actionable"
+    assert by_family["Volatility expansion"].research_quality_status == "insufficient_research"
+    assert "owner_risk_acceptance_required" in (
+        by_family["Volatility expansion"].risk_disclosure_classifications
     )
-    assert by_family["Volatility expansion"].carrier_candidate.status == "registered_metadata_only"
+    assert by_family["Volatility expansion"].carrier_readiness_report.status == (
+        "observation_ready_not_actionable"
+    )
+    assert by_family["Volatility expansion"].carrier_candidate.status == "observation_candidate_only"
     assert by_family["Volatility expansion"].observation_bridge.bridge_method == (
         "CarrierReadinessReport"
     )
     assert by_family["Volatility expansion"].observation_bridge.status == "readiness_report_only"
     assert "fake breakout" in by_family["Volatility expansion"].risk_disclosure_contract.failure_modes
     assert by_family["Mean reversion"].strategy_family_id == "MR-001-live-readonly-v0"
-    assert by_family["Mean reversion"].classification == "blocked"
+    assert by_family["Mean reversion"].classification == "dry-run-only"
     assert by_family["Mean reversion"].admission_level_code == "L2"
-    assert by_family["Mean reversion"].carrier_readiness_report.status == (
-        "candidate_registered_not_actionable"
+    assert by_family["Mean reversion"].research_quality_status == "insufficient_research"
+    assert "owner_risk_acceptance_required" in (
+        by_family["Mean reversion"].risk_disclosure_classifications
     )
-    assert by_family["Mean reversion"].carrier_candidate.status == "registered_metadata_only"
+    assert by_family["Mean reversion"].carrier_readiness_report.status == (
+        "observation_ready_not_actionable"
+    )
+    assert by_family["Mean reversion"].carrier_candidate.status == "observation_candidate_only"
     assert by_family["Mean reversion"].observation_bridge.bridge_method == "CarrierCandidate"
     assert by_family["Mean reversion"].observation_bridge.status == "candidate_metadata_only"
     assert "liquidity wick" in by_family["Mean reversion"].risk_disclosure_contract.failure_modes
-    assert state.classification_counts == {"actionable": 1, "blocked": 2}
+    assert state.classification_counts == {"actionable": 1, "dry-run-only": 2}
     levels = {
         item.level: item for item in state.candidate_pipeline_standard.admission_levels
     }
     assert set(levels) == {"L0", "L1", "L2", "L3", "L4"}
     assert levels["L0"].live_action_allowed is False
-    assert levels["L1"].action_candidate_allowed is False
+    assert levels["L1"].action_candidate_allowed is True
+    assert levels["L1"].live_action_allowed is False
     assert levels["L2"].action_candidate_allowed is True
     assert levels["L2"].live_action_allowed is False
     assert levels["L3"].live_action_allowed is True
@@ -65,6 +74,9 @@ def test_production_strategy_family_admission_state_structures_three_families():
     policy = state.candidate_pipeline_standard.warning_hard_blocker_policy
     assert policy.weak_strategy_evidence_policy == "warning_not_hard_blocker"
     assert "weak strategy evidence" in policy.warning_items
+    assert policy.l3_requires_owner_risk_acceptance is True
+    assert "insufficient_research" in policy.owner_risk_acceptance_may_override
+    assert "FinalGate" in policy.owner_risk_acceptance_never_overrides
     assert "missing Owner execute authorization" in policy.hard_blockers_for_live_action
     assert "ExecutionIntent" in policy.post_action_acceptance_outputs
     assert "Review" in policy.post_action_acceptance_outputs
@@ -162,8 +174,8 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert "BoundedLiveAuthorization" in completion_by_family["Trend"].blocked_stages
     assert "ActionCandidate" in completion_by_family["Trend"].bridge_methods
     assert "FinalGateDryRun" in completion_by_family["Trend"].bridge_methods
-    assert completion_by_family["Volatility expansion"].completion_status == "blocked"
-    assert completion_by_family["Mean reversion"].completion_status == "blocked"
+    assert completion_by_family["Volatility expansion"].completion_status == "dry_run_only"
+    assert completion_by_family["Mean reversion"].completion_status == "dry_run_only"
     for item in completion_by_family.values():
         assert item.blocker_ids
         assert item.next_retry_conditions
@@ -199,8 +211,8 @@ def test_production_strategy_family_admission_state_structures_three_families():
     assert risk_control_by_family["Trend"].audit_chain_status == (
         "gap_open_no_live_action_evidence"
     )
-    assert risk_control_by_family["Volatility expansion"].classification == "blocked"
-    assert risk_control_by_family["Mean reversion"].classification == "blocked"
+    assert risk_control_by_family["Volatility expansion"].classification == "dry-run-only"
+    assert risk_control_by_family["Mean reversion"].classification == "dry-run-only"
     for item in risk_control_by_family.values():
         assert item.blocker_ids
         assert item.next_retry_conditions
@@ -576,8 +588,8 @@ def test_production_strategy_family_admission_state_structures_three_families():
         assert item.mutates_pg is False
     assert state.sprint_acceptance_verdict.status == "in_progress_pass_with_constraint"
     assert state.sprint_acceptance_verdict.completed_family_count == 0
-    assert state.sprint_acceptance_verdict.dry_run_only_family_count == 0
-    assert state.sprint_acceptance_verdict.blocked_family_count == 2
+    assert state.sprint_acceptance_verdict.dry_run_only_family_count == 2
+    assert state.sprint_acceptance_verdict.blocked_family_count == 0
     assert state.sprint_acceptance_verdict.actionable_family_count == 1
     assert state.sprint_acceptance_verdict.live_execution_ready is False
     assert state.sprint_acceptance_verdict.frontend_action_enabled is False
@@ -1171,8 +1183,8 @@ def test_production_strategy_family_admission_state_exposes_bridge_contracts():
     assert by_bridge_status["TrendObservation"].status == "present"
     assert by_bridge_status["TrendObservation"].families == ["Trend"]
     assert by_bridge_status["StrategyGroupMappingProposal"].status == "present"
-    assert by_bridge_status["CarrierCandidate"].status == "present"
-    assert by_bridge_status["CarrierReadinessReport"].status == "present"
+    assert by_bridge_status["CarrierCandidate"].status == "mixed"
+    assert by_bridge_status["CarrierReadinessReport"].status == "mixed"
     assert by_bridge_status["ActionCandidate"].status == "blocked"
     assert by_bridge_status["RiskDisclosureDraft"].status == "draft"
     assert by_bridge_status["AuthorizationDraftProposal"].status == "draft"
@@ -2035,5 +2047,11 @@ def test_product_backbone_represents_bnb_trend_mr_and_volatility_samples():
         protection["Volatility expansion"].hard_blockers_for_live_action
     )
     warnings = {item.classification for item in state.warning_records}
-    assert warnings == {"strategy_warning"}
+    assert warnings == {
+        "strategy_warning",
+        "warning",
+        "fragile_evidence",
+        "insufficient_research",
+        "owner_risk_acceptance_required",
+    }
     assert state.hard_blocker_records == state.blocker_records

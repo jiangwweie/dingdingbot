@@ -185,6 +185,40 @@ PRE_POST_EXCHANGE_READS = [
 ]
 
 AdmissionLevelCode = Literal["L0", "L1", "L2", "L3", "L4"]
+ResearchRiskClassification = Literal[
+    "warning",
+    "fragile_evidence",
+    "insufficient_research",
+    "owner_risk_acceptance_required",
+]
+
+RESEARCH_RISK_CLASSIFICATIONS = [
+    "warning",
+    "fragile_evidence",
+    "insufficient_research",
+    "owner_risk_acceptance_required",
+]
+
+OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE = [
+    "fragile_evidence",
+    "insufficient_research",
+    "weak strategy evidence",
+    "thin sample",
+    "incomplete signal markers",
+    "historical fragility",
+]
+
+OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES = [
+    "Owner authorization",
+    "scope match",
+    "budget availability",
+    "account and reconciliation facts",
+    "position or open-order conflicts",
+    "mandatory TP/SL protection",
+    "FinalGate",
+    "Operation Layer",
+    "runtime/profile/environment/GKS guards",
+]
 
 
 class ProductionAdmissionModel(BaseModel):
@@ -201,6 +235,7 @@ class AdmissionLevelSpec(ProductionAdmissionModel):
     required_artifacts: list[str] = Field(default_factory=list)
     hard_gate_policy: str
     example_status: str
+    owner_risk_acceptance_required_for_l3: bool = False
 
 
 class WarningHardBlockerPolicy(ProductionAdmissionModel):
@@ -208,6 +243,16 @@ class WarningHardBlockerPolicy(ProductionAdmissionModel):
         "warning_not_hard_blocker"
     )
     warning_items: list[str] = Field(default_factory=list)
+    research_deficiency_classifications: list[str] = Field(
+        default_factory=lambda: list(RESEARCH_RISK_CLASSIFICATIONS)
+    )
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
+    l3_requires_owner_risk_acceptance: bool = True
     hard_blockers_for_live_action: list[str] = Field(default_factory=list)
     post_action_acceptance_outputs: list[str] = Field(default_factory=list)
     policy_summary: str
@@ -222,6 +267,17 @@ class StrategyFamilySpec(ProductionAdmissionModel):
     supported_symbols: list[str] = Field(default_factory=list)
     evidence_requirements: list[str] = Field(default_factory=list)
     warning_items: list[str] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
     hard_blockers_for_live_action: list[str] = Field(default_factory=list)
     not_alpha_proof: bool = True
 
@@ -251,12 +307,29 @@ class CarrierSpec(ProductionAdmissionModel):
     action_registry_supported: bool = False
     can_produce_action_candidate: bool = False
     blockers: list[str] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
 
 
 class RiskDisclosureSpec(ProductionAdmissionModel):
     family: str
     acknowledgement_required: bool = True
     weak_strategy_evidence_is_warning: bool = True
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     warnings: list[str] = Field(default_factory=list)
     hard_blockers_not_included: list[str] = Field(default_factory=list)
 
@@ -273,7 +346,13 @@ class WarningRecord(ProductionAdmissionModel):
     warning_id: str
     family: str
     carrier_id: Optional[str] = None
-    classification: Literal["strategy_warning"] = "strategy_warning"
+    classification: Literal[
+        "strategy_warning",
+        "warning",
+        "fragile_evidence",
+        "insufficient_research",
+        "owner_risk_acceptance_required",
+    ] = "strategy_warning"
     description: str
     owner_ack_required: bool = True
     blocks_after_ack: Literal[False] = False
@@ -487,6 +566,17 @@ class ActionCandidateSpec(ProductionAdmissionModel):
     owner_scope_required: list[str] = Field(default_factory=lambda: list(REQUIRED_OWNER_SCOPE_FIELDS))
     hard_blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
     post_action_acceptance_outputs: list[str] = Field(default_factory=list)
     final_gate_required: bool = True
     may_execute_live: Literal[False] = False
@@ -508,6 +598,11 @@ class TradingConsoleCandidateOutput(ProductionAdmissionModel):
     warning_count: int
     hard_blocker_count: int
     owner_decision_text: str
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
     frontend_action_enabled: Literal[False] = False
     may_execute_live: Literal[False] = False
 
@@ -551,6 +646,21 @@ class GenericActionSpec(ProductionAdmissionModel):
     protection_template: dict[str, object] = Field(default_factory=dict)
     review_template: dict[str, object] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_status: Literal["required", "accepted", "not_required"] = (
+        "required"
+    )
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     hard_blockers: list[str] = Field(default_factory=list)
     final_gate_adapter_ref: str = "generic_final_gate_adapter_contract"
     action_entry_payload_ref: Optional[str] = None
@@ -617,6 +727,8 @@ class GenericFinalGateAdapterContract(ProductionAdmissionModel):
     warning_not_blocker: list[str] = Field(
         default_factory=lambda: [
             "weak strategy evidence",
+            "fragile_evidence",
+            "insufficient_research",
             "incomplete signal markers",
             "fee/funding/slippage gaps",
             "incomplete review UI",
@@ -663,6 +775,12 @@ class TradingConsoleActionEntryOutput(ProductionAdmissionModel):
     warning_count: int
     hard_blocker_count: int
     owner_decision_text: str
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     may_execute_live: Literal[False] = False
     frontend_action_enabled: Literal[False] = False
 
@@ -678,6 +796,9 @@ class CandidatePipelineStandard(ProductionAdmissionModel):
         default_factory=lambda: WarningHardBlockerPolicy(
             warning_items=[
                 "weak strategy evidence",
+                "fragile_evidence",
+                "insufficient_research",
+                "owner_risk_acceptance_required",
                 "incomplete signal markers",
                 "incomplete fee/funding/slippage",
                 "incomplete review UI",
@@ -700,8 +821,9 @@ class CandidatePipelineStandard(ProductionAdmissionModel):
                 "Audit",
             ],
             policy_summary=(
-                "Strategy weakness is disclosed as risk. Live action is blocked only by "
-                "authorization, scope, exposure, protection, recording, guard, or "
+                "Strategy weakness is disclosed as risk and can be accepted by Owner. "
+                "Owner risk acceptance never overrides authorization, scope, exposure, "
+                "protection, recording, guard, FinalGate, Operation Layer, or "
                 "ActionCandidate validity failures."
             ),
         )
@@ -871,8 +993,20 @@ class RiskDisclosureDraft(ProductionAdmissionModel):
     strategy_group: str
     summary: str
     failure_modes: list[str] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
     owner_acknowledgement_required: Literal[True] = True
+    owner_risk_acceptance_required: Literal[True] = True
     acknowledgement_phrase: str = "I ACCEPT BOUNDED PRODUCTION RISK"
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
+    owner_risk_acceptance_cannot_override_execution_safety_gates: Literal[True] = True
     required_before_authorization: list[str] = Field(
         default_factory=lambda: [
             "Owner reviews risk disclosure",
@@ -918,6 +1052,11 @@ class CarrierCandidate(ProductionAdmissionModel):
     context_timeframes: list[str] = Field(default_factory=list)
     source: str = "strategy_family_registry_seed"
     evidence: str
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
     blockers: list[str] = Field(default_factory=list)
     next_retry_condition: str
     starts_runner: Literal[False] = False
@@ -943,6 +1082,11 @@ class CarrierReadinessReport(ProductionAdmissionModel):
     primary_timeframe: Optional[str] = None
     context_timeframes: list[str] = Field(default_factory=list)
     readiness_checks: list[dict[str, str]] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
     blockers: list[str] = Field(default_factory=list)
     next_retry_condition: str
     backend_actionable: Literal[False] = False
@@ -1223,6 +1367,17 @@ class ActionCandidate(ProductionAdmissionModel):
     )
     official_action_endpoints: dict[str, str] = Field(
         default_factory=lambda: dict(OFFICIAL_ACTION_API_ENDPOINTS)
+    )
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
     )
     required_before_action: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
@@ -1736,6 +1891,18 @@ class FamilyAdmissionRow(ProductionAdmissionModel):
     backend_actionable: bool = False
     frontend_action_enabled: bool = False
     required_scope_missing: list[str] = Field(default_factory=lambda: list(REQUIRED_OWNER_SCOPE_FIELDS))
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_may_override: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_MAY_OVERRIDE)
+    )
+    owner_risk_acceptance_never_overrides: list[str] = Field(
+        default_factory=lambda: list(OWNER_RISK_ACCEPTANCE_NEVER_OVERRIDES)
+    )
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     risk_disclosure_draft: str
     risk_disclosure_contract: RiskDisclosureDraft
     strategy_group_mapping: StrategyGroupMappingProposal
@@ -2058,6 +2225,10 @@ class _FamilyConfig(ProductionAdmissionModel):
     admission_level: str
     risk_disclosure: str
     failure_modes: list[str] = Field(default_factory=list)
+    research_quality_status: ResearchRiskClassification = "warning"
+    risk_disclosure_classifications: list[ResearchRiskClassification] = Field(
+        default_factory=list
+    )
     blocker_id: str
     blocker_stage: str
     blocker_evidence: str
@@ -2103,6 +2274,8 @@ def build_production_strategy_family_admission_state(
                     admission_level_code="L0",
                     admission_level="not_available",
                     classification="blocked",
+                    research_quality_status=config.research_quality_status,
+                    risk_disclosure_classifications=_risk_disclosure_classifications(config),
                     risk_disclosure_draft=config.risk_disclosure,
                     risk_disclosure_contract=_risk_disclosure_contract(config),
                     strategy_group_mapping=_strategy_group_mapping(
@@ -2255,6 +2428,8 @@ def build_production_strategy_family_admission_state(
                 admission_level_code=config.admission_level_code,
                 admission_level=config.admission_level,
                 classification=config.classification,
+                research_quality_status=config.research_quality_status,
+                risk_disclosure_classifications=_risk_disclosure_classifications(config),
                 bounded_live_authorization_state=_bounded_live_authorization_state(
                     scope_review=scope_review,
                     action_api_compatibility=action_api_compatibility,
@@ -5091,7 +5266,21 @@ def _risk_disclosure_contract(config: _FamilyConfig) -> RiskDisclosureDraft:
         strategy_group=config.strategy_group,
         summary=config.risk_disclosure,
         failure_modes=list(config.failure_modes),
+        research_quality_status=config.research_quality_status,
+        risk_disclosure_classifications=_risk_disclosure_classifications(config),
     )
+
+
+def _risk_disclosure_classifications(
+    config: _FamilyConfig,
+) -> list[ResearchRiskClassification]:
+    items: list[ResearchRiskClassification] = [
+        "warning",
+        config.research_quality_status,
+        "owner_risk_acceptance_required",
+    ]
+    items.extend(config.risk_disclosure_classifications)
+    return _dedupe(items)  # type: ignore[return-value]
 
 
 def _protection_plan_draft(*, scope_review: ScopeReview) -> ProtectionPlanDraft:
@@ -5197,7 +5386,11 @@ def _carrier_candidate(
             "official_action_api_candidate_not_supported",
             "backend_final_gate_not_actionable",
         ]
-        evidence = "Carrier candidate is present for observation/dry-run review only."
+        evidence = (
+            "Carrier candidate is present for Owner review and dry-run proposal; "
+            "research-quality weakness is disclosed as risk, while live remains "
+            "blocked by execution gates."
+        )
     elif config.classification == "actionable":
         status = "registered_metadata_only"
         blockers = [
@@ -5225,6 +5418,8 @@ def _carrier_candidate(
         primary_timeframe=primary_timeframe,
         context_timeframes=context_timeframes,
         evidence=evidence,
+        research_quality_status=config.research_quality_status,
+        risk_disclosure_classifications=_risk_disclosure_classifications(config),
         blockers=blockers,
         next_retry_condition=config.next_retry_condition,
     )
@@ -5270,6 +5465,14 @@ def _carrier_readiness_report(
             "code": "backend_actionable",
             "status": "block",
         },
+        {
+            "code": "research_quality_disclosure",
+            "status": config.research_quality_status,
+        },
+        {
+            "code": "owner_risk_acceptance",
+            "status": "required_before_l3",
+        },
     ]
     blockers = [
         "backend_final_gate_not_actionable",
@@ -5289,6 +5492,8 @@ def _carrier_readiness_report(
         primary_timeframe=primary_timeframe,
         context_timeframes=context_timeframes,
         readiness_checks=readiness_checks,
+        research_quality_status=config.research_quality_status,
+        risk_disclosure_classifications=_risk_disclosure_classifications(config),
         blockers=_dedupe(blockers),
         next_retry_condition=config.next_retry_condition,
     )
@@ -5313,6 +5518,7 @@ def _action_candidate(
         ]
     )
     required_before_action = [
+        "Owner accepts disclosed strategy/evidence risk when admission is L3",
         "complete matched Owner scope",
         "candidate carrier supported by official action API registry",
         "backend final gate returns actionable=true",
@@ -5320,6 +5526,7 @@ def _action_candidate(
         "pre-action exchange evidence captured",
         "mandatory TP/SL plan validated",
         "Review and audit recording path available",
+        "Owner risk acceptance never overrides execution safety gates",
     ]
     return ActionCandidate(
         status=(
@@ -5330,6 +5537,8 @@ def _action_candidate(
         family=config.family_label,
         carrier_id=carrier_id,
         candidate_carrier_id=action_api_compatibility.candidate_carrier_id,
+        research_quality_status=config.research_quality_status,
+        risk_disclosure_classifications=_risk_disclosure_classifications(config),
         required_before_action=required_before_action,
         blockers=_dedupe(blockers),
         next_retry_condition=(
@@ -5532,11 +5741,17 @@ def _admission_level_specs() -> list[AdmissionLevelSpec]:
         AdmissionLevelSpec(
             level="L1",
             name="displayable candidate",
-            semantics="Can appear in Trading Console as a displayable candidate with nearest-match context.",
-            action_candidate_allowed=False,
+            semantics=(
+                "Can appear in Trading Console as a displayable candidate or "
+                "candidate shell with risk-disclosure context."
+            ),
+            action_candidate_allowed=True,
             live_action_allowed=False,
             required_artifacts=["StrategyFamilySpec", "StrategyGroupSpec"],
-            hard_gate_policy="Display only; warnings are acceptable.",
+            hard_gate_policy=(
+                "Display/review only; research weakness is warning/risk acceptance, "
+                "not a live execution gate."
+            ),
             example_status="displayable",
         ),
         AdmissionLevelSpec(
@@ -5561,7 +5776,8 @@ def _admission_level_specs() -> list[AdmissionLevelSpec]:
             name="Owner-confirmed bounded live candidate",
             semantics=(
                 "May enter official Owner-confirmed bounded live path only after exact "
-                "scope, hard gates, TP/SL, recording, and evidence are present."
+                "scope, explicit Owner risk acceptance, hard execution gates, TP/SL, "
+                "recording, and evidence are present."
             ),
             action_candidate_allowed=True,
             live_action_allowed=True,
@@ -5572,8 +5788,12 @@ def _admission_level_specs() -> list[AdmissionLevelSpec]:
                 "ProtectionPlan",
                 "ReviewTemplate",
             ],
-            hard_gate_policy="Few hard live gates; strategy weakness remains a warning.",
+            hard_gate_policy=(
+                "Owner risk acceptance may override evidence weakness only; execution "
+                "safety gates remain hard blockers."
+            ),
             example_status="Trend exact-scope candidate",
+            owner_risk_acceptance_required_for_l3=True,
         ),
         AdmissionLevelSpec(
             level="L4",
@@ -5608,6 +5828,13 @@ def _strategy_family_specs(rows: list[FamilyAdmissionRow]) -> list[StrategyFamil
                 "review template",
             ],
             warning_items=list(row.risk_disclosure_contract.failure_modes),
+            research_quality_status=row.research_quality_status,
+            risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+            owner_risk_acceptance_required=row.owner_risk_acceptance_required,
+            owner_risk_acceptance_may_override=list(row.owner_risk_acceptance_may_override),
+            owner_risk_acceptance_never_overrides=list(
+                row.owner_risk_acceptance_never_overrides
+            ),
             hard_blockers_for_live_action=_row_hard_blockers(row),
         )
         for row in rows
@@ -5645,6 +5872,9 @@ def _carrier_specs(rows: list[FamilyAdmissionRow]) -> list[CarrierSpec]:
             action_registry_supported=row.action_api_compatibility.compatible,
             can_produce_action_candidate=row.action_candidate.candidate_carrier_id is not None,
             blockers=list(row.carrier_candidate.blockers),
+            research_quality_status=row.research_quality_status,
+            risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+            owner_risk_acceptance_required=row.owner_risk_acceptance_required,
         )
         for row in rows
     ]
@@ -5654,12 +5884,22 @@ def _risk_disclosure_specs(rows: list[FamilyAdmissionRow]) -> list[RiskDisclosur
     return [
         RiskDisclosureSpec(
             family=row.family,
+            research_quality_status=row.research_quality_status,
+            risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+            owner_risk_acceptance_required=row.owner_risk_acceptance_required,
+            owner_risk_acceptance_may_override=list(row.owner_risk_acceptance_may_override),
+            owner_risk_acceptance_never_overrides=list(
+                row.owner_risk_acceptance_never_overrides
+            ),
             warnings=list(row.risk_disclosure_contract.failure_modes),
             hard_blockers_not_included=[
                 "weak strategy evidence",
                 "thin sample",
                 "incomplete signal markers",
                 "fee/funding/slippage unavailable",
+                "fragile_evidence",
+                "insufficient_research",
+                "owner_risk_acceptance_required",
             ],
         )
         for row in rows
@@ -5719,6 +5959,21 @@ def _protection_templates(rows: list[FamilyAdmissionRow]) -> list[ProtectionTemp
 def _warning_records(rows: list[FamilyAdmissionRow]) -> list[WarningRecord]:
     records: list[WarningRecord] = []
     for row in rows:
+        for classification in row.risk_disclosure_classifications:
+            records.append(
+                WarningRecord(
+                    warning_id=(
+                        f"warning:{row.carrier_id or row.family}:"
+                        f"research:{classification}"
+                    ),
+                    family=row.family,
+                    carrier_id=row.carrier_id,
+                    classification=classification,
+                    description=_research_risk_description(row, classification),
+                    owner_ack_required=True,
+                    blocks_after_ack=False,
+                )
+            )
         for index, warning in enumerate(row.risk_disclosure_contract.failure_modes, start=1):
             records.append(
                 WarningRecord(
@@ -5732,6 +5987,31 @@ def _warning_records(rows: list[FamilyAdmissionRow]) -> list[WarningRecord]:
                 )
             )
     return records
+
+
+def _research_risk_description(
+    row: FamilyAdmissionRow,
+    classification: ResearchRiskClassification,
+) -> str:
+    if classification == "owner_risk_acceptance_required":
+        return (
+            "Owner must explicitly accept disclosed strategy/evidence risk before "
+            "any L3 bounded-live path; this never bypasses execution safety gates."
+        )
+    if classification == "fragile_evidence":
+        return (
+            "Research evidence is fragile and must remain visible as Owner-accepted "
+            "risk rather than a silent rejection."
+        )
+    if classification == "insufficient_research":
+        return (
+            "Research-quality evidence is insufficient for confidence claims; the "
+            "candidate remains reviewable as L1/L2 with explicit risk disclosure."
+        )
+    return (
+        f"{row.family} has strategy/evidence warnings that require Owner review "
+        "but are not execution hard blockers after acceptance."
+    )
 
 
 def _candidate_actionability(rows: list[FamilyAdmissionRow]) -> list[CandidateActionability]:
@@ -5805,7 +6085,12 @@ def _final_gate_adapter_results(
                     candidate_status=row.action_candidate.status,
                     action_registry_supported=row.action_api_compatibility.compatible,
                     proposal_role=_proposal_role(row),
-                    warnings=list(row.risk_disclosure_contract.failure_modes),
+                    warnings=_dedupe(
+                        [
+                            *list(row.risk_disclosure_contract.failure_modes),
+                            *list(row.risk_disclosure_classifications),
+                        ]
+                    ),
                     hard_blockers=_row_hard_blockers(row),
                     evidence=[
                         row.strategy_group_mapping.evidence,
@@ -5946,6 +6231,13 @@ def _action_candidate_specs(rows: list[FamilyAdmissionRow]) -> list[ActionCandid
             action_registry_supported=row.action_api_compatibility.compatible,
             hard_blockers=_row_hard_blockers(row),
             warnings=list(row.risk_disclosure_contract.failure_modes),
+            research_quality_status=row.research_quality_status,
+            risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+            owner_risk_acceptance_required=row.owner_risk_acceptance_required,
+            owner_risk_acceptance_may_override=list(row.owner_risk_acceptance_may_override),
+            owner_risk_acceptance_never_overrides=list(
+                row.owner_risk_acceptance_never_overrides
+            ),
             post_action_acceptance_outputs=[
                 "ExecutionIntent",
                 "Entry",
@@ -6003,6 +6295,19 @@ def _generic_action_specs(rows: list[FamilyAdmissionRow]) -> list[GenericActionS
                 protection_template=_protection_template(row),
                 review_template=_review_template_payload(row),
                 warnings=list(row.risk_disclosure_contract.failure_modes),
+                research_quality_status=row.research_quality_status,
+                risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+                owner_risk_acceptance_required=row.owner_risk_acceptance_required,
+                owner_risk_acceptance_status="required",
+                owner_risk_acceptance_may_override=list(
+                    row.owner_risk_acceptance_may_override
+                ),
+                owner_risk_acceptance_never_overrides=list(
+                    row.owner_risk_acceptance_never_overrides
+                ),
+                owner_risk_acceptance_cannot_override_execution_safety_gates=(
+                    row.owner_risk_acceptance_cannot_override_execution_safety_gates
+                ),
                 hard_blockers=hard_blockers,
                 action_entry_payload_ref=payload_id,
             )
@@ -6064,6 +6369,12 @@ def _trading_console_action_entry_output(
                 warning_count=len(row.risk_disclosure_contract.failure_modes),
                 hard_blocker_count=len(_row_hard_blockers(row)),
                 owner_decision_text=_action_entry_owner_decision_text(row, generic_status),
+                research_quality_status=row.research_quality_status,
+                risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+                owner_risk_acceptance_required=row.owner_risk_acceptance_required,
+                owner_risk_acceptance_cannot_override_execution_safety_gates=(
+                    row.owner_risk_acceptance_cannot_override_execution_safety_gates
+                ),
             )
         )
     return output
@@ -6082,6 +6393,9 @@ def _trading_console_candidate_output(rows: list[FamilyAdmissionRow]) -> list[Tr
             warning_count=len(row.risk_disclosure_contract.failure_modes),
             hard_blocker_count=len(_row_hard_blockers(row)),
             owner_decision_text=_owner_decision_text(row),
+            research_quality_status=row.research_quality_status,
+            risk_disclosure_classifications=list(row.risk_disclosure_classifications),
+            owner_risk_acceptance_required=row.owner_risk_acceptance_required,
         )
         for row in rows
     ]
@@ -6379,11 +6693,17 @@ def _candidate_state(row: FamilyAdmissionRow) -> str:
 
 def _owner_decision_text(row: FamilyAdmissionRow) -> str:
     if row.admission_level_code == "L3":
-        return "Owner may review exact bounded live scope; execute only after official final gate passes."
+        return (
+            "Owner may review exact bounded live scope; proceed only after explicit "
+            "risk acceptance and all execution safety gates pass."
+        )
     if row.admission_level_code == "L2":
-        return "Owner may review proposal and risk disclosure; no live action path yet."
+        return (
+            "Owner may review ActionCandidate proposal and accept disclosed evidence "
+            "risk; no live action path until execution gates are available."
+        )
     if row.admission_level_code == "L1":
-        return "Display-only candidate."
+        return "Owner may inspect a displayable candidate with risk-disclosure context."
     return "Parked or rejected candidate."
 
 
@@ -6423,6 +6743,7 @@ def _family_configs() -> list[_FamilyConfig]:
                 "regime uncertainty",
                 "false continuation",
             ],
+            research_quality_status="fragile_evidence",
             blocker_id="BRC-PROD-ADMIT-20260604-TREND-001",
             blocker_stage="BoundedLiveAuthorization",
             blocker_evidence=(
@@ -6439,33 +6760,36 @@ def _family_configs() -> list[_FamilyConfig]:
             family_type=StrategyFamilyType.VOLATILITY_BREAKOUT,
             family_label="Volatility expansion",
             strategy_group="Volatility contraction followed by breakout / release",
-            classification="blocked",
+            classification="dry-run-only",
             admission_level_code="L2",
-            admission_level="Hypothesis intake",
+            admission_level="ActionCandidate proposal intake",
             risk_disclosure="Failure modes: fake breakout, news wick, low-volume breakout.",
             failure_modes=[
                 "fake breakout",
                 "news wick",
                 "low-volume breakout",
             ],
+            research_quality_status="insufficient_research",
             blocker_id="BRC-PROD-ADMIT-20260604-VOL-001",
-            blocker_stage="CarrierReadinessReport",
+            blocker_stage="BoundedLiveAuthorization",
             blocker_evidence=(
-                "Candidate is registered_hypothesis_only with no runner/evaluator activation "
-                "and no complete Owner numeric scope."
+                "Volatility expansion is reviewable as an L2 ActionCandidate proposal, "
+                "but it is not supported by the current official action API / FinalGate "
+                "execution path for bounded live action."
             ),
-            bridge_method="CarrierReadinessReport",
+            bridge_method="ActionCandidate",
             next_retry_condition=(
-                "Evaluator/readiness evidence exists and Owner provides explicit scoped production authorization."
+                "Official action API and FinalGate support the exact carrier, Owner accepts "
+                "disclosed research risk, and all execution safety gates pass."
             ),
         ),
         _FamilyConfig(
             family_type=StrategyFamilyType.MEAN_REVERSION,
             family_label="Mean reversion",
             strategy_group="Range stretch / snapback",
-            classification="blocked",
+            classification="dry-run-only",
             admission_level_code="L2",
-            admission_level="Hypothesis intake",
+            admission_level="ActionCandidate proposal intake",
             risk_disclosure=(
                 "Failure modes: catching falling knife, range break into trend, liquidity wick."
             ),
@@ -6474,15 +6798,18 @@ def _family_configs() -> list[_FamilyConfig]:
                 "range break into trend",
                 "liquidity wick",
             ],
+            research_quality_status="insufficient_research",
             blocker_id="BRC-PROD-ADMIT-20260604-MR-001",
-            blocker_stage="CarrierCandidate",
+            blocker_stage="BoundedLiveAuthorization",
             blocker_evidence=(
-                "Mean-reversion candidate is metadata-only and lacks evaluator/readiness evidence "
-                "plus complete Owner numeric scope."
+                "Mean-reversion is reviewable as an L2 ActionCandidate proposal, "
+                "but it is not supported by the current official action API / FinalGate "
+                "execution path for bounded live action."
             ),
-            bridge_method="CarrierCandidate",
+            bridge_method="ActionCandidate",
             next_retry_condition=(
-                "MR evaluator/readiness evidence exists and Owner provides explicit scoped production authorization."
+                "Official action API and FinalGate support the exact carrier, Owner accepts "
+                "disclosed research risk, and all execution safety gates pass."
             ),
         ),
     ]

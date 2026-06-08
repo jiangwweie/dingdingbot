@@ -41,6 +41,9 @@ ACTION_SPEC_REQUIRED_FIELDS = [
 
 STRATEGY_WARNING_CODES = {
     "weak strategy evidence",
+    "fragile_evidence",
+    "insufficient_research",
+    "owner_risk_acceptance_required",
     "weak current alpha proof",
     "regime uncertainty",
     "false continuation",
@@ -117,6 +120,13 @@ class ActionSpecDraftInput(ActionSpecFinalGateModel):
     protection_template: dict[str, Any] = Field(default_factory=dict)
     review_template: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    research_quality_status: str = "warning"
+    risk_disclosure_classifications: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_status: str = "required"
+    owner_risk_acceptance_may_override: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_never_overrides: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     hard_blockers: list[str] = Field(default_factory=list)
     final_gate_adapter_ref: Optional[str] = None
     action_entry_payload_ref: Optional[str] = None
@@ -180,6 +190,13 @@ class NormalizedActionSpec(ActionSpecFinalGateModel):
     review_template: dict[str, Any] = Field(default_factory=dict)
     validation_issues: list[ActionSpecValidationIssue] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    research_quality_status: str = "warning"
+    risk_disclosure_classifications: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_status: str = "required"
+    owner_risk_acceptance_may_override: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_never_overrides: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     hard_blockers: list[str] = Field(default_factory=list)
     official_final_gate_required: Literal[True] = True
     operation_layer_required: Literal[True] = True
@@ -347,6 +364,21 @@ class ActionSpecFinalGateAdapterService:
             review_template=dict(action_spec.review_template),
             validation_issues=issues,
             warnings=warnings,
+            research_quality_status=action_spec.research_quality_status,
+            risk_disclosure_classifications=list(
+                action_spec.risk_disclosure_classifications
+            ),
+            owner_risk_acceptance_required=action_spec.owner_risk_acceptance_required,
+            owner_risk_acceptance_status=action_spec.owner_risk_acceptance_status,
+            owner_risk_acceptance_may_override=list(
+                action_spec.owner_risk_acceptance_may_override
+            ),
+            owner_risk_acceptance_never_overrides=list(
+                action_spec.owner_risk_acceptance_never_overrides
+            ),
+            owner_risk_acceptance_cannot_override_execution_safety_gates=(
+                action_spec.owner_risk_acceptance_cannot_override_execution_safety_gates
+            ),
             hard_blockers=hard_blockers,
         )
 

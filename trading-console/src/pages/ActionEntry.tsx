@@ -88,6 +88,14 @@ function confirmableStateLabel(value?: string): string {
   return '禁用';
 }
 
+function riskClassificationLabel(value?: string): string {
+  if (value === 'fragile_evidence') return '证据脆弱';
+  if (value === 'insufficient_research') return '研究不足';
+  if (value === 'owner_risk_acceptance_required') return '需 Owner 接受';
+  if (value === 'warning') return '风险警告';
+  return displayValue(value, '风险');
+}
+
 function readinessVariant(value?: string) {
   if (value === 'owner_confirmable' || value === 'budget_confirmable' || value === 'authorization_draft_ready' || value === 'needs_owner_authorization' || value === 'needs_budget_authorization') return 'warning' as const;
   if (value === 'proposal_only' || value === 'dry_run_only' || value === 'disabled_by_policy') return 'caution' as const;
@@ -189,6 +197,9 @@ export default function ActionEntry() {
   const selectedBudgetDraft = selectedLoop.budget_draft || {};
   const selectedPostAction = selectedLoop.post_action_readiness || {};
   const riskReview = pageData.risk_review || {};
+  const riskClassifications = asArray<string>(riskReview.risk_disclosure_classifications);
+  const ownerRiskOverrideItems = asArray<string>(riskReview.owner_risk_acceptance_may_override);
+  const ownerRiskNeverOverrideItems = asArray<string>(riskReview.owner_risk_acceptance_never_overrides);
   const finalGate = pageData.final_gate_result || {};
   const actionState = pageData.action_state || {};
   const authorizationPath = pageData.authorization_draft_path || {};
@@ -666,6 +677,37 @@ export default function ActionEntry() {
             <div className="rounded bg-rose-50 p-3 text-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
               <div className="text-xs">硬阻断</div>
               <div className="font-mono text-lg">{riskReview.hard_blocker_count || 0}</div>
+            </div>
+            <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+              <div className="text-xs text-slate-500">Research quality</div>
+              <div className="mt-1 text-sm font-medium">{riskClassificationLabel(riskReview.research_quality_status)}</div>
+            </div>
+            <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
+              <div className="text-xs text-slate-500">Owner acceptance</div>
+              <div className="mt-1 text-sm font-medium">
+                {riskReview.owner_risk_acceptance_required ? riskClassificationLabel('owner_risk_acceptance_required') : '无需接受'}
+              </div>
+            </div>
+          </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {riskClassifications.map((item) => (
+              <Badge key={item} variant={item === 'warning' ? 'caution' : 'warning'}>
+                {riskClassificationLabel(item)}
+              </Badge>
+            ))}
+          </div>
+          <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="rounded-md border border-amber-200 p-3 text-amber-900 dark:border-amber-900/50 dark:text-amber-200">
+              <div className="font-medium">可接受覆盖</div>
+              <div className="mt-1 break-words text-slate-600 dark:text-slate-400">
+                {ownerRiskOverrideItems.slice(0, 3).map(riskClassificationLabel).join(' / ') || '仅限证据弱点'}
+              </div>
+            </div>
+            <div className="rounded-md border border-red-200 p-3 text-red-900 dark:border-red-900/50 dark:text-red-200">
+              <div className="font-medium">不可覆盖</div>
+              <div className="mt-1 break-words text-slate-600 dark:text-slate-400">
+                {ownerRiskNeverOverrideItems.slice(0, 3).join(' / ') || '执行安全门'}
+              </div>
             </div>
           </div>
           <div className="space-y-2 text-sm">

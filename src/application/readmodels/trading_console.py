@@ -554,6 +554,8 @@ class TradingConsoleReadModelService:
             {
                 "code": record.id,
                 "message": record.evidence,
+                "severity": record.severity,
+                "stage": record.stage,
             }
             for record in state.blocker_records
         ]
@@ -825,6 +827,8 @@ class TradingConsoleReadModelService:
             {
                 "code": record.id,
                 "message": record.evidence,
+                "severity": record.severity,
+                "stage": record.stage,
             }
             for record in state.blocker_records
         ]
@@ -2648,21 +2652,55 @@ def _action_entry_risk_review(
     blockers: list[dict[str, Any]],
 ) -> dict[str, Any]:
     action_spec = dict(selected_candidate.get("generic_action_spec") or {})
+    risk_classifications = _dedupe_strings(
+        [str(item) for item in action_spec.get("risk_disclosure_classifications") or []]
+    )
     warnings = _dedupe_strings(
         [
             *[str(item) for item in action_spec.get("warnings") or []],
+            *risk_classifications,
             *[str(item) for item in adapter_contract.get("warning_not_blocker") or []],
         ]
     )
+    execution_safety_blockers = [
+        item
+        for item in blockers
+        if item.get("severity", "hard_blocker") == "hard_blocker"
+    ]
     hard_blockers = _dedupe_strings(
         [
             *[str(item) for item in action_spec.get("hard_blockers") or []],
-            *[str(item.get("code") or item.get("message")) for item in blockers],
+            *[
+                str(item.get("code") or item.get("message"))
+                for item in execution_safety_blockers
+            ],
         ]
     )
     return {
         "warning_policy": "warnings_require_owner_review_but_do_not_enable_action",
         "weak_strategy_evidence_policy": "warning_not_hard_blocker",
+        "research_quality_status": action_spec.get("research_quality_status") or "warning",
+        "risk_disclosure_classifications": risk_classifications,
+        "owner_risk_acceptance_required": bool(
+            action_spec.get("owner_risk_acceptance_required", True)
+        ),
+        "owner_risk_acceptance_status": (
+            action_spec.get("owner_risk_acceptance_status") or "required"
+        ),
+        "owner_risk_acceptance_may_override": [
+            str(item)
+            for item in action_spec.get("owner_risk_acceptance_may_override") or []
+        ],
+        "owner_risk_acceptance_never_overrides": [
+            str(item)
+            for item in action_spec.get("owner_risk_acceptance_never_overrides") or []
+        ],
+        "owner_risk_acceptance_cannot_override_execution_safety_gates": bool(
+            action_spec.get(
+                "owner_risk_acceptance_cannot_override_execution_safety_gates",
+                True,
+            )
+        ),
         "warnings": warnings,
         "hard_blockers": hard_blockers,
         "warning_count": len(warnings),

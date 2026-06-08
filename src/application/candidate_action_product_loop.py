@@ -199,6 +199,13 @@ class CandidateActionReadinessLoop(CandidateActionProductLoopModel):
     disabled_reason: str
     next_recommended_action: str
     warnings: list[str] = Field(default_factory=list)
+    research_quality_status: str = "warning"
+    risk_disclosure_classifications: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_required: bool = True
+    owner_risk_acceptance_status: str = "required"
+    owner_risk_acceptance_may_override: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_never_overrides: list[str] = Field(default_factory=list)
+    owner_risk_acceptance_cannot_override_execution_safety_gates: bool = True
     hard_blockers: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     stage_statuses: list[ProductLoopStageStatus] = Field(default_factory=list)
@@ -322,6 +329,10 @@ def _build_candidate_loop(
         [
             *[str(item) for item in adapter_result.get("warnings") or []],
             *[str(item) for item in generic_spec.get("warnings") or []],
+            *[
+                str(item)
+                for item in generic_spec.get("risk_disclosure_classifications") or []
+            ],
         ]
     )
     hard_blockers = _dedupe(
@@ -405,6 +416,28 @@ def _build_candidate_loop(
         disabled_reason=disabled_reason,
         next_recommended_action=_next_recommended_action(preview_status, family),
         warnings=warnings,
+        research_quality_status=str(generic_spec.get("research_quality_status") or "warning"),
+        risk_disclosure_classifications=[
+            str(item) for item in generic_spec.get("risk_disclosure_classifications") or []
+        ],
+        owner_risk_acceptance_required=bool(
+            generic_spec.get("owner_risk_acceptance_required", True)
+        ),
+        owner_risk_acceptance_status=str(
+            generic_spec.get("owner_risk_acceptance_status") or "required"
+        ),
+        owner_risk_acceptance_may_override=[
+            str(item) for item in generic_spec.get("owner_risk_acceptance_may_override") or []
+        ],
+        owner_risk_acceptance_never_overrides=[
+            str(item) for item in generic_spec.get("owner_risk_acceptance_never_overrides") or []
+        ],
+        owner_risk_acceptance_cannot_override_execution_safety_gates=bool(
+            generic_spec.get(
+                "owner_risk_acceptance_cannot_override_execution_safety_gates",
+                True,
+            )
+        ),
         hard_blockers=hard_blockers,
         evidence_refs=_evidence_refs(
             candidate_id=candidate_id,
