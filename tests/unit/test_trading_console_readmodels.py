@@ -839,6 +839,95 @@ def test_owner_action_flow_post_action_scopes_review_ledger_to_active_signal(mon
     assert exchange.cancel_calls == 0
 
 
+def test_owner_action_flow_live_review_scopes_to_active_authorization(monkeypatch):
+    _configure_auth(monkeypatch)
+    current_signal = "owner-live-auth-current"
+    old_signal = "owner-live-auth-old"
+    orders = [
+        _FakeOrder("entry-current", "ENTRY", "current-entry", parent_order_id=None, status="FILLED"),
+        _FakeOrder("tp-current", "TP1", "current-tp", parent_order_id="entry-current", status="OPEN"),
+        _FakeOrder("sl-current", "SL", "current-sl", parent_order_id="entry-current", status="OPEN"),
+        _FakeOrder("entry-old", "ENTRY", "old-entry", parent_order_id=None, status="FILLED"),
+        _FakeOrder("tp-old", "TP1", "old-tp", parent_order_id="entry-old", status="FILLED"),
+    ]
+    for item in orders[:3]:
+        item.signal_id = current_signal
+    for item in orders[3:]:
+        item.signal_id = old_signal
+
+    class _ActiveAuthPositionRepo:
+        async def list_active(self, *, symbol=None, limit=200):
+            return [
+                SimpleNamespace(
+                    id="pos-auth-current",
+                    signal_id=current_signal,
+                    symbol=BNB,
+                    direction="LONG",
+                    entry_price=Decimal("630"),
+                    current_qty=Decimal("0.01"),
+                    watermark_price=Decimal("630"),
+                    realized_pnl=Decimal("0"),
+                    total_fees_paid=Decimal("0"),
+                    total_funding_paid=Decimal("0"),
+                    projected_exit_fills={},
+                    projected_exit_fees={},
+                    opened_at=1780496661000,
+                    closed_at=None,
+                    is_closed=False,
+                )
+            ]
+
+    class _MixedLiveReviewRepo:
+        async def list(self, *, authorization_id=None, symbol=None, limit=50):
+            return [
+                SimpleNamespace(
+                    review_id="live-review-auth-old-closed-reviewed",
+                    authorization_id="auth-old",
+                    lifecycle_status="closed_reviewed",
+                    review_status="closed_reviewed",
+                    symbol=BNB,
+                    places_order=False,
+                    mutates_exchange=False,
+                    grants_trading_permission=False,
+                    frontend_action_enabled=False,
+                ),
+                SimpleNamespace(
+                    review_id="live-review-auth-current-pending-open",
+                    authorization_id="auth-current",
+                    lifecycle_status="protected_open",
+                    review_status="pending_open",
+                    symbol=BNB,
+                    places_order=False,
+                    mutates_exchange=False,
+                    grants_trading_permission=False,
+                    frontend_action_enabled=False,
+                ),
+            ]
+
+    _patch_deps(
+        monkeypatch,
+        exchange=_FakeExchangeGateway(),
+        position_repo=_ActiveAuthPositionRepo(),
+        order_repo=_FakeOrderRepo(orders),
+    )
+    from src.interfaces import api as api_module
+
+    monkeypatch.setattr(api_module, "_live_lifecycle_review_repo", _MixedLiveReviewRepo(), raising=False)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-action-flow")
+
+    assert response.status_code == 200
+    post_action = response.json()["data"]["post_action_state"]
+    ledger = post_action["review_ledger"]
+    assert post_action["current_lifecycle_authorization_ids"] == ["auth-current"]
+    assert ledger["lifecycle_status"] == "protected_open_from_pg_orders"
+    assert ledger["review_decision"]["review_id"] == "live-review-auth-current-pending-open"
+    assert ledger["review_decision"]["review_status"] == "pending_open"
+
+
 def test_execution_control_blocks_consumed_authorization_but_stays_read_only(monkeypatch):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())

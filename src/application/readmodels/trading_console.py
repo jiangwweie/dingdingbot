@@ -2887,8 +2887,13 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         if str(item.get("status") or "").lower() == "completed"
     ]
     active_signal_ids = _active_position_signal_ids(snap)
+    active_authorization_ids = _authorization_ids_for_signals(active_signal_ids)
     lifecycle_entry_orders = _orders_for_active_lifecycle(entry_orders, active_signal_ids)
     lifecycle_protection_orders = _orders_for_active_lifecycle(protection_orders, active_signal_ids)
+    lifecycle_live_reviews = _live_reviews_for_active_lifecycle(
+        snap.live_lifecycle_reviews,
+        active_authorization_ids,
+    )
     day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     exchange_state = _post_action_exchange_state(
         snap=snap,
@@ -2899,7 +2904,7 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         entry_orders=lifecycle_entry_orders,
         protection_orders=lifecycle_protection_orders,
         reviews=snap.review_records,
-        live_lifecycle_reviews=snap.live_lifecycle_reviews,
+        live_lifecycle_reviews=lifecycle_live_reviews,
     )
     next_attempt_gate = _post_action_next_attempt_gate(
         snap=snap,
@@ -2918,6 +2923,7 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         "entry_order_count": len(entry_orders),
         "protection_order_count": len(protection_orders),
         "current_lifecycle_signal_ids": sorted(active_signal_ids),
+        "current_lifecycle_authorization_ids": sorted(active_authorization_ids),
         "current_lifecycle_entry_order_count": len(lifecycle_entry_orders),
         "current_lifecycle_protection_order_count": len(lifecycle_protection_orders),
         "active_position_count": len(snap.pg_positions),
@@ -2935,6 +2941,7 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
             "tp_sl_orders": protection_orders[:5],
             "current_lifecycle_entry_orders": lifecycle_entry_orders[:5],
             "current_lifecycle_tp_sl_orders": lifecycle_protection_orders[:5],
+            "current_lifecycle_live_lifecycle_reviews": lifecycle_live_reviews[:5],
             "active_positions": snap.pg_positions[:5],
             "open_orders": snap.pg_open_orders[:5],
             "reviews": snap.review_records[:5],
@@ -2961,6 +2968,27 @@ def _orders_for_active_lifecycle(
         return orders
     scoped = [item for item in orders if str(item.get("signal_id") or "") in active_signal_ids]
     return scoped if scoped else orders
+
+
+def _authorization_ids_for_signals(signal_ids: set[str]) -> set[str]:
+    authorization_ids: set[str] = set()
+    for signal_id in signal_ids:
+        if signal_id.startswith("owner-live-"):
+            authorization_ids.add(signal_id.removeprefix("owner-live-"))
+    return authorization_ids
+
+
+def _live_reviews_for_active_lifecycle(
+    reviews: list[dict[str, Any]],
+    active_authorization_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not active_authorization_ids:
+        return reviews
+    scoped = [
+        item for item in reviews
+        if str(item.get("authorization_id") or "") in active_authorization_ids
+    ]
+    return scoped
 
 
 def _post_action_exchange_state(
