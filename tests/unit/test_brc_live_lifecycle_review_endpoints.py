@@ -105,3 +105,52 @@ def test_live_lifecycle_pending_open_review_endpoint_records_no_action_ledger(mo
     assert payload["no_action_guarantee"]["places_order"] is False
     assert latest.status_code == 200
     assert latest.json()["review"]["review_id"] == "live-review-auth-1-pending-open"
+
+
+def test_live_lifecycle_closed_reviewed_endpoint_records_terminal_review(monkeypatch):
+    _configure_auth(monkeypatch)
+    repo = _FakeLiveLifecycleReviewRepo()
+    from src.interfaces import api_brc_console
+
+    monkeypatch.setattr(api_brc_console, "_live_lifecycle_review_repository", lambda: repo)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/live-lifecycle-reviews/closed-reviewed",
+            json={
+                "authorization_id": "auth-closed",
+                "carrier_id": "MR-001-live-readonly-v0",
+                "strategy_family_id": "MR-001",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+                "quantity": "0.014",
+                "max_notional": "25",
+                "leverage": "1",
+                "max_attempts": 1,
+                "final_gate_result": "passed",
+                "protection_status": "tp_filled_sibling_sl_canceled",
+                "entry_order_id": "entry-closed",
+                "entry_exchange_order_id": "exchange-entry-closed",
+                "tp_order_ids": ["tp-closed"],
+                "tp_exchange_order_ids": ["exchange-tp-closed"],
+                "sl_order_id": "sl-canceled",
+                "sl_exchange_order_id": "exchange-sl-canceled",
+                "owner_risk_acceptance": "owner_accepted_l3_bounded_live",
+                "review_decision": "park",
+                "strategy_outcome": "closed_reviewed",
+                "close_reason": "take_profit_filled",
+                "cleanup_evidence_ref": "/tmp/cleanup.json",
+                "evidence_refs": ["/tmp/cleanup.json"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["review"]["review_status"] == "closed_reviewed"
+    assert payload["review"]["lifecycle_status"] == "closed_reviewed"
+    assert payload["review"]["metadata"]["review_decision"] == "park"
+    assert payload["review"]["metadata"]["cleanup_evidence_ref"] == "/tmp/cleanup.json"
+    assert payload["review"]["places_order"] is False
+    assert payload["review"]["mutates_exchange"] is False

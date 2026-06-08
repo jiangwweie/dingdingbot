@@ -189,6 +189,13 @@ class BrcLiveLifecyclePendingOpenReviewRequest(BaseModel):
     created_by: str = Field(default="codex", max_length=128)
 
 
+class BrcLiveLifecycleClosedReviewedRequest(BrcLiveLifecyclePendingOpenReviewRequest):
+    review_decision: Literal["promote", "revise", "park"] = "park"
+    strategy_outcome: str = Field(default="closed_reviewed", max_length=128)
+    close_reason: Optional[str] = Field(default=None, max_length=256)
+    cleanup_evidence_ref: Optional[str] = Field(default=None, max_length=512)
+
+
 class BrcLiveLifecycleReviewResponse(BaseModel):
     review: dict[str, Any]
     no_action_guarantee: dict[str, bool] = Field(
@@ -6586,6 +6593,64 @@ async def create_live_lifecycle_pending_open_review(
             "ledger_write_path": "official_api_brc_live_lifecycle_reviews_pending_open",
             "no_action_guarantee": True,
         },
+        created_by=body.created_by,
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
+    repo = _live_lifecycle_review_repository()
+    await repo.initialize()
+    saved = await repo.append(record)
+    return BrcLiveLifecycleReviewResponse(review=saved.model_dump(mode="json"))
+
+
+@router.post(
+    "/live-lifecycle-reviews/closed-reviewed",
+    response_model=BrcLiveLifecycleReviewResponse,
+)
+async def create_live_lifecycle_closed_reviewed(
+    body: BrcLiveLifecycleClosedReviewedRequest,
+) -> BrcLiveLifecycleReviewResponse:
+    now_ms = int(time.time() * 1000)
+    metadata = {
+        **body.metadata,
+        "ledger_write_path": "official_api_brc_live_lifecycle_reviews_closed_reviewed",
+        "review_decision": body.review_decision,
+        "strategy_outcome": body.strategy_outcome,
+        "close_reason": body.close_reason,
+        "cleanup_evidence_ref": body.cleanup_evidence_ref,
+        "no_action_guarantee": True,
+    }
+    record = BrcLiveLifecycleReviewRecord(
+        review_id=body.review_id
+        or _default_live_lifecycle_review_id(body.authorization_id, "closed-reviewed"),
+        authorization_id=body.authorization_id,
+        carrier_id=body.carrier_id,
+        strategy_family_id=body.strategy_family_id,
+        symbol=body.symbol,
+        side=body.side,
+        quantity=body.quantity,
+        max_notional=body.max_notional,
+        leverage=body.leverage,
+        max_attempts=body.max_attempts,
+        protection_mode=body.protection_mode,
+        review_requirement=body.review_requirement,
+        lifecycle_status="closed_reviewed",
+        review_status="closed_reviewed",
+        final_gate_result=body.final_gate_result,
+        protection_status=body.protection_status,
+        execution_intent_id=body.execution_intent_id,
+        entry_order_id=body.entry_order_id,
+        entry_exchange_order_id=body.entry_exchange_order_id,
+        tp_order_ids=body.tp_order_ids,
+        tp_exchange_order_ids=body.tp_exchange_order_ids,
+        sl_order_id=body.sl_order_id,
+        sl_exchange_order_id=body.sl_exchange_order_id,
+        tp_price=body.tp_price,
+        sl_trigger=body.sl_trigger,
+        owner_risk_acceptance=body.owner_risk_acceptance,
+        hard_gates_passed=body.hard_gates_passed,
+        evidence_refs=body.evidence_refs,
+        metadata={key: value for key, value in metadata.items() if value is not None},
         created_by=body.created_by,
         created_at_ms=now_ms,
         updated_at_ms=now_ms,
