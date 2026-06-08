@@ -259,7 +259,9 @@ async def strategy_family_admission_state(
 async def action_entry_readiness(
     market_regime: Optional[str] = Query(default=None),
     symbol_preference: Optional[str] = Query(default=None),
+    preferred_strategy_family: Optional[str] = Query(default=None),
     risk_tier: Optional[str] = Query(default=None),
+    owner_risk_acceptance: Optional[str] = Query(default=None),
     note: Optional[str] = Query(default=None),
     family: Optional[str] = Query(default=None),
     strategy_family_id: Optional[str] = Query(default=None),
@@ -302,8 +304,10 @@ async def action_entry_readiness(
         market_input={
             "regime": market_regime,
             "symbol_preference": symbol_preference,
+            "preferred_strategy_family": preferred_strategy_family,
             "side": side,
             "risk_tier": risk_tier,
+            "owner_risk_acceptance": owner_risk_acceptance,
             "note": note,
         },
     )
@@ -314,7 +318,9 @@ async def owner_action_flow(
     include_exchange: bool = Query(default=False),
     market_regime: Optional[str] = Query(default=None),
     symbol_preference: Optional[str] = Query(default=None),
+    preferred_strategy_family: Optional[str] = Query(default=None),
     risk_tier: Optional[str] = Query(default=None),
+    owner_risk_acceptance: Optional[str] = Query(default=None),
     note: Optional[str] = Query(default=None),
     family: Optional[str] = Query(default=None),
     strategy_family_id: Optional[str] = Query(default=None),
@@ -366,8 +372,10 @@ async def owner_action_flow(
         market_input={
             "regime": market_regime,
             "symbol_preference": symbol_preference,
+            "preferred_strategy_family": preferred_strategy_family,
             "side": side,
             "risk_tier": risk_tier,
+            "owner_risk_acceptance": owner_risk_acceptance,
             "note": note,
         },
         custom_budget={

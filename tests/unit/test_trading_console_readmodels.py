@@ -1948,8 +1948,11 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
         "regime": "not_selected",
         "mapped_family": None,
         "symbol_preference": None,
+        "preferred_strategy_family": None,
         "side": None,
         "risk_tier": "tiny",
+        "owner_risk_acceptance": "not_recorded",
+        "owner_risk_acceptance_recorded": False,
         "note": None,
         "source": "owner_input_query",
         "persisted": False,
@@ -2284,6 +2287,10 @@ def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
     assert flow["budgeted_autonomy_v01"]["policy"]["daily_attempts"]["used"] == 0
     assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
     assert flow["budgeted_autonomy_v01"]["places_order"] is False
+    assert flow["next_attempt_gate"]["status"] == "clear_for_preflight"
+    assert flow["next_attempt_gate"]["gate"] == "clear_for_next_preflight"
+    assert flow["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is True
+    assert flow["next_attempt_gate"]["action_allowed"] is False
 
 
 def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkeypatch):
@@ -2611,6 +2618,10 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert data["action_state"]["frontend_action_enabled"] is False
     assert data["action_state"]["places_order"] is False
     flow = data["owner_action_flow"]
+    assert flow["next_attempt_gate"]["status"] == "blocked"
+    assert flow["next_attempt_gate"]["gate"] == "current_lifecycle_open_protected"
+    assert flow["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is False
+    assert flow["next_attempt_gate"]["frontend_action_enabled"] is False
     assert flow["status"] == "not_actionable"
     assert flow["unsafe_action_enabled"] is False
     assert flow["budget_summary"]["status"] == "degraded_missing_account_facts"
@@ -2758,7 +2769,15 @@ def test_owner_action_flow_include_exchange_marks_eth_pg_exchange_cleanup_needed
     assert post_action["exchange_state"]["status"] == (
         "pg_open_exchange_flat_cleanup_needed"
     )
+    assert post_action["next_attempt_gate"]["status"] == "blocked"
+    assert post_action["next_attempt_gate"]["gate"] == (
+        "position_order_conflict_requires_recovery"
+    )
+    assert post_action["next_attempt_gate"]["blockers"][0]["id"] == (
+        "NEXT-ATTEMPT-PG-EXCHANGE-CLEANUP-REQUIRED"
+    )
     flow = data["owner_action_flow"]
+    assert flow["next_attempt_gate"]["status"] == "blocked"
     autonomy_loop = flow["budgeted_autonomy_loop"]
     assert autonomy_loop["outcome"] == "blocked_with_retry_condition"
     assert autonomy_loop["hard_blockers"][0]["id"] == (
@@ -2845,6 +2864,9 @@ def test_owner_action_flow_marks_external_flat_hygiene_closed_reviewed(monkeypat
     assert ledger["exit"]["status"] == "external_exchange_flat_unresolved"
     assert ledger["review_decision"]["status"] == "revise"
     assert ledger["strategy_outcome"] == "revise_after_external_flat_reconciliation"
+    assert post_action["next_attempt_gate"]["status"] == "clear_for_preflight"
+    assert post_action["next_attempt_gate"]["gate"] == "clear_for_next_preflight"
+    assert post_action["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is True
     autonomy_loop = data["owner_action_flow"]["budgeted_autonomy_loop"]
     assert autonomy_loop["outcome"] == "closed_reviewed"
     assert autonomy_loop["active_loop"] is False
@@ -3013,8 +3035,10 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
     query = {
         "market_regime": "trend",
         "symbol_preference": "SOL/USDT:USDT",
+        "preferred_strategy_family": "Trend",
         "side": "long",
         "risk_tier": "small",
+        "owner_risk_acceptance": "accepted",
         "note": "Owner sees a small trend continuation setup.",
         "family": "Trend",
         "strategy_family_id": "TF-001-live-readonly-v0",
@@ -3038,10 +3062,17 @@ def test_action_entry_readiness_accepts_owner_market_input_without_actions(monke
     assert market_input["regime"] == "trend"
     assert market_input["mapped_family"] == "Trend"
     assert market_input["symbol_preference"] == "SOL/USDT:USDT"
+    assert market_input["preferred_strategy_family"] == "Trend"
     assert market_input["side"] == "long"
     assert market_input["risk_tier"] == "small"
+    assert market_input["owner_risk_acceptance"] == "accepted"
+    assert market_input["owner_risk_acceptance_recorded"] is True
     assert market_input["note"] == "Owner sees a small trend continuation setup."
     assert market_input["persisted"] is False
+    risk_review = payload["data"]["risk_review"]
+    assert risk_review["owner_risk_acceptance_status"] == "accepted"
+    assert risk_review["owner_risk_acceptance_recorded"] is True
+    assert risk_review["owner_risk_acceptance_cannot_override_execution_safety_gates"] is True
 
     selected = payload["data"]["selected_candidate"]
     assert selected["family"] == "Trend"

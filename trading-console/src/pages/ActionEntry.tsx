@@ -7,8 +7,10 @@ import { blockingReasonLabel, sideLabel } from '@/lib/ownerViewModel';
 type ActionEntryInput = {
   market_regime: string;
   symbol_preference: string;
+  preferred_strategy_family: string;
   side: string;
   risk_tier: string;
+  owner_risk_acceptance: string;
   note: string;
   family: string;
   strategy_family_id: string;
@@ -25,8 +27,10 @@ type ActionEntryInput = {
 const INITIAL_INPUT: ActionEntryInput = {
   market_regime: 'trend',
   symbol_preference: 'SOL/USDT:USDT',
+  preferred_strategy_family: 'Trend',
   side: 'long',
   risk_tier: 'tiny',
+  owner_risk_acceptance: 'not_recorded',
   note: '',
   family: 'Trend',
   strategy_family_id: 'TF-001-live-readonly-v0',
@@ -217,6 +221,7 @@ export default function ActionEntry() {
   const postAuditEvents = asArray<any>(postSummary.audit_events);
   const ownerActionFlow = pageData.owner_action_flow || {};
   const flowSteps = asArray<any>(ownerActionFlow.flow_steps);
+  const nextAttemptGate = ownerActionFlow.next_attempt_gate || postAction.next_attempt_gate || {};
   const budgetRecommendation = pageData.budget_recommendation || {};
   const budgetSummary = ownerActionFlow.budget_summary || {};
   const candidateChoices = asArray<any>(ownerActionFlow.market_selection?.candidate_choices);
@@ -251,6 +256,7 @@ export default function ActionEntry() {
     setDraftInput((current) => ({
       ...current,
       market_regime: regimeForFamily(family, current.market_regime),
+      preferred_strategy_family: family,
       family,
       strategy_family_id: String(candidate.strategy_family_id || carrierId),
       carrier_id: carrierId,
@@ -270,6 +276,7 @@ export default function ActionEntry() {
     setDraftInput((current) => ({
       ...current,
       market_regime: regimeForFamily(String(loop.family || ''), current.market_regime),
+      preferred_strategy_family: String(loop.family || ''),
       family: String(loop.family || ''),
       strategy_family_id: String(loop.strategy_family_id || loop.carrier_id || ''),
       carrier_id: String(loop.carrier_id || ''),
@@ -442,13 +449,21 @@ export default function ActionEntry() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <label className="space-y-1 text-sm">
               <span className="text-xs font-medium text-slate-500">行情判断</span>
               <select value={draftInput.market_regime} onChange={(event) => updateField('market_regime', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
                 <option value="trend">趋势</option>
                 <option value="volatility_expansion">波动扩张</option>
                 <option value="mean_reversion">区间/震荡</option>
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-slate-500">策略族偏好</span>
+              <select value={draftInput.preferred_strategy_family} onChange={(event) => updateField('preferred_strategy_family', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                <option value="Trend">Trend</option>
+                <option value="Mean reversion">Mean reversion</option>
+                <option value="Volatility expansion">Volatility expansion</option>
               </select>
             </label>
             <label className="space-y-1 text-sm">
@@ -475,12 +490,20 @@ export default function ActionEntry() {
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              <span className="text-xs font-medium text-slate-500">数量</span>
-              <input value={draftInput.quantity} onChange={(event) => updateField('quantity', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
+              <span className="text-xs font-medium text-slate-500">研究风险接受</span>
+              <select value={draftInput.owner_risk_acceptance} onChange={(event) => updateField('owner_risk_acceptance', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                <option value="not_recorded">未记录</option>
+                <option value="accepted">Owner 已接受</option>
+                <option value="declined">Owner 未接受</option>
+              </select>
             </label>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-slate-500">数量</span>
+              <input value={draftInput.quantity} onChange={(event) => updateField('quantity', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
+            </label>
             <label className="space-y-1 text-sm">
               <span className="text-xs font-medium text-slate-500">Carrier</span>
               <input value={draftInput.carrier_id} onChange={(event) => updateField('carrier_id', event.target.value)} className="w-full rounded-md border border-slate-200 bg-white p-2 text-sm dark:border-slate-800 dark:bg-slate-950" />
@@ -685,9 +708,12 @@ export default function ActionEntry() {
             <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">
               <div className="text-xs text-slate-500">Owner acceptance</div>
               <div className="mt-1 text-sm font-medium">
-                {riskReview.owner_risk_acceptance_required ? riskClassificationLabel('owner_risk_acceptance_required') : '无需接受'}
+                {riskReview.owner_risk_acceptance_recorded ? '已接受策略研究风险' : riskReview.owner_risk_acceptance_required ? riskClassificationLabel('owner_risk_acceptance_required') : '无需接受'}
               </div>
             </div>
+          </div>
+          <div className="mb-4 rounded-md border border-slate-200 p-3 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400">
+            {displayValue(riskReview.owner_risk_acceptance_disclosure, '策略风险为警告；执行安全门不可覆盖。')}
           </div>
           <div className="mb-4 flex flex-wrap gap-2">
             {riskClassifications.map((item) => (
@@ -831,6 +857,22 @@ export default function ActionEntry() {
           <div className="rounded bg-slate-50 p-3 dark:bg-slate-800/40">审计：{postAction.audit_event_count || 0}</div>
         </div>
         <p className="mt-3 text-xs text-slate-500">重复执行安全：{displayValue(postAction.retry_safety, '无法确认')}</p>
+        <div className="mt-4 rounded-md border border-slate-200 p-3 dark:border-slate-800">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium">下一次尝试门控</h3>
+            <Badge variant={nextAttemptGate.status === 'clear_for_preflight' ? 'normal' : 'danger'}>
+              {displayValue(nextAttemptGate.status, '未知')}
+            </Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+            <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">Gate：{displayValue(nextAttemptGate.gate, '暂无')}</div>
+            <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">PG Pos：{nextAttemptGate.pg_active_position_count || 0}</div>
+            <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">PG Orders：{nextAttemptGate.pg_open_order_count || 0}</div>
+            <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">Ex Pos：{nextAttemptGate.exchange_position_count || 0}</div>
+            <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">Ex Prot：{nextAttemptGate.exchange_open_protection_count || 0}</div>
+          </div>
+          <div className="mt-3 text-xs text-slate-500">{displayValue(nextAttemptGate.retry_condition, '进入下一轮前仍需官方授权与 FinalGate。')}</div>
+        </div>
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
           <EvidenceList
             title="执行意图"

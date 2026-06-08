@@ -941,6 +941,7 @@ class TradingConsoleReadModelService:
                 selected_candidate=selected_candidate,
                 adapter_contract=state.generic_final_gate_adapter_contract.model_dump(mode="json"),
                 blockers=blockers,
+                market_input=normalized_market_input,
             ),
             "authorization_draft_path": _action_entry_authorization_draft_path(
                 selected_candidate=selected_candidate,
@@ -2097,16 +2098,28 @@ def _normalize_action_entry_market_input(value: Optional[dict[str, Any]]) -> dic
     regime = _normalized_market_regime(value.get("regime"))
     side = _optional_nonempty_str(value.get("side"))
     symbol_preference = _optional_nonempty_str(value.get("symbol_preference"))
+    preferred_strategy_family = _normalized_preferred_strategy_family(
+        value.get("preferred_strategy_family")
+    )
     risk_tier = _normalized_risk_tier(value.get("risk_tier"))
+    owner_risk_acceptance = _normalized_owner_risk_acceptance(
+        value.get("owner_risk_acceptance")
+    )
     note = _optional_nonempty_str(value.get("note"))
     if note is not None and len(note) > 500:
         note = f"{note[:500]}..."
+    mapped_family = _market_regime_family(regime)
+    if preferred_strategy_family is not None:
+        mapped_family = preferred_strategy_family
     return {
         "regime": regime,
-        "mapped_family": _market_regime_family(regime),
+        "mapped_family": mapped_family,
         "symbol_preference": symbol_preference,
+        "preferred_strategy_family": preferred_strategy_family,
         "side": side,
         "risk_tier": risk_tier,
+        "owner_risk_acceptance": owner_risk_acceptance,
+        "owner_risk_acceptance_recorded": owner_risk_acceptance == "accepted",
         "note": note,
         "source": "owner_input_query",
         "persisted": False,
@@ -2158,6 +2171,33 @@ def _market_regime_family(regime: str) -> Optional[str]:
         "volatility_expansion": "Volatility expansion",
         "mean_reversion": "Mean reversion",
     }.get(regime)
+
+
+def _normalized_preferred_strategy_family(value: Any) -> Optional[str]:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "trend": "Trend",
+        "tf": "Trend",
+        "trend_following": "Trend",
+        "mean_reversion": "Mean reversion",
+        "mr": "Mean reversion",
+        "range": "Mean reversion",
+        "ranging": "Mean reversion",
+        "sideways": "Mean reversion",
+        "volatility": "Volatility expansion",
+        "volatility_expansion": "Volatility expansion",
+        "vol_expansion": "Volatility expansion",
+    }
+    return aliases.get(normalized)
+
+
+def _normalized_owner_risk_acceptance(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"accepted", "accept", "true", "yes", "owner_accepted"}:
+        return "accepted"
+    if normalized in {"declined", "decline", "false", "no", "rejected"}:
+        return "declined"
+    return "not_recorded"
 
 
 def _optional_nonempty_str(value: Any) -> Optional[str]:
@@ -2650,11 +2690,19 @@ def _action_entry_risk_review(
     selected_candidate: dict[str, Any],
     adapter_contract: dict[str, Any],
     blockers: list[dict[str, Any]],
+    market_input: dict[str, Any],
 ) -> dict[str, Any]:
     action_spec = dict(selected_candidate.get("generic_action_spec") or {})
     risk_classifications = _dedupe_strings(
         [str(item) for item in action_spec.get("risk_disclosure_classifications") or []]
     )
+    raw_owner_acceptance = str(market_input.get("owner_risk_acceptance") or "not_recorded")
+    owner_acceptance_status = (
+        raw_owner_acceptance
+        if raw_owner_acceptance in {"accepted", "declined"}
+        else str(action_spec.get("owner_risk_acceptance_status") or "required")
+    )
+    owner_acceptance_recorded = owner_acceptance_status == "accepted"
     warnings = _dedupe_strings(
         [
             *[str(item) for item in action_spec.get("warnings") or []],
@@ -2684,8 +2732,14 @@ def _action_entry_risk_review(
         "owner_risk_acceptance_required": bool(
             action_spec.get("owner_risk_acceptance_required", True)
         ),
-        "owner_risk_acceptance_status": (
-            action_spec.get("owner_risk_acceptance_status") or "required"
+        "owner_risk_acceptance_status": owner_acceptance_status,
+        "owner_risk_acceptance_recorded": owner_acceptance_recorded,
+        "owner_risk_acceptance_source": "owner_input_query" if owner_acceptance_recorded else "not_recorded",
+        "owner_risk_acceptance_disclosure": (
+            "Owner accepted strategy-family research weakness as a warning only; "
+            "execution safety gates remain hard blockers."
+            if owner_acceptance_recorded
+            else "Strategy-family research weakness remains disclosed as a warning."
         ),
         "owner_risk_acceptance_may_override": [
             str(item)
@@ -2806,6 +2860,16 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         entry_orders=entry_orders,
         protection_orders=protection_orders,
     )
+    review_ledger = _post_action_review_ledger(
+        entry_orders=entry_orders,
+        protection_orders=protection_orders,
+        reviews=snap.review_records,
+    )
+    next_attempt_gate = _post_action_next_attempt_gate(
+        snap=snap,
+        exchange_state=exchange_state,
+        review_ledger=review_ledger,
+    )
     return {
         "status": "available" if (snap.pg_intents or snap.pg_orders or snap.review_records or snap.audit_events) else "empty",
         "intent_count": len(snap.pg_intents),
@@ -2817,19 +2881,20 @@ def _action_entry_post_action_state(snap: TradingConsoleSnapshot) -> dict[str, A
         "daily_attempt_day_key": day_key,
         "entry_order_count": len(entry_orders),
         "protection_order_count": len(protection_orders),
+        "active_position_count": len(snap.pg_positions),
+        "open_order_count": len(snap.pg_open_orders),
         "review_count": len(snap.review_records),
         "audit_event_count": len(snap.audit_events),
         "retry_safety": "consumed_authorization_or_completed_intent_blocks_duplicate_execution",
         "exchange_state": exchange_state,
-        "review_ledger": _post_action_review_ledger(
-            entry_orders=entry_orders,
-            protection_orders=protection_orders,
-            reviews=snap.review_records,
-        ),
+        "review_ledger": review_ledger,
+        "next_attempt_gate": next_attempt_gate,
         "summary": {
             "intents": snap.pg_intents[:5],
             "entry_orders": entry_orders[:5],
             "tp_sl_orders": protection_orders[:5],
+            "active_positions": snap.pg_positions[:5],
+            "open_orders": snap.pg_open_orders[:5],
             "reviews": snap.review_records[:5],
             "audit_events": snap.audit_events[:5],
         },
@@ -2980,6 +3045,103 @@ def _post_action_review_ledger(
     }
 
 
+def _post_action_next_attempt_gate(
+    *,
+    snap: TradingConsoleSnapshot,
+    exchange_state: dict[str, Any],
+    review_ledger: dict[str, Any],
+) -> dict[str, Any]:
+    exchange_position_count = int(exchange_state.get("exchange_position_count") or 0)
+    exchange_open_protection_count = int(exchange_state.get("exchange_open_protection_count") or 0)
+    pg_active_position_count = len(snap.pg_positions)
+    pg_open_order_count = len(snap.pg_open_orders)
+    lifecycle_status = str(review_ledger.get("lifecycle_status") or "not_started_or_unknown")
+    blockers: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    if exchange_state.get("cleanup_required") is True:
+        blockers.append(
+            {
+                "id": "NEXT-ATTEMPT-PG-EXCHANGE-CLEANUP-REQUIRED",
+                "stage": "post_action_reconciliation",
+                "path": "Owner Action Flow next attempt gate",
+                "evidence": "PG open protection exists while exchange is flat/no protection.",
+                "severity": "hard_blocker",
+                "bridge": "official_reconciliation_or_hygiene_cleanup",
+                "retry_condition": "Run official reconciliation/review cleanup until PG and exchange facts agree.",
+            }
+        )
+    if pg_active_position_count or pg_open_order_count or exchange_position_count or exchange_open_protection_count:
+        if (
+            pg_active_position_count
+            and pg_open_order_count
+            and (not snap.include_exchange or exchange_position_count)
+            and (not snap.include_exchange or exchange_open_protection_count)
+        ):
+            lifecycle_gate = "current_lifecycle_open_protected"
+            warnings.append("current_position_or_protection_open_no_next_attempt")
+            retry_condition = "Wait for the current scoped lifecycle to close, then reconcile PG/exchange and complete review."
+        else:
+            lifecycle_gate = "position_order_conflict_requires_recovery"
+            retry_condition = "Resolve active position/open order/protection conflict through official recovery before any new attempt."
+            blockers.append(
+                {
+                    "id": "NEXT-ATTEMPT-POSITION-ORDER-CONFLICT",
+                    "stage": "pre_next_attempt",
+                    "path": "Owner Action Flow next attempt gate",
+                    "evidence": (
+                        f"pg_active_position_count={pg_active_position_count}, "
+                        f"pg_open_order_count={pg_open_order_count}, "
+                        f"exchange_position_count={exchange_position_count}, "
+                        f"exchange_open_protection_count={exchange_open_protection_count}"
+                    ),
+                    "severity": "hard_blocker",
+                    "bridge": "official_reconciliation_or_lifecycle_review",
+                    "retry_condition": "PG/exchange position and order counts must be aligned and flat, or current lifecycle must be proven open-protected.",
+                }
+            )
+    elif lifecycle_status in {
+        "closed_from_pg_exit_order",
+        "closed_external_exchange_flat_unresolved",
+        "not_started_or_unknown",
+    }:
+        lifecycle_gate = "clear_for_next_preflight"
+        retry_condition = "Create fresh Owner/Budget authorization and rerun official FinalGate for exactly one scoped attempt."
+        if lifecycle_status == "closed_external_exchange_flat_unresolved":
+            warnings.append("prior_external_flat_cleanup_reviewed")
+    else:
+        lifecycle_gate = "review_state_incomplete"
+        retry_condition = "Complete or classify post-action Review Ledger before next bounded-live attempt."
+        blockers.append(
+            {
+                "id": "NEXT-ATTEMPT-REVIEW-STATE-INCOMPLETE",
+                "stage": "post_action_review",
+                "path": "Owner Action Flow next attempt gate",
+                "evidence": f"review_ledger.lifecycle_status={lifecycle_status}",
+                "severity": "hard_blocker",
+                "bridge": "complete_review_ledger",
+                "retry_condition": "Review Ledger lifecycle_status must be closed/reviewed, open-protected, or not-started with flat evidence.",
+            }
+        )
+    blocked = bool(blockers) or lifecycle_gate != "clear_for_next_preflight"
+    return {
+        "gate": lifecycle_gate,
+        "status": "blocked" if blocked else "clear_for_preflight",
+        "next_attempt_allowed_by_lifecycle": not blocked,
+        "action_allowed": False,
+        "may_execute_live": False,
+        "frontend_action_enabled": False,
+        "requires_official_final_gate": True,
+        "pg_active_position_count": pg_active_position_count,
+        "pg_open_order_count": pg_open_order_count,
+        "exchange_position_count": exchange_position_count,
+        "exchange_open_protection_count": exchange_open_protection_count,
+        "review_lifecycle_status": lifecycle_status,
+        "warnings": warnings,
+        "blockers": blockers,
+        "retry_condition": retry_condition,
+    }
+
+
 def _post_action_order_ledger_entry(order: dict[str, Any] | None) -> dict[str, Any]:
     if order is None:
         return {"status": "not_available", "reason": "entry_order_not_recorded"}
@@ -3056,6 +3218,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
     final_gate = dict(data.get("final_gate_result") or {})
     action_state = dict(data.get("action_state") or {})
     post_action = dict(data.get("post_action_state") or {})
+    next_attempt_gate = dict(post_action.get("next_attempt_gate") or {})
     candidate_output = [
         dict(item) for item in data.get("candidate_output") or []
         if isinstance(item, dict)
@@ -3146,13 +3309,14 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         {
             "step": "post_action_evidence",
             "label": "Post-action timeline / evidence",
-            "status": post_action.get("status") or "empty",
+            "status": next_attempt_gate.get("status") or post_action.get("status") or "empty",
             "summary": (
                 f"{post_action.get('intent_count', 0)} intents / "
                 f"{post_action.get('entry_order_count', 0)} entries / "
                 f"{post_action.get('protection_order_count', 0)} TP-SL / "
                 f"{post_action.get('review_count', 0)} reviews / "
-                f"{post_action.get('audit_event_count', 0)} audit events"
+                f"{post_action.get('audit_event_count', 0)} audit events; "
+                f"{next_attempt_gate.get('gate') or 'lifecycle gate unavailable'}"
             ),
         },
         {
@@ -3189,6 +3353,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         },
         "budgeted_autonomy_loop": budgeted_autonomy_loop,
         "budgeted_autonomy_v01": budgeted_autonomy_v01,
+        "next_attempt_gate": next_attempt_gate,
         "budget_summary": {
             "status": budget_status,
             "owner_selection_status": owner_budget_selection.get("status"),
