@@ -2025,10 +2025,31 @@ def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkey
 def test_owner_action_flow_accepts_owner_approved_custom_budget_envelope(monkeypatch):
     _configure_auth(monkeypatch)
     exchange = _FakeExchangeGateway(normal_orders=[], stop_orders=[])
+    window_start_ms = int(time.time() * 1000)
+    prior_same_day_ms = window_start_ms - 1_000
+    intent_repo = _FakeIntentRepo(
+        [
+            SimpleNamespace(
+                id="intent-before-budget-window",
+                signal_id="signal-before-budget-window",
+                symbol="SOL/USDT:USDT",
+                status="completed",
+                order_id="entry-before-budget-window",
+                authorization_id="auth-before-budget-window",
+                exchange_order_id="exchange-before-budget-window",
+                blocked_reason=None,
+                blocked_message=None,
+                failed_reason=None,
+                created_at=prior_same_day_ms,
+                updated_at=prior_same_day_ms,
+            )
+        ]
+    )
     _patch_deps(
         monkeypatch,
         exchange=exchange,
         order_repo=_FakeOrderRepo([]),
+        intent_repo=intent_repo,
         account_snapshot=_FakeAccountSnapshot(),
     )
     from src.interfaces.api import app
@@ -2064,11 +2085,20 @@ def test_owner_action_flow_accepts_owner_approved_custom_budget_envelope(monkeyp
                 "custom_max_active_positions": "1",
                 "custom_max_attempts": "1",
                 "custom_max_leverage": "1",
+                "custom_budget_authorization_id": "budget-envelope:owner-approved-test",
+                "custom_attempt_window_start_ms": str(window_start_ms),
             },
         )
 
     assert response.status_code == 200
-    flow = response.json()["data"]["owner_action_flow"]
+    data = response.json()["data"]
+    assert data["budget_recommendation"]["budget_envelope"]["envelope_id"] == (
+        "budget-envelope:owner-approved-test"
+    )
+    assert data["budget_recommendation"]["owner_approved_budget_window"][
+        "attempt_window_start_ms"
+    ] == window_start_ms
+    flow = data["owner_action_flow"]
     assert flow["budget_summary"]["status"] == "available"
     assert flow["budget_summary"]["recommended_total_budget"] == "25"
     assert flow["budget_summary"]["recommended_max_notional_per_action"] == "20"
@@ -2080,6 +2110,10 @@ def test_owner_action_flow_accepts_owner_approved_custom_budget_envelope(monkeyp
     assert proposal["estimated_notional_usdt"] == "20.0"
     assert "owner_max_notional_exceeds_budget_envelope" not in proposal["hard_blockers"]
     assert flow["budgeted_autonomy_v01"]["policy"]["budget"]["max_notional_per_action"] == "20"
+    assert flow["budgeted_autonomy_v01"]["policy"]["daily_attempts"]["used"] == 0
+    assert flow["budgeted_autonomy_v01"]["policy"]["daily_attempts"]["source"] == (
+        "trading_console_selected_symbol_pg_intents_owner_budget_window"
+    )
     assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
     assert flow["budgeted_autonomy_v01"]["places_order"] is False
 

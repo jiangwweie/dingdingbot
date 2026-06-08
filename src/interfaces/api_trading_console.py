@@ -329,6 +329,8 @@ async def owner_action_flow(
     custom_max_active_positions: Optional[int] = Query(default=None, ge=1, le=3),
     custom_max_attempts: Optional[int] = Query(default=None, ge=1, le=3),
     custom_max_leverage: Optional[str] = Query(default=None),
+    custom_budget_authorization_id: Optional[str] = Query(default=None),
+    custom_attempt_window_start_ms: Optional[int] = Query(default=None, ge=0),
 ) -> TradingConsoleReadModelResponse:
     return await _service(include_exchange=include_exchange).owner_action_flow(
         owner_scope={
@@ -365,6 +367,8 @@ async def owner_action_flow(
             "max_active_positions": custom_max_active_positions,
             "max_attempts": custom_max_attempts,
             "max_leverage": custom_max_leverage,
+            "budget_authorization_id": custom_budget_authorization_id,
+            "attempt_window_start_ms": custom_attempt_window_start_ms,
         },
         include_exchange=include_exchange,
     )
@@ -396,6 +400,8 @@ async def budget_recommendation(
     custom_max_active_positions: Optional[int] = Query(default=None, ge=1, le=3),
     custom_max_attempts: Optional[int] = Query(default=None, ge=1, le=3),
     custom_max_leverage: Optional[str] = Query(default=None),
+    custom_budget_authorization_id: Optional[str] = Query(default=None),
+    custom_attempt_window_start_ms: Optional[int] = Query(default=None, ge=0),
 ) -> TradingConsoleReadModelResponse:
     return await _service(include_exchange=include_exchange).budget_recommendation(
         include_exchange=include_exchange,
@@ -408,6 +414,8 @@ async def budget_recommendation(
             "max_active_positions": custom_max_active_positions,
             "max_attempts": custom_max_attempts,
             "max_leverage": custom_max_leverage,
+            "budget_authorization_id": custom_budget_authorization_id,
+            "attempt_window_start_ms": custom_attempt_window_start_ms,
         },
         owner_selection={
             "symbol": symbol,

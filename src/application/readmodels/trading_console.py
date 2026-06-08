@@ -692,6 +692,7 @@ class TradingConsoleReadModelService:
             custom=custom_budget,
             owner_selection=raw_owner_selection,
         )
+        budget = _apply_owner_approved_budget_window(budget, custom_budget or {})
         envelope = dict(budget.get("budget_envelope") or {})
         candidate_output = apply_budget_envelope_to_action_candidates(candidate_output, envelope)
         generic_action_specs = apply_budget_envelope_to_generic_action_specs(
@@ -2910,6 +2911,39 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _apply_owner_approved_budget_window(
+    budget: dict[str, Any],
+    custom_budget: dict[str, Any],
+) -> dict[str, Any]:
+    budget_id = _optional_nonempty_str(
+        custom_budget.get("budget_authorization_id")
+        or custom_budget.get("owner_budget_id")
+    )
+    attempt_window_start_ms = _optional_int_value(
+        custom_budget.get("attempt_window_start_ms")
+        or custom_budget.get("owner_budget_approved_at_ms")
+    )
+    if budget_id is None and attempt_window_start_ms is None:
+        return budget
+    result = dict(budget)
+    envelope = dict(result.get("budget_envelope") or {})
+    if budget_id is not None:
+        envelope["envelope_id"] = budget_id
+    if attempt_window_start_ms is not None:
+        envelope["attempt_window_start_ms"] = attempt_window_start_ms
+    result["budget_envelope"] = envelope
+    result["owner_approved_budget_window"] = {
+        "budget_authorization_id": budget_id or envelope.get("envelope_id"),
+        "attempt_window_start_ms": attempt_window_start_ms,
+        "source": "owner_action_flow_custom_budget_query",
+        "creates_authorization": False,
+        "creates_execution_intent": False,
+        "places_order": False,
+        "mutates_pg": False,
+    }
+    return result
+
+
 def _owner_action_candidate_choices(
     *,
     candidate_output: list[dict[str, Any]],
@@ -3086,7 +3120,11 @@ def _budgeted_autonomy_v01_projection(
         review_required="post_action_review_required",
         protection_mode="single_tp_plus_sl",
     )
-    review_ledger = dict(post_action.get("review_ledger") or {})
+    attempt_window_start_ms = _optional_int_value(envelope.get("attempt_window_start_ms"))
+    review_ledger = _review_ledger_for_budget_window(
+        review_ledger=dict(post_action.get("review_ledger") or {}),
+        attempt_window_start_ms=attempt_window_start_ms,
+    )
     exchange_state = dict(post_action.get("exchange_state") or {})
     entry = dict(review_ledger.get("entry") or {})
     tp_sl = dict(review_ledger.get("tp_sl_result") or {})
@@ -3120,6 +3158,7 @@ def _budgeted_autonomy_v01_projection(
         post_action=post_action,
         symbol=selected_spec.get("symbol"),
         day_key=day_key,
+        attempt_window_start_ms=attempt_window_start_ms,
     )
     daily_state = BudgetedAutonomyDailyState(
         day_key=day_key,
@@ -3127,7 +3166,11 @@ def _budgeted_autonomy_v01_projection(
         attempts_allowed=max_attempts,
         budget_used_notional=Decimal("0"),
         realized_loss=Decimal("0"),
-        source="trading_console_selected_symbol_pg_intents_current_utc_day",
+        source=(
+            "trading_console_selected_symbol_pg_intents_owner_budget_window"
+            if attempt_window_start_ms is not None
+            else "trading_console_selected_symbol_pg_intents_current_utc_day"
+        ),
     )
     candidates = [
         _budgeted_autonomy_candidate_from_spec(item)
@@ -3149,16 +3192,21 @@ def _completed_intents_for_scope_today(
     post_action: dict[str, Any],
     symbol: Any,
     day_key: str,
+    attempt_window_start_ms: int | None = None,
 ) -> int:
     selected_symbol = str(symbol or "")
     counts = dict(post_action.get("completed_intents_today_by_symbol") or {})
-    if selected_symbol:
+    if attempt_window_start_ms is None and selected_symbol:
         parsed_count = _optional_int_value(counts.get(selected_symbol))
         if parsed_count is not None:
             return parsed_count
-    elif counts:
+    elif attempt_window_start_ms is None and counts:
         return sum(_optional_int_value(item) or 0 for item in counts.values())
     day_start_ms = _day_start_ms(day_key)
+    window_start_ms = max(
+        day_start_ms,
+        attempt_window_start_ms if attempt_window_start_ms is not None else day_start_ms,
+    )
     summary = dict(post_action.get("summary") or {})
     intents = [
         dict(item)
@@ -3172,10 +3220,24 @@ def _completed_intents_for_scope_today(
         if selected_symbol and str(item.get("symbol") or "") != selected_symbol:
             continue
         created_at = _optional_int_value(item.get("created_at"))
-        if created_at is None or created_at < day_start_ms:
+        if created_at is None or created_at < window_start_ms:
             continue
         count += 1
     return count
+
+
+def _review_ledger_for_budget_window(
+    *,
+    review_ledger: dict[str, Any],
+    attempt_window_start_ms: int | None,
+) -> dict[str, Any]:
+    if attempt_window_start_ms is None:
+        return review_ledger
+    entry = dict(review_ledger.get("entry") or {})
+    entry_created_at = _optional_int_value(entry.get("created_at_ms"))
+    if entry_created_at is not None and entry_created_at < attempt_window_start_ms:
+        return {}
+    return review_ledger
 
 
 def _completed_intent_counts_by_symbol_today(

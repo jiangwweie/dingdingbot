@@ -44,14 +44,16 @@ def main() -> None:
     _guard()
     cookie = _session_cookie()
     scope = _scope_from_env()
+    budget_window = _budget_window_from_env()
     result: dict[str, Any] = {
         "generated_from": "budgeted_autonomy_v01_cycle_runner",
         "initial_scope": dict(scope),
+        "budget_window": dict(budget_window),
         "scope": scope,
         "safety": _safety_flags(),
         "steps": [],
     }
-    flow = _owner_action_flow(cookie, scope)
+    flow = _owner_action_flow(cookie, scope, budget_window)
     result["steps"].append({"name": "owner_action_flow", "response": flow})
     if flow["status"] >= 300:
         _finish(result, "blocked_with_retry_condition", "owner_action_flow_failed")
@@ -220,6 +222,21 @@ def _api_base() -> str:
     return (os.environ.get(API_BASE_ENV) or "http://127.0.0.1:18080").rstrip("/")
 
 
+def _budget_window_from_env() -> dict[str, str]:
+    budget_id = (
+        os.environ.get("BUDGETED_AUTONOMY_BUDGET_AUTHORIZATION_ID")
+        or f"budget-envelope:owner-approved-v01:{int(time.time() * 1000)}"
+    )
+    approved_at_ms = (
+        os.environ.get("BUDGETED_AUTONOMY_BUDGET_APPROVED_AT_MS")
+        or str(int(time.time() * 1000))
+    )
+    return {
+        "custom_budget_authorization_id": budget_id,
+        "custom_attempt_window_start_ms": approved_at_ms,
+    }
+
+
 def _session_cookie() -> str:
     config = _load_auth_config()
     now = int(time.time())
@@ -262,11 +279,16 @@ def _request_json(
         return {"status": exc.code, "body": parsed}
 
 
-def _owner_action_flow(cookie: str, scope: dict[str, str]) -> dict[str, Any]:
+def _owner_action_flow(
+    cookie: str,
+    scope: dict[str, str],
+    budget_window: dict[str, str],
+) -> dict[str, Any]:
     query = urllib.parse.urlencode(
         {
             "include_exchange": "true",
             **scope,
+            **budget_window,
             "current_price": os.environ.get("BUDGETED_AUTONOMY_CURRENT_PRICE", ""),
             "min_notional": os.environ.get("BUDGETED_AUTONOMY_MIN_NOTIONAL", ""),
             "min_qty": os.environ.get("BUDGETED_AUTONOMY_MIN_QTY", ""),
