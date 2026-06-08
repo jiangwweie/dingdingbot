@@ -24,6 +24,12 @@ from src.application.budget_recommendation import (
     apply_budget_envelope_to_generic_action_specs,
     build_budget_recommendation,
 )
+from src.application.budgeted_autonomy import (
+    BudgetedAutonomyAuthorization,
+    BudgetedAutonomyCandidateInput,
+    BudgetedAutonomyPositionEvidence,
+    evaluate_budgeted_autonomy_loop,
+)
 from src.application.notional_sizing import (
     ContractMarketRules,
     compute_notional_sizing,
@@ -2532,6 +2538,12 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         candidate_output=candidate_output,
         generic_specs=generic_specs,
     )
+    budgeted_autonomy_loop = _budgeted_autonomy_loop_projection(
+        envelope=envelope,
+        selected_spec=selected_spec,
+        generic_specs=generic_specs,
+        post_action=post_action,
+    )
     steps = [
         {
             "step": "market_input",
@@ -2604,6 +2616,12 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
                 f"{post_action.get('audit_event_count', 0)} audit events"
             ),
         },
+        {
+            "step": "budgeted_autonomy_loop",
+            "label": "Budgeted autonomy loop",
+            "status": budgeted_autonomy_loop.get("outcome"),
+            "summary": budgeted_autonomy_loop.get("retry_condition"),
+        },
     ]
     return {
         "status": "actionable" if action_enabled else "not_actionable",
@@ -2624,6 +2642,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
                 lambda item: item.get("proposal_role") == "range_candidate",
             ),
         },
+        "budgeted_autonomy_loop": budgeted_autonomy_loop,
         "budget_summary": {
             "status": budget_status,
             "owner_selection_status": owner_budget_selection.get("status"),
@@ -2760,6 +2779,125 @@ def _owner_action_candidate_choices(
             }
         )
     return choices
+
+
+def _budgeted_autonomy_loop_projection(
+    *,
+    envelope: dict[str, Any],
+    selected_spec: dict[str, Any],
+    generic_specs: list[dict[str, Any]],
+    post_action: dict[str, Any],
+) -> dict[str, Any]:
+    max_notional = _decimal_from_any(envelope.get("max_notional_per_action")) or Decimal("0.01")
+    max_daily_loss = _decimal_from_any(envelope.get("max_daily_loss")) or Decimal("0")
+    max_leverage = _decimal_from_any(envelope.get("max_leverage")) or Decimal("1")
+    allowed_symbols = [str(item) for item in envelope.get("allowed_symbols") or []]
+    allowed_sides = [
+        _normalize_side(item) for item in envelope.get("allowed_sides") or []
+        if _normalize_side(item) in {"long", "short"}
+    ]
+    if not allowed_sides:
+        allowed_sides = ["long"]
+    selected_carrier = selected_spec.get("carrier_id")
+    allowed_carriers = [
+        str(item.get("carrier_id"))
+        for item in generic_specs
+        if isinstance(item, dict) and item.get("carrier_id")
+    ]
+    if selected_carrier and str(selected_carrier) not in allowed_carriers:
+        allowed_carriers.append(str(selected_carrier))
+    authorization = BudgetedAutonomyAuthorization(
+        budget_authorization_id=str(envelope.get("envelope_id") or "budgeted-autonomy:read-model"),
+        allowed_carriers=allowed_carriers,
+        allowed_symbols=allowed_symbols,
+        allowed_sides=allowed_sides,  # type: ignore[arg-type]
+        max_notional_per_action=max_notional,
+        daily_loss_cap=max_daily_loss,
+        max_active_positions=int(envelope.get("max_active_positions") or 1),
+        max_attempts=int(envelope.get("max_attempts") or 1),
+        max_leverage=max_leverage,
+        review_required="post_action_review_required",
+        protection_mode="single_tp_plus_sl",
+    )
+    review_ledger = dict(post_action.get("review_ledger") or {})
+    entry = dict(review_ledger.get("entry") or {})
+    tp_sl = dict(review_ledger.get("tp_sl_result") or {})
+    positions: list[BudgetedAutonomyPositionEvidence] = []
+    if review_ledger.get("lifecycle_status") == "protected_open_from_pg_orders":
+        position_symbol = (
+            str(selected_spec.get("symbol"))
+            if selected_spec.get("symbol")
+            else (allowed_symbols[0] if allowed_symbols else "unknown")
+        )
+        open_protection_order_count = int(tp_sl.get("open_protection_order_count") or 0)
+        positions.append(
+            BudgetedAutonomyPositionEvidence(
+                carrier_id=str(selected_carrier) if selected_carrier else None,
+                symbol=position_symbol,
+                side=_normalize_side(selected_spec.get("side")),
+                quantity=_decimal_from_any(entry.get("quantity")),
+                entry_price=_decimal_from_any(entry.get("average_price")),
+                exchange_position_present=False,
+                pg_position_count=1,
+                open_tp_count=1 if open_protection_order_count > 0 else 0,
+                open_sl_count=1 if open_protection_order_count > 1 else 0,
+                pg_open_order_count=open_protection_order_count,
+                retry_allowed=False,
+                review_recorded=bool(post_action.get("review_count")),
+                audit_recorded=bool(post_action.get("audit_event_count")),
+            )
+        )
+    candidates = [
+        _budgeted_autonomy_candidate_from_spec(item)
+        for item in generic_specs
+        if isinstance(item, dict) and item.get("carrier_id")
+    ]
+    evaluation = evaluate_budgeted_autonomy_loop(
+        authorization=authorization,
+        positions=positions,
+        candidates=candidates,
+        review_ledger=review_ledger,
+    )
+    return evaluation.model_dump(mode="json")
+
+
+def _budgeted_autonomy_candidate_from_spec(spec: dict[str, Any]) -> BudgetedAutonomyCandidateInput:
+    return BudgetedAutonomyCandidateInput(
+        candidate_id=str(spec.get("action_candidate_ref") or spec.get("carrier_id") or "unknown"),
+        family=str(spec.get("family") or "unknown"),
+        carrier_id=str(spec.get("carrier_id") or "unknown"),
+        symbol=str(spec.get("symbol") or (spec.get("supported_symbols") or ["unknown"])[0]),
+        side=_normalize_side(spec.get("side")),
+        status=str(spec.get("status") or "invalid_blocked"),
+        action_registry_supported=bool(spec.get("action_registry_supported")),
+        proposal_role=str(spec.get("proposal_role") or "unknown"),
+        quantity=_decimal_from_any(spec.get("quantity") or spec.get("computed_quantity")),
+        target_notional_usdt=_decimal_from_any(spec.get("target_notional_usdt")),
+        estimated_notional_usdt=_decimal_from_any(spec.get("estimated_notional_usdt")),
+        max_notional=_decimal_from_any(spec.get("max_notional") or spec.get("recommended_max_notional")),
+        leverage=_decimal_from_any(spec.get("leverage")),
+        max_attempts=int(spec["max_attempts"]) if spec.get("max_attempts") is not None else None,
+        protection_mode=spec.get("protection_mode"),
+        review_requirement=spec.get("review_requirement"),
+        warnings=list(spec.get("warnings") or []),
+        hard_blockers=list(spec.get("hard_blockers") or []),
+    )
+
+
+def _decimal_from_any(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _normalize_side(value: Any) -> str:
+    text = str(value or "long").lower()
+    if text in {"sell", "short"}:
+        return "short"
+    return "long"
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:

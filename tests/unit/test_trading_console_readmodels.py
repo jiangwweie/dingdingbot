@@ -1985,6 +1985,22 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert proposal["backend_actionable"] is False
     assert proposal["frontend_action_enabled"] is False
     assert proposal["places_order"] is False
+    autonomy_loop = flow["budgeted_autonomy_loop"]
+    assert autonomy_loop["loop_version"] == "budgeted_autonomy_v0"
+    assert autonomy_loop["outcome"] == "protected_open_review_pending"
+    assert autonomy_loop["active_loop"] is True
+    assert autonomy_loop["active_position_count"] == 1
+    assert autonomy_loop["selected_candidate"] is None
+    assert autonomy_loop["blocked_candidates"][0]["status"] == "blocked"
+    assert autonomy_loop["blocked_candidates"][0]["blockers"][0]["id"] == (
+        "BUDGETED-AUTONOMY-ACTIVE-POSITION"
+    )
+    assert autonomy_loop["action_allowed"] is False
+    assert autonomy_loop["backend_actionable"] is False
+    assert autonomy_loop["frontend_action_enabled"] is False
+    assert autonomy_loop["auto_execution_enabled"] is False
+    assert autonomy_loop["places_order"] is False
+    assert autonomy_loop["mutates_pg"] is False
     steps = {item["step"]: item for item in flow["flow_steps"]}
     assert set(steps) == {
         "market_input",
@@ -1995,6 +2011,7 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
         "final_gate",
         "action_state",
         "post_action_evidence",
+        "budgeted_autonomy_loop",
     }
     assert steps["market_input"]["status"] == "ready"
     assert steps["candidate_selection"]["summary"] == (
@@ -2002,6 +2019,9 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     )
     assert steps["budget_envelope"]["status"] == "blocked"
     assert steps["action_state"]["status"] == "blocked"
+    assert steps["budgeted_autonomy_loop"]["status"] == (
+        "protected_open_review_pending"
+    )
     assert flow["timeline"]["entry_order_count"] == 1
     assert flow["timeline"]["protection_order_count"] == 2
     assert exchange.open_order_calls == []
