@@ -2037,6 +2037,60 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
         assert item["action_spec"]["may_execute_live"] is False
         assert item["final_gate_preview"]["frontend_action_enabled"] is False
 
+    product_loop = payload["data"]["candidate_action_product_loop"]
+    assert product_loop["status"] == "non_live_product_loop_ready"
+    assert product_loop["no_action_guarantee"]["places_order"] is False
+    readiness_loop = {
+        item["candidate_id"]: item
+        for item in payload["data"]["candidate_action_readiness_loop"]
+    }
+    assert set(readiness_loop) >= {
+        "action-candidate:MI-001-BNB-LONG",
+        "action-candidate:TF-001-live-readonly-v0",
+        "action-candidate:MR-001-live-readonly-v0",
+        "action-candidate:VB-001-live-readonly-v0",
+    }
+    trend_loop = readiness_loop["action-candidate:TF-001-live-readonly-v0"]
+    assert trend_loop["readiness_state"] == "authorization_draft_ready"
+    assert trend_loop["confirmable_state"] == "owner_confirmable"
+    assert trend_loop["authorization_draft"]["draft_status"] == "authorization_draft_ready"
+    assert trend_loop["final_gate_readiness"]["status"] == "needs_owner_authorization"
+    assert "account_facts" in trend_loop["final_gate_readiness"]["missing_facts"]
+    assert trend_loop["operation_layer_preflight"]["kind"] == "operation_layer_preflight"
+    assert trend_loop["operation_layer_preflight"]["preflight_endpoint"] == (
+        "POST /api/brc/operations/preflight"
+    )
+    assert trend_loop["operation_layer_preflight"]["not_submitted"] is True
+    assert trend_loop["protection_draft"]["template_id"] == (
+        "protection-template:TF-001-live-readonly-v0"
+    )
+    assert trend_loop["review_plan"]["template_id"] == (
+        "review-template:TF-001-live-readonly-v0"
+    )
+    assert {stage["stage"] for stage in trend_loop["stage_statuses"]} == {
+        "candidate_authorization_final_gate_readiness",
+        "owner_confirmed_console_action_entry",
+        "operation_layer_dry_run_preflight",
+        "protection_review_operational_loop",
+    }
+    assert readiness_loop["action-candidate:MR-001-live-readonly-v0"][
+        "confirmable_state"
+    ] == "budget_confirmable"
+    assert readiness_loop["action-candidate:VB-001-live-readonly-v0"][
+        "operation_layer_preflight"
+    ]["status"] == "disabled_by_policy"
+    assert readiness_loop["action-candidate:MI-001-BNB-LONG"][
+        "confirmable_state"
+    ] == "dry_run_only"
+    selected_loop = payload["data"]["selected_candidate_action_readiness_loop"]
+    assert selected_loop["candidate_id"] == "action-candidate:TF-001-live-readonly-v0"
+    for item in readiness_loop.values():
+        assert item["backend_actionable"] is False
+        assert item["may_execute_live"] is False
+        assert item["frontend_action_enabled"] is False
+        assert item["places_order"] is False
+        assert item["exchange_write_action"] is False
+
     console_action_model = payload["data"]["trading_console_candidate_action_read_model"]
     assert console_action_model["product_surface"] == "owner_action_entry"
     assert console_action_model["frontend_policy"] == (

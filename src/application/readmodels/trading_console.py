@@ -35,6 +35,9 @@ from src.application.budgeted_autonomy_v01 import (
     BudgetedAutonomyDailyState,
     evaluate_budgeted_autonomy_v01,
 )
+from src.application.candidate_action_product_loop import (
+    build_candidate_action_product_loop,
+)
 from src.application.notional_sizing import (
     ContractMarketRules,
     compute_notional_sizing,
@@ -891,10 +894,45 @@ class TradingConsoleReadModelService:
             payload_contracts=payload_contracts,
             action_entry_output=action_entry_output,
         )
+        post_action_state = _action_entry_post_action_state(snap)
+        product_loop = build_candidate_action_product_loop(
+            owner_market_input=normalized_market_input,
+            budget_recommendation=budget,
+            selected_candidate=selected_candidate,
+            candidate_output=candidate_output,
+            generic_action_specs=generic_action_specs,
+            action_entry_payload_contracts=payload_contracts,
+            action_entry_output=action_entry_output,
+            final_gate_adapter_results=final_gate_adapter_results,
+            post_action_state=post_action_state,
+            fact_context={
+                "account": snap.account_snapshot_summary,
+                "environment": snap.environment,
+                "guards": snap.guards,
+                "pg_positions": snap.pg_positions,
+                "pg_open_orders": snap.pg_open_orders,
+                "completed_intents_today_by_symbol": post_action_state.get(
+                    "completed_intents_today_by_symbol",
+                    {},
+                ),
+                "reconciliation_ref": snap.guards.get("reconciliation_ref"),
+            },
+        ).model_dump(mode="json")
         return {
             "owner_market_input": normalized_market_input,
             "budget_recommendation": budget,
             "selected_candidate": selected_candidate,
+            "candidate_action_product_loop": {
+                "status": product_loop["status"],
+                "loop_version": product_loop["loop_version"],
+                "no_action_guarantee": product_loop["no_action_guarantee"],
+            },
+            "candidate_action_readiness_loop": product_loop[
+                "candidate_action_readiness_loop"
+            ],
+            "selected_candidate_action_readiness_loop": product_loop[
+                "selected_candidate_action_readiness_loop"
+            ],
             "risk_review": _action_entry_risk_review(
                 selected_candidate=selected_candidate,
                 adapter_contract=state.generic_final_gate_adapter_contract.model_dump(mode="json"),
@@ -909,7 +947,7 @@ class TradingConsoleReadModelService:
                 blockers=blockers,
             ),
             "action_state": _action_entry_action_state(selected_candidate),
-            "post_action_state": _action_entry_post_action_state(snap),
+            "post_action_state": post_action_state,
             "generic_final_gate_adapter_contract": (
                 state.generic_final_gate_adapter_contract.model_dump(mode="json")
             ),

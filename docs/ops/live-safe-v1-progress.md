@@ -2,6 +2,41 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-08 (BRC Candidate-to-Action Product Loop Sprint)
+
+- Added backend-owned `CandidateActionProductLoop` contract that composes
+  ActionCandidate, authorization draft status, BudgetEnvelope draft status,
+  normalized ActionSpec, FinalGate readiness, official Operation Layer
+  preflight contract, protection draft, review plan, and post-action readiness
+  into one non-live Owner-facing loop.
+- Wired `/api/trading-console/action-entry-readiness` and
+  `/api/trading-console/owner-action-flow` to expose
+  `candidate_action_readiness_loop` and
+  `selected_candidate_action_readiness_loop`. The loop covers BNB, Trend/SOL,
+  MR/ETH, and Volatility through the same contract: BNB is dry-run/historical,
+  Trend is Owner-confirmable, MR is BudgetEnvelope-confirmable, and Volatility
+  remains proposal-only.
+- Updated Trading Console Action Entry to consume backend loop state for
+  candidate cards, four-stage readiness, FinalGate fact bindings, official
+  Operation Layer preflight, authorization, budget, protection, review, and
+  disabled action state. The screen remains an Owner operations surface rather
+  than raw JSON, documentation, or code explanation.
+- Preserved execution boundaries: this sprint does not create authorization,
+  execution intent, orders, cancels, closes, PG mutation from readmodel paths,
+  exchange writes, runtime start, profile changes, credential changes, or
+  deployment.
+- Verification passed:
+  - `python3 -m pytest -q tests/unit/test_candidate_action_product_loop.py tests/unit/test_action_spec_final_gate_adapter.py tests/unit/test_production_strategy_family_admission.py tests/unit/test_trading_console_readmodels.py tests/unit/test_brc_operation_layer.py::test_runtime_state_operations_execute_or_degrade_safely tests/unit/test_brc_operation_layer.py::test_runtime_transition_unavailable_when_adapter_missing tests/unit/test_brc_operation_layer.py::test_revoke_budget_preflight_and_confirmation_persist_effective_state tests/unit/test_brc_operation_layer.py::test_revoke_budget_repeated_confirm_is_idempotent_noop tests/unit/test_brc_operation_layer.py::test_revoke_budget_blocks_when_no_current_budget_authorization`
+  - `python3 -m pytest -q tests/unit/test_brc_console_api_surface.py`
+  - `python3 -m py_compile src/application/candidate_action_product_loop.py src/application/action_spec_final_gate_adapter.py src/application/production_strategy_family_admission.py src/application/readmodels/trading_console.py src/interfaces/api_trading_console.py`
+  - `npm run lint --prefix trading-console`
+  - `npm run build --prefix trading-console`
+  - `python3 -m alembic heads`
+  - temporary clean SQLite `alembic upgrade head`
+  - `git diff --check`
+- Migration status: no migration added; Alembic remains at single head `043`.
+  Deployment deferred per Owner preference for local integration.
+
 ## 2026-06-08 (BRC ActionSpec FinalGate Adapter Contract Sprint)
 
 - Added a strategy-independent, non-live

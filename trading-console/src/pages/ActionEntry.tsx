@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, CircleDashed, Lock, ShieldCheck, Target } from 'lucide-react';
+import { AlertTriangle, CircleDashed, ClipboardCheck, FileCheck2, ListChecks, Lock, Route, ShieldCheck, Target } from 'lucide-react';
 import { Badge, Card, DeferredActionSlot, EnvelopeStatus, PageHeader, PageSummary, TechnicalDetails } from '@/components/ui';
 import { asArray, displayValue, useReadModel } from '@/lib/tradingConsoleApi';
 import { blockingReasonLabel, sideLabel } from '@/lib/ownerViewModel';
@@ -69,10 +69,30 @@ function actionEntryStateLabel(value?: string): string {
 }
 
 function finalGateStatusLabel(value?: string): string {
+  if (value === 'needs_owner_authorization') return '需要 Owner 授权';
+  if (value === 'needs_budget_authorization') return '需要预算授权';
+  if (value === 'final_gate_ready_but_execution_disabled') return '门禁就绪但禁止执行';
   if (value === 'blocked_until_official_final_gate_passes') return '等待最终门禁';
   if (value === 'proposal_only') return '仅提案';
+  if (value === 'dry_run_only') return '仅干跑';
   if (value === 'blocked') return '阻断';
   return '无法确认';
+}
+
+function confirmableStateLabel(value?: string): string {
+  if (value === 'owner_confirmable') return 'Owner 可确认';
+  if (value === 'budget_confirmable') return '预算可确认';
+  if (value === 'proposal_only') return '仅提案';
+  if (value === 'dry_run_only') return '仅干跑';
+  if (value === 'blocked') return '已阻断';
+  return '禁用';
+}
+
+function readinessVariant(value?: string) {
+  if (value === 'owner_confirmable' || value === 'budget_confirmable' || value === 'authorization_draft_ready' || value === 'needs_owner_authorization' || value === 'needs_budget_authorization') return 'warning' as const;
+  if (value === 'proposal_only' || value === 'dry_run_only' || value === 'disabled_by_policy') return 'caution' as const;
+  if (value === 'ready' || value === 'implemented' || value === 'final_gate_ready_but_execution_disabled') return 'normal' as const;
+  return 'danger' as const;
 }
 
 function queryFromInput(input: ActionEntryInput): string {
@@ -157,6 +177,17 @@ export default function ActionEntry() {
   const selectedAction = selected.action_entry || {};
   const selectedSpec = selected.generic_action_spec || {};
   const scopeReview = selected.scope_review || {};
+  const actionLoops = asArray<any>(pageData.candidate_action_readiness_loop);
+  const selectedLoop = pageData.selected_candidate_action_readiness_loop || {};
+  const selectedLoopStages = asArray<any>(selectedLoop.stage_statuses);
+  const selectedFacts = asArray<any>(selectedLoop.final_gate_readiness?.fact_bindings);
+  const selectedMissingFacts = asArray<string>(selectedLoop.final_gate_readiness?.missing_facts);
+  const selectedOperationPreflight = selectedLoop.operation_layer_preflight || {};
+  const selectedProtection = selectedLoop.protection_draft || {};
+  const selectedReview = selectedLoop.review_plan || {};
+  const selectedAuthorization = selectedLoop.authorization_draft || {};
+  const selectedBudgetDraft = selectedLoop.budget_draft || {};
+  const selectedPostAction = selectedLoop.post_action_readiness || {};
   const riskReview = pageData.risk_review || {};
   const finalGate = pageData.final_gate_result || {};
   const actionState = pageData.action_state || {};
@@ -184,7 +215,7 @@ export default function ActionEntry() {
   const budgetHardBlockers = asArray<any>(budgetSummary.hard_blockers);
   const summaryMood = actionState.enabled === true
     ? 'ok'
-    : finalGate.status === 'proposal_only'
+    : selectedLoop.confirmable_state === 'proposal_only' || selectedLoop.confirmable_state === 'dry_run_only' || finalGate.status === 'proposal_only'
       ? 'unknown'
       : 'blocked';
 
@@ -224,6 +255,25 @@ export default function ActionEntry() {
     }));
   };
 
+  const selectReadinessLoop = (loop: any) => {
+    setDraftInput((current) => ({
+      ...current,
+      market_regime: regimeForFamily(String(loop.family || ''), current.market_regime),
+      family: String(loop.family || ''),
+      strategy_family_id: String(loop.strategy_family_id || loop.carrier_id || ''),
+      carrier_id: String(loop.carrier_id || ''),
+      symbol_preference: String(loop.symbol || current.symbol_preference),
+      symbol: String(loop.symbol || ''),
+      side: String(loop.side || 'long'),
+      quantity: String(loop.action_spec_draft?.quantity || ''),
+      max_notional: String(loop.max_notional || loop.action_spec_draft?.max_notional || ''),
+      leverage: String(loop.leverage || loop.action_spec_draft?.leverage || '1'),
+      max_attempts: String(loop.action_spec_draft?.max_attempts || '1'),
+      protection_mode: String(loop.protection_draft?.mode || 'single_tp_plus_sl'),
+      review_requirement: String(loop.review_plan?.review_requirement || 'post_action_review_required'),
+    }));
+  };
+
   if (loading) return <div className="p-4 text-sm text-slate-500">正在读取当前内容...</div>;
 
   return (
@@ -234,8 +284,8 @@ export default function ActionEntry() {
 
       <PageSummary
         mood={summaryMood}
-        title={actionState.enabled === true ? '后端返回可行动状态' : '当前不可直接执行'}
-        description={actionState.enabled === true ? '仍需通过官方执行链路提交。' : displayValue(actionState.disabled_reason, '等待 Owner 授权、最终门禁和证据检查。')}
+        title={actionState.enabled === true ? '后端返回可行动状态' : confirmableStateLabel(selectedLoop.confirmable_state)}
+        description={actionState.enabled === true ? '仍需通过官方执行链路提交。' : displayValue(selectedLoop.disabled_reason || actionState.disabled_reason, '等待 Owner 授权、最终门禁和证据检查。')}
       />
 
       <EnvelopeStatus envelope={envelope} error={error} />
@@ -298,6 +348,65 @@ export default function ActionEntry() {
               </div>
             </div>
           ))}
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-medium">Candidate-to-Action Readiness</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {displayValue(selectedLoop.candidate_id, '暂无候选')} · {displayValue(selectedLoop.next_recommended_action, '等待后端 readiness')}
+            </p>
+          </div>
+          <Badge variant={readinessVariant(selectedLoop.confirmable_state)}>
+            {confirmableStateLabel(selectedLoop.confirmable_state)}
+          </Badge>
+        </div>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+          {selectedLoopStages.map((stage) => (
+            <div key={stage.stage} className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+              <div className="flex items-center justify-between gap-2">
+                <div className="truncate text-xs font-medium text-slate-500">{displayValue(stage.label, '阶段')}</div>
+                <Badge variant={readinessVariant(stage.status)}>{displayValue(stage.status, '未知')}</Badge>
+              </div>
+              <div className="mt-2 line-clamp-2 text-xs text-slate-600 dark:text-slate-400">
+                {displayValue(stage.summary, '暂无')}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-blue-600" />
+              <h3 className="text-sm font-medium">FinalGate facts</h3>
+            </div>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {selectedFacts.slice(0, 8).map((fact) => (
+                <div key={fact.code} className="rounded bg-slate-50 p-2 text-xs dark:bg-slate-800/40">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium">{displayValue(fact.label, fact.code)}</span>
+                    <Badge variant={readinessVariant(fact.status)}>{displayValue(fact.status, '未知')}</Badge>
+                  </div>
+                  <div className="mt-1 truncate text-slate-500">{displayValue(fact.retry_condition || fact.evidence_ref, '已绑定')}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <Route className="h-4 w-4 text-amber-600" />
+              <h3 className="text-sm font-medium">Official preflight</h3>
+            </div>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">状态：{displayValue(selectedOperationPreflight.status, '暂无')}</div>
+              <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">操作：{displayValue(selectedOperationPreflight.operation_type, '暂无')}</div>
+              <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">预检：{displayValue(selectedOperationPreflight.preflight_endpoint, '暂无')}</div>
+              <div className="rounded bg-slate-50 p-2 dark:bg-slate-800/40">审计：{selectedOperationPreflight.auditable ? '可审计' : '不可用'}</div>
+            </div>
+            <div className="mt-3 text-xs text-slate-500">{displayValue(selectedOperationPreflight.disabled_reason, '官方预检路径未返回')}</div>
+          </div>
         </div>
       </Card>
 
@@ -487,30 +596,32 @@ export default function ActionEntry() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {candidateOutput.map((candidate) => (
-          <Card key={`${candidate.family}-${candidate.carrier_id || 'proposal'}`} className="p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {actionLoops.map((loop) => (
+          <Card key={loop.candidate_id} className="p-4">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
-                <h3 className="text-sm font-semibold">{candidate.family}</h3>
-                <div className="text-xs text-slate-500 mt-1">{displayValue(candidate.carrier_id, '暂无 Carrier')}</div>
+                <h3 className="text-sm font-semibold">{displayValue(loop.family, '候选')}</h3>
+                <div className="text-xs text-slate-500 mt-1">{displayValue(loop.carrier_id, loop.candidate_id)}</div>
               </div>
-              <Badge variant={candidate.candidate_state === 'bounded_live_candidate' ? 'warning' : 'caution'}>
-                {proposalRoleLabel[String(candidateChoices.find((item) => item.carrier_id === candidate.carrier_id)?.proposal_role || 'unknown')]}
+              <Badge variant={readinessVariant(loop.confirmable_state)}>
+                {confirmableStateLabel(loop.confirmable_state)}
               </Badge>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
-              <div>准入：{candidate.admission_level}</div>
-              <div>警告：{candidate.warning_count}</div>
-              <div>阻断：{candidate.hard_blocker_count}</div>
-              <div>Registry：{candidate.action_registry_supported ? '支持' : '未支持'}</div>
-              <div>Max：{displayValue(candidate.recommended_sizing?.max_notional_per_action, '暂无')}</div>
-              <div>预算：{displayValue(candidate.recommended_sizing?.status, '暂无')}</div>
-              <div className="col-span-2">支持标的：{displayValue(candidateChoices.find((item) => item.carrier_id === candidate.carrier_id)?.supported_symbols?.join(', '), '暂无')}</div>
+              <div>准入：{displayValue(loop.admission_level, 'L?')}</div>
+              <div>警告：{asArray(loop.warnings).length}</div>
+              <div>阻断：{asArray(loop.hard_blockers).length}</div>
+              <div>状态：{displayValue(loop.readiness_state, '暂无')}</div>
+              <div>标的：{displayValue(loop.symbol, '暂无')}</div>
+              <div>方向：{sideLabel(loop.side)}</div>
+              <div>Max：{displayValue(loop.max_notional, '暂无')}</div>
+              <div>预检：{displayValue(loop.operation_layer_preflight?.status, '暂无')}</div>
             </div>
+            <div className="mt-3 line-clamp-2 text-xs text-slate-500">{displayValue(loop.next_recommended_action, '等待后端建议')}</div>
             <button
               type="button"
-              onClick={() => selectCandidate(candidate)}
+              onClick={() => selectReadinessLoop(loop)}
               className="mt-4 w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               选择候选
@@ -581,8 +692,10 @@ export default function ActionEntry() {
             <h2 className="text-base font-medium">授权草案路径</h2>
           </div>
           <div className="space-y-2 text-sm">
-            <div>状态：{displayValue(authorizationPath.status, '无法确认')}</div>
-            <div>官方路径：{authorizationPath.official_service_path_available ? '可进入预检' : '不可用'}</div>
+            <div>模式：{displayValue(selectedAuthorization.mode, '无法确认')}</div>
+            <div>草案：{displayValue(selectedAuthorization.draft_status || authorizationPath.status, '无法确认')}</div>
+            <div>授权：{displayValue(selectedAuthorization.authorization_status, '暂无')}</div>
+            <div>官方路径：{selectedAuthorization.official_preflight_endpoint ? '可进入预检' : '不可用'}</div>
             <div>提交方式：Operation Layer / BRC 官方 API</div>
           </div>
         </Card>
@@ -593,10 +706,11 @@ export default function ActionEntry() {
             <h2 className="text-base font-medium">最终门禁</h2>
           </div>
           <div className="space-y-2 text-sm">
-            <div>结果：{finalGateStatusLabel(finalGate.status)}</div>
-            <div>证据：{finalGate.evidence_status === 'pre_action_evidence_required' ? '需执行前证据' : '无法确认'}</div>
+            <div>结果：{finalGateStatusLabel(selectedLoop.final_gate_readiness?.status || finalGate.status)}</div>
+            <div>预览：{displayValue(selectedLoop.final_gate_readiness?.preview_status, '暂无')}</div>
+            <div>缺失事实：{selectedMissingFacts.length}</div>
             <div>预览输入：{finalGatePreviewInputs.length}</div>
-            <div>阻断：{asArray(finalGate.blocker_ids).length}</div>
+            <div>阻断：{asArray(selectedLoop.final_gate_readiness?.hard_blockers || finalGate.blocker_ids).length}</div>
           </div>
         </Card>
 
@@ -610,8 +724,52 @@ export default function ActionEntry() {
               {displayValue(actionState.label, '有界实盘执行')}
             </button>
           ) : (
-            <DeferredActionSlot actionName={displayValue(actionState.label, '有界实盘执行')} reason={displayValue(actionState.disabled_reason, '当前不可操作')} />
+            <DeferredActionSlot actionName={displayValue(actionState.label, '有界实盘执行')} reason={displayValue(selectedLoop.disabled_reason || actionState.disabled_reason, '当前不可操作')} />
           )}
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <ShieldCheck className="h-4 w-4 text-emerald-600" />
+            <h2 className="text-base font-medium">保护计划</h2>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div>状态：{displayValue(selectedProtection.status, '暂无')}</div>
+            <div>模板：{displayValue(selectedProtection.template_id, '暂无')}</div>
+            <div>模式：{displayValue(selectedProtection.mode, '暂无')}</div>
+            <div>组件：{asArray(selectedProtection.required_components).join(' / ') || '暂无'}</div>
+            <div className="text-xs text-slate-500">{displayValue(selectedProtection.retry_condition, '等待保护计划')}</div>
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <FileCheck2 className="h-4 w-4 text-indigo-600" />
+            <h2 className="text-base font-medium">复盘计划</h2>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div>状态：{displayValue(selectedReview.status, '暂无')}</div>
+            <div>模板：{displayValue(selectedReview.template_id, '暂无')}</div>
+            <div>要求：{displayValue(selectedReview.review_requirement, '暂无')}</div>
+            <div>重点：{asArray(selectedReview.family_review_focus).slice(0, 3).join(' / ') || '暂无'}</div>
+            <div className="text-xs text-slate-500">Post-action review：{selectedReview.post_action_required ? 'required' : 'not required'}</div>
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <ClipboardCheck className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+            <h2 className="text-base font-medium">Readiness result</h2>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div>预算：{displayValue(selectedBudgetDraft.status, '暂无')}</div>
+            <div>预算授权：{displayValue(selectedBudgetDraft.budget_authorization_status, '暂无')}</div>
+            <div>ActionSpec：{displayValue(selectedLoop.action_spec_draft?.normalized_status, '暂无')}</div>
+            <div>Post-action：{displayValue(selectedPostAction.status, 'empty')}</div>
+            <div className="text-xs text-slate-500">所有按钮保持后端禁用，直到官方预检与 FinalGate 通过。</div>
+          </div>
         </Card>
       </div>
 
