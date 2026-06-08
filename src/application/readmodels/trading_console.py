@@ -3391,6 +3391,10 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         post_action=post_action,
     )
     lifecycle_monitoring = _owner_action_lifecycle_monitoring(post_action)
+    just_in_time_lifecycle_audit = _owner_action_just_in_time_lifecycle_audit(
+        lifecycle_monitoring=lifecycle_monitoring,
+        next_attempt_gate=next_attempt_gate,
+    )
     capital_selection = _owner_action_capital_selection(
         envelope=envelope,
         owner_budget_selection=owner_budget_selection,
@@ -3509,6 +3513,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         "budgeted_autonomy_loop": budgeted_autonomy_loop,
         "budgeted_autonomy_v01": budgeted_autonomy_v01,
         "next_attempt_gate": next_attempt_gate,
+        "just_in_time_lifecycle_audit": just_in_time_lifecycle_audit,
         "lifecycle_monitoring": lifecycle_monitoring,
         "capital_selection": capital_selection,
         "protection_review_readiness": protection_review,
@@ -3663,6 +3668,69 @@ def _owner_action_lifecycle_monitoring(post_action: dict[str, Any]) -> dict[str,
         "next_attempt_gate": gate.get("gate"),
         "disabled_reason": gate.get("disabled_reason"),
         "retry_condition": gate.get("retry_condition"),
+        "action_allowed": False,
+        "frontend_action_enabled": False,
+        "places_order": False,
+    }
+
+
+def _owner_action_just_in_time_lifecycle_audit(
+    *,
+    lifecycle_monitoring: dict[str, Any],
+    next_attempt_gate: dict[str, Any],
+) -> dict[str, Any]:
+    classification = str(lifecycle_monitoring.get("status") or "unknown_fail_closed")
+    gate = str(next_attempt_gate.get("gate") or "unknown")
+    can_continue = (
+        next_attempt_gate.get("next_attempt_allowed_by_lifecycle") is True
+        and classification in {"closed_reviewed", "no_current_lifecycle", "external_flat"}
+    )
+    if classification == "still_open_protected":
+        decision = "block_next_attempt_current_lifecycle_open"
+        next_action = "wait_for_tp_or_sl_close"
+    elif classification in {"tp_filled_position_closed", "sl_filled_position_closed", "external_flat"}:
+        decision = "requires_reconciliation_before_continuing"
+        next_action = "reconcile_close_cleanup_and_record_closed_reviewed"
+    elif classification in {
+        "exchange_flat_pg_open",
+        "pg_flat_exchange_open",
+        "protection_missing",
+        "protection_orphaned",
+        "inconsistent_requires_recovery",
+        "unknown_fail_closed",
+        "review_required",
+    }:
+        decision = "block_next_attempt_recovery_required"
+        next_action = "official_recovery_required"
+    else:
+        decision = "continue_to_owner_budget_final_gate" if can_continue else "block_next_attempt"
+        next_action = "owner_decision_and_final_gate" if can_continue else next_attempt_gate.get("required_next_step")
+    return {
+        "audit_stage": "next_attempt_preflight",
+        "audit_version": "jit_lifecycle_audit_v1",
+        "backend_owned_state": True,
+        "frontend_must_not_infer": True,
+        "classification": classification,
+        "decision": decision,
+        "can_continue_to_authorization": can_continue,
+        "can_execute_live": False,
+        "current_lifecycle_authorization_ids": list(
+            lifecycle_monitoring.get("current_lifecycle_authorization_ids") or []
+        ),
+        "review_status": lifecycle_monitoring.get("review_status"),
+        "review_id": lifecycle_monitoring.get("review_id"),
+        "pg_active_position_count": lifecycle_monitoring.get("pg_active_position_count"),
+        "pg_open_order_count": lifecycle_monitoring.get("pg_open_order_count"),
+        "exchange_position_count": lifecycle_monitoring.get("exchange_position_count"),
+        "exchange_open_protection_count": lifecycle_monitoring.get("exchange_open_protection_count"),
+        "next_attempt_gate": gate,
+        "disabled_reason": next_attempt_gate.get("disabled_reason"),
+        "retry_condition": next_attempt_gate.get("retry_condition"),
+        "next_recommended_action": next_action,
+        "allowed_exchange_write": (
+            "residual_sibling_protection_cancel_only_after_confirmed_flat"
+        ),
+        "active_tp_sl_cancel_allowed": False,
         "action_allowed": False,
         "frontend_action_enabled": False,
         "places_order": False,

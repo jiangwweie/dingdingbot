@@ -2467,6 +2467,12 @@ def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
     assert flow["next_attempt_gate"]["gate"] == "clear_for_next_preflight"
     assert flow["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is True
     assert flow["next_attempt_gate"]["action_allowed"] is False
+    jit_audit = flow["just_in_time_lifecycle_audit"]
+    assert jit_audit["classification"] in {"closed_reviewed", "no_current_lifecycle"}
+    assert jit_audit["can_continue_to_authorization"] is True
+    assert jit_audit["decision"] == "continue_to_owner_budget_final_gate"
+    assert jit_audit["can_execute_live"] is False
+    assert jit_audit["places_order"] is False
 
 
 def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkeypatch):
@@ -2820,6 +2826,15 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert lifecycle_monitoring["next_attempt_gate"] == "current_lifecycle_open_protected"
     assert lifecycle_monitoring["review_status"] == "pending_open"
     assert lifecycle_monitoring["action_allowed"] is False
+    jit_audit = flow["just_in_time_lifecycle_audit"]
+    assert jit_audit["audit_stage"] == "next_attempt_preflight"
+    assert jit_audit["classification"] == "still_open_protected"
+    assert jit_audit["decision"] == "block_next_attempt_current_lifecycle_open"
+    assert jit_audit["can_continue_to_authorization"] is False
+    assert jit_audit["can_execute_live"] is False
+    assert jit_audit["next_recommended_action"] == "wait_for_tp_or_sl_close"
+    assert jit_audit["active_tp_sl_cancel_allowed"] is False
+    assert jit_audit["places_order"] is False
     assert flow["budget_summary"]["status"] == "degraded_missing_account_facts"
     assert flow["budget_summary"]["account_capacity_status"] == "degraded"
     assert flow["budget_summary"]["owner_selection_status"] == "within_recommendation"
