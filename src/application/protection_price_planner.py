@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.application.owner_action_carrier_catalog import (
     BNB_OWNER_ACTION_CARRIER_ID,
+    MR_OWNER_ACTION_CARRIER_ID,
     TREND_OWNER_ACTION_CARRIER_ID,
 )
 from src.application.owner_trial_flow import BoundedLiveTrialAuthorization
@@ -285,6 +286,14 @@ def default_protection_planner_configs() -> dict[str, ProtectionPlannerConfig]:
         ProtectionPlannerConfig(
             carrier_id=TREND_OWNER_ACTION_CARRIER_ID,
             symbol="SOL/USDT:USDT",
+            side="long",
+            stop_loss_fraction=Decimal("0.01"),
+            tp_targets_pct=(Decimal("1.0"),),
+            tp_ratios=(Decimal("1.0"),),
+        ),
+        ProtectionPlannerConfig(
+            carrier_id=MR_OWNER_ACTION_CARRIER_ID,
+            symbol="ETH/USDT:USDT",
             side="long",
             stop_loss_fraction=Decimal("0.01"),
             tp_targets_pct=(Decimal("1.0"),),

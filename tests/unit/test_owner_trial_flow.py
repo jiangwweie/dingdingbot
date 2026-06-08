@@ -210,6 +210,20 @@ async def _acknowledge_all_trend(service: OwnerTrialFlowService):
     )
 
 
+async def _acknowledge_all_mr_eth(service: OwnerTrialFlowService):
+    current = await service.current(carrier_id="MR-001-live-readonly-v0")
+    return await service.create_risk_acknowledgement(
+        OwnerRiskAcknowledgementCreateRequest(
+            carrier_id="MR-001-live-readonly-v0",
+            acknowledged_warning_codes=[
+                str(item["warning_id"])
+                for item in current.strategy_warnings
+            ],
+        ),
+        operator_id="owner",
+    )
+
+
 async def _acknowledge_all_mr_btc(service: OwnerTrialFlowService):
     current = await service.current(carrier_id="MR-001-BTC-live-readonly-v0")
     return await service.create_risk_acknowledgement(
@@ -258,6 +272,23 @@ async def _create_valid_trend_draft(service: OwnerTrialFlowService):
     )
 
 
+async def _create_valid_mr_eth_draft(service: OwnerTrialFlowService):
+    acknowledgement = await _acknowledge_all_mr_eth(service)
+    return await service.create_authorization_draft(
+        BoundedLiveTrialAuthorizationDraftCreateRequest(
+            carrier_id="MR-001-live-readonly-v0",
+            linked_acknowledgement_id=acknowledgement.acknowledgement_id,
+            symbol="ETH/USDT:USDT",
+            side="long",
+            max_notional="20",
+            quantity="0.01",
+            leverage="1",
+            protection_plan_type="single_tp_plus_sl",
+        ),
+        operator_id="owner",
+    )
+
+
 async def _create_valid_mr_btc_draft(service: OwnerTrialFlowService):
     acknowledgement = await _acknowledge_all_mr_btc(service)
     return await service.create_authorization_draft(
@@ -296,6 +327,20 @@ def _trend_activation_request(**patch):
         "side": "long",
         "max_notional": "20",
         "quantity": "0.1",
+        "leverage": "1",
+        "protection_plan_type": "single_tp_plus_sl",
+    }
+    payload.update(patch)
+    return OwnerLiveAuthorizationActivationRequest(**payload)
+
+
+def _mr_eth_activation_request(**patch):
+    payload = {
+        "carrier_id": "MR-001-live-readonly-v0",
+        "symbol": "ETH/USDT:USDT",
+        "side": "long",
+        "max_notional": "20",
+        "quantity": "0.01",
         "leverage": "1",
         "protection_plan_type": "single_tp_plus_sl",
     }
@@ -2190,6 +2235,136 @@ def test_owner_bounded_execution_valid_price_snapshot_clears_protection_source_b
             assert plan.sl_price.quantize(Decimal("0.1")) == Decimal("594.1")
             assert plan.tp_quantity.quantize(Decimal("0.01")) == Decimal("0.01")
             assert plan.sl_quantity.quantize(Decimal("0.01")) == Decimal("0.01")
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_mr_eth_scope_builds_protection_plan_before_entry():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE brc_execution_results"))
+            await conn.run_sync(lambda sync_conn: PGBrcExecutionResultORM.__table__.create(sync_conn, checkfirst=False))
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("1682.91"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.001"),
+                    amount_step=Decimal("0.001"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.01"),
+                ),
+            ),
+        )
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+        )
+        try:
+            draft = await _create_valid_mr_eth_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _mr_eth_activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(
+                        candidate_id="MR-001-live-readonly-v0",
+                        symbol="ETH/USDT:USDT",
+                        startup_guard_clear=True,
+                        market_min_amount="0.001",
+                        market_amount_step="0.001",
+                        market_tick_size="0.01",
+                        market_price_precision="2",
+                    ),
+                )
+
+            assert "protection_planner_config_missing" not in exc_info.value.blockers
+            assert "entry_order_executor_not_enabled" in exc_info.value.blockers
+            plan = await protection_repo.latest_valid_plan(
+                authorization.authorization_id,
+                phase="pre_entry_reference",
+            )
+            assert plan is not None
+            assert plan.carrier_id == "MR-001-live-readonly-v0"
+            assert plan.symbol == "ETH/USDT:USDT"
+            assert plan.tp_price.quantize(Decimal("0.01")) == Decimal("1699.73")
+            assert plan.sl_price.quantize(Decimal("0.01")) == Decimal("1666.08")
+            assert plan.tp_quantity.quantize(Decimal("0.001")) == Decimal("0.010")
+            assert plan.sl_quantity.quantize(Decimal("0.001")) == Decimal("0.010")
+            async with session_maker() as session:
+                intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
+                order_count = await session.scalar(text("SELECT count(*) FROM orders"))
+            assert intent_count == 0
+            assert order_count == 0
+        finally:
+            await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_owner_bounded_execution_mr_btc_planner_config_stays_blocked_outside_eth_scope():
+    async def scenario():
+        service, bridge, engine = await _bridge_service()
+        session_maker = service._repository._session_maker
+        protection_repo = PgProtectionPricePlanRepository(session_maker)
+        protection_service = ProtectionPlannerService(
+            repository=protection_repo,
+            price_source=StaticProtectionPriceSource(
+                reference_price=Decimal("105000"),
+                filters=ProtectionExchangeFilters(
+                    min_amount=Decimal("0.001"),
+                    amount_step=Decimal("0.001"),
+                    min_notional=Decimal("5"),
+                    min_notional_source="test",
+                    tick_size=Decimal("0.1"),
+                ),
+            ),
+        )
+        execute_service = OwnerBoundedExecutionService(
+            final_gate_service=bridge,
+            session_maker=session_maker,
+            protection_planner_service=protection_service,
+        )
+        try:
+            draft = await _create_valid_mr_btc_draft(service)
+            authorization = await service.activate_live_authorization(
+                draft.draft_id,
+                _mr_btc_activation_request(),
+                operator_id="owner",
+            )
+
+            with pytest.raises(OwnerBoundedExecutionError) as exc_info:
+                await execute_service.execute_authorization(
+                    authorization.authorization_id,
+                    operator_id="owner",
+                    fact_snapshot=_clear_fact_snapshot(
+                        candidate_id="MR-001-BTC-live-readonly-v0",
+                        symbol="BTC/USDT:USDT",
+                        startup_guard_clear=True,
+                        market_min_amount="0.001",
+                        market_amount_step="0.001",
+                        market_tick_size="0.1",
+                    ),
+                )
+
+            assert "protection_planner_config_missing" in exc_info.value.blockers
             async with session_maker() as session:
                 intent_count = await session.scalar(text("SELECT count(*) FROM execution_intents"))
                 order_count = await session.scalar(text("SELECT count(*) FROM orders"))
