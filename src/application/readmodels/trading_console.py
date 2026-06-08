@@ -30,6 +30,10 @@ from src.application.budgeted_autonomy import (
     BudgetedAutonomyPositionEvidence,
     evaluate_budgeted_autonomy_loop,
 )
+from src.application.budgeted_autonomy_v01 import (
+    BudgetedAutonomyDailyState,
+    evaluate_budgeted_autonomy_v01,
+)
 from src.application.notional_sizing import (
     ContractMarketRules,
     compute_notional_sizing,
@@ -2659,6 +2663,12 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
         generic_specs=generic_specs,
         post_action=post_action,
     )
+    budgeted_autonomy_v01 = _budgeted_autonomy_v01_projection(
+        envelope=envelope,
+        selected_spec=selected_spec,
+        generic_specs=generic_specs,
+        post_action=post_action,
+    )
     steps = [
         {
             "step": "market_input",
@@ -2737,6 +2747,12 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             "status": budgeted_autonomy_loop.get("outcome"),
             "summary": budgeted_autonomy_loop.get("retry_condition"),
         },
+        {
+            "step": "budgeted_autonomy_v01",
+            "label": "Budgeted autonomy v0.1 policy",
+            "status": budgeted_autonomy_v01.get("outcome"),
+            "summary": budgeted_autonomy_v01.get("retry_condition"),
+        },
     ]
     return {
         "status": "actionable" if action_enabled else "not_actionable",
@@ -2758,6 +2774,7 @@ def _owner_action_flow(data: dict[str, Any]) -> dict[str, Any]:
             ),
         },
         "budgeted_autonomy_loop": budgeted_autonomy_loop,
+        "budgeted_autonomy_v01": budgeted_autonomy_v01,
         "budget_summary": {
             "status": budget_status,
             "owner_selection_status": owner_budget_selection.get("status"),
@@ -2977,6 +2994,97 @@ def _budgeted_autonomy_loop_projection(
         authorization=authorization,
         positions=positions,
         candidates=candidates,
+        review_ledger=review_ledger,
+    )
+    return evaluation.model_dump(mode="json")
+
+
+def _budgeted_autonomy_v01_projection(
+    *,
+    envelope: dict[str, Any],
+    selected_spec: dict[str, Any],
+    generic_specs: list[dict[str, Any]],
+    post_action: dict[str, Any],
+) -> dict[str, Any]:
+    max_notional = _decimal_from_any(envelope.get("max_notional_per_action")) or Decimal("0.01")
+    max_daily_loss = _decimal_from_any(envelope.get("max_daily_loss")) or Decimal("0")
+    max_leverage = _decimal_from_any(envelope.get("max_leverage")) or Decimal("1")
+    allowed_symbols = [str(item) for item in envelope.get("allowed_symbols") or []]
+    allowed_sides = [
+        _normalize_side(item) for item in envelope.get("allowed_sides") or []
+        if _normalize_side(item) in {"long", "short"}
+    ]
+    if not allowed_sides:
+        allowed_sides = ["long"]
+    selected_carrier = selected_spec.get("carrier_id")
+    allowed_carriers = [
+        str(item.get("carrier_id"))
+        for item in generic_specs
+        if isinstance(item, dict) and item.get("carrier_id")
+    ]
+    if selected_carrier and str(selected_carrier) not in allowed_carriers:
+        allowed_carriers.append(str(selected_carrier))
+    max_attempts = int(envelope.get("max_attempts") or 1)
+    authorization = BudgetedAutonomyAuthorization(
+        budget_authorization_id=str(envelope.get("envelope_id") or "budgeted-autonomy:read-model"),
+        allowed_carriers=allowed_carriers,
+        allowed_symbols=allowed_symbols,
+        allowed_sides=allowed_sides,  # type: ignore[arg-type]
+        max_notional_per_action=max_notional,
+        daily_loss_cap=max_daily_loss,
+        max_active_positions=int(envelope.get("max_active_positions") or 1),
+        max_attempts=max_attempts,
+        max_leverage=max_leverage,
+        review_required="post_action_review_required",
+        protection_mode="single_tp_plus_sl",
+    )
+    review_ledger = dict(post_action.get("review_ledger") or {})
+    exchange_state = dict(post_action.get("exchange_state") or {})
+    entry = dict(review_ledger.get("entry") or {})
+    tp_sl = dict(review_ledger.get("tp_sl_result") or {})
+    positions: list[BudgetedAutonomyPositionEvidence] = []
+    if review_ledger.get("lifecycle_status") == "protected_open_from_pg_orders":
+        open_protection_order_count = int(tp_sl.get("open_protection_order_count") or 0)
+        positions.append(
+            BudgetedAutonomyPositionEvidence(
+                carrier_id=str(selected_carrier) if selected_carrier else None,
+                symbol=str(selected_spec.get("symbol") or (allowed_symbols[0] if allowed_symbols else "unknown")),
+                side=_normalize_side(selected_spec.get("side")),
+                quantity=_decimal_from_any(entry.get("quantity")),
+                entry_price=_decimal_from_any(entry.get("average_price")),
+                exchange_position_present=(
+                    int(exchange_state.get("exchange_position_count") or 0) > 0
+                ),
+                exchange_verified_flat=(
+                    exchange_state.get("status") == "pg_open_exchange_flat_cleanup_needed"
+                ),
+                pg_position_count=1,
+                open_tp_count=1 if open_protection_order_count > 0 else 0,
+                open_sl_count=1 if open_protection_order_count > 1 else 0,
+                pg_open_order_count=open_protection_order_count,
+                retry_allowed=False,
+                review_recorded=bool(post_action.get("review_count")),
+                audit_recorded=bool(post_action.get("audit_event_count")),
+            )
+        )
+    daily_state = BudgetedAutonomyDailyState(
+        day_key=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        attempts_used=int(post_action.get("completed_intent_count") or 0),
+        attempts_allowed=max_attempts,
+        budget_used_notional=Decimal("0"),
+        realized_loss=Decimal("0"),
+        source="trading_console_current_scope_pg_intents",
+    )
+    candidates = [
+        _budgeted_autonomy_candidate_from_spec(item)
+        for item in generic_specs
+        if isinstance(item, dict) and item.get("carrier_id")
+    ]
+    evaluation = evaluate_budgeted_autonomy_v01(
+        authorization=authorization,
+        positions=positions,
+        candidates=candidates,
+        daily_state=daily_state,
         review_ledger=review_ledger,
     )
     return evaluation.model_dump(mode="json")

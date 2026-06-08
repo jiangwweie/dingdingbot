@@ -8,6 +8,10 @@ from src.application.budgeted_autonomy import (
     BudgetedAutonomyPositionEvidence,
     evaluate_budgeted_autonomy_loop,
 )
+from src.application.budgeted_autonomy_v01 import (
+    BudgetedAutonomyDailyState,
+    evaluate_budgeted_autonomy_v01,
+)
 
 
 def _authorization(**overrides):
@@ -232,3 +236,55 @@ def test_external_flat_reviewed_ledger_closes_loop_without_selecting_candidate()
     assert evaluation.blocked_candidates == []
     assert evaluation.action_allowed is False
     assert evaluation.auto_execution_enabled is False
+
+
+def test_v01_selects_candidate_when_daily_budget_policy_allows_final_gate_retry():
+    evaluation = evaluate_budgeted_autonomy_v01(
+        authorization=_authorization(max_attempts=2),
+        positions=[],
+        candidates=[_candidate()],
+        daily_state=BudgetedAutonomyDailyState(
+            day_key="2026-06-08",
+            attempts_used=1,
+            attempts_allowed=2,
+            budget_used_notional=Decimal("0"),
+            realized_loss=Decimal("0"),
+        ),
+        review_ledger={},
+        now_ms=1780496665000,
+    )
+
+    assert evaluation.loop_version == "budgeted_autonomy_v0_1"
+    assert evaluation.outcome == "blocked_with_retry_condition"
+    assert evaluation.selected_candidate is not None
+    assert evaluation.selected_candidate.status == "eligible_for_final_gate"
+    assert evaluation.policy["daily_attempts"]["remaining"] == 1
+    assert evaluation.policy["position_policy"]["single_position_default"] is True
+    assert evaluation.policy["budget"]["remaining_notional"] == "20"
+    assert evaluation.hard_blockers == []
+    assert evaluation.action_allowed is False
+    assert evaluation.places_order is False
+
+
+def test_v01_daily_attempts_exhausted_blocks_candidate_selection():
+    evaluation = evaluate_budgeted_autonomy_v01(
+        authorization=_authorization(max_attempts=1),
+        positions=[],
+        candidates=[_candidate()],
+        daily_state=BudgetedAutonomyDailyState(
+            day_key="2026-06-08",
+            attempts_used=1,
+            attempts_allowed=1,
+        ),
+        review_ledger={},
+        now_ms=1780496665000,
+    )
+
+    assert evaluation.outcome == "blocked_with_retry_condition"
+    assert evaluation.selected_candidate is None
+    assert evaluation.blocked_candidates[0].blockers[0].id == (
+        "BUDGETED-AUTONOMY-V01-DAILY-ATTEMPTS-EXHAUSTED"
+    )
+    assert evaluation.policy["daily_attempts"]["remaining"] == 0
+    assert evaluation.action_allowed is False
+    assert evaluation.places_order is False

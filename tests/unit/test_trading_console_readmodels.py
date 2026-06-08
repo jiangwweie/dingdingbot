@@ -2050,6 +2050,13 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert autonomy_loop["auto_execution_enabled"] is False
     assert autonomy_loop["places_order"] is False
     assert autonomy_loop["mutates_pg"] is False
+    autonomy_v01 = flow["budgeted_autonomy_v01"]
+    assert autonomy_v01["loop_version"] == "budgeted_autonomy_v0_1"
+    assert autonomy_v01["outcome"] == "protected_open_review_pending"
+    assert autonomy_v01["policy"]["daily_attempts"]["allowed"] == 1
+    assert autonomy_v01["policy"]["position_policy"]["single_position_default"] is True
+    assert autonomy_v01["action_allowed"] is False
+    assert autonomy_v01["places_order"] is False
     steps = {item["step"]: item for item in flow["flow_steps"]}
     assert set(steps) == {
         "market_input",
@@ -2061,6 +2068,7 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
         "action_state",
         "post_action_evidence",
         "budgeted_autonomy_loop",
+        "budgeted_autonomy_v01",
     }
     assert steps["market_input"]["status"] == "ready"
     assert steps["candidate_selection"]["summary"] == (
@@ -2069,6 +2077,9 @@ def test_owner_action_flow_wraps_action_entry_readiness_without_actions(monkeypa
     assert steps["budget_envelope"]["status"] == "blocked"
     assert steps["action_state"]["status"] == "blocked"
     assert steps["budgeted_autonomy_loop"]["status"] == (
+        "protected_open_review_pending"
+    )
+    assert steps["budgeted_autonomy_v01"]["status"] == (
         "protected_open_review_pending"
     )
     assert flow["timeline"]["entry_order_count"] == 1
