@@ -2156,6 +2156,81 @@ def test_owner_action_flow_include_exchange_marks_eth_pg_exchange_cleanup_needed
     assert exchange.cancel_calls == 0
 
 
+def test_owner_action_flow_marks_external_flat_hygiene_closed_reviewed(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    tp = _FakeOrder("tp-eth", "TP1", "tp-exchange-eth", symbol="ETH/USDT:USDT")
+    sl = _FakeOrder("sl-eth", "SL", "sl-exchange-eth", symbol="ETH/USDT:USDT")
+    for order in (tp, sl):
+        order.status = "CANCELED"
+        order.exit_reason = "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+    eth_orders = [
+        _FakeOrder(
+            "entry-eth",
+            "ENTRY",
+            "entry-exchange-eth",
+            parent_order_id=None,
+            status="FILLED",
+            symbol="ETH/USDT:USDT",
+        ),
+        tp,
+        sl,
+    ]
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        order_repo=_FakeOrderRepo(eth_orders),
+        position_repo=_FakePositionRepo(),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "include_exchange": "true",
+                "market_regime": "mean_reversion",
+                "family": "Mean reversion",
+                "strategy_family_id": "MR-001-live-readonly-v0",
+                "carrier_id": "MR-001-live-readonly-v0",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+                "target_notional_usdt": "16.8",
+                "current_price": "1680",
+                "min_notional": "5",
+                "min_qty": "0.001",
+                "qty_step": "0.001",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    post_action = data["post_action_state"]
+    assert post_action["exchange_state"]["status"] == "exchange_flat"
+    ledger = post_action["review_ledger"]
+    assert ledger["lifecycle_status"] == "closed_external_exchange_flat_unresolved"
+    assert ledger["tp_sl_result"]["status"] == "external_flat_local_hygiene_terminalized"
+    assert ledger["tp_sl_result"]["open_protection_order_count"] == 0
+    assert ledger["exit"]["status"] == "external_exchange_flat_unresolved"
+    assert ledger["review_decision"]["status"] == "revise"
+    assert ledger["strategy_outcome"] == "revise_after_external_flat_reconciliation"
+    autonomy_loop = data["owner_action_flow"]["budgeted_autonomy_loop"]
+    assert autonomy_loop["outcome"] == "closed_reviewed"
+    assert autonomy_loop["active_loop"] is False
+    assert autonomy_loop["selected_candidate"] is None
+    assert autonomy_loop["action_allowed"] is False
+    assert autonomy_loop["places_order"] is False
+    assert data["action_state"]["enabled"] is False
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
 def test_owner_action_flow_allows_mr_btc_owner_selection_without_actions(monkeypatch):
     _configure_auth(monkeypatch)
     exchange = _FakeExchangeGateway()

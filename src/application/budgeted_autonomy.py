@@ -573,7 +573,11 @@ def _ledger_closed_reviewed(ledger: dict[str, object]) -> bool:
     lifecycle = ledger.get("lifecycle_status")
     review = ledger.get("review_decision")
     review_status = review.get("status") if isinstance(review, dict) else None
-    return lifecycle == "closed_from_pg_exit_order" and review_status not in {None, "pending", "not_recorded"}
+    closed_lifecycles = {
+        "closed_from_pg_exit_order",
+        "closed_external_exchange_flat_unresolved",
+    }
+    return lifecycle in closed_lifecycles and review_status not in {None, "pending", "not_recorded"}
 
 
 def _budget_summary(authorization: BudgetedAutonomyAuthorization) -> dict[str, object]:

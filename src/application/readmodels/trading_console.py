@@ -2493,10 +2493,18 @@ def _post_action_review_ledger(
         item for item in protection_orders
         if str(item.get("status") or "").upper() in {"OPEN", "SUBMITTED", "NEW"}
     ]
+    external_hygiene_orders = [
+        item for item in protection_orders
+        if str(item.get("exit_reason") or "") == "EXTERNAL_CLOSE_LOCAL_HYGIENE"
+        and str(item.get("status") or "").upper() in {"CANCELED", "EXPIRED", "CLOSED"}
+    ]
     entry_filled = str((entry_order or {}).get("status") or "").upper() in {"FILLED", "CLOSED"}
     if exit_orders:
         lifecycle_status = "closed_from_pg_exit_order"
         tp_sl_status = "tp_or_sl_filled"
+    elif entry_filled and external_hygiene_orders and not open_protection_orders:
+        lifecycle_status = "closed_external_exchange_flat_unresolved"
+        tp_sl_status = "external_flat_local_hygiene_terminalized"
     elif entry_filled and open_protection_orders:
         lifecycle_status = "protected_open_from_pg_orders"
         tp_sl_status = "protected_open"
@@ -2510,7 +2518,7 @@ def _post_action_review_ledger(
         "ledger_version": "owner_bounded_review_ledger_v0",
         "lifecycle_status": lifecycle_status,
         "entry": _post_action_order_ledger_entry(entry_order),
-        "exit": _post_action_exit_ledger_entry(exit_orders),
+        "exit": _post_action_exit_ledger_entry(exit_orders, external_hygiene_orders),
         "realized_pnl": _post_action_not_available("position_not_closed"),
         "unrealized_pnl": _post_action_not_available("trading_console_default_read_model_does_not_call_exchange"),
         "costs": {
@@ -2527,12 +2535,23 @@ def _post_action_review_ledger(
         "strategy_outcome": (
             "pending_closed_trade_review"
             if lifecycle_status == "closed_from_pg_exit_order"
+            else "revise_after_external_flat_reconciliation"
+            if lifecycle_status == "closed_external_exchange_flat_unresolved"
             else "pending_post_action_review"
         ),
         "review_decision": {
-            "status": "pending" if reviews else "not_recorded",
+            "status": (
+                "revise"
+                if lifecycle_status == "closed_external_exchange_flat_unresolved"
+                else "pending" if reviews else "not_recorded"
+            ),
             "allowed_values": ["promote", "revise", "park"],
             "requires_owner_review": True,
+            **(
+                {"source": "system_reconciliation_review"}
+                if lifecycle_status == "closed_external_exchange_flat_unresolved"
+                else {}
+            ),
         },
         "warnings": [
             "fee_not_available",
@@ -2557,8 +2576,24 @@ def _post_action_order_ledger_entry(order: dict[str, Any] | None) -> dict[str, A
     }
 
 
-def _post_action_exit_ledger_entry(exit_orders: list[dict[str, Any]]) -> dict[str, Any]:
+def _post_action_exit_ledger_entry(
+    exit_orders: list[dict[str, Any]],
+    external_hygiene_orders: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if not exit_orders:
+        hygiene_orders = list(external_hygiene_orders or [])
+        if hygiene_orders:
+            return {
+                "status": "external_exchange_flat_unresolved",
+                "reason": "exchange_flat_no_exit_fill_recorded",
+                "hard_blocker": False,
+                "terminalized_protection_order_ids": [
+                    item.get("order_id") for item in hygiene_orders if item.get("order_id")
+                ],
+                "terminalized_exchange_order_ids": [
+                    item.get("exchange_order_id") for item in hygiene_orders if item.get("exchange_order_id")
+                ],
+            }
         return {
             "status": "not_available",
             "reason": "no_exit_fill_recorded",

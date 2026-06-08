@@ -212,3 +212,23 @@ def test_closed_reviewed_ledger_closes_loop_without_selecting_candidate():
     assert evaluation.blocked_candidates == []
     assert evaluation.action_allowed is False
     assert evaluation.auto_execution_enabled is False
+
+
+def test_external_flat_reviewed_ledger_closes_loop_without_selecting_candidate():
+    evaluation = evaluate_budgeted_autonomy_loop(
+        authorization=_authorization(),
+        positions=[],
+        candidates=[_candidate()],
+        review_ledger={
+            "lifecycle_status": "closed_external_exchange_flat_unresolved",
+            "review_decision": {"status": "revise"},
+        },
+        now_ms=1780496665000,
+    )
+
+    assert evaluation.outcome == "closed_reviewed"
+    assert evaluation.active_loop is False
+    assert evaluation.selected_candidate is None
+    assert evaluation.blocked_candidates == []
+    assert evaluation.action_allowed is False
+    assert evaluation.auto_execution_enabled is False
