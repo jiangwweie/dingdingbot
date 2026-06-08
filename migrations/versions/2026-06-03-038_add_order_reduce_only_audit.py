@@ -23,6 +23,10 @@ def _has_column(table_name: str, column_name: str) -> bool:
     return any(column["name"] == column_name for column in inspector.get_columns(table_name))
 
 
+def _dialect_name() -> str:
+    return str(op.get_bind().dialect.name)
+
+
 def upgrade() -> None:
     if not _has_column("orders", "reduce_only"):
         op.add_column(
@@ -34,7 +38,8 @@ def upgrade() -> None:
                 server_default=sa.text("false"),
             ),
         )
-        op.alter_column("orders", "reduce_only", server_default=None)
+        if _dialect_name() != "sqlite":
+            op.alter_column("orders", "reduce_only", server_default=None)
 
 
 def downgrade() -> None:

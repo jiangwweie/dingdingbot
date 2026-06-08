@@ -42,8 +42,12 @@ def _has_constraint(table_name: str, constraint_name: str) -> bool:
     return any(constraint.get("name") == constraint_name for constraint in constraints)
 
 
+def _dialect_name() -> str:
+    return str(op.get_bind().dialect.name)
+
+
 def upgrade() -> None:
-    if _has_table("brc_bounded_live_trial_authorizations") and _has_constraint(
+    if _dialect_name() != "sqlite" and _has_table("brc_bounded_live_trial_authorizations") and _has_constraint(
         "brc_bounded_live_trial_authorizations",
         "ck_brc_trial_auths_not_consumed",
     ):
@@ -58,7 +62,11 @@ def upgrade() -> None:
             "execution_intents",
             sa.Column("authorization_id", sa.String(length=128), nullable=True),
         )
-    if _has_table("execution_intents") and _has_table("brc_bounded_live_trial_authorizations"):
+    if (
+        _dialect_name() != "sqlite"
+        and _has_table("execution_intents")
+        and _has_table("brc_bounded_live_trial_authorizations")
+    ):
         if not _has_constraint("execution_intents", "fk_execution_intents_authorization_id"):
             op.create_foreign_key(
                 "fk_execution_intents_authorization_id",
@@ -69,12 +77,15 @@ def upgrade() -> None:
                 deferrable=True,
                 initially="DEFERRED",
             )
-        if not _has_index("execution_intents", "idx_execution_intents_authorization_id"):
-            op.create_index(
-                "idx_execution_intents_authorization_id",
-                "execution_intents",
-                ["authorization_id"],
-            )
+    if _has_table("execution_intents") and not _has_index(
+        "execution_intents",
+        "idx_execution_intents_authorization_id",
+    ):
+        op.create_index(
+            "idx_execution_intents_authorization_id",
+            "execution_intents",
+            ["authorization_id"],
+        )
 
 
 def downgrade() -> None:
@@ -83,7 +94,7 @@ def downgrade() -> None:
         "idx_execution_intents_authorization_id",
     ):
         op.drop_index("idx_execution_intents_authorization_id", table_name="execution_intents")
-    if _has_table("execution_intents") and _has_constraint(
+    if _dialect_name() != "sqlite" and _has_table("execution_intents") and _has_constraint(
         "execution_intents",
         "fk_execution_intents_authorization_id",
     ):
@@ -94,7 +105,7 @@ def downgrade() -> None:
         )
     if _has_table("execution_intents") and _has_column("execution_intents", "authorization_id"):
         op.drop_column("execution_intents", "authorization_id")
-    if _has_table("brc_bounded_live_trial_authorizations") and not _has_constraint(
+    if _dialect_name() != "sqlite" and _has_table("brc_bounded_live_trial_authorizations") and not _has_constraint(
         "brc_bounded_live_trial_authorizations",
         "ck_brc_trial_auths_not_consumed",
     ):

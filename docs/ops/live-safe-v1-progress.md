@@ -2,6 +2,37 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-08 (BRC Product Backbone Acceptance Pass)
+
+- Performed local integration acceptance on the product backbone introduced in
+  `3e64e0b4`: StrategyFamily / Carrier, ActionCandidate, RiskDisclosure,
+  Admission L0-L4, warning vs hard blocker policy, Generic ActionSpec,
+  FinalGate preview/input, ProtectionTemplate, ReviewTemplate, and Trading
+  Console Action Entry.
+- Result: the backbone is locally integrated as a non-mutating read-model and
+  action-entry handoff surface, not frontend-only fake UI. BNB historical proof,
+  Trend/SOL, MR/ETH, and Volatility proposal samples are represented through
+  the same product model. Volatility remains proposal/dry-run and is not live
+  enabled.
+- Added regression coverage for:
+  - no-exact-match Owner input returning nearest candidates and blockers instead
+    of an empty Action Entry dead end;
+  - v0.2 cockpit top-level pause/revoke state fields remaining exposed.
+- Migration hygiene: fixed SQLite clean-chain compatibility in existing
+  revisions `020`, `036`, and `038` by keeping PostgreSQL constraint/default
+  behavior and skipping unsupported SQLite ALTER operations. No new migration
+  was added. `043` remains the single Alembic head.
+- Verification passed:
+  - `python3 -m py_compile src/application/production_strategy_family_admission.py src/application/readmodels/trading_console.py src/interfaces/api_trading_console.py`
+  - `python3 -m pytest -q tests/unit/test_production_strategy_family_admission.py tests/unit/test_trading_console_readmodels.py`
+  - `npm run lint --prefix trading-console`
+  - `npm run build --prefix trading-console`
+  - `python3 -m alembic heads`
+  - temporary clean SQLite `alembic upgrade head`
+- Safety boundary preserved: no deployment, no live action, no exchange write,
+  no order placement/cancel/close, no funds transfer/withdrawal, no credential
+  change, no runtime profile change, and no Operation Layer or FinalGate bypass.
+
 ## 2026-06-08 (BRC Product Backbone Local Sprint)
 
 - Implemented the local BRC candidate/action product backbone in the Trading Console read-model path: `ProductBackboneReadModel`, first-class warnings, candidate actionability, protection templates, FinalGate preview inputs, and candidate/action-entry surface policy.

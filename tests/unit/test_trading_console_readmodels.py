@@ -592,6 +592,13 @@ def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch)
     assert data["recovery"]["detectable_states"]["runtime_server_version_drift"] == "not_detectable"
     assert data["budget"]["action_allowed"] is False
     assert data["budget"]["grants_trading_permission"] is False
+    assert "autonomy_effective_state" in data
+    assert "budget_effective_state" in data
+    assert "budget_authorization_status" in data
+    assert "can_attempt_next_budgeted_action" in data
+    assert "can_pause_autonomy" in data
+    assert "can_revoke_budget" in data
+    assert "last_control_operation" in data
     controls = {item["control_id"]: item for item in data["controls"]}
     assert controls["refresh_status"]["enabled"] is True
     assert controls["reconcile_now"]["enabled"] is True
@@ -2856,6 +2863,61 @@ def test_owner_action_flow_blocks_mr_symbol_outside_carrier_bounds(monkeypatch):
     assert proposal["frontend_action_enabled"] is False
     assert proposal["places_order"] is False
     assert data["action_state"]["enabled"] is False
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_no_exact_match_returns_nearest_candidates_and_blockers(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway()
+    _patch_deps(monkeypatch, exchange=exchange)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "market_regime": "unknown",
+                "family": "Unmapped family",
+                "carrier_id": "UNKNOWN-CARRIER",
+                "symbol": "DOGE/USDT:USDT",
+                "symbol_preference": "DOGE/USDT:USDT",
+                "side": "short",
+                "quantity": "1",
+                "max_notional": "10",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    data = payload["data"]
+    assert data["owner_market_input"]["regime"] == "not_selected"
+    assert len(data["candidate_output"]) == 3
+    selected = data["selected_candidate"]
+    assert selected["family"] == "Trend"
+    assert selected["carrier_id"] == "TF-001-live-readonly-v0"
+    assert selected["scope_review"]["verdict"] == "mismatch"
+    mismatches = {item["field"] for item in selected["scope_review"]["mismatches"]}
+    assert {"symbol", "side", "quantity", "max_notional"} <= mismatches
+    flow = data["owner_action_flow"]
+    choices = flow["market_selection"]["candidate_choices"]
+    assert {item["family"] for item in choices} == {
+        "Trend",
+        "Volatility expansion",
+        "Mean reversion",
+    }
+    assert flow["selected_action_proposal"]["family"] == "Trend"
+    assert data["risk_review"]["hard_blocker_count"] > 0
+    assert data["action_state"]["enabled"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+    assert exchange.open_order_calls == []
+    assert exchange.position_calls == []
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 

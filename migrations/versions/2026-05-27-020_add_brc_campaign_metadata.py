@@ -35,13 +35,18 @@ def _has_column(table_name: str, column_name: str) -> bool:
     )
 
 
+def _dialect_name() -> str:
+    return str(op.get_bind().dialect.name)
+
+
 def upgrade() -> None:
     if _has_table("brc_campaigns") and not _has_column("brc_campaigns", "metadata"):
         op.add_column(
             "brc_campaigns",
             sa.Column("metadata", _jsonb_type(), nullable=False, server_default=sa.text("'{}'")),
         )
-        op.alter_column("brc_campaigns", "metadata", server_default=None)
+        if _dialect_name() != "sqlite":
+            op.alter_column("brc_campaigns", "metadata", server_default=None)
 
 
 def downgrade() -> None:
