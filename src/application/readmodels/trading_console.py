@@ -1,9 +1,9 @@
-"""Trading Console aggregation read models.
+"""Trading Console aggregation and Owner action-entry read models.
 
 This module composes existing repositories and runtime adapters into frontend
-read-model responses. This namespace intentionally has no mutation methods and
-never calls exchange write APIs; product actions live on the official Operation
-Layer path.
+responses. This namespace intentionally has no mutation methods and never calls
+exchange write APIs; product actions are surfaced as official Operation Layer /
+FinalGate handoffs.
 """
 
 from __future__ import annotations
@@ -128,7 +128,7 @@ class TradingConsoleSnapshot:
 
 
 class TradingConsoleReadModelService:
-    """Build Trading Console read models from read-only dependencies."""
+    """Build Trading Console product read models from non-mutating dependencies."""
 
     def __init__(self, deps: TradingConsoleDependencies) -> None:
         self._deps = deps
@@ -392,7 +392,7 @@ class TradingConsoleReadModelService:
             blockers=blockers,
             data={
                 "hard_gate": {
-                    "status": "blocked" if blockers else "read_only_no_execute_endpoint",
+                    "status": "blocked" if blockers else "official_execute_path_required",
                     "gates": [
                         {
                             "code": "authorization_actionable",
@@ -412,7 +412,7 @@ class TradingConsoleReadModelService:
                 },
                 "execution_preview": {
                     "status": "not_available",
-                    "reason": "read_only_sprint_does_not_wrap_execute",
+                    "reason": "trading_console_get_requires_official_operation_layer_submit",
                 },
                 "deferred_execute_endpoint": True,
             },
@@ -526,7 +526,7 @@ class TradingConsoleReadModelService:
                         "strategy_family_id": DEFAULT_STRATEGY_FAMILY_ID,
                         "symbol": DEFAULT_SYMBOL,
                         "side": "long",
-                        "status": "blocked" if blocked_reasons else "read_only_available",
+                        "status": "blocked" if blocked_reasons else "candidate_available_for_review",
                         "blocked_reasons": blocked_reasons,
                         "authorization": auth,
                         "protection": protection,
@@ -870,6 +870,16 @@ class TradingConsoleReadModelService:
             item.model_dump(mode="json")
             for item in state.trading_console_action_entry_output
         ]
+        product_backbone = state.product_backbone.model_dump(mode="json")
+        candidate_actionability = [
+            item.model_dump(mode="json") for item in state.candidate_actionability
+        ]
+        final_gate_preview_inputs = [
+            item.model_dump(mode="json") for item in state.final_gate_preview_inputs
+        ]
+        protection_templates = [
+            item.model_dump(mode="json") for item in state.protection_templates
+        ]
         selected_candidate = _select_action_entry_candidate(
             market_input=normalized_market_input,
             owner_scope=owner_scope or {},
@@ -899,6 +909,19 @@ class TradingConsoleReadModelService:
             "post_action_state": _action_entry_post_action_state(snap),
             "generic_final_gate_adapter_contract": (
                 state.generic_final_gate_adapter_contract.model_dump(mode="json")
+            ),
+            "product_backbone": product_backbone,
+            "candidate_actionability": candidate_actionability,
+            "final_gate_preview_inputs": final_gate_preview_inputs,
+            "protection_templates": protection_templates,
+            "warning_records": [
+                item.model_dump(mode="json") for item in state.warning_records
+            ],
+            "hard_blocker_records": [
+                item.model_dump(mode="json") for item in state.hard_blocker_records
+            ],
+            "trading_console_candidate_action_read_model": (
+                state.trading_console_candidate_action_read_model.model_dump(mode="json")
             ),
             "generic_action_specs": generic_action_specs,
             "action_entry_payload_contracts": payload_contracts,
@@ -1049,7 +1072,7 @@ class TradingConsoleReadModelService:
                     "/api/runtime/*",
                     "/api/dev/testnet/brc/*",
                 ],
-                "action_api_policy": "deferred_not_exposed_in_trading_console_v1",
+                "action_api_policy": "official_brc_operation_layer_required_for_submit",
                 "sample_data_policy": "not_allowed_as_trading_console_truth_source",
             },
         )
@@ -2621,7 +2644,7 @@ def _action_entry_authorization_draft_path(
         "places_order": False,
         "required_owner_scope_fields": action_entry.get("required_owner_scope_fields") or [],
         "operation_steps": flow.get("operation_steps") or [],
-        "note": "Authorization draft creation is not performed by this read model.",
+        "note": "Trading Console prepares the handoff; authorization submit must use the official API path.",
     }
 
 

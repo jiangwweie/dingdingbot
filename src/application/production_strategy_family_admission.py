@@ -1,8 +1,10 @@
-"""Production strategy-family admission state builder.
+"""Production strategy-family admission and action-entry state builder.
 
-This module builds Owner-reviewable admission state only. It does not create
-admission requests, authorizations, execution intents, orders, protection
-orders, reviews, runtime transitions, or PG mutations.
+This module builds the Owner-facing product backbone for candidate review,
+ActionSpec shaping, FinalGate preview inputs, protection/review templates, and
+official action-path handoff. It does not create admission requests,
+authorizations, execution intents, orders, protection orders, reviews, runtime
+transitions, or PG mutations.
 """
 
 from __future__ import annotations
@@ -260,6 +262,210 @@ class ReviewTemplate(ProductionAdmissionModel):
     pre_action_evidence_required: list[str] = Field(default_factory=list)
 
 
+class WarningRecord(ProductionAdmissionModel):
+    warning_id: str
+    family: str
+    carrier_id: Optional[str] = None
+    classification: Literal["strategy_warning"] = "strategy_warning"
+    description: str
+    owner_ack_required: bool = True
+    blocks_after_ack: Literal[False] = False
+
+
+class CandidateActionability(ProductionAdmissionModel):
+    family: str
+    strategy_family_id: Optional[str] = None
+    carrier_id: Optional[str] = None
+    admission_level: AdmissionLevelCode
+    actionability: Literal[
+        "historical_proof_not_current_action",
+        "displayable",
+        "proposal_review",
+        "owner_scope_final_gate_ready",
+        "blocked",
+    ]
+    action_registry_supported: bool
+    owner_can_review: bool = True
+    owner_authorization_path_available: bool
+    final_gate_preview_available: bool
+    budget_envelope_compatible: bool = False
+    warning_count: int
+    hard_blocker_count: int
+    disabled_reason: str
+    next_hard_gate: str
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+
+
+class ProtectionTemplateSpec(ProductionAdmissionModel):
+    template_id: str
+    family: str
+    carrier_id: Optional[str] = None
+    mode: Literal[
+        "single_tp_plus_sl",
+        "fixed_percent_tp_sl",
+        "atr_based_tp_sl",
+        "range_reversion_stop",
+        "manual_review_required",
+    ]
+    required_components: list[str] = Field(default_factory=list)
+    parameter_requirements: list[str] = Field(default_factory=list)
+    hard_blockers_for_live_action: list[str] = Field(default_factory=list)
+    review_template_ref: str
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+
+
+class FinalGatePreviewInputModel(ProductionAdmissionModel):
+    preview_id: str
+    candidate_id: Optional[str] = None
+    carrier_id: Optional[str] = None
+    strategy_family: str
+    strategy_family_id: Optional[str] = None
+    admission_level: AdmissionLevelCode
+    account_scope_ref: str = "pre_action_account_and_subaccount_facts_required"
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    quantity: Optional[str] = None
+    target_notional_usdt: Optional[str] = None
+    max_notional: Optional[str] = None
+    leverage: Optional[str] = None
+    max_attempts: Optional[int] = None
+    protection_mode: Optional[str] = None
+    protection_template_id: str
+    budget_envelope_ref: Optional[str] = None
+    owner_authorization_ref: Optional[str] = None
+    required_checks: list[str] = Field(default_factory=list)
+    warning_refs: list[str] = Field(default_factory=list)
+    hard_blocker_refs: list[str] = Field(default_factory=list)
+    status: Literal[
+        "ready_for_official_final_gate_preview",
+        "proposal_only",
+        "blocked_invalid_scope",
+    ]
+    final_gate_endpoint: str = OFFICIAL_ACTION_API_ENDPOINTS["final_gate_dry_run"]
+    operation_layer_required: bool = True
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+
+
+class ProductBackboneCarrierExample(ProductionAdmissionModel):
+    example_id: str
+    role: Literal[
+        "historical_regression_sample",
+        "owner_confirmed_candidate",
+        "budgeted_autonomy_sample",
+        "proposal_dry_run_candidate",
+    ]
+    family: str
+    strategy_family_id: Optional[str] = None
+    carrier_id: Optional[str] = None
+    admission_level: AdmissionLevelCode
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    quantity: Optional[str] = None
+    target_notional_usdt: Optional[str] = None
+    max_notional: Optional[str] = None
+    leverage: Optional[str] = None
+    protection_template_id: str
+    review_template_id: str
+    actionability: str
+    budgeted_autonomy_compatible: bool = False
+    current_status: str
+    warnings: list[str] = Field(default_factory=list)
+    hard_blockers: list[str] = Field(default_factory=list)
+    final_gate_preview_ref: Optional[str] = None
+    may_execute_live: Literal[False] = False
+    frontend_action_enabled: Literal[False] = False
+
+
+class ProductBackboneReadModel(ProductionAdmissionModel):
+    version: str = "brc_product_backbone_v0_3"
+    product_chain: list[str] = Field(
+        default_factory=lambda: [
+            "StrategyFamily / Carrier",
+            "ActionCandidate",
+            "Owner risk understanding",
+            "Owner authorization or BudgetEnvelope authorization",
+            "ActionSpec",
+            "FinalGate preview",
+            "Operation Layer",
+            "bounded live action",
+            "Protection",
+            "close / TP / SL",
+            "Review Ledger",
+            "promote / revise / park",
+        ]
+    )
+    principles: list[str] = Field(
+        default_factory=lambda: [
+            "low-friction admission",
+            "medium-friction ActionCandidate generation",
+            "few hard execution gates",
+            "strategy weakness is warning, execution uncertainty is hard blocker",
+            "Review drives iteration",
+        ]
+    )
+    carrier_examples: list[ProductBackboneCarrierExample] = Field(default_factory=list)
+    console_flow: list[str] = Field(
+        default_factory=lambda: [
+            "Owner market input",
+            "candidate list",
+            "risk disclosure",
+            "authorization draft path",
+            "FinalGate preview",
+            "Owner confirm through official path when actionable",
+            "post-action status",
+        ]
+    )
+    official_action_path: list[str] = Field(default_factory=lambda: list(OFFICIAL_ACTION_API_ENDPOINTS.values()))
+    execution_policy: str = (
+        "Trading Console may present candidates and official-path handoff; live action "
+        "requires Owner authorization, FinalGate pass, Operation Layer, protection, and evidence."
+    )
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_authorization": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "starts_runtime": False,
+            "mutates_pg": False,
+            "exchange_write_action": False,
+        }
+    )
+
+
+class TradingConsoleCandidateActionReadModel(ProductionAdmissionModel):
+    read_model_id: str = "trading_console_candidate_action_entry_v0_3"
+    product_surface: str = "owner_action_entry"
+    owner_questions_answered: list[str] = Field(
+        default_factory=lambda: [
+            "what_candidates_exist",
+            "why_this_candidate",
+            "symbol_side_suggested_scope",
+            "protection_template",
+            "warnings_vs_hard_blockers",
+            "owner_authorization_path",
+            "final_gate_preview_checks",
+            "disabled_reason",
+        ]
+    )
+    candidate_output_ref: str = "trading_console_candidate_output"
+    action_entry_output_ref: str = "trading_console_action_entry_output"
+    product_backbone_ref: str = "product_backbone"
+    frontend_policy: str = "operate_as_candidate_action_entry_not_document_or_code_explanation"
+    action_enablement_source: Literal["backend_actionable_only"] = "backend_actionable_only"
+    official_submit_paths: list[str] = Field(default_factory=lambda: list(OFFICIAL_ACTION_API_ENDPOINTS.values()))
+    disabled_action_policy: str = "show exact hard blockers and retry conditions when action is disabled"
+    never_show_as: list[str] = Field(
+        default_factory=lambda: [
+            "documentation_surface",
+            "code_explanation",
+            "passive_dashboard_only",
+        ]
+    )
+
+
 class ActionCandidateSpec(ProductionAdmissionModel):
     family: str
     carrier_id: Optional[str] = None
@@ -507,8 +713,9 @@ class CandidatePipelineStandard(ProductionAdmissionModel):
         ]
     )
     trading_console_output_contract: str = (
-        "GET /api/trading-console/strategy-family-admission-state exposes read-only "
-        "candidate_output and action_candidate specs; it does not create actions."
+        "GET /api/trading-console/strategy-family-admission-state exposes the "
+        "candidate/action-entry product backbone and official action handoff; "
+        "the GET itself has no side effects."
     )
     official_action_path: list[str] = Field(default_factory=lambda: list(OFFICIAL_ACTION_API_ENDPOINTS.values()))
     no_action_guarantee: dict[str, bool] = Field(
@@ -1497,7 +1704,7 @@ class ScopeReview(ProductionAdmissionModel):
         "candidate_mismatch",
         "complete_dry_run_only",
     ] = "not_provided"
-    actionability: Literal["disabled_read_only"] = "disabled_read_only"
+    actionability: Literal["disabled_until_backend_actionable"] = "disabled_until_backend_actionable"
 
 
 class AdmissionContract(ProductionAdmissionModel):
@@ -1676,7 +1883,10 @@ class SprintAcceptanceVerdict(ProductionAdmissionModel):
     live_execution_ready: Literal[False] = False
     frontend_action_enabled: Literal[False] = False
     live_actions_taken: Literal[False] = False
-    summary: str = "Admission sprint has read-only/proposal artifacts only; no candidate is live-executable."
+    summary: str = (
+        "Admission sprint has candidate/action-entry backbone artifacts; no candidate "
+        "is live-executable until official authorization and FinalGate pass."
+    )
     remaining_global_requirements: list[str] = Field(default_factory=list)
 
 
@@ -1753,6 +1963,15 @@ class ProductionStrategyFamilyAdmissionState(ProductionAdmissionModel):
     carrier_specs: list[CarrierSpec] = Field(default_factory=list)
     risk_disclosure_specs: list[RiskDisclosureSpec] = Field(default_factory=list)
     review_templates: list[ReviewTemplate] = Field(default_factory=list)
+    protection_templates: list[ProtectionTemplateSpec] = Field(default_factory=list)
+    warning_records: list[WarningRecord] = Field(default_factory=list)
+    hard_blocker_records: list[BlockerRecord] = Field(default_factory=list)
+    candidate_actionability: list[CandidateActionability] = Field(default_factory=list)
+    final_gate_preview_inputs: list[FinalGatePreviewInputModel] = Field(default_factory=list)
+    product_backbone: ProductBackboneReadModel = Field(default_factory=ProductBackboneReadModel)
+    trading_console_candidate_action_read_model: TradingConsoleCandidateActionReadModel = Field(
+        default_factory=TradingConsoleCandidateActionReadModel
+    )
     action_candidate_specs: list[ActionCandidateSpec] = Field(default_factory=list)
     trading_console_candidate_output: list[TradingConsoleCandidateOutput] = Field(
         default_factory=list
@@ -2171,6 +2390,13 @@ def build_production_strategy_family_admission_state(
         carrier_specs=_carrier_specs(rows),
         risk_disclosure_specs=_risk_disclosure_specs(rows),
         review_templates=_review_templates(rows),
+        protection_templates=_protection_templates(rows),
+        warning_records=_warning_records(rows),
+        hard_blocker_records=blocker_records,
+        candidate_actionability=_candidate_actionability(rows),
+        final_gate_preview_inputs=_final_gate_preview_inputs(rows),
+        product_backbone=_product_backbone(rows),
+        trading_console_candidate_action_read_model=TradingConsoleCandidateActionReadModel(),
         action_candidate_specs=_action_candidate_specs(rows),
         trading_console_candidate_output=_trading_console_candidate_output(rows),
         generic_final_gate_adapter_contract=_generic_final_gate_adapter_contract(),
@@ -2635,7 +2861,7 @@ def _scoped_dry_run_examples(rows: list[FamilyAdmissionRow]) -> list[ScopedDryRu
                     else "scope_complete_but_candidate_action_api_unsupported"
                 ),
                 evidence=(
-                    "Complete bounded Owner-scope query example for read-only contract "
+                    "Complete bounded Owner-scope query example for side-effect-free contract "
                     f"review of {row.family}; this is not an authorization."
                 ),
                 next_retry_condition=(
@@ -3788,7 +4014,7 @@ def _objective_acceptance_audit_matrix(
                 "ExecutionIntent -> Entry -> TP/SL -> Review."
             ),
             status="PASS_WITH_CONSTRAINT",
-            verification_scope="read-only/proposal chain rows for each family",
+            verification_scope="candidate/proposal chain rows for each family",
             completion_evidence="blocked_with_bridge_artifact",
             evidence_refs=[
                 "full_chain_evidence_matrix",
@@ -5297,7 +5523,7 @@ def _admission_level_specs() -> list[AdmissionLevelSpec]:
         AdmissionLevelSpec(
             level="L1",
             name="displayable candidate",
-            semantics="Can appear in Trading Console as read-only candidate.",
+            semantics="Can appear in Trading Console as a displayable candidate with nearest-match context.",
             action_candidate_allowed=False,
             live_action_allowed=False,
             required_artifacts=["StrategyFamilySpec", "StrategyGroupSpec"],
@@ -5368,7 +5594,7 @@ def _strategy_family_specs(rows: list[FamilyAdmissionRow]) -> list[StrategyFamil
             hypothesis=row.strategy_group_mapping.evidence,
             supported_symbols=list(row.supported_symbols),
             evidence_requirements=[
-                "read-only candidate evidence",
+                "candidate evidence",
                 "Owner risk disclosure",
                 "review template",
             ],
@@ -5451,6 +5677,158 @@ def _review_templates(rows: list[FamilyAdmissionRow]) -> list[ReviewTemplate]:
         )
         for row in rows
     ]
+
+
+def _protection_templates(rows: list[FamilyAdmissionRow]) -> list[ProtectionTemplateSpec]:
+    templates: list[ProtectionTemplateSpec] = []
+    for row in rows:
+        template = _protection_template(row)
+        templates.append(
+            ProtectionTemplateSpec(
+                template_id=str(template["template_id"]),
+                family=row.family,
+                carrier_id=row.carrier_id,
+                mode="single_tp_plus_sl",
+                required_components=["TP", "SL"],
+                parameter_requirements=[
+                    "take_profit_price from official service",
+                    "stop_loss_price from official service",
+                    "reduce-only protection order recording",
+                    "post-action protection health check",
+                ],
+                hard_blockers_for_live_action=[
+                    "missing or unknown protection",
+                    "TP/SL plan unavailable",
+                    "protection recording unavailable",
+                ],
+                review_template_ref=f"review-template:{row.carrier_id or row.family}",
+            )
+        )
+    return templates
+
+
+def _warning_records(rows: list[FamilyAdmissionRow]) -> list[WarningRecord]:
+    records: list[WarningRecord] = []
+    for row in rows:
+        for index, warning in enumerate(row.risk_disclosure_contract.failure_modes, start=1):
+            records.append(
+                WarningRecord(
+                    warning_id=(
+                        f"warning:{row.carrier_id or row.family}:"
+                        f"{index}:{_normalize(warning)}"
+                    ),
+                    family=row.family,
+                    carrier_id=row.carrier_id,
+                    description=warning,
+                )
+            )
+    return records
+
+
+def _candidate_actionability(rows: list[FamilyAdmissionRow]) -> list[CandidateActionability]:
+    actionability: list[CandidateActionability] = []
+    for row in rows:
+        generic_status = _generic_action_spec_status(row, _carrier_scope_template(row))
+        if generic_status == "valid_blocked_final_gate":
+            status: Literal[
+                "historical_proof_not_current_action",
+                "displayable",
+                "proposal_review",
+                "owner_scope_final_gate_ready",
+                "blocked",
+            ] = "owner_scope_final_gate_ready"
+            disabled_reason = "FinalGate, Owner authorization, protection, and audit evidence are still required."
+            next_hard_gate = "FinalGate"
+        elif row.admission_level_code == "L2":
+            status = "proposal_review"
+            disabled_reason = "Candidate is reviewable but not live-enabled."
+            next_hard_gate = "official_action_api_or_readiness"
+        elif row.admission_level_code == "L1":
+            status = "displayable"
+            disabled_reason = "Candidate is displayable only."
+            next_hard_gate = "ActionCandidate"
+        else:
+            status = "blocked"
+            disabled_reason = row.next_retry_condition
+            next_hard_gate = row.blocker_record.stage
+        actionability.append(
+            CandidateActionability(
+                family=row.family,
+                strategy_family_id=row.strategy_family_id,
+                carrier_id=row.carrier_id,
+                admission_level=row.admission_level_code,
+                actionability=status,
+                action_registry_supported=row.action_api_compatibility.compatible,
+                owner_authorization_path_available=row.action_api_compatibility.compatible,
+                final_gate_preview_available=generic_status == "valid_blocked_final_gate",
+                budget_envelope_compatible=(
+                    row.family == "Mean reversion"
+                    or row.admission_level_code in {"L3", "L4"}
+                ),
+                warning_count=len(row.risk_disclosure_contract.failure_modes),
+                hard_blocker_count=len(_row_hard_blockers(row)),
+                disabled_reason=disabled_reason,
+                next_hard_gate=next_hard_gate,
+            )
+        )
+    return actionability
+
+
+def _final_gate_preview_inputs(rows: list[FamilyAdmissionRow]) -> list[FinalGatePreviewInputModel]:
+    previews: list[FinalGatePreviewInputModel] = []
+    for row in rows:
+        scope_template = _carrier_scope_template(row)
+        generic_status = _generic_action_spec_status(row, scope_template)
+        hard_blockers = _row_hard_blockers(row)
+        previews.append(
+            FinalGatePreviewInputModel(
+                preview_id=f"final-gate-preview:{row.carrier_id or row.family}",
+                candidate_id=row.action_candidate.candidate_carrier_id or row.carrier_id,
+                carrier_id=row.carrier_id,
+                strategy_family=row.family,
+                strategy_family_id=row.strategy_family_id,
+                admission_level=row.admission_level_code,
+                symbol=_optional_str(scope_template.get("symbol")),
+                side=_optional_str(scope_template.get("side")),
+                quantity=_optional_str(scope_template.get("quantity")),
+                target_notional_usdt=_optional_str(scope_template.get("target_notional_usdt")),
+                max_notional=_optional_str(scope_template.get("max_notional")),
+                leverage=_optional_str(scope_template.get("leverage")),
+                max_attempts=_optional_int(scope_template.get("max_attempts")),
+                protection_mode=_optional_str(scope_template.get("protection_mode")),
+                protection_template_id=f"protection-template:{row.carrier_id or row.family}",
+                budget_envelope_ref=(
+                    f"budget-envelope:{row.carrier_id}"
+                    if row.family == "Mean reversion" and row.carrier_id
+                    else None
+                ),
+                owner_authorization_ref=(
+                    f"owner-authorization:{row.carrier_id}"
+                    if row.action_api_compatibility.compatible and row.carrier_id
+                    else None
+                ),
+                required_checks=list(
+                    GenericFinalGateAdapterContract().required_pre_action_facts
+                ),
+                warning_refs=[
+                    (
+                        f"warning:{row.carrier_id or row.family}:"
+                        f"{index}:{_normalize(warning)}"
+                    )
+                    for index, warning in enumerate(row.risk_disclosure_contract.failure_modes, start=1)
+                ],
+                hard_blocker_refs=hard_blockers,
+                status=_final_gate_preview_status(generic_status),
+            )
+        )
+    return previews
+
+
+def _product_backbone(rows: list[FamilyAdmissionRow]) -> ProductBackboneReadModel:
+    examples = [_bnb_backbone_example()]
+    for row in rows:
+        examples.append(_row_backbone_example(row))
+    return ProductBackboneReadModel(carrier_examples=examples)
 
 
 def _action_candidate_specs(rows: list[FamilyAdmissionRow]) -> list[ActionCandidateSpec]:
@@ -5658,6 +6036,87 @@ def _action_entry_owner_decision_text(row: FamilyAdmissionRow, status: str) -> s
     if status == "proposal_non_action":
         return "Proposal only; this carrier is not action-registry-supported."
     return f"Blocked until {row.next_retry_condition}"
+
+
+def _final_gate_preview_status(
+    generic_status: str,
+) -> Literal[
+    "ready_for_official_final_gate_preview",
+    "proposal_only",
+    "blocked_invalid_scope",
+]:
+    if generic_status == "valid_blocked_final_gate":
+        return "ready_for_official_final_gate_preview"
+    if generic_status == "proposal_non_action":
+        return "proposal_only"
+    return "blocked_invalid_scope"
+
+
+def _bnb_backbone_example() -> ProductBackboneCarrierExample:
+    return ProductBackboneCarrierExample(
+        example_id="backbone-example:MI-001-BNB-LONG",
+        role="historical_regression_sample",
+        family="BNB manual bounded live proof",
+        strategy_family_id="MI-001",
+        carrier_id="MI-001-BNB-LONG",
+        admission_level="L0",
+        symbol="BNB/USDT:USDT",
+        side="long",
+        quantity="0.01",
+        max_notional="20",
+        leverage="1",
+        protection_template_id="protection-template:MI-001-BNB-LONG",
+        review_template_id="review-template:MI-001-BNB-LONG",
+        actionability="historical_proof_not_current_authorization",
+        current_status="regression_sample_requires_fresh_scope_before_new_action",
+        warnings=[],
+        hard_blockers=[
+            "fresh Owner authorization required",
+            "fresh PG/exchange validation required",
+            "FinalGate pass required",
+        ],
+        final_gate_preview_ref="final-gate-preview:MI-001-BNB-LONG",
+    )
+
+
+def _row_backbone_example(row: FamilyAdmissionRow) -> ProductBackboneCarrierExample:
+    scope_template = _carrier_scope_template(row)
+    if row.family == "Trend":
+        role: Literal[
+            "historical_regression_sample",
+            "owner_confirmed_candidate",
+            "budgeted_autonomy_sample",
+            "proposal_dry_run_candidate",
+        ] = "owner_confirmed_candidate"
+        current_status = "l3_owner_scope_candidate_blocked_until_final_gate"
+    elif row.family == "Mean reversion":
+        role = "budgeted_autonomy_sample"
+        current_status = "budget_envelope_compatible_proposal_blocked_until_scope_and_gate"
+    else:
+        role = "proposal_dry_run_candidate"
+        current_status = "proposal_dry_run_not_live_enabled"
+    return ProductBackboneCarrierExample(
+        example_id=f"backbone-example:{row.carrier_id or row.family}",
+        role=role,
+        family=row.family,
+        strategy_family_id=row.strategy_family_id,
+        carrier_id=row.carrier_id,
+        admission_level=row.admission_level_code,
+        symbol=_optional_str(scope_template.get("symbol")),
+        side=_optional_str(scope_template.get("side")),
+        quantity=_optional_str(scope_template.get("quantity")),
+        target_notional_usdt=_optional_str(scope_template.get("target_notional_usdt")),
+        max_notional=_optional_str(scope_template.get("max_notional")),
+        leverage=_optional_str(scope_template.get("leverage")),
+        protection_template_id=f"protection-template:{row.carrier_id or row.family}",
+        review_template_id=f"review-template:{row.carrier_id or row.family}",
+        actionability=_action_candidate_spec_status(row),
+        budgeted_autonomy_compatible=row.family == "Mean reversion",
+        current_status=current_status,
+        warnings=list(row.risk_disclosure_contract.failure_modes),
+        hard_blockers=_row_hard_blockers(row),
+        final_gate_preview_ref=f"final-gate-preview:{row.carrier_id or row.family}",
+    )
 
 
 def _optional_str(value: object) -> Optional[str]:

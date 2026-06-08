@@ -161,6 +161,11 @@ export default function ActionEntry() {
   const finalGate = pageData.final_gate_result || {};
   const actionState = pageData.action_state || {};
   const authorizationPath = pageData.authorization_draft_path || {};
+  const productBackbone = pageData.product_backbone || {};
+  const backboneExamples = asArray<any>(productBackbone.carrier_examples);
+  const candidateActionability = asArray<any>(pageData.candidate_actionability);
+  const finalGatePreviewInputs = asArray<any>(pageData.final_gate_preview_inputs);
+  const consoleActionModel = pageData.trading_console_candidate_action_read_model || {};
   const postAction = pageData.post_action_state || {};
   const postSummary = postAction.summary || {};
   const postIntents = asArray<any>(postSummary.intents);
@@ -237,6 +242,45 @@ export default function ActionEntry() {
 
       <Card className="p-4">
         <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-medium">产品主链</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {displayValue(consoleActionModel.product_surface, 'owner_action_entry')} · {displayValue(productBackbone.version, 'brc_product_backbone')}
+            </p>
+          </div>
+          <Badge variant="muted">官方路径提交</Badge>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {asArray<string>(productBackbone.product_chain).slice(0, 12).map((stage) => (
+            <span key={stage} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
+              {stage}
+            </span>
+          ))}
+        </div>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+          {backboneExamples.map((item) => (
+            <div key={item.example_id} className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+              <div className="flex items-center justify-between gap-2">
+                <div className="truncate text-sm font-medium">{displayValue(item.carrier_id, item.family)}</div>
+                <Badge variant={item.role === 'owner_confirmed_candidate' ? 'warning' : item.role === 'budgeted_autonomy_sample' ? 'caution' : 'muted'}>
+                  {displayValue(item.admission_level, 'L?')}
+                </Badge>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">{displayValue(item.family, '候选')}</div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div>{displayValue(item.symbol, '暂无')}</div>
+                <div>{sideLabel(item.side)}</div>
+                <div>Max {displayValue(item.max_notional, '暂无')}</div>
+                <div>{displayValue(item.protection_template_id, '暂无保护')}</div>
+              </div>
+              <div className="mt-2 line-clamp-2 text-xs text-slate-500">{displayValue(item.current_status, '暂无状态')}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-medium">行动流</h2>
           <Badge variant={ownerActionFlow.status === 'actionable' ? 'normal' : 'caution'}>
             {ownerActionFlow.status === 'actionable' ? '可行动' : '不可直接执行'}
@@ -268,7 +312,7 @@ export default function ActionEntry() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-medium">Owner 行情输入</h2>
-              <p className="text-xs text-slate-500 mt-1">输入只用于本页候选预检，不创建授权、不写入 PG。</p>
+              <p className="text-xs text-slate-500 mt-1">输入会更新候选、预算、授权草案路径和最终门禁预览；提交必须进入官方路径。</p>
             </div>
             <button
               type="submit"
@@ -538,8 +582,8 @@ export default function ActionEntry() {
           </div>
           <div className="space-y-2 text-sm">
             <div>状态：{displayValue(authorizationPath.status, '无法确认')}</div>
-            <div>官方路径：{authorizationPath.official_service_path_available ? '可查看' : '不可用'}</div>
-            <div>本页创建授权：否</div>
+            <div>官方路径：{authorizationPath.official_service_path_available ? '可进入预检' : '不可用'}</div>
+            <div>提交方式：Operation Layer / BRC 官方 API</div>
           </div>
         </Card>
 
@@ -551,6 +595,7 @@ export default function ActionEntry() {
           <div className="space-y-2 text-sm">
             <div>结果：{finalGateStatusLabel(finalGate.status)}</div>
             <div>证据：{finalGate.evidence_status === 'pre_action_evidence_required' ? '需执行前证据' : '无法确认'}</div>
+            <div>预览输入：{finalGatePreviewInputs.length}</div>
             <div>阻断：{asArray(finalGate.blocker_ids).length}</div>
           </div>
         </Card>
@@ -635,7 +680,34 @@ export default function ActionEntry() {
         </div>
       </Card>
 
-      <TechnicalDetails title="Raw / Debug：Action Entry 响应">
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-medium">候选行动性</h2>
+          <Badge variant="muted">{candidateActionability.length} candidates</Badge>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {candidateActionability.map((item) => (
+            <div key={`${item.family}-${item.carrier_id}`} className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">{displayValue(item.family, '候选')}</div>
+                <Badge variant={item.actionability === 'owner_scope_final_gate_ready' ? 'warning' : item.actionability === 'proposal_review' ? 'caution' : 'danger'}>
+                  {displayValue(item.actionability, 'blocked')}
+                </Badge>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">{displayValue(item.carrier_id, '暂无 Carrier')}</div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div>警告 {displayValue(item.warning_count, '0')}</div>
+                <div>阻断 {displayValue(item.hard_blocker_count, '0')}</div>
+                <div>授权路径 {item.owner_authorization_path_available ? '可预检' : '不可用'}</div>
+                <div>FinalGate {item.final_gate_preview_available ? '可预览' : '待补齐'}</div>
+              </div>
+              <div className="mt-3 line-clamp-2 text-xs text-slate-500">{displayValue(item.disabled_reason, '等待后端行动性')}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <TechnicalDetails title="证据详情：Action Entry 响应">
         <button
           type="button"
           onClick={() => navigator.clipboard?.writeText(JSON.stringify(pageData, null, 2))}

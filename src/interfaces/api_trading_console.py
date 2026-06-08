@@ -1,4 +1,4 @@
-"""Trading Console read-only API namespace."""
+"""Trading Console Owner action-entry and non-mutating product API namespace."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from src.interfaces.operator_auth import require_operator_session
 
 router = APIRouter(
     prefix="/api/trading-console",
-    tags=["Trading Console Read Models"],
+    tags=["Trading Console"],
     dependencies=[Depends(require_operator_session)],
 )
 

@@ -1931,3 +1931,77 @@ def test_mismatched_owner_scope_does_not_bind_to_unsupported_candidate():
     assert vol.scope_review.verdict == "candidate_mismatch"
     assert "symbol not supported by candidate" in vol.scope_review.mismatches
     assert vol.backend_actionable is False
+
+
+def test_product_backbone_represents_bnb_trend_mr_and_volatility_samples():
+    state = build_production_strategy_family_admission_state(now_ms=1770000000000)
+
+    assert state.product_backbone.version == "brc_product_backbone_v0_3"
+    assert "ActionCandidate" in state.product_backbone.product_chain
+    assert "FinalGate preview" in state.product_backbone.product_chain
+    assert state.product_backbone.no_action_guarantee["places_order"] is False
+    assert state.trading_console_candidate_action_read_model.product_surface == (
+        "owner_action_entry"
+    )
+    assert "documentation_surface" in state.trading_console_candidate_action_read_model.never_show_as
+    assert "code_explanation" in state.trading_console_candidate_action_read_model.never_show_as
+
+    examples = {
+        item.carrier_id: item for item in state.product_backbone.carrier_examples
+    }
+    assert set(examples) >= {
+        "MI-001-BNB-LONG",
+        "TF-001-live-readonly-v0",
+        "MR-001-live-readonly-v0",
+        "VB-001-live-readonly-v0",
+    }
+    assert examples["MI-001-BNB-LONG"].role == "historical_regression_sample"
+    assert examples["MI-001-BNB-LONG"].admission_level == "L0"
+    assert examples["MI-001-BNB-LONG"].symbol == "BNB/USDT:USDT"
+    assert "fresh Owner authorization required" in examples["MI-001-BNB-LONG"].hard_blockers
+    assert examples["TF-001-live-readonly-v0"].role == "owner_confirmed_candidate"
+    assert examples["TF-001-live-readonly-v0"].symbol == "SOL/USDT:USDT"
+    assert examples["MR-001-live-readonly-v0"].role == "budgeted_autonomy_sample"
+    assert examples["MR-001-live-readonly-v0"].budgeted_autonomy_compatible is True
+    assert examples["VB-001-live-readonly-v0"].role == "proposal_dry_run_candidate"
+    for item in examples.values():
+        assert item.may_execute_live is False
+        assert item.frontend_action_enabled is False
+
+    actionability = {item.family: item for item in state.candidate_actionability}
+    assert actionability["Trend"].actionability == "owner_scope_final_gate_ready"
+    assert actionability["Trend"].final_gate_preview_available is True
+    assert actionability["Trend"].owner_authorization_path_available is True
+    assert actionability["Mean reversion"].actionability == "proposal_review"
+    assert actionability["Mean reversion"].budget_envelope_compatible is True
+    assert actionability["Volatility expansion"].actionability == "proposal_review"
+    assert actionability["Volatility expansion"].owner_authorization_path_available is False
+    for item in actionability.values():
+        assert item.may_execute_live is False
+        assert item.frontend_action_enabled is False
+
+    previews = {item.strategy_family: item for item in state.final_gate_preview_inputs}
+    assert previews["Trend"].status == "ready_for_official_final_gate_preview"
+    assert previews["Trend"].symbol == "SOL/USDT:USDT"
+    assert "exact Owner execute authorization" in previews["Trend"].required_checks
+    assert previews["Trend"].protection_template_id == (
+        "protection-template:TF-001-live-readonly-v0"
+    )
+    assert previews["Mean reversion"].status == "proposal_only"
+    assert previews["Mean reversion"].target_notional_usdt == "22"
+    assert previews["Volatility expansion"].status == "proposal_only"
+    for item in previews.values():
+        assert item.operation_layer_required is True
+        assert item.may_execute_live is False
+        assert item.frontend_action_enabled is False
+
+    protection = {item.family: item for item in state.protection_templates}
+    assert set(protection) == {"Trend", "Volatility expansion", "Mean reversion"}
+    assert protection["Trend"].mode == "single_tp_plus_sl"
+    assert protection["Mean reversion"].required_components == ["TP", "SL"]
+    assert "missing or unknown protection" in (
+        protection["Volatility expansion"].hard_blockers_for_live_action
+    )
+    warnings = {item.classification for item in state.warning_records}
+    assert warnings == {"strategy_warning"}
+    assert state.hard_blocker_records == state.blocker_records

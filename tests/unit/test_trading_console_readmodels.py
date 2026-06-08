@@ -1968,6 +1968,48 @@ def test_action_entry_readiness_exposes_generic_specs_without_actions(monkeypatc
     assert "missing Owner execute authorization" in adapter["hard_blockers_for_live_action"]
     assert "weak strategy evidence" in adapter["warning_not_blocker"]
 
+    product_backbone = payload["data"]["product_backbone"]
+    assert product_backbone["version"] == "brc_product_backbone_v0_3"
+    assert "Owner market input" in product_backbone["console_flow"]
+    assert product_backbone["no_action_guarantee"]["places_order"] is False
+    examples = {
+        item["carrier_id"]: item for item in product_backbone["carrier_examples"]
+    }
+    assert examples["MI-001-BNB-LONG"]["role"] == "historical_regression_sample"
+    assert examples["MI-001-BNB-LONG"]["symbol"] == "BNB/USDT:USDT"
+    assert examples["TF-001-live-readonly-v0"]["role"] == "owner_confirmed_candidate"
+    assert examples["TF-001-live-readonly-v0"]["symbol"] == "SOL/USDT:USDT"
+    assert examples["MR-001-live-readonly-v0"]["role"] == "budgeted_autonomy_sample"
+    assert examples["MR-001-live-readonly-v0"]["budgeted_autonomy_compatible"] is True
+    assert examples["VB-001-live-readonly-v0"]["role"] == "proposal_dry_run_candidate"
+    assert all(item["may_execute_live"] is False for item in examples.values())
+
+    actionability = {
+        item["family"]: item for item in payload["data"]["candidate_actionability"]
+    }
+    assert actionability["Trend"]["actionability"] == "owner_scope_final_gate_ready"
+    assert actionability["Trend"]["final_gate_preview_available"] is True
+    assert actionability["Mean reversion"]["budget_envelope_compatible"] is True
+    assert actionability["Volatility expansion"]["owner_authorization_path_available"] is False
+    assert all(item["frontend_action_enabled"] is False for item in actionability.values())
+
+    final_gate_inputs = {
+        item["strategy_family"]: item for item in payload["data"]["final_gate_preview_inputs"]
+    }
+    assert final_gate_inputs["Trend"]["status"] == "ready_for_official_final_gate_preview"
+    assert final_gate_inputs["Trend"]["symbol"] == "SOL/USDT:USDT"
+    assert final_gate_inputs["Mean reversion"]["target_notional_usdt"] == "22"
+    assert "exact Owner execute authorization" in final_gate_inputs["Trend"]["required_checks"]
+    assert all(item["may_execute_live"] is False for item in final_gate_inputs.values())
+
+    console_action_model = payload["data"]["trading_console_candidate_action_read_model"]
+    assert console_action_model["product_surface"] == "owner_action_entry"
+    assert console_action_model["frontend_policy"] == (
+        "operate_as_candidate_action_entry_not_document_or_code_explanation"
+    )
+    assert "documentation_surface" in console_action_model["never_show_as"]
+    assert "code_explanation" in console_action_model["never_show_as"]
+
     specs = {item["family"]: item for item in payload["data"]["generic_action_specs"]}
     trend = specs["Trend"]
     assert trend["carrier_id"] == "TF-001-live-readonly-v0"

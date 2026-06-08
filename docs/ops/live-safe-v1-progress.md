@@ -2,6 +2,23 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-08 (BRC Product Backbone Local Sprint)
+
+- Implemented the local BRC candidate/action product backbone in the Trading Console read-model path: `ProductBackboneReadModel`, first-class warnings, candidate actionability, protection templates, FinalGate preview inputs, and candidate/action-entry surface policy.
+- Represented BNB historical bounded-live proof, Trend/SOL, MR/ETH budget-envelope-compatible candidate, and Volatility dry-run proposal through the same product chain shape. BNB remains historical regression evidence only and does not grant fresh authorization.
+- Wired `/api/trading-console/action-entry-readiness` and `/api/trading-console/owner-action-flow` to expose `product_backbone`, `candidate_actionability`, `final_gate_preview_inputs`, `protection_templates`, warning records, hard blockers, and the Trading Console candidate/action read model.
+- Updated Trading Console Action Entry so the first screen is an Owner action-entry surface: product chain, candidate examples, candidate actionability, authorization handoff, FinalGate preview, disabled reasons, and post-action evidence. It is not presented as a documentation page, passive status page, or code explanation surface.
+- Safety boundary preserved: no live action, no order placement, no exchange write, no PG mutation from the Trading Console GET path, no runtime profile change, no credential change, no deployment.
+- Targeted verification passed:
+  - `python3 -m py_compile src/application/production_strategy_family_admission.py src/application/readmodels/trading_console.py src/interfaces/api_trading_console.py`
+  - `python3 -m pytest -q tests/unit/test_production_strategy_family_admission.py`
+  - `python3 -m pytest -q tests/unit/test_trading_console_readmodels.py`
+  - `npm run lint --prefix trading-console`
+  - `npm run build --prefix trading-console`
+  - `python3 -m alembic heads`
+- Migration status: `python3 -m alembic heads` reports single head `043`. Temporary clean SQLite upgrade-to-head was attempted separately from the dirty local dev DB and failed at revision `020` on SQLite `ALTER TABLE brc_campaigns ALTER COLUMN metadata DROP DEFAULT`; this is a SQLite migration-chain compatibility issue before `043`, distinct from the previously known dirty local SQLite `orders` table conflict. No new migration was added in this sprint. Before any server release, validate the migration chain against the target environment and resolve the SQLite clean-chain hygiene issue if SQLite remains a release validation target.
+- Deployment deferred: no coherent release candidate deployed and Owner preference is less frequent deployment.
+
 ## 2026-04-29
 
 - Archived pre-live-safe docs, tests, scripts, and generated artifacts.
