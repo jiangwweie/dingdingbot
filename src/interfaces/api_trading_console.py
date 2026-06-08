@@ -322,6 +322,13 @@ async def owner_action_flow(
     max_attempts: Optional[int] = Query(default=None, ge=1, le=10),
     protection_mode: Optional[str] = Query(default=None),
     review_requirement: Optional[str] = Query(default=None),
+    custom_total_budget: Optional[str] = Query(default=None),
+    custom_max_notional_per_action: Optional[str] = Query(default=None),
+    custom_max_daily_loss: Optional[str] = Query(default=None),
+    custom_capacity_fraction: Optional[str] = Query(default=None),
+    custom_max_active_positions: Optional[int] = Query(default=None, ge=1, le=3),
+    custom_max_attempts: Optional[int] = Query(default=None, ge=1, le=3),
+    custom_max_leverage: Optional[str] = Query(default=None),
 ) -> TradingConsoleReadModelResponse:
     return await _service(include_exchange=include_exchange).owner_action_flow(
         owner_scope={
@@ -349,6 +356,15 @@ async def owner_action_flow(
             "side": side,
             "risk_tier": risk_tier,
             "note": note,
+        },
+        custom_budget={
+            "total_budget": custom_total_budget,
+            "max_notional_per_action": custom_max_notional_per_action,
+            "max_daily_loss": custom_max_daily_loss,
+            "capacity_fraction": custom_capacity_fraction,
+            "max_active_positions": custom_max_active_positions,
+            "max_attempts": custom_max_attempts,
+            "max_leverage": custom_max_leverage,
         },
         include_exchange=include_exchange,
     )

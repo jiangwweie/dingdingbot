@@ -596,6 +596,7 @@ class TradingConsoleReadModelService:
         *,
         owner_scope: Optional[dict[str, Any]] = None,
         market_input: Optional[dict[str, Any]] = None,
+        custom_budget: Optional[dict[str, Any]] = None,
         include_exchange: bool = False,
     ) -> TradingConsoleReadModelResponse:
         snap = await self.snapshot(
@@ -606,6 +607,7 @@ class TradingConsoleReadModelService:
             snap=snap,
             owner_scope=owner_scope,
             market_input=market_input,
+            custom_budget=custom_budget,
         )
         data = {
             **data,
@@ -658,6 +660,7 @@ class TradingConsoleReadModelService:
         snap: TradingConsoleSnapshot,
         owner_scope: Optional[dict[str, Any]] = None,
         market_input: Optional[dict[str, Any]] = None,
+        custom_budget: Optional[dict[str, Any]] = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         normalized_market_input = _normalize_action_entry_market_input(market_input)
         state = build_production_strategy_family_admission_state(
@@ -686,6 +689,7 @@ class TradingConsoleReadModelService:
         budget = self._budget_recommendation_payload(
             snap=snap,
             risk_tier=normalized_market_input.get("risk_tier") or "tiny",
+            custom=custom_budget,
             owner_selection=raw_owner_selection,
         )
         envelope = dict(budget.get("budget_envelope") or {})

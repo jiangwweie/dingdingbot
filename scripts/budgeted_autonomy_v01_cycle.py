@@ -46,6 +46,7 @@ def main() -> None:
     scope = _scope_from_env()
     result: dict[str, Any] = {
         "generated_from": "budgeted_autonomy_v01_cycle_runner",
+        "initial_scope": dict(scope),
         "scope": scope,
         "safety": _safety_flags(),
         "steps": [],
@@ -67,6 +68,10 @@ def main() -> None:
     if autonomy.get("selected_candidate") is None:
         _finish(result, "blocked_with_retry_condition", "no_v01_candidate_selected")
         return
+    selected_scope = _scope_from_selected_proposal(flow_body, scope)
+    result["selected_scope"] = selected_scope
+    result["scope"] = selected_scope
+    scope = selected_scope
 
     current = _request_json(
         "GET",
@@ -199,6 +204,7 @@ def _scope_from_env() -> dict[str, str]:
         "BUDGETED_AUTONOMY_SYMBOL": "symbol",
         "BUDGETED_AUTONOMY_SIDE": "side",
         "BUDGETED_AUTONOMY_QUANTITY": "quantity",
+        "BUDGETED_AUTONOMY_TARGET_NOTIONAL_USDT": "target_notional_usdt",
         "BUDGETED_AUTONOMY_MAX_NOTIONAL": "max_notional",
         "BUDGETED_AUTONOMY_LEVERAGE": "leverage",
         "BUDGETED_AUTONOMY_MAX_ATTEMPTS": "max_attempts",
@@ -266,9 +272,64 @@ def _owner_action_flow(cookie: str, scope: dict[str, str]) -> dict[str, Any]:
             "min_qty": os.environ.get("BUDGETED_AUTONOMY_MIN_QTY", ""),
             "qty_step": os.environ.get("BUDGETED_AUTONOMY_QTY_STEP", ""),
             "price_tick": os.environ.get("BUDGETED_AUTONOMY_PRICE_TICK", ""),
+            "risk_tier": os.environ.get("BUDGETED_AUTONOMY_RISK_TIER", ""),
+            "custom_total_budget": os.environ.get("BUDGETED_AUTONOMY_CUSTOM_TOTAL_BUDGET", ""),
+            "custom_max_notional_per_action": os.environ.get(
+                "BUDGETED_AUTONOMY_CUSTOM_MAX_NOTIONAL_PER_ACTION", ""
+            ),
+            "custom_max_daily_loss": os.environ.get(
+                "BUDGETED_AUTONOMY_CUSTOM_MAX_DAILY_LOSS", ""
+            ),
+            "custom_capacity_fraction": os.environ.get(
+                "BUDGETED_AUTONOMY_CUSTOM_CAPACITY_FRACTION", ""
+            ),
+            "custom_max_active_positions": os.environ.get(
+                "BUDGETED_AUTONOMY_CUSTOM_MAX_ACTIVE_POSITIONS", ""
+            ),
+            "custom_max_attempts": os.environ.get("BUDGETED_AUTONOMY_CUSTOM_MAX_ATTEMPTS", ""),
+            "custom_max_leverage": os.environ.get("BUDGETED_AUTONOMY_CUSTOM_MAX_LEVERAGE", ""),
         }
     )
     return _request_json("GET", f"/api/trading-console/owner-action-flow?{query}", cookie=cookie)
+
+
+def _scope_from_selected_proposal(flow_body: dict[str, Any], fallback: dict[str, str]) -> dict[str, str]:
+    proposal = (
+        flow_body.get("data", {})
+        .get("owner_action_flow", {})
+        .get("selected_action_proposal", {})
+    )
+    if not isinstance(proposal, dict):
+        return dict(fallback)
+    result = dict(fallback)
+    field_map = {
+        "family": "family",
+        "strategy_family_id": "strategy_family_id",
+        "carrier_id": "carrier_id",
+        "symbol": "symbol",
+        "side": "side",
+        "max_notional": "max_notional",
+        "leverage": "leverage",
+        "max_attempts": "max_attempts",
+        "protection_mode": "protection_mode",
+        "review_requirement": "review_requirement",
+    }
+    for source, target in field_map.items():
+        value = proposal.get(source)
+        if value not in (None, ""):
+            result[target] = str(value)
+    quantity = (
+        proposal.get("computed_quantity")
+        or proposal.get("quantity")
+        or proposal.get("recommended_quantity")
+    )
+    if quantity in (None, ""):
+        raise RuntimeError("selected proposal does not provide an exact quantity")
+    result["quantity"] = str(quantity)
+    target_notional = proposal.get("target_notional_usdt")
+    if target_notional not in (None, ""):
+        result["target_notional_usdt"] = str(target_notional)
+    return result
 
 
 def _warning_ids(current: dict[str, Any]) -> list[str]:

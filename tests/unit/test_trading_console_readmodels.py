@@ -2022,6 +2022,113 @@ def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkey
     assert v01["places_order"] is False
 
 
+def test_owner_action_flow_accepts_owner_approved_custom_budget_envelope(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(normal_orders=[], stop_orders=[])
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        order_repo=_FakeOrderRepo([]),
+        account_snapshot=_FakeAccountSnapshot(),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "include_exchange": "true",
+                "market_regime": "trend",
+                "family": "Trend",
+                "strategy_family_id": "TF-001-live-readonly-v0",
+                "carrier_id": "TF-001-live-readonly-v0",
+                "symbol": "SOL/USDT:USDT",
+                "side": "long",
+                "target_notional_usdt": "20",
+                "current_price": "200",
+                "min_notional": "5",
+                "min_qty": "0.01",
+                "qty_step": "0.01",
+                "price_tick": "0.01",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+                "risk_tier": "custom",
+                "custom_total_budget": "25",
+                "custom_max_notional_per_action": "20",
+                "custom_max_daily_loss": "1",
+                "custom_capacity_fraction": "0.2",
+                "custom_max_active_positions": "1",
+                "custom_max_attempts": "1",
+                "custom_max_leverage": "1",
+            },
+        )
+
+    assert response.status_code == 200
+    flow = response.json()["data"]["owner_action_flow"]
+    assert flow["budget_summary"]["status"] == "available"
+    assert flow["budget_summary"]["recommended_total_budget"] == "25"
+    assert flow["budget_summary"]["recommended_max_notional_per_action"] == "20"
+    assert flow["budget_summary"]["owner_selection_status"] == "within_recommendation"
+    proposal = flow["selected_action_proposal"]
+    assert proposal["status"] == "valid_blocked_final_gate"
+    assert proposal["target_notional_usdt"] == "20"
+    assert proposal["computed_quantity"] == "0.1"
+    assert proposal["estimated_notional_usdt"] == "20.0"
+    assert "owner_max_notional_exceeds_budget_envelope" not in proposal["hard_blockers"]
+    assert flow["budgeted_autonomy_v01"]["policy"]["budget"]["max_notional_per_action"] == "20"
+    assert flow["budgeted_autonomy_v01"]["frontend_action_enabled"] is False
+    assert flow["budgeted_autonomy_v01"]["places_order"] is False
+
+
+def test_budgeted_autonomy_runner_uses_selected_proposal_exact_quantity():
+    from scripts.budgeted_autonomy_v01_cycle import _scope_from_selected_proposal
+
+    scope = {
+        "market_regime": "trend",
+        "family": "Trend",
+        "strategy_family_id": "TF-001-live-readonly-v0",
+        "carrier_id": "TF-001-live-readonly-v0",
+        "symbol": "SOL/USDT:USDT",
+        "side": "long",
+        "quantity": "0.1",
+        "max_notional": "20",
+        "leverage": "1",
+        "max_attempts": "1",
+        "protection_mode": "single_tp_plus_sl",
+        "review_requirement": "post_action_review_required",
+    }
+    flow_body = {
+        "data": {
+            "owner_action_flow": {
+                "selected_action_proposal": {
+                    "family": "Trend",
+                    "strategy_family_id": "TF-001-live-readonly-v0",
+                    "carrier_id": "TF-001-live-readonly-v0",
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "computed_quantity": "0.15",
+                    "target_notional_usdt": "20",
+                    "max_notional": "20",
+                    "leverage": "1",
+                    "max_attempts": 1,
+                    "protection_mode": "single_tp_plus_sl",
+                    "review_requirement": "post_action_review_required",
+                }
+            }
+        }
+    }
+
+    selected = _scope_from_selected_proposal(flow_body, scope)
+
+    assert selected["quantity"] == "0.15"
+    assert selected["target_notional_usdt"] == "20"
+    assert selected["carrier_id"] == "TF-001-live-readonly-v0"
+
+
 def test_owner_action_flow_computes_mr_eth_quantity_from_target_notional(monkeypatch):
     _configure_auth(monkeypatch)
     exchange = _FakeExchangeGateway()
