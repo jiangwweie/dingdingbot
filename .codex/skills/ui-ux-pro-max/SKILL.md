@@ -1,6 +1,16 @@
 ---
 name: ui-ux-pro-max
-description: Use for frontend UI/UX design, redesign, polish, dashboard/console pages, SaaS/operator interfaces, React/Tailwind implementation, visual review, and when the user asks for UI UMAX, UI/UX Pro Max, AI Studio visual migration, or non-document-style product UI. For Owner Console work in this repo, use before editing frontend screens.
+description: >-
+  Use for frontend UI/UX design, redesign, polish, product console
+  implementation, SaaS/operator interfaces, React/Tailwind implementation,
+  visual review, and when the user asks for UI UMAX, UI/UX Pro Max, AI Studio
+  visual migration, or non-document-style product UI. For this repo, use before
+  editing Owner Console or Trading Console screens, especially Action Entry,
+  ActionCandidate review, budget/authorization, FinalGate, blocker/warning,
+  position/protection, and Review Ledger flows. Follow the BRC product
+  principles: the console is an Owner bounded-live operations surface, not a
+  read-only dashboard, documentation page, code explanation, raw JSON viewer, or
+  passive report unless the specific artifact is explicitly scoped read-only.
 ---
 # ui-ux-pro-max
 
@@ -14,31 +24,53 @@ python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system 
 
 ## BRC Owner Console Project Adaptation
 
-The Owner Console is the Owner's decision cockpit, not a documentation page, debug page, or raw API field viewer.
+The Owner Console and Trading Console are the Owner's bounded-live operating surfaces. They are not merely read-only dashboards, documentation pages, debug pages, code explanations, PG/read-model browsers, enum displays, or raw API field viewers.
+
+Project authority for this repository:
+1. Owner explicit correction, `AGENTS.md`, current tracked code, and current `docs/ops/knowledge-pack/*`.
+2. This BRC project adaptation.
+3. Existing product UI and Gemini/front-end design baseline.
+4. Generic design-system search output from this skill.
+
+Generic design recommendations are supporting input only. They must not override project product semantics, safety boundaries, or the current Owner correction that the console is not a read-only product.
 
 Primary UX goal:
 Help the Owner quickly understand:
 - current environment and safety state;
 - active StrategyFamily / Carrier;
-- available next action;
+- available next action or why no action is currently available;
+- ActionCandidate records and candidate actionability;
+- budget availability and authorization state;
+- FinalGate preview, required inputs, and gate result;
 - hard blockers vs acknowledgeable strategy warnings;
 - evidence behind the decision;
-- what will happen after authorization.
+- active position / TP/SL protection state when relevant;
+- pause, revoke, or recovery controls when relevant;
+- post-action evidence and Review Ledger outcomes;
+- what will happen after authorization and what remains disabled.
 
 Core rules:
 - Use product UI, not Markdown-like report layouts.
-- Treat the Owner Console as a bounded-live operations console: when backend action state is wired, expose controlled Operation Layer flows with preflight, confirmation, result, and disabled reasons.
+- Treat Owner Console and Trading Console as bounded-live operations consoles: when backend action state is wired, expose controlled Operation Layer flows with preflight, confirmation, result, and disabled reasons.
 - Do not reduce frontend work to read-only documentation, code explanation, raw JSON display, or passive status reporting unless the specific endpoint/report is explicitly scoped as read-only.
+- Do not generalize a GET/read-model namespace into "the console product is read-only"; the UI should still show the official action path, readiness, disabled reasons, and handoff points.
+- Do not make source-code explanations, API schemas, markdown reports, or documentation copy the primary screen unless the user explicitly asks for documentation.
 - Keep current state and next action visible above technical detail.
+- Every candidate/action surface should answer: what can the Owner do now, why is it enabled or disabled, what risk is being accepted, which gate applies, and what evidence/result will be recorded.
 - Separate hard blockers from strategy warnings.
 - Collapse technical/debug details by default.
 - Never hide live/testnet/observe mode.
 - Never imply live readiness without explicit Owner live authorization.
+- Never bypass or visually imply bypass of ActionCandidate -> Owner/BudgetEnvelope authorization -> ActionSpec -> FinalGate -> Operation Layer -> protection -> Review Ledger.
+- Never auto-fill confirmation phrases, fake live execution, or add controls that imply real-funds action without the official backend path and explicit Owner authorization.
 - Do not present BNB as the whole architecture; BNB is only the first Carrier.
 
 Domain vocabulary:
 - StrategyFamily = strategy logic, no order authority.
 - Carrier = StrategyFamily + symbol + side + risk cap.
+- ActionCandidate = reviewable proposed action, not direct order authority.
+- ActionSpec = official execution intent evaluated by FinalGate.
+- FinalGate = final safety gate for the exact action.
 - BoundedLiveTrialAuthorization = one-time Owner-confirmed live trial authorization.
 - Warning = strategy/evidence/regime risk; Owner may acknowledge.
 - Hard Blocker = execution safety issue; cannot be bypassed.
@@ -46,7 +78,7 @@ Domain vocabulary:
 Codex frontend boundary:
 Codex may wire API data, types, tests, and small UI components.
 Codex must preserve product layout, hierarchy, and Owner decision flow.
-Large UI redesign should follow this project adaptation and the existing Gemini/front-end design baseline.
+Large UI redesign should follow this project adaptation and the existing Gemini/front-end design baseline. If generic design guidance conflicts with project principles, keep the project principles.
 
 Comprehensive design guide for web and mobile applications. Contains 67 styles, 96 color palettes, 57 font pairings, 99 UX guidelines, and 25 chart types across 13 technology stacks. Searchable database with priority-based recommendations.
 
@@ -89,12 +121,41 @@ Extract key information from user request:
 - **Industry**: healthcare, fintech, gaming, education, etc.
 - **Stack**: React, Vue, Next.js, or default to `html-tailwind`
 
-### Step 2: Generate Design System (REQUIRED)
+For this repository, also identify whether the screen is:
+- an Owner/Trading Console action surface;
+- a read-model endpoint view supporting an action surface;
+- a genuinely read-only evidence/report artifact;
+- a debug/developer-only surface.
 
-**Always start with `--design-system`** to get comprehensive recommendations with reasoning:
+If it is Owner Console or Trading Console work, map the UI to the product chain before choosing layout details:
+
+```text
+StrategyFamily / Carrier
+-> ActionCandidate
+-> Owner risk understanding
+-> Owner authorization or BudgetEnvelope authorization
+-> ActionSpec
+-> FinalGate
+-> Operation Layer
+-> official bounded live action
+-> active position / TP/SL protection monitoring
+-> close / TP / SL
+-> Review Ledger
+-> promote / revise / park
+```
+
+### Step 2: Establish Design Authority
+
+For general projects, use `--design-system` to get comprehensive recommendations with reasoning.
+
+For this repository, first inspect the existing screen patterns and project product rules. Use design-system search only as supplemental guidance for visual polish, chart selection, typography, responsiveness, and accessibility.
 
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "<product_type> <industry> <keywords>" --design-system [-p "Project Name"]
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<product_type> <industry> <keywords>" --design-system [-p "Project Name"]
+```
+
+```bash
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "bounded live trading operations console fintech risk" --design-system -p "BRC Owner Console"
 ```
 
 This command:
@@ -105,7 +166,7 @@ This command:
 
 **Example:**
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service" --design-system -p "Serenity Spa"
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service" --design-system -p "Serenity Spa"
 ```
 
 ### Step 2b: Persist Design System (Master + Overrides Pattern)
@@ -113,7 +174,7 @@ python3 skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service" --d
 To save the design system for hierarchical retrieval across sessions, add `--persist`:
 
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name"
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name"
 ```
 
 This creates:
@@ -122,7 +183,7 @@ This creates:
 
 **With page-specific override:**
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name" --page "dashboard"
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name" --page "dashboard"
 ```
 
 This also creates:
@@ -138,7 +199,7 @@ This also creates:
 After getting the design system, use domain searches to get additional details:
 
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <domain> [-n <max_results>]
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <domain> [-n <max_results>]
 ```
 
 **When to use detailed searches:**
@@ -156,7 +217,7 @@ python3 skills/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <domain> [-n
 Get implementation-specific best practices. If user doesn't specify a stack, **default to `html-tailwind`**.
 
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "<keyword>" --stack html-tailwind
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<keyword>" --stack html-tailwind
 ```
 
 Available stacks: `html-tailwind`, `react`, `nextjs`, `vue`, `svelte`, `swiftui`, `react-native`, `flutter`, `shadcn`, `jetpack-compose`
@@ -207,10 +268,10 @@ Available stacks: `html-tailwind`, `react`, `nextjs`, `vue`, `svelte`, `swiftui`
 - Industry: Beauty/Wellness
 - Stack: html-tailwind (default)
 
-### Step 2: Generate Design System (REQUIRED)
+### Step 2: Establish Design Authority
 
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service elegant" --design-system -p "Serenity Spa"
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service elegant" --design-system -p "Serenity Spa"
 ```
 
 **Output:** Complete design system with pattern, style, colors, typography, effects, and anti-patterns.
@@ -219,16 +280,16 @@ python3 skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service eleg
 
 ```bash
 # Get UX guidelines for animation and accessibility
-python3 skills/ui-ux-pro-max/scripts/search.py "animation accessibility" --domain ux
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "animation accessibility" --domain ux
 
 # Get alternative typography options if needed
-python3 skills/ui-ux-pro-max/scripts/search.py "elegant luxury serif" --domain typography
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "elegant luxury serif" --domain typography
 ```
 
 ### Step 4: Stack Guidelines
 
 ```bash
-python3 skills/ui-ux-pro-max/scripts/search.py "layout responsive form" --stack html-tailwind
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "layout responsive form" --stack html-tailwind
 ```
 
 **Then:** Synthesize design system + detailed searches and implement the design.
@@ -241,10 +302,10 @@ The `--design-system` flag supports two output formats:
 
 ```bash
 # ASCII box (default) - best for terminal display
-python3 skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system
 
-# Markdown - best for documentation
-python3 skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system -f markdown
+# Markdown - best for external documentation, not as the primary app screen
+python3 .codex/skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system -f markdown
 ```
 
 ---
@@ -303,6 +364,13 @@ These are frequently overlooked issues that make UI look unprofessional:
 ## Pre-Delivery Checklist
 
 Before delivering UI code, verify these items:
+
+### BRC Product Semantics
+- [ ] Owner Console / Trading Console screens are operating surfaces, not documentation or code-explanation pages.
+- [ ] Read-only endpoints remain read-only, but their UI still supports action understanding, disabled reasons, and official handoff points when part of an action flow.
+- [ ] Candidate/action screens show ActionCandidate status, risk, budget/authorization state, FinalGate preview/result, hard blockers, warnings, and evidence.
+- [ ] Live/testnet/observe mode is visible, and no UI implies live readiness or real-funds action without exact Owner authorization.
+- [ ] Confirmation controls are never auto-filled, and no UI suggests bypassing the official ActionSpec -> FinalGate -> Operation Layer path.
 
 ### Visual Quality
 - [ ] No emojis used as icons (use SVG instead)
