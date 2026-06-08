@@ -2086,6 +2086,10 @@ class PGBrcMultiCarrierBudgetAuthorizationORM(PGCoreBase):
         ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
+    revoked_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    revoked_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    revoke_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_control_operation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auto_execution_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     order_permission_granted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -2117,7 +2121,8 @@ class PGBrcMultiCarrierBudgetAuthorizationORM(PGCoreBase):
             name="ck_brc_budget_auth_validity_window",
         ),
         CheckConstraint(
-            "status IN ('draft_disabled_pending_owner_authorization')",
+            "status IN ('draft_disabled_pending_owner_authorization', "
+            "'active_metadata_only', 'paused_metadata_only', 'revoked', 'expired')",
             name="ck_brc_budget_auth_status",
         ),
         CheckConstraint("live_ready IS FALSE", name="ck_brc_budget_auth_live_not_ready"),

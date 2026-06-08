@@ -50,11 +50,11 @@ export default function Login() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
             <ShieldCheck className="h-5 w-5" />
-            <span className="text-sm font-medium">只读交易控制台</span>
+            <span className="text-sm font-medium">受控交易控制台</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">登录交易控制台</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            使用 Operator 账号进入，只读取当前子账户事实。
+            使用 Operator 账号进入；操作控制需经过预检和确认。
           </p>
         </div>
 
@@ -121,8 +121,8 @@ export default function Login() {
         </Card>
 
         <div className="flex items-center justify-between text-xs text-slate-500">
-          <Badge variant="muted">只读</Badge>
-          <span>不会开放下单、撤单、平仓或保护重试。</span>
+          <Badge variant="muted">操作需确认</Badge>
+          <span>不会直接开放下单、撤单、平仓或保护重试。</span>
         </div>
       </div>
     </div>

@@ -27,6 +27,8 @@ Help the Owner quickly understand:
 
 Core rules:
 - Use product UI, not Markdown-like report layouts.
+- Treat the Owner Console as a bounded-live operations console: when backend action state is wired, expose controlled Operation Layer flows with preflight, confirmation, result, and disabled reasons.
+- Do not reduce frontend work to read-only documentation, code explanation, raw JSON display, or passive status reporting unless the specific endpoint/report is explicitly scoped as read-only.
 - Keep current state and next action visible above technical detail.
 - Separate hard blockers from strategy warnings.
 - Collapse technical/debug details by default.

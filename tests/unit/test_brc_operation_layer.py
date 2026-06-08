@@ -82,6 +82,9 @@ async def _operation_service(
     runtime_stop_failure: Exception | None = None,
     fixed_rehearsal_adapter: bool = False,
     fixed_rehearsal_failure: Exception | None = None,
+    budget_adapter: bool = True,
+    budget_revoke_adapter: bool = True,
+    budget_authorization_status: str | None = "active_metadata_only",
     create_campaign: bool = True,
     runtime_state: dict | None = None,
     admission_readiness=None,
@@ -135,6 +138,33 @@ async def _operation_service(
     runtime.update(runtime_state or {})
     fixed_rehearsal_calls = []
     runtime_stop_calls = []
+    budget_revoke_calls = []
+    budget_state = {
+        "latest_budget_authorization": (
+            {
+                "budget_authorization_id": "budget-1",
+                "status": budget_authorization_status,
+                "updated_at_ms": 1780496600000,
+                "live_ready": False,
+                "auto_execution_enabled": False,
+                "order_permission_granted": False,
+                "execution_permission_granted": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "metadata_only": True,
+            }
+            if budget_authorization_status is not None
+            else None
+        ),
+        "eligible_carrier_ids": ["MI-001-BNB-LONG"],
+        "disabled_execution_state": {
+            "live_ready": False,
+            "auto_execution_enabled": False,
+            "order_permission_granted": False,
+            "execution_permission_granted": False,
+        },
+        "budget_scope_source": "pg_metadata",
+    }
 
     async def _runtime_summary():
         return dict(runtime)
@@ -149,11 +179,52 @@ async def _operation_service(
         return {"packet": "review", "mutation_executed": False, "live_ready": False}
 
     async def _runtime_transition(target_state, input_params):
+        runtime["current_runtime_state"] = target_state
         return {
             "status": target_state,
             "operation_id": input_params["operation_id"],
             "preflight_id": input_params["preflight_id"],
             "places_orders": False,
+            "live_ready": False,
+        }
+
+    async def _budget_summary():
+        latest = budget_state.get("latest_budget_authorization")
+        return {
+            **budget_state,
+            "latest_budget_authorization": dict(latest) if isinstance(latest, dict) else None,
+            "available": latest is not None,
+            "ready": latest is not None,
+            "source": "pg_metadata",
+        }
+
+    async def _budget_revoke(input_params):
+        budget_revoke_calls.append(dict(input_params))
+        latest = budget_state.get("latest_budget_authorization")
+        if latest is None:
+            raise RuntimeError("No current budget authorization metadata exists to revoke.")
+        already_revoked = latest.get("status") == "revoked"
+        if not already_revoked:
+            latest.update(
+                {
+                    "status": "revoked",
+                    "revoked_at_ms": 1780496700000,
+                    "revoked_by": input_params.get("revoked_by"),
+                    "revoke_reason": input_params.get("reason"),
+                    "last_control_operation_id": input_params.get("operation_id"),
+                    "updated_at_ms": 1780496700000,
+                }
+            )
+        return {
+            **latest,
+            "already_revoked": already_revoked,
+            "budget_effective_state": "revoked",
+            "future_budgeted_actions_allowed": False,
+            "places_orders": False,
+            "closes_positions": False,
+            "cancels_orders": False,
+            "withdrawal_executed": False,
+            "transfer_executed": False,
             "live_ready": False,
         }
 
@@ -273,6 +344,8 @@ async def _operation_service(
             audit_writable=_audit_writable,
             review_packet_reader=_review_packet,
             runtime_transition=_runtime_transition if runtime_adapter else None,
+            budget_authorization_summary=_budget_summary if budget_adapter else None,
+            budget_revoke_executor=_budget_revoke if budget_revoke_adapter else None,
             runtime_stop_executor=_runtime_stop if runtime_stop_adapter else None,
             fixed_rehearsal_executor=_fixed_rehearsal if fixed_rehearsal_adapter else None,
             admission_readiness=admission_readiness,
@@ -312,6 +385,8 @@ async def _operation_service(
     await service.initialize()
     market["fixed_rehearsal_calls"] = fixed_rehearsal_calls
     market["runtime_stop_calls"] = runtime_stop_calls
+    market["budget_revoke_calls"] = budget_revoke_calls
+    market["budget_state"] = budget_state
     market["runtime_state"] = runtime
     return service, op_repo, brc_repo, market
 
@@ -6386,6 +6461,8 @@ async def test_runtime_state_operations_execute_or_degrade_safely():
     )
     assert pause.status == "executed"
     assert pause.next_state["runtime_transition"]["status"] == "paused"
+    assert pause.result_summary["pg_state_mutated"] is True
+    assert pause.result_summary["places_orders"] is False
     assert pause.result_summary["live_ready"] is False
 
     monitor_preflight = await service.preflight(
@@ -6418,6 +6495,84 @@ async def test_runtime_transition_unavailable_when_adapter_missing():
     assert result is not None
     assert result.status == "blocked"
     assert "runtime transition adapter unavailable" in (result.blocked_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_revoke_budget_preflight_and_confirmation_persist_effective_state():
+    service, _, _, market = await _operation_service()
+    preflight = await service.preflight(
+        operation_type="revoke_budget",
+        requested_by="owner",
+        input_params={"reason": "owner revoke budget"},
+    )
+
+    assert preflight.status == "awaiting_confirmation"
+    assert preflight.decision == "warn"
+    assert preflight.confirmation_requirement.phrase == "CONFIRM_REVOKE_BUDGET"
+    assert preflight.after["budget_authorization_id"] == "budget-1"
+    assert preflight.after["budget_effective_state"] == "revoked"
+    assert preflight.after["future_budgeted_actions_allowed"] is False
+
+    result = await service.confirm(
+        operation_id=preflight.operation_id,
+        preflight_id=preflight.preflight_id,
+        confirmation_phrase="CONFIRM_REVOKE_BUDGET",
+        idempotency_key=preflight.idempotency_key,
+    )
+
+    assert result.status == "executed"
+    assert result.result_summary["budget_authorization_id"] == "budget-1"
+    assert result.result_summary["budget_effective_state"] == "revoked"
+    assert result.result_summary["future_budgeted_actions_allowed"] is False
+    assert result.result_summary["places_orders"] is False
+    assert result.result_summary["closes_positions"] is False
+    assert result.result_summary["cancels_orders"] is False
+    assert result.result_summary["transfer_executed"] is False
+    assert result.result_summary["withdrawal_executed"] is False
+    assert market["budget_state"]["latest_budget_authorization"]["status"] == "revoked"
+    assert market["budget_state"]["latest_budget_authorization"]["last_control_operation_id"] == preflight.operation_id
+    assert len(market["budget_revoke_calls"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_budget_repeated_confirm_is_idempotent_noop():
+    service, _, _, market = await _operation_service(budget_authorization_status="revoked")
+    preflight = await service.preflight(
+        operation_type="revoke_budget",
+        requested_by="owner",
+        input_params={"reason": "owner revoke budget again"},
+    )
+
+    assert preflight.status == "awaiting_confirmation"
+    assert preflight.after["already_revoked"] is True
+
+    result = await service.confirm(
+        operation_id=preflight.operation_id,
+        preflight_id=preflight.preflight_id,
+        confirmation_phrase="CONFIRM_REVOKE_BUDGET",
+        idempotency_key=preflight.idempotency_key,
+    )
+
+    assert result.status == "noop"
+    assert result.result_summary["already_revoked"] is True
+    assert result.result_summary["future_budgeted_actions_allowed"] is False
+    assert len(market["budget_revoke_calls"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_budget_blocks_when_no_current_budget_authorization():
+    service, op_repo, _, _ = await _operation_service(budget_authorization_status=None)
+    preflight = await service.preflight(
+        operation_type="revoke_budget",
+        requested_by="owner",
+        input_params={},
+    )
+
+    assert preflight.status == "blocked"
+    result = await op_repo.get_execution_result(preflight.operation_id)
+    assert result is not None
+    assert result.status == "blocked"
+    assert "current budget authorization unavailable" in (result.blocked_reason or "")
 
 
 @pytest.mark.asyncio

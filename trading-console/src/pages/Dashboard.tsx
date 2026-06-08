@@ -32,6 +32,9 @@ type Control = {
   confirmation_required?: boolean;
   disabled_reason?: string | null;
   risk_impact?: string;
+  scope?: Record<string, any>;
+  confirmation_summary?: string[];
+  post_action_result?: string;
 };
 
 type OperationState = {
@@ -79,6 +82,11 @@ const statusTone: Record<string, { panel: string; badge: 'normal' | 'warning' | 
     badge: 'muted',
     icon: CirclePause,
   },
+  revoked: {
+    panel: 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-100',
+    badge: 'danger',
+    icon: Lock,
+  },
 };
 
 function controlIcon(id: string) {
@@ -109,6 +117,17 @@ function controlDisabledReason(control: Control): string {
   if (control.disabled_reason.includes('Operation Layer POST')) return '控制台尚未接入 Operation Layer 提交入口';
   if (control.disabled_reason.includes('budget-revoke')) return '预算撤销 API 尚未接入当前预算读模型';
   return control.disabled_reason;
+}
+
+function controlConfirmLabel(control: Control): string {
+  if (control.control_id === 'pause_autonomy') return '确认暂停自治';
+  if (control.control_id === 'revoke_budget') return '确认撤销预算';
+  return `确认${control.label}`;
+}
+
+function controlImpactCopy(control: Control): string {
+  if (control.risk_impact) return control.risk_impact;
+  return 'Operation Layer 会先预检，再要求 Owner 输入确认短语；该控制不会下单、撤单、平仓、转账或提现。';
 }
 
 function MetricTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -163,6 +182,7 @@ export default function Dashboard() {
           input_params: {
             reason: `${control.control_id} from trading console cockpit`,
             control_id: control.control_id,
+            budget_authorization_id: control.scope?.budget_authorization_id,
           },
           source: { kind: 'trading_console_cockpit', ref: control.control_id },
         }),
@@ -296,7 +316,7 @@ export default function Dashboard() {
                 to={nextAction.route}
                 className="mt-4 inline-flex w-full cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                执行查看
+                打开查看
               </Link>
             ) : (
               <button
@@ -439,7 +459,7 @@ export default function Dashboard() {
                   <Badge variant={control.enabled ? 'normal' : 'muted'}>{control.enabled ? '可用' : '禁用'}</Badge>
                 </div>
                 <p className="mt-2 line-clamp-3 text-xs text-slate-500">
-                  {control.enabled ? displayValue(control.risk_impact || control.kind, '可执行控制') : controlDisabledReason(control)}
+                  {control.enabled ? displayValue(control.risk_impact || control.post_action_result || control.kind, '可执行控制') : controlDisabledReason(control)}
                 </p>
                 {control.confirmation_required && <div className="mt-2 text-xs font-medium text-amber-600">需要确认</div>}
               </div>
@@ -487,8 +507,15 @@ export default function Dashboard() {
               <div>
                 <div className="font-semibold">{operationState.control.label}</div>
                 <p className="mt-1 text-slate-600 dark:text-slate-400">
-                  Operation Layer 会先预检，再要求 Owner 输入确认短语；该控制不会下单、撤单、平仓、转账或提现。
+                  {controlImpactCopy(operationState.control)}
                 </p>
+                {asArray<string>(operationState.control.confirmation_summary).length > 0 && (
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-500 dark:text-slate-400">
+                    {asArray<string>(operationState.control.confirmation_summary).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <button
                 type="button"
@@ -541,7 +568,7 @@ export default function Dashboard() {
                       disabled={operationState.loading || operationState.confirmationPhrase !== operationState.preflight.confirmation_requirement.phrase}
                       className="mt-3 inline-flex cursor-pointer items-center rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
                     >
-                      确认执行暂停
+                      {controlConfirmLabel(operationState.control)}
                     </button>
                   </div>
                 )}

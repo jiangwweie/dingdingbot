@@ -1723,6 +1723,46 @@ async def _operation_runtime_transition(target_state: str, input_params: dict[st
     return _dump_jsonable(snapshot)
 
 
+async def _operation_budget_authorization_summary() -> dict[str, Any]:
+    current = await _multi_carrier_budget_authorization_service_instance().current()
+    payload = current.model_dump(mode="json")
+    payload["available"] = payload.get("latest_budget_authorization") is not None
+    payload["ready"] = payload["available"]
+    payload["source"] = payload.get("budget_scope_source") or "pg_metadata"
+    return payload
+
+
+async def _operation_revoke_budget_authorization(input_params: dict[str, Any]) -> dict[str, Any]:
+    current = await _multi_carrier_budget_authorization_service_instance().current()
+    before = current.latest_budget_authorization
+    requested_id = input_params.get("budget_authorization_id")
+    target_id = str(requested_id) if requested_id else (
+        before.budget_authorization_id if before is not None else None
+    )
+    already_revoked = bool(before is not None and before.status == "revoked" and (requested_id in {None, before.budget_authorization_id}))
+    revoked = await _multi_carrier_budget_authorization_service_instance().revoke(
+        budget_authorization_id=target_id,
+        revoked_by=str(input_params.get("revoked_by") or input_params.get("updated_by") or "owner"),
+        revoke_reason=str(input_params.get("reason") or "Owner revoked budget authorization from Trading Console"),
+        operation_id=str(input_params.get("operation_id") or "") or None,
+    )
+    payload = revoked.model_dump(mode="json")
+    payload.update(
+        {
+            "already_revoked": already_revoked,
+            "budget_effective_state": "revoked",
+            "future_budgeted_actions_allowed": False,
+            "places_orders": False,
+            "closes_positions": False,
+            "cancels_orders": False,
+            "withdrawal_executed": False,
+            "transfer_executed": False,
+            "live_ready": False,
+        }
+    )
+    return payload
+
+
 def _runtime_stop_adapter_available(api_module: Any) -> bool:
     campaign_state = getattr(api_module, "_campaign_state_service", None)
     return campaign_state is not None and hasattr(campaign_state, "get_state") and hasattr(campaign_state, "set_state")
@@ -1848,6 +1888,8 @@ async def _get_operation_service(request: Optional[Request] = None) -> BrcOperat
             audit_writable=_operation_audit_writable,
             review_packet_reader=_operation_review_packet,
             runtime_transition=_operation_runtime_transition,
+            budget_authorization_summary=_operation_budget_authorization_summary,
+            budget_revoke_executor=_operation_revoke_budget_authorization,
             runtime_stop_executor=(
                 _operation_runtime_stop
                 if _runtime_stop_adapter_available(api_module)

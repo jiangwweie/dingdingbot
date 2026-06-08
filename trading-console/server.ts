@@ -98,6 +98,23 @@ async function startServer() {
     }
   });
 
+  app.all('/api/brc/operations/*', async (req, res) => {
+    const allowed =
+      req.method === 'POST' &&
+      (
+        req.path === '/api/brc/operations/preflight' ||
+        /^\/api\/brc\/operations\/[^/]+\/confirm$/.test(req.path)
+      );
+    if (!allowed) {
+      res.status(405).json({
+        error: 'trading_console_operation_proxy_method_not_allowed',
+        message: 'Trading Console forwards only Operation Layer preflight and confirm requests.',
+      });
+      return;
+    }
+    await proxyJsonRequest(req, res);
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

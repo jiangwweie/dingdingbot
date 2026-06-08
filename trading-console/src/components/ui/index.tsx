@@ -131,8 +131,8 @@ export const EnvelopeStatus = ({ envelope, error }: { envelope: Envelope<any> | 
     <ReadModelErrorPanel error={error || null} />
     {hasUnsafeNoActionFlag(envelope) && (
       <Panel
-        title="只读安全状态异常"
-        items={[{ message: '只读安全状态无法确认。' }]}
+        title="安全状态异常"
+        items={[{ message: '控制台安全状态无法确认。' }]}
         icon={XCircle}
         variant="danger"
       />

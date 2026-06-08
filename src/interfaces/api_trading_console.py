@@ -519,6 +519,8 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         signal_repo=getattr(api_module, "_signal_repo", None),
         brc_campaign_service=getattr(api_module, "_brc_campaign_service", None),
         owner_trial_flow_service=_owner_trial_flow_service(),
+        campaign_state_service=getattr(api_module, "_campaign_state_service", None),
+        multi_carrier_budget_authorization_service=_multi_carrier_budget_authorization_service(),
         global_kill_switch_service=getattr(api_module, "_global_kill_switch_service", None),
         startup_trading_guard_service=getattr(api_module, "_startup_trading_guard_service", None),
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
@@ -572,6 +574,20 @@ def _owner_trial_flow_service() -> Optional[Any]:
         from src.interfaces.api_brc_console import _owner_trial_flow_service_instance
 
         return _owner_trial_flow_service_instance()
+    except Exception:
+        return None
+
+
+def _multi_carrier_budget_authorization_service() -> Optional[Any]:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_multi_carrier_budget_authorization_service", None)
+    if injected is not None:
+        return injected
+    try:
+        from src.interfaces.api_brc_console import _multi_carrier_budget_authorization_service_instance
+
+        return _multi_carrier_budget_authorization_service_instance()
     except Exception:
         return None
 

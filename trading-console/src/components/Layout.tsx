@@ -32,7 +32,7 @@ export function AppShell() {
   const envLabel = environment.trading_env === 'testnet'
     ? '测试'
     : environment.exchange_testnet === false
-      ? '实盘只读'
+      ? '实盘受控'
       : '未知';
 
   useEffect(() => {
@@ -118,7 +118,7 @@ export function AppShell() {
           <span className="font-semibold text-slate-700 dark:text-slate-200">交易控制台</span>
           <span className="text-slate-400">·</span>
           <span className="text-slate-600 dark:text-slate-300">子账户：BNB 行动账户</span>
-          <Badge variant="muted">只读</Badge>
+          <Badge variant="muted">操作需确认</Badge>
           <span className="text-slate-600 dark:text-slate-300">环境：{envLabel}</span>
           {envData?.freshness_status && <FreshnessBadge status={envData.freshness_status} />}
           {overall.status && <span className="font-semibold text-slate-700 dark:text-slate-200">状态：{overall.label || overall.status}</span>}

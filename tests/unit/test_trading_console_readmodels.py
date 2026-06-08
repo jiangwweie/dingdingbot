@@ -267,6 +267,64 @@ class _FakeOwnerTrialFlowService:
         )
 
 
+class _FakeCampaignStateService:
+    def __init__(self, *, status: str = "observe"):
+        self.status = status
+
+    def get_state(self):
+        return {
+            "scope_key": "runtime:default",
+            "status": self.status,
+            "reason": f"unit {self.status}",
+            "updated_by": "owner",
+            "updated_at_ms": 1780496600000,
+            "source": "unit",
+        }
+
+
+class _FakeBudgetAuthorizationService:
+    def __init__(self, *, status: str | None = "active_metadata_only"):
+        self.status = status
+
+    async def current(self):
+        latest = None
+        if self.status is not None:
+            latest = {
+                "budget_authorization_id": "budget-1",
+                "allowed_carriers": [],
+                "global_budget": "100",
+                "max_attempts": 3,
+                "daily_loss_limit": "25",
+                "max_concurrent_positions": 1,
+                "cooldown_seconds": 0,
+                "status": self.status,
+                "revoked_at_ms": 1780496700000 if self.status == "revoked" else None,
+                "revoked_by": "owner" if self.status == "revoked" else None,
+                "revoke_reason": "unit revoke" if self.status == "revoked" else None,
+                "last_control_operation_id": "op-revoke" if self.status == "revoked" else None,
+                "live_ready": False,
+                "auto_execution_enabled": False,
+                "order_permission_granted": False,
+                "execution_permission_granted": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "metadata_only": True,
+                "created_at_ms": 1780496500000,
+                "updated_at_ms": 1780496700000 if self.status == "revoked" else 1780496600000,
+            }
+        return {
+            "latest_budget_authorization": latest,
+            "eligible_carrier_ids": ["MI-001-BNB-LONG"],
+            "disabled_execution_state": {
+                "live_ready": False,
+                "auto_execution_enabled": False,
+                "order_permission_granted": False,
+                "execution_permission_granted": False,
+            },
+            "budget_scope_source": "pg_metadata",
+        }
+
+
 class _FakeExchangeGateway:
     def __init__(self, *, positions=None, normal_orders=None, stop_orders=None):
         self._positions = [] if positions is None else list(positions)
@@ -327,6 +385,9 @@ def _patch_deps(
     order_repo=None,
     account_snapshot=None,
     intent_repo=None,
+    startup_summary=None,
+    campaign_state_status: str = "observe",
+    budget_authorization_status: str | None = "active_metadata_only",
 ):
     from src.interfaces import api as api_module
 
@@ -358,8 +419,21 @@ def _patch_deps(
         _FakeOwnerTrialFlowService(),
         raising=False,
     )
+    monkeypatch.setattr(
+        api_module,
+        "_campaign_state_service",
+        _FakeCampaignStateService(status=campaign_state_status),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_multi_carrier_budget_authorization_service",
+        _FakeBudgetAuthorizationService(status=budget_authorization_status),
+        raising=False,
+    )
     monkeypatch.setattr(api_module, "_global_kill_switch_service", _FakeGks())
     monkeypatch.setattr(api_module, "_startup_trading_guard_service", _FakeStartupGuard())
+    monkeypatch.setattr(api_module, "_startup_reconciliation_summary", startup_summary)
 
 
 def test_trading_console_requires_operator_session(monkeypatch):
@@ -514,6 +588,8 @@ def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch)
     assert data["autonomy"]["state"] == "recovery_required"
     assert data["recovery"]["required"] is True
     assert data["protection"]["status"] == "orphaned"
+    assert data["recovery"]["detectable_states"]["pending_migration_mismatch"] == "not_detectable"
+    assert data["recovery"]["detectable_states"]["runtime_server_version_drift"] == "not_detectable"
     assert data["budget"]["action_allowed"] is False
     assert data["budget"]["grants_trading_permission"] is False
     controls = {item["control_id"]: item for item in data["controls"]}
@@ -525,8 +601,91 @@ def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch)
     assert controls["pause_autonomy"]["confirm_endpoint"] == "POST /api/brc/operations/{operation_id}/confirm"
     assert controls["pause_autonomy"]["confirmation_required"] is True
     assert controls["pause_autonomy"]["disabled_reason"] is None
-    assert controls["revoke_budget"]["enabled"] is False
+    assert controls["revoke_budget"]["enabled"] is True
+    assert controls["revoke_budget"]["operation_type"] == "revoke_budget"
+    assert controls["revoke_budget"]["confirmation_required"] is True
+    assert controls["revoke_budget"]["disabled_reason"] is None
     assert any(item["area"] == "recovery" for item in data["blockers"])
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_operations_cockpit_shows_paused_autonomy_effective_state(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    _patch_deps(monkeypatch, exchange=exchange, campaign_state_status="paused")
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/operations-cockpit?include_exchange=true")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["autonomy_effective_state"] in {"recovery_required", "paused"}
+    assert data["budget"]["paused"] is True
+    assert data["can_attempt_next_budgeted_action"] is False
+    controls = {item["control_id"]: item for item in data["controls"]}
+    assert controls["pause_autonomy"]["enabled"] is False
+    assert "paused" in controls["pause_autonomy"]["disabled_reason"].lower()
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_operations_cockpit_shows_revoked_budget_effective_state(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    _patch_deps(monkeypatch, exchange=exchange, budget_authorization_status="revoked")
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/operations-cockpit?include_exchange=true")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["budget_effective_state"] == "revoked"
+    assert data["budget_authorization_status"] == "revoked"
+    assert data["budget"]["revoked"] is True
+    assert data["budget"]["can_revoke_budget"] is False
+    assert data["can_attempt_next_budgeted_action"] is False
+    controls = {item["control_id"]: item for item in data["controls"]}
+    assert controls["revoke_budget"]["enabled"] is False
+    assert "revoked" in controls["revoke_budget"]["disabled_reason"].lower()
+    assert data["last_control_operation"]["operation_id"] == "op-revoke"
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_operations_cockpit_surfaces_detected_runtime_and_migration_drift(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        startup_summary={
+            "runtime_git_sha": "runtime-a",
+            "server_git_sha": "server-b",
+            "alembic_current_revision": "041",
+            "alembic_expected_head": "042",
+        },
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/operations-cockpit?include_exchange=true")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    drift = data["recovery"]["operational_drift"]
+    assert drift["runtime_server_version"]["status"] == "drift"
+    assert drift["runtime_server_version"]["drift"] is True
+    assert drift["migration"]["status"] == "mismatch"
+    assert drift["migration"]["mismatch"] is True
+    assert data["recovery"]["detectable_states"]["runtime_server_version_drift"] is True
+    assert data["recovery"]["detectable_states"]["pending_migration_mismatch"] is True
+    assert data["recovery"]["required"] is True
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 

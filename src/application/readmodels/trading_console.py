@@ -1,8 +1,9 @@
-"""Read-only Trading Console aggregation models.
+"""Trading Console aggregation read models.
 
 This module composes existing repositories and runtime adapters into frontend
-read models. It intentionally has no mutation methods and never calls exchange
-write APIs.
+read-model responses. This namespace intentionally has no mutation methods and
+never calls exchange write APIs; product actions live on the official Operation
+Layer path.
 """
 
 from __future__ import annotations
@@ -94,6 +95,8 @@ class TradingConsoleDependencies:
     signal_repo: Optional[Any] = None
     brc_campaign_service: Optional[Any] = None
     owner_trial_flow_service: Optional[Any] = None
+    campaign_state_service: Optional[Any] = None
+    multi_carrier_budget_authorization_service: Optional[Any] = None
     global_kill_switch_service: Optional[Any] = None
     startup_trading_guard_service: Optional[Any] = None
     startup_reconciliation_summary: Optional[dict[str, Any]] = None
@@ -117,6 +120,8 @@ class TradingConsoleSnapshot:
     review_records: list[dict[str, Any]]
     signal_records: list[dict[str, Any]]
     authorization_state: dict[str, Any]
+    runtime_control_state: dict[str, Any]
+    budget_authorization_state: dict[str, Any]
     exchange: dict[str, Any]
     warnings: list[dict[str, Any]]
     unavailable: list[dict[str, Any]]
@@ -158,6 +163,8 @@ class TradingConsoleReadModelService:
             carrier_id=DEFAULT_CARRIER_ID,
             unavailable=unavailable,
         )
+        runtime_control_state = self._read_runtime_control_state(unavailable=unavailable)
+        budget_authorization_state = await self._read_budget_authorization_state(unavailable=unavailable)
         exchange = await self._read_exchange(
             symbols=symbols,
             include_exchange=include_exchange,
@@ -191,6 +198,8 @@ class TradingConsoleReadModelService:
             review_records=review_records,
             signal_records=signal_records,
             authorization_state=authorization_state,
+            runtime_control_state=runtime_control_state,
+            budget_authorization_state=budget_authorization_state,
             exchange=exchange,
             warnings=warnings,
             unavailable=unavailable,
@@ -327,6 +336,7 @@ class TradingConsoleReadModelService:
                 "read_only_actions": {
                     "manual_reconciliation": "existing_separate_api_if_enabled",
                 },
+                "operational_drift": snap.environment.get("operational_drift") or {},
                 "deferred_actions": [
                     "retry_protection",
                     "cancel_order",
@@ -651,6 +661,8 @@ class TradingConsoleReadModelService:
             budget_summary=budget_summary,
             budget_recommendation=action_data.get("budget_recommendation") or {},
             post_action=post_action,
+            budget_authorization=snap.budget_authorization_state,
+            runtime_control=snap.runtime_control_state,
         )
         active_position = _cockpit_active_position(
             positions=positions,
@@ -665,6 +677,7 @@ class TradingConsoleReadModelService:
             recovery=recovery,
             review=review,
             budget=budget,
+            runtime_control=snap.runtime_control_state,
         )
         blockers = _cockpit_blockers(
             snap=snap,
@@ -691,6 +704,7 @@ class TradingConsoleReadModelService:
             review=review,
             budget=budget,
             active_position=active_position,
+            autonomy=autonomy,
         )
         return self._response(
             "operations_cockpit",
@@ -708,6 +722,16 @@ class TradingConsoleReadModelService:
                 "overall_status": overall,
                 "primary_message": overall["message"],
                 "primary_next_action": overall["primary_next_action"],
+                "autonomy_effective_state": autonomy.get("autonomy_effective_state"),
+                "budget_effective_state": budget.get("budget_effective_state"),
+                "budget_authorization_status": budget.get("budget_authorization_status"),
+                "can_attempt_next_budgeted_action": autonomy.get("can_attempt_next_budgeted_action"),
+                "can_pause_autonomy": autonomy.get("can_pause_autonomy"),
+                "can_revoke_budget": budget.get("can_revoke_budget"),
+                "last_control_operation": _latest_control_operation(
+                    snap.runtime_control_state,
+                    snap.budget_authorization_state,
+                ),
                 "autonomy": autonomy,
                 "budget": budget,
                 "active_position": active_position,
@@ -728,10 +752,12 @@ class TradingConsoleReadModelService:
                     "guards": snap.guards,
                     "consistency": consistency,
                     "authorization": snap.authorization_state,
+                    "runtime_control_state": snap.runtime_control_state,
+                    "budget_authorization_state": snap.budget_authorization_state,
                     "budgeted_autonomy_loop": owner_flow.get("budgeted_autonomy_loop") or {},
                     "budgeted_autonomy_v01": owner_flow.get("budgeted_autonomy_v01") or {},
                     "post_action_state": post_action,
-                    "source_policy": "read_only_pg_exchange_aggregation",
+                    "read_model_source_policy": "pg_exchange_aggregation_no_write",
                     "raw_debug_sections_available": [
                         "dashboard-state",
                         "order-ledger",
@@ -1089,6 +1115,8 @@ class TradingConsoleReadModelService:
                 )
             ),
             "symbols": getattr(market, "symbols", None) or startup_summary.get("symbols") or [DEFAULT_SYMBOL],
+            "startup_reconciliation": startup_summary or "not_available",
+            "operational_drift": _operational_drift_summary(startup_summary),
             "live_ready": False,
         }
 
@@ -1406,6 +1434,115 @@ class TradingConsoleReadModelService:
             },
             "current": payload,
             "future_action_slots": _authorization_future_action_slots(),
+        }
+
+    def _read_runtime_control_state(self, *, unavailable: list[dict[str, Any]]) -> dict[str, Any]:
+        service = self._deps.campaign_state_service
+        if service is None or not hasattr(service, "get_state"):
+            unavailable.append({"source": "runtime_control_state", "code": "campaign_state_service_unavailable"})
+            return {
+                "status": "unknown",
+                "autonomy_effective_state": "unknown",
+                "source": "campaign_state_service_unavailable",
+                "can_attempt_next_budgeted_action": False,
+                "disabled_reason": "runtime control state is unavailable",
+            }
+        try:
+            state = service.get_state()
+        except Exception as exc:
+            unavailable.append({"source": "runtime_control_state", "code": "read_failed", "error": str(exc)})
+            return {
+                "status": "unknown",
+                "autonomy_effective_state": "unknown",
+                "source": "read_failed",
+                "can_attempt_next_budgeted_action": False,
+                "disabled_reason": "runtime control state read failed",
+            }
+        payload = _plain_dict(state)
+        status = str(payload.get("status") or "unknown")
+        paused = status == "paused"
+        return {
+            "status": status,
+            "autonomy_effective_state": "paused" if paused else status,
+            "reason": payload.get("reason"),
+            "updated_by": payload.get("updated_by"),
+            "updated_at_ms": payload.get("updated_at_ms"),
+            "source": payload.get("source") or "runtime_campaign_state",
+            "can_attempt_next_budgeted_action": not paused and status not in {"hard_locked", "closed", "loss_locked"},
+            "disabled_reason": (
+                "Autonomy is paused; future budgeted action attempts are blocked until Owner resumes or resets."
+                if paused
+                else None
+            ),
+            "last_control_operation": {
+                "operation_type": "enter_pause" if paused else "runtime_state",
+                "status": status,
+                "operation_id": None,
+                "updated_at_ms": payload.get("updated_at_ms"),
+                "updated_by": payload.get("updated_by"),
+                "source": payload.get("source") or "runtime_campaign_state",
+            },
+        }
+
+    async def _read_budget_authorization_state(self, *, unavailable: list[dict[str, Any]]) -> dict[str, Any]:
+        service = self._deps.multi_carrier_budget_authorization_service
+        if service is None or not hasattr(service, "current"):
+            unavailable.append({"source": "budget_authorization_state", "code": "budget_authorization_service_unavailable"})
+            return {
+                "status": "unknown",
+                "budget_effective_state": "unknown",
+                "source": "budget_authorization_service_unavailable",
+                "can_attempt_next_budgeted_action": False,
+                "disabled_reason": "budget authorization state is unavailable",
+            }
+        try:
+            current = await service.current()
+        except Exception as exc:
+            unavailable.append({"source": "budget_authorization_state", "code": "read_failed", "error": str(exc)})
+            return {
+                "status": "unknown",
+                "budget_effective_state": "unknown",
+                "source": "read_failed",
+                "can_attempt_next_budgeted_action": False,
+                "disabled_reason": "budget authorization state read failed",
+            }
+        payload = _plain_dict(current)
+        latest = dict(payload.get("latest_budget_authorization") or {})
+        status = str(latest.get("status") or "not_available")
+        revoked = status == "revoked"
+        return {
+            "status": status,
+            "budget_authorization_id": latest.get("budget_authorization_id"),
+            "budget_effective_state": (
+                "revoked" if revoked
+                else "available_metadata_only" if latest
+                else "not_available"
+            ),
+            "budget_authorization_status": status,
+            "revoked": revoked,
+            "revoked_at_ms": latest.get("revoked_at_ms"),
+            "revoked_by": latest.get("revoked_by"),
+            "revoke_reason": latest.get("revoke_reason"),
+            "last_control_operation_id": latest.get("last_control_operation_id"),
+            "source": payload.get("budget_scope_source") or "pg_metadata",
+            "latest_budget_authorization": latest,
+            "disabled_execution_state": payload.get("disabled_execution_state") or {},
+            "can_attempt_next_budgeted_action": bool(latest) and not revoked,
+            "disabled_reason": (
+                "Budget authorization has been revoked; re-authorization is required before future budgeted autonomy attempts."
+                if revoked
+                else "No current budget authorization metadata exists."
+                if not latest
+                else None
+            ),
+            "last_control_operation": {
+                "operation_type": "revoke_budget" if revoked else "budget_authorization",
+                "status": status,
+                "operation_id": latest.get("last_control_operation_id"),
+                "updated_at_ms": latest.get("updated_at_ms"),
+                "updated_by": latest.get("revoked_by"),
+                "source": payload.get("budget_scope_source") or "pg_metadata",
+            },
         }
 
     async def _read_exchange(
@@ -3469,6 +3606,20 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return result
 
 
+def _latest_control_operation(
+    runtime_control: dict[str, Any],
+    budget_authorization: dict[str, Any],
+) -> dict[str, Any]:
+    candidates = [
+        dict(runtime_control.get("last_control_operation") or {}),
+        dict(budget_authorization.get("last_control_operation") or {}),
+    ]
+    candidates = [item for item in candidates if item.get("status")]
+    if not candidates:
+        return {"status": "not_available", "source": "not_available"}
+    return max(candidates, key=lambda item: int(item.get("updated_at_ms") or 0))
+
+
 def _cockpit_overall_status(
     *,
     snap: TradingConsoleSnapshot,
@@ -3569,6 +3720,28 @@ def _primary_next_action(
             "system_action_available": False,
             "reason": "A closed or unresolved action needs Owner review before another attempt.",
         }
+    if autonomy.get("state") == "paused":
+        return {
+            "action_id": "autonomy_paused",
+            "label": "查看暂停状态",
+            "enabled": True,
+            "route": "/",
+            "confirmation_required": False,
+            "owner_action_required": True,
+            "system_action_available": False,
+            "reason": "Autonomy is paused; future budgeted actions are blocked until Owner resumes or resets through an approved path.",
+        }
+    if autonomy.get("state") == "revoked" or budget.get("revoked") is True:
+        return {
+            "action_id": "budget_revoked",
+            "label": "查看预算授权",
+            "enabled": True,
+            "route": "/action-entry",
+            "confirmation_required": False,
+            "owner_action_required": True,
+            "system_action_available": False,
+            "reason": "Budget authorization is revoked; future budgeted autonomy attempts require a new Owner-approved budget.",
+        }
     hard_blockers = [item for item in blockers if item.get("severity") == "hard_blocker"]
     if hard_blockers:
         item = hard_blockers[0]
@@ -3614,18 +3787,21 @@ def _cockpit_autonomy_summary(
     recovery: dict[str, Any],
     review: dict[str, Any],
     budget: dict[str, Any],
+    runtime_control: dict[str, Any],
 ) -> dict[str, Any]:
     v01 = dict(owner_flow.get("budgeted_autonomy_v01") or {})
     base = dict(v01.get("base_loop") or {})
     policy = dict(v01.get("policy") or {})
     outcome = str(v01.get("outcome") or base.get("outcome") or "blocked_with_retry_condition")
+    runtime_status = str(runtime_control.get("status") or "")
+    runtime_paused = runtime_status == "paused"
     if recovery.get("required"):
         state = "recovery_required"
     elif authorization.get("is_cancelled"):
         state = "revoked"
-    elif policy.get("pause_state") == "paused":
+    elif runtime_paused or policy.get("pause_state") == "paused":
         state = "paused"
-    elif policy.get("revoked") is True:
+    elif budget.get("revoked") is True or policy.get("revoked") is True:
         state = "revoked"
     elif active_position.get("exists"):
         state = "waiting_position_close"
@@ -3641,6 +3817,7 @@ def _cockpit_autonomy_summary(
         state = "blocked_with_retry_condition"
     return {
         "state": state,
+        "autonomy_effective_state": state,
         "label": _autonomy_label(state),
         "message": _autonomy_message(
             state=state,
@@ -3654,6 +3831,18 @@ def _cockpit_autonomy_summary(
         "retry_condition": v01.get("retry_condition") or base.get("retry_condition"),
         "authorization_status": authorization.get("status"),
         "authorization_actionable": bool(authorization.get("is_actionable")),
+        "runtime_control_state": runtime_control,
+        "can_attempt_next_budgeted_action": (
+            state in {"budget_available", "candidate_selected"}
+            and budget.get("can_attempt_next_budgeted_action") is True
+            and runtime_control.get("can_attempt_next_budgeted_action") is not False
+        ),
+        "can_pause_autonomy": not runtime_paused,
+        "pause_disabled_reason": (
+            runtime_control.get("disabled_reason")
+            if runtime_paused
+            else None
+        ),
         "auto_execution_enabled": False,
         "backend_actionable": False,
         "frontend_action_enabled": False,
@@ -3668,6 +3857,8 @@ def _cockpit_budget_summary(
     budget_summary: dict[str, Any],
     budget_recommendation: dict[str, Any],
     post_action: dict[str, Any],
+    budget_authorization: dict[str, Any],
+    runtime_control: dict[str, Any],
 ) -> dict[str, Any]:
     envelope = dict(budget_recommendation.get("budget_envelope") or {})
     policy = dict((owner_flow.get("budgeted_autonomy_v01") or {}).get("policy") or {})
@@ -3698,16 +3889,35 @@ def _cockpit_budget_summary(
     total_budget = envelope.get("total_budget") or budget_summary.get("recommended_total_budget")
     per_action = envelope.get("max_notional_per_action") or budget_summary.get("recommended_max_notional_per_action")
     status = envelope.get("status") or budget_summary.get("status") or "not_available"
-    paused = policy.get("pause_state") == "paused"
-    revoked = policy.get("revoked") is True
+    paused = policy.get("pause_state") == "paused" or runtime_control.get("status") == "paused"
+    revoked = budget_authorization.get("revoked") is True or policy.get("revoked") is True
+    budget_authorization_status = budget_authorization.get("budget_authorization_status") or budget_authorization.get("status")
+    budget_effective_state = (
+        "revoked" if revoked
+        else budget_authorization.get("budget_effective_state")
+        or ("available" if status == "available" else status)
+    )
     another_action_allowed = bool(
         status == "available"
         and not paused
         and not revoked
+        and budget_authorization.get("can_attempt_next_budgeted_action") is not False
         and (remaining_attempts is None or remaining_attempts > 0)
+    )
+    budget_auth_id = budget_authorization.get("budget_authorization_id")
+    can_revoke_budget = bool(budget_auth_id and not revoked)
+    revoke_disabled_reason = (
+        "Budget authorization has already been revoked."
+        if revoked
+        else "No current budget authorization metadata exists."
+        if not budget_auth_id
+        else None
     )
     return {
         "status": status,
+        "budget_effective_state": budget_effective_state,
+        "budget_authorization_status": budget_authorization_status,
+        "budget_authorization_id": budget_auth_id,
         "label": _budget_label(status),
         "authorized_scope": {
             "symbols": envelope.get("allowed_symbols") or [],
@@ -3724,8 +3934,14 @@ def _cockpit_budget_summary(
         "daily_max_attempts": max_attempts,
         "daily_attempts_remaining": remaining_attempts,
         "another_action_allowed": another_action_allowed,
+        "can_attempt_next_budgeted_action": another_action_allowed,
+        "can_revoke_budget": can_revoke_budget,
+        "revoke_disabled_reason": revoke_disabled_reason,
         "paused": paused,
         "revoked": revoked,
+        "revoked_at_ms": budget_authorization.get("revoked_at_ms"),
+        "revoked_by": budget_authorization.get("revoked_by"),
+        "last_control_operation": budget_authorization.get("last_control_operation"),
         "last_budget_update_time": None,
         "freshness_status": (budget_recommendation.get("account_capacity") or {}).get("freshness", {}).get("freshness_status"),
         "not_authorization": envelope.get("not_authorization", True),
@@ -3854,9 +4070,19 @@ def _cockpit_recovery_summary(
         if item.get("classification") in {"pg_only", "exchange_only", "mismatch", "orphan_protection"}
     ]
     startup = snap.environment.get("startup_reconciliation") or snap.guards.get("startup_reconciliation")
-    required = bool(mismatch_orders or snap.recovery_tasks)
+    operational_drift = dict(snap.environment.get("operational_drift") or {})
+    runtime_server_version = dict(operational_drift.get("runtime_server_version") or {})
+    migration = dict(operational_drift.get("migration") or {})
+    operational_drift_required = bool(
+        runtime_server_version.get("drift") is True
+        or migration.get("mismatch") is True
+    )
+    required = bool(mismatch_orders or snap.recovery_tasks or operational_drift_required)
     if required:
-        summary = "Recovery is required because local and exchange/order evidence is not clean."
+        if operational_drift_required:
+            summary = "Recovery is required because deployment/runtime drift or migration mismatch is visible."
+        else:
+            summary = "Recovery is required because local and exchange/order evidence is not clean."
     elif snap.unavailable:
         summary = "Recovery state cannot be fully confirmed because some sources are unavailable."
     else:
@@ -3877,6 +4103,7 @@ def _cockpit_recovery_summary(
         "recovery_task_counts": _count_by(snap.recovery_tasks, "status"),
         "consistency_status": consistency.get("status"),
         "startup_reconciliation": startup or "not_available",
+        "operational_drift": operational_drift,
         "detectable_states": {
             "pg_exchange_drift": bool(mismatch_orders),
             "orphan_protection_suspected": any(item.get("classification") == "orphan_protection" for item in mismatch_orders),
@@ -3884,8 +4111,18 @@ def _cockpit_recovery_summary(
             "failed_protection_placement": any("protection" in str(item.get("code") or "") for item in snap.warnings),
             "external_flat": any(item.get("classification") == "orphan_protection" for item in mismatch_orders),
             "stale_account_facts": any(item.get("source") in {"account_snapshot", "exchange"} for item in snap.unavailable),
-            "pending_migration_mismatch": False,
-            "runtime_server_version_drift": "not_checked",
+            "pending_migration_mismatch": (
+                migration.get("mismatch")
+                if migration.get("detectable") is True
+                else "not_detectable"
+            ),
+            "pending_migration_mismatch_status": migration.get("status") or "not_detectable",
+            "runtime_server_version_drift": (
+                runtime_server_version.get("drift")
+                if runtime_server_version.get("detectable") is True
+                else "not_detectable"
+            ),
+            "runtime_server_version_drift_status": runtime_server_version.get("status") or "not_detectable",
         },
     }
 
@@ -3986,13 +4223,26 @@ def _cockpit_blockers(
             evidence_source="review_state",
         ))
     if budget.get("another_action_allowed") is not True:
+        revoked_or_paused = budget.get("revoked") is True or budget.get("paused") is True
         blockers.append(_cockpit_blocker(
             code="budget_not_actionable",
             area="budget",
-            what="Cannot confirm another budgeted action under the current budget envelope.",
+            what=(
+                "Cannot confirm another budgeted action because budget authorization is revoked."
+                if budget.get("revoked") is True
+                else "Cannot confirm another budgeted action because autonomy is paused."
+                if budget.get("paused") is True
+                else "Cannot confirm another budgeted action under the current budget envelope."
+            ),
             why="Budget, attempts, freshness, pause, and revoke state must allow another action.",
-            severity="hard_blocker" if budget.get("status") != "available" else "warning",
-            clears_when="Budget envelope is available, not paused/revoked, and attempts remain.",
+            severity="hard_blocker" if budget.get("status") != "available" or revoked_or_paused else "warning",
+            clears_when=(
+                "Create a new Owner-approved budget authorization before further budgeted autonomy attempts."
+                if budget.get("revoked") is True
+                else "Resume or reset autonomy through the approved Operation Layer path before further attempts."
+                if budget.get("paused") is True
+                else "Budget envelope is available, not paused/revoked, and attempts remain."
+            ),
             owner_action_required=True,
             system_action_available=False,
             route="/action-entry",
@@ -4074,7 +4324,10 @@ def _cockpit_controls(
     review: dict[str, Any],
     budget: dict[str, Any],
     active_position: dict[str, Any],
+    autonomy: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    can_pause = bool(autonomy.get("can_pause_autonomy", True))
+    can_revoke = bool(budget.get("can_revoke_budget"))
     return [
         {
             "control_id": "refresh_status",
@@ -4099,26 +4352,49 @@ def _cockpit_controls(
         {
             "control_id": "pause_autonomy",
             "label": "预检暂停自治",
-            "enabled": True,
+            "enabled": can_pause,
             "kind": "operation_layer_preflight",
             "operation_type": "enter_pause",
             "preflight_endpoint": "POST /api/brc/operations/preflight",
             "confirm_endpoint": "POST /api/brc/operations/{operation_id}/confirm",
             "confirmation_required": True,
-            "disabled_reason": None,
+            "disabled_reason": autonomy.get("pause_disabled_reason") if not can_pause else None,
             "scope": {"active_position": active_position.get("symbol"), "budget_status": budget.get("status")},
-            "risk_impact": "Runs Operation Layer preflight for enter_pause. Confirming stops new strategy actions; it does not close positions, cancel orders, place orders, withdraw, or transfer.",
-            "post_action_result": "Operation Layer records the runtime pause transition or a safe blocked/noop result.",
+            "requires_confirmation": True,
+            "confirmation_summary": [
+                "Temporarily prevents further autonomy/action attempts.",
+                "Does not close active positions.",
+                "Does not cancel TP/SL orders.",
+                "Does not transfer or withdraw funds.",
+            ],
+            "risk_impact": "暂停会临时阻断后续自治/预算动作；不会平仓、撤 TP/SL、下单、转账或提现。",
+            "post_action_result": "Cockpit should show Autonomy Paused and next budgeted action blocked after confirmation.",
         },
         {
             "control_id": "revoke_budget",
-            "label": "撤销预算",
-            "enabled": False,
-            "kind": "not_wired",
+            "label": "预检撤销预算",
+            "enabled": can_revoke,
+            "kind": "operation_layer_preflight",
+            "operation_type": "revoke_budget",
+            "preflight_endpoint": "POST /api/brc/operations/preflight",
+            "confirm_endpoint": "POST /api/brc/operations/{operation_id}/confirm",
             "confirmation_required": True,
-            "disabled_reason": "No persisted budget-revoke action API is wired to the current BudgetEnvelope read model.",
-            "scope": budget.get("authorized_scope"),
-            "risk_impact": "Would block future budgeted entries only; would not alter existing exchange exposure.",
+            "disabled_reason": budget.get("revoke_disabled_reason") if not can_revoke else None,
+            "scope": {
+                **dict(budget.get("authorized_scope") or {}),
+                "budget_authorization_id": budget.get("budget_authorization_id"),
+                "budget_authorization_status": budget.get("budget_authorization_status"),
+            },
+            "requires_confirmation": True,
+            "confirmation_summary": [
+                "Terminates the current budget authorization for future budgeted autonomy actions.",
+                "Does not close active positions.",
+                "Does not cancel TP/SL orders.",
+                "Does not transfer or withdraw funds.",
+                "Current active position/protection must still be monitored separately.",
+            ],
+            "risk_impact": "撤销预算会终止该预算授权下的后续预算自治动作；不会平仓、撤 TP/SL、转账或提现。",
+            "post_action_result": "Cockpit should show Budget Revoked and future budgeted actions blocked after confirmation.",
         },
         {
             "control_id": "view_recovery_recommendation",
@@ -4211,14 +4487,14 @@ def _autonomy_message(
     if state == "paused":
         return "Autonomy is paused. Budget may still exist but no new action should start."
     if state == "revoked":
-        return "Budget or authorization is revoked."
+        return "Budget authorization is revoked. Future budgeted autonomy actions require re-authorization."
     if authorization.get("blocking_reason"):
         return f"Autonomy is blocked by authorization: {authorization.get('blocking_reason')}."
     if budget.get("status") != "available":
         return "Autonomy is blocked because budget is not currently actionable."
     if protection.get("status") not in {"protected", "unknown"} and active_position.get("exists"):
         return "Autonomy is blocked because protection is not complete."
-    return "Autonomy is not executing; current state is read-only."
+    return "Autonomy is not executing; current state is controlled by backend gates."
 
 
 def _budget_label(value: str) -> str:
@@ -4227,6 +4503,8 @@ def _budget_label(value: str) -> str:
         "degraded_missing_account_facts": "Budget degraded: missing account facts",
         "blocked_no_capacity": "Budget blocked: no capacity",
         "not_available": "Budget not available",
+        "revoked": "Budget revoked",
+        "available_metadata_only": "Budget metadata available",
     }.get(str(value), str(value))
 
 
@@ -4423,6 +4701,213 @@ def _parse_bool_env(value: Optional[str]) -> Optional[bool]:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     return None
+
+
+def _operational_drift_summary(startup_summary: dict[str, Any]) -> dict[str, Any]:
+    runtime_version = _runtime_server_version_summary(startup_summary)
+    migration = _migration_drift_summary(startup_summary)
+    return {
+        "runtime_server_version": runtime_version,
+        "migration": migration,
+        "requires_recovery": bool(
+            runtime_version.get("drift") is True
+            or migration.get("mismatch") is True
+        ),
+    }
+
+
+def _runtime_server_version_summary(startup_summary: dict[str, Any]) -> dict[str, Any]:
+    explicit_drift = _parse_bool_env(
+        _string_or_none(
+            _mapping_value(
+                startup_summary,
+                "runtime_server_version_drift",
+                "version_drift",
+                "server_version_drift",
+            )
+            or _env_value(
+                "BRC_RUNTIME_SERVER_VERSION_DRIFT",
+                "RUNTIME_SERVER_VERSION_DRIFT",
+                "SERVER_VERSION_DRIFT",
+            )
+        )
+    )
+    runtime_version = (
+        _mapping_value(
+            startup_summary,
+            "runtime_git_sha",
+            "runtime_commit",
+            "runtime_version",
+            "git_sha",
+            "commit_sha",
+        )
+        or _env_value(
+            "BRC_RUNTIME_COMMIT",
+            "BRC_DEPLOY_COMMIT",
+            "GIT_COMMIT",
+            "GIT_SHA",
+            "SOURCE_COMMIT",
+            "APP_COMMIT",
+            "RENDER_GIT_COMMIT",
+        )
+    )
+    server_version = (
+        _mapping_value(
+            startup_summary,
+            "server_git_sha",
+            "server_commit",
+            "server_version",
+            "deployed_git_sha",
+            "deployed_commit",
+            "expected_git_sha",
+            "expected_commit",
+            "release_git_sha",
+            "release_commit",
+        )
+        or _env_value(
+            "BRC_SERVER_COMMIT",
+            "BRC_EXPECTED_COMMIT",
+            "BRC_RELEASE_COMMIT",
+            "SERVER_GIT_SHA",
+            "DEPLOYED_GIT_SHA",
+            "EXPECTED_GIT_SHA",
+            "RELEASE_GIT_SHA",
+        )
+    )
+    if explicit_drift is not None:
+        drift = explicit_drift
+        status = "drift" if drift else "match"
+        detectable = True
+    elif runtime_version and server_version:
+        drift = str(runtime_version) != str(server_version)
+        status = "drift" if drift else "match"
+        detectable = True
+    else:
+        drift = None
+        status = "not_detectable"
+        detectable = False
+    return {
+        "status": status,
+        "detectable": detectable,
+        "drift": drift,
+        "runtime_version": runtime_version or "not_available",
+        "server_version": server_version or "not_available",
+        "missing_evidence": [] if detectable else _missing_version_evidence(runtime_version, server_version),
+    }
+
+
+def _migration_drift_summary(startup_summary: dict[str, Any]) -> dict[str, Any]:
+    explicit_mismatch = _parse_bool_env(
+        _string_or_none(
+            _mapping_value(
+                startup_summary,
+                "pending_migration_mismatch",
+                "migration_mismatch",
+                "alembic_mismatch",
+            )
+            or _env_value(
+                "BRC_PENDING_MIGRATION_MISMATCH",
+                "PENDING_MIGRATION_MISMATCH",
+                "ALEMBIC_MISMATCH",
+            )
+        )
+    )
+    current_revision = (
+        _mapping_value(
+            startup_summary,
+            "alembic_current_revision",
+            "current_alembic_revision",
+            "db_revision",
+            "db_alembic_revision",
+            "migration_current",
+        )
+        or _env_value(
+            "BRC_ALEMBIC_CURRENT",
+            "ALEMBIC_CURRENT",
+            "DB_ALEMBIC_REVISION",
+            "DB_REVISION",
+        )
+    )
+    expected_head = (
+        _mapping_value(
+            startup_summary,
+            "alembic_expected_head",
+            "expected_alembic_head",
+            "alembic_head",
+            "migration_head",
+            "migration_expected_head",
+        )
+        or _env_value(
+            "BRC_ALEMBIC_HEAD",
+            "ALEMBIC_HEAD",
+            "EXPECTED_ALEMBIC_HEAD",
+            "MIGRATION_HEAD",
+        )
+    )
+    if explicit_mismatch is not None:
+        mismatch = explicit_mismatch
+        status = "mismatch" if mismatch else "match"
+        detectable = True
+    elif current_revision and expected_head:
+        mismatch = str(current_revision) != str(expected_head)
+        status = "mismatch" if mismatch else "match"
+        detectable = True
+    else:
+        mismatch = None
+        status = "not_detectable"
+        detectable = False
+    return {
+        "status": status,
+        "detectable": detectable,
+        "mismatch": mismatch,
+        "current_revision": current_revision or "not_available",
+        "expected_head": expected_head or "not_available",
+        "missing_evidence": [] if detectable else _missing_migration_evidence(current_revision, expected_head),
+    }
+
+
+def _mapping_value(mapping: dict[str, Any], *keys: str) -> Optional[str]:
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        value = mapping.get(key)
+        text = _string_or_none(value)
+        if text is not None:
+            return text
+    return None
+
+
+def _env_value(*names: str) -> Optional[str]:
+    for name in names:
+        text = _string_or_none(os.environ.get(name))
+        if text is not None:
+            return text
+    return None
+
+
+def _string_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _missing_version_evidence(runtime_version: Any, server_version: Any) -> list[str]:
+    missing: list[str] = []
+    if not runtime_version:
+        missing.append("runtime_version")
+    if not server_version:
+        missing.append("server_version")
+    return missing
+
+
+def _missing_migration_evidence(current_revision: Any, expected_head: Any) -> list[str]:
+    missing: list[str] = []
+    if not current_revision:
+        missing.append("current_revision")
+    if not expected_head:
+        missing.append("expected_head")
+    return missing
 
 
 def _normalized_status(value: Any) -> str:

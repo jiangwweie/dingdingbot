@@ -251,6 +251,23 @@ def test_brc_console_requires_session(monkeypatch):
         assert response.status_code == 401
 
 
+def test_brc_operation_preflight_requires_session(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/brc/operations/preflight",
+            json={
+                "operation_type": "revoke_budget",
+                "requested_by": "owner",
+                "input_params": {},
+                "source": {"kind": "unit"},
+            },
+        )
+        assert response.status_code == 401
+
+
 def test_brc_console_dashboard_is_human_readable_after_login(monkeypatch):
     _configure_auth(monkeypatch)
     from src.interfaces.api import app

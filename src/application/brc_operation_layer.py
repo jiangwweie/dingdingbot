@@ -40,6 +40,7 @@ OperationType = Literal[
     "run_fixed_testnet_rehearsal",
     "enter_observe",
     "enter_pause",
+    "revoke_budget",
     "enter_strategy_or_monitor",
     "pause_new_entries",
     "emergency_stop_runtime",
@@ -349,6 +350,8 @@ class OperationLayerReaders:
     audit_writable: Callable[[], Awaitable[bool]]
     review_packet_reader: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     runtime_transition: Optional[Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]] = None
+    budget_authorization_summary: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None
+    budget_revoke_executor: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     runtime_stop_executor: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     fixed_rehearsal_executor: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     admission_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
@@ -478,6 +481,9 @@ class BrcOperationService:
         market_summary = await self._readers.markets_orders_summary()
         campaign_summary = await self._campaign_summary()
         playbook_summary = self._playbook_preflight_summary(input_params)
+        budget_authorization_summary: Optional[dict[str, Any]] = None
+        if operation_type == "revoke_budget":
+            budget_authorization_summary = await self._budget_authorization_summary()
         admission_readiness: Optional[dict[str, Any]] = None
         if operation_type == "create_gated_trial_from_admission":
             admission_readiness = await self._admission_readiness(input_params)
@@ -582,6 +588,7 @@ class BrcOperationService:
             signal_loop_start_readiness=signal_loop_start_readiness,
             signal_evaluation_readiness=signal_evaluation_readiness,
             signal_trade_intent_readiness=signal_trade_intent_readiness,
+            budget_authorization_summary=budget_authorization_summary,
         )
         dry_run_plan = after.get("dry_run_plan")
         if operation_type == "emergency_flatten" and isinstance(dry_run_plan, dict):
@@ -606,6 +613,7 @@ class BrcOperationService:
             "market": market_summary,
             "campaign": campaign_summary,
             "playbook": playbook_summary,
+            "budget_authorization": budget_authorization_summary or {},
             "risk": risk_result,
             "admission": admission_readiness or {},
             "admission_campaign": admission_campaign_readiness or {},
@@ -1040,6 +1048,8 @@ class BrcOperationService:
                 preflight=preflight,
                 target_state="paused",
             )
+        if operation.operation_type == "revoke_budget":
+            return await self._execute_revoke_budget(operation=operation, preflight=preflight)
         if operation.operation_type == "enter_strategy_or_monitor":
             return await self._execute_monitor_carrier_noop(operation=operation, preflight=preflight)
         if operation.operation_type == "run_fixed_testnet_rehearsal":
@@ -1358,10 +1368,11 @@ class BrcOperationService:
                 recheck_result={"passed": True},
             )
         next_state = str(transition.get("status") or transition.get("next_state") or target_state)
+        is_noop = next_state == preflight.before.get("runtime_state")
         return await self._persist_result(
             operation=operation,
             preflight=preflight,
-            status="noop" if next_state == preflight.before.get("runtime_state") else "executed",
+            status="noop" if is_noop else "executed",
             recheck_result={"passed": True},
             adapter_result={"runtime_transition": transition},
             result_summary={
@@ -1369,7 +1380,13 @@ class BrcOperationService:
                 "message": f"Runtime campaign state transition recorded as {next_state}. No orders were placed, closed, or cancelled.",
                 "target_state": target_state,
                 "next_state": next_state,
-                "mutation_executed": False,
+                "mutation_executed": not is_noop,
+                "pg_state_mutated": not is_noop,
+                "places_orders": False,
+                "closes_positions": False,
+                "cancels_orders": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
                 "live_ready": False,
             },
             audit_refs=[
@@ -1381,6 +1398,82 @@ class BrcOperationService:
                 }
             ],
             final_state_snapshot={"runtime_transition": transition},
+        )
+
+    async def _execute_revoke_budget(
+        self,
+        *,
+        operation: OperationRecord,
+        preflight: PreflightSnapshot,
+    ) -> ExecutionResult:
+        if self._readers.budget_revoke_executor is None:
+            return await self._execute_no_safe_executor(operation=operation, preflight=preflight)
+        try:
+            revoked = await self._readers.budget_revoke_executor(
+                {
+                    **operation.input_params,
+                    "operation_id": operation.operation_id,
+                    "preflight_id": preflight.preflight_id,
+                    "revoked_by": operation.requested_by,
+                    "authorization_source": "brc_operation_layer",
+                    "places_orders": False,
+                    "closes_positions": False,
+                    "cancels_orders": False,
+                    "withdrawal_executed": False,
+                    "transfer_executed": False,
+                    "live_ready": False,
+                }
+            )
+        except Exception as exc:
+            return await self._persist_result(
+                operation=operation,
+                preflight=preflight,
+                status="blocked",
+                blocked_reason=str(exc),
+                recheck_result={"passed": True},
+            )
+        already_revoked = bool(revoked.get("already_revoked"))
+        budget_authorization_id = revoked.get("budget_authorization_id") or preflight.after.get(
+            "budget_authorization_id"
+        )
+        result_status: ExecutionStatus = "noop" if already_revoked else "executed"
+        message = (
+            "Budget authorization was already revoked; future budgeted autonomy actions remain blocked."
+            if already_revoked
+            else "Budget authorization revoked. Future budgeted autonomy actions under this envelope are blocked."
+        )
+        return await self._persist_result(
+            operation=operation,
+            preflight=preflight,
+            status=result_status,
+            recheck_result={"passed": True},
+            adapter_result={"budget_revoke": revoked},
+            result_summary={
+                "operation_type": operation.operation_type,
+                "message": (
+                    f"{message} This does not close active positions, cancel TP/SL orders, "
+                    "place orders, transfer funds, or withdraw funds."
+                ),
+                "budget_authorization_id": budget_authorization_id,
+                "budget_effective_state": "revoked",
+                "future_budgeted_actions_allowed": False,
+                "already_revoked": already_revoked,
+                "mutation_executed": not already_revoked,
+                "places_orders": False,
+                "closes_positions": False,
+                "cancels_orders": False,
+                "withdrawal_executed": False,
+                "transfer_executed": False,
+                "live_ready": False,
+            },
+            audit_refs=[
+                {
+                    "type": "budget_authorization_revoke",
+                    "ref_id": str(budget_authorization_id or operation.operation_id),
+                    "operation_id": operation.operation_id,
+                }
+            ],
+            final_state_snapshot={"budget_authorization": revoked},
         )
 
     async def _execute_monitor_carrier_noop(
@@ -4263,8 +4356,37 @@ class BrcOperationService:
             }
         return await self._readers.signal_trade_intent_readiness(input_params)
 
+    async def _budget_authorization_summary(self) -> dict[str, Any]:
+        if self._readers.budget_authorization_summary is None:
+            return {
+                "available": False,
+                "ready": False,
+                "latest_budget_authorization": None,
+                "blockers": ["budget authorization reader unavailable"],
+                "warnings": [],
+                "source": "operation_layer_reader_unavailable",
+            }
+        return await self._readers.budget_authorization_summary()
+
     def _effective_policy(self, operation_type: str) -> OperationPolicy:
         policy = self._registry.get_policy(operation_type)
+        if operation_type == "revoke_budget":
+            if (
+                self._readers.budget_authorization_summary is None
+                or self._readers.budget_revoke_executor is None
+            ):
+                return policy
+            return policy.model_copy(
+                update={
+                    "capability_status": "enabled",
+                    "current_reason": (
+                        "Operation-backed budget revoke is available. It only terminates future "
+                        "budgeted autonomy attempts under the selected envelope."
+                    ),
+                    "backend_executor": "budget_authorization_revoke",
+                    "executable_through_operation": True,
+                }
+            )
         if operation_type == "run_fixed_testnet_rehearsal":
             if self._readers.fixed_rehearsal_executor is None:
                 return policy
@@ -4330,6 +4452,7 @@ class BrcOperationService:
         signal_loop_start_readiness: Optional[dict[str, Any]] = None,
         signal_evaluation_readiness: Optional[dict[str, Any]] = None,
         signal_trade_intent_readiness: Optional[dict[str, Any]] = None,
+        budget_authorization_summary: Optional[dict[str, Any]] = None,
     ) -> tuple[PreflightDecision, list[str], list[str], str, dict[str, Any], dict[str, Any]]:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -4431,6 +4554,8 @@ class BrcOperationService:
             after.update(
                 {
                     "runtime_state": target_state,
+                    "autonomy_effective_state": target_state,
+                    "future_budgeted_actions_allowed": target_state != "paused",
                     "places_orders": False,
                     "closes_positions": False,
                     "cancels_orders": False,
@@ -4438,6 +4563,55 @@ class BrcOperationService:
             )
             if self._readers.runtime_transition is None:
                 blockers.append("runtime transition adapter unavailable")
+        elif policy.operation_type == "revoke_budget":
+            budget_summary = dict(budget_authorization_summary or {})
+            latest = dict(budget_summary.get("latest_budget_authorization") or {})
+            requested_budget_id = _optional_str(input_params.get("budget_authorization_id"))
+            budget_authorization_id = requested_budget_id or _optional_str(
+                latest.get("budget_authorization_id")
+            )
+            budget_status = str(latest.get("status") or "not_available")
+            before.update(
+                {
+                    "budget_authorization_id": latest.get("budget_authorization_id"),
+                    "budget_authorization_status": budget_status,
+                    "budget_effective_state": (
+                        "revoked" if budget_status == "revoked"
+                        else "available_metadata_only" if latest
+                        else "not_available"
+                    ),
+                    "future_budgeted_actions_allowed": budget_status != "revoked" and bool(latest),
+                }
+            )
+            after.update(
+                {
+                    "budget_authorization_id": budget_authorization_id,
+                    "budget_authorization_status": "revoked",
+                    "budget_effective_state": "revoked",
+                    "future_budgeted_actions_allowed": False,
+                    "places_orders": False,
+                    "closes_positions": False,
+                    "cancels_orders": False,
+                    "withdrawal_executed": False,
+                    "transfer_executed": False,
+                }
+            )
+            if self._readers.budget_authorization_summary is None:
+                blockers.append("budget authorization reader unavailable")
+            if self._readers.budget_revoke_executor is None:
+                blockers.append("budget revoke executor unavailable")
+            if not budget_authorization_id:
+                blockers.append("current budget authorization unavailable")
+            if requested_budget_id and latest and requested_budget_id != latest.get("budget_authorization_id"):
+                warnings.append(
+                    "requested budget_authorization_id differs from latest budget metadata; executor will target the requested id"
+                )
+            if budget_status == "revoked":
+                after["already_revoked"] = True
+                warnings.append("budget authorization is already revoked; confirmation will be idempotent")
+            warnings.append(
+                "revoke_budget blocks future budgeted autonomy actions only; it does not close positions, cancel TP/SL, transfer, or withdraw"
+            )
         elif policy.operation_type == "enter_strategy_or_monitor":
             after.update(
                 {
@@ -5925,6 +6099,17 @@ def _build_default_policies() -> dict[str, OperationPolicy]:
             executable_through_operation=True,
         ),
         OperationPolicy(
+            operation_type="revoke_budget",
+            display_name="Revoke Budget Authorization",
+            risk_level="low",
+            allowed_env=["local", "testnet"],
+            confirmation_phrase="CONFIRM_REVOKE_BUDGET",
+            capability_status="unavailable",
+            current_reason="Budget revoke requires the budget authorization reader and revoke executor to be wired.",
+            backend_executor=None,
+            executable_through_operation=False,
+        ),
+        OperationPolicy(
             operation_type="enter_strategy_or_monitor",
             display_name="Enter Strategy Or Monitor",
             risk_level="medium",
@@ -6216,6 +6401,11 @@ def _operation_summary(operation_type: str, after: dict[str, Any]) -> str:
         return "Enter observe state after Owner confirmation. No order placement, close, or cancellation is performed."
     if operation_type == "enter_pause":
         return "Enter pause state after Owner confirmation. New strategy actions stop; no automatic close or cancel occurs."
+    if operation_type == "revoke_budget":
+        return (
+            "Revoke budget authorization after Owner confirmation. This blocks future budgeted autonomy actions "
+            "under the selected envelope and does not close positions, cancel TP/SL, transfer, or withdraw."
+        )
     if operation_type == "enter_strategy_or_monitor":
         return (
             "Enter monitor carrier after Owner confirmation. This does not enable unrestricted automatic trading "

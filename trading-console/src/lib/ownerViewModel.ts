@@ -168,7 +168,7 @@ export function gateStatusLabel(value?: string): string {
   if (text === 'pass') return '通过';
   if (text === 'warning') return '需关注';
   if (text === 'block' || text === 'blocked') return '阻断';
-  if (text === 'read_only_no_execute_endpoint') return '只读展示';
+  if (text === 'read_only_no_execute_endpoint') return '无执行入口';
   return value ? String(value) : '未知';
 }
 

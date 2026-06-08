@@ -56,7 +56,7 @@ export default function AuditChain() {
             <Search className="w-5 h-5" />
           </button>
         </form>
-        <div className="mt-2 text-xs text-slate-400">当前展示后端返回的只读链路。</div>
+        <div className="mt-2 text-xs text-slate-400">当前展示后端返回的审计链路。</div>
       </Card>
 
       <EnvelopeStatus envelope={envelope} error={error} />

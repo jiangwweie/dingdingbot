@@ -95,6 +95,63 @@ class PgMultiCarrierBudgetAuthorizationRepository:
         except SQLAlchemyError as exc:
             raise _pg_error(exc) from exc
 
+    async def get(
+        self,
+        budget_authorization_id: str,
+    ) -> MultiCarrierBudgetAuthorization | None:
+        try:
+            async with self._session_maker() as session:
+                row = await session.get(
+                    PGBrcMultiCarrierBudgetAuthorizationORM,
+                    budget_authorization_id,
+                )
+                return self._to_authorization(row) if row is not None else None
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
+    async def revoke(
+        self,
+        *,
+        budget_authorization_id: str,
+        revoked_at_ms: int,
+        revoked_by: str,
+        revoke_reason: str | None,
+        operation_id: str | None,
+    ) -> MultiCarrierBudgetAuthorization:
+        try:
+            async with self._session_maker() as session:
+                async with session.begin():
+                    row = await session.get(
+                        PGBrcMultiCarrierBudgetAuthorizationORM,
+                        budget_authorization_id,
+                        with_for_update=True,
+                    )
+                    if row is None:
+                        raise MultiCarrierBudgetAuthorizationInfrastructureError(
+                            "budget_authorization_not_found",
+                            "Budget authorization metadata row was not found.",
+                        )
+                    if row.status != "revoked":
+                        row.status = "revoked"
+                        row.revoked_at_ms = revoked_at_ms
+                        row.revoked_by = revoked_by
+                        row.revoke_reason = revoke_reason
+                        row.last_control_operation_id = operation_id
+                        row.updated_at_ms = revoked_at_ms
+                        metadata = dict(row.metadata_json or {})
+                        metadata["status"] = "revoked"
+                        metadata["revoked_at_ms"] = revoked_at_ms
+                        metadata["revoked_by"] = revoked_by
+                        metadata["revoke_reason"] = revoke_reason
+                        metadata["last_control_operation_id"] = operation_id
+                        row.metadata_json = metadata
+                    await session.flush()
+                    return self._to_authorization(row)
+        except MultiCarrierBudgetAuthorizationInfrastructureError:
+            raise
+        except SQLAlchemyError as exc:
+            raise _pg_error(exc) from exc
+
     @staticmethod
     def _to_authorization(
         row: PGBrcMultiCarrierBudgetAuthorizationORM,
@@ -115,6 +172,10 @@ class PgMultiCarrierBudgetAuthorizationRepository:
             status=row.status,
             linked_acknowledgement_id=row.linked_acknowledgement_id,
             linked_authorization_id=row.linked_authorization_id,
+            revoked_at_ms=row.revoked_at_ms,
+            revoked_by=row.revoked_by,
+            revoke_reason=row.revoke_reason,
+            last_control_operation_id=row.last_control_operation_id,
             live_ready=row.live_ready,
             auto_execution_enabled=row.auto_execution_enabled,
             order_permission_granted=row.order_permission_granted,

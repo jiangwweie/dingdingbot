@@ -21,6 +21,13 @@ from src.application.strategy_trial_carrier_expansion import (
 
 
 BUDGET_AUTHORIZATION_SOURCE = "owner_console"
+BudgetAuthorizationStatus = Literal[
+    "draft_disabled_pending_owner_authorization",
+    "active_metadata_only",
+    "paused_metadata_only",
+    "revoked",
+    "expired",
+]
 
 
 class MultiCarrierBudgetAuthorizationError(ValueError):
@@ -91,11 +98,15 @@ class MultiCarrierBudgetAuthorization(BaseModel):
     cooldown_seconds: int = Field(ge=0)
     valid_from_ms: int | None = None
     valid_until_ms: int | None = None
-    status: Literal["draft_disabled_pending_owner_authorization"] = (
+    status: BudgetAuthorizationStatus = (
         "draft_disabled_pending_owner_authorization"
     )
     linked_acknowledgement_id: str | None = None
     linked_authorization_id: str | None = None
+    revoked_at_ms: int | None = None
+    revoked_by: str | None = None
+    revoke_reason: str | None = None
+    last_control_operation_id: str | None = None
     live_ready: Literal[False] = False
     auto_execution_enabled: Literal[False] = False
     order_permission_granted: Literal[False] = False
@@ -128,6 +139,23 @@ class MultiCarrierBudgetAuthorizationRepository(Protocol):
     async def latest(self) -> MultiCarrierBudgetAuthorization | None:
         ...
 
+    async def get(
+        self,
+        budget_authorization_id: str,
+    ) -> MultiCarrierBudgetAuthorization | None:
+        ...
+
+    async def revoke(
+        self,
+        *,
+        budget_authorization_id: str,
+        revoked_at_ms: int,
+        revoked_by: str,
+        revoke_reason: str | None,
+        operation_id: str | None,
+    ) -> MultiCarrierBudgetAuthorization:
+        ...
+
 
 class MultiCarrierBudgetAuthorizationService:
     def __init__(self, repository: MultiCarrierBudgetAuthorizationRepository) -> None:
@@ -138,6 +166,34 @@ class MultiCarrierBudgetAuthorizationService:
             latest_budget_authorization=await self._repository.latest(),
             eligible_carrier_ids=sorted(budget_eligible_carrier_ids()),
             disabled_execution_state=_disabled_execution_state(),
+        )
+
+    async def revoke(
+        self,
+        *,
+        budget_authorization_id: str | None = None,
+        revoked_by: str = "owner",
+        revoke_reason: str | None = None,
+        operation_id: str | None = None,
+    ) -> MultiCarrierBudgetAuthorization:
+        authorization = (
+            await self._repository.get(budget_authorization_id)
+            if budget_authorization_id
+            else await self._repository.latest()
+        )
+        if authorization is None:
+            raise MultiCarrierBudgetAuthorizationError(
+                "budget_authorization_not_found",
+                "No current budget authorization metadata exists to revoke.",
+            )
+        if authorization.status == "revoked":
+            return authorization
+        return await self._repository.revoke(
+            budget_authorization_id=authorization.budget_authorization_id,
+            revoked_at_ms=_now_ms(),
+            revoked_by=revoked_by,
+            revoke_reason=revoke_reason,
+            operation_id=operation_id,
         )
 
     async def create_foundation(

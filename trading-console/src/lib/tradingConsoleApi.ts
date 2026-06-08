@@ -34,7 +34,7 @@ export function useReadModel<T>(path: string): ReadModelState<T> {
         const payload = await response.json();
         if (active) setEnvelope(payload);
       } catch (err) {
-        console.error('Trading Console read-only API error', { path, error: err });
+        console.error('Trading Console read-model API error', { path, error: err });
         if (active) {
           setEnvelope(null);
           setError(err instanceof Error ? err.message : String(err));

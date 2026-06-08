@@ -224,7 +224,7 @@ export default function ActionEntry() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <PageHeader title="Owner Action Flow" subtitle="从行情判断进入候选选择、风险复核、授权草案路径、最终门禁和行动状态。" status={envelope?.freshness_status}>
-        <Badge variant="muted">只读入口</Badge>
+        <Badge variant="muted">预检入口</Badge>
       </PageHeader>
 
       <PageSummary
@@ -268,7 +268,7 @@ export default function ActionEntry() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-medium">Owner 行情输入</h2>
-              <p className="text-xs text-slate-500 mt-1">输入只用于本页只读查询，不创建授权、不写入 PG。</p>
+              <p className="text-xs text-slate-500 mt-1">输入只用于本页候选预检，不创建授权、不写入 PG。</p>
             </div>
             <button
               type="submit"
@@ -635,7 +635,7 @@ export default function ActionEntry() {
         </div>
       </Card>
 
-      <TechnicalDetails title="Raw / Debug：Action Entry 只读响应">
+      <TechnicalDetails title="Raw / Debug：Action Entry 响应">
         <button
           type="button"
           onClick={() => navigator.clipboard?.writeText(JSON.stringify(pageData, null, 2))}
