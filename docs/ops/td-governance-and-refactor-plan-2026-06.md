@@ -240,15 +240,23 @@ Operation Layer runtime-safety-readiness recheck validation:
 
 python3 -m pytest -q tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_preflight_blocks_when_permission_below_intent_recording \
   tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_preflight_allows_when_permission_allows \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_runtime_safety_reader_requires_explicit_runtime_id \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_preflight_blocks_explicit_runtime_id_without_reader \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_preflight_blocks_on_runtime_safety_reader_blocker \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_confirm_rechecks_runtime_safety_reader_for_runtime_id \
   tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_confirm_rechecks_runtime_safety_readiness \
   tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_observe_only_records_would_enter_intent \
   tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_auto_within_budget_records_candidate_without_execution \
   tests/unit/test_execution_permission.py \
   tests/unit/test_strategy_runtime_safety_readiness.py
-25 passed
+29 passed
+
+python3 -m pytest -q tests/unit/test_brc_operation_layer.py
+176 passed
 
 python3 -m compileall -q tests/unit/test_brc_operation_layer.py \
   src/application/brc_operation_layer.py \
+  src/interfaces/api_brc_console.py \
   src/application/execution_permission.py \
   src/application/strategy_runtime_safety_readiness_service.py \
   src/domain/strategy_runtime_safety_readiness.py
@@ -1261,6 +1269,15 @@ Current local Sprint 7 slice:
   time before recording a trial trade intent. The proof preserves
   `trade_intent_created=false`, `execution_intent_created=false`, and
   `order_created=false`.
+- `BrcOperationService` now enriches the Operation Layer runtime summary with
+  `runtime_safety_readiness` only when an explicit `runtime_instance_id` /
+  `strategy_runtime_instance_id` is supplied. The BRC Console API wires this to
+  the existing non-executing `StrategyRuntimeSafetyReadinessService.preview`.
+  Missing readers, unreadable readiness, missing runtime ids, or runtime-id
+  mismatches fail closed as blocked runtime-safety-readiness facts. This
+  prevents record-intent preflight/confirm from relying on user-supplied
+  active-position/runtime facts while still avoiding any guessed "current
+  runtime" selection.
 
 Required properties:
 

@@ -827,6 +827,59 @@ async def _operation_runtime_summary() -> dict[str, Any]:
     }
 
 
+def _operation_input_runtime_instance_id(input_params: Mapping[str, Any]) -> Optional[str]:
+    for key in ("runtime_instance_id", "strategy_runtime_instance_id"):
+        value = input_params.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    runtime = input_params.get("runtime")
+    if isinstance(runtime, Mapping):
+        for key in ("runtime_instance_id", "strategy_runtime_instance_id", "id"):
+            value = runtime.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return None
+
+
+async def _operation_strategy_runtime_service() -> Any:
+    api_module = _api_module()
+    injected = getattr(api_module, "_strategy_runtime_service", None)
+    if injected is not None:
+        return injected
+    try:
+        from src.application.strategy_runtime_service import StrategyRuntimeInstanceService
+        from src.infrastructure.pg_brc_admission_repository import PgBrcAdmissionRepository
+        from src.infrastructure.pg_strategy_runtime_repository import PgStrategyRuntimeRepository
+
+        service = StrategyRuntimeInstanceService(
+            runtime_repository=PgStrategyRuntimeRepository(),
+            admission_repository=PgBrcAdmissionRepository(),
+        )
+        await service.initialize()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="Strategy runtime repository unavailable; persistent PG facts are required.",
+        ) from exc
+    setattr(api_module, "_strategy_runtime_service", service)
+    return service
+
+
+async def _operation_runtime_safety_readiness(input_params: dict[str, Any]) -> dict[str, Any]:
+    runtime_instance_id = _operation_input_runtime_instance_id(input_params)
+    if runtime_instance_id is None:
+        return {}
+    from src.application.strategy_runtime_safety_readiness_service import (
+        StrategyRuntimeSafetyReadinessService,
+    )
+
+    service = StrategyRuntimeSafetyReadinessService(
+        runtime_service=await _operation_strategy_runtime_service()
+    )
+    readiness = await service.preview(runtime_instance_id=runtime_instance_id)
+    return readiness.model_dump(mode="json")
+
+
 async def _operation_markets_orders_summary() -> dict[str, Any]:
     facts = await _account_facts(_api_module())
     payload = facts.model_dump(mode="json")
@@ -2061,6 +2114,7 @@ async def _get_operation_service(request: Optional[Request] = None) -> BrcOperat
             runtime_summary=_operation_runtime_summary,
             markets_orders_summary=_operation_markets_orders_summary,
             audit_writable=_operation_audit_writable,
+            runtime_safety_readiness=_operation_runtime_safety_readiness,
             review_packet_reader=_operation_review_packet,
             runtime_transition=_operation_runtime_transition,
             budget_authorization_summary=_operation_budget_authorization_summary,

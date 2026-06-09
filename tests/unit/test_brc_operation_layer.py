@@ -115,6 +115,7 @@ async def _operation_service(
     admission_signal_evaluator_factory=None,
     signal_trade_intent_readiness=None,
     signal_trade_intent_recorder_factory=None,
+    runtime_safety_readiness=None,
     execution_permission_max: ExecutionPermission | None = None,
     brc_service: BoundedRiskCampaignService | None = None,
     brc_repo_existing=None,
@@ -342,6 +343,7 @@ async def _operation_service(
             runtime_summary=_runtime_summary,
             markets_orders_summary=_market_summary,
             audit_writable=_audit_writable,
+            runtime_safety_readiness=runtime_safety_readiness,
             review_packet_reader=_review_packet,
             runtime_transition=_runtime_transition if runtime_adapter else None,
             budget_authorization_summary=_budget_summary if budget_adapter else None,
@@ -2462,6 +2464,7 @@ async def _phase18_signal_evaluated_context(
     execution_mode: AdmissionExecutionMode = AdmissionExecutionMode.OBSERVE_ONLY,
     *,
     runtime_state: dict | None = None,
+    runtime_safety_readiness=None,
     execution_permission_max: ExecutionPermission | None = ExecutionPermission.INTENT_RECORDING,
 ):
     admission, engine, binding, service, brc_repo, market = await _phase17_signal_loop_started_context(
@@ -2492,6 +2495,7 @@ async def _phase18_signal_evaluated_context(
         runtime_state=runtime_state,
         signal_trade_intent_readiness=_signal_trade_intent_readiness(admission, service._brc),
         signal_trade_intent_recorder_factory=_signal_trade_intent_recorder(admission),
+        runtime_safety_readiness=runtime_safety_readiness,
         execution_permission_max=execution_permission_max,
     )
     return admission, engine, binding, service, brc_repo, market
@@ -5520,6 +5524,194 @@ async def test_record_trial_trade_intent_preflight_allows_when_permission_allows
     assert preflight.trade_intent_summary["intent_would_be_recorded"] is True
     assert preflight.trade_intent_summary["execution_intent_created"] is False
     assert preflight.trade_intent_summary["order_created"] is False
+
+
+@pytest.mark.asyncio
+async def test_record_trial_trade_intent_runtime_safety_reader_requires_explicit_runtime_id():
+    calls: list[dict[str, Any]] = []
+
+    async def _runtime_safety_readiness(input_params):
+        calls.append(dict(input_params))
+        return {
+            "runtime_instance_id": "rt-unused",
+            "status": "blocked",
+            "blockers": ["should_not_be_read_without_runtime_id"],
+            "missing_boundary_facts": ["should_not_be_read_without_runtime_id"],
+            "not_execution_authority": True,
+            "execution_intent_created": False,
+            "runtime_state_mutated": False,
+            "order_created": False,
+            "exchange_called": False,
+        }
+
+    admission, engine, binding, service, brc_repo, _ = await _phase18_signal_evaluated_context(
+        runtime_safety_readiness=_runtime_safety_readiness,
+    )
+    try:
+        preflight = await service.preflight(
+            operation_type="record_trial_trade_intent_from_signal_evaluation",
+            requested_by="owner",
+            input_params={
+                "campaign_id": brc_repo.campaign.campaign_id,
+                "binding_id": binding.binding_id,
+                "intended_action": "entry",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+            },
+        )
+    finally:
+        await engine.dispose()
+
+    assert calls == []
+    assert preflight.decision in {"allow", "warn"}
+    assert "runtime_safety_readiness" not in preflight.runtime_summary
+    assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
+
+
+@pytest.mark.asyncio
+async def test_record_trial_trade_intent_preflight_blocks_explicit_runtime_id_without_reader():
+    admission, engine, binding, service, brc_repo, _ = await _phase18_signal_evaluated_context()
+    try:
+        preflight = await service.preflight(
+            operation_type="record_trial_trade_intent_from_signal_evaluation",
+            requested_by="owner",
+            input_params={
+                "campaign_id": brc_repo.campaign.campaign_id,
+                "binding_id": binding.binding_id,
+                "runtime_instance_id": "rt-missing-reader",
+                "intended_action": "entry",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+            },
+        )
+    finally:
+        await engine.dispose()
+
+    assert preflight.decision == "block"
+    readiness = preflight.runtime_summary["runtime_safety_readiness"]
+    assert readiness["runtime_instance_id"] == "rt-missing-reader"
+    assert readiness["status"] == "blocked"
+    assert readiness["blockers"] == ["runtime_safety_readiness_reader_unavailable"]
+    assert preflight.after["execution_permission_resolution"]["runtime_safety_permission"] == "signal_only"
+    assert "runtime_safety_readiness_reader_unavailable" in "; ".join(preflight.risk_summary["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_record_trial_trade_intent_preflight_blocks_on_runtime_safety_reader_blocker():
+    calls: list[dict[str, Any]] = []
+
+    async def _runtime_safety_readiness(input_params):
+        calls.append(dict(input_params))
+        return {
+            "runtime_instance_id": "rt-blocked",
+            "status": "blocked",
+            "blockers": ["max_loss_budget_present"],
+            "missing_boundary_facts": ["max_loss_budget_present"],
+            "not_execution_authority": True,
+            "execution_intent_created": False,
+            "runtime_state_mutated": False,
+            "order_created": False,
+            "exchange_called": False,
+        }
+
+    admission, engine, binding, service, brc_repo, _ = await _phase18_signal_evaluated_context(
+        runtime_safety_readiness=_runtime_safety_readiness,
+    )
+    try:
+        preflight = await service.preflight(
+            operation_type="record_trial_trade_intent_from_signal_evaluation",
+            requested_by="owner",
+            input_params={
+                "campaign_id": brc_repo.campaign.campaign_id,
+                "binding_id": binding.binding_id,
+                "runtime_instance_id": "rt-blocked",
+                "intended_action": "entry",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+            },
+        )
+    finally:
+        await engine.dispose()
+
+    assert [call["runtime_instance_id"] for call in calls] == ["rt-blocked"]
+    assert preflight.decision == "block"
+    assert preflight.runtime_summary["runtime_safety_readiness"]["blockers"] == ["max_loss_budget_present"]
+    assert preflight.after["execution_permission_resolution"]["runtime_safety_permission"] == "signal_only"
+    assert "runtime safety readiness blocks intent recording" in "; ".join(preflight.risk_summary["blockers"])
+    assert "max_loss_budget_present" in "; ".join(preflight.risk_summary["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_record_trial_trade_intent_confirm_rechecks_runtime_safety_reader_for_runtime_id():
+    calls: list[dict[str, Any]] = []
+
+    async def _runtime_safety_readiness(input_params):
+        calls.append(dict(input_params))
+        if len(calls) == 1:
+            return {
+                "runtime_instance_id": "rt-recheck",
+                "status": "ready_for_owner_codex_confirmation",
+                "blockers": [],
+                "warnings": [],
+                "missing_boundary_facts": [],
+                "not_execution_authority": True,
+                "execution_intent_created": False,
+                "runtime_state_mutated": False,
+                "order_created": False,
+                "exchange_called": False,
+            }
+        return {
+            "runtime_instance_id": "rt-recheck",
+            "status": "blocked",
+            "blockers": ["max_active_positions_boundary_present"],
+            "missing_boundary_facts": ["max_active_positions_boundary_present"],
+            "not_execution_authority": True,
+            "execution_intent_created": False,
+            "runtime_state_mutated": False,
+            "order_created": False,
+            "exchange_called": False,
+        }
+
+    admission, engine, binding, service, brc_repo, _ = await _phase18_signal_evaluated_context(
+        runtime_safety_readiness=_runtime_safety_readiness,
+    )
+    try:
+        preflight = await service.preflight(
+            operation_type="record_trial_trade_intent_from_signal_evaluation",
+            requested_by="owner",
+            input_params={
+                "campaign_id": brc_repo.campaign.campaign_id,
+                "binding_id": binding.binding_id,
+                "runtime_instance_id": "rt-recheck",
+                "intended_action": "entry",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+            },
+        )
+        assert preflight.decision in {"allow", "warn"}
+        assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
+
+        result = await service.confirm(
+            operation_id=preflight.operation_id,
+            preflight_id=preflight.preflight_id,
+            confirmation_phrase="CONFIRM_RECORD_TRIAL_TRADE_INTENT",
+            idempotency_key=preflight.idempotency_key,
+        )
+        intents = await admission._repo.list_trial_trade_intents_by_campaign(
+            brc_repo.campaign.campaign_id
+        )
+    finally:
+        await engine.dispose()
+
+    assert [call["runtime_instance_id"] for call in calls] == ["rt-recheck", "rt-recheck"]
+    assert result.status == "blocked"
+    blocked_reason = str(result.result_summary.get("blocked_reason") or "")
+    assert "runtime safety readiness blocks intent recording" in blocked_reason
+    assert "max_active_positions_boundary_present" in blocked_reason
+    assert len(intents) == 0
+    assert brc_repo.campaign.metadata_json["trade_intent_created"] is False
+    assert brc_repo.campaign.metadata_json["execution_intent_created"] is False
+    assert brc_repo.campaign.metadata_json["order_created"] is False
 
 
 @pytest.mark.asyncio

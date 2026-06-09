@@ -348,6 +348,7 @@ class OperationLayerReaders:
     runtime_summary: Callable[[], Awaitable[dict[str, Any]]]
     markets_orders_summary: Callable[[], Awaitable[dict[str, Any]]]
     audit_writable: Callable[[], Awaitable[bool]]
+    runtime_safety_readiness: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     review_packet_reader: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     runtime_transition: Optional[Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]] = None
     budget_authorization_summary: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None
@@ -525,6 +526,10 @@ class BrcOperationService:
             signal_evaluation_readiness = await self._admission_signal_evaluation_readiness(input_params)
         signal_trade_intent_readiness: Optional[dict[str, Any]] = None
         if operation_type == "record_trial_trade_intent_from_signal_evaluation":
+            runtime_summary = await self._runtime_summary_with_safety_readiness(
+                input_params=input_params,
+                runtime_summary=runtime_summary,
+            )
             signal_trade_intent_readiness = await self._signal_trade_intent_readiness(input_params)
             permission_resolution = self._execution_permission_resolver.resolve(
                 requested_permission=ExecutionPermission.INTENT_RECORDING,
@@ -3966,7 +3971,9 @@ class BrcOperationService:
                     readiness.get("enforcement", {}).get("not_executed_reason")
                     or "execution mode unavailable"
                 )
-            current_runtime = await self._readers.runtime_summary()
+            current_runtime = await self._runtime_summary_with_safety_readiness(
+                input_params=operation.input_params,
+            )
             permission_resolution = self._execution_permission_resolver.resolve(
                 requested_permission=ExecutionPermission.INTENT_RECORDING,
                 operation_type=operation.operation_type,
@@ -4083,6 +4090,54 @@ class BrcOperationService:
             "max_attempts": campaign.risk_envelope.max_attempts,
             "loss_counter_resets_on_playbook_switch": False,
         }
+
+    async def _runtime_summary_with_safety_readiness(
+        self,
+        *,
+        input_params: dict[str, Any],
+        runtime_summary: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        summary = dict(runtime_summary) if runtime_summary is not None else await self._readers.runtime_summary()
+        runtime_instance_id = _explicit_runtime_instance_id(input_params)
+        if runtime_instance_id is None:
+            return summary
+
+        if self._readers.runtime_safety_readiness is None:
+            readiness = _blocked_runtime_safety_readiness(
+                runtime_instance_id=runtime_instance_id,
+                reason="runtime_safety_readiness_reader_unavailable",
+            )
+        else:
+            try:
+                readiness = _runtime_safety_readiness_payload(
+                    await self._readers.runtime_safety_readiness(dict(input_params))
+                )
+            except Exception:
+                readiness = _blocked_runtime_safety_readiness(
+                    runtime_instance_id=runtime_instance_id,
+                    reason="runtime_safety_readiness_source_error",
+                )
+
+        readiness_runtime_id = _optional_str(readiness.get("runtime_instance_id"))
+        if not readiness:
+            readiness = _blocked_runtime_safety_readiness(
+                runtime_instance_id=runtime_instance_id,
+                reason="runtime_safety_readiness_missing",
+            )
+        elif readiness_runtime_id is None:
+            readiness = _blocked_runtime_safety_readiness(
+                runtime_instance_id=runtime_instance_id,
+                reason="runtime_safety_readiness_runtime_id_missing",
+            )
+        elif readiness_runtime_id != runtime_instance_id:
+            readiness = _blocked_runtime_safety_readiness(
+                runtime_instance_id=runtime_instance_id,
+                reason="runtime_safety_readiness_runtime_id_mismatch",
+            )
+
+        summary["runtime_safety_readiness"] = readiness
+        summary["runtime_safety_readiness_runtime_instance_id"] = runtime_instance_id
+        return summary
 
     async def _admission_readiness(self, input_params: dict[str, Any]) -> dict[str, Any]:
         if self._readers.admission_readiness is None:
@@ -6376,6 +6431,51 @@ def _optional_str(value: Any) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _explicit_runtime_instance_id(input_params: dict[str, Any]) -> Optional[str]:
+    for key in ("runtime_instance_id", "strategy_runtime_instance_id"):
+        runtime_instance_id = _optional_str(input_params.get(key))
+        if runtime_instance_id is not None:
+            return runtime_instance_id
+    runtime = input_params.get("runtime")
+    if isinstance(runtime, dict):
+        return _optional_str(
+            runtime.get("runtime_instance_id")
+            or runtime.get("strategy_runtime_instance_id")
+            or runtime.get("id")
+        )
+    return None
+
+
+def _runtime_safety_readiness_payload(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(mode="json")
+        return dict(dumped) if isinstance(dumped, dict) else {}
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _blocked_runtime_safety_readiness(
+    *,
+    runtime_instance_id: str,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "runtime_instance_id": runtime_instance_id,
+        "status": "blocked",
+        "blockers": [reason],
+        "warnings": [],
+        "missing_boundary_facts": ["runtime_safety_readiness_source"],
+        "required_owner_confirmations": [],
+        "requirements": [],
+        "not_execution_authority": True,
+        "execution_intent_created": False,
+        "runtime_state_mutated": False,
+        "order_created": False,
+        "exchange_called": False,
+    }
 
 
 def _operation_summary(operation_type: str, after: dict[str, Any]) -> str:
