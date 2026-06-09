@@ -893,6 +893,106 @@ class PGBrcLiveLifecycleReviewORM(PGCoreBase):
     )
 
 
+class PGOwnerCapitalAdjustmentORM(PGCoreBase):
+    """Owner-recorded external capital events for review/account baselines."""
+
+    __tablename__ = "owner_capital_adjustments"
+
+    adjustment_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    adjustment_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USDT")
+    amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    capital_base_delta: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    target_capital_base: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    evidence_refs: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    records_external_owner_action: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    transfer_instruction_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_instruction_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mutates_runtime_budget: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mutates_strategy_pnl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    creates_risk_event: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "adjustment_type IN ('owner_manual_withdrawal', 'manual_profit_extraction', "
+            "'owner_capital_injection', 'capital_base_reset')",
+            name="ck_owner_capital_adjustments_type",
+        ),
+        CheckConstraint(
+            "amount IS NULL OR amount > 0",
+            name="ck_owner_capital_adjustments_positive_amount",
+        ),
+        CheckConstraint(
+            "target_capital_base IS NULL OR target_capital_base >= 0",
+            name="ck_owner_capital_adjustments_nonnegative_target",
+        ),
+        CheckConstraint(
+            "records_external_owner_action = true",
+            name="ck_owner_capital_adjustments_external_owner_action",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_owner_capital_adjustments_no_withdrawal_instruction",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_owner_capital_adjustments_no_transfer_instruction",
+        ),
+        CheckConstraint(
+            "order_instruction_created = false",
+            name="ck_owner_capital_adjustments_no_order_instruction",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_owner_capital_adjustments_no_exchange_call",
+        ),
+        CheckConstraint(
+            "mutates_runtime_budget = false",
+            name="ck_owner_capital_adjustments_no_runtime_budget_mutation",
+        ),
+        CheckConstraint(
+            "mutates_strategy_pnl = false",
+            name="ck_owner_capital_adjustments_no_strategy_pnl_mutation",
+        ),
+        CheckConstraint(
+            "creates_risk_event = false",
+            name="ck_owner_capital_adjustments_no_risk_event",
+        ),
+        Index(
+            "idx_owner_capital_adjustments_currency_time",
+            "currency",
+            "occurred_at_ms",
+        ),
+        Index(
+            "idx_owner_capital_adjustments_type_time",
+            "adjustment_type",
+            "occurred_at_ms",
+        ),
+        Index(
+            "idx_owner_capital_adjustments_recorded_by_time",
+            "recorded_by",
+            "occurred_at_ms",
+        ),
+    )
+
+
 class PGStrategyRuntimeInstanceORM(PGCoreBase):
     """Shadow StrategyRuntimeInstance governance record.
 

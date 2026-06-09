@@ -651,6 +651,16 @@ Current local B0 implementation slice:
   Owner-recorded capital adjustments. Missing equity facts fail closed; equity
   movement without trade or Owner-capital evidence stays unresolved rather than
   being mislabeled as strategy loss.
+- `migrations/versions/2026-06-09-059_create_owner_capital_adjustments.py`
+  and `src/infrastructure/pg_owner_capital_adjustment_repository.py` persist
+  Owner capital adjustment records with hard no-withdrawal, no-transfer,
+  no-order, no-exchange, no-runtime-budget, no-strategy-PnL, and no-risk-event
+  constraints.
+- `src/interfaces/api_brc_console.py` exposes narrow
+  `/api/brc/owner-capital-adjustments` record/list APIs for external Owner
+  capital facts only. These APIs do not initiate withdrawals, transfers, orders,
+  exchange calls, runtime budget mutations, strategy PnL mutations, or risk
+  events.
 - `src/interfaces/api_trading_console.py` exposes a read-only
   `/strategy-runtime-promotion-gate` preview endpoint backed by that service.
   It also exposes
@@ -717,6 +727,17 @@ Current local B0 implementation slice:
   withdrawal / profit extraction / injection / capital-base reset are review
   and capital-baseline facts, not strategy PnL, risk events, exchange calls, or
   withdrawal / transfer / order instructions.
+- `src/application/readmodels/trading_console.py` exposes
+  `review-state.owner_capital_base_review` plus
+  `/api/trading-console/owner-capital-review`; `trading-console/src/pages/ReviewState.tsx`
+  surfaces Owner records, Owner equity flow, trading PnL, unexplained equity
+  delta, and withdrawal-adjusted capital base in the analysis page. Missing
+  account-equity / capital-base facts stay visible rather than inferred.
+- `tests/unit/test_owner_capital_adjustment_repository.py` verifies PG
+  persistence roundtrip and no-action flags. Trading Console readmodel tests
+  verify a recorded Owner withdrawal can explain an equity drop without
+  strategy-loss attribution or any withdrawal/transfer/order/exchange
+  instruction.
 
 Remaining B0 work:
 
@@ -726,8 +747,9 @@ Remaining B0 work:
   account/active-position overlay and Trading Console internal assembly,
   especially scheduler/runtime reader wiring plus funding, open-interest, and
   crowding readers;
-- persistence/API/Console productization for owner capital adjustments and
-  withdrawal-adjusted capital base review;
+- deeper capital-base automation beyond the first Owner-record/API/Console
+  slice, especially automatic account-equity baseline snapshots and linkage to
+  closed-trade review packets;
 - explicit Owner/Codex confirmation values for the promotion gate, especially
   first-real-submit attempt / budget release-or-consume acceptance. Local
   reservation/mutation now uses a max-loss-first budget basis, and the

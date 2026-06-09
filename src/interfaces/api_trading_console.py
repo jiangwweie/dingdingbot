@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -1018,8 +1019,50 @@ async def execution_control_state(
 async def review_state(
     symbol: Optional[str] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
+    include_exchange: bool = Query(default=False),
+    previous_account_equity: Optional[Decimal] = Query(default=None, ge=Decimal("0")),
+    current_account_equity: Optional[Decimal] = Query(default=None, ge=Decimal("0")),
+    starting_capital_base: Optional[Decimal] = Query(default=None, ge=Decimal("0")),
+    realized_trading_pnl: Decimal = Query(default=Decimal("0")),
+    tolerance: Decimal = Query(default=Decimal("0"), ge=Decimal("0")),
+    owner_capital_currency: str = Query(default="USDT", min_length=1, max_length=16),
 ) -> TradingConsoleReadModelResponse:
-    return await _service(include_exchange=False).review_state(symbol=symbol, limit=limit)
+    return await _service(include_exchange=include_exchange).review_state(
+        symbol=symbol,
+        limit=limit,
+        include_exchange=include_exchange,
+        previous_account_equity=previous_account_equity,
+        current_account_equity=current_account_equity,
+        starting_capital_base=starting_capital_base,
+        realized_trading_pnl=realized_trading_pnl,
+        tolerance=tolerance,
+        owner_capital_currency=owner_capital_currency,
+    )
+
+
+@router.get("/owner-capital-review", response_model=TradingConsoleReadModelResponse)
+async def owner_capital_review(
+    symbol: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    include_exchange: bool = Query(default=False),
+    previous_account_equity: Optional[Decimal] = Query(default=None, ge=Decimal("0")),
+    current_account_equity: Optional[Decimal] = Query(default=None, ge=Decimal("0")),
+    starting_capital_base: Optional[Decimal] = Query(default=None, ge=Decimal("0")),
+    realized_trading_pnl: Decimal = Query(default=Decimal("0")),
+    tolerance: Decimal = Query(default=Decimal("0"), ge=Decimal("0")),
+    owner_capital_currency: str = Query(default="USDT", min_length=1, max_length=16),
+) -> TradingConsoleReadModelResponse:
+    return await _service(include_exchange=include_exchange).owner_capital_review(
+        symbol=symbol,
+        limit=limit,
+        include_exchange=include_exchange,
+        previous_account_equity=previous_account_equity,
+        current_account_equity=current_account_equity,
+        starting_capital_base=starting_capital_base,
+        realized_trading_pnl=realized_trading_pnl,
+        tolerance=tolerance,
+        owner_capital_currency=owner_capital_currency,
+    )
 
 
 @router.get("/audit-chain", response_model=TradingConsoleReadModelResponse)
@@ -1361,6 +1404,13 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         execution_recovery_repo = _cached_pg_repo(api_module, "_trading_console_pg_execution_recovery_repo", _build_pg_execution_recovery_repo)
     if live_lifecycle_review_repo is None:
         live_lifecycle_review_repo = _cached_pg_repo(api_module, "_trading_console_pg_live_lifecycle_review_repo", _build_pg_live_lifecycle_review_repo)
+    owner_capital_adjustment_repo = getattr(api_module, "_owner_capital_adjustment_repo", None)
+    if owner_capital_adjustment_repo is None:
+        owner_capital_adjustment_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_owner_capital_adjustment_repo",
+            _build_pg_owner_capital_adjustment_repo,
+        )
 
     return TradingConsoleDependencies(
         runtime_bound=bool(api_module.get_runtime_context() is not None),
@@ -1381,6 +1431,7 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         owner_trial_flow_service=_owner_trial_flow_service(),
         campaign_state_service=getattr(api_module, "_campaign_state_service", None),
         multi_carrier_budget_authorization_service=_multi_carrier_budget_authorization_service(),
+        owner_capital_adjustment_repo=owner_capital_adjustment_repo,
         global_kill_switch_service=getattr(api_module, "_global_kill_switch_service", None),
         startup_trading_guard_service=getattr(api_module, "_startup_trading_guard_service", None),
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
@@ -1877,6 +1928,14 @@ def _build_pg_live_lifecycle_review_repo() -> Any:
     from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
 
     return PgLiveLifecycleReviewRepository()
+
+
+def _build_pg_owner_capital_adjustment_repo() -> Any:
+    from src.infrastructure.pg_owner_capital_adjustment_repository import (
+        PgOwnerCapitalAdjustmentRepository,
+    )
+
+    return PgOwnerCapitalAdjustmentRepository()
 
 
 def _owner_trial_flow_service() -> Optional[Any]:

@@ -134,9 +134,16 @@ from src.domain.brc_admission import (
     TrialStage,
 )
 from src.domain.live_lifecycle_review import BrcLiveLifecycleReviewRecord
+from src.domain.owner_capital_adjustment import (
+    OwnerCapitalAdjustmentRecord,
+    OwnerCapitalAdjustmentType,
+)
 from src.interfaces.operator_auth import OperatorSessionDependency, require_operator_session
 from src.interfaces import api_console_runtime as runtime
 from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
+from src.infrastructure.pg_owner_capital_adjustment_repository import (
+    PgOwnerCapitalAdjustmentRepository,
+)
 
 
 router = APIRouter(
@@ -222,6 +229,50 @@ class BrcLiveLifecycleReviewListResponse(BaseModel):
             "frontend_action_enabled": False,
         }
     )
+
+
+class OwnerCapitalAdjustmentCreateRequest(BaseModel):
+    adjustment_id: Optional[str] = Field(default=None, max_length=128)
+    adjustment_type: OwnerCapitalAdjustmentType
+    currency: str = Field(default="USDT", min_length=1, max_length=16)
+    amount: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
+    capital_base_delta: Optional[Decimal] = None
+    target_capital_base: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    reason: str = Field(min_length=1, max_length=512)
+    occurred_at_ms: Optional[int] = Field(default=None, ge=0)
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OwnerCapitalAdjustmentResponse(BaseModel):
+    adjustment: dict[str, Any]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_withdrawal_instruction": False,
+            "creates_transfer_instruction": False,
+            "creates_order_instruction": False,
+            "calls_exchange": False,
+            "mutates_runtime_budget": False,
+            "mutates_strategy_pnl": False,
+            "creates_risk_event": False,
+        }
+    )
+
+
+class OwnerCapitalAdjustmentListResponse(BaseModel):
+    adjustments: list[dict[str, Any]]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_withdrawal_instruction": False,
+            "creates_transfer_instruction": False,
+            "creates_order_instruction": False,
+            "calls_exchange": False,
+            "mutates_runtime_budget": False,
+            "mutates_strategy_pnl": False,
+            "creates_risk_event": False,
+        }
+    )
+
 
 dev_testnet_router = APIRouter(
     prefix="/api/dev/testnet/brc",
@@ -6545,9 +6596,73 @@ def _live_lifecycle_review_repository() -> PgLiveLifecycleReviewRepository:
     return PgLiveLifecycleReviewRepository()
 
 
+def _owner_capital_adjustment_repository() -> PgOwnerCapitalAdjustmentRepository:
+    injected = getattr(_api_module(), "_owner_capital_adjustment_repo", None)
+    if injected is not None:
+        return injected
+    return PgOwnerCapitalAdjustmentRepository()
+
+
 def _default_live_lifecycle_review_id(authorization_id: str, status: str) -> str:
     safe_auth = re.sub(r"[^A-Za-z0-9_.:-]+", "-", authorization_id).strip("-")
     return f"live-review-{safe_auth}-{status}"
+
+
+def _default_owner_capital_adjustment_id(
+    adjustment_type: OwnerCapitalAdjustmentType,
+    occurred_at_ms: int,
+) -> str:
+    return f"owner-capital-{adjustment_type.value}-{occurred_at_ms}"
+
+
+@router.post(
+    "/owner-capital-adjustments",
+    response_model=OwnerCapitalAdjustmentResponse,
+)
+async def create_owner_capital_adjustment(
+    body: OwnerCapitalAdjustmentCreateRequest,
+    session: OperatorSessionDependency,
+) -> OwnerCapitalAdjustmentResponse:
+    occurred_at_ms = body.occurred_at_ms or int(time.time() * 1000)
+    record = OwnerCapitalAdjustmentRecord(
+        adjustment_id=body.adjustment_id
+        or _default_owner_capital_adjustment_id(body.adjustment_type, occurred_at_ms),
+        adjustment_type=body.adjustment_type,
+        currency=body.currency,
+        amount=body.amount,
+        capital_base_delta=body.capital_base_delta,
+        target_capital_base=body.target_capital_base,
+        reason=body.reason,
+        occurred_at_ms=occurred_at_ms,
+        recorded_by=session.username,
+        evidence_refs=body.evidence_refs,
+        metadata={
+            **body.metadata,
+            "ledger_write_path": "official_api_brc_owner_capital_adjustments",
+            "external_owner_action_only": True,
+            "automatic_withdrawal": False,
+        },
+    )
+    repo = _owner_capital_adjustment_repository()
+    await repo.initialize()
+    saved = await repo.append(record)
+    return OwnerCapitalAdjustmentResponse(adjustment=saved.model_dump(mode="json"))
+
+
+@router.get(
+    "/owner-capital-adjustments",
+    response_model=OwnerCapitalAdjustmentListResponse,
+)
+async def list_owner_capital_adjustments(
+    currency: Optional[str] = Query(default=None, min_length=1, max_length=16),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> OwnerCapitalAdjustmentListResponse:
+    repo = _owner_capital_adjustment_repository()
+    await repo.initialize()
+    records = await repo.list(currency=currency, limit=limit)
+    return OwnerCapitalAdjustmentListResponse(
+        adjustments=[record.model_dump(mode="json") for record in records]
+    )
 
 
 @router.post(

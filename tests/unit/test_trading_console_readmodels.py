@@ -10,6 +10,10 @@ from src.application.production_strategy_family_admission import (
     API_BACKED_AUTHORIZATION_OPERATION_CHAIN,
     REQUIRED_OWNER_SCOPE_FIELDS,
 )
+from src.domain.owner_capital_adjustment import (
+    OwnerCapitalAdjustmentRecord,
+    OwnerCapitalAdjustmentType,
+)
 from src.interfaces.operator_auth import create_password_hash
 
 
@@ -358,6 +362,18 @@ class _FakeBudgetAuthorizationService:
         }
 
 
+class _FakeOwnerCapitalAdjustmentRepo:
+    def __init__(self, records=None):
+        self.records = [] if records is None else list(records)
+
+    async def list(self, *, currency=None, limit=50):
+        items = [
+            item for item in self.records
+            if currency is None or item.currency == currency
+        ]
+        return items[:limit]
+
+
 class _FakeExchangeGateway:
     def __init__(self, *, positions=None, normal_orders=None, stop_orders=None):
         self._positions = [] if positions is None else list(positions)
@@ -421,6 +437,7 @@ def _patch_deps(
     startup_summary=None,
     campaign_state_status: str = "observe",
     budget_authorization_status: str | None = "active_metadata_only",
+    owner_capital_adjustment_repo=None,
 ):
     from src.interfaces import api as api_module
 
@@ -465,6 +482,12 @@ def _patch_deps(
         _FakeBudgetAuthorizationService(status=budget_authorization_status),
         raising=False,
     )
+    monkeypatch.setattr(
+        api_module,
+        "_owner_capital_adjustment_repo",
+        owner_capital_adjustment_repo or _FakeOwnerCapitalAdjustmentRepo(),
+        raising=False,
+    )
     monkeypatch.setattr(api_module, "_global_kill_switch_service", _FakeGks())
     monkeypatch.setattr(api_module, "_startup_trading_guard_service", _FakeStartupGuard())
     monkeypatch.setattr(api_module, "_startup_reconciliation_summary", startup_summary)
@@ -480,11 +503,21 @@ def test_trading_console_requires_operator_session(monkeypatch):
     assert response.status_code == 401
 
 
-def test_trading_console_router_is_get_only():
+def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted():
     from fastapi.routing import APIRoute
 
     from src.interfaces.api_trading_console import router
 
+    allowed_post_paths = {
+        "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
+        "/api/trading-console/runtime-execution-intents/drafts/{runtime_execution_intent_draft_id}",
+        "/api/trading-console/runtime-execution-protection-plans/intents/{execution_intent_id}",
+        "/api/trading-console/runtime-execution-submit-authorizations/intents/{execution_intent_id}",
+        "/api/trading-console/runtime-execution-attempt-reservations/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-attempt-mutations/reservations/{reservation_id}",
+        "/api/trading-console/runtime-execution-order-lifecycle-handoff-drafts/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-controlled-submit/authorizations/{authorization_id}",
+    }
     routes = [
         route for route in router.routes
         if isinstance(route, APIRoute) and route.path.startswith("/api/trading-console")
@@ -492,7 +525,10 @@ def test_trading_console_router_is_get_only():
 
     assert routes
     for route in routes:
-        assert route.methods == {"GET"}
+        if route.methods == {"POST"}:
+            assert route.path in allowed_post_paths
+        else:
+            assert route.methods == {"GET"}
 
 
 def test_trading_console_action_apis_are_absent(monkeypatch):
@@ -4019,6 +4055,54 @@ def test_audit_chain_masks_raw_payloads_and_exposes_relationship_ids(monkeypatch
     assert "totp" not in rendered
 
 
+def test_review_state_separates_owner_withdrawal_from_strategy_pnl(monkeypatch):
+    _configure_auth(monkeypatch)
+    owner_withdrawal = OwnerCapitalAdjustmentRecord(
+        adjustment_id="owner-withdrawal-review-1",
+        adjustment_type=OwnerCapitalAdjustmentType.OWNER_MANUAL_WITHDRAWAL,
+        amount=Decimal("30"),
+        reason="Owner manually withdrew profit outside the system.",
+        occurred_at_ms=1780496666000,
+        recorded_by="owner",
+        evidence_refs=["owner-note://withdrawal-review-1"],
+    )
+    _patch_deps(
+        monkeypatch,
+        exchange=_FakeExchangeGateway(),
+        owner_capital_adjustment_repo=_FakeOwnerCapitalAdjustmentRepo(
+            [owner_withdrawal]
+        ),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/review-state"
+            "?previous_account_equity=130"
+            "&current_account_equity=100"
+            "&starting_capital_base=130"
+            "&realized_trading_pnl=0"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    review = payload["data"]["owner_capital_base_review"]
+    assert review["status"] == "reviewed"
+    assert review["classification"] == "explained_by_owner_capital_events"
+    assert review["record_count"] == 1
+    assert review["review_result"]["owner_equity_flow_delta"] == "-30"
+    assert review["review_result"]["ending_capital_base"] == "100"
+    assert review["review_result"]["owner_capital_events_are_strategy_pnl"] is False
+    assert review["review_result"]["owner_capital_events_are_risk_events"] is False
+    assert review["no_action_guarantee"]["creates_withdrawal_instruction"] is False
+    assert review["no_action_guarantee"]["creates_transfer_instruction"] is False
+    assert review["no_action_guarantee"]["creates_order_instruction"] is False
+    assert review["no_action_guarantee"]["calls_exchange"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+
+
 def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
@@ -4034,6 +4118,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/authorization-state",
         "/api/trading-console/execution-control-state",
         "/api/trading-console/review-state",
+        "/api/trading-console/owner-capital-review",
         "/api/trading-console/audit-chain?authorization_id=auth-1",
         "/api/trading-console/carrier-availability",
         "/api/trading-console/strategy-family-admission-state",

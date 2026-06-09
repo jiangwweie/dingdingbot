@@ -43,6 +43,11 @@ from src.application.notional_sizing import (
     compute_notional_sizing,
     validate_fixed_quantity_scope,
 )
+from src.domain.owner_capital_adjustment import (
+    OwnerCapitalAdjustmentRecord,
+    OwnerCapitalBaseReviewInput,
+    review_owner_capital_base_movement,
+)
 from src.application.owner_action_carrier_catalog import owner_action_carrier_id_for_symbol
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
@@ -101,6 +106,7 @@ class TradingConsoleDependencies:
     owner_trial_flow_service: Optional[Any] = None
     campaign_state_service: Optional[Any] = None
     multi_carrier_budget_authorization_service: Optional[Any] = None
+    owner_capital_adjustment_repo: Optional[Any] = None
     global_kill_switch_service: Optional[Any] = None
     startup_trading_guard_service: Optional[Any] = None
     startup_reconciliation_summary: Optional[dict[str, Any]] = None
@@ -434,13 +440,34 @@ class TradingConsoleReadModelService:
         *,
         symbol: Optional[str] = None,
         limit: int = 100,
+        include_exchange: bool = False,
+        previous_account_equity: Decimal | None = None,
+        current_account_equity: Decimal | None = None,
+        starting_capital_base: Decimal | None = None,
+        realized_trading_pnl: Decimal = Decimal("0"),
+        tolerance: Decimal = Decimal("0"),
+        owner_capital_currency: str = "USDT",
     ) -> TradingConsoleReadModelResponse:
-        snap = await self.snapshot(symbol=symbol, include_exchange=False, limit=limit)
+        snap = await self.snapshot(
+            symbol=symbol,
+            include_exchange=include_exchange,
+            limit=limit,
+        )
         filled_orders = [
             order for order in snap.pg_orders
             if order.get("filled_qty") not in {None, "0", "0E-18", "0.0"}
             or order.get("average_exec_price") is not None
         ]
+        owner_capital_review = await self._owner_capital_base_review(
+            snap=snap,
+            previous_account_equity=previous_account_equity,
+            current_account_equity=current_account_equity,
+            starting_capital_base=starting_capital_base,
+            realized_trading_pnl=realized_trading_pnl,
+            tolerance=tolerance,
+            currency=owner_capital_currency,
+            limit=limit,
+        )
         return self._response(
             "review_state",
             snap,
@@ -449,6 +476,7 @@ class TradingConsoleReadModelService:
                 "live_lifecycle_reviews": snap.live_lifecycle_reviews,
                 "filled_order_facts": filled_orders,
                 "positions": snap.pg_positions,
+                "owner_capital_base_review": owner_capital_review,
                 "unavailable_fields": {
                     "fills_table": "not_available",
                     "fee": "not_available",
@@ -457,6 +485,39 @@ class TradingConsoleReadModelService:
                     "slippage": "not_available",
                 },
             },
+        )
+
+    async def owner_capital_review(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        limit: int = 100,
+        include_exchange: bool = False,
+        previous_account_equity: Decimal | None = None,
+        current_account_equity: Decimal | None = None,
+        starting_capital_base: Decimal | None = None,
+        realized_trading_pnl: Decimal = Decimal("0"),
+        tolerance: Decimal = Decimal("0"),
+        owner_capital_currency: str = "USDT",
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(
+            symbol=symbol,
+            include_exchange=include_exchange,
+            limit=limit,
+        )
+        return self._response(
+            "owner_capital_review",
+            snap,
+            data=await self._owner_capital_base_review(
+                snap=snap,
+                previous_account_equity=previous_account_equity,
+                current_account_equity=current_account_equity,
+                starting_capital_base=starting_capital_base,
+                realized_trading_pnl=realized_trading_pnl,
+                tolerance=tolerance,
+                currency=owner_capital_currency,
+                limit=limit,
+            ),
         )
 
     async def audit_chain(
@@ -1143,6 +1204,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/authorization-state",
                     "GET /api/trading-console/execution-control-state",
                     "GET /api/trading-console/review-state",
+                    "GET /api/trading-console/owner-capital-review",
                     "GET /api/trading-console/audit-chain",
                     "GET /api/trading-console/carrier-availability",
                     "GET /api/trading-console/strategy-family-admission-state",
@@ -1432,6 +1494,121 @@ class TradingConsoleReadModelService:
         except Exception as exc:
             unavailable.append({"source": "review_state", "code": "read_failed", "error": str(exc)})
             return []
+
+    async def _read_owner_capital_adjustments(
+        self,
+        *,
+        currency: str,
+        limit: int,
+        unavailable: list[dict[str, Any]],
+    ) -> list[OwnerCapitalAdjustmentRecord]:
+        repo = self._deps.owner_capital_adjustment_repo
+        if repo is None or not hasattr(repo, "list"):
+            unavailable.append(
+                {
+                    "source": "owner_capital_adjustments",
+                    "code": "repo_unavailable",
+                }
+            )
+            return []
+        try:
+            return list(await repo.list(currency=currency, limit=limit))
+        except Exception as exc:
+            unavailable.append(
+                {
+                    "source": "owner_capital_adjustments",
+                    "code": "read_failed",
+                    "error": str(exc),
+                }
+            )
+            return []
+
+    async def _owner_capital_base_review(
+        self,
+        *,
+        snap: TradingConsoleSnapshot,
+        previous_account_equity: Decimal | None,
+        current_account_equity: Decimal | None,
+        starting_capital_base: Decimal | None,
+        realized_trading_pnl: Decimal,
+        tolerance: Decimal,
+        currency: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        records = await self._read_owner_capital_adjustments(
+            currency=currency,
+            limit=limit,
+            unavailable=snap.unavailable,
+        )
+        current_equity = current_account_equity
+        if current_equity is None:
+            current_equity = _decimal_or_none(
+                snap.account_snapshot_summary.get("total_balance")
+            )
+        required_inputs = []
+        if previous_account_equity is None:
+            required_inputs.append("previous_account_equity")
+        if current_equity is None:
+            required_inputs.append("current_account_equity")
+        if starting_capital_base is None:
+            required_inputs.append("starting_capital_base")
+
+        base_payload: dict[str, Any] = {
+            "status": "reviewed" if not required_inputs else "review_inputs_required",
+            "currency": currency,
+            "record_count": len(records),
+            "records": [record.model_dump(mode="json") for record in records],
+            "required_inputs": required_inputs,
+            "input_facts": {
+                "previous_account_equity": _scalar(previous_account_equity),
+                "current_account_equity": _scalar(current_equity),
+                "starting_capital_base": _scalar(starting_capital_base),
+                "realized_trading_pnl": _scalar(realized_trading_pnl),
+                "tolerance": _scalar(tolerance),
+                "current_account_equity_source": (
+                    "query"
+                    if current_account_equity is not None
+                    else snap.account_snapshot_summary.get("status")
+                ),
+            },
+            "review_principle": "owner_capital_events_are_not_strategy_pnl",
+            "no_action_guarantee": {
+                "creates_withdrawal_instruction": False,
+                "creates_transfer_instruction": False,
+                "creates_order_instruction": False,
+                "calls_exchange": False,
+                "mutates_runtime_budget": False,
+                "mutates_strategy_pnl": False,
+                "creates_risk_event": False,
+            },
+        }
+        if required_inputs:
+            base_payload["classification"] = "not_reviewed_missing_inputs"
+            base_payload["review_result"] = None
+            base_payload["unexplained_account_equity_delta"] = "not_available"
+            base_payload["ending_capital_base"] = "not_available"
+            return base_payload
+
+        assert previous_account_equity is not None
+        assert current_equity is not None
+        assert starting_capital_base is not None
+        result = review_owner_capital_base_movement(
+            OwnerCapitalBaseReviewInput(
+                previous_account_equity=previous_account_equity,
+                current_account_equity=current_equity,
+                starting_capital_base=starting_capital_base,
+                realized_trading_pnl=realized_trading_pnl,
+                owner_capital_adjustments=records,
+                tolerance=tolerance,
+            )
+        )
+        base_payload["classification"] = result.classification.value
+        base_payload["review_result"] = result.model_dump(mode="json")
+        base_payload["unexplained_account_equity_delta"] = _scalar(
+            result.unexplained_account_equity_delta
+        )
+        base_payload["ending_capital_base"] = _scalar(result.ending_capital_base)
+        return base_payload
 
     async def _read_live_lifecycle_reviews(
         self,
@@ -2152,6 +2329,15 @@ def _scalar(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value in {None, "", "not_available", "unknown"}:
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
 
 
 def _plain_dict(value: Any) -> dict[str, Any]:

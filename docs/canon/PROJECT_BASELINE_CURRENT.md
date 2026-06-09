@@ -249,9 +249,10 @@ BRC should become strategy runtime governance:
   StrategyFamilyVersion to StrategyImplementation, RequiredFacts,
   StrategyEvaluationContext, EntryPolicy, ProtectionPolicy, ExitPolicy, attempt
   consumption, budget reservation, and right-tail review metrics.
-- Owner profit withdrawal is manual. The system may record withdrawal/capital
-  base adjustment facts for review, but must not initiate withdrawals,
-  transfers, or fund movement.
+- Owner profit withdrawal is manual. The system can record Owner external
+  withdrawal/capital-base adjustment facts for review and Trading Console
+  capital-base classification, but must not initiate withdrawals, transfers, or
+  fund movement.
 - The target chain is defined in `docs/canon/BRC_TARGET_SEMANTICS.md`.
 
 ---

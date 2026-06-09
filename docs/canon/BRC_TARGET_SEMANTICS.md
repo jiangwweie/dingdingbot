@@ -297,11 +297,28 @@ Current local review/account-baseline implementation slice:
   Owner-recorded capital adjustments. It marks unexplained account-equity
   deltas unresolved instead of guessing whether they are strategy losses or
   withdrawals.
+- `src/infrastructure/pg_owner_capital_adjustment_repository.py` and migration
+  `059` persist Owner capital adjustment records with hard no-withdrawal,
+  no-transfer, no-order, no-exchange, no-runtime-budget, no-strategy-PnL, and
+  no-risk-event constraints.
+- `src/interfaces/api_brc_console.py` exposes narrow
+  `/api/brc/owner-capital-adjustments` record/list APIs for Owner external
+  capital facts only. They do not initiate withdrawal, transfer, order,
+  exchange call, runtime budget mutation, strategy PnL mutation, or risk event.
+- `src/application/readmodels/trading_console.py` and
+  `trading-console/src/pages/ReviewState.tsx` surface Owner capital records and
+  withdrawal-adjusted capital-base review in the Trading Console analysis page.
+  Missing account-equity / capital-base inputs remain explicit instead of being
+  inferred.
 - `tests/unit/test_owner_capital_adjustment_review.py` verifies manual
   withdrawals and profit extraction do not become strategy losses or risk
   events, capital injection and capital-base reset are separate review facts,
   missing Owner records leave equity drops unresolved, and no withdrawal,
   transfer, order, or exchange instruction is created.
+- `tests/unit/test_owner_capital_adjustment_repository.py` verifies PG
+  persistence roundtrip preserves no-action flags. Trading Console readmodel
+  tests verify recorded Owner withdrawal can explain equity drop without
+  strategy loss attribution.
 
 Future Review should emphasize right-tail asymmetric evaluation, including
 MFE, MAE, R multiple, tail win size, small loss count, winner hold time, runner
