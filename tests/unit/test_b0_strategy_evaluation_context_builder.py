@@ -284,6 +284,40 @@ async def test_builder_context_can_feed_cpm_semantic_shadow_candidate():
     assert candidate.metadata["fact_check"]["status"] == "PASS"
 
 
+async def test_binding_service_builds_context_from_signal_pair_before_shadow_candidate():
+    signal_input = _signal_input()
+    output = _output()
+    runtime = _runtime()
+
+    candidate = await StrategySemanticsShadowBindingService(
+        shadow_service=_FakeShadowService()
+    ).create_semantic_order_candidate_from_strategy_signal_pair(
+        signal_input,
+        output,
+        runtime=runtime,
+        context_id="context-built-by-service",
+        intended_notional=Decimal("10"),
+        entry_price_reference=Decimal("2525"),
+        stop_price_reference=Decimal("2475"),
+        max_loss_reference=Decimal("3"),
+        leverage=Decimal("1"),
+    )
+
+    assert candidate.not_order is True
+    assert candidate.not_execution_intent is True
+    assert candidate.metadata["adapter_scope"] == "b0_shadow_only"
+    assert candidate.metadata["strategy_evaluation_context_id"] == (
+        "context-built-by-service"
+    )
+    assert candidate.metadata["strategy_evaluation_missing_facts"] == [
+        "crowding_proxy",
+        "open_interest",
+        "range_structure",
+        "short_squeeze_risk",
+    ]
+    assert candidate.metadata["fact_check"]["status"] == "PASS"
+
+
 async def test_builder_missing_4h_context_blocks_cpm_binding():
     signal_input = _signal_input(include_4h=False)
     output = _output()
@@ -300,6 +334,21 @@ async def test_builder_missing_4h_context_blocks_cpm_binding():
         ).create_semantic_order_candidate_from_strategy_output(
             output,
             context=context,
+            runtime=_runtime(),
+            stop_price_reference=Decimal("2475"),
+        )
+
+
+async def test_binding_service_signal_pair_still_blocks_missing_required_facts():
+    signal_input = _signal_input(include_4h=False)
+    output = _output()
+
+    with pytest.raises(StrategySemanticsBindingError, match="BLOCK_MISSING_FACTS"):
+        await StrategySemanticsShadowBindingService(
+            shadow_service=_FakeShadowService()
+        ).create_semantic_order_candidate_from_strategy_signal_pair(
+            signal_input,
+            output,
             runtime=_runtime(),
             stop_price_reference=Decimal("2475"),
         )

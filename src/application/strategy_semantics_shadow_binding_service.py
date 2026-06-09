@@ -10,6 +10,9 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional, Protocol
 
+from src.application.strategy_evaluation_context_builder import (
+    StrategyEvaluationContextBuilder,
+)
 from src.domain.signal_evaluation import (
     OrderCandidate,
     OrderCandidateProtectionPreview,
@@ -24,6 +27,7 @@ from src.domain.strategy_semantics import (
     initial_strategy_semantics_catalog,
 )
 from src.domain.strategy_family_signal import (
+    StrategyFamilySignalInput,
     SignalType,
     StrategyFamilySignalOutput,
 )
@@ -136,6 +140,67 @@ class StrategySemanticsShadowBindingService:
                 "source_strategy_signal_id": output.signal_id,
                 "source_strategy_signal_type": output.signal_type.value,
                 "source_strategy_required_execution_mode": output.required_execution_mode,
+                **(metadata or {}),
+            },
+        )
+
+    async def create_semantic_order_candidate_from_strategy_signal_pair(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        output: StrategyFamilySignalOutput,
+        *,
+        runtime: StrategyRuntimeInstance | None = None,
+        context_builder: StrategyEvaluationContextBuilder | None = None,
+        context_id: str | None = None,
+        proposed_quantity: Decimal | None = None,
+        intended_notional: Decimal | None = None,
+        entry_price_reference: Decimal | None = None,
+        stop_price_reference: Decimal | None = None,
+        max_loss_reference: Decimal | None = None,
+        leverage: Decimal | None = None,
+        take_profit_references: list[dict] | None = None,
+        expires_at_ms: int | None = None,
+        metadata: dict | None = None,
+    ) -> OrderCandidate:
+        """Create a shadow candidate from a coherent signal input/output pair.
+
+        This is the B0 orchestration path for existing strategy-family signal
+        evaluators. It builds StrategyEvaluationContext from read-only facts and
+        then reuses the explicit-context binding path. It remains non-executing.
+        """
+
+        builder = context_builder or StrategyEvaluationContextBuilder()
+        context = builder.build(
+            signal_input,
+            output=output,
+            runtime=runtime,
+            context_id=context_id,
+        )
+        return await self.create_semantic_order_candidate_from_strategy_output(
+            output,
+            context=context,
+            runtime=runtime,
+            proposed_quantity=proposed_quantity,
+            intended_notional=intended_notional,
+            entry_price_reference=entry_price_reference,
+            stop_price_reference=stop_price_reference,
+            max_loss_reference=max_loss_reference,
+            leverage=leverage,
+            take_profit_references=take_profit_references,
+            expires_at_ms=expires_at_ms,
+            metadata={
+                "strategy_evaluation_context_id": context.context_id,
+                "strategy_evaluation_context_source": (
+                    "strategy_evaluation_context_builder"
+                ),
+                "strategy_evaluation_missing_facts": context.metadata.get(
+                    "missing_facts",
+                    [],
+                ),
+                "strategy_evaluation_stale_facts": context.metadata.get(
+                    "stale_facts",
+                    [],
+                ),
                 **(metadata or {}),
             },
         )

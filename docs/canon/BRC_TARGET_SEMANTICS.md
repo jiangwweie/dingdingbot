@@ -196,7 +196,10 @@ Current local B0 implementation slice:
   `StrategyFamilySignalOutput`, persist a shadow SignalEvaluation, and then
   create a semantically bound shadow OrderCandidate when the output is
   `WOULD_ENTER`, the side is supported, RequiredFacts pass, and concrete
-  protection is present.
+  protection is present. It also exposes a B0 orchestration method for a
+  coherent `StrategyFamilySignalInput` + `StrategyFamilySignalOutput` pair:
+  the service builds StrategyEvaluationContext from read-only facts and then
+  applies the same shadow-only RequiredFacts gate.
 - This is not proven-alpha approval, not execution authority, and not a real
   OrderLifecycle adapter. Live fact readers, BRF/RMR concrete evaluator
   details, FCO funding/OI/crowding data coverage, and runtime promotion remain

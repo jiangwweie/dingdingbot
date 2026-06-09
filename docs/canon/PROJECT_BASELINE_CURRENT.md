@@ -100,7 +100,11 @@ Key facts:
   and persist a shadow SignalEvaluation plus semantically bound shadow
   OrderCandidate through the existing shadow repository path. They do not
   implement real execution, create ExecutionIntent records, call OrderLifecycle,
-  call exchange, or prove alpha.
+  call exchange, or prove alpha. The binding service also has a B0
+  non-executing orchestration path that accepts a coherent
+  `StrategyFamilySignalInput` + `StrategyFamilySignalOutput` pair, builds the
+  StrategyEvaluationContext, and then applies the same RequiredFacts gate before
+  shadow candidate creation.
 - **StrategyEvaluationContextBuilder** now exists as a local non-executing B0
   application mapper from `StrategyFamilySignalInput`,
   `StrategyFamilySignalOutput`, and optional `StrategyRuntimeInstance` snapshots

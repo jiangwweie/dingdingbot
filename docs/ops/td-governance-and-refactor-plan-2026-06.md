@@ -112,7 +112,7 @@ python3 -m pytest -q tests/unit/test_b0_strategy_evaluation_context_builder.py \
   tests/unit/test_td4_runtime_final_gate_preview.py \
   tests/unit/test_td5_runtime_execution_plan.py \
   tests/unit/test_strategy_runtime_backbone.py
-125 passed
+127 passed
 
 python3 -m compileall -q src/application/strategy_evaluation_context_builder.py \
   src/application/strategy_semantics_shadow_binding_service.py \
@@ -522,7 +522,10 @@ Current local B0 implementation slice:
   consume `StrategyFamilySignalOutput`, persist a shadow SignalEvaluation, and
   then create a semantically bound shadow OrderCandidate when the output is
   `WOULD_ENTER`, the side is supported, RequiredFacts pass, and concrete
-  protection is present.
+  protection is present. It also has a B0 signal-pair orchestration method that
+  accepts `StrategyFamilySignalInput` + `StrategyFamilySignalOutput`, builds
+  StrategyEvaluationContext from read-only facts, and applies the same
+  shadow-only gate.
 - `tests/unit/test_b0_strategy_semantics_binding.py` verifies catalog
   semantics, missing/stale fact blocking, BRF shadow candidate binding, RMR
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
@@ -533,7 +536,9 @@ Current local B0 implementation slice:
   missing 4h CPM context blocks binding, BRF does not invent missing
   short-squeeze risk facts, FCO keeps open-interest/crowding dependencies
   missing until explicit sources exist, and observation-only account facts do
-  not satisfy account RequiredFacts.
+  not satisfy account RequiredFacts. It also verifies that the binding service
+  can build context from a signal input/output pair without requiring the caller
+  to hand-assemble StrategyEvaluationContext.
 
 Remaining B0 work:
 
