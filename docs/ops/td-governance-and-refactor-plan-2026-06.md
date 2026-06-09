@@ -182,6 +182,23 @@ passed
 
 git diff --check
 passed
+
+B0 Trading Console promotion-gate preview API validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_td3_signal_evaluation_order_candidate_shadow.py \
+  tests/unit/test_td4_runtime_final_gate_preview.py
+28 passed
+
+python3 -m compileall -q src/interfaces/api_trading_console.py \
+  src/application/strategy_runtime_promotion_gate_service.py \
+  src/domain/strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
+passed
+
+git diff --check
+passed
 ```
 
 Deployment note:
@@ -604,6 +621,11 @@ Current local B0 implementation slice:
   by `StrategyFamilyVersion` from the semantics catalog, fails closed on unknown
   bindings, and remains non-executing. This is the intended reusable gate entry
   for future Console / Sprint 5 promotion checks.
+- `src/interfaces/api_trading_console.py` exposes a read-only
+  `/strategy-runtime-promotion-gate` preview endpoint backed by that service.
+  It returns promotion blockers and warnings only. It does not record strategy
+  signals, create OrderCandidates, create ExecutionIntents, create local
+  orders, call OrderLifecycle, or call exchange.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges that B0
   signal-pair path into existing runtime planning: strategy signal pair ->
   semantic shadow OrderCandidate -> RuntimeExecutionPlan /
@@ -650,7 +672,9 @@ Current local B0 implementation slice:
   submit confirmations while remaining non-execution authority.
 - `tests/unit/test_b0_strategy_runtime_promotion_gate_service.py` verifies the
   application service evaluates CPM/BRF by StrategyFamilyVersion and does not
-  guess unknown strategy bindings.
+  guess unknown strategy bindings. It also verifies the Trading Console
+  read-only preview endpoint defaults to blocked, returns ready when CPM
+  confirmations are supplied, and maps unknown bindings to 404.
 
 Remaining B0 work:
 

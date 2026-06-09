@@ -218,6 +218,10 @@ Current local B0 implementation slice:
 - `src/application/strategy_runtime_promotion_gate_service.py` exposes that
   gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
   for unknown bindings and remains non-executing.
+- `src/interfaces/api_trading_console.py` exposes a read-only
+  `/strategy-runtime-promotion-gate` preview endpoint for that gate. The
+  endpoint returns blockers/warnings only; it does not write strategy signals,
+  create OrderCandidates, create ExecutionIntents, or authorize execution.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges the B0
   signal-pair path into the existing non-executing runtime planning path:
   strategy signal pair -> semantically bound shadow OrderCandidate ->

@@ -56,6 +56,13 @@ from src.domain.runtime_execution_attempt_mutation import (
 )
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, RuntimeExecutionPlan
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
+from src.domain.strategy_runtime_promotion_gate import (
+    FirstRealSubmitConfirmationFacts,
+    RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateResult,
+    StrategyRuntimePromotionScope,
+    StrategySemanticsConfirmationFacts,
+)
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
 
@@ -269,6 +276,93 @@ async def get_strategy_runtime(
     service = await _strategy_runtime_service()
     try:
         return _runtime_view(await service.get_runtime(runtime_instance_id))
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/strategy-runtime-promotion-gate",
+    response_model=StrategyRuntimePromotionGateResult,
+)
+async def runtime_strategy_promotion_gate_preview(
+    strategy_family_id: str = Query(..., min_length=1, max_length=128),
+    strategy_family_version_id: str = Query(..., min_length=1, max_length=128),
+    scope: StrategyRuntimePromotionScope = (
+        StrategyRuntimePromotionScope.CONTROLLED_RUNTIME_EXECUTION
+    ),
+    strategy_family_confirmed: bool = False,
+    implementation_source_confirmed: bool = False,
+    required_facts_confirmed: bool = False,
+    entry_policy_confirmed: bool = False,
+    exit_policy_confirmed: bool = False,
+    protection_policy_confirmed: bool = False,
+    eligible_for_runtime_execution_confirmed: bool = False,
+    right_tail_review_metrics_confirmed: bool = False,
+    runtime_profile_confirmed: bool = False,
+    owner_confirmation_mode_confirmed: bool = False,
+    attempt_consumption_rule_confirmed: bool = False,
+    budget_reservation_rule_confirmed: bool = False,
+    trusted_active_position_source_confirmed: bool = False,
+    trusted_account_fact_source_confirmed: bool = False,
+    short_side_conservative_profile_confirmed: bool = False,
+    budget_release_or_consume_rule_confirmed: bool = False,
+    protection_creation_failure_policy_confirmed: bool = False,
+    duplicate_submit_policy_confirmed: bool = False,
+    deployment_readiness_confirmed: bool = False,
+    explicit_owner_real_submit_authorization: bool = False,
+) -> StrategyRuntimePromotionGateResult:
+    service = await _strategy_runtime_promotion_gate_service()
+    try:
+        return service.preview(
+            strategy_family_id=strategy_family_id,
+            strategy_family_version_id=strategy_family_version_id,
+            scope=scope,
+            semantic_confirmations=StrategySemanticsConfirmationFacts(
+                strategy_family_confirmed=strategy_family_confirmed,
+                implementation_source_confirmed=implementation_source_confirmed,
+                required_facts_confirmed=required_facts_confirmed,
+                entry_policy_confirmed=entry_policy_confirmed,
+                exit_policy_confirmed=exit_policy_confirmed,
+                protection_policy_confirmed=protection_policy_confirmed,
+                eligible_for_runtime_execution_confirmed=(
+                    eligible_for_runtime_execution_confirmed
+                ),
+                right_tail_review_metrics_confirmed=(
+                    right_tail_review_metrics_confirmed
+                ),
+            ),
+            runtime_confirmations=RuntimeExecutionConfirmationFacts(
+                runtime_profile_confirmed=runtime_profile_confirmed,
+                owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+                attempt_consumption_rule_confirmed=attempt_consumption_rule_confirmed,
+                budget_reservation_rule_confirmed=budget_reservation_rule_confirmed,
+                trusted_active_position_source_confirmed=(
+                    trusted_active_position_source_confirmed
+                ),
+                trusted_account_fact_source_confirmed=(
+                    trusted_account_fact_source_confirmed
+                ),
+                short_side_conservative_profile_confirmed=(
+                    short_side_conservative_profile_confirmed
+                ),
+            ),
+            first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
+                budget_release_or_consume_rule_confirmed=(
+                    budget_release_or_consume_rule_confirmed
+                ),
+                protection_creation_failure_policy_confirmed=(
+                    protection_creation_failure_policy_confirmed
+                ),
+                duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
+                deployment_readiness_confirmed=deployment_readiness_confirmed,
+                explicit_owner_real_submit_authorization=(
+                    explicit_owner_real_submit_authorization
+                ),
+            ),
+        )
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
@@ -1351,6 +1445,21 @@ async def _runtime_strategy_signal_planning_service() -> Any:
         ),
     )
     setattr(api_module, "_runtime_strategy_signal_planning_service", service)
+    return service
+
+
+async def _strategy_runtime_promotion_gate_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_strategy_runtime_promotion_gate_service", None)
+    if injected is not None:
+        return injected
+    from src.application.strategy_runtime_promotion_gate_service import (
+        StrategyRuntimePromotionGateService,
+    )
+
+    service = StrategyRuntimePromotionGateService()
+    setattr(api_module, "_strategy_runtime_promotion_gate_service", service)
     return service
 
 
