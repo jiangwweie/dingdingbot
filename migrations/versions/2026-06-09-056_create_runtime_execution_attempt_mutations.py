@@ -121,7 +121,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "owner_bounded_execution_called = false",
-            name="ck_runtime_execution_attempt_mutations_no_owner_bounded_execution",
+            name="ck_rt_attempt_mut_no_owner_bounded_exec",
         ),
         sa.CheckConstraint(
             "order_lifecycle_called = false",

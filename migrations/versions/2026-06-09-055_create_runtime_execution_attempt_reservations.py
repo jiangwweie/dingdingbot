@@ -110,7 +110,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "execution_intent_status_changed = false",
-            name="ck_runtime_execution_attempt_reservations_no_intent_status_change",
+            name="ck_rt_attempt_res_no_intent_status_change",
         ),
         sa.CheckConstraint(
             "order_created = false",
@@ -122,7 +122,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "owner_bounded_execution_called = false",
-            name="ck_runtime_execution_attempt_reservations_no_owner_bounded_execution",
+            name="ck_rt_attempt_res_no_owner_bounded_exec",
         ),
         sa.CheckConstraint(
             "order_lifecycle_called = false",

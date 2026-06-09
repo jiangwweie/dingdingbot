@@ -107,7 +107,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "owner_bounded_execution_called = false",
-            name="ck_runtime_execution_submit_authorizations_no_owner_bounded_execution",
+            name="ck_rt_submit_auth_no_owner_bounded_exec",
         ),
         sa.CheckConstraint(
             "order_lifecycle_called = false",

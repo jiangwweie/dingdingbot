@@ -70,7 +70,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "submit_executed = false",
-            name="ck_runtime_execution_controlled_submit_results_no_submit_executed",
+            name="ck_rt_submit_result_no_submit",
         ),
         sa.CheckConstraint(
             "order_created = false",
@@ -78,15 +78,15 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "exchange_called = false",
-            name="ck_runtime_execution_controlled_submit_results_no_exchange_called",
+            name="ck_rt_submit_result_no_exchange",
         ),
         sa.CheckConstraint(
             "owner_bounded_execution_called = false",
-            name="ck_runtime_execution_controlled_submit_results_no_owner_bounded_execution",
+            name="ck_rt_submit_result_no_owner_bounded_exec",
         ),
         sa.CheckConstraint(
             "order_lifecycle_called = false",
-            name="ck_runtime_execution_controlled_submit_results_no_order_lifecycle",
+            name="ck_rt_submit_result_no_order_lifecycle",
         ),
     )
     op.create_index(

@@ -60,11 +60,11 @@ def upgrade() -> None:
         op.add_column(TABLE, sa.Column("final_gate_verdict", sa.String(length=16), nullable=False))
 
     _create_check(
-        "ck_runtime_execution_controlled_submit_results_preflight_status",
+        "ck_rt_submit_result_preflight_status",
         "preflight_status IN ('blocked', 'ready_for_controlled_submit_adapter')",
     )
     _create_check(
-        "ck_runtime_execution_controlled_submit_results_final_gate_verdict",
+        "ck_rt_submit_result_gate_verdict",
         "final_gate_verdict IN ('PASS', 'WARN', 'BLOCK')",
     )
     op.create_index(
@@ -78,8 +78,8 @@ def downgrade() -> None:
     if not _has_table(TABLE):
         return
     op.drop_index("idx_runtime_execution_controlled_submit_results_preflight", table_name=TABLE)
-    _drop_check("ck_runtime_execution_controlled_submit_results_final_gate_verdict")
-    _drop_check("ck_runtime_execution_controlled_submit_results_preflight_status")
+    _drop_check("ck_rt_submit_result_gate_verdict")
+    _drop_check("ck_rt_submit_result_preflight_status")
     if _has_column(TABLE, "final_gate_verdict"):
         op.drop_column(TABLE, "final_gate_verdict")
     if _has_column(TABLE, "preflight_status"):
