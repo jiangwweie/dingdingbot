@@ -1,60 +1,127 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Users, List, Box, ShieldCheck, PlayCircle, Activity, History, Server, LineChart, Moon, Sun, Menu, ShieldAlert, LogOut, Target } from 'lucide-react';
-import { Badge, DataStatusLine, FreshnessBadge, ReadModelErrorPanel } from './ui';
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  CircleCheck,
+  CircleDot,
+  Database,
+  FolderSearch,
+  Home,
+  Layers3,
+  ListChecks,
+  LogOut,
+  Menu,
+  Moon,
+  ShieldCheck,
+  Sun,
+} from 'lucide-react';
+import { DataStatusLine, FreshnessBadge, ReadModelErrorPanel } from './ui';
 import { useReadModel } from '@/lib/tradingConsoleApi';
 import { useAuth } from '@/lib/auth';
+import { StatusChip, type ConsoleTone } from './console/ConsolePrimitives';
 
 const NAV_ITEMS = [
-  { name: 'Cockpit', path: '/', icon: LayoutDashboard },
-  { name: '账户总览', path: '/account', icon: Users },
-  { name: '订单台账', path: '/ledger', icon: List },
-  { name: '保护健康', path: '/protection', icon: ShieldAlert },
-  { name: '行动对象', path: '/carrier', icon: Box },
-  { name: '有界实盘授权', path: '/authorization', icon: ShieldCheck },
-  { name: '实盘执行控制', path: '/execution', icon: PlayCircle },
-  { name: '行动入口', path: '/action-entry', icon: Target },
-  { name: '异常恢复', path: '/recovery', icon: Activity },
-  { name: '实盘复盘', path: '/review', icon: History },
-  { name: '技术审计', path: '/audit', icon: Server },
-  { name: '信号图表预留', path: '/signals', icon: LineChart },
+  { name: '控制总览', path: '/', icon: Home },
+  { name: '策略库', path: '/strategy', icon: Layers3 },
+  { name: '运行治理', path: '/runtime', icon: ShieldCheck },
+  { name: '交易与仓位', path: '/trades', icon: ListChecks },
+  { name: '分析', path: '/analysis', icon: BarChart3 },
+  { name: '异常介入', path: '/incident', icon: AlertTriangle },
+  { name: '证据', path: '/evidence', icon: FolderSearch },
 ];
 
+function ownerStatusTone(envelope: any, error: string | null): ConsoleTone {
+  if (error || envelope?.blockers?.length > 0) return 'intervention';
+  if (
+    envelope?.freshness_status === 'degraded'
+    || envelope?.freshness_status === 'warning'
+    || envelope?.freshness_status === 'not_live_connected'
+    || envelope?.warnings?.length > 0
+    || envelope?.unavailable?.length > 0
+  ) {
+    return 'attention';
+  }
+  return 'normal';
+}
+
+function ownerStatusLabel(tone: ConsoleTone): string {
+  if (tone === 'intervention' || tone === 'blocked') return '需要介入';
+  if (tone === 'attention') return '有待关注项';
+  return '当前无需操作';
+}
+
+function ThemeToggleButton({
+  darkMode,
+  onToggle,
+  compact = false,
+}: {
+  darkMode: boolean;
+  onToggle: () => void;
+  compact?: boolean;
+}) {
+  const Icon = darkMode ? Sun : Moon;
+  const label = darkMode ? '白天模式' : '暗黑模式';
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={`切换到${label}`}
+      aria-pressed={darkMode}
+      title={`切换到${label}`}
+      className={cn(
+        'inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500',
+        compact && 'min-h-9 w-9 px-0',
+      )}
+    >
+      <Icon className="h-4 w-4" />
+      {!compact && <span>{label}</span>}
+    </button>
+  );
+}
+
 export function AppShell() {
-  const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
+  const [darkMode, setDarkMode] = useState(() => {
+    const stored = window.localStorage.getItem('brc-console-theme');
+    if (stored === 'light') return false;
+    if (stored === 'dark') return true;
+    return true;
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { session, logout } = useAuth();
   const { envelope: envData, error } = useReadModel<any>('/api/trading-console/operations-cockpit?include_exchange=true');
   const environment = envData?.data?.evidence?.environment || {};
   const overall = envData?.data?.overall_status || {};
-  const updatedAt = envData?.generated_at_ms ? new Date(envData.generated_at_ms).toLocaleTimeString() : '未知';
+  const updatedAt = envData?.generated_at_ms ? new Date(envData.generated_at_ms).toLocaleTimeString('zh-CN', { hour12: false }) : '未知';
   const envLabel = environment.trading_env === 'testnet'
     ? '测试'
     : environment.exchange_testnet === false
       ? '实盘受控'
       : '未知';
+  const ownerTone = ownerStatusTone(envData, error);
 
   useEffect(() => {
-    if (darkMode) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
+    document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
+    window.localStorage.setItem('brc-console-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="console-surface min-h-screen flex flex-col text-slate-100 md:flex-row">
 
       {/* Mobile Header */}
       <div className="md:hidden flex flex-col sticky top-0 z-20">
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/95 p-4">
           <div>
-            <div className="font-semibold">交易控制台</div>
-            <div className="text-xs text-slate-500">子账户：BNB 行动账户 · {envLabel}</div>
+            <div className="font-semibold">BRC Owner Console</div>
+            <div className="text-xs text-slate-500">策略运行账户 · {envLabel}</div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-md bg-slate-100 dark:bg-slate-800">
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 rounded-md bg-slate-100 dark:bg-slate-800">
+            <ThemeToggleButton darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} compact />
+            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="cursor-pointer rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300">
               <Menu className="w-4 h-4" />
             </button>
           </div>
@@ -63,14 +130,18 @@ export function AppShell() {
 
       {/* Sidebar */}
       <aside className={cn(
-        "fixed md:relative top-0 left-0 h-screen w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col z-30 transition-transform md:translate-x-0 overflow-y-auto",
+        "fixed md:relative top-0 left-0 h-screen w-64 bg-slate-950/95 border-r border-slate-800 flex flex-col z-30 transition-transform md:translate-x-0 overflow-y-auto console-scrollbar",
         mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
       )}>
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 hidden md:flex items-center justify-between">
-          <span className="font-semibold font-mono tracking-tight">交易控制台</span>
-          <button onClick={() => setDarkMode(!darkMode)} className="p-1 px-2 text-xs rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition">
-            {darkMode ? 'Light' : 'Dark'}
-          </button>
+        <div className="hidden min-h-[72px] items-center justify-between border-b border-slate-800 px-5 md:flex">
+          <div className="flex items-center gap-3">
+            <CircleDot className="h-6 w-6 text-slate-400" />
+            <div>
+              <div className="text-lg font-semibold leading-5">BRC</div>
+              <div className="text-[10px] font-medium uppercase text-slate-500">Owner Console</div>
+            </div>
+          </div>
+          <ThemeToggleButton darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} compact />
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {NAV_ITEMS.map((item) => (
@@ -79,10 +150,10 @@ export function AppShell() {
               to={item.path}
               onClick={() => setMobileMenuOpen(false)}
               className={({ isActive }) => cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
                 isActive
-                  ? "bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 font-medium"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  ? "bg-slate-800/80 text-slate-50 shadow-[3px_0_0_#7ca7ff_inset]"
+                  : "text-slate-400 hover:bg-slate-900/80 hover:text-slate-100"
               )}
             >
               <item.icon className="w-4 h-4" />
@@ -90,13 +161,13 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-slate-200 dark:border-slate-800 p-3">
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+        <div className="border-t border-slate-800 p-3">
+          <div className="mb-2 text-xs text-slate-500">
             登录：{session?.username || 'Operator'}
           </div>
           <button
             onClick={logout}
-            className="w-full flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+            className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <LogOut className="w-4 h-4" />
             退出登录
@@ -108,29 +179,36 @@ export function AppShell() {
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
 
         {/* Global Owner Status Bar */}
-        <div className={cn(
-          "px-4 py-2 text-xs border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3 transition-colors shrink-0",
-          envData?.blockers?.length > 0 ? "bg-rose-50 dark:bg-rose-900/20" :
-          envData?.freshness_status === 'degraded' || envData?.freshness_status === 'warning' || envData?.warnings?.length > 0 ? "bg-amber-50 dark:bg-amber-900/20" :
-          envData?.freshness_status === 'not_live_connected' ? "bg-slate-50 dark:bg-slate-900" :
-          "bg-white dark:bg-slate-900"
-        )}>
-          <span className="font-semibold text-slate-700 dark:text-slate-200">交易控制台</span>
-          <span className="text-slate-400">·</span>
-          <span className="text-slate-600 dark:text-slate-300">子账户：BNB 行动账户</span>
-          <Badge variant="muted">操作需确认</Badge>
-          <span className="text-slate-600 dark:text-slate-300">环境：{envLabel}</span>
-          {envData?.freshness_status && <FreshnessBadge status={envData.freshness_status} />}
-          {overall.status && <span className="font-semibold text-slate-700 dark:text-slate-200">状态：{overall.label || overall.status}</span>}
-          {envData?.blockers?.length > 0 && <span className="font-semibold text-red-600 dark:text-red-400">存在阻断项</span>}
-          {error && <span className="font-semibold text-red-600 dark:text-red-400">当前内容暂不可用</span>}
-          <div className="ml-auto flex items-center gap-3 text-slate-500">
+        <div className="flex min-h-[72px] shrink-0 flex-wrap items-center gap-3 border-b border-slate-800 bg-slate-950/70 px-4 py-3 text-xs backdrop-blur md:px-7">
+          <button
+            type="button"
+            className="hidden cursor-pointer rounded-md border border-slate-800 p-2 text-slate-500 transition hover:bg-slate-900 hover:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 md:inline-flex"
+            aria-label="导航状态"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <div className="flex min-w-0 items-center gap-3">
+            <StatusChip tone={ownerTone} className="shrink-0">
+              {ownerTone === 'normal' ? <CircleCheck className="h-3.5 w-3.5" /> : <Activity className="h-3.5 w-3.5" />}
+              {ownerStatusLabel(ownerTone)}
+            </StatusChip>
+            {envData?.freshness_status && <FreshnessBadge status={envData.freshness_status} />}
+            <span className="hidden text-slate-500 lg:inline">更新于 {updatedAt}</span>
+          </div>
+          <div className="ml-auto flex min-w-0 items-center gap-3 text-slate-500">
+            <span className="hidden sm:inline">环境：{envLabel}</span>
+            {overall.label && <span className="hidden truncate text-slate-300 md:inline">状态：{overall.label}</span>}
             <DataStatusLine envelope={envData} />
-            <span>更新时间：{updatedAt}</span>
+            {error && <span className="font-semibold text-rose-300">当前内容暂不可用</span>}
+            <ThemeToggleButton darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} />
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-xs font-semibold text-slate-200">
+              OW
+            </div>
+            <span className="hidden text-slate-300 sm:inline">Owner</span>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto p-4 md:p-8">
+        <div className="flex-1 overflow-auto p-4 md:p-7 console-scrollbar">
           <ReadModelErrorPanel error={error} />
           <Outlet />
         </div>
@@ -139,7 +217,7 @@ export function AppShell() {
       {/* Mobile Overlay */}
       {mobileMenuOpen && (
         <div
-          className="fixed inset-0 bg-black/20 dark:bg-black/40 z-10 md:hidden"
+          className="fixed inset-0 bg-black/50 z-10 md:hidden"
           onClick={() => setMobileMenuOpen(false)}
         />
       )}

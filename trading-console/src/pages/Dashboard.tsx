@@ -3,19 +3,26 @@ import { Link } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
-  CheckCircle2,
+  BarChart3,
   CirclePause,
-  ClipboardCheck,
   DatabaseZap,
   FileSearch,
+  FolderSearch,
   Lock,
   RefreshCw,
   ShieldCheck,
-  ShieldQuestion,
-  TimerReset,
   WalletCards,
 } from 'lucide-react';
-import { Badge, Card, EnvelopeStatus, PageHeader, TechnicalDetails } from '@/components/ui';
+import {
+  ActionNudge,
+  ConsolePanel,
+  EntityRow,
+  InspectorPanel,
+  MetricRailItem,
+  StatusChip,
+  type ConsoleTone,
+} from '@/components/console/ConsolePrimitives';
+import { TechnicalDetails } from '@/components/ui';
 import { asArray, displayValue, formatTimestampMs, useReadModel } from '@/lib/tradingConsoleApi';
 import { cn } from '@/lib/utils';
 import { blockingReasonLabel, formatMoney, protectionStatusLabel, sideLabel } from '@/lib/ownerViewModel';
@@ -27,8 +34,6 @@ type Control = {
   kind: string;
   route?: string | null;
   operation_type?: string;
-  preflight_endpoint?: string;
-  confirm_endpoint?: string;
   confirmation_required?: boolean;
   disabled_reason?: string | null;
   risk_impact?: string;
@@ -46,70 +51,50 @@ type OperationState = {
   confirmationPhrase: string;
 };
 
-const statusTone: Record<string, { panel: string; badge: 'normal' | 'warning' | 'danger' | 'caution' | 'muted'; icon: any }> = {
-  safe: {
-    panel: 'border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-100',
-    badge: 'normal',
-    icon: CheckCircle2,
-  },
-  warning: {
-    panel: 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100',
-    badge: 'warning',
-    icon: AlertTriangle,
-  },
-  blocked: {
-    panel: 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-100',
-    badge: 'danger',
-    icon: Lock,
-  },
-  active_position: {
-    panel: 'border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/20 dark:text-blue-100',
-    badge: 'caution',
-    icon: Activity,
-  },
-  review_required: {
-    panel: 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-100',
-    badge: 'warning',
-    icon: ClipboardCheck,
-  },
-  recovery_required: {
-    panel: 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-100',
-    badge: 'danger',
-    icon: DatabaseZap,
-  },
-  paused: {
-    panel: 'border-slate-200 bg-slate-100 text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100',
-    badge: 'muted',
-    icon: CirclePause,
-  },
-  revoked: {
-    panel: 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-100',
-    badge: 'danger',
-    icon: Lock,
-  },
+const statusTone: Record<string, ConsoleTone> = {
+  safe: 'normal',
+  warning: 'attention',
+  active_position: 'normal',
+  review_required: 'attention',
+  recovery_required: 'intervention',
+  blocked: 'blocked',
+  paused: 'attention',
+  revoked: 'blocked',
 };
+
+const statusCopy: Record<string, string> = {
+  safe: '当前无需操作',
+  warning: '有待关注项',
+  blocked: '需要介入',
+  active_position: '持仓监控中',
+  review_required: '需要分析确认',
+  recovery_required: '需要介入',
+  paused: '已暂停',
+  revoked: '预算已撤销',
+};
+
+function productRoute(route?: string | null): string {
+  const map: Record<string, string> = {
+    '/ledger': '/trades',
+    '/protection': '/trades',
+    '/review': '/analysis',
+    '/recovery': '/incident',
+    '/audit': '/evidence',
+    '/carrier': '/strategy',
+    '/authorization': '/runtime',
+    '/execution': '/runtime',
+    '/action-entry': '/runtime',
+  };
+  return route ? map[route] || route : '/';
+}
 
 function controlIcon(id: string) {
   if (id === 'refresh_status') return RefreshCw;
   if (id === 'reconcile_now') return DatabaseZap;
   if (id === 'pause_autonomy') return CirclePause;
   if (id === 'revoke_budget') return Lock;
-  if (id === 'open_review_item') return ClipboardCheck;
+  if (id === 'view_evidence') return FolderSearch;
   return FileSearch;
-}
-
-function statusCopy(status?: string): string {
-  const map: Record<string, string> = {
-    safe: '安全',
-    warning: '需关注',
-    blocked: '阻断',
-    active_position: '持仓中',
-    review_required: '待复盘',
-    recovery_required: '需恢复',
-    paused: '已暂停',
-    revoked: '已撤销',
-  };
-  return map[String(status || '')] || '无法确认';
 }
 
 function controlDisabledReason(control: Control): string {
@@ -127,33 +112,58 @@ function controlConfirmLabel(control: Control): string {
 
 function controlImpactCopy(control: Control): string {
   if (control.risk_impact) return control.risk_impact;
-  return 'Operation Layer 会先预检，再要求 Owner 输入确认短语；该控制不会下单、撤单、平仓、转账或提现。';
+  return 'Operation Layer 会先预检，再要求 Owner 输入确认短语；不会下单、撤单、平仓、转账或提现。';
 }
 
-function MetricTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-      <div className="text-xs font-medium text-slate-500">{label}</div>
-      <div className="mt-1 min-h-7 break-words font-mono text-lg font-semibold text-slate-950 dark:text-slate-100">{value}</div>
-      {sub && <div className="mt-1 min-h-4 text-xs text-slate-500">{sub}</div>}
-    </div>
+function ownerStatusTone(status?: string): ConsoleTone {
+  return statusTone[String(status || '')] || 'attention';
+}
+
+function ownerStatusCopy(status?: string): string {
+  return statusCopy[String(status || '')] || '状态待确认';
+}
+
+function resultTone(status?: string): ConsoleTone {
+  const text = String(status || '').toLowerCase();
+  if (text.includes('block') || text.includes('revoked')) return 'blocked';
+  if (text.includes('required') || text.includes('warning') || text.includes('pending')) return 'attention';
+  if (text.includes('safe') || text.includes('protected') || text.includes('available')) return 'normal';
+  return 'unavailable';
+}
+
+function SoftButton({
+  children,
+  to,
+  onClick,
+  disabled = false,
+  tone = 'neutral',
+}: {
+  children: ReactNode;
+  to?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  tone?: 'neutral' | 'attention' | 'danger';
+}) {
+  const classes = cn(
+    'inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-blue-500',
+    tone === 'danger'
+      ? 'border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20'
+      : tone === 'attention'
+        ? 'border-amber-500/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20'
+        : 'border-slate-700 bg-slate-800/70 text-slate-200 hover:bg-slate-800',
+    disabled && 'cursor-not-allowed opacity-50 hover:bg-slate-800/70',
   );
-}
-
-function SectionTitle({ icon: Icon, title, action }: { icon: any; title: string; action?: ReactNode }) {
+  if (to && !disabled) return <Link to={to} className={classes}>{children}</Link>;
   return (
-    <div className="mb-4 flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 text-slate-500" />
-        <h2 className="text-base font-semibold">{title}</h2>
-      </div>
-      {action}
-    </div>
+    <button type="button" onClick={onClick} disabled={disabled} className={classes}>
+      {children}
+    </button>
   );
 }
 
 export default function Dashboard() {
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [nudgeVisible, setNudgeVisible] = useState(true);
   const endpoint = useMemo(
     () => `/api/trading-console/operations-cockpit?include_exchange=true&_=${refreshNonce}`,
     [refreshNonce],
@@ -180,11 +190,11 @@ export default function Dashboard() {
           operation_type: control.operation_type,
           requested_by: 'owner',
           input_params: {
-            reason: `${control.control_id} from trading console cockpit`,
+            reason: `${control.control_id} from trading console control overview`,
             control_id: control.control_id,
             budget_authorization_id: control.scope?.budget_authorization_id,
           },
-          source: { kind: 'trading_console_cockpit', ref: control.control_id },
+          source: { kind: 'trading_console_control_overview', ref: control.control_id },
         }),
       });
       if (response.status === 401) {
@@ -256,7 +266,13 @@ export default function Dashboard() {
     evidence?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  if (loading) return <div className="p-4 text-sm text-slate-500">正在读取当前内容...</div>;
+  if (loading) {
+    return (
+      <div className="flex min-h-[480px] items-center justify-center rounded-md border border-slate-800 bg-slate-900/50 text-sm text-slate-400">
+        正在读取控制总览...
+      </div>
+    );
+  }
 
   const data = envelope?.data || {};
   const overall = data.overall_status || {};
@@ -268,363 +284,421 @@ export default function Dashboard() {
   const candidate = data.candidate || {};
   const review = data.review || {};
   const recovery = data.recovery || {};
+  const postAction = data.evidence?.post_action_state || {};
   const controls = asArray<Control>(data.controls);
   const blockers = asArray<any>(data.blockers);
   const warnings = asArray<any>(data.warnings);
-  const tone = statusTone[String(overall.status || 'warning')] || statusTone.warning;
-  const StatusIcon = tone.icon;
+  const unavailable = asArray<any>(envelope?.unavailable);
+  const tone = ownerStatusTone(overall.status);
+  const attentionCount = warnings.length + unavailable.length + (review.review_required_before_next_action ? 1 : 0);
+  const interventionCount = blockers.length + (recovery.required ? 1 : 0);
+  const recentTradeCount = Number(postAction.completed_intent_count ?? postAction.intent_count ?? 0);
+  const runtimeCount = autonomy.state || budget.status || position.exists ? 1 : 0;
+  const selected = candidate.selected || {};
+
+  const inspectorItems = [
+    {
+      title: '边界内',
+      body: budget.another_action_allowed
+        ? '预算和尝试仍显示可评审；真正行动仍需要授权、FinalGate、保护和审计链路。'
+        : displayValue(budget.message || budget.retry_condition, '预算或尝试状态不可确认，系统不会从前端推断可行动。'),
+      tone: budget.another_action_allowed ? 'normal' as ConsoleTone : 'attention' as ConsoleTone,
+      action: <SoftButton to="/runtime">查看运行治理</SoftButton>,
+    },
+    {
+      title: protection.status === 'protected' ? '保护正常' : '保护待确认',
+      body: position.exists
+        ? `当前仓位保护状态：${protectionStatusLabel(protection.status)}。新尝试应等待仓位关闭或保护重新确认。`
+        : '当前没有活跃仓位；进入新尝试前仍需要保护计划和账户事实通过。',
+      tone: protection.status === 'protected' || !position.exists ? 'normal' as ConsoleTone : 'attention' as ConsoleTone,
+      action: <SoftButton to="/trades">查看交易与仓位</SoftButton>,
+    },
+    {
+      title: interventionCount > 0 ? '存在介入项' : '无异常介入',
+      body: interventionCount > 0
+        ? displayValue(blockers[0]?.what || blockers[0]?.message || recovery.summary, '需要查看异常介入面板。')
+        : '当前未看到需要 Owner 立即介入的异常事件。',
+      tone: interventionCount > 0 ? 'intervention' as ConsoleTone : 'normal' as ConsoleTone,
+      action: <SoftButton to="/incident" tone={interventionCount > 0 ? 'danger' : 'neutral'}>进入异常介入</SoftButton>,
+    },
+    {
+      title: attentionCount > 0 ? '保持关注' : '暂无关注项',
+      body: attentionCount > 0
+        ? '存在警告、缺失事实或待分析事项；这些不是自动执行授权。'
+        : '当前没有额外警告；证据仍可随时展开核对。',
+      tone: attentionCount > 0 ? 'attention' as ConsoleTone : 'normal' as ConsoleTone,
+      action: <SoftButton onClick={openEvidence}>查看证据</SoftButton>,
+    },
+  ];
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
-      <PageHeader
-        title="Autonomy Operations Cockpit"
-        subtitle="Owner 打开后先看安全、自治、仓位保护、预算和下一步动作。"
-        status={envelope?.freshness_status}
-      >
-        <button
-          type="button"
-          onClick={() => setRefreshNonce((value) => value + 1)}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          <RefreshCw className="h-4 w-4" />
-          刷新
-        </button>
-      </PageHeader>
-
-      <section className={cn('rounded-lg border p-5', tone.panel)}>
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <StatusIcon className="h-6 w-6 shrink-0" />
-              <Badge variant={tone.badge}>{statusCopy(overall.status)}</Badge>
-              <span className="text-xs opacity-75">更新：{formatTimestampMs(envelope?.generated_at_ms)}</span>
-            </div>
-            <h1 className="mt-4 max-w-4xl text-2xl font-semibold tracking-tight md:text-3xl">
-              {displayValue(data.primary_message || overall.message, '当前系统状态无法确认')}
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm opacity-80">
-              自治状态：{displayValue(autonomy.label, '无法确认')} · {displayValue(autonomy.message, '暂无说明')}
-            </p>
+    <div className="mx-auto max-w-[1500px] space-y-4">
+      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusChip tone={tone}>{ownerStatusCopy(overall.status)}</StatusChip>
+            {error && <StatusChip tone="intervention">内容暂不可用</StatusChip>}
           </div>
-
-          <div className="rounded-md border border-white/40 bg-white/70 p-4 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Primary Next Action</div>
-            <div className="mt-2 text-lg font-semibold">{displayValue(nextAction.label, '刷新状态')}</div>
-            <p className="mt-2 min-h-10 text-sm text-slate-600 dark:text-slate-400">{displayValue(nextAction.reason, '读取最新状态。')}</p>
-            {nextAction.enabled && nextAction.route ? (
-              <Link
-                to={nextAction.route}
-                className="mt-4 inline-flex w-full cursor-pointer items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                打开查看
-              </Link>
-            ) : (
-              <button
-                type="button"
-                disabled
-                className="mt-4 w-full cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900"
-              >
-                当前不可操作
-              </button>
-            )}
-          </div>
+          <h1 className="mt-4 text-3xl font-semibold text-slate-100">控制总览</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            {displayValue(data.primary_message || overall.message, '当前系统状态无法确认。')}
+          </p>
         </div>
-      </section>
+        <div className="flex flex-wrap items-center gap-2">
+          <SoftButton onClick={() => setRefreshNonce((value) => value + 1)}>
+            <RefreshCw className="h-4 w-4" />
+            刷新
+          </SoftButton>
+          <SoftButton to={productRoute(nextAction.route)} tone={nextAction.owner_action_required ? 'attention' : 'neutral'}>
+            {displayValue(nextAction.label, '查看状态')}
+          </SoftButton>
+        </div>
+      </header>
 
-      <EnvelopeStatus envelope={envelope} error={error} />
+      <ConsolePanel>
+        <div className="grid grid-cols-1 md:grid-cols-4">
+          <MetricRailItem label="Runtime" value={runtimeCount} tone={tone} sub={displayValue(autonomy.label, '状态待确认')} />
+          <MetricRailItem label="Attention" value={attentionCount} tone={attentionCount > 0 ? 'attention' : 'normal'} sub="待关注" />
+          <MetricRailItem label="Intervention" value={interventionCount} tone={interventionCount > 0 ? 'intervention' : 'normal'} sub="需介入" />
+          <MetricRailItem label="Recent Trades" value={recentTradeCount} tone="unavailable" sub="最近交易事实" />
+        </div>
+      </ConsolePanel>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        <MetricTile
-          label="预算剩余"
-          value={formatMoney(budget.remaining_budget)}
-          sub={`总预算 ${formatMoney(budget.total_budget)} · 单次 ${formatMoney(budget.per_action_max_notional)}`}
-        />
-        <MetricTile
-          label="今日尝试"
-          value={`${displayValue(budget.daily_attempts_used, '0')} / ${displayValue(budget.daily_max_attempts, '暂无')}`}
-          sub={`剩余 ${displayValue(budget.daily_attempts_remaining, '暂无')} · ${budget.another_action_allowed ? '可继续评审' : '不可继续'}`}
-        />
-        <MetricTile
-          label="仓位"
-          value={position.exists ? `${displayValue(position.symbol, '未知')} ${sideLabel(position.side)}` : '无活跃仓位'}
-          sub={position.exists ? `数量 ${displayValue(position.quantity, '暂无')} · 名义 ${formatMoney(position.notional)}` : 'PG/交易所未显示活跃仓位'}
-        />
-        <MetricTile
-          label="保护"
-          value={protectionStatusLabel(protection.status)}
-          sub={`TP ${displayValue(protection.tp_count, '0')} · SL ${displayValue(protection.sl_count, '0')}`}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          <ConsolePanel title="运行实例概览" caption="优先展示边界、尝试、保护和候选上下文">
+            <EntityRow
+              title={displayValue(selected.carrier_id || selected.family, '当前无候选策略')}
+              subtitle={displayValue(selected.reason_selected, '策略候选和运行绑定由后端 readmodel 决定')}
+              tone={resultTone(autonomy.state)}
+              active={Boolean(selected.carrier_id)}
+              cells={[
+                { label: '市场', value: displayValue(selected.symbol || position.symbol, '暂无') },
+                { label: '方向', value: sideLabel(selected.side || position.side) },
+                { label: '模式', value: displayValue(autonomy.label, '无法确认') },
+                { label: '状态', value: displayValue(budget.label || overall.label, '待确认'), className: 'text-emerald-200' },
+              ]}
+              action={<SoftButton to="/runtime">治理</SoftButton>}
+            />
+            <EntityRow
+              title="运行边界"
+              subtitle="预算、尝试和杠杆是边界，不是收益承诺"
+              tone={budget.another_action_allowed ? 'normal' : 'attention'}
+              cells={[
+                { label: '预算剩余', value: formatMoney(budget.remaining_budget) },
+                { label: '总预算', value: formatMoney(budget.total_budget) },
+                { label: '尝试', value: `${displayValue(budget.daily_attempts_used, '0')} / ${displayValue(budget.daily_max_attempts, '暂无')}` },
+                { label: '最大杠杆', value: displayValue(budget.authorized_scope?.max_leverage, '暂无') },
+              ]}
+              action={<SoftButton to="/runtime">边界</SoftButton>}
+            />
+            <EntityRow
+              title={position.exists ? `${displayValue(position.symbol, '未知')} ${sideLabel(position.side)}` : '当前无活跃仓位'}
+              subtitle={position.exists ? '仓位存在时不展示新买卖入口' : '没有仓位不等于可直接执行'}
+              tone={position.exists ? resultTone(protection.status) : 'normal'}
+              cells={[
+                { label: '名义', value: formatMoney(position.notional) },
+                { label: '未实现 PnL', value: formatMoney(position.unrealized_pnl) },
+                { label: '保护', value: protectionStatusLabel(protection.status) },
+                { label: 'TP / SL', value: `${displayValue(protection.tp_count, '0')} / ${displayValue(protection.sl_count, '0')}` },
+              ]}
+              action={<SoftButton to="/trades">仓位</SoftButton>}
+            />
+          </ConsolePanel>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <ConsolePanel title="策略表现" caption="右尾复盘指标待接入；缺失时不推断收益质量">
+              <div className="divide-y divide-slate-800/90">
+                <StrategyMetricRow
+                  name={displayValue(selected.family, '策略族待选择')}
+                  subtitle={displayValue(selected.carrier_id, '当前 readmodel 未提供策略表现序列')}
+                  pnl={formatMoney(review.latest_closed_trade?.realized_pnl)}
+                  status={selected.carrier_id ? '保持观察' : '数据待补'}
+                />
+                <StrategyMetricRow
+                  name="右尾指标"
+                  subtitle="MFE / MAE / R multiple / runner giveback"
+                  pnl="待接入"
+                  status="分析"
+                />
+              </div>
+            </ConsolePanel>
+
+            <ConsolePanel title="最近交易" caption="交易事实连接到策略 / runtime 后再进入分析">
+              <div className="divide-y divide-slate-800/90">
+                <TradeFactRow
+                  time={formatTimestampMs(review.latest_closed_trade?.closed_at_ms)}
+                  strategy={displayValue(review.latest_closed_trade?.strategy_family_id || selected.family, '暂无策略')}
+                  result={displayValue(review.latest_closed_trade?.strategy_outcome, '暂无关闭交易')}
+                  pnl={formatMoney(review.latest_closed_trade?.realized_pnl)}
+                />
+                <TradeFactRow
+                  time={formatTimestampMs(envelope?.generated_at_ms)}
+                  strategy="Review Ledger"
+                  result={displayValue(review.review_status || review.status, '等待分析事实')}
+                  pnl="待核对"
+                />
+              </div>
+              <div className="border-t border-slate-800 px-4 py-3">
+                <SoftButton to="/analysis">查看分析</SoftButton>
+              </div>
+            </ConsolePanel>
+          </div>
+
+          <ConsolePanel title="治理动作" caption="只展示当前后端已暴露的控制和导航；不提供买卖按钮">
+            <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-2 xl:grid-cols-4">
+              {controls.map((control) => (
+                <div key={control.control_id}>
+                  <ControlTile
+                    control={control}
+                    loading={operationState?.loading}
+                    onPreflight={() => void runOperationPreflight(control)}
+                    onRefresh={() => setRefreshNonce((value) => value + 1)}
+                    onEvidence={openEvidence}
+                  />
+                </div>
+              ))}
+            </div>
+            {operationState && (
+              <OperationPreflightPanel
+                state={operationState}
+                setState={setOperationState}
+                onConfirm={() => void confirmOperation()}
+              />
+            )}
+          </ConsolePanel>
+        </div>
+
+        <InspectorPanel
+          items={inspectorItems}
+          footer={
+            <div className="text-xs leading-5 text-slate-500">
+              说明：控制台只呈现官方 readmodel / Operation Layer 路径。FinalGate preview、shadow runtime、候选和授权状态都不会自动变成下单权限。
+            </div>
+          }
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <Card className="p-5">
-          <SectionTitle icon={WalletCards} title="预算与自治" action={<Badge variant={budget.another_action_allowed ? 'normal' : 'warning'}>{budget.another_action_allowed ? '预算可评审' : '预算不可行动'}</Badge>} />
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <MetricTile label="状态" value={displayValue(budget.label, '无法确认')} />
-            <MetricTile label="允许标的" value={asArray<string>(budget.authorized_scope?.symbols).join(', ') || '暂无'} />
-            <MetricTile label="最大杠杆" value={displayValue(budget.authorized_scope?.max_leverage, '暂无')} />
-          </div>
-          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="font-medium">自治判断</div>
-            <div className="mt-1 text-slate-600 dark:text-slate-400">
-              {displayValue(autonomy.message, '暂无自治说明')}
-            </div>
-            <div className="mt-2 text-xs text-slate-500">
-              Loop：{displayValue(autonomy.loop_outcome, 'unknown')} · 授权：{displayValue(autonomy.authorization_status, 'unknown')} · 自动执行：关闭
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <SectionTitle icon={ShieldCheck} title="当前仓位 / 保护" />
-          {position.exists ? (
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-2">
-                <MetricTile label="标的" value={displayValue(position.symbol, '未知')} />
-                <MetricTile label="方向" value={sideLabel(position.side)} />
-                <MetricTile label="入场" value={formatMoney(position.entry_price)} />
-                <MetricTile label="标记价" value={formatMoney(position.current_mark_price)} />
-                <MetricTile label="未实现 PnL" value={formatMoney(position.unrealized_pnl)} />
-                <MetricTile label="一致性" value={displayValue(position.pg_exchange_consistency, '无法确认')} />
-              </div>
-              <Link to="/protection" className="inline-flex w-full items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
-                查看保护健康
-              </Link>
-            </div>
-          ) : (
-            <div className="rounded-md border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-800">
-              当前没有活跃仓位。若准备新动作，仍需预算、授权、FinalGate 和保护计划全部通过。
-            </div>
-          )}
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="p-5">
-          <SectionTitle icon={TimerReset} title="恢复 / 清理" action={<Badge variant={recovery.required ? 'danger' : 'normal'}>{recovery.required ? '需处理' : '未发现'}</Badge>} />
-          <p className="min-h-12 text-sm text-slate-600 dark:text-slate-400">{displayValue(recovery.summary, '暂无恢复状态')}</p>
-          <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-            <MetricTile label="恢复任务" value={String(asArray(recovery.recovery_tasks).length)} />
-            <MetricTile label="不一致" value={String(asArray(recovery.mismatches).length)} />
-          </div>
-          <Link to="/recovery" className="mt-4 inline-flex w-full items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
-            查看恢复建议
-          </Link>
-        </Card>
-
-        <Card className="p-5">
-          <SectionTitle icon={ClipboardCheck} title="复盘" action={<Badge variant={review.review_required_before_next_action ? 'warning' : 'muted'}>{review.review_required_before_next_action ? '待复盘' : '无阻断'}</Badge>} />
-          <div className="space-y-3 text-sm">
-            <MetricTile label="待复盘" value={String(review.pending_review_count || 0)} />
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-              <div className="text-xs font-medium text-slate-500">最近交易状态</div>
-              <div className="mt-1">{displayValue(review.latest_closed_trade?.status, '暂无关闭交易')}</div>
-              <div className="mt-1 text-xs text-slate-500">结果：{displayValue(review.latest_closed_trade?.strategy_outcome, 'pending')}</div>
-            </div>
-          </div>
-          <Link to="/review" className="mt-4 inline-flex w-full items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
-            打开复盘
-          </Link>
-        </Card>
-
-        <Card className="p-5">
-          <SectionTitle icon={ShieldQuestion} title="候选 / 下一动作" />
-          <div className="space-y-3 text-sm">
-            <MetricTile label="候选" value={displayValue(candidate.selected?.carrier_id, '暂无候选')} sub={displayValue(candidate.selected?.family, '暂无策略族')} />
-            <MetricTile label="标的 / 方向" value={`${displayValue(candidate.selected?.symbol, '暂无')} · ${sideLabel(candidate.selected?.side)}`} />
-          </div>
-          <Link to="/action-entry" className="mt-4 inline-flex w-full items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
-            查看候选与预算
-          </Link>
-        </Card>
-      </div>
-
-      <Card className="p-5">
-        <SectionTitle icon={Activity} title="控制" />
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {controls.map((control) => {
-            const Icon = controlIcon(control.control_id);
-            const card = (
-              <div className={cn(
-                'min-h-28 rounded-md border p-3 text-left transition',
-                control.enabled
-                  ? 'cursor-pointer border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800'
-                  : 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900/70',
-              )}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 font-medium">
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span>{control.label}</span>
-                  </div>
-                  <Badge variant={control.enabled ? 'normal' : 'muted'}>{control.enabled ? '可用' : '禁用'}</Badge>
-                </div>
-                <p className="mt-2 line-clamp-3 text-xs text-slate-500">
-                  {control.enabled ? displayValue(control.risk_impact || control.post_action_result || control.kind, '可执行控制') : controlDisabledReason(control)}
-                </p>
-                {control.confirmation_required && <div className="mt-2 text-xs font-medium text-amber-600">需要确认</div>}
-              </div>
-            );
-            if (!control.enabled) return <div key={control.control_id}>{card}</div>;
-            if (control.kind === 'operation_layer_preflight') {
-              return (
-                <button
-                  key={control.control_id}
-                  type="button"
-                  onClick={() => void runOperationPreflight(control)}
-                  disabled={operationState?.loading}
-                  className="w-full disabled:opacity-70"
-                >
-                  {card}
-                </button>
-              );
-            }
-            if (control.control_id === 'refresh_status') {
-              return (
-                <button
-                  key={control.control_id}
-                  type="button"
-                  onClick={() => setRefreshNonce((value) => value + 1)}
-                  className="w-full"
-                >
-                  {card}
-                </button>
-              );
-            }
-            if (control.control_id === 'view_evidence') {
-              return (
-                <button key={control.control_id} type="button" onClick={openEvidence} className="w-full">
-                  {card}
-                </button>
-              );
-            }
-            if (control.route) return <Link key={control.control_id} to={control.route}>{card}</Link>;
-            return <div key={control.control_id}>{card}</div>;
-          })}
-        </div>
-        {operationState && (
-          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-              <div>
-                <div className="font-semibold">{operationState.control.label}</div>
-                <p className="mt-1 text-slate-600 dark:text-slate-400">
-                  {controlImpactCopy(operationState.control)}
-                </p>
-                {asArray<string>(operationState.control.confirmation_summary).length > 0 && (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-500 dark:text-slate-400">
-                    {asArray<string>(operationState.control.confirmation_summary).map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setOperationState(null)}
-                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-white dark:border-slate-800 dark:hover:bg-slate-900"
-              >
-                关闭
-              </button>
-            </div>
-            {operationState.loading && <div className="mt-3 text-slate-500">正在执行 Operation Layer 请求...</div>}
-            {operationState.error && (
-              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-200">
-                {operationState.error}
-              </div>
-            )}
-            {operationState.preflight && (
-              <div className="mt-4 space-y-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <MetricTile label="预检状态" value={displayValue(operationState.preflight.status, '无法确认')} />
-                  <MetricTile label="决策" value={displayValue(operationState.preflight.decision, '无法确认')} />
-                  <MetricTile label="操作 ID" value={displayValue(operationState.preflight.operation_id, '暂无')} />
-                </div>
-                <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-                  <div className="text-xs font-medium text-slate-500">预检摘要</div>
-                  <p className="mt-1 text-slate-700 dark:text-slate-300">{displayValue(operationState.preflight.summary, '暂无摘要')}</p>
-                  {asArray<string>(operationState.preflight.risk_summary?.blockers).length > 0 && (
-                    <div className="mt-2 text-xs text-rose-600">
-                      阻断：{asArray<string>(operationState.preflight.risk_summary?.blockers).join('；')}
-                    </div>
-                  )}
-                  {asArray<string>(operationState.preflight.risk_summary?.warnings).length > 0 && (
-                    <div className="mt-2 text-xs text-amber-600">
-                      警告：{asArray<string>(operationState.preflight.risk_summary?.warnings).join('；')}
-                    </div>
-                  )}
-                </div>
-                {operationState.preflight.status === 'awaiting_confirmation' && operationState.preflight.confirmation_requirement?.phrase && !operationState.result && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
-                    <label className="block text-xs font-medium text-amber-800 dark:text-amber-200">
-                      输入确认短语：{operationState.preflight.confirmation_requirement.phrase}
-                    </label>
-                    <input
-                      value={operationState.confirmationPhrase}
-                      onChange={(event) => setOperationState({ ...operationState, confirmationPhrase: event.target.value })}
-                      className="mt-2 w-full rounded-md border border-amber-200 bg-white px-3 py-2 font-mono text-sm text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 dark:border-amber-900/50 dark:bg-slate-950 dark:text-slate-100"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void confirmOperation()}
-                      disabled={operationState.loading || operationState.confirmationPhrase !== operationState.preflight.confirmation_requirement.phrase}
-                      className="mt-3 inline-flex cursor-pointer items-center rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
-                    >
-                      {controlConfirmLabel(operationState.control)}
-                    </button>
-                  </div>
-                )}
-                {operationState.result && (
-                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200">
-                    <div className="font-medium">执行结果：{displayValue(operationState.result.status, '无法确认')}</div>
-                    <div className="mt-1 text-xs">{displayValue(operationState.result.result_summary?.message, 'Operation Layer 已返回结果。')}</div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-
-      <Card className="p-5">
-        <SectionTitle icon={AlertTriangle} title="阻断与警告" />
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div>
-            <div className="mb-2 text-sm font-medium">阻断</div>
-            {blockers.length === 0 ? (
-              <div className="rounded-md border border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800">当前没有 cockpit 阻断。</div>
-            ) : (
-              <div className="space-y-2">
-                {blockers.map((item, index) => (
-                  <Link key={`${item.code}-${index}`} to={item.route || '/execution'} className="block rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
-                    <div className="font-medium">{displayValue(item.what, '存在阻断')}</div>
-                    <div className="mt-1 text-xs opacity-80">{displayValue(item.clears_when, '等待条件清除')}</div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-          <div>
-            <div className="mb-2 text-sm font-medium">警告</div>
-            {warnings.length === 0 ? (
-              <div className="rounded-md border border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800">当前没有额外警告。</div>
-            ) : (
-              <div className="space-y-2">
-                {warnings.map((item, index) => (
-                  <div key={`${item.code}-${index}`} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                    <div className="font-medium">{blockingReasonLabel(item.message || item.code)}</div>
-                    <div className="mt-1 text-xs opacity-80">{displayValue(item.source, 'read_model')}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </Card>
+      {nudgeVisible && (attentionCount > 0 || interventionCount > 0) && (
+        <ActionNudge
+          tone={interventionCount > 0 ? 'intervention' : 'attention'}
+          text={
+            interventionCount > 0
+              ? displayValue(blockers[0]?.what || blockers[0]?.message || recovery.summary, '存在需要介入的事项')
+              : displayValue(warnings[0]?.message || unavailable[0]?.error, '存在待关注或待补数据')
+          }
+          action={<SoftButton to={interventionCount > 0 ? '/incident' : '/evidence'}>查看</SoftButton>}
+          onDismiss={() => setNudgeVisible(false)}
+        />
+      )}
 
       <div id="cockpit-evidence">
-        <TechnicalDetails title="技术证据">
-          <pre className="overflow-auto font-mono">{JSON.stringify(data.evidence || data, null, 2)}</pre>
+        <TechnicalDetails title="证据与技术细节">
+          <pre className="overflow-auto font-mono text-xs leading-5">{JSON.stringify(data.evidence || data, null, 2)}</pre>
         </TechnicalDetails>
       </div>
+    </div>
+  );
+}
+
+function StrategyMetricRow({
+  name,
+  subtitle,
+  pnl,
+  status,
+}: {
+  name: string;
+  subtitle: string;
+  pnl: string;
+  status: string;
+}) {
+  return (
+    <div className="grid min-h-16 grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-3 px-4 py-3 text-sm">
+      <div className="min-w-0">
+        <div className="truncate font-medium text-slate-100">{name}</div>
+        <div className="mt-1 truncate text-xs text-slate-500">{subtitle}</div>
+      </div>
+      <div className="font-mono text-slate-300">{pnl}</div>
+      <div className="text-right text-xs text-slate-400">{status}</div>
+    </div>
+  );
+}
+
+function TradeFactRow({
+  time,
+  strategy,
+  result,
+  pnl,
+}: {
+  time: string;
+  strategy: string;
+  result: string;
+  pnl: string;
+}) {
+  return (
+    <div className="grid min-h-16 grid-cols-[92px_minmax(0,1fr)_100px_88px] items-center gap-3 px-4 py-3 text-sm">
+      <div className="truncate font-mono text-xs text-slate-500">{time}</div>
+      <div className="truncate text-slate-200">{strategy}</div>
+      <div className="truncate text-xs text-slate-400">{result}</div>
+      <div className="truncate text-right font-mono text-slate-300">{pnl}</div>
+    </div>
+  );
+}
+
+function ControlTile({
+  control,
+  loading,
+  onPreflight,
+  onRefresh,
+  onEvidence,
+}: {
+  control: Control;
+  loading?: boolean;
+  onPreflight: () => void;
+  onRefresh: () => void;
+  onEvidence: () => void;
+}) {
+  const Icon = controlIcon(control.control_id);
+  const disabled = !control.enabled || loading;
+  const content = (
+    <div className={cn(
+      'min-h-28 bg-slate-900 px-4 py-3 text-left transition',
+      control.enabled ? 'hover:bg-slate-800/80' : 'opacity-60',
+    )}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-slate-400" />
+          <span className="truncate text-sm font-medium text-slate-100">{control.label}</span>
+        </div>
+        <StatusChip tone={control.enabled ? 'normal' : 'unavailable'} className="h-6 px-2">
+          {control.enabled ? '可用' : '不可用'}
+        </StatusChip>
+      </div>
+      <p className="mt-3 line-clamp-3 text-xs leading-5 text-slate-500">
+        {control.enabled
+          ? displayValue(control.risk_impact || control.post_action_result || control.kind, '可查看')
+          : controlDisabledReason(control)}
+      </p>
+    </div>
+  );
+
+  if (control.kind === 'operation_layer_preflight') {
+    return (
+      <button type="button" onClick={onPreflight} disabled={disabled} className="cursor-pointer disabled:cursor-not-allowed">
+        {content}
+      </button>
+    );
+  }
+  if (control.control_id === 'refresh_status') {
+    return (
+      <button type="button" onClick={onRefresh} disabled={loading} className="cursor-pointer disabled:cursor-not-allowed">
+        {content}
+      </button>
+    );
+  }
+  if (control.control_id === 'view_evidence') {
+    return (
+      <button type="button" onClick={onEvidence} className="cursor-pointer">
+        {content}
+      </button>
+    );
+  }
+  if (control.route && control.enabled) return <Link to={productRoute(control.route)}>{content}</Link>;
+  return <div>{content}</div>;
+}
+
+function OperationPreflightPanel({
+  state,
+  setState,
+  onConfirm,
+}: {
+  state: OperationState;
+  setState: (state: OperationState | null) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="border-t border-slate-800 bg-slate-950/45 p-4 text-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="font-semibold text-slate-100">{state.control.label}</div>
+          <p className="mt-1 max-w-3xl leading-6 text-slate-400">
+            {controlImpactCopy(state.control)}
+          </p>
+          {asArray<string>(state.control.confirmation_summary).length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {asArray<string>(state.control.confirmation_summary).map((item) => (
+                <span key={item}>
+                  <StatusChip tone="unavailable">{item}</StatusChip>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <SoftButton onClick={() => setState(null)}>关闭</SoftButton>
+      </div>
+      {state.loading && <div className="mt-3 text-slate-500">正在执行 Operation Layer 请求...</div>}
+      {state.error && (
+        <div className="mt-3 rounded-md border border-rose-500/35 bg-rose-500/10 p-3 text-rose-200">
+          {state.error}
+        </div>
+      )}
+      {state.preflight && (
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-1 gap-px overflow-hidden rounded-md border border-slate-800 bg-slate-800 md:grid-cols-3">
+            <PreflightCell label="预检状态" value={displayValue(state.preflight.status, '无法确认')} />
+            <PreflightCell label="决策" value={displayValue(state.preflight.decision, '无法确认')} />
+            <PreflightCell label="操作 ID" value={displayValue(state.preflight.operation_id, '暂无')} />
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-900 p-3">
+            <div className="text-xs font-medium text-slate-500">预检摘要</div>
+            <p className="mt-1 leading-6 text-slate-300">{displayValue(state.preflight.summary, '暂无摘要')}</p>
+            {asArray<string>(state.preflight.risk_summary?.blockers).length > 0 && (
+              <div className="mt-2 text-xs text-rose-300">
+                阻断：{asArray<string>(state.preflight.risk_summary?.blockers).join('；')}
+              </div>
+            )}
+            {asArray<string>(state.preflight.risk_summary?.warnings).length > 0 && (
+              <div className="mt-2 text-xs text-amber-300">
+                警告：{asArray<string>(state.preflight.risk_summary?.warnings).join('；')}
+              </div>
+            )}
+          </div>
+          {state.preflight.status === 'awaiting_confirmation' && state.preflight.confirmation_requirement?.phrase && !state.result && (
+            <div className="rounded-md border border-amber-500/35 bg-amber-500/10 p-3">
+              <label className="block text-xs font-medium text-amber-200">
+                输入确认短语：{state.preflight.confirmation_requirement.phrase}
+              </label>
+              <input
+                value={state.confirmationPhrase}
+                onChange={(event) => setState({ ...state, confirmationPhrase: event.target.value })}
+                className="mt-2 w-full rounded-md border border-amber-500/35 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <SoftButton
+                onClick={onConfirm}
+                disabled={state.loading || state.confirmationPhrase !== state.preflight.confirmation_requirement.phrase}
+                tone="attention"
+              >
+                {controlConfirmLabel(state.control)}
+              </SoftButton>
+            </div>
+          )}
+          {state.result && (
+            <div className="rounded-md border border-emerald-500/35 bg-emerald-500/10 p-3 text-emerald-200">
+              <div className="font-medium">执行结果：{displayValue(state.result.status, '无法确认')}</div>
+              <div className="mt-1 text-xs">{displayValue(state.result.result_summary?.message, 'Operation Layer 已返回结果。')}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreflightCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-slate-900 px-4 py-3">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-1 truncate font-mono text-sm text-slate-200">{value}</div>
     </div>
   );
 }

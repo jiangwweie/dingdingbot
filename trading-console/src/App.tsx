@@ -47,6 +47,12 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedShell />}>
             <Route index element={<Dashboard />} />
+            <Route path="strategy" element={<CarrierShelf />} />
+            <Route path="runtime" element={<AuthorizationState />} />
+            <Route path="trades" element={<OrderLedger />} />
+            <Route path="analysis" element={<ReviewState />} />
+            <Route path="incident" element={<RecoveryState />} />
+            <Route path="evidence" element={<AuditChain />} />
             <Route path="account" element={<AccountRisk />} />
             <Route path="ledger" element={<OrderLedger />} />
             <Route path="protection" element={<ProtectionHealth />} />
