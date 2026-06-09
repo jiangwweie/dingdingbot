@@ -170,6 +170,11 @@ class BrcLiveLifecyclePendingOpenReviewRequest(BaseModel):
     authorization_id: str = Field(max_length=128)
     carrier_id: str = Field(max_length=128)
     strategy_family_id: Optional[str] = Field(default=None, max_length=128)
+    runtime_instance_id: Optional[str] = Field(default=None, max_length=128)
+    trial_binding_id: Optional[str] = Field(default=None, max_length=128)
+    strategy_family_version_id: Optional[str] = Field(default=None, max_length=128)
+    signal_evaluation_id: Optional[str] = Field(default=None, max_length=128)
+    order_candidate_id: Optional[str] = Field(default=None, max_length=128)
     symbol: str = Field(max_length=64)
     side: Literal["long", "short"]
     quantity: str = Field(max_length=64)
@@ -6679,6 +6684,11 @@ async def create_live_lifecycle_pending_open_review(
         authorization_id=body.authorization_id,
         carrier_id=body.carrier_id,
         strategy_family_id=body.strategy_family_id,
+        runtime_instance_id=body.runtime_instance_id,
+        trial_binding_id=body.trial_binding_id,
+        strategy_family_version_id=body.strategy_family_version_id,
+        signal_evaluation_id=body.signal_evaluation_id,
+        order_candidate_id=body.order_candidate_id,
         symbol=body.symbol,
         side=body.side,
         quantity=body.quantity,
@@ -6741,6 +6751,11 @@ async def create_live_lifecycle_closed_reviewed(
         authorization_id=body.authorization_id,
         carrier_id=body.carrier_id,
         strategy_family_id=body.strategy_family_id,
+        runtime_instance_id=body.runtime_instance_id,
+        trial_binding_id=body.trial_binding_id,
+        strategy_family_version_id=body.strategy_family_version_id,
+        signal_evaluation_id=body.signal_evaluation_id,
+        order_candidate_id=body.order_candidate_id,
         symbol=body.symbol,
         side=body.side,
         quantity=body.quantity,

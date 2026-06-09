@@ -4206,6 +4206,21 @@ def test_review_state_surfaces_right_tail_review_metrics(monkeypatch):
     assert review["trade_reviews"][0]["classification"] == "right_tail_win"
     assert review["trade_reviews"][0]["mfe_pct"] == "18.0000"
     assert review["trade_reviews"][0]["mae_pct"] == "-2.0000"
+    assert review["closed_trade_review_packet_summary"]["packet_count"] == 2
+    assert review["closed_trade_review_packet_summary"]["reviewed_packet_count"] == 2
+    assert review["closed_trade_review_packets"][0]["source_review_id"] == (
+        "live-review-tail-win"
+    )
+    assert review["closed_trade_review_packets"][0]["runtime_instance_id"] == (
+        "runtime-cpm-1"
+    )
+    assert review["closed_trade_review_packets"][0]["order_candidate_id"] == (
+        "candidate-cpm-1"
+    )
+    assert review["closed_trade_review_packets"][0]["not_trading_authority"] is True
+    assert review["closed_trade_review_packets"][0]["places_order"] is False
+    assert review["closed_trade_review_packets"][0]["creates_execution_intent"] is False
+    assert review["closed_trade_review_packets"][0]["calls_exchange"] is False
     assert review["no_action_guarantee"]["places_order"] is False
     assert review["no_action_guarantee"]["creates_execution_intent"] is False
     assert review["no_action_guarantee"]["calls_exchange"] is False

@@ -190,6 +190,14 @@ Key facts:
   path facts remain `review_inputs_required`; the readmodel does not infer from
   orders or exchange and does not create execution, order, budget, strategy-PnL,
   exchange, or withdrawal authority.
+- **RuntimeSemanticReviewPacket** now exists as a pure non-executing packet
+  generator for `BrcLiveLifecycleReviewRecord`. It preserves runtime / trial /
+  strategy-version / signal-evaluation / order-candidate / execution-intent IDs
+  when present, marks missing semantic trace explicitly, reviews right-tail
+  facts only from explicit lifecycle metadata, and is surfaced in Trading
+  Console `right_tail_review.closed_trade_review_packets`. It does not create
+  orders, ExecutionIntent records, exchange calls, runtime-budget mutations,
+  strategy-PnL mutations, or withdrawal instructions.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange. Its

@@ -816,6 +816,14 @@ Current local B0 implementation slice:
   coverage. The source policy is explicit
   `live_lifecycle_review.metadata.right_tail_trade_path` only; missing trade
   path facts remain visible instead of being inferred from order/exchange data.
+- `src/domain/runtime_semantic_review_packet.py` adds a pure non-executing
+  closed-trade semantic review packet generator for
+  `BrcLiveLifecycleReviewRecord`. Trading Console right-tail review now returns
+  `closed_trade_review_packets` / `closed_trade_review_packet_summary`; packets
+  preserve available runtime, trial, strategy-version, signal-evaluation,
+  order-candidate, and execution-intent IDs, mark missing semantic trace
+  explicitly, and cannot create orders, intents, exchange calls, budget/PnL
+  mutations, or withdrawal instructions.
 - `tests/unit/test_right_tail_review.py` and Trading Console readmodel tests
   verify long/short right-tail metrics, missing-input behavior, payoff
   asymmetry, and no-action guarantees.
@@ -828,10 +836,11 @@ Remaining B0 work:
   binding gate, but automatic planner invocation remains disabled until Owner /
   Codex promotion gates are satisfied. Deployment enablement for funding,
   open-interest, and crowding sources remains open;
-- deeper review automation beyond the first Owner-record/API/Console and
-  explicit right-tail-metrics slices, especially automatic account-equity
-  baseline snapshots, closed-trade review packet generation, and strategy
-  semantic ID propagation through order / position / review records;
+- deeper review automation beyond the first Owner-record/API/Console,
+  explicit right-tail-metrics, and non-executing semantic-packet slices,
+  especially automatic account-equity baseline snapshots, automated
+  order/exchange-to-review source orchestration, and strategy semantic ID
+  propagation through order / position records;
 - explicit Owner/Codex confirmation values for the promotion gate, especially
   first-real-submit attempt / budget release-or-consume acceptance. Local
   reservation/mutation now uses a max-loss-first budget basis, and the

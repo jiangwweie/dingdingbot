@@ -48,9 +48,13 @@ from src.domain.owner_capital_adjustment import (
     OwnerCapitalBaseReviewInput,
     review_owner_capital_base_movement,
 )
+from src.domain.live_lifecycle_review import BrcLiveLifecycleReviewRecord
 from src.domain.right_tail_review import (
     RightTailTradePathFacts,
     summarize_right_tail_reviews,
+)
+from src.domain.runtime_semantic_review_packet import (
+    summarize_runtime_semantic_review_packets,
 )
 from src.application.owner_action_carrier_catalog import owner_action_carrier_id_for_symbol
 from src.application.production_strategy_family_admission import (
@@ -1636,14 +1640,27 @@ class TradingConsoleReadModelService:
         return base_payload
 
     def _right_tail_review(self, *, snap: TradingConsoleSnapshot) -> dict[str, Any]:
+        lifecycle_records: list[BrcLiveLifecycleReviewRecord] = []
         facts: list[RightTailTradePathFacts] = []
         skipped: list[dict[str, Any]] = []
         for review in snap.live_lifecycle_reviews:
-            metadata = review.get("metadata") or {}
-            if not isinstance(metadata, dict):
+            try:
+                lifecycle_record = _live_lifecycle_review_record(review)
+            except Exception as exc:
                 skipped.append(
                     {
                         "review_id": review.get("review_id"),
+                        "reason": "live_lifecycle_review_record_invalid",
+                        "error": str(exc),
+                    }
+                )
+                continue
+            lifecycle_records.append(lifecycle_record)
+            metadata = lifecycle_record.metadata
+            if not isinstance(metadata, dict):
+                skipped.append(
+                    {
+                        "review_id": lifecycle_record.review_id,
                         "reason": "metadata_not_object",
                     }
                 )
@@ -1654,22 +1671,22 @@ class TradingConsoleReadModelService:
             if not isinstance(raw_facts, dict):
                 skipped.append(
                     {
-                        "review_id": review.get("review_id"),
+                        "review_id": lifecycle_record.review_id,
                         "reason": "right_tail_trade_path_not_object",
                     }
                 )
                 continue
             payload = {
-                "trade_id": review.get("review_id") or review.get("authorization_id"),
-                "source_review_id": review.get("review_id"),
-                "symbol": review.get("symbol"),
-                "side": review.get("side"),
-                "strategy_family_id": review.get("strategy_family_id"),
-                "strategy_family_version_id": review.get(
-                    "strategy_family_version_id"
+                "trade_id": lifecycle_record.review_id,
+                "source_review_id": lifecycle_record.review_id,
+                "symbol": lifecycle_record.symbol,
+                "side": lifecycle_record.side,
+                "strategy_family_id": lifecycle_record.strategy_family_id,
+                "strategy_family_version_id": (
+                    lifecycle_record.strategy_family_version_id
                 ),
-                "runtime_instance_id": review.get("runtime_instance_id"),
-                "order_candidate_id": review.get("order_candidate_id"),
+                "runtime_instance_id": lifecycle_record.runtime_instance_id,
+                "order_candidate_id": lifecycle_record.order_candidate_id,
                 **raw_facts,
             }
             try:
@@ -1677,14 +1694,23 @@ class TradingConsoleReadModelService:
             except Exception as exc:
                 skipped.append(
                     {
-                        "review_id": review.get("review_id"),
+                        "review_id": lifecycle_record.review_id,
                         "reason": "right_tail_trade_path_invalid",
                         "error": str(exc),
                     }
                 )
         summary = summarize_right_tail_reviews(facts).model_dump(mode="json")
+        semantic_packets = summarize_runtime_semantic_review_packets(
+            lifecycle_records
+        ).model_dump(mode="json")
         summary["source"] = "live_lifecycle_review.metadata.right_tail_trade_path"
         summary["skipped_sources"] = skipped
+        summary["closed_trade_review_packets"] = semantic_packets["packets"]
+        summary["closed_trade_review_packet_summary"] = {
+            key: value
+            for key, value in semantic_packets.items()
+            if key != "packets"
+        }
         summary["required_metadata_shape"] = {
             "metadata_key": "right_tail_trade_path",
             "required_fields": [
@@ -2451,6 +2477,15 @@ def _plain_dict(value: Any) -> dict[str, Any]:
         if isinstance(attr, (str, int, float, bool, Decimal, Enum, type(None), list, tuple, dict)):
             result[key] = _json_value(attr)
     return result
+
+
+def _live_lifecycle_review_record(
+    review: dict[str, Any],
+) -> BrcLiveLifecycleReviewRecord:
+    payload = dict(review)
+    payload.setdefault("created_at_ms", 0)
+    payload.setdefault("updated_at_ms", payload["created_at_ms"])
+    return BrcLiveLifecycleReviewRecord.model_validate(payload)
 
 
 def _json_value(value: Any) -> Any:

@@ -359,6 +359,13 @@ Current local review/account-baseline implementation slice:
   `live_lifecycle_review.metadata.right_tail_trade_path` only; missing path
   facts stay `review_inputs_required` rather than inferred from orders or
   exchange.
+- `src/domain/runtime_semantic_review_packet.py` builds non-executing closed
+  trade semantic review packets from `BrcLiveLifecycleReviewRecord`. Packets
+  preserve available runtime / trial / strategy-version / signal-evaluation /
+  order-candidate / execution-intent IDs, mark incomplete semantic trace
+  explicitly, and evaluate right-tail facts only from explicit lifecycle
+  metadata. Trading Console right-tail review now includes
+  `closed_trade_review_packets` and a packet summary.
 - `tests/unit/test_owner_capital_adjustment_review.py` verifies manual
   withdrawals and profit extraction do not become strategy losses or risk
   events, capital injection and capital-base reset are separate review facts,
@@ -373,7 +380,10 @@ Current local review/account-baseline implementation slice:
   Trading Console readmodel tests verify explicit lifecycle metadata can surface
   right-tail review without creating any action authority.
 
-Future Review still needs closed-trade packet automation, automatic account
-equity baseline snapshots, strategy semantic ID propagation through order /
-position / review, and richer source readers. Review must not reduce strategy
-performance to win rate, average return, or short-term PnL only.
+Future Review still needs automatic account-equity baseline snapshots,
+strategy semantic ID propagation through order / position records, fuller
+review-source orchestration, and richer source readers. Closed-trade semantic
+packet generation now exists as a non-executing first slice, but it remains
+explicit-metadata/readmodel driven rather than automated from order/exchange
+facts. Review must not reduce strategy performance to win rate, average return,
+or short-term PnL only.

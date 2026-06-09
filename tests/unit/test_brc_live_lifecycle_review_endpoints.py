@@ -74,6 +74,11 @@ def test_live_lifecycle_pending_open_review_endpoint_records_no_action_ledger(mo
                 "authorization_id": "auth-1",
                 "carrier_id": "MR-001-live-readonly-v0",
                 "strategy_family_id": "MR-001",
+                "strategy_family_version_id": "MR-001-v0",
+                "runtime_instance_id": "runtime-1",
+                "trial_binding_id": "trial-binding-1",
+                "signal_evaluation_id": "signal-evaluation-1",
+                "order_candidate_id": "order-candidate-1",
                 "symbol": "ETH/USDT:USDT",
                 "side": "long",
                 "quantity": "0.014",
@@ -100,6 +105,11 @@ def test_live_lifecycle_pending_open_review_endpoint_records_no_action_ledger(mo
     payload = response.json()
     assert payload["review"]["review_status"] == "pending_open"
     assert payload["review"]["lifecycle_status"] == "protected_open"
+    assert payload["review"]["strategy_family_version_id"] == "MR-001-v0"
+    assert payload["review"]["runtime_instance_id"] == "runtime-1"
+    assert payload["review"]["trial_binding_id"] == "trial-binding-1"
+    assert payload["review"]["signal_evaluation_id"] == "signal-evaluation-1"
+    assert payload["review"]["order_candidate_id"] == "order-candidate-1"
     assert payload["review"]["places_order"] is False
     assert payload["review"]["mutates_exchange"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
@@ -123,6 +133,11 @@ def test_live_lifecycle_closed_reviewed_endpoint_records_terminal_review(monkeyp
                 "authorization_id": "auth-closed",
                 "carrier_id": "MR-001-live-readonly-v0",
                 "strategy_family_id": "MR-001",
+                "strategy_family_version_id": "MR-001-v0",
+                "runtime_instance_id": "runtime-closed",
+                "trial_binding_id": "trial-binding-closed",
+                "signal_evaluation_id": "signal-evaluation-closed",
+                "order_candidate_id": "order-candidate-closed",
                 "symbol": "ETH/USDT:USDT",
                 "side": "long",
                 "quantity": "0.014",
@@ -150,6 +165,11 @@ def test_live_lifecycle_closed_reviewed_endpoint_records_terminal_review(monkeyp
     payload = response.json()
     assert payload["review"]["review_status"] == "closed_reviewed"
     assert payload["review"]["lifecycle_status"] == "closed_reviewed"
+    assert payload["review"]["strategy_family_version_id"] == "MR-001-v0"
+    assert payload["review"]["runtime_instance_id"] == "runtime-closed"
+    assert payload["review"]["trial_binding_id"] == "trial-binding-closed"
+    assert payload["review"]["signal_evaluation_id"] == "signal-evaluation-closed"
+    assert payload["review"]["order_candidate_id"] == "order-candidate-closed"
     assert payload["review"]["metadata"]["review_decision"] == "park"
     assert payload["review"]["metadata"]["cleanup_evidence_ref"] == "/tmp/cleanup.json"
     assert payload["review"]["places_order"] is False
