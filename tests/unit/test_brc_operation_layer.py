@@ -5523,6 +5523,62 @@ async def test_record_trial_trade_intent_preflight_allows_when_permission_allows
 
 
 @pytest.mark.asyncio
+async def test_record_trial_trade_intent_confirm_rechecks_runtime_safety_readiness():
+    admission, engine, binding, service, brc_repo, market = await _phase18_signal_evaluated_context()
+    try:
+        preflight = await service.preflight(
+            operation_type="record_trial_trade_intent_from_signal_evaluation",
+            requested_by="owner",
+            input_params={
+                "campaign_id": brc_repo.campaign.campaign_id,
+                "binding_id": binding.binding_id,
+                "intended_action": "entry",
+                "symbol": "ETH/USDT:USDT",
+                "side": "long",
+            },
+        )
+        assert preflight.decision in {"allow", "warn"}
+        assert preflight.after["execution_permission_resolution"]["final_permission"] == "intent_recording"
+
+        market["runtime_state"]["runtime_safety_readiness"] = {
+            "status": "blocked",
+            "blockers": ["max_loss_budget_present"],
+            "missing_boundary_facts": ["max_loss_budget_present"],
+            "not_execution_authority": True,
+            "execution_intent_created": False,
+            "runtime_state_mutated": False,
+            "order_created": False,
+            "exchange_called": False,
+        }
+        result = await service.confirm(
+            operation_id=preflight.operation_id,
+            preflight_id=preflight.preflight_id,
+            confirmation_phrase="CONFIRM_RECORD_TRIAL_TRADE_INTENT",
+            idempotency_key=preflight.idempotency_key,
+        )
+        intents = await admission._repo.list_trial_trade_intents_by_campaign(
+            brc_repo.campaign.campaign_id
+        )
+    finally:
+        await engine.dispose()
+
+    assert result.status == "blocked"
+    blocked_reason = str(result.result_summary.get("blocked_reason") or "")
+    assert "runtime safety readiness blocks intent recording" in blocked_reason
+    assert "max_loss_budget_present" in blocked_reason
+    assert result.result_summary["status"] == "blocked"
+    assert len(intents) == 0
+    assert brc_repo.campaign.metadata_json["trade_intent_created"] is False
+    assert brc_repo.campaign.metadata_json["execution_intent_created"] is False
+    assert brc_repo.campaign.metadata_json["order_created"] is False
+    assert not [
+        event
+        for event in brc_repo.events
+        if event["event_type"] == "admission_trial_trade_intent_recorded_no_execution"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_record_trial_trade_intent_observe_only_records_would_enter_intent():
     admission, engine, binding, service, brc_repo, _ = await _phase18_signal_evaluated_context(
         execution_mode=AdmissionExecutionMode.OBSERVE_ONLY,
