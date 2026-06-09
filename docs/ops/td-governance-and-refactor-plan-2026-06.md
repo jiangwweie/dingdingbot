@@ -236,6 +236,24 @@ python3 -m compileall -q src/domain/strategy_runtime_promotion_gate.py \
   tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
 passed
 
+Operation Layer runtime-safety-readiness recheck validation:
+
+python3 -m pytest -q tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_preflight_blocks_when_permission_below_intent_recording \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_preflight_allows_when_permission_allows \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_confirm_rechecks_runtime_safety_readiness \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_observe_only_records_would_enter_intent \
+  tests/unit/test_brc_operation_layer.py::test_record_trial_trade_intent_auto_within_budget_records_candidate_without_execution \
+  tests/unit/test_execution_permission.py \
+  tests/unit/test_strategy_runtime_safety_readiness.py
+25 passed
+
+python3 -m compileall -q tests/unit/test_brc_operation_layer.py \
+  src/application/brc_operation_layer.py \
+  src/application/execution_permission.py \
+  src/application/strategy_runtime_safety_readiness_service.py \
+  src/domain/strategy_runtime_safety_readiness.py
+passed
+
 Owner capital-base review semantics validation:
 
 python3 -m pytest -q tests/unit/test_owner_capital_adjustment_review.py
@@ -1237,6 +1255,12 @@ Current local Sprint 7 slice:
   `signal_only`, while ready-for-confirmation still caps at non-executing
   `intent_recording`. This aligns execution-permission resolution with the
   Sprint 7 runtime boundary facts without granting order authority.
+- `BrcOperationService` has focused confirmation-recheck coverage proving that
+  if runtime safety readiness becomes blocked after a trade-intent preflight,
+  `record_trial_trade_intent_from_signal_evaluation` is blocked at confirm
+  time before recording a trial trade intent. The proof preserves
+  `trade_intent_created=false`, `execution_intent_created=false`, and
+  `order_created=false`.
 
 Required properties:
 
