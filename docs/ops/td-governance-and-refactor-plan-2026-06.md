@@ -199,6 +199,13 @@ python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.
   tests/unit/test_td4_runtime_final_gate_preview.py
 41 passed
 
+B0 first-real-submit promotion-gate API validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_td5_runtime_execution_plan.py
+95 passed
+
 python3 -m compileall -q src/interfaces/api_trading_console.py \
   src/application/strategy_runtime_promotion_gate_service.py \
   src/domain/strategy_runtime_promotion_gate.py \
@@ -686,8 +693,11 @@ Current local B0 implementation slice:
   guess unknown strategy bindings. It also verifies the Trading Console
   read-only preview endpoint defaults to blocked, returns ready when CPM
   confirmations are supplied, maps unknown bindings to 404, resolves
-  runtime-bound gate previews from StrategyRuntimeInstance, and maps unknown
-  runtime IDs to 404.
+  runtime-bound gate previews from StrategyRuntimeInstance, maps unknown
+  runtime IDs to 404, and keeps first-real-submit scope blocked until extra
+  submit confirmations are supplied. Even when those confirmations are supplied,
+  the result is only `READY_FOR_FIRST_REAL_SUBMIT_GATE_REVIEW`, not execution
+  authority.
 
 Remaining B0 work:
 

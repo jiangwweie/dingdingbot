@@ -11,6 +11,7 @@ from src.application.strategy_runtime_promotion_gate_service import (
 from src.domain.strategy_runtime_promotion_gate import (
     RuntimeExecutionConfirmationFacts,
     StrategyRuntimePromotionGateStatus,
+    StrategyRuntimePromotionScope,
     StrategySemanticsConfirmationFacts,
 )
 from src.domain.strategy_runtime import (
@@ -272,3 +273,108 @@ async def test_trading_console_promotion_gate_preview_for_runtime_unknown_runtim
         )
 
     assert exc_info.value.status_code == 404
+
+
+async def test_trading_console_first_real_submit_scope_blocks_missing_submit_confirmations(
+    monkeypatch,
+):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == "runtime-cpm-promotion-gate"
+            return _runtime()
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_promotion_gate_service",
+        StrategyRuntimePromotionGateService(),
+        raising=False,
+    )
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", _RuntimeService(), raising=False)
+
+    result = await api_trading_console.runtime_strategy_promotion_gate_preview_for_runtime(
+        runtime_instance_id="runtime-cpm-promotion-gate",
+        scope=StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW,
+        strategy_family_confirmed=True,
+        implementation_source_confirmed=True,
+        required_facts_confirmed=True,
+        entry_policy_confirmed=True,
+        exit_policy_confirmed=True,
+        protection_policy_confirmed=True,
+        eligible_for_runtime_execution_confirmed=True,
+        right_tail_review_metrics_confirmed=True,
+        runtime_profile_confirmed=True,
+        owner_confirmation_mode_confirmed=True,
+        attempt_consumption_rule_confirmed=True,
+        budget_reservation_rule_confirmed=True,
+        trusted_active_position_source_confirmed=True,
+        trusted_account_fact_source_confirmed=True,
+    )
+
+    assert result.status == StrategyRuntimePromotionGateStatus.BLOCKED
+    assert "first_real_submit_duplicate_submit_policy_confirmed_missing" in (
+        result.blockers
+    )
+    assert "first_real_submit_explicit_owner_real_submit_authorization_missing" in (
+        result.blockers
+    )
+    assert result.not_execution_authority is True
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+
+
+async def test_trading_console_first_real_submit_scope_can_reach_gate_review_only(
+    monkeypatch,
+):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == "runtime-cpm-promotion-gate"
+            return _runtime()
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_promotion_gate_service",
+        StrategyRuntimePromotionGateService(),
+        raising=False,
+    )
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", _RuntimeService(), raising=False)
+
+    result = await api_trading_console.runtime_strategy_promotion_gate_preview_for_runtime(
+        runtime_instance_id="runtime-cpm-promotion-gate",
+        scope=StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW,
+        strategy_family_confirmed=True,
+        implementation_source_confirmed=True,
+        required_facts_confirmed=True,
+        entry_policy_confirmed=True,
+        exit_policy_confirmed=True,
+        protection_policy_confirmed=True,
+        eligible_for_runtime_execution_confirmed=True,
+        right_tail_review_metrics_confirmed=True,
+        runtime_profile_confirmed=True,
+        owner_confirmation_mode_confirmed=True,
+        attempt_consumption_rule_confirmed=True,
+        budget_reservation_rule_confirmed=True,
+        trusted_active_position_source_confirmed=True,
+        trusted_account_fact_source_confirmed=True,
+        budget_release_or_consume_rule_confirmed=True,
+        protection_creation_failure_policy_confirmed=True,
+        duplicate_submit_policy_confirmed=True,
+        deployment_readiness_confirmed=True,
+        explicit_owner_real_submit_authorization=True,
+    )
+
+    assert (
+        result.status
+        == StrategyRuntimePromotionGateStatus.READY_FOR_FIRST_REAL_SUBMIT_GATE_REVIEW
+    )
+    assert result.blockers == []
+    assert result.not_execution_authority is True
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
