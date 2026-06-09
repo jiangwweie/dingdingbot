@@ -208,12 +208,17 @@ python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.
 
 python3 -m compileall -q src/interfaces/api_trading_console.py \
   src/application/strategy_runtime_promotion_gate_service.py \
-  src/domain/strategy_runtime_promotion_gate.py \
+src/domain/strategy_runtime_promotion_gate.py \
   tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
 passed
 
 git diff --check
 passed
+
+Owner capital-base review semantics validation:
+
+python3 -m pytest -q tests/unit/test_owner_capital_adjustment_review.py
+10 passed
 ```
 
 Deployment note:
@@ -636,6 +641,16 @@ Current local B0 implementation slice:
   by `StrategyFamilyVersion` from the semantics catalog, fails closed on unknown
   bindings, and remains non-executing. This is the intended reusable gate entry
   for future Console / Sprint 5 promotion checks.
+- `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
+  withdrawal, manual profit extraction, capital injection, and capital-base
+  reset review facts. These facts can explain account-equity movement and
+  adjust review capital base, but they cannot create withdrawal, transfer,
+  order, exchange, runtime-budget, strategy-PnL, or risk-event instructions.
+- `src/application/owner_capital_adjustment_review_service.py` classifies
+  read-only account-equity deltas against realized trading PnL and
+  Owner-recorded capital adjustments. Missing equity facts fail closed; equity
+  movement without trade or Owner-capital evidence stays unresolved rather than
+  being mislabeled as strategy loss.
 - `src/interfaces/api_trading_console.py` exposes a read-only
   `/strategy-runtime-promotion-gate` preview endpoint backed by that service.
   It also exposes
@@ -698,6 +713,10 @@ Current local B0 implementation slice:
   submit confirmations are supplied. Even when those confirmations are supplied,
   the result is only `READY_FOR_FIRST_REAL_SUBMIT_GATE_REVIEW`, not execution
   authority.
+- `tests/unit/test_owner_capital_adjustment_review.py` verifies Owner manual
+  withdrawal / profit extraction / injection / capital-base reset are review
+  and capital-baseline facts, not strategy PnL, risk events, exchange calls, or
+  withdrawal / transfer / order instructions.
 
 Remaining B0 work:
 
@@ -707,6 +726,8 @@ Remaining B0 work:
   account/active-position overlay and Trading Console internal assembly,
   especially scheduler/runtime reader wiring plus funding, open-interest, and
   crowding readers;
+- persistence/API/Console productization for owner capital adjustments and
+  withdrawal-adjusted capital base review;
 - explicit Owner/Codex confirmation values for the promotion gate, especially
   first-real-submit attempt / budget release-or-consume acceptance. Local
   reservation/mutation now uses a max-loss-first budget basis, and the

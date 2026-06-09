@@ -273,6 +273,24 @@ capital injection, capital base reset, and strategy performance. Manual profit
 withdrawal is a review/account-baseline fact, not a strategy loss or automatic
 fund movement instruction.
 
+Current local review/account-baseline implementation slice:
+
+- `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
+  withdrawal, manual profit extraction, capital injection, and capital base
+  reset semantics. These records are external Owner facts only; they cannot
+  create withdrawal, transfer, order, runtime-budget, strategy-PnL, risk-event,
+  or exchange instructions.
+- `src/application/owner_capital_adjustment_review_service.py` can classify
+  read-only account-equity movement against realized trading PnL plus
+  Owner-recorded capital adjustments. It marks unexplained account-equity
+  deltas unresolved instead of guessing whether they are strategy losses or
+  withdrawals.
+- `tests/unit/test_owner_capital_adjustment_review.py` verifies manual
+  withdrawals and profit extraction do not become strategy losses or risk
+  events, capital injection and capital-base reset are separate review facts,
+  missing Owner records leave equity drops unresolved, and no withdrawal,
+  transfer, order, or exchange instruction is created.
+
 Future Review should emphasize right-tail asymmetric evaluation, including
 MFE, MAE, R multiple, tail win size, small loss count, winner hold time, runner
 giveback, whether the runner was capped too early, stop effectiveness, and
