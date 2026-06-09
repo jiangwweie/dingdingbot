@@ -997,6 +997,184 @@ class PGStrategyRuntimeEventORM(PGCoreBase):
     )
 
 
+class PGSignalEvaluationORM(PGCoreBase):
+    """Shadow SignalEvaluation record.
+
+    Rows in this table are evaluation evidence only. They do not grant
+    execution permission, create intents, place orders, mutate exchange state,
+    or call FinalGate.
+    """
+
+    __tablename__ = "signal_evaluations"
+
+    signal_evaluation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    source_signal_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_codes_json: Mapped[list] = mapped_column(
+        "reason_codes",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    evidence_snapshot_json: Mapped[dict] = mapped_column(
+        "evidence_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    policy_snapshot_json: Mapped[dict] = mapped_column(
+        "policy_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    evaluated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    shadow_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    execution_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('evaluated', 'invalidated', 'expired', 'parked')",
+            name="ck_signal_evaluations_status",
+        ),
+        CheckConstraint(
+            "decision IN ('candidate', 'no_action', 'invalid', 'park')",
+            name="ck_signal_evaluations_decision",
+        ),
+        CheckConstraint(
+            "side IN ('long', 'short', 'none')",
+            name="ck_signal_evaluations_side",
+        ),
+        CheckConstraint(
+            "execution_enabled = false",
+            name="ck_signal_evaluations_execution_disabled",
+        ),
+        CheckConstraint("shadow_mode = true", name="ck_signal_evaluations_shadow_mode"),
+        CheckConstraint("not_order = true", name="ck_signal_evaluations_not_order"),
+        CheckConstraint(
+            "not_execution_intent = true",
+            name="ck_signal_evaluations_not_execution_intent",
+        ),
+        Index("idx_signal_evaluations_runtime_time", "runtime_instance_id", "evaluated_at_ms"),
+        Index("idx_signal_evaluations_trial_binding", "trial_binding_id"),
+        Index("idx_signal_evaluations_family_version", "strategy_family_version_id"),
+        Index("idx_signal_evaluations_symbol_status", "symbol", "status"),
+        Index("idx_signal_evaluations_status_time", "status", "updated_at_ms"),
+    )
+
+
+class PGOrderCandidateORM(PGCoreBase):
+    """Shadow OrderCandidate record.
+
+    Candidate rows are pre-authorization review facts. They are not exchange
+    orders, execution intents, or FinalGate results.
+    """
+
+    __tablename__ = "order_candidates"
+
+    order_candidate_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    signal_evaluation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    candidate_order_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposed_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    intended_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    entry_price_reference: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    risk_preview_json: Mapped[dict] = mapped_column(
+        "risk_preview",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    protection_preview_json: Mapped[dict] = mapped_column(
+        "protection_preview",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    evidence_refs_json: Mapped[list] = mapped_column(
+        "evidence_refs",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    shadow_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    execution_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    candidate_executable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('proposed', 'under_review', 'expired', 'parked')",
+            name="ck_order_candidates_status",
+        ),
+        CheckConstraint("side IN ('long', 'short')", name="ck_order_candidates_side"),
+        CheckConstraint(
+            "proposed_quantity IS NULL OR proposed_quantity >= 0",
+            name="ck_order_candidates_proposed_quantity_nonnegative",
+        ),
+        CheckConstraint(
+            "intended_notional IS NULL OR intended_notional >= 0",
+            name="ck_order_candidates_intended_notional_nonnegative",
+        ),
+        CheckConstraint(
+            "execution_enabled = false",
+            name="ck_order_candidates_execution_disabled",
+        ),
+        CheckConstraint("shadow_mode = true", name="ck_order_candidates_shadow_mode"),
+        CheckConstraint(
+            "candidate_executable = false",
+            name="ck_order_candidates_not_executable",
+        ),
+        CheckConstraint("not_order = true", name="ck_order_candidates_not_order"),
+        CheckConstraint(
+            "not_execution_intent = true",
+            name="ck_order_candidates_not_execution_intent",
+        ),
+        Index("idx_order_candidates_signal_evaluation", "signal_evaluation_id"),
+        Index("idx_order_candidates_runtime_time", "runtime_instance_id", "updated_at_ms"),
+        Index("idx_order_candidates_trial_binding", "trial_binding_id"),
+        Index("idx_order_candidates_family_version", "strategy_family_version_id"),
+        Index("idx_order_candidates_symbol_status", "symbol", "status"),
+        Index("idx_order_candidates_status_time", "status", "updated_at_ms"),
+    )
+
+
 class PGBrcLlmIntentORM(PGCoreBase):
     """Persisted normalized BRC LLM intent ledger."""
 
