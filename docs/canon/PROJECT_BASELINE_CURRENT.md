@@ -125,7 +125,9 @@ Key facts:
   Owner/Codex strategy, runtime, fact-source, BRF short-profile, and first real
   submit confirmations into explicit blockers while preserving
   `not_execution_authority=true`, `execution_intent_created=false`,
-  `order_created=false`, and `exchange_called=false`.
+  `order_created=false`, and `exchange_called=false`. A small application
+  service can evaluate the gate by `StrategyFamilyVersion` from the semantics
+  catalog without guessing unknown bindings.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signal pairs into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->

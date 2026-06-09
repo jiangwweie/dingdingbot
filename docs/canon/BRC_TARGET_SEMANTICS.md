@@ -215,6 +215,9 @@ Current local B0 implementation slice:
   attempt/budget rules, BRF short-side conservative profile, or first-real-submit
   confirmations are missing. Lack of proven alpha is a warning limiting
   economic/autonomy admission, not a semantic blocker.
+- `src/application/strategy_runtime_promotion_gate_service.py` exposes that
+  gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
+  for unknown bindings and remains non-executing.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges the B0
   signal-pair path into the existing non-executing runtime planning path:
   strategy signal pair -> semantically bound shadow OrderCandidate ->

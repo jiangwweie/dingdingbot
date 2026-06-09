@@ -169,11 +169,14 @@ passed
 
 B0 promotion gate follow-up validation:
 
-python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
   tests/unit/test_b0_strategy_semantics_binding.py
-15 passed
+18 passed
 
-python3 -m compileall -q src/domain/strategy_runtime_promotion_gate.py \
+python3 -m compileall -q src/application/strategy_runtime_promotion_gate_service.py \
+  src/domain/strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
   tests/unit/test_b0_strategy_runtime_promotion_gate.py
 passed
 
@@ -597,6 +600,10 @@ Current local B0 implementation slice:
   shadow/preview work. It blocks missing strategy semantics, runtime profile,
   trusted fact source, attempt/budget, BRF short-profile, and first-real-submit
   confirmations while preserving `not_execution_authority=true`.
+- `src/application/strategy_runtime_promotion_gate_service.py` wraps that gate
+  by `StrategyFamilyVersion` from the semantics catalog, fails closed on unknown
+  bindings, and remains non-executing. This is the intended reusable gate entry
+  for future Console / Sprint 5 promotion checks.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges that B0
   signal-pair path into existing runtime planning: strategy signal pair ->
   semantic shadow OrderCandidate -> RuntimeExecutionPlan /
@@ -641,6 +648,9 @@ Current local B0 implementation slice:
   conservative short-profile confirmation, RMR cannot promote as a runtime
   trade strategy, and first-real-submit scope requires additional explicit
   submit confirmations while remaining non-execution authority.
+- `tests/unit/test_b0_strategy_runtime_promotion_gate_service.py` verifies the
+  application service evaluates CPM/BRF by StrategyFamilyVersion and does not
+  guess unknown strategy bindings.
 
 Remaining B0 work:
 
