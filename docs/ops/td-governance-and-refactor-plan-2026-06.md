@@ -617,6 +617,13 @@ Current local B0 implementation slice:
   snapshots. It maps available OHLCV, price-action, account, runtime-boundary,
   position-projection, funding, range, volatility, and crowding-related facts,
   and explicitly marks absent facts as missing rather than inferring them.
+- `src/domain/rmr_regime_classifier.py` implements the first concrete RMR
+  closed-candle classifier for `TREND_UP`, `TREND_DOWN`, `CHOP`, `RANGE`, and
+  `UNCERTAIN`. It emits range / volatility / strategy-effect evidence only,
+  with `not_execution_authority=true`, `hard_filter=false`, and no
+  order/execution permissions. `StrategyEvaluationContextBuilder` can map
+  RMR-001 classifier output into `range_structure`, `volatility_state`, and
+  `market_state` facts.
 - `src/application/strategy_semantics_shadow_binding_service.py` can create
   only shadow OrderCandidate records after RequiredFacts pass. It can now
   consume `StrategyFamilySignalOutput`, persist a shadow SignalEvaluation, and
@@ -690,10 +697,11 @@ Current local B0 implementation slice:
   complete CPM input/output/runtime facts can feed the semantic shadow binding,
   missing 4h CPM context blocks binding, BRF does not invent missing
   short-squeeze risk facts, FCO keeps open-interest/crowding dependencies
-  missing until explicit sources exist, and observation-only account facts do
-  not satisfy account RequiredFacts. It also verifies that the binding service
-  can build context from a signal input/output pair without requiring the caller
-  to hand-assemble StrategyEvaluationContext.
+  missing until explicit sources exist, RMR classifier output can satisfy
+  range/volatility regime facts without execution authority, and
+  observation-only account facts do not satisfy account RequiredFacts. It also
+  verifies that the binding service can build context from a signal input/output
+  pair without requiring the caller to hand-assemble StrategyEvaluationContext.
 - `tests/unit/test_b0_runtime_strategy_signal_planning.py` verifies that a
   complete CPM signal input/output pair can reach a ready
   RuntimeExecutionIntentDraft without execution, blocks when local
@@ -713,6 +721,9 @@ Current local B0 implementation slice:
   conservative short-profile confirmation, RMR cannot promote as a runtime
   trade strategy, and first-real-submit scope requires additional explicit
   submit confirmations while remaining non-execution authority.
+- `tests/unit/test_rmr_regime_classifier.py` verifies trend/chop classification,
+  insufficient closed-candle behavior, forbidden execution-field rejection, and
+  absence of execution/order methods.
 - `tests/unit/test_b0_strategy_runtime_promotion_gate_service.py` verifies the
   application service evaluates CPM/BRF by StrategyFamilyVersion and does not
   guess unknown strategy bindings. It also verifies the Trading Console
@@ -757,7 +768,6 @@ Current local B0 implementation slice:
 Remaining B0 work:
 
 - Owner/Codex-gated BRF evaluator details;
-- RMR regime classifier implementation details;
 - live/runtime fact-source orchestration beyond the current injected trusted
   account/active-position overlay and Trading Console internal assembly,
   especially scheduler/runtime reader wiring plus funding, open-interest, and

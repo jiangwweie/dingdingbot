@@ -59,7 +59,8 @@ FCO:
 - BRF is a short-side bear-rally-failure price-action reference implementation
   candidate, not a proven-alpha production strategy.
 - RMR is initially a range/chop regime classifier, not the first trading
-  strategy.
+  strategy. It now has a pure closed-candle classifier implementation for
+  regime evidence only.
 - FCO is a funding / open-interest / crowding backlog family until data facts,
   freshness, and missing-fact behavior are defined.
 
@@ -114,6 +115,12 @@ Key facts:
   inventing it. It intentionally blocks or downgrades cases such as missing 4h
   CPM context, observation-only account facts, BRF without explicit
   short-squeeze risk facts, and FCO without open-interest/crowding sources.
+- **RMR Regime Classifier** now exists as a pure closed-candle classifier for
+  `TREND_UP`, `TREND_DOWN`, `CHOP`, `RANGE`, and `UNCERTAIN`. The context
+  builder can use RMR-001 classifier output to populate `range_structure`,
+  `volatility_state`, and `market_state` facts. RMR output is observe/downgrade
+  evidence only: it is not an order candidate, execution intent, hard execution
+  filter, or trading authority.
 - **StrategyRuntimeFactOverlayService** now exists as a local non-executing
   read-only fact overlay before B0 strategy signal planning. When explicitly
   injected, it replaces caller-provided account/position allow facts with

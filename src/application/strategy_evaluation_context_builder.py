@@ -18,6 +18,10 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalOutput,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
+from src.domain.rmr_regime_classifier import (
+    RmrRegimeAssessment,
+    classify_rmr_regime,
+)
 from src.domain.strategy_semantics import (
     FactAvailabilityStatus,
     MarketState,
@@ -382,6 +386,21 @@ class StrategyEvaluationContextBuilder:
             value = _explicit_market_context_value(signal_input, fact_key)
             source = "signal_input.market_snapshot"
             observed_at_ms = signal_input.market_snapshot.timestamp_ms
+        if value is None and fact_key == "range_structure":
+            assessment = _rmr_assessment(signal_input)
+            if assessment is not None and assessment.status == "classified":
+                value = {
+                    "range_structure": assessment.range_structure,
+                    "market_state": assessment.market_state.value,
+                    "confidence": str(assessment.confidence),
+                    "reason_codes": list(assessment.reason_codes),
+                    "strategy_effect": assessment.strategy_effect,
+                    "classifier": "RMR-001",
+                    "hard_filter": assessment.hard_filter,
+                    "execution_authority": assessment.execution_authority,
+                }
+                source = "rmr_regime_classifier"
+                observed_at_ms = signal_input.market_snapshot.timestamp_ms
         if value is None:
             return fact_key, _missing_fact(
                 fact_key,
@@ -432,6 +451,18 @@ class StrategyEvaluationContextBuilder:
                     else None
                 ),
             }
+        if value is None:
+            assessment = _rmr_assessment(signal_input)
+            if assessment is not None and assessment.status == "classified":
+                value = {
+                    "volatility_state": assessment.volatility_state,
+                    "market_state": assessment.market_state.value,
+                    "confidence": str(assessment.confidence),
+                    "reason_codes": list(assessment.reason_codes),
+                    "classifier": "RMR-001",
+                    "hard_filter": assessment.hard_filter,
+                    "execution_authority": assessment.execution_authority,
+                }
         if value is None:
             return fact_key, _missing_fact(
                 fact_key,
@@ -662,6 +693,9 @@ def _market_state(
     if explicit is None:
         explicit = _explicit_market_context_value(signal_input, "market_state")
     if explicit is None:
+        assessment = _rmr_assessment(signal_input)
+        if assessment is not None and assessment.status == "classified":
+            return assessment.market_state
         return MarketState.UNCERTAIN
     if isinstance(explicit, MarketState):
         return explicit
@@ -669,6 +703,14 @@ def _market_state(
         return MarketState(str(explicit).upper())
     except ValueError:
         return MarketState.UNCERTAIN
+
+
+def _rmr_assessment(
+    signal_input: StrategyFamilySignalInput,
+) -> RmrRegimeAssessment | None:
+    if signal_input.strategy_family_id != "RMR-001":
+        return None
+    return classify_rmr_regime(_candle_window(signal_input, "1h"))
 
 
 def _context_id(evaluation_id: str) -> str:

@@ -32,6 +32,7 @@ from src.domain.strategy_runtime import (
 )
 from src.domain.strategy_semantics import (
     FactAvailabilityStatus,
+    MarketState,
     StrategyFactCheckStatus,
     initial_strategy_semantics_catalog,
 )
@@ -49,6 +50,23 @@ def _candles(count: int) -> list[dict]:
                 "open_time_ms": NOW_MS - (count - index) * 3_600_000,
                 "open": str(close - Decimal("1")),
                 "high": str(close + Decimal("2")),
+                "low": str(close - Decimal("3")),
+                "close": str(close),
+                "volume": "100",
+            }
+        )
+    return candles
+
+
+def _trend_down_candles(count: int) -> list[dict]:
+    candles: list[dict] = []
+    for index in range(count):
+        close = Decimal("2600") - Decimal(index * 8)
+        candles.append(
+            {
+                "open_time_ms": NOW_MS - (count - index) * 3_600_000,
+                "open": str(close + Decimal("1")),
+                "high": str(close + Decimal("3")),
                 "low": str(close - Decimal("3")),
                 "close": str(close),
                 "volume": "100",
@@ -408,6 +426,32 @@ def test_builder_keeps_fco_data_dependencies_missing_until_explicit_sources_exis
     assert context.facts["open_interest"].status == FactAvailabilityStatus.MISSING
     assert context.facts["crowding_proxy"].status == FactAvailabilityStatus.MISSING
     assert fact_check.status == StrategyFactCheckStatus.BLOCK_MISSING_FACTS
+
+
+def test_builder_generates_rmr_regime_facts_without_execution_authority():
+    signal_input = _signal_input(
+        family_id="RMR-001",
+        version_id="RMR-001-v0",
+    )
+    signal_input.market_snapshot.candle_context["windows"]["1h"] = _trend_down_candles(16)
+    context = build_strategy_evaluation_context(signal_input)
+    rmr = initial_strategy_semantics_catalog().get_binding(
+        strategy_family_id="RMR-001",
+        strategy_family_version_id="RMR-001-v0",
+    )
+    fact_check = rmr.fact_check(context)
+
+    assert context.market_state == MarketState.TREND_DOWN
+    assert fact_check.status == StrategyFactCheckStatus.PASS
+    assert context.facts["range_structure"].source == "rmr_regime_classifier"
+    range_value = context.facts["range_structure"].value_snapshot["value"]
+    assert range_value["market_state"] == "TREND_DOWN"
+    assert range_value["strategy_effect"]["brf"] == (
+        "context_support_only_not_execution_authority"
+    )
+    assert range_value["hard_filter"] is False
+    assert range_value["execution_authority"] is False
+    assert context.facts["volatility_state"].status == FactAvailabilityStatus.AVAILABLE
 
 
 def test_builder_marks_observation_only_account_facts_as_missing():

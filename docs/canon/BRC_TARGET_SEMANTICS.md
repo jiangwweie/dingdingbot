@@ -188,7 +188,8 @@ Initial strategy-semantics reference candidates:
 - `RMR-001`: range/chop regime classifier first, not the first trading
   strategy. RMR may downgrade CPM/BRF to observe-only or raise review
   requirements, but stale or missing RMR output must not act as execution
-  authority.
+  authority. A pure closed-candle RMR classifier now exists for regime evidence
+  only.
 - `FCO-001`: funding / open-interest / crowding backlog family until data
   facts and freshness semantics are available.
 
@@ -205,6 +206,12 @@ Current local B0 implementation slice:
   position-projection, funding, range, volatility, and crowding-related facts
   when explicit evidence exists, and marks missing facts explicitly instead of
   allowing strategy semantics to guess.
+- `src/domain/rmr_regime_classifier.py` classifies explicit closed-candle
+  windows into `TREND_UP`, `TREND_DOWN`, `CHOP`, `RANGE`, or `UNCERTAIN` and
+  emits range / volatility / strategy-effect evidence with
+  `not_execution_authority=true`, `hard_filter=false`, and no order/execution
+  permissions. `StrategyEvaluationContextBuilder` can use that output for
+  RMR-001 `range_structure`, `volatility_state`, and `market_state` facts.
 - `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
   SignalEvaluation against those semantics and can create only a shadow
   OrderCandidate through SignalEvaluationShadowService. It can also consume a
@@ -248,8 +255,8 @@ Current local B0 implementation slice:
   and cached account facts. This is an application assembly point only; no
   public strategy-signal write endpoint is exposed by this slice.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. Live fact readers, BRF/RMR concrete evaluator
-  details, FCO funding/OI/crowding data coverage, and runtime promotion remain
+  OrderLifecycle adapter. Live fact readers, BRF concrete evaluator details,
+  FCO funding/OI/crowding data coverage, and runtime promotion remain
   Owner/Codex-gated before promotion beyond shadow binding.
 
 ProtectionPolicy and ExitPolicy must stay separate:
