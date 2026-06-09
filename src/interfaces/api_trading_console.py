@@ -6,13 +6,15 @@ import asyncio
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from src.application.readmodels.trading_console import (
     TradingConsoleDependencies,
     TradingConsoleReadModelResponse,
     TradingConsoleReadModelService,
 )
+from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
 
 
@@ -92,6 +94,47 @@ def _live_read_only_exchange_env_safe() -> bool:
     )
 
 
+class StrategyRuntimeBoundaryView(BaseModel):
+    max_attempts: int
+    attempts_used: int
+    attempts_remaining: int
+    max_active_positions: int
+    max_notional_per_attempt: str | None = None
+    total_budget: str | None = None
+    budget_remaining: str | None = None
+    allowed_symbols: list[str] = Field(default_factory=list)
+    allowed_sides: list[str] = Field(default_factory=list)
+    max_leverage: str | None = None
+    requires_protection: bool
+    requires_review: bool
+
+
+class StrategyRuntimeInspectionView(BaseModel):
+    runtime_instance_id: str
+    trial_binding_id: str
+    admission_decision_id: str
+    strategy_family_id: str
+    strategy_family_version_id: str
+    owner_risk_acceptance_id: str | None = None
+    carrier_id: str | None = None
+    symbol: str
+    side: str
+    status: StrategyRuntimeInstanceStatus
+    boundary: StrategyRuntimeBoundaryView
+    policy_snapshot: dict[str, Any] = Field(default_factory=dict)
+    review_requirement: str
+    execution_enabled: bool
+    execution_mode: str
+    shadow_mode: bool
+    created_at_ms: int
+    updated_at_ms: int
+    activated_at_ms: int | None = None
+    expires_at_ms: int | None = None
+    revoked_at_ms: int | None = None
+    closed_at_ms: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("/dashboard-state", response_model=TradingConsoleReadModelResponse)
 async def dashboard_state(
     symbol: Optional[str] = Query(default=None),
@@ -101,6 +144,36 @@ async def dashboard_state(
         symbol=symbol,
         include_exchange=include_exchange,
     )
+
+
+@router.get(
+    "/strategy-runtimes",
+    response_model=list[StrategyRuntimeInspectionView],
+)
+async def list_strategy_runtimes(
+    status: Optional[StrategyRuntimeInstanceStatus] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[StrategyRuntimeInspectionView]:
+    service = await _strategy_runtime_service()
+    runtimes = await service.list_runtimes(status=status, limit=limit)
+    return [_runtime_view(runtime) for runtime in runtimes]
+
+
+@router.get(
+    "/strategy-runtimes/{runtime_instance_id}",
+    response_model=StrategyRuntimeInspectionView,
+)
+async def get_strategy_runtime(
+    runtime_instance_id: str,
+) -> StrategyRuntimeInspectionView:
+    service = await _strategy_runtime_service()
+    try:
+        return _runtime_view(await service.get_runtime(runtime_instance_id))
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
 
 
 @router.get("/operations-cockpit", response_model=TradingConsoleReadModelResponse)
@@ -538,6 +611,81 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
         execution_orchestrator=getattr(api_module, "_execution_orchestrator", None),
     )
+
+
+async def _strategy_runtime_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_strategy_runtime_service", None)
+    if injected is not None:
+        return injected
+    try:
+        from src.application.strategy_runtime_service import StrategyRuntimeInstanceService
+        from src.infrastructure.pg_brc_admission_repository import PgBrcAdmissionRepository
+        from src.infrastructure.pg_strategy_runtime_repository import (
+            PgStrategyRuntimeRepository,
+        )
+
+        service = StrategyRuntimeInstanceService(
+            runtime_repository=PgStrategyRuntimeRepository(),
+            admission_repository=PgBrcAdmissionRepository(),
+        )
+        await service.initialize()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="Strategy runtime repository unavailable; persistent PG facts are required.",
+        ) from exc
+    setattr(api_module, "_strategy_runtime_service", service)
+    return service
+
+
+def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspectionView:
+    boundary = runtime.boundary
+    return StrategyRuntimeInspectionView(
+        runtime_instance_id=runtime.runtime_instance_id,
+        trial_binding_id=runtime.trial_binding_id,
+        admission_decision_id=runtime.admission_decision_id,
+        strategy_family_id=runtime.strategy_family_id,
+        strategy_family_version_id=runtime.strategy_family_version_id,
+        owner_risk_acceptance_id=runtime.owner_risk_acceptance_id,
+        carrier_id=runtime.carrier_id,
+        symbol=runtime.symbol,
+        side=runtime.side,
+        status=runtime.status,
+        boundary=StrategyRuntimeBoundaryView(
+            max_attempts=boundary.max_attempts,
+            attempts_used=boundary.attempts_used,
+            attempts_remaining=boundary.attempts_remaining,
+            max_active_positions=boundary.max_active_positions,
+            max_notional_per_attempt=_decimal_string(boundary.max_notional_per_attempt),
+            total_budget=_decimal_string(boundary.total_budget),
+            budget_remaining=_decimal_string(boundary.budget_remaining),
+            allowed_symbols=list(boundary.allowed_symbols),
+            allowed_sides=list(boundary.allowed_sides),
+            max_leverage=_decimal_string(boundary.max_leverage),
+            requires_protection=boundary.requires_protection,
+            requires_review=boundary.requires_review,
+        ),
+        policy_snapshot=runtime.policy_snapshot.model_dump(mode="json"),
+        review_requirement=runtime.review_requirement.value,
+        execution_enabled=runtime.execution_enabled,
+        execution_mode="shadow_disabled",
+        shadow_mode=runtime.shadow_mode,
+        created_at_ms=runtime.created_at_ms,
+        updated_at_ms=runtime.updated_at_ms,
+        activated_at_ms=runtime.activated_at_ms,
+        expires_at_ms=runtime.expires_at_ms,
+        revoked_at_ms=runtime.revoked_at_ms,
+        closed_at_ms=runtime.closed_at_ms,
+        metadata=dict(runtime.metadata),
+    )
+
+
+def _decimal_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _cached_pg_repo(api_module: Any, attr_name: str, factory: Any) -> Optional[Any]:

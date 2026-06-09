@@ -1,0 +1,262 @@
+"""Application service for StrategyRuntimeInstance shadow governance."""
+
+from __future__ import annotations
+
+import time
+import uuid
+from decimal import Decimal
+from typing import Any, Optional, Protocol
+
+from src.domain.brc_admission import AdmissionTrialBinding, StrategyFamilyVersion
+from src.domain.strategy_runtime import (
+    StrategyRuntimeBoundary,
+    StrategyRuntimeEvent,
+    StrategyRuntimeInstance,
+    StrategyRuntimeInstanceStatus,
+    StrategyRuntimePolicySnapshot,
+)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+class StrategyRuntimeError(ValueError):
+    """Raised when a runtime shadow operation violates governance rules."""
+
+
+class StrategyRuntimeRepositoryPort(Protocol):
+    async def initialize(self) -> None:
+        ...
+
+    async def create(self, runtime: StrategyRuntimeInstance) -> StrategyRuntimeInstance:
+        ...
+
+    async def get(self, runtime_instance_id: str) -> Optional[StrategyRuntimeInstance]:
+        ...
+
+    async def list(self, *, status: Optional[StrategyRuntimeInstanceStatus] = None, limit: int = 100) -> list[StrategyRuntimeInstance]:
+        ...
+
+    async def update_status(self, runtime: StrategyRuntimeInstance) -> StrategyRuntimeInstance:
+        ...
+
+    async def record_event(self, event: StrategyRuntimeEvent) -> StrategyRuntimeEvent:
+        ...
+
+    async def find_by_trial_binding_id(self, trial_binding_id: str) -> Optional[StrategyRuntimeInstance]:
+        ...
+
+
+class StrategyRuntimeAdmissionRepositoryPort(Protocol):
+    async def get_admission_trial_binding(self, binding_id: str) -> Optional[AdmissionTrialBinding]:
+        ...
+
+    async def get_strategy_family_version(self, strategy_family_version_id: str) -> Optional[StrategyFamilyVersion]:
+        ...
+
+
+class StrategyRuntimeInstanceService:
+    def __init__(
+        self,
+        *,
+        runtime_repository: StrategyRuntimeRepositoryPort,
+        admission_repository: StrategyRuntimeAdmissionRepositoryPort,
+    ) -> None:
+        self._runtime_repo = runtime_repository
+        self._admission_repo = admission_repository
+
+    async def initialize(self) -> None:
+        await self._runtime_repo.initialize()
+
+    async def create_draft_from_trial_binding(
+        self,
+        trial_binding_id: str,
+        *,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        carrier_id: Optional[str] = None,
+        max_attempts: int = 1,
+        max_active_positions: int = 1,
+        max_notional_per_attempt: Optional[Decimal] = None,
+        total_budget: Optional[Decimal] = None,
+        max_leverage: Optional[Decimal] = None,
+        expires_at_ms: Optional[int] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> StrategyRuntimeInstance:
+        existing = await self._runtime_repo.find_by_trial_binding_id(trial_binding_id)
+        if existing is not None:
+            raise StrategyRuntimeError(
+                f"strategy runtime already exists for trial binding: {trial_binding_id}"
+            )
+        binding = await self._admission_repo.get_admission_trial_binding(trial_binding_id)
+        if binding is None:
+            raise StrategyRuntimeError(f"admission trial binding not found: {trial_binding_id}")
+        version = await self._admission_repo.get_strategy_family_version(
+            binding.strategy_family_version_id
+        )
+        if version is None:
+            raise StrategyRuntimeError(
+                f"strategy family version not found: {binding.strategy_family_version_id}"
+            )
+
+        selected_symbol = symbol or _first_nonempty(version.supported_symbols) or "unresolved"
+        selected_side = (side or "shadow").lower()
+        now_ms = _now_ms()
+        boundary = StrategyRuntimeBoundary(
+            max_attempts=max_attempts,
+            attempts_used=0,
+            max_active_positions=max_active_positions,
+            max_notional_per_attempt=max_notional_per_attempt,
+            total_budget=total_budget,
+            allowed_symbols=[selected_symbol],
+            allowed_sides=[selected_side],
+            max_leverage=max_leverage,
+            requires_protection=True,
+            requires_review=True,
+        )
+        policy_snapshot = StrategyRuntimePolicySnapshot(
+            risk_policy_snapshot={},
+            playbook_id=binding.playbook_id,
+            playbook_snapshot=dict(binding.playbook_catalog_snapshot_json),
+            admission_execution_mode=binding.execution_mode.value,
+            source="admission_trial_binding",
+        )
+        runtime = StrategyRuntimeInstance(
+            runtime_instance_id=_id("strategy-runtime"),
+            trial_binding_id=binding.binding_id,
+            admission_decision_id=binding.admission_decision_id,
+            strategy_family_id=version.strategy_family_id,
+            strategy_family_version_id=binding.strategy_family_version_id,
+            owner_risk_acceptance_id=binding.owner_risk_acceptance_id,
+            carrier_id=carrier_id or binding.runtime_carrier_id,
+            symbol=selected_symbol,
+            side=selected_side,
+            status=StrategyRuntimeInstanceStatus.DRAFT,
+            boundary=boundary,
+            policy_snapshot=policy_snapshot,
+            execution_enabled=False,
+            shadow_mode=True,
+            created_at_ms=now_ms,
+            updated_at_ms=now_ms,
+            expires_at_ms=expires_at_ms,
+            metadata={
+                "source_binding_status": binding.binding_status.value,
+                "source_trial_env": binding.trial_env.value,
+                "source_trial_stage": binding.trial_stage.value,
+                **(metadata or {}),
+            },
+        )
+        saved = await self._runtime_repo.create(runtime)
+        await self._record_event(
+            saved,
+            previous_status=None,
+            reason="runtime draft created from admission trial binding",
+        )
+        return saved
+
+    async def activate_runtime(self, runtime_instance_id: str, *, actor: str = "owner") -> StrategyRuntimeInstance:
+        runtime = await self._require_runtime(runtime_instance_id)
+        if runtime.status in {StrategyRuntimeInstanceStatus.EXPIRED, StrategyRuntimeInstanceStatus.REVOKED}:
+            raise StrategyRuntimeError(f"{runtime.status.value} runtime cannot activate")
+        updated = runtime.transition_to(
+            StrategyRuntimeInstanceStatus.ACTIVE,
+            now_ms=_now_ms(),
+            reason="shadow runtime activated; execution remains disabled",
+        )
+        saved = await self._runtime_repo.update_status(updated)
+        await self._record_event(
+            saved,
+            previous_status=runtime.status,
+            actor=actor,
+            reason="shadow runtime activated; no execution intent, FinalGate, or order created",
+        )
+        return saved
+
+    async def pause_runtime(self, runtime_instance_id: str, *, actor: str = "owner") -> StrategyRuntimeInstance:
+        return await self._transition(
+            runtime_instance_id,
+            StrategyRuntimeInstanceStatus.PAUSED,
+            actor=actor,
+            reason="shadow runtime paused",
+        )
+
+    async def revoke_runtime(self, runtime_instance_id: str, *, actor: str = "owner") -> StrategyRuntimeInstance:
+        return await self._transition(
+            runtime_instance_id,
+            StrategyRuntimeInstanceStatus.REVOKED,
+            actor=actor,
+            reason="shadow runtime revoked",
+        )
+
+    async def expire_runtime(self, runtime_instance_id: str, *, actor: str = "system") -> StrategyRuntimeInstance:
+        return await self._transition(
+            runtime_instance_id,
+            StrategyRuntimeInstanceStatus.EXPIRED,
+            actor=actor,
+            reason="shadow runtime expired",
+        )
+
+    async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+        return await self._require_runtime(runtime_instance_id)
+
+    async def list_runtimes(
+        self,
+        *,
+        status: Optional[StrategyRuntimeInstanceStatus] = None,
+        limit: int = 100,
+    ) -> list[StrategyRuntimeInstance]:
+        return await self._runtime_repo.list(status=status, limit=limit)
+
+    async def _transition(
+        self,
+        runtime_instance_id: str,
+        target_status: StrategyRuntimeInstanceStatus,
+        *,
+        actor: str,
+        reason: str,
+    ) -> StrategyRuntimeInstance:
+        runtime = await self._require_runtime(runtime_instance_id)
+        updated = runtime.transition_to(target_status, now_ms=_now_ms(), reason=reason)
+        saved = await self._runtime_repo.update_status(updated)
+        await self._record_event(saved, previous_status=runtime.status, actor=actor, reason=reason)
+        return saved
+
+    async def _require_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+        runtime = await self._runtime_repo.get(runtime_instance_id)
+        if runtime is None:
+            raise StrategyRuntimeError(f"strategy runtime not found: {runtime_instance_id}")
+        return runtime
+
+    async def _record_event(
+        self,
+        runtime: StrategyRuntimeInstance,
+        *,
+        previous_status: Optional[StrategyRuntimeInstanceStatus],
+        actor: str = "system",
+        reason: str,
+    ) -> None:
+        event = StrategyRuntimeEvent(
+            event_id=_id("strategy-runtime-event"),
+            runtime_instance_id=runtime.runtime_instance_id,
+            event_type="status_transition" if previous_status is not None else "created",
+            previous_status=previous_status,
+            next_status=runtime.status,
+            actor=actor,
+            reason=reason,
+            metadata={"execution_enabled": runtime.execution_enabled, "shadow_mode": runtime.shadow_mode},
+            created_at_ms=_now_ms(),
+        )
+        await self._runtime_repo.record_event(event)
+
+
+def _first_nonempty(items: list[str]) -> Optional[str]:
+    for item in items:
+        value = str(item).strip()
+        if value:
+            return value
+    return None
