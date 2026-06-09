@@ -209,6 +209,12 @@ Current local B0 implementation slice:
   read-only sources, marks unavailable/stale facts through SignalDataQuality,
   and keeps missing trusted facts as B0 blockers instead of allowing manual
   active-position counts to pass.
+- `src/domain/strategy_runtime_promotion_gate.py` provides a pure non-executing
+  promotion gate for the remaining Owner/Codex decisions. It blocks promotion
+  beyond shadow/preview if strategy semantics, runtime profile, fact sources,
+  attempt/budget rules, BRF short-side conservative profile, or first-real-submit
+  confirmations are missing. Lack of proven alpha is a warning limiting
+  economic/autonomy admission, not a semantic blocker.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges the B0
   signal-pair path into the existing non-executing runtime planning path:
   strategy signal pair -> semantically bound shadow OrderCandidate ->

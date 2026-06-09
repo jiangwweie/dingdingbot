@@ -166,6 +166,19 @@ passed
 
 git diff --check
 passed
+
+B0 promotion gate follow-up validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_semantics_binding.py
+15 passed
+
+python3 -m compileall -q src/domain/strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py
+passed
+
+git diff --check
+passed
 ```
 
 Deployment note:
@@ -579,6 +592,11 @@ Current local B0 implementation slice:
   account/position facts missing or stale through SignalDataQuality when the
   trusted source is unavailable, and preserve fail-closed RequiredFacts behavior
   before semantic shadow candidate creation.
+- `src/domain/strategy_runtime_promotion_gate.py` provides a pure non-executing
+  promotion gate for Owner/Codex confirmations before promotion beyond
+  shadow/preview work. It blocks missing strategy semantics, runtime profile,
+  trusted fact source, attempt/budget, BRF short-profile, and first-real-submit
+  confirmations while preserving `not_execution_authority=true`.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges that B0
   signal-pair path into existing runtime planning: strategy signal pair ->
   semantic shadow OrderCandidate -> RuntimeExecutionPlan /
@@ -617,6 +635,12 @@ Current local B0 implementation slice:
   runtime draft path without creating ExecutionIntent records, local orders, or
   exchange calls. It also verifies Trading Console internal assembly wires the
   overlay from PG positions plus cached account facts.
+- `tests/unit/test_b0_strategy_runtime_promotion_gate.py` verifies that CPM
+  remains blocked until Owner/Codex semantic/runtime confirmations exist, lack
+  of proven alpha warns rather than blocking semantic promotion, BRF requires
+  conservative short-profile confirmation, RMR cannot promote as a runtime
+  trade strategy, and first-real-submit scope requires additional explicit
+  submit confirmations while remaining non-execution authority.
 
 Remaining B0 work:
 
@@ -626,10 +650,11 @@ Remaining B0 work:
   account/active-position overlay and Trading Console internal assembly,
   especially scheduler/runtime reader wiring plus funding, open-interest, and
   crowding readers;
-- explicit real-submit attempt / budget release-or-consume acceptance before
-  runtime promotion. Local reservation/mutation now uses a max-loss-first budget
-  basis, but promotion still requires Owner/Codex confirmation of when
-  reservation is released, confirmed consumed, or handled after submit failure.
+- explicit Owner/Codex confirmation values for the promotion gate, especially
+  first-real-submit attempt / budget release-or-consume acceptance. Local
+  reservation/mutation now uses a max-loss-first budget basis, and the
+  promotion gate blocks until Owner/Codex confirms when reservation is released,
+  confirmed consumed, or handled after submit failure.
 
 Problem statement:
 
@@ -755,14 +780,17 @@ Codex constraints:
   logic, exit logic, or attempt semantics without Owner confirmation.
 - Codex may document architecture options, implementation boundaries, and
   validation gates.
+- Codex may implement pure models, shadow bindings, read-only fact overlays,
+  non-executing previews, and promotion gates that make missing decisions block
+  explicitly.
 - Codex may inspect existing strategy-related code and evidence to inform the
   options.
 - Codex must not continue toward real OrderLifecycle adapter implementation
-  until B0 is accepted.
+  until the promotion gate is satisfied and Owner explicitly authorizes the
+  next execution stage.
 
-Forbidden in B0:
+Forbidden beyond B0 shadow / preview / gate work:
 
-- no code changes;
 - no strategy optimization;
 - no backtest parameter tuning;
 - no real or testnet execution;

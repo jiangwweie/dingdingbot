@@ -1,0 +1,257 @@
+"""Promotion gate for strategy-runtime execution readiness.
+
+This module is pure domain logic. It evaluates whether a strategy semantics
+binding has the Owner/Codex confirmations needed before promotion beyond
+shadow/preview runtime governance. It does not create candidates, intents,
+orders, exchange payloads, or runtime mutations.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.domain.strategy_semantics import (
+    StrategyCandidateMode,
+    StrategyImplementationBinding,
+    StrategyImplementationKind,
+)
+
+
+class StrategyRuntimePromotionGateModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StrategyRuntimePromotionScope(str, Enum):
+    CONTROLLED_RUNTIME_EXECUTION = "controlled_runtime_execution"
+    FIRST_REAL_SUBMIT_GATE_REVIEW = "first_real_submit_gate_review"
+
+
+class StrategyRuntimePromotionGateStatus(str, Enum):
+    BLOCKED = "blocked"
+    READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN = (
+        "ready_for_controlled_runtime_execution_design"
+    )
+    READY_FOR_FIRST_REAL_SUBMIT_GATE_REVIEW = (
+        "ready_for_first_real_submit_gate_review"
+    )
+
+
+class StrategySemanticsConfirmationFacts(StrategyRuntimePromotionGateModel):
+    strategy_family_confirmed: bool = False
+    implementation_source_confirmed: bool = False
+    required_facts_confirmed: bool = False
+    entry_policy_confirmed: bool = False
+    exit_policy_confirmed: bool = False
+    protection_policy_confirmed: bool = False
+    eligible_for_runtime_execution_confirmed: bool = False
+    right_tail_review_metrics_confirmed: bool = False
+
+
+class RuntimeExecutionConfirmationFacts(StrategyRuntimePromotionGateModel):
+    runtime_profile_confirmed: bool = False
+    owner_confirmation_mode_confirmed: bool = False
+    attempt_consumption_rule_confirmed: bool = False
+    budget_reservation_rule_confirmed: bool = False
+    trusted_active_position_source_confirmed: bool = False
+    trusted_account_fact_source_confirmed: bool = False
+    short_side_conservative_profile_confirmed: bool = False
+
+
+class FirstRealSubmitConfirmationFacts(StrategyRuntimePromotionGateModel):
+    budget_release_or_consume_rule_confirmed: bool = False
+    protection_creation_failure_policy_confirmed: bool = False
+    duplicate_submit_policy_confirmed: bool = False
+    deployment_readiness_confirmed: bool = False
+    explicit_owner_real_submit_authorization: bool = False
+
+
+class StrategyRuntimePromotionGateInput(StrategyRuntimePromotionGateModel):
+    binding: StrategyImplementationBinding
+    scope: StrategyRuntimePromotionScope = (
+        StrategyRuntimePromotionScope.CONTROLLED_RUNTIME_EXECUTION
+    )
+    semantic_confirmations: StrategySemanticsConfirmationFacts = Field(
+        default_factory=StrategySemanticsConfirmationFacts
+    )
+    runtime_confirmations: RuntimeExecutionConfirmationFacts = Field(
+        default_factory=RuntimeExecutionConfirmationFacts
+    )
+    first_real_submit_confirmations: FirstRealSubmitConfirmationFacts = Field(
+        default_factory=FirstRealSubmitConfirmationFacts
+    )
+
+
+class StrategyRuntimePromotionGateResult(StrategyRuntimePromotionGateModel):
+    status: StrategyRuntimePromotionGateStatus
+    scope: StrategyRuntimePromotionScope
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    missing_owner_decisions: list[str] = Field(default_factory=list)
+    binding_candidate_mode: StrategyCandidateMode
+    implementation_kind: StrategyImplementationKind
+    proven_alpha: bool
+    not_execution_authority: Literal[True] = True
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    exchange_called: Literal[False] = False
+
+
+def evaluate_strategy_runtime_promotion_gate(
+    gate_input: StrategyRuntimePromotionGateInput,
+) -> StrategyRuntimePromotionGateResult:
+    binding = gate_input.binding
+    blockers: list[str] = []
+    warnings: list[str] = []
+    missing_owner_decisions: list[str] = []
+
+    _check_binding_admission(binding, blockers, warnings)
+    _check_semantic_confirmations(
+        gate_input.semantic_confirmations,
+        blockers,
+        missing_owner_decisions,
+    )
+    _check_runtime_confirmations(
+        binding,
+        gate_input.runtime_confirmations,
+        blockers,
+        missing_owner_decisions,
+    )
+    if gate_input.scope == StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW:
+        _check_first_real_submit_confirmations(
+            gate_input.first_real_submit_confirmations,
+            blockers,
+            missing_owner_decisions,
+        )
+
+    if blockers:
+        status = StrategyRuntimePromotionGateStatus.BLOCKED
+    elif gate_input.scope == StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW:
+        status = StrategyRuntimePromotionGateStatus.READY_FOR_FIRST_REAL_SUBMIT_GATE_REVIEW
+    else:
+        status = (
+            StrategyRuntimePromotionGateStatus.READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN
+        )
+
+    if not binding.proven_alpha:
+        warnings.append(
+            "strategy_not_proven_alpha_limits_economic_and_autonomy_admission"
+        )
+
+    return StrategyRuntimePromotionGateResult(
+        status=status,
+        scope=gate_input.scope,
+        blockers=sorted(set(blockers)),
+        warnings=sorted(set(warnings)),
+        missing_owner_decisions=sorted(set(missing_owner_decisions)),
+        binding_candidate_mode=binding.candidate_mode,
+        implementation_kind=binding.implementation_kind,
+        proven_alpha=binding.proven_alpha,
+    )
+
+
+def _check_binding_admission(
+    binding: StrategyImplementationBinding,
+    blockers: list[str],
+    warnings: list[str],
+) -> None:
+    if binding.candidate_mode != StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED:
+        blockers.append("strategy_binding_not_trade_candidate")
+    if binding.implementation_kind == StrategyImplementationKind.REGIME_CLASSIFIER:
+        blockers.append("regime_classifier_not_runtime_trade_strategy")
+    if binding.implementation_kind == StrategyImplementationKind.DATA_DEPENDENT_BACKLOG:
+        blockers.append("data_backlog_not_runtime_trade_strategy")
+    if binding.reference_implementation:
+        warnings.append("reference_implementation_not_proven_production_strategy")
+
+
+def _check_semantic_confirmations(
+    facts: StrategySemanticsConfirmationFacts,
+    blockers: list[str],
+    missing_owner_decisions: list[str],
+) -> None:
+    required = {
+        "strategy_family_confirmed": facts.strategy_family_confirmed,
+        "implementation_source_confirmed": facts.implementation_source_confirmed,
+        "required_facts_confirmed": facts.required_facts_confirmed,
+        "entry_policy_confirmed": facts.entry_policy_confirmed,
+        "exit_policy_confirmed": facts.exit_policy_confirmed,
+        "protection_policy_confirmed": facts.protection_policy_confirmed,
+        "eligible_for_runtime_execution_confirmed": (
+            facts.eligible_for_runtime_execution_confirmed
+        ),
+        "right_tail_review_metrics_confirmed": (
+            facts.right_tail_review_metrics_confirmed
+        ),
+    }
+    _append_missing(required, "semantic", blockers, missing_owner_decisions)
+
+
+def _check_runtime_confirmations(
+    binding: StrategyImplementationBinding,
+    facts: RuntimeExecutionConfirmationFacts,
+    blockers: list[str],
+    missing_owner_decisions: list[str],
+) -> None:
+    required = {
+        "runtime_profile_confirmed": facts.runtime_profile_confirmed,
+        "owner_confirmation_mode_confirmed": facts.owner_confirmation_mode_confirmed,
+        "attempt_consumption_rule_confirmed": facts.attempt_consumption_rule_confirmed,
+        "budget_reservation_rule_confirmed": facts.budget_reservation_rule_confirmed,
+        "trusted_active_position_source_confirmed": (
+            facts.trusted_active_position_source_confirmed
+        ),
+        "trusted_account_fact_source_confirmed": (
+            facts.trusted_account_fact_source_confirmed
+        ),
+    }
+    if _binding_requires_short_side_conservative_profile(binding):
+        required["short_side_conservative_profile_confirmed"] = (
+            facts.short_side_conservative_profile_confirmed
+        )
+    _append_missing(required, "runtime", blockers, missing_owner_decisions)
+
+
+def _check_first_real_submit_confirmations(
+    facts: FirstRealSubmitConfirmationFacts,
+    blockers: list[str],
+    missing_owner_decisions: list[str],
+) -> None:
+    required = {
+        "budget_release_or_consume_rule_confirmed": (
+            facts.budget_release_or_consume_rule_confirmed
+        ),
+        "protection_creation_failure_policy_confirmed": (
+            facts.protection_creation_failure_policy_confirmed
+        ),
+        "duplicate_submit_policy_confirmed": facts.duplicate_submit_policy_confirmed,
+        "deployment_readiness_confirmed": facts.deployment_readiness_confirmed,
+        "explicit_owner_real_submit_authorization": (
+            facts.explicit_owner_real_submit_authorization
+        ),
+    }
+    _append_missing(required, "first_real_submit", blockers, missing_owner_decisions)
+
+
+def _append_missing(
+    required: dict[str, bool],
+    prefix: str,
+    blockers: list[str],
+    missing_owner_decisions: list[str],
+) -> None:
+    for key, confirmed in required.items():
+        if confirmed:
+            continue
+        blockers.append(f"{prefix}_{key}_missing")
+        missing_owner_decisions.append(key)
+
+
+def _binding_requires_short_side_conservative_profile(
+    binding: StrategyImplementationBinding,
+) -> bool:
+    supported_sides = {side.lower() for side in binding.supported_sides}
+    if "short" in supported_sides:
+        return True
+    return bool(binding.metadata.get("short_side_conservative_profile_required"))

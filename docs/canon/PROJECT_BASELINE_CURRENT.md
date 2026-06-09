@@ -120,6 +120,12 @@ Key facts:
   trusted local/read-only sources, marks missing/stale account or position
   facts through `SignalDataQuality`, and lets B0 RequiredFacts fail closed
   rather than trusting owner/user-supplied active-position counts.
+- **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
+  gate for promotion beyond B0 shadow/preview work. It turns missing
+  Owner/Codex strategy, runtime, fact-source, BRF short-profile, and first real
+  submit confirmations into explicit blockers while preserving
+  `not_execution_authority=true`, `execution_intent_created=false`,
+  `order_created=false`, and `exchange_called=false`.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signal pairs into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->
