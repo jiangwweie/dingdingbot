@@ -20,6 +20,7 @@ from src.domain.signal_evaluation import (
     SignalEvaluation,
     SignalEvaluationStatus,
 )
+from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
 
@@ -320,6 +321,30 @@ async def get_order_candidate(
     service = await _signal_evaluation_shadow_service()
     try:
         return _order_candidate_view(await service.get_order_candidate(order_candidate_id))
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-final-gate-preview/order-candidates/{order_candidate_id}",
+    response_model=RuntimeFinalGatePreview,
+)
+async def runtime_final_gate_preview_for_order_candidate(
+    order_candidate_id: str,
+    active_positions_count: Optional[int] = Query(default=None, ge=0),
+    owner_reviewed: bool = Query(default=False),
+) -> RuntimeFinalGatePreview:
+    service = await _runtime_final_gate_preview_service()
+    try:
+        return await service.preview_order_candidate(
+            order_candidate_id=order_candidate_id,
+            active_positions_count=active_positions_count,
+            owner_reviewed=owner_reviewed,
+            metadata={"api": "trading_console_get"},
+        )
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
@@ -827,6 +852,24 @@ async def _signal_evaluation_shadow_service() -> Any:
             detail="Signal evaluation repository unavailable; persistent PG facts are required.",
         ) from exc
     setattr(api_module, "_signal_evaluation_shadow_service", service)
+    return service
+
+
+async def _runtime_final_gate_preview_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_final_gate_preview_service", None)
+    if injected is not None:
+        return injected
+    from src.application.runtime_final_gate_preview_service import (
+        RuntimeFinalGatePreviewService,
+    )
+
+    service = RuntimeFinalGatePreviewService(
+        runtime_service=await _strategy_runtime_service(),
+        signal_evaluation_service=await _signal_evaluation_shadow_service(),
+    )
+    setattr(api_module, "_runtime_final_gate_preview_service", service)
     return service
 
 
