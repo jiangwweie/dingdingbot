@@ -303,6 +303,13 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
     right_tail_review_metrics_confirmed: bool = False,
     runtime_profile_confirmed: bool = False,
     owner_confirmation_mode_confirmed: bool = False,
+    max_loss_budget_confirmed: bool = False,
+    max_notional_boundary_confirmed: bool = False,
+    max_leverage_boundary_confirmed: bool = False,
+    margin_usage_boundary_confirmed: bool = False,
+    liquidation_buffer_boundary_confirmed: bool = False,
+    protection_readiness_source_confirmed: bool = False,
+    stale_fact_behavior_confirmed: bool = False,
     attempt_consumption_rule_confirmed: bool = False,
     budget_reservation_rule_confirmed: bool = False,
     trusted_active_position_source_confirmed: bool = False,
@@ -338,6 +345,15 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
         right_tail_review_metrics_confirmed=right_tail_review_metrics_confirmed,
         runtime_profile_confirmed=runtime_profile_confirmed,
         owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+        max_loss_budget_confirmed=max_loss_budget_confirmed,
+        max_notional_boundary_confirmed=max_notional_boundary_confirmed,
+        max_leverage_boundary_confirmed=max_leverage_boundary_confirmed,
+        margin_usage_boundary_confirmed=margin_usage_boundary_confirmed,
+        liquidation_buffer_boundary_confirmed=liquidation_buffer_boundary_confirmed,
+        protection_readiness_source_confirmed=(
+            protection_readiness_source_confirmed
+        ),
+        stale_fact_behavior_confirmed=stale_fact_behavior_confirmed,
         attempt_consumption_rule_confirmed=attempt_consumption_rule_confirmed,
         budget_reservation_rule_confirmed=budget_reservation_rule_confirmed,
         trusted_active_position_source_confirmed=(
@@ -381,6 +397,13 @@ async def runtime_strategy_promotion_gate_preview(
     right_tail_review_metrics_confirmed: bool = False,
     runtime_profile_confirmed: bool = False,
     owner_confirmation_mode_confirmed: bool = False,
+    max_loss_budget_confirmed: bool = False,
+    max_notional_boundary_confirmed: bool = False,
+    max_leverage_boundary_confirmed: bool = False,
+    margin_usage_boundary_confirmed: bool = False,
+    liquidation_buffer_boundary_confirmed: bool = False,
+    protection_readiness_source_confirmed: bool = False,
+    stale_fact_behavior_confirmed: bool = False,
     attempt_consumption_rule_confirmed: bool = False,
     budget_reservation_rule_confirmed: bool = False,
     trusted_active_position_source_confirmed: bool = False,
@@ -415,6 +438,17 @@ async def runtime_strategy_promotion_gate_preview(
             runtime_confirmations=RuntimeExecutionConfirmationFacts(
                 runtime_profile_confirmed=runtime_profile_confirmed,
                 owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+                max_loss_budget_confirmed=max_loss_budget_confirmed,
+                max_notional_boundary_confirmed=max_notional_boundary_confirmed,
+                max_leverage_boundary_confirmed=max_leverage_boundary_confirmed,
+                margin_usage_boundary_confirmed=margin_usage_boundary_confirmed,
+                liquidation_buffer_boundary_confirmed=(
+                    liquidation_buffer_boundary_confirmed
+                ),
+                protection_readiness_source_confirmed=(
+                    protection_readiness_source_confirmed
+                ),
+                stale_fact_behavior_confirmed=stale_fact_behavior_confirmed,
                 attempt_consumption_rule_confirmed=attempt_consumption_rule_confirmed,
                 budget_reservation_rule_confirmed=budget_reservation_rule_confirmed,
                 trusted_active_position_source_confirmed=(

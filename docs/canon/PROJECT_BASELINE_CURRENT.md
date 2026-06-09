@@ -2,7 +2,7 @@
 title: PROJECT_BASELINE_CURRENT
 status: CURRENT_CANON
 authority: owner-correction + code-verification + semantic-audit
-last_verified: 2026-06-09
+last_verified: 2026-06-10
 supersedes:
   - docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md (for canon reading order)
 source_of_truth:
@@ -145,8 +145,13 @@ Key facts:
   planner invocation and deployment enablement are not yet productized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
-  Owner/Codex strategy, runtime, fact-source, BRF short-profile, and first real
-  submit confirmations into explicit blockers while preserving
+  Owner/Codex strategy, runtime, fact-source, runtime safety boundary,
+  BRF short-profile, and first real submit confirmations into explicit
+  blockers. The runtime safety confirmations now separately cover max-loss
+  budget, max-notional boundary, max-leverage boundary, margin usage boundary,
+  liquidation-buffer boundary, protection-readiness source, stale-fact
+  behavior, trusted account facts, and trusted active-position facts while
+  preserving
   `not_execution_authority=true`, `execution_intent_created=false`,
   `order_created=false`, and `exchange_called=false`. A small application
   service can evaluate the gate by `StrategyFamilyVersion` from the semantics

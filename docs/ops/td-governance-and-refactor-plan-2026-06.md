@@ -215,6 +215,19 @@ passed
 git diff --check
 passed
 
+Sprint 7 runtime safety confirmation-gate validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
+16 passed
+
+python3 -m compileall -q src/domain/strategy_runtime_promotion_gate.py \
+  src/application/strategy_runtime_promotion_gate_service.py \
+  src/interfaces/api_trading_console.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
+passed
+
 Owner capital-base review semantics validation:
 
 python3 -m pytest -q tests/unit/test_owner_capital_adjustment_review.py
@@ -1181,6 +1194,21 @@ Scope:
 - CapitalProtection enforcement review;
 - leverage / margin / liquidation-buffer participation in runtime risk;
 - scripts bypass containment.
+
+Current local Sprint 7 slice:
+
+- `StrategyRuntimePromotionGate` now blocks promotion unless runtime safety
+  confirmations separately cover max-loss budget, max-notional boundary,
+  max-leverage boundary, margin usage boundary, liquidation-buffer boundary,
+  protection-readiness source, stale-fact behavior, trusted active-position
+  facts, trusted account facts, attempt consumption, and budget reservation.
+  This is a pure non-executing gate: it does not create candidates, create
+  intents, create orders, call OwnerBoundedExecution, call OrderLifecycle, call
+  exchange, or mutate runtime state.
+- Trading Console promotion-gate preview APIs expose those confirmations as
+  explicit opt-in query facts. Missing values remain blockers, so the UI/API
+  cannot collapse “runtime profile confirmed” into leverage/margin/liquidation
+  readiness.
 
 Required properties:
 
