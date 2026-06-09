@@ -149,6 +149,23 @@ passed
 
 git diff --check
 passed
+
+B0 Trading Console internal assembly follow-up validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_fact_overlay.py \
+  tests/unit/test_td4_runtime_final_gate_preview.py \
+  tests/unit/test_td5_runtime_execution_plan.py \
+  tests/unit/test_td3_signal_evaluation_order_candidate_shadow.py
+100 passed
+
+python3 -m compileall -q src/interfaces/api_trading_console.py \
+  src/application/strategy_runtime_fact_overlay_service.py \
+  src/application/runtime_strategy_signal_planning_service.py \
+  tests/unit/test_b0_strategy_runtime_fact_overlay.py
+passed
+
+git diff --check
+passed
 ```
 
 Deployment note:
@@ -569,6 +586,11 @@ Current local B0 implementation slice:
   before semantic binding when explicitly configured. It remains non-executing
   and does not write recorded ExecutionIntent rows, create local orders, call
   OrderLifecycle, or call exchange.
+- `src/interfaces/api_trading_console.py` now has an internal non-endpoint
+  service factory that wires RuntimeStrategySignalPlanningService with the
+  trusted overlay, PG active-position source, cached account facts, shadow
+  SignalEvaluation service, and runtime execution planning service. This does
+  not expose a public strategy-signal write endpoint.
 - `tests/unit/test_b0_strategy_semantics_binding.py` verifies catalog
   semantics, missing/stale fact blocking, BRF shadow candidate binding, RMR
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
@@ -593,15 +615,17 @@ Current local B0 implementation slice:
   trusted overlay replaces caller-supplied active-position counts, fails closed
   when trusted position/account fact sources are missing, and can feed the
   runtime draft path without creating ExecutionIntent records, local orders, or
-  exchange calls.
+  exchange calls. It also verifies Trading Console internal assembly wires the
+  overlay from PG positions plus cached account facts.
 
 Remaining B0 work:
 
 - Owner/Codex-gated BRF evaluator details;
 - RMR regime classifier implementation details;
 - live/runtime fact-source orchestration beyond the current injected trusted
-  account/active-position overlay, especially scheduler/runtime reader wiring
-  plus funding, open-interest, and crowding readers;
+  account/active-position overlay and Trading Console internal assembly,
+  especially scheduler/runtime reader wiring plus funding, open-interest, and
+  crowding readers;
 - explicit real-submit attempt / budget release-or-consume acceptance before
   runtime promotion. Local reservation/mutation now uses a max-loss-first budget
   basis, but promotion still requires Owner/Codex confirmation of when

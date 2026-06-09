@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -1316,6 +1317,43 @@ async def _runtime_execution_planning_service() -> Any:
     return service
 
 
+async def _runtime_strategy_signal_planning_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_strategy_signal_planning_service", None)
+    if injected is not None:
+        return injected
+    from src.application.runtime_strategy_signal_planning_service import (
+        RuntimeStrategySignalPlanningService,
+    )
+    from src.application.strategy_runtime_fact_overlay_service import (
+        StrategyRuntimeFactOverlayService,
+    )
+    from src.application.strategy_semantics_shadow_binding_service import (
+        StrategySemanticsShadowBindingService,
+    )
+
+    position_source = getattr(api_module, "_position_repo", None)
+    if position_source is None:
+        position_source = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        )
+    service = RuntimeStrategySignalPlanningService(
+        semantics_binding_service=StrategySemanticsShadowBindingService(
+            shadow_service=await _signal_evaluation_shadow_service(),
+        ),
+        runtime_execution_planning_service=await _runtime_execution_planning_service(),
+        runtime_fact_overlay_service=StrategyRuntimeFactOverlayService(
+            active_position_source=position_source,
+            account_facts_source=_TradingConsoleCachedAccountFactsSource(api_module),
+        ),
+    )
+    setattr(api_module, "_runtime_strategy_signal_planning_service", service)
+    return service
+
+
 async def _runtime_execution_intent_adapter_service() -> Any:
     from src.interfaces import api as api_module
 
@@ -1364,6 +1402,77 @@ async def _runtime_execution_intent_adapter_service() -> Any:
     )
     setattr(api_module, "_runtime_execution_intent_adapter_service", service)
     return service
+
+
+class _TradingConsoleCachedAccountFactsSource:
+    """Trial-readiness account facts source from already-cached account state."""
+
+    def __init__(self, api_module: Any) -> None:
+        self._api_module = api_module
+
+    async def read_trial_readiness_account_facts(
+        self,
+        *,
+        candidate_id: str,
+        symbol: str,
+        side: str,
+        generated_at_ms: int,
+    ) -> Any:
+        from src.application.trial_readiness_account_facts import (
+            AccountFactsFreshnessStatus,
+            AccountFactsReconciliationStatus,
+            AccountFactsSourceType,
+            TrialReadinessAccountFacts,
+        )
+
+        snapshot = _trading_console_cached_account_snapshot(self._api_module)
+        if snapshot is None:
+            return TrialReadinessAccountFacts(
+                source_id="trading_console_cached_account_snapshot_unavailable",
+                source_type=AccountFactsSourceType.UNAVAILABLE,
+                freshness_status=AccountFactsFreshnessStatus.MISSING,
+                reconciliation_status=AccountFactsReconciliationStatus.UNKNOWN,
+                read_only_guarantee=True,
+                external_call_performed=False,
+                external_call_type="none",
+                notes=(
+                    f"candidate={candidate_id}",
+                    f"symbol={symbol}",
+                    f"side={side}",
+                    "cached account snapshot unavailable",
+                ),
+            )
+
+        timestamp_ms = _int_or_none(_read_snapshot_value(snapshot, "timestamp"))
+        freshness = _cached_account_snapshot_freshness(
+            timestamp_ms,
+            generated_at_ms=generated_at_ms,
+        )
+        return TrialReadinessAccountFacts(
+            account_id="trading_console_cached_account",
+            account_type="cached_account_snapshot",
+            source_id="trading_console_cached_account_snapshot",
+            source_type=AccountFactsSourceType.CACHED_SNAPSHOT,
+            account_equity=_decimal_or_none(
+                _read_snapshot_value(snapshot, "total_balance")
+            ),
+            available_margin=_decimal_or_none(
+                _read_snapshot_value(snapshot, "available_balance")
+            ),
+            timestamp_ms=timestamp_ms,
+            freshness_status=freshness,
+            reconciliation_status=AccountFactsReconciliationStatus.UNKNOWN,
+            read_only_guarantee=True,
+            external_call_performed=False,
+            external_call_type="none",
+            notes=(
+                f"candidate={candidate_id}",
+                f"symbol={symbol}",
+                f"side={side}",
+                "source=Trading Console cached account snapshot",
+                "no account API call performed by this source",
+            ),
+        )
 
 
 def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspectionView:
@@ -1474,6 +1583,72 @@ def _decimal_string(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _trading_console_cached_account_snapshot(api_module: Any) -> Any:
+    account_getter = getattr(api_module, "_account_getter", None)
+    if callable(account_getter):
+        try:
+            return account_getter()
+        except Exception:
+            return None
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    if gateway is not None and hasattr(gateway, "get_account_snapshot"):
+        try:
+            return gateway.get_account_snapshot()
+        except Exception:
+            return None
+    read_only_gateway = getattr(api_module, "_trading_console_read_only_exchange_gateway", None)
+    if read_only_gateway is not None and hasattr(read_only_gateway, "get_account_snapshot"):
+        try:
+            return read_only_gateway.get_account_snapshot()
+        except Exception:
+            return None
+    return None
+
+
+def _cached_account_snapshot_freshness(
+    timestamp_ms: int | None,
+    *,
+    generated_at_ms: int,
+) -> Any:
+    from src.application.trial_readiness_account_facts import (
+        AccountFactsFreshnessStatus,
+    )
+
+    if timestamp_ms is None:
+        return AccountFactsFreshnessStatus.MISSING
+    if timestamp_ms > generated_at_ms + 60_000:
+        return AccountFactsFreshnessStatus.UNKNOWN
+    if generated_at_ms - timestamp_ms <= 5 * 60 * 1000:
+        return AccountFactsFreshnessStatus.FRESH
+    return AccountFactsFreshnessStatus.STALE
+
+
+def _read_snapshot_value(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _decimal_or_none(value: Any) -> Any:
+    if value is None:
+        return None
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _cached_pg_repo(api_module: Any, attr_name: str, factory: Any) -> Optional[Any]:

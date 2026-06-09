@@ -216,6 +216,10 @@ Current local B0 implementation slice:
   runtime fact overlay before semantic binding when explicitly configured. It
   does not create a recorded ExecutionIntent, local order, OrderLifecycle call,
   or exchange request.
+- `src/interfaces/api_trading_console.py` has an internal service factory that
+  wires the B0 runtime strategy signal planner with PG active-position facts
+  and cached account facts. This is an application assembly point only; no
+  public strategy-signal write endpoint is exposed by this slice.
 - This is not proven-alpha approval, not execution authority, and not a real
   OrderLifecycle adapter. Live fact readers, BRF/RMR concrete evaluator
   details, FCO funding/OI/crowding data coverage, and runtime promotion remain

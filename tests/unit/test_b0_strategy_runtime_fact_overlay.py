@@ -30,7 +30,7 @@ from src.application.trial_readiness_account_facts import (
     StaticTrialReadinessAccountFactsSource,
     TrialReadinessAccountFacts,
 )
-from src.domain.models import Direction, Position
+from src.domain.models import AccountSnapshot, Direction, Position
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraftStatus
 from src.domain.signal_evaluation import (
     OrderCandidate,
@@ -434,3 +434,42 @@ async def test_strategy_signal_planning_blocks_before_candidate_when_overlay_acc
             max_loss_reference=Decimal("3"),
             leverage=Decimal("1"),
         )
+
+
+async def test_trading_console_factory_wires_trusted_runtime_fact_overlay(monkeypatch):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    class _PlanningService:
+        pass
+
+    class _ShadowService:
+        pass
+
+    position_source = _PositionSource(positions=[])
+    monkeypatch.setattr(api_module, "_runtime_strategy_signal_planning_service", None, raising=False)
+    monkeypatch.setattr(api_module, "_runtime_execution_planning_service", _PlanningService(), raising=False)
+    monkeypatch.setattr(api_module, "_signal_evaluation_shadow_service", _ShadowService(), raising=False)
+    monkeypatch.setattr(api_module, "_position_repo", position_source, raising=False)
+    monkeypatch.setattr(
+        api_module,
+        "_account_getter",
+        lambda: AccountSnapshot(
+            total_balance=Decimal("30"),
+            available_balance=Decimal("29"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=NOW_MS,
+        ),
+        raising=False,
+    )
+
+    service = await api_trading_console._runtime_strategy_signal_planning_service()
+    overlay = service._runtime_fact_overlay_service
+    result = await overlay.apply(_signal_input(), output=_output(), runtime=_runtime())
+
+    assert overlay is not None
+    assert result.blockers == []
+    assert result.signal_input.position_open_order_summary["active_positions_count"] == 0
+    assert result.signal_input.account_facts_snapshot.source == "cached_snapshot"
+    assert result.signal_input.account_facts_snapshot.available_balance == Decimal("29")

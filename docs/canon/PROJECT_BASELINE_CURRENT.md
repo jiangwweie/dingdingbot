@@ -130,7 +130,9 @@ Key facts:
   overlay is injected, it applies that overlay before semantic binding. It does
   not expose owner-supplied active-position counts as an allow fact; runtime
   FinalGate must use configured local active-position facts or block when
-  unavailable.
+  unavailable. Trading Console now has an internal non-endpoint service factory
+  that wires this planner with PG active-position facts and cached account facts;
+  it does not expose a new strategy-signal write endpoint.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange. Its
