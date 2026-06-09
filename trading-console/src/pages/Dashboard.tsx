@@ -562,7 +562,7 @@ function ControlTile({
   const disabled = !control.enabled || loading;
   const content = (
     <div className={cn(
-      'min-h-28 bg-slate-900 px-4 py-3 text-left transition',
+      'min-h-28 w-full bg-slate-900 px-4 py-3 text-left transition',
       control.enabled ? 'hover:bg-slate-800/80' : 'opacity-60',
     )}>
       <div className="flex items-center justify-between gap-2">
@@ -584,27 +584,27 @@ function ControlTile({
 
   if (control.kind === 'operation_layer_preflight') {
     return (
-      <button type="button" onClick={onPreflight} disabled={disabled} className="cursor-pointer disabled:cursor-not-allowed">
+      <button type="button" onClick={onPreflight} disabled={disabled} className="w-full cursor-pointer disabled:cursor-not-allowed">
         {content}
       </button>
     );
   }
   if (control.control_id === 'refresh_status') {
     return (
-      <button type="button" onClick={onRefresh} disabled={loading} className="cursor-pointer disabled:cursor-not-allowed">
+      <button type="button" onClick={onRefresh} disabled={loading} className="w-full cursor-pointer disabled:cursor-not-allowed">
         {content}
       </button>
     );
   }
   if (control.control_id === 'view_evidence') {
     return (
-      <button type="button" onClick={onEvidence} className="cursor-pointer">
+      <button type="button" onClick={onEvidence} className="w-full cursor-pointer">
         {content}
       </button>
     );
   }
-  if (control.route && control.enabled) return <Link to={productRoute(control.route)}>{content}</Link>;
-  return <div>{content}</div>;
+  if (control.route && control.enabled) return <Link to={productRoute(control.route)} className="block w-full">{content}</Link>;
+  return <div className="w-full">{content}</div>;
 }
 
 function OperationPreflightPanel({
