@@ -628,3 +628,43 @@ async def test_trading_console_factory_wires_trusted_runtime_fact_overlay(monkey
     assert result.signal_input.position_open_order_summary["active_positions_count"] == 0
     assert result.signal_input.account_facts_snapshot.source == "cached_snapshot"
     assert result.signal_input.account_facts_snapshot.available_balance == Decimal("29")
+    assert overlay._market_fact_source is None
+
+
+async def test_trading_console_factory_can_enable_public_market_fact_source(monkeypatch):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    class _PlanningService:
+        pass
+
+    class _ShadowService:
+        pass
+
+    monkeypatch.setenv("TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED", "true")
+    monkeypatch.setattr(api_module, "_runtime_strategy_signal_planning_service", None, raising=False)
+    monkeypatch.setattr(api_module, "_runtime_execution_planning_service", _PlanningService(), raising=False)
+    monkeypatch.setattr(api_module, "_signal_evaluation_shadow_service", _ShadowService(), raising=False)
+    monkeypatch.setattr(api_module, "_position_repo", _PositionSource(positions=[]), raising=False)
+    monkeypatch.setattr(
+        api_module,
+        "_account_getter",
+        lambda: AccountSnapshot(
+            total_balance=Decimal("30"),
+            available_balance=Decimal("29"),
+            unrealized_pnl=Decimal("0"),
+            positions=[],
+            timestamp=NOW_MS,
+        ),
+        raising=False,
+    )
+
+    service = await api_trading_console._runtime_strategy_signal_planning_service()
+    overlay = service._runtime_fact_overlay_service
+
+    assert overlay._market_fact_source is not None
+    assert (
+        overlay._market_fact_source.source_id
+        == "binance_usdm_derivative_market_facts_read_only"
+    )
+    assert overlay._market_fact_source.is_live_read_only is True

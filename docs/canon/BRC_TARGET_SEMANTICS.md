@@ -190,8 +190,11 @@ Initial strategy-semantics reference candidates:
   requirements, but stale or missing RMR output must not act as execution
   authority. A pure closed-candle RMR classifier now exists for regime evidence
   only.
-- `FCO-001`: funding / open-interest / crowding backlog family until data
-  facts and freshness semantics are available.
+- `FCO-001`: funding / open-interest / crowding backlog family until
+  deployment-backed fact coverage, freshness semantics, and Owner strategy
+  semantics are confirmed. A Binance USD-M public/read-only derivative fact
+  source now exists as infrastructure, but that does not promote FCO to a
+  runtime strategy by itself.
 
 Current local B0 implementation slice:
 
@@ -262,13 +265,16 @@ Current local B0 implementation slice:
   or exchange request.
 - `src/interfaces/api_trading_console.py` has an internal service factory that
   wires the B0 runtime strategy signal planner with PG active-position facts
-  and cached account facts. This is an application assembly point only; no
-  public strategy-signal write endpoint is exposed by this slice.
+  and cached account facts. It can also opt into
+  `BinanceUsdmDerivativeMarketFactSource` via
+  `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true` for public/read-only
+  funding, open-interest, and crowding facts. This is an application assembly
+  point only; no public strategy-signal write endpoint is exposed by this slice.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. Live fact reader implementations, scheduler/runtime
-  wiring, BRF runtime-profile confirmation, deployment-backed FCO
-  funding/OI/crowding coverage, and runtime promotion remain Owner/Codex-gated
-  before promotion beyond shadow binding.
+  OrderLifecycle adapter. Scheduler/runtime automatic fact-source wiring, BRF
+  runtime-profile confirmation, deployment-backed FCO funding/OI/crowding
+  coverage, and runtime promotion remain Owner/Codex-gated before promotion
+  beyond shadow binding.
 
 ProtectionPolicy and ExitPolicy must stay separate:
 

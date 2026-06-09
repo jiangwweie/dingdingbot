@@ -1583,10 +1583,29 @@ async def _runtime_strategy_signal_planning_service() -> Any:
         runtime_fact_overlay_service=StrategyRuntimeFactOverlayService(
             active_position_source=position_source,
             account_facts_source=_TradingConsoleCachedAccountFactsSource(api_module),
+            market_fact_source=_trading_console_public_market_fact_source(),
         ),
     )
     setattr(api_module, "_runtime_strategy_signal_planning_service", service)
     return service
+
+
+def _trading_console_public_market_fact_source() -> Any | None:
+    """Return the optional public market fact source for B0 semantics.
+
+    Disabled by default so normal Console reads do not acquire a new network
+    dependency. When enabled, the source remains public/read-only and has no
+    API key, account, order, withdrawal, transfer, or ExchangeGateway dependency.
+    """
+
+    enabled = os.environ.get("TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED", "").strip().lower()
+    if enabled not in {"1", "true", "yes"}:
+        return None
+    from src.infrastructure.binance_usdm_derivative_market_fact_source import (
+        BinanceUsdmDerivativeMarketFactSource,
+    )
+
+    return BinanceUsdmDerivativeMarketFactSource()
 
 
 async def _strategy_runtime_promotion_gate_service() -> Any:

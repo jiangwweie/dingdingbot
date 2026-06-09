@@ -647,8 +647,10 @@ Current local B0 implementation slice:
   or stale through SignalDataQuality when the trusted source is unavailable or
   stale, and preserve fail-closed RequiredFacts behavior before semantic shadow
   candidate creation. The market-fact overlay is a non-executing injection
-  point only; live reader implementations and scheduler/runtime wiring remain
-  separate work.
+  point only. `BinanceUsdmDerivativeMarketFactSource` now supplies Binance
+  USD-M public/read-only funding, open-interest, and global long/short
+  account-ratio crowding facts without API keys, ExchangeGateway, account
+  access, or order/write dependencies.
 - `src/domain/strategy_runtime_promotion_gate.py` provides a pure non-executing
   promotion gate for Owner/Codex confirmations before promotion beyond
   shadow/preview work. It blocks missing strategy semantics, runtime profile,
@@ -697,7 +699,10 @@ Current local B0 implementation slice:
   service factory that wires RuntimeStrategySignalPlanningService with the
   trusted overlay, PG active-position source, cached account facts, shadow
   SignalEvaluation service, and runtime execution planning service. This does
-  not expose a public strategy-signal write endpoint.
+  not expose a public strategy-signal write endpoint. It can explicitly opt into
+  the Binance public derivative market fact source with
+  `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`; the default remains off
+  so normal Console reads do not acquire a new public-network dependency.
 - `tests/unit/test_b0_strategy_semantics_binding.py` verifies catalog
   semantics, missing/stale fact blocking, BRF shadow candidate binding, RMR
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
@@ -726,7 +731,13 @@ Current local B0 implementation slice:
   a trusted read-only market fact source is injected, and can feed the runtime
   draft path without creating ExecutionIntent records, local orders, or exchange
   calls. It also verifies Trading Console internal assembly wires the overlay
-  from PG positions plus cached account facts.
+  from PG positions plus cached account facts, and only enables the Binance
+  public derivative market fact source behind an explicit environment switch.
+- `tests/unit/test_binance_usdm_derivative_market_fact_source.py` verifies the
+  Binance public derivative market fact source parses funding, open-interest,
+  notional, and crowding proxy facts; marks missing/stale facts explicitly; and
+  remains no-API-key, no-ExchangeGateway, no-order, no-ExecutionIntent, and
+  no-execution-authority.
 - `tests/unit/test_b0_strategy_runtime_promotion_gate.py` verifies that CPM
   remains blocked until Owner/Codex semantic/runtime confirmations exist, lack
   of proven alpha warns rather than blocking semantic promotion, BRF requires
@@ -786,8 +797,8 @@ Remaining B0 work:
 
 - live/runtime fact-source orchestration beyond the current injected trusted
   account/active-position/market-fact overlays and Trading Console internal
-  assembly, especially scheduler/runtime reader implementations and deployment
-  wiring for funding, open-interest, and crowding sources;
+  assembly, especially scheduler/runtime automatic evaluation binding and
+  deployment enablement for funding, open-interest, and crowding sources;
 - deeper review automation beyond the first Owner-record/API/Console and
   explicit right-tail-metrics slices, especially automatic account-equity
   baseline snapshots, closed-trade review packet generation, and strategy
@@ -854,8 +865,8 @@ Initial strategy-family reference candidates:
 - `RMR-001` / range or chop recognition is initially a regime classifier, not
   the first trading strategy.
 - `FCO-001` / funding, open interest, and crowding remains a data-dependent
-  backlog family until RequiredFacts and market-data freshness semantics are
-  available.
+  backlog family until deployment-backed fact coverage, runtime wiring, and
+  Owner-confirmed strategy semantics are available.
 
 RequiredFacts boundary:
 
@@ -1203,7 +1214,9 @@ Optimization tracks:
 
 2. **Strategy family expansion**
    Complete CPM long, BRF short, and RMR regime-classifier semantics first.
-   Keep FCO funding/open-interest/crowding as a data-dependent backlog family.
+   Keep FCO funding/open-interest/crowding as a data-dependent backlog family
+   until its public/read-only fact coverage is deployment-wired and its strategy
+   semantics are Owner-confirmed.
    Later strategy families may include mean reversion, breakout failure, and
    momentum continuation when their facts and review semantics are explicit.
 

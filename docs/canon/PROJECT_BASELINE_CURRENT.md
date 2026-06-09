@@ -61,8 +61,10 @@ FCO:
 - RMR is initially a range/chop regime classifier, not the first trading
   strategy. It now has a pure closed-candle classifier implementation for
   regime evidence only.
-- FCO is a funding / open-interest / crowding backlog family until data facts,
-  freshness, and missing-fact behavior are defined.
+- FCO is a funding / open-interest / crowding backlog family until
+  deployment-backed fact coverage, freshness, missing-fact behavior, and Owner
+  strategy semantics are confirmed. A Binance USD-M public derivative fact
+  reader now exists as B0 infrastructure, but FCO is not promoted by that alone.
 
 ---
 
@@ -134,9 +136,12 @@ Key facts:
   with trusted local/read-only sources, marks missing/stale account, position,
   funding, open-interest, or crowding facts through `SignalDataQuality`, and
   lets B0 RequiredFacts fail closed rather than trusting owner/user-supplied
-  active-position counts or manually supplied derivative-market facts. This is
-  an injection point for trusted facts; live funding/OI/crowding reader
-  implementations and scheduler/runtime wiring are not yet productized.
+  active-position counts or manually supplied derivative-market facts.
+  `BinanceUsdmDerivativeMarketFactSource` can supply trusted public/read-only
+  funding, open-interest, and global long/short account-ratio crowding facts,
+  and Trading Console can opt into that source via
+  `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`. Scheduler/runtime
+  automatic wiring and deployment enablement are not yet productized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, BRF short-profile, and first real
