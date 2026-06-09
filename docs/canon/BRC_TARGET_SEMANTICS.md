@@ -310,6 +310,19 @@ Current local review/account-baseline implementation slice:
   withdrawal-adjusted capital-base review in the Trading Console analysis page.
   Missing account-equity / capital-base inputs remain explicit instead of being
   inferred.
+- `src/domain/right_tail_review.py` defines pure right-tail trade-path review
+  metrics for explicit trade facts: MFE, MAE, R multiple, tail win size, small
+  loss count, winner hold time, runner giveback / early cap, stop
+  effectiveness, and attempt-continuation quality. It cannot create execution,
+  order, exchange, runtime-budget, strategy-PnL, or withdrawal instructions.
+- `src/application/readmodels/trading_console.py` exposes
+  `review-state.right_tail_review` plus
+  `/api/trading-console/right-tail-review`; `trading-console/src/pages/ReviewState.tsx`
+  surfaces right-tail wins, small losses, max R, MFE, and single-tail-win
+  coverage. The source policy is explicit
+  `live_lifecycle_review.metadata.right_tail_trade_path` only; missing path
+  facts stay `review_inputs_required` rather than inferred from orders or
+  exchange.
 - `tests/unit/test_owner_capital_adjustment_review.py` verifies manual
   withdrawals and profit extraction do not become strategy losses or risk
   events, capital injection and capital-base reset are separate review facts,
@@ -319,9 +332,12 @@ Current local review/account-baseline implementation slice:
   persistence roundtrip preserves no-action flags. Trading Console readmodel
   tests verify recorded Owner withdrawal can explain equity drop without
   strategy loss attribution.
+- `tests/unit/test_right_tail_review.py` verifies long/short right-tail metrics,
+  payoff asymmetry, explicit missing-input behavior, and no-action guarantees.
+  Trading Console readmodel tests verify explicit lifecycle metadata can surface
+  right-tail review without creating any action authority.
 
-Future Review should emphasize right-tail asymmetric evaluation, including
-MFE, MAE, R multiple, tail win size, small loss count, winner hold time, runner
-giveback, whether the runner was capped too early, stop effectiveness, and
-whether the attempt deserved continuation. Review must not reduce strategy
+Future Review still needs closed-trade packet automation, automatic account
+equity baseline snapshots, strategy semantic ID propagation through order /
+position / review, and richer source readers. Review must not reduce strategy
 performance to win rate, average return, or short-term PnL only.

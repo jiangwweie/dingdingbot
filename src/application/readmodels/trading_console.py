@@ -48,6 +48,10 @@ from src.domain.owner_capital_adjustment import (
     OwnerCapitalBaseReviewInput,
     review_owner_capital_base_movement,
 )
+from src.domain.right_tail_review import (
+    RightTailTradePathFacts,
+    summarize_right_tail_reviews,
+)
 from src.application.owner_action_carrier_catalog import owner_action_carrier_id_for_symbol
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
@@ -468,6 +472,7 @@ class TradingConsoleReadModelService:
             currency=owner_capital_currency,
             limit=limit,
         )
+        right_tail_review = self._right_tail_review(snap=snap)
         return self._response(
             "review_state",
             snap,
@@ -477,6 +482,7 @@ class TradingConsoleReadModelService:
                 "filled_order_facts": filled_orders,
                 "positions": snap.pg_positions,
                 "owner_capital_base_review": owner_capital_review,
+                "right_tail_review": right_tail_review,
                 "unavailable_fields": {
                     "fills_table": "not_available",
                     "fee": "not_available",
@@ -518,6 +524,24 @@ class TradingConsoleReadModelService:
                 currency=owner_capital_currency,
                 limit=limit,
             ),
+        )
+
+    async def right_tail_review(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        limit: int = 100,
+        include_exchange: bool = False,
+    ) -> TradingConsoleReadModelResponse:
+        snap = await self.snapshot(
+            symbol=symbol,
+            include_exchange=include_exchange,
+            limit=limit,
+        )
+        return self._response(
+            "right_tail_review",
+            snap,
+            data=self._right_tail_review(snap=snap),
         )
 
     async def audit_chain(
@@ -1205,6 +1229,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/execution-control-state",
                     "GET /api/trading-console/review-state",
                     "GET /api/trading-console/owner-capital-review",
+                    "GET /api/trading-console/right-tail-review",
                     "GET /api/trading-console/audit-chain",
                     "GET /api/trading-console/carrier-availability",
                     "GET /api/trading-console/strategy-family-admission-state",
@@ -1609,6 +1634,72 @@ class TradingConsoleReadModelService:
         )
         base_payload["ending_capital_base"] = _scalar(result.ending_capital_base)
         return base_payload
+
+    def _right_tail_review(self, *, snap: TradingConsoleSnapshot) -> dict[str, Any]:
+        facts: list[RightTailTradePathFacts] = []
+        skipped: list[dict[str, Any]] = []
+        for review in snap.live_lifecycle_reviews:
+            metadata = review.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                skipped.append(
+                    {
+                        "review_id": review.get("review_id"),
+                        "reason": "metadata_not_object",
+                    }
+                )
+                continue
+            raw_facts = metadata.get("right_tail_trade_path")
+            if raw_facts is None:
+                continue
+            if not isinstance(raw_facts, dict):
+                skipped.append(
+                    {
+                        "review_id": review.get("review_id"),
+                        "reason": "right_tail_trade_path_not_object",
+                    }
+                )
+                continue
+            payload = {
+                "trade_id": review.get("review_id") or review.get("authorization_id"),
+                "source_review_id": review.get("review_id"),
+                "symbol": review.get("symbol"),
+                "side": review.get("side"),
+                "strategy_family_id": review.get("strategy_family_id"),
+                "strategy_family_version_id": review.get(
+                    "strategy_family_version_id"
+                ),
+                "runtime_instance_id": review.get("runtime_instance_id"),
+                "order_candidate_id": review.get("order_candidate_id"),
+                **raw_facts,
+            }
+            try:
+                facts.append(RightTailTradePathFacts.model_validate(payload))
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "review_id": review.get("review_id"),
+                        "reason": "right_tail_trade_path_invalid",
+                        "error": str(exc),
+                    }
+                )
+        summary = summarize_right_tail_reviews(facts).model_dump(mode="json")
+        summary["source"] = "live_lifecycle_review.metadata.right_tail_trade_path"
+        summary["skipped_sources"] = skipped
+        summary["required_metadata_shape"] = {
+            "metadata_key": "right_tail_trade_path",
+            "required_fields": [
+                "entry_price",
+                "exit_price",
+                "mfe_price",
+                "mae_price",
+                "realized_pnl",
+                "opened_at_ms",
+                "closed_at_ms",
+                "max_loss_budget_or_protection_stop_price",
+            ],
+            "source_policy": "explicit_only_no_order_or_exchange_inference",
+        }
+        return summary
 
     async def _read_live_lifecycle_reviews(
         self,

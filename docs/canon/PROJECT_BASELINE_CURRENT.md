@@ -145,6 +145,14 @@ Key facts:
   unavailable. Trading Console now has an internal non-endpoint service factory
   that wires this planner with PG active-position facts and cached account facts;
   it does not expose a new strategy-signal write endpoint.
+- **RightTailReview** now exists as pure review logic plus Trading Console
+  read-only presentation. It calculates MFE, MAE, R multiple, tail-win size,
+  small-loss count, winner hold time, runner giveback / early cap, stop
+  effectiveness, and attempt-continuation quality only from explicit
+  `live_lifecycle_review.metadata.right_tail_trade_path` facts. Missing trade
+  path facts remain `review_inputs_required`; the readmodel does not infer from
+  orders or exchange and does not create execution, order, budget, strategy-PnL,
+  exchange, or withdrawal authority.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange. Its

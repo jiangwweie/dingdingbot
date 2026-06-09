@@ -234,7 +234,17 @@ class _FakeBrcService:
 
 
 class _FakeLiveLifecycleReviewRepo:
+    def __init__(self, records=None):
+        self.records = records
+
     async def list(self, *, authorization_id=None, symbol=None, limit=50):
+        if self.records is not None:
+            records = [
+                item for item in self.records
+                if (authorization_id is None or getattr(item, "authorization_id", None) == authorization_id)
+                and (symbol is None or getattr(item, "symbol", None) == symbol)
+            ]
+            return records[:limit]
         return [
             SimpleNamespace(
                 review_id="live-review-auth-1-pending-open",
@@ -438,6 +448,7 @@ def _patch_deps(
     campaign_state_status: str = "observe",
     budget_authorization_status: str | None = "active_metadata_only",
     owner_capital_adjustment_repo=None,
+    live_lifecycle_review_repo=None,
 ):
     from src.interfaces import api as api_module
 
@@ -463,7 +474,12 @@ def _patch_deps(
     monkeypatch.setattr(api_module, "_audit_logger", _FakeAuditLogger())
     monkeypatch.setattr(api_module, "_signal_repo", _FakeSignalRepo())
     monkeypatch.setattr(api_module, "_brc_campaign_service", _FakeBrcService())
-    monkeypatch.setattr(api_module, "_live_lifecycle_review_repo", _FakeLiveLifecycleReviewRepo(), raising=False)
+    monkeypatch.setattr(
+        api_module,
+        "_live_lifecycle_review_repo",
+        live_lifecycle_review_repo or _FakeLiveLifecycleReviewRepo(),
+        raising=False,
+    )
     monkeypatch.setattr(
         api_module,
         "_owner_trial_flow_service",
@@ -4103,6 +4119,104 @@ def test_review_state_separates_owner_withdrawal_from_strategy_pnl(monkeypatch):
     assert payload["no_action_guarantee"]["mutates_pg"] is False
 
 
+def test_review_state_surfaces_right_tail_review_metrics(monkeypatch):
+    _configure_auth(monkeypatch)
+    live_reviews = [
+        SimpleNamespace(
+            review_id="live-review-tail-win",
+            authorization_id="auth-tail-win",
+            carrier_id="CPM-001-live-readonly-v0",
+            strategy_family_id="CPM-001",
+            strategy_family_version_id="CPM-001-v0",
+            runtime_instance_id="runtime-cpm-1",
+            order_candidate_id="candidate-cpm-1",
+            symbol=BNB,
+            side="long",
+            quantity="0.01",
+            lifecycle_status="closed_reviewed",
+            review_status="closed_reviewed",
+            metadata={
+                "right_tail_trade_path": {
+                    "entry_price": "100",
+                    "exit_price": "115",
+                    "mfe_price": "118",
+                    "mae_price": "98",
+                    "realized_pnl": "15",
+                    "max_loss_budget": "3",
+                    "opened_at_ms": 1780496600000,
+                    "closed_at_ms": 1780497600000,
+                    "runner_preserved": True,
+                }
+            },
+            places_order=False,
+            mutates_exchange=False,
+        ),
+        SimpleNamespace(
+            review_id="live-review-small-loss",
+            authorization_id="auth-small-loss",
+            carrier_id="CPM-001-live-readonly-v0",
+            strategy_family_id="CPM-001",
+            strategy_family_version_id="CPM-001-v0",
+            runtime_instance_id="runtime-cpm-1",
+            order_candidate_id="candidate-cpm-2",
+            symbol=BNB,
+            side="long",
+            quantity="0.01",
+            lifecycle_status="closed_reviewed",
+            review_status="closed_reviewed",
+            metadata={
+                "right_tail_trade_path": {
+                    "entry_price": "100",
+                    "exit_price": "98",
+                    "mfe_price": "101",
+                    "mae_price": "97",
+                    "realized_pnl": "-2",
+                    "max_loss_budget": "3",
+                    "opened_at_ms": 1780498600000,
+                    "closed_at_ms": 1780499000000,
+                    "runner_preserved": False,
+                }
+            },
+            places_order=False,
+            mutates_exchange=False,
+        ),
+    ]
+    _patch_deps(
+        monkeypatch,
+        exchange=_FakeExchangeGateway(),
+        live_lifecycle_review_repo=_FakeLiveLifecycleReviewRepo(live_reviews),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/review-state")
+        direct = client.get("/api/trading-console/right-tail-review")
+
+    assert response.status_code == 200
+    payload = response.json()
+    review = payload["data"]["right_tail_review"]
+    assert review["status"] == "reviewed"
+    assert review["right_tail_win_count"] == 1
+    assert review["small_loss_count"] == 1
+    assert review["max_r_multiple"] == "5.0000"
+    assert review["largest_tail_win"] == "15"
+    assert review["single_tail_win_covers_small_losses"] == "7.5000"
+    assert review["payoff_asymmetry_present"] is True
+    assert review["trade_reviews"][0]["classification"] == "right_tail_win"
+    assert review["trade_reviews"][0]["mfe_pct"] == "18.0000"
+    assert review["trade_reviews"][0]["mae_pct"] == "-2.0000"
+    assert review["no_action_guarantee"]["places_order"] is False
+    assert review["no_action_guarantee"]["creates_execution_intent"] is False
+    assert review["no_action_guarantee"]["calls_exchange"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+
+    assert direct.status_code == 200
+    assert direct.json()["read_model"] == "right_tail_review"
+    assert direct.json()["data"]["right_tail_win_count"] == 1
+
+
 def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
@@ -4119,6 +4233,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/execution-control-state",
         "/api/trading-console/review-state",
         "/api/trading-console/owner-capital-review",
+        "/api/trading-console/right-tail-review",
         "/api/trading-console/audit-chain?authorization_id=auth-1",
         "/api/trading-console/carrier-availability",
         "/api/trading-console/strategy-family-admission-state",

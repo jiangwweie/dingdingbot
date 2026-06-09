@@ -738,6 +738,21 @@ Current local B0 implementation slice:
   verify a recorded Owner withdrawal can explain an equity drop without
   strategy-loss attribution or any withdrawal/transfer/order/exchange
   instruction.
+- `src/domain/right_tail_review.py` defines pure right-tail trade-path metrics:
+  MFE, MAE, R multiple, tail win size, small loss count, winner hold time,
+  runner giveback / early cap, stop effectiveness, and attempt-continuation
+  quality. It is review-only and cannot create execution, order, exchange,
+  runtime-budget, strategy-PnL, or withdrawal instructions.
+- `src/application/readmodels/trading_console.py` exposes
+  `review-state.right_tail_review` plus
+  `/api/trading-console/right-tail-review`; `trading-console/src/pages/ReviewState.tsx`
+  surfaces tail wins, small losses, max R, max MFE, and single-tail-win
+  coverage. The source policy is explicit
+  `live_lifecycle_review.metadata.right_tail_trade_path` only; missing trade
+  path facts remain visible instead of being inferred from order/exchange data.
+- `tests/unit/test_right_tail_review.py` and Trading Console readmodel tests
+  verify long/short right-tail metrics, missing-input behavior, payoff
+  asymmetry, and no-action guarantees.
 
 Remaining B0 work:
 
@@ -747,9 +762,10 @@ Remaining B0 work:
   account/active-position overlay and Trading Console internal assembly,
   especially scheduler/runtime reader wiring plus funding, open-interest, and
   crowding readers;
-- deeper capital-base automation beyond the first Owner-record/API/Console
-  slice, especially automatic account-equity baseline snapshots and linkage to
-  closed-trade review packets;
+- deeper review automation beyond the first Owner-record/API/Console and
+  explicit right-tail-metrics slices, especially automatic account-equity
+  baseline snapshots, closed-trade review packet generation, and strategy
+  semantic ID propagation through order / position / review records;
 - explicit Owner/Codex confirmation values for the promotion gate, especially
   first-real-submit attempt / budget release-or-consume acceptance. Local
   reservation/mutation now uses a max-loss-first budget basis, and the

@@ -1065,6 +1065,19 @@ async def owner_capital_review(
     )
 
 
+@router.get("/right-tail-review", response_model=TradingConsoleReadModelResponse)
+async def right_tail_review(
+    symbol: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    include_exchange: bool = Query(default=False),
+) -> TradingConsoleReadModelResponse:
+    return await _service(include_exchange=include_exchange).right_tail_review(
+        symbol=symbol,
+        limit=limit,
+        include_exchange=include_exchange,
+    )
+
+
 @router.get("/audit-chain", response_model=TradingConsoleReadModelResponse)
 async def audit_chain(
     authorization_id: Optional[str] = Query(default=None),
