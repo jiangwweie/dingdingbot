@@ -1,11 +1,14 @@
 # 交易控制台页面结构与 UI 设计规范 v0.1
 
-> [!IMPORTANT]
-> 2026-06-08 当前产品口径覆盖说明：
-> 本文档是 Gate 2 read-model / 只读前端 UI 规划材料，不再代表完整交易控制台产品边界。
-> 当前权威产品模型见 `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`。
-> Console 是 Owner bounded-live operations surface；动作按钮只有在官方后端 actionability、
-> FinalGate、Operation Layer、保护和 Review 路径齐备时才可启用。
+> [!CAUTION]
+> **SUPERSEDED** — This document describes an earlier Gate 2 read-model UI design and no longer represents current product direction or agent instructions.
+>
+> Current authoritative product semantics:
+> - `docs/canon/BRC_TARGET_SEMANTICS.md`
+> - `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> - `docs/canon/DOCUMENT_GOVERNANCE.md`
+>
+> This file is preserved only as historical reference.
 
 ## 0. 文档状态
 

@@ -1,11 +1,14 @@
 # 交易控制台 API 接入文档 v0.1
 
-> [!IMPORTANT]
-> 2026-06-08 当前产品口径覆盖说明：
-> 本文档是 Gate 2 `/api/trading-console/*` read-model 接入规范，不再代表完整交易控制台产品边界。
-> 当前权威产品模型见 `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`。
-> 旧文中的“禁止接入真实 action API”只适用于本 Gate 2 read-model 版本；
-> 当前产品允许在官方后端 actionability、FinalGate、Operation Layer、保护和 Review 路径齐备时设计有界动作流。
+> [!CAUTION]
+> **SUPERSEDED** — This document describes an earlier Gate 2 read-model product design and no longer represents current product direction or agent instructions.
+>
+> Current authoritative product semantics:
+> - `docs/canon/BRC_TARGET_SEMANTICS.md`
+> - `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> - `docs/canon/DOCUMENT_GOVERNANCE.md`
+>
+> This file is preserved only as historical reference.
 
 ## 0. 文档状态
 

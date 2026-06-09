@@ -1,3 +1,17 @@
+> [!CAUTION]
+> **SUPERSEDED** — This document describes an earlier roadmap, program model, or planning baseline that no longer represents current project direction, current constraints, or current agent instructions.
+>
+> It is preserved for historical traceability only.
+>
+> Current authoritative sources:
+>
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+> * `docs/canon/TECH_DEBT_BASELINE.md`
+> * `docs/canon/DOCUMENT_GOVERNANCE.md`
+
 # BRC-R0/R1: Bounded Risk Campaign + Mock PnL Testnet Plan
 
 Date: 2026-05-25

@@ -1,3 +1,17 @@
+> [!NOTE]
+> **HISTORICAL_EVIDENCE** — This document is a historical roadmap, readiness, rehearsal, safety, or phase artifact from an earlier project phase.
+>
+> It may be useful for context, auditing, or traceability, but it does **not** represent current project state, constraints, product direction, or agent instructions.
+>
+> Current authoritative sources:
+>
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+> * `docs/canon/TECH_DEBT_BASELINE.md`
+> * `docs/canon/DOCUMENT_GOVERNANCE.md`
+
 # PLC Phase 3 ADR-0009 Authorization Request
 
 Status: READY_FOR_OWNER_APPROVAL / DO NOT EXECUTE WITHOUT EXPLICIT APPROVAL

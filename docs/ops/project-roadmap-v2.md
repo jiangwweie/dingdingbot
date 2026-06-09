@@ -1,3 +1,15 @@
+> [!CAUTION]
+> **PARTIALLY_SUPERSEDED_ROADMAP** — This roadmap contains historical direction and later Owner amendments.
+>
+> The old full-auto / multi-direction roadmap language must **not** be treated as current project direction.
+>
+> Current target semantics are defined in:
+>
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+>
+> This file may be read only as historical planning context. If a statement here conflicts with `docs/canon/*`, canon wins.
+
 > [!IMPORTANT]
 > This roadmap contains both historical labels and later Owner amendments.
 > For the current product model, read `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`.

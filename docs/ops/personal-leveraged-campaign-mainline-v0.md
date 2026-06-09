@@ -1,3 +1,18 @@
+> [!CAUTION]
+> **SUPERSEDED** — This document describes an earlier PLC mainline model and no longer represents current project direction, current constraints, or current agent instructions.
+>
+> Current target semantics are BRC strategy runtime governance:
+> Owner authorization should ultimately authorize a bounded StrategyRuntimeInstance, not one immediate trade.
+>
+> Current authoritative sources:
+>
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+> * `docs/canon/TECH_DEBT_BASELINE.md`
+> * `docs/canon/DOCUMENT_GOVERNANCE.md`
+
 # Personal Leveraged Campaign Mainline v0
 
 Last updated: 2026-05-25

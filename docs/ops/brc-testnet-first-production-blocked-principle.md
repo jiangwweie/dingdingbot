@@ -1,3 +1,15 @@
+> [!CAUTION]
+> **PARTIALLY_SUPERSEDED_SAFETY_CONTEXT** — This document describes an earlier environment-gating / testnet-first safety context.
+>
+> Do **not** interpret it as a permanent prohibition on all production or bounded-live work.
+>
+> Current runtime safety boundaries are defined in:
+>
+> * `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+>
+> This file is preserved only as historical safety context. If it conflicts with `docs/canon/*`, canon wins.
+
 # BRC Testnet-First / Production-Blocked Operating Principle
 
 Date: 2026-05-26

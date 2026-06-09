@@ -1,3 +1,16 @@
+> [!NOTE]
+> **HISTORICAL_EVIDENCE** — This document is a historical research artifact from an earlier project phase.
+>
+> It may be useful for context, auditing, or traceability, but it does **not** represent current project state, constraints, product direction, or agent instructions.
+>
+> Current authoritative sources:
+> - `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> - `docs/canon/BRC_TARGET_SEMANTICS.md`
+> - `docs/canon/AGENT_WORKSPACE_RULES.md`
+> - `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+> - `docs/canon/TECH_DEBT_BASELINE.md`
+> - `docs/canon/DOCUMENT_GOVERNANCE.md`
+
 # NSC-019 — Direction B 4h Trend + 1h Entry Timing Minimal Experiment Plan
 
 **Task ID:** NSC-019
