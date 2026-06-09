@@ -101,6 +101,15 @@ Key facts:
   OrderCandidate through the existing shadow repository path. They do not
   implement real execution, create ExecutionIntent records, call OrderLifecycle,
   call exchange, or prove alpha.
+- **StrategyEvaluationContextBuilder** now exists as a local non-executing B0
+  application mapper from `StrategyFamilySignalInput`,
+  `StrategyFamilySignalOutput`, and optional `StrategyRuntimeInstance` snapshots
+  into RequiredFacts. It can surface available OHLCV, price-action, account,
+  runtime-boundary, position-projection, funding, range, volatility, and
+  crowding-related facts while marking absent data as missing instead of
+  inventing it. It intentionally blocks or downgrades cases such as missing 4h
+  CPM context, observation-only account facts, BRF without explicit
+  short-squeeze risk facts, and FCO without open-interest/crowding sources.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange.

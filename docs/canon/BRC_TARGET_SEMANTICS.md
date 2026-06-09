@@ -183,6 +183,13 @@ Current local B0 implementation slice:
   StrategyEvaluationContext, RequiredFacts, fact freshness/missing behavior,
   ProtectionPolicy, ExitPolicy, initial CPM / BRF / RMR / FCO semantics, and
   right-tail review metrics.
+- `src/application/strategy_evaluation_context_builder.py` builds
+  StrategyEvaluationContext from read-only `StrategyFamilySignalInput`,
+  `StrategyFamilySignalOutput`, and optional `StrategyRuntimeInstance`
+  snapshots. It maps existing OHLCV, price-action, account, runtime-boundary,
+  position-projection, funding, range, volatility, and crowding-related facts
+  when explicit evidence exists, and marks missing facts explicitly instead of
+  allowing strategy semantics to guess.
 - `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
   SignalEvaluation against those semantics and can create only a shadow
   OrderCandidate through SignalEvaluationShadowService. It can also consume a
@@ -191,7 +198,8 @@ Current local B0 implementation slice:
   `WOULD_ENTER`, the side is supported, RequiredFacts pass, and concrete
   protection is present.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. BRF/RMR concrete evaluator details remain
+  OrderLifecycle adapter. Live fact readers, BRF/RMR concrete evaluator
+  details, FCO funding/OI/crowding data coverage, and runtime promotion remain
   Owner/Codex-gated before promotion beyond shadow binding.
 
 ProtectionPolicy and ExitPolicy must stay separate:

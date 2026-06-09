@@ -103,6 +103,23 @@ python3 -m alembic heads
 
 git diff --check
 passed
+
+B0 context builder follow-up validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_evaluation_context_builder.py \
+  tests/unit/test_b0_strategy_semantics_binding.py \
+  tests/unit/test_td3_signal_evaluation_order_candidate_shadow.py \
+  tests/unit/test_td4_runtime_final_gate_preview.py \
+  tests/unit/test_td5_runtime_execution_plan.py \
+  tests/unit/test_strategy_runtime_backbone.py
+125 passed
+
+python3 -m compileall -q src/application/strategy_evaluation_context_builder.py \
+  src/application/strategy_semantics_shadow_binding_service.py \
+  src/domain/strategy_semantics.py \
+  tests/unit/test_b0_strategy_evaluation_context_builder.py \
+  tests/unit/test_b0_strategy_semantics_binding.py
+passed
 ```
 
 Deployment note:
@@ -494,6 +511,12 @@ Current local B0 implementation slice:
   StrategyEvaluationContext, RequiredFacts, fact freshness/missing behavior,
   ProtectionPolicy, ExitPolicy, initial CPM / BRF / RMR / FCO semantics, and
   right-tail review metrics.
+- `src/application/strategy_evaluation_context_builder.py` builds
+  StrategyEvaluationContext from read-only `StrategyFamilySignalInput`,
+  `StrategyFamilySignalOutput`, and optional `StrategyRuntimeInstance`
+  snapshots. It maps available OHLCV, price-action, account, runtime-boundary,
+  position-projection, funding, range, volatility, and crowding-related facts,
+  and explicitly marks absent facts as missing rather than inferring them.
 - `src/application/strategy_semantics_shadow_binding_service.py` can create
   only shadow OrderCandidate records after RequiredFacts pass. It can now
   consume `StrategyFamilySignalOutput`, persist a shadow SignalEvaluation, and
@@ -505,13 +528,21 @@ Current local B0 implementation slice:
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
   StrategyFamilySignalOutput orchestration, CPM short rejection, non-entry
   output rejection, and PG-backed shadow repository integration.
+- `tests/unit/test_b0_strategy_evaluation_context_builder.py` verifies that
+  complete CPM input/output/runtime facts can feed the semantic shadow binding,
+  missing 4h CPM context blocks binding, BRF does not invent missing
+  short-squeeze risk facts, FCO keeps open-interest/crowding dependencies
+  missing until explicit sources exist, and observation-only account facts do
+  not satisfy account RequiredFacts.
 
 Remaining B0 work:
 
 - Owner/Codex-gated BRF evaluator details;
 - RMR regime classifier implementation details;
-- live/runtime fact-source integration beyond explicit StrategyEvaluationContext
-  inputs;
+- live/runtime fact-source integration beyond current
+  StrategyFamilySignalInput / StrategyFamilySignalOutput /
+  StrategyRuntimeInstance snapshots, especially trusted account, active
+  position, funding, open-interest, and crowding readers;
 - explicit attempt / budget consumption acceptance before runtime promotion.
 
 Problem statement:
