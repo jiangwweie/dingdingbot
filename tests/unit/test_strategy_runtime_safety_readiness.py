@@ -78,6 +78,39 @@ def test_safety_readiness_blocks_missing_runtime_boundary_facts():
     assert result.exchange_called is False
 
 
+def test_safety_readiness_does_not_let_notional_or_leverage_compensate_missing_loss_budget():
+    complete = _runtime()
+    runtime = complete.model_copy(
+        update={
+            "boundary": complete.boundary.model_copy(
+                update={
+                    "total_budget": None,
+                    "max_margin_per_attempt": None,
+                    "min_liquidation_stop_buffer": None,
+                }
+            )
+        }
+    )
+
+    result = evaluate_strategy_runtime_safety_readiness(runtime)
+
+    assert result.status == RuntimeSafetyReadinessStatus.BLOCKED
+    assert "max_notional_boundary_present" not in result.blockers
+    assert "max_leverage_boundary_present" not in result.blockers
+    assert "max_loss_budget_present" in result.blockers
+    assert "budget_reservation_basis_required" in result.blockers
+    assert "margin_usage_boundary_present" in result.blockers
+    assert "liquidation_buffer_boundary_present" in result.blockers
+    assert "max_loss_budget_present" in result.missing_boundary_facts
+    assert "margin_usage_boundary_present" in result.missing_boundary_facts
+    assert "liquidation_buffer_boundary_present" in result.missing_boundary_facts
+    assert result.not_execution_authority is True
+    assert result.execution_intent_created is False
+    assert result.runtime_state_mutated is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+
+
 def test_safety_readiness_allows_owner_codex_confirmation_when_boundary_complete():
     result = evaluate_strategy_runtime_safety_readiness(_runtime())
 
