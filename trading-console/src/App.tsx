@@ -8,17 +8,12 @@ import { AppShell } from './components/Layout';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
 import Dashboard from './pages/Dashboard';
-import AccountRisk from './pages/AccountRisk';
 import OrderLedger from './pages/OrderLedger';
-import ProtectionHealth from './pages/ProtectionHealth';
 import CarrierShelf from './pages/CarrierShelf';
 import AuthorizationState from './pages/AuthorizationState';
-import ExecutionControl from './pages/ExecutionControl';
-import ActionEntry from './pages/ActionEntry';
 import RecoveryState from './pages/RecoveryState';
 import ReviewState from './pages/ReviewState';
 import AuditChain from './pages/AuditChain';
-import SignalMarkerFeed from './pages/SignalMarkerFeed';
 import Login from './pages/Login';
 
 function ProtectedShell() {
@@ -55,17 +50,17 @@ export default function App() {
               <Route path="analysis" element={<ReviewState />} />
               <Route path="incident" element={<RecoveryState />} />
               <Route path="evidence" element={<AuditChain />} />
-              <Route path="account" element={<AccountRisk />} />
-              <Route path="ledger" element={<OrderLedger />} />
-              <Route path="protection" element={<ProtectionHealth />} />
-              <Route path="carrier" element={<CarrierShelf />} />
-              <Route path="authorization" element={<AuthorizationState />} />
-              <Route path="execution" element={<ExecutionControl />} />
-              <Route path="action-entry" element={<ActionEntry />} />
-              <Route path="recovery" element={<RecoveryState />} />
-              <Route path="review" element={<ReviewState />} />
-              <Route path="audit" element={<AuditChain />} />
-              <Route path="signals" element={<SignalMarkerFeed />} />
+              <Route path="account" element={<Navigate to="/trades" replace />} />
+              <Route path="ledger" element={<Navigate to="/trades" replace />} />
+              <Route path="protection" element={<Navigate to="/trades" replace />} />
+              <Route path="carrier" element={<Navigate to="/strategy" replace />} />
+              <Route path="authorization" element={<Navigate to="/runtime" replace />} />
+              <Route path="execution" element={<Navigate to="/runtime" replace />} />
+              <Route path="action-entry" element={<Navigate to="/runtime" replace />} />
+              <Route path="recovery" element={<Navigate to="/incident" replace />} />
+              <Route path="review" element={<Navigate to="/analysis" replace />} />
+              <Route path="audit" element={<Navigate to="/evidence" replace />} />
+              <Route path="signals" element={<Navigate to="/runtime" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
