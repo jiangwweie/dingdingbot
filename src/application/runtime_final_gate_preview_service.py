@@ -246,6 +246,15 @@ class RuntimeFinalGatePreviewService:
         add_check: Any,
     ) -> None:
         intended = candidate.intended_notional
+        max_loss_reference = candidate.risk_preview.max_loss_reference
+        budget_reservation_amount = max_loss_reference or intended
+        budget_reservation_basis = (
+            "max_loss_reference"
+            if max_loss_reference is not None
+            else "intended_notional_fallback"
+            if intended is not None
+            else "missing"
+        )
         remaining = runtime.budget_remaining
         per_attempt = runtime.boundary.max_notional_per_attempt
         if intended is None:
@@ -254,8 +263,7 @@ class RuntimeFinalGatePreviewService:
                 RuntimeFinalGatePreviewVerdict.WARN,
                 "candidate_notional_missing",
             )
-            return
-        if per_attempt is not None and intended > per_attempt:
+        elif per_attempt is not None and intended > per_attempt:
             add_check(
                 "budget_remaining",
                 RuntimeFinalGatePreviewVerdict.BLOCK,
@@ -263,12 +271,21 @@ class RuntimeFinalGatePreviewService:
                 facts={"intended_notional": intended, "max_notional_per_attempt": per_attempt},
             )
             return
-        if remaining is not None and intended > remaining:
+        if (
+            remaining is not None
+            and budget_reservation_amount is not None
+            and budget_reservation_amount > remaining
+        ):
             add_check(
                 "budget_remaining",
                 RuntimeFinalGatePreviewVerdict.BLOCK,
                 "candidate_exceeds_budget_remaining",
-                facts={"intended_notional": intended, "budget_remaining": remaining},
+                facts={
+                    "intended_notional": intended,
+                    "budget_remaining": remaining,
+                    "budget_reservation_amount": budget_reservation_amount,
+                    "budget_reservation_basis": budget_reservation_basis,
+                },
             )
             return
         add_check(
@@ -279,7 +296,13 @@ class RuntimeFinalGatePreviewService:
                 else RuntimeFinalGatePreviewVerdict.WARN
             ),
             "budget_available" if remaining is not None else "runtime_budget_unbounded",
-            facts={"intended_notional": intended, "budget_remaining": remaining},
+            facts={
+                "intended_notional": intended,
+                "max_loss_reference": max_loss_reference,
+                "budget_remaining": remaining,
+                "budget_reservation_amount": budget_reservation_amount,
+                "budget_reservation_basis": budget_reservation_basis,
+            },
         )
 
     @staticmethod

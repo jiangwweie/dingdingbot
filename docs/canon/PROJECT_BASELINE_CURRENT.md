@@ -114,9 +114,22 @@ Key facts:
   inventing it. It intentionally blocks or downgrades cases such as missing 4h
   CPM context, observation-only account facts, BRF without explicit
   short-squeeze risk facts, and FCO without open-interest/crowding sources.
+- **RuntimeStrategySignalPlanningService** now exists as a local non-executing
+  bridge from strategy signal pairs into the runtime planning path. It can run:
+  `StrategyFamilySignalInput + StrategyFamilySignalOutput ->
+  StrategyEvaluationContext -> shadow OrderCandidate -> RuntimeExecutionPlan /
+  RuntimeExecutionIntentDraft`, while preserving `not_order=true`,
+  `not_execution_intent=true`, `execution_intent_created=false`,
+  `order_created=false`, and `exchange_called=false`. It does not expose
+  owner-supplied active-position counts as an allow fact; runtime FinalGate must
+  use configured local active-position facts or block when unavailable.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
-  create ExecutionIntent records, place orders, or call the exchange.
+  create ExecutionIntent records, place orders, or call the exchange. Its
+  budget check now separates notional exposure from loss budget:
+  `max_notional_per_attempt` checks candidate notional, while runtime budget
+  remaining prefers `risk_preview.max_loss_reference` and falls back to notional
+  only when max-loss evidence is missing.
 - **RuntimeExecutionPlan / RuntimeExecutionIntentDraft / RuntimeExecutionIntent
   adapter preview / recorded ExecutionIntent audit / submit-readiness preview /
   Owner submit authorization record / controlled submit plan preview /

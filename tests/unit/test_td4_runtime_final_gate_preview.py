@@ -149,6 +149,46 @@ def test_runtime_final_gate_preview_passes_with_complete_safe_shadow_facts():
     assert preview.runtime_state_mutated is False
 
 
+def test_runtime_final_gate_budget_check_prefers_max_loss_over_notional():
+    preview = _preview_service().preview(
+        runtime=_runtime(
+            boundary=StrategyRuntimeBoundary(
+                max_attempts=2,
+                attempts_used=0,
+                budget_reserved=Decimal("0"),
+                max_active_positions=1,
+                max_notional_per_attempt=Decimal("10"),
+                total_budget=Decimal("9"),
+                allowed_symbols=["ETH/USDT:USDT"],
+                allowed_sides=["long"],
+                max_leverage=Decimal("1"),
+                requires_protection=True,
+                requires_review=True,
+            )
+        ),
+        candidate=_candidate(
+            intended_notional=Decimal("10"),
+            risk_preview=OrderCandidateRiskPreview(
+                intended_notional=Decimal("10"),
+                proposed_quantity=Decimal("0.004"),
+                max_loss_reference=Decimal("3"),
+                leverage=Decimal("1"),
+            ),
+        ),
+        active_positions_count=0,
+        owner_reviewed=True,
+    )
+
+    budget_check = next(
+        check for check in preview.checks if check.name == "budget_remaining"
+    )
+    assert preview.verdict == RuntimeFinalGatePreviewVerdict.PASS
+    assert "candidate_exceeds_budget_remaining" not in preview.blockers
+    assert budget_check.facts["budget_reservation_basis"] == "max_loss_reference"
+    assert budget_check.facts["budget_reservation_amount"] == Decimal("3")
+    assert budget_check.facts["intended_notional"] == Decimal("10")
+
+
 async def test_runtime_final_gate_preview_uses_local_active_position_source_when_query_missing():
     preview = await _preview_service_with_positions([]).preview_order_candidate(
         order_candidate_id="order-candidate-1",

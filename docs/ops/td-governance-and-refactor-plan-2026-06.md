@@ -107,21 +107,29 @@ python3 -m alembic heads
 git diff --check
 passed
 
-B0 context builder follow-up validation:
+B0 signal-to-runtime-draft follow-up validation:
 
 python3 -m pytest -q tests/unit/test_b0_strategy_evaluation_context_builder.py \
   tests/unit/test_b0_strategy_semantics_binding.py \
+  tests/unit/test_b0_runtime_strategy_signal_planning.py \
   tests/unit/test_td3_signal_evaluation_order_candidate_shadow.py \
   tests/unit/test_td4_runtime_final_gate_preview.py \
   tests/unit/test_td5_runtime_execution_plan.py \
   tests/unit/test_strategy_runtime_backbone.py
-128 passed
+132 passed
 
 python3 -m compileall -q src/application/strategy_evaluation_context_builder.py \
   src/application/strategy_semantics_shadow_binding_service.py \
+  src/application/runtime_strategy_signal_planning_service.py \
+  src/application/runtime_final_gate_preview_service.py \
   src/domain/strategy_semantics.py \
+  src/domain/runtime_execution_attempt_reservation.py \
+  src/domain/runtime_execution_attempt_mutation.py \
   tests/unit/test_b0_strategy_evaluation_context_builder.py \
-  tests/unit/test_b0_strategy_semantics_binding.py
+  tests/unit/test_b0_strategy_semantics_binding.py \
+  tests/unit/test_b0_runtime_strategy_signal_planning.py \
+  tests/unit/test_td4_runtime_final_gate_preview.py \
+  tests/unit/test_td5_runtime_execution_plan.py
 passed
 ```
 
@@ -529,6 +537,12 @@ Current local B0 implementation slice:
   accepts `StrategyFamilySignalInput` + `StrategyFamilySignalOutput`, builds
   StrategyEvaluationContext from read-only facts, and applies the same
   shadow-only gate.
+- `src/application/runtime_strategy_signal_planning_service.py` bridges that B0
+  signal-pair path into existing runtime planning: strategy signal pair ->
+  semantic shadow OrderCandidate -> RuntimeExecutionPlan /
+  RuntimeExecutionIntentDraft. It remains non-executing and does not write
+  recorded ExecutionIntent rows, create local orders, call OrderLifecycle, or
+  call exchange.
 - `tests/unit/test_b0_strategy_semantics_binding.py` verifies catalog
   semantics, missing/stale fact blocking, BRF shadow candidate binding, RMR
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
@@ -542,6 +556,11 @@ Current local B0 implementation slice:
   not satisfy account RequiredFacts. It also verifies that the binding service
   can build context from a signal input/output pair without requiring the caller
   to hand-assemble StrategyEvaluationContext.
+- `tests/unit/test_b0_runtime_strategy_signal_planning.py` verifies that a
+  complete CPM signal input/output pair can reach a ready
+  RuntimeExecutionIntentDraft without execution, blocks when local
+  active-position facts are unavailable, and stops before OrderCandidate
+  creation when RequiredFacts are missing.
 
 Remaining B0 work:
 

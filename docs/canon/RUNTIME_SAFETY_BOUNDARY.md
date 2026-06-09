@@ -152,6 +152,10 @@ If code changes create executable paths for any of these, reclassify them.
   as an allow signal. Active position facts must come from trusted local
   projection / reconciliation / account-fact sources; unavailable or stale
   facts must block execution.
+- Runtime budget checks must distinguish exposure from loss budget:
+  `max_notional_per_attempt` checks candidate notional, while runtime budget
+  remaining prefers concrete max-loss evidence and falls back to notional only
+  when loss-budget evidence is missing.
 
 Before the first real runtime submit, the following must be explicitly
 confirmed:
