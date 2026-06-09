@@ -692,9 +692,12 @@ Current local B0 implementation slice:
   signal-pair path into existing runtime planning: strategy signal pair ->
   semantic shadow OrderCandidate -> RuntimeExecutionPlan /
   RuntimeExecutionIntentDraft. It can apply the trusted runtime fact overlay
-  before semantic binding when explicitly configured. It remains non-executing
-  and does not write recorded ExecutionIntent rows, create local orders, call
-  OrderLifecycle, or call exchange.
+  before semantic binding when explicitly configured. It now reads
+  StrategySemantics RequiredFacts and automatically requires trusted
+  funding/open-interest/crowding overlays when those facts are required by the
+  strategy; missing overlay support fails closed before trusting caller-supplied
+  facts. It remains non-executing and does not write recorded ExecutionIntent
+  rows, create local orders, call OrderLifecycle, or call exchange.
 - `src/interfaces/api_trading_console.py` now has an internal non-endpoint
   service factory that wires RuntimeStrategySignalPlanningService with the
   trusted overlay, PG active-position source, cached account facts, shadow
@@ -721,8 +724,10 @@ Current local B0 implementation slice:
   complete CPM signal input/output pair can reach a ready
   RuntimeExecutionIntentDraft without execution, blocks when local
   active-position facts are unavailable, and stops before OrderCandidate
-  creation when RequiredFacts are missing. It also verifies the PG-backed
-  roundtrip through SignalEvaluation / OrderCandidate shadow repositories and
+  creation when RequiredFacts are missing. It also verifies strategy-required
+  funding/open-interest/crowding facts require a trusted overlay before runtime
+  planning can continue, and verifies the PG-backed roundtrip through
+  SignalEvaluation / OrderCandidate shadow repositories and
   RuntimeExecutionIntentDraft repository.
 - `tests/unit/test_b0_strategy_runtime_fact_overlay.py` verifies that the
   trusted overlay replaces caller-supplied active-position counts, fails closed
@@ -730,9 +735,11 @@ Current local B0 implementation slice:
   funding/open-interest/crowding facts stale, can satisfy FCO RequiredFacts when
   a trusted read-only market fact source is injected, and can feed the runtime
   draft path without creating ExecutionIntent records, local orders, or exchange
-  calls. It also verifies Trading Console internal assembly wires the overlay
-  from PG positions plus cached account facts, and only enables the Binance
-  public derivative market fact source behind an explicit environment switch.
+  calls. It also verifies runtime planning passes strategy-required market fact
+  keys into the overlay, blocks caller-supplied FCO market facts when the trusted
+  source is missing, wires Trading Console internal assembly from PG positions
+  plus cached account facts, and only enables the Binance public derivative
+  market fact source behind an explicit environment switch.
 - `tests/unit/test_binance_usdm_derivative_market_fact_source.py` verifies the
   Binance public derivative market fact source parses funding, open-interest,
   notional, and crowding proxy facts; marks missing/stale facts explicitly; and
@@ -797,7 +804,7 @@ Remaining B0 work:
 
 - live/runtime fact-source orchestration beyond the current injected trusted
   account/active-position/market-fact overlays and Trading Console internal
-  assembly, especially scheduler/runtime automatic evaluation binding and
+  assembly, especially scheduler-level automatic evaluation binding and
   deployment enablement for funding, open-interest, and crowding sources;
 - deeper review automation beyond the first Owner-record/API/Console and
   explicit right-tail-metrics slices, especially automatic account-equity

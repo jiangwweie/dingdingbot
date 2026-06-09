@@ -13,6 +13,7 @@ from src.application.runtime_final_gate_preview_service import (
     RuntimeFinalGatePreviewService,
 )
 from src.application.runtime_strategy_signal_planning_service import (
+    RuntimeStrategySignalPlanningError,
     RuntimeStrategySignalPlanningService,
 )
 from src.application.signal_evaluation_shadow_service import SignalEvaluationShadowService
@@ -376,6 +377,63 @@ async def test_strategy_signal_pair_stops_before_candidate_when_required_facts_m
         )
 
     assert store.candidate is None
+
+
+async def test_strategy_signal_pair_requires_overlay_for_strategy_required_market_facts():
+    signal_input = _signal_input().model_copy(
+        update={
+            "strategy_family_id": "FCO-001",
+            "strategy_family_version_id": "FCO-001-v0",
+        },
+        deep=True,
+    )
+    output = StrategyFamilySignalOutput(
+        signal_id="signal-fco-no-overlay",
+        evaluation_id=signal_input.evaluation_id,
+        strategy_family_id="FCO-001",
+        strategy_family_version_id="FCO-001-v0",
+        symbol=signal_input.symbol,
+        timestamp_ms=NOW_MS,
+        timeframe="1h",
+        signal_type=SignalType.WOULD_ENTER,
+        side=SignalSide.LONG,
+        confidence=Decimal("0.6"),
+        reason_codes=["funding_oi_crowding_review"],
+        human_summary="FCO required market facts must have trusted overlay.",
+        required_execution_mode="observe_only",
+        evidence_payload={"market_facts": {"status": "caller_supplied"}},
+    )
+    runtime = _runtime().model_copy(
+        update={
+            "runtime_instance_id": "runtime-fco-no-overlay",
+            "trial_binding_id": "trial-fco-no-overlay",
+            "admission_decision_id": "admission-fco-no-overlay",
+            "strategy_family_id": "FCO-001",
+            "strategy_family_version_id": "FCO-001-v0",
+        },
+        deep=True,
+    )
+
+    with pytest.raises(
+        RuntimeStrategySignalPlanningError,
+        match="trusted market fact overlay is required",
+    ):
+        await _service(active_positions=[]).intent_draft_for_strategy_signal_pair(
+            signal_input,
+            output,
+            runtime=runtime,
+            owner_reviewed=True,
+            owner_confirmed_for_intent=True,
+            proposed_quantity=Decimal("0.004"),
+            intended_notional=Decimal("10"),
+            entry_price_reference=Decimal("2525"),
+            stop_price_reference=Decimal("2475"),
+            max_loss_reference=Decimal("3"),
+            leverage=Decimal("1"),
+            margin_required=Decimal("10"),
+            liquidation_price_reference=Decimal("2400"),
+            liquidation_stop_buffer=Decimal("75"),
+        )
 
 
 async def test_strategy_signal_pair_records_pg_shadow_candidate_and_intent_draft():

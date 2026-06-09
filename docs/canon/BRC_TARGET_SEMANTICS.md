@@ -261,8 +261,11 @@ Current local B0 implementation slice:
   can replace caller-provided account/position facts and trusted
   funding/OI/crowding market facts with injected read-only overlays, and keeps
   RequiredFacts fail-closed when those trusted sources are missing or stale. It
-  does not create a recorded ExecutionIntent, local order, OrderLifecycle call,
-  or exchange request.
+  also reads StrategySemantics RequiredFacts before overlay application, so a
+  strategy requiring funding, open-interest, or crowding cannot rely on
+  caller-supplied market facts or a missing overlay. It does not create a
+  recorded ExecutionIntent, local order, OrderLifecycle call, or exchange
+  request.
 - `src/interfaces/api_trading_console.py` has an internal service factory that
   wires the B0 runtime strategy signal planner with PG active-position facts
   and cached account facts. It can also opt into
@@ -271,7 +274,7 @@ Current local B0 implementation slice:
   funding, open-interest, and crowding facts. This is an application assembly
   point only; no public strategy-signal write endpoint is exposed by this slice.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. Scheduler/runtime automatic fact-source wiring, BRF
+  OrderLifecycle adapter. Scheduler-level fact-source orchestration, BRF
   runtime-profile confirmation, deployment-backed FCO funding/OI/crowding
   coverage, and runtime promotion remain Owner/Codex-gated before promotion
   beyond shadow binding.

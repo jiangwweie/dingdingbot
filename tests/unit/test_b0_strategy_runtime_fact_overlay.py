@@ -311,9 +311,11 @@ def _planning_service(
     *,
     overlay: StrategyRuntimeFactOverlayService,
     final_gate_positions: list[Position] | None = None,
+    store: _ShadowAndCandidateStore | None = None,
+    runtime: StrategyRuntimeInstance | None = None,
 ) -> RuntimeStrategySignalPlanningService:
-    runtime = _runtime()
-    store = _ShadowAndCandidateStore()
+    runtime = runtime or _runtime()
+    store = store or _ShadowAndCandidateStore()
 
     class _RuntimeService:
         async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
@@ -589,6 +591,83 @@ async def test_strategy_signal_planning_blocks_before_candidate_when_overlay_acc
             max_loss_reference=Decimal("3"),
             leverage=Decimal("1"),
         )
+
+
+async def test_strategy_signal_planning_requires_trusted_market_facts_from_required_facts():
+    store = _ShadowAndCandidateStore()
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_PositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+        market_fact_source=None,
+    )
+    signal_input = _signal_input(family_id="FCO-001", version_id="FCO-001-v0")
+    signal_input.market_snapshot.candle_context["market_facts"] = {
+        "open_interest": {"open_interest": "999"},
+        "crowding_proxy": {"status": "caller_supplied"},
+    }
+    output = StrategyFamilySignalOutput(
+        signal_id="signal-fco-runtime-required-market-facts",
+        evaluation_id=signal_input.evaluation_id,
+        strategy_family_id="FCO-001",
+        strategy_family_version_id="FCO-001-v0",
+        symbol=signal_input.symbol,
+        timestamp_ms=NOW_MS,
+        timeframe="1h",
+        signal_type=SignalType.WOULD_ENTER,
+        side=SignalSide.LONG,
+        confidence=Decimal("0.6"),
+        reason_codes=["funding_oi_crowding_review"],
+        human_summary="FCO required market facts must come from trusted overlay.",
+        required_execution_mode="observe_only",
+        evidence_payload={"market_facts": {"status": "caller_supplied"}},
+    )
+    runtime = _runtime().model_copy(
+        update={
+            "runtime_instance_id": "runtime-fco-required-market-facts",
+            "trial_binding_id": "trial-fco-required-market-facts",
+            "admission_decision_id": "admission-fco-required-market-facts",
+            "strategy_family_id": "FCO-001",
+            "strategy_family_version_id": "FCO-001-v0",
+            "side": "long",
+        },
+        deep=True,
+    )
+    service = _planning_service(overlay=overlay, store=store, runtime=runtime)
+
+    with pytest.raises(StrategySemanticsBindingError, match="data_backlog_only"):
+        await service.intent_draft_for_strategy_signal_pair(
+            signal_input,
+            output,
+            runtime=runtime,
+            owner_reviewed=True,
+            owner_confirmed_for_intent=True,
+            proposed_quantity=Decimal("0.004"),
+            intended_notional=Decimal("10"),
+            entry_price_reference=Decimal("2525"),
+            stop_price_reference=Decimal("2475"),
+            max_loss_reference=Decimal("3"),
+            leverage=Decimal("1"),
+            margin_required=Decimal("10"),
+            liquidation_price_reference=Decimal("2400"),
+            liquidation_stop_buffer=Decimal("75"),
+        )
+
+    assert store.candidate is None
+    assert store.evaluation is not None
+    overlay_metadata = store.evaluation.metadata["trusted_runtime_fact_overlay"]
+    market_overlay = overlay_metadata["metadata"]["market_fact_overlay"]
+    assert overlay_metadata["blockers"] == ["trusted_market_fact_source_unavailable"]
+    assert market_overlay["required_by_strategy_semantics"] is True
+    assert market_overlay["required_keys"] == [
+        "funding_rate",
+        "open_interest",
+        "crowding_proxy",
+    ]
+    assert store.evaluation.metadata["strategy_required_trusted_market_facts"] == [
+        "funding_rate",
+        "open_interest",
+        "crowding_proxy",
+    ]
 
 
 async def test_trading_console_factory_wires_trusted_runtime_fact_overlay(monkeypatch):

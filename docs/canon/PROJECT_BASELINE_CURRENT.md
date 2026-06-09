@@ -161,8 +161,11 @@ Key facts:
   RuntimeExecutionIntentDraft`, while preserving `not_order=true`,
   `not_execution_intent=true`, `execution_intent_created=false`,
   `order_created=false`, and `exchange_called=false`. If a trusted runtime fact
-  overlay is injected, it applies that overlay before semantic binding. It does
-  not expose owner-supplied active-position counts as an allow fact; runtime
+  overlay is injected, it applies that overlay before semantic binding. It now
+  reads StrategySemantics RequiredFacts and automatically requires trusted
+  market facts for required funding, open-interest, or crowding facts; if no
+  overlay is available for such a strategy, planning fails closed. It does not
+  expose owner-supplied active-position counts as an allow fact; runtime
   FinalGate must use configured local active-position facts or block when
   unavailable. Trading Console now has an internal non-endpoint service factory
   that wires this planner with PG active-position facts and cached account facts;

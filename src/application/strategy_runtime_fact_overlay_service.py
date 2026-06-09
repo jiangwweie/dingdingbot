@@ -119,6 +119,8 @@ class StrategyRuntimeFactOverlayService:
         *,
         output: StrategyFamilySignalOutput | None = None,
         runtime: StrategyRuntimeInstance | None = None,
+        required_market_fact_keys: tuple[str, ...] | None = None,
+        require_trusted_market_fact_source: bool | None = None,
     ) -> StrategyRuntimeFactOverlayResult:
         blockers: list[str] = []
         warnings: list[str] = []
@@ -146,6 +148,8 @@ class StrategyRuntimeFactOverlayService:
             warnings=warnings,
             missing_fields=missing_fields,
             stale_fields=stale_fields,
+            required_market_fact_keys=required_market_fact_keys,
+            require_trusted_market_fact_source=require_trusted_market_fact_source,
         )
         notes.append("trusted_runtime_fact_overlay_applied")
 
@@ -317,20 +321,29 @@ class StrategyRuntimeFactOverlayService:
         warnings: list[str],
         missing_fields: set[str],
         stale_fields: set[str],
+        required_market_fact_keys: tuple[str, ...] | None,
+        require_trusted_market_fact_source: bool | None,
     ) -> tuple[MarketSnapshot, dict[str, Any]]:
         source = self._market_fact_source
+        market_fact_keys = tuple(dict.fromkeys(required_market_fact_keys or self._market_fact_keys))
+        trusted_source_required = (
+            self._require_trusted_market_fact_source
+            if require_trusted_market_fact_source is None
+            else require_trusted_market_fact_source
+        )
         if source is None or not hasattr(source, "read_strategy_market_facts"):
-            if self._require_trusted_market_fact_source:
+            if trusted_source_required:
                 blockers.append("trusted_market_fact_source_unavailable")
-                missing_fields.update(self._market_fact_keys)
+                missing_fields.update(market_fact_keys)
                 return _market_snapshot_without_trusted_facts(
                     signal_input,
-                    missing_keys=self._market_fact_keys,
+                    missing_keys=market_fact_keys,
                     reason="trusted_market_fact_source_unavailable",
                 ), {
                     "status": "missing",
                     "reason": "trusted_market_fact_source_unavailable",
-                    "required_keys": list(self._market_fact_keys),
+                    "required_keys": list(market_fact_keys),
+                    "required_by_strategy_semantics": required_market_fact_keys is not None,
                 }
             return signal_input.market_snapshot, {
                 "status": "unchanged",
@@ -344,38 +357,40 @@ class StrategyRuntimeFactOverlayService:
             )
         except Exception as exc:
             blockers.append("trusted_market_fact_read_failed")
-            missing_fields.update(self._market_fact_keys)
+            missing_fields.update(market_fact_keys)
             return _market_snapshot_without_trusted_facts(
                 signal_input,
-                missing_keys=self._market_fact_keys,
+                missing_keys=market_fact_keys,
                 reason="trusted_market_fact_read_failed",
             ), {
                 "status": "read_failed",
                 "error_type": type(exc).__name__,
-                "required_keys": list(self._market_fact_keys),
+                "required_keys": list(market_fact_keys),
+                "required_by_strategy_semantics": required_market_fact_keys is not None,
             }
 
         if not facts.read_only_guarantee:
             blockers.append("trusted_market_fact_source_not_read_only")
-            missing_fields.update(self._market_fact_keys)
+            missing_fields.update(market_fact_keys)
             warnings.append("market_fact:source_not_read_only")
             return _market_snapshot_without_trusted_facts(
                 signal_input,
-                missing_keys=self._market_fact_keys,
+                missing_keys=market_fact_keys,
                 reason="trusted_market_fact_source_not_read_only",
             ), {
                 "status": "not_read_only",
                 "source_id": facts.source_id,
                 "external_call_type": facts.external_call_type,
+                "required_by_strategy_semantics": required_market_fact_keys is not None,
             }
 
-        inferred_missing = _missing_market_fact_keys(facts, self._market_fact_keys)
+        inferred_missing = _missing_market_fact_keys(facts, market_fact_keys)
         missing_fields.update(inferred_missing)
         missing_fields.update(facts.missing_fields)
         stale_market_fields = set(facts.stale_fields)
         if _freshness_is_stale(facts.freshness):
             stale_market_fields.update(
-                key for key in self._market_fact_keys if key not in inferred_missing
+                key for key in market_fact_keys if key not in inferred_missing
             )
         stale_fields.update(stale_market_fields)
         warnings.extend(f"market_fact:{warning}" for warning in facts.warnings)
@@ -393,6 +408,8 @@ class StrategyRuntimeFactOverlayService:
             "missing_fields": sorted({*inferred_missing, *facts.missing_fields}),
             "stale_fields": sorted(stale_market_fields),
             "warnings": list(facts.warnings),
+            "required_keys": list(market_fact_keys),
+            "required_by_strategy_semantics": required_market_fact_keys is not None,
         }
 
 

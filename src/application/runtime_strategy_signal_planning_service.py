@@ -36,6 +36,23 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalOutput,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
+from src.domain.strategy_semantics import (
+    StrategySemanticsCatalog,
+    initial_strategy_semantics_catalog,
+)
+
+
+TRUSTED_MARKET_FACT_KEYS = frozenset(
+    {
+        "funding_rate",
+        "open_interest",
+        "crowding_proxy",
+    }
+)
+
+
+class RuntimeStrategySignalPlanningError(ValueError):
+    """Raised when runtime strategy planning cannot stay within B0 gates."""
 
 
 class RuntimeStrategySignalPlanningService:
@@ -47,10 +64,12 @@ class RuntimeStrategySignalPlanningService:
         semantics_binding_service: StrategySemanticsShadowBindingService,
         runtime_execution_planning_service: RuntimeExecutionPlanningService,
         runtime_fact_overlay_service: StrategyRuntimeFactOverlayService | None = None,
+        semantics_catalog: StrategySemanticsCatalog | None = None,
     ) -> None:
         self._semantics_binding_service = semantics_binding_service
         self._runtime_execution_planning_service = runtime_execution_planning_service
         self._runtime_fact_overlay_service = runtime_fact_overlay_service
+        self._semantics_catalog = semantics_catalog or initial_strategy_semantics_catalog()
 
     async def create_order_candidate_from_strategy_signal_pair(
         self,
@@ -114,10 +133,24 @@ class RuntimeStrategySignalPlanningService:
         runtime: StrategyRuntimeInstance,
         metadata: dict | None,
     ) -> tuple[StrategyFamilySignalInput, dict]:
+        required_market_fact_keys = self._required_trusted_market_fact_keys(
+            signal_input,
+            output,
+        )
         overlay = self._runtime_fact_overlay_service
         if overlay is None:
+            if required_market_fact_keys:
+                raise RuntimeStrategySignalPlanningError(
+                    "trusted market fact overlay is required by strategy semantics"
+                )
             return signal_input, dict(metadata or {})
-        result = await overlay.apply(signal_input, output=output, runtime=runtime)
+        result = await overlay.apply(
+            signal_input,
+            output=output,
+            runtime=runtime,
+            required_market_fact_keys=required_market_fact_keys or None,
+            require_trusted_market_fact_source=bool(required_market_fact_keys),
+        )
         return result.signal_input, {
             **(metadata or {}),
             "trusted_runtime_fact_overlay": {
@@ -126,7 +159,32 @@ class RuntimeStrategySignalPlanningService:
                 "warnings": result.warnings,
                 "metadata": result.metadata,
             },
+            "strategy_required_trusted_market_facts": list(required_market_fact_keys),
         }
+
+    def _required_trusted_market_fact_keys(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        output: StrategyFamilySignalOutput,
+    ) -> tuple[str, ...]:
+        try:
+            binding = self._semantics_catalog.get_binding(
+                strategy_family_id=(
+                    output.strategy_family_id
+                    or signal_input.strategy_family_id
+                ),
+                strategy_family_version_id=(
+                    output.strategy_family_version_id
+                    or signal_input.strategy_family_version_id
+                ),
+            )
+        except KeyError:
+            return ()
+        return tuple(
+            fact.fact_key
+            for fact in binding.required_facts
+            if fact.fact_key in TRUSTED_MARKET_FACT_KEYS
+        )
 
     async def plan_strategy_signal_pair(
         self,
