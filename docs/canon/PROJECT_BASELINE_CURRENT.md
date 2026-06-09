@@ -128,8 +128,10 @@ Key facts:
   `order_created=false`, and `exchange_called=false`. A small application
   service can evaluate the gate by `StrategyFamilyVersion` from the semantics
   catalog without guessing unknown bindings. Trading Console exposes a read-only
-  promotion-gate preview endpoint for this result; it does not record strategy
-  signals, create candidates, create intents, or authorize execution.
+  promotion-gate preview endpoint for this result, including a runtime-id route
+  that resolves `StrategyFamilyVersion` from `StrategyRuntimeInstance`; it does
+  not record strategy signals, create candidates, create intents, or authorize
+  execution.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signal pairs into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->

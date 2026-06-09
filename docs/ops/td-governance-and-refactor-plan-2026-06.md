@@ -191,6 +191,14 @@ python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.
   tests/unit/test_td4_runtime_final_gate_preview.py
 28 passed
 
+B0 runtime-bound promotion-gate preview API validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_strategy_runtime_backbone.py \
+  tests/unit/test_td4_runtime_final_gate_preview.py
+41 passed
+
 python3 -m compileall -q src/interfaces/api_trading_console.py \
   src/application/strategy_runtime_promotion_gate_service.py \
   src/domain/strategy_runtime_promotion_gate.py \
@@ -623,9 +631,12 @@ Current local B0 implementation slice:
   for future Console / Sprint 5 promotion checks.
 - `src/interfaces/api_trading_console.py` exposes a read-only
   `/strategy-runtime-promotion-gate` preview endpoint backed by that service.
-  It returns promotion blockers and warnings only. It does not record strategy
-  signals, create OrderCandidates, create ExecutionIntents, create local
-  orders, call OrderLifecycle, or call exchange.
+  It also exposes
+  `/strategy-runtimes/{runtime_instance_id}/promotion-gate`, which resolves the
+  strategy family/version from StrategyRuntimeInstance before evaluating the
+  same gate. Both return promotion blockers and warnings only. They do not
+  record strategy signals, create OrderCandidates, create ExecutionIntents,
+  create local orders, call OrderLifecycle, or call exchange.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges that B0
   signal-pair path into existing runtime planning: strategy signal pair ->
   semantic shadow OrderCandidate -> RuntimeExecutionPlan /
@@ -674,7 +685,9 @@ Current local B0 implementation slice:
   application service evaluates CPM/BRF by StrategyFamilyVersion and does not
   guess unknown strategy bindings. It also verifies the Trading Console
   read-only preview endpoint defaults to blocked, returns ready when CPM
-  confirmations are supplied, and maps unknown bindings to 404.
+  confirmations are supplied, maps unknown bindings to 404, resolves
+  runtime-bound gate previews from StrategyRuntimeInstance, and maps unknown
+  runtime IDs to 404.
 
 Remaining B0 work:
 

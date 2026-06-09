@@ -284,6 +284,83 @@ async def get_strategy_runtime(
 
 
 @router.get(
+    "/strategy-runtimes/{runtime_instance_id}/promotion-gate",
+    response_model=StrategyRuntimePromotionGateResult,
+)
+async def runtime_strategy_promotion_gate_preview_for_runtime(
+    runtime_instance_id: str,
+    scope: StrategyRuntimePromotionScope = (
+        StrategyRuntimePromotionScope.CONTROLLED_RUNTIME_EXECUTION
+    ),
+    strategy_family_confirmed: bool = False,
+    implementation_source_confirmed: bool = False,
+    required_facts_confirmed: bool = False,
+    entry_policy_confirmed: bool = False,
+    exit_policy_confirmed: bool = False,
+    protection_policy_confirmed: bool = False,
+    eligible_for_runtime_execution_confirmed: bool = False,
+    right_tail_review_metrics_confirmed: bool = False,
+    runtime_profile_confirmed: bool = False,
+    owner_confirmation_mode_confirmed: bool = False,
+    attempt_consumption_rule_confirmed: bool = False,
+    budget_reservation_rule_confirmed: bool = False,
+    trusted_active_position_source_confirmed: bool = False,
+    trusted_account_fact_source_confirmed: bool = False,
+    short_side_conservative_profile_confirmed: bool = False,
+    budget_release_or_consume_rule_confirmed: bool = False,
+    protection_creation_failure_policy_confirmed: bool = False,
+    duplicate_submit_policy_confirmed: bool = False,
+    deployment_readiness_confirmed: bool = False,
+    explicit_owner_real_submit_authorization: bool = False,
+) -> StrategyRuntimePromotionGateResult:
+    runtime_service = await _strategy_runtime_service()
+    try:
+        runtime = await runtime_service.get_runtime(runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    return await runtime_strategy_promotion_gate_preview(
+        strategy_family_id=runtime.strategy_family_id,
+        strategy_family_version_id=runtime.strategy_family_version_id,
+        scope=scope,
+        strategy_family_confirmed=strategy_family_confirmed,
+        implementation_source_confirmed=implementation_source_confirmed,
+        required_facts_confirmed=required_facts_confirmed,
+        entry_policy_confirmed=entry_policy_confirmed,
+        exit_policy_confirmed=exit_policy_confirmed,
+        protection_policy_confirmed=protection_policy_confirmed,
+        eligible_for_runtime_execution_confirmed=(
+            eligible_for_runtime_execution_confirmed
+        ),
+        right_tail_review_metrics_confirmed=right_tail_review_metrics_confirmed,
+        runtime_profile_confirmed=runtime_profile_confirmed,
+        owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+        attempt_consumption_rule_confirmed=attempt_consumption_rule_confirmed,
+        budget_reservation_rule_confirmed=budget_reservation_rule_confirmed,
+        trusted_active_position_source_confirmed=(
+            trusted_active_position_source_confirmed
+        ),
+        trusted_account_fact_source_confirmed=trusted_account_fact_source_confirmed,
+        short_side_conservative_profile_confirmed=(
+            short_side_conservative_profile_confirmed
+        ),
+        budget_release_or_consume_rule_confirmed=(
+            budget_release_or_consume_rule_confirmed
+        ),
+        protection_creation_failure_policy_confirmed=(
+            protection_creation_failure_policy_confirmed
+        ),
+        duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
+        deployment_readiness_confirmed=deployment_readiness_confirmed,
+        explicit_owner_real_submit_authorization=(
+            explicit_owner_real_submit_authorization
+        ),
+    )
+
+
+@router.get(
     "/strategy-runtime-promotion-gate",
     response_model=StrategyRuntimePromotionGateResult,
 )
