@@ -138,7 +138,10 @@ OwnerBoundedExecutionService is a valuable one-shot execution asset:
   max_loss_budget / total_budget, budget_reserved, max_notional_per_attempt,
   max_active_positions, max_leverage, protection requirement, and review
   requirement. The purpose is bounded loss and no runaway, not avoiding every
-  loss.
+  loss. `max_notional_per_attempt` controls exposure size; runtime
+  `budget_reserved` should prefer concrete max-loss evidence
+  (`risk_preview.max_loss_reference`) and use notional only as a conservative
+  fallback when loss-budget evidence is absent.
 
 Before controlled runtime execution, BRC must pass a Strategy Semantics /
 Entry-Exit Policy Binding gate:

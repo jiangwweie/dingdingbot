@@ -110,7 +110,18 @@ def build_runtime_execution_attempt_mutation(
     attempts_used_after = runtime.boundary.attempts_used
     attempts_remaining_after = runtime.attempts_remaining
     budget_remaining_after = runtime.budget_remaining
+    budget_reservation_amount = _metadata_decimal(
+        reservation.metadata.get("budget_reservation_amount")
+    )
+    budget_reservation_basis = str(
+        reservation.metadata.get("budget_reservation_basis") or "metadata_missing"
+    )
     updated_runtime: StrategyRuntimeInstance | None = None
+
+    if budget_reservation_amount is None and reservation.intended_notional is not None:
+        budget_reservation_amount = reservation.intended_notional
+        budget_reservation_basis = "intended_notional_fallback"
+        warnings.append("budget_reservation_metadata_missing_using_intended_notional")
 
     if reservation.status != RuntimeExecutionAttemptReservationStatus.PENDING_RUNTIME_MUTATION:
         blockers.append("reservation_not_pending_runtime_mutation")
@@ -133,17 +144,20 @@ def build_runtime_execution_attempt_mutation(
         and reservation.intended_notional > runtime.boundary.max_notional_per_attempt
     ):
         blockers.append("reservation_exceeds_max_notional_per_attempt")
+    if budget_reservation_amount is None:
+        blockers.append("budget_reservation_amount_missing")
     if (
-        reservation.intended_notional is not None
+        budget_reservation_amount is not None
         and runtime.budget_remaining is not None
-        and reservation.intended_notional > runtime.budget_remaining
+        and budget_reservation_amount > runtime.budget_remaining
     ):
         blockers.append("reservation_exceeds_budget_remaining")
 
     if not blockers:
         assert reservation.intended_notional is not None
+        assert budget_reservation_amount is not None
         attempts_used_after = runtime.boundary.attempts_used + 1
-        budget_reserved_after = budget_reserved_before + reservation.intended_notional
+        budget_reserved_after = budget_reserved_before + budget_reservation_amount
         next_boundary = StrategyRuntimeBoundary.model_validate(
             {
                 **runtime.boundary.model_dump(mode="python"),
@@ -213,6 +227,13 @@ def build_runtime_execution_attempt_mutation(
             metadata={
                 "scope": "runtime_execution_attempt_mutation",
                 "derived_from_reservation_id": reservation.reservation_id,
+                "budget_reservation_basis": budget_reservation_basis,
+                "budget_reservation_amount": (
+                    str(budget_reservation_amount)
+                    if budget_reservation_amount is not None
+                    else None
+                ),
+                "budget_reservation_prefers_max_loss_reference": True,
                 "mutates_runtime_attempt_budget_only": status
                 == RuntimeExecutionAttemptMutationStatus.APPLIED,
                 "does_not_change_execution_intent_status": True,
@@ -227,6 +248,12 @@ def build_runtime_execution_attempt_mutation(
 
 def _mutation_id(reservation_id: str) -> str:
     return f"runtime-attempt-mutation-{reservation_id}"
+
+
+def _metadata_decimal(value: Any) -> Optional[Decimal]:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value))
 
 
 def _dedupe(items: list[str]) -> list[str]:

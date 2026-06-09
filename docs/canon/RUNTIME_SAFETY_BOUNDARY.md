@@ -158,6 +158,9 @@ confirmed:
 
 - symbol, side, max_notional_per_attempt, max_attempts, max_loss_budget,
   max_leverage, and max_active_positions;
+- budget reservation basis: prefer concrete max-loss evidence for
+  `budget_reserved`, and use notional only as a conservative fallback when
+  loss-budget evidence is missing;
 - whether the profile is Owner-confirm-each-entry or budget-bounded automatic
   attempts;
 - when an attempt is consumed;

@@ -163,14 +163,18 @@ Key facts:
   RuntimeExecutionAttemptReservationPreview computes attempts/budget before and
   after from StrategyRuntimeInstance boundary while keeping
   `reservation_recorded=false`, `runtime_budget_mutated=false`, and
-  `attempt_consumed=false`.
+  `attempt_consumed=false`. Budget reservation now prefers
+  `risk_preview.max_loss_reference` as the trial-loss budget amount; it falls
+  back to `intended_notional` only when max-loss evidence is missing, while
+  still checking `intended_notional` against `max_notional_per_attempt`.
   RuntimeExecutionAttemptReservation can record `pending_runtime_mutation` as
   an audit fact while still keeping `runtime_budget_mutated=false`,
   `attempt_consumed=false`, `execution_intent_status_changed=false`,
   `order_created=false`, and `exchange_called=false`.
   RuntimeExecutionAttemptMutation can apply that pending reservation to runtime
-  state by incrementing `attempts_used` and `budget_reserved`. It blocks stale
-  attempt/budget drift and still keeps `execution_intent_status_changed=false`,
+  state by incrementing `attempts_used` and `budget_reserved` using the same
+  max-loss-first budget basis. It blocks stale attempt/budget drift and still
+  keeps `execution_intent_status_changed=false`,
   `order_created=false`, `exchange_called=false`,
   `owner_bounded_execution_called=false`, and `order_lifecycle_called=false`.
   RuntimeExecutionSubmitAdapterPreview exposes missing OrderLifecycle/protection

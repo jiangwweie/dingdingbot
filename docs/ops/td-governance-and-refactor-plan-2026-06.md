@@ -63,10 +63,13 @@ Codex verified the local working tree on 2026-06-09:
   runtime FinalGate preflight can reach `ready_for_controlled_submit_adapter`.
   RuntimeExecutionAttemptReservation can record
   `pending_runtime_mutation` from a ready reservation preview while keeping
-  runtime budget unmutated and attempts unconsumed. RuntimeExecutionAttemptMutation
-  can then apply that pending reservation to runtime state by incrementing
-  attempts and `budget_reserved`, while still not changing ExecutionIntent
-  status, creating orders, calling OwnerBoundedExecution, calling
+  runtime budget unmutated and attempts unconsumed. The preview and reservation
+  prefer `risk_preview.max_loss_reference` as the trial-loss budget amount and
+  fall back to `intended_notional` only when max-loss evidence is absent.
+  RuntimeExecutionAttemptMutation can then apply that pending reservation to
+  runtime state by incrementing attempts and `budget_reserved` using the same
+  budget basis, while still not changing ExecutionIntent status, creating
+  orders, calling OwnerBoundedExecution, calling
   OrderLifecycle, or calling exchange. RuntimeExecutionProtectionPlan can record
   concrete stop/take-profit snapshots from the runtime intent source payload as
   a non-order, non-exchange-payload audit fact.
@@ -112,7 +115,7 @@ python3 -m pytest -q tests/unit/test_b0_strategy_evaluation_context_builder.py \
   tests/unit/test_td4_runtime_final_gate_preview.py \
   tests/unit/test_td5_runtime_execution_plan.py \
   tests/unit/test_strategy_runtime_backbone.py
-127 passed
+128 passed
 
 python3 -m compileall -q src/application/strategy_evaluation_context_builder.py \
   src/application/strategy_semantics_shadow_binding_service.py \
@@ -548,7 +551,10 @@ Remaining B0 work:
   StrategyFamilySignalInput / StrategyFamilySignalOutput /
   StrategyRuntimeInstance snapshots, especially trusted account, active
   position, funding, open-interest, and crowding readers;
-- explicit attempt / budget consumption acceptance before runtime promotion.
+- explicit real-submit attempt / budget release-or-consume acceptance before
+  runtime promotion. Local reservation/mutation now uses a max-loss-first budget
+  basis, but promotion still requires Owner/Codex confirmation of when
+  reservation is released, confirmed consumed, or handled after submit failure.
 
 Problem statement:
 
@@ -784,7 +790,10 @@ Current execution pre-integration status already present locally:
   attempts/budget reservation preview. It computes attempts and budget
   before/after from `StrategyRuntimeInstance.boundary`, can reach
   `ready_to_reserve_attempt`, and keeps `reservation_recorded=false`,
-  `runtime_budget_mutated=false`, and `attempt_consumed=false`.
+  `runtime_budget_mutated=false`, and `attempt_consumed=false`. Its budget
+  basis prefers `risk_preview.max_loss_reference` and falls back to
+  `intended_notional` only when max-loss evidence is missing; `intended_notional`
+  still remains the exposure value checked against `max_notional_per_attempt`.
 - `RuntimeExecutionAttemptReservation` exists as a pending audit record. It can
   record `pending_runtime_mutation` from a ready reservation preview in
   `runtime_execution_attempt_reservations`, while keeping
@@ -793,8 +802,9 @@ Current execution pre-integration status already present locally:
   `exchange_called=false`.
 - `RuntimeExecutionAttemptMutation` exists as a controlled runtime state update
   record. It can apply a pending reservation to `StrategyRuntimeInstance` by
-  incrementing `attempts_used` and `budget_reserved`, and records the mutation
-  in `runtime_execution_attempt_mutations`. It blocks stale attempt/budget
+  incrementing `attempts_used` and `budget_reserved` using the reservation's
+  max-loss-first budget basis, and records the mutation in
+  `runtime_execution_attempt_mutations`. It blocks stale attempt/budget
   state drift and does not change ExecutionIntent status, create orders, call
   OwnerBoundedExecution, call OrderLifecycle, or call exchange.
 - Current B0/B1 work may write a recorded `execution_intents` audit row. It

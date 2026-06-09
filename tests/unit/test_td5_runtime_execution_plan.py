@@ -2365,6 +2365,66 @@ async def test_runtime_execution_attempt_mutation_applies_runtime_budget_and_att
     assert runtime_service.events[-1].metadata["exchange_called"] is False
 
 
+async def test_runtime_execution_attempt_budget_prefers_max_loss_reference_over_notional():
+    candidate = _candidate(
+        risk_preview=OrderCandidateRiskPreview(
+            intended_notional=Decimal("6"),
+            proposed_quantity=Decimal("0.01"),
+            max_loss_reference=Decimal("2"),
+            leverage=Decimal("1"),
+        ),
+    )
+    draft = await _planning_service(
+        active_positions=[],
+        candidate=candidate,
+    ).intent_draft_for_order_candidate(
+        order_candidate_id="candidate-1",
+        owner_reviewed=True,
+        owner_confirmed_for_intent=True,
+    )
+    reservation_repo = _AttemptReservationRecorder()
+    mutation_repo = _AttemptMutationRecorder()
+    runtime_service = _RuntimeMutator()
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftLookup({draft.draft_id: draft}),
+        intent_repository=_IntentRecorder(),
+        submit_authorization_repository=_SubmitAuthorizationRecorder(),
+        attempt_reservation_repository=reservation_repo,
+        attempt_mutation_repository=mutation_repo,
+        final_gate_preview_service=_ready_final_gate_lookup(),
+        runtime_service=runtime_service,
+    )
+    intent = await service.create_recorded_intent_from_draft(draft.draft_id)
+    authorization = await service.create_submit_authorization_for_intent(
+        intent.id,
+        owner_confirmed_for_submit=True,
+    )
+
+    preview = await service.attempt_reservation_preview_for_authorization(
+        authorization.authorization_id
+    )
+    reservation = await service.record_attempt_reservation_for_authorization(
+        authorization.authorization_id
+    )
+    mutation = await service.apply_attempt_mutation_for_reservation(
+        reservation.reservation_id
+    )
+
+    assert preview.budget_remaining_before == Decimal("20")
+    assert preview.budget_remaining_after == Decimal("18")
+    assert preview.metadata["budget_reservation_basis"] == "max_loss_reference"
+    assert preview.metadata["budget_reservation_amount"] == "2"
+    assert reservation.budget_remaining_after == Decimal("18")
+    assert reservation.metadata["budget_reservation_basis"] == "max_loss_reference"
+    assert mutation.status == RuntimeExecutionAttemptMutationStatus.APPLIED
+    assert mutation.budget_reserved_after == Decimal("2")
+    assert mutation.budget_remaining_after == Decimal("18")
+    assert mutation.metadata["budget_reservation_basis"] == "max_loss_reference"
+    assert mutation.metadata["budget_reservation_amount"] == "2"
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("2")
+    assert runtime_service.runtime.budget_remaining == Decimal("18")
+
+
 async def test_runtime_execution_attempt_mutation_blocks_stale_runtime_state_without_mutation():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",

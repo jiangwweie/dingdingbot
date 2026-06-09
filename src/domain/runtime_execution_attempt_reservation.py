@@ -184,6 +184,11 @@ def build_runtime_execution_attempt_reservation(
             "scope": "runtime_execution_attempt_reservation",
             "pending_runtime_mutation_only": True,
             "derived_from_preview_id": preview.reservation_preview_id,
+            "budget_reservation_basis": preview.metadata.get("budget_reservation_basis"),
+            "budget_reservation_amount": preview.metadata.get("budget_reservation_amount"),
+            "budget_reservation_prefers_max_loss_reference": preview.metadata.get(
+                "budget_reservation_prefers_max_loss_reference",
+            ),
             "does_not_increment_attempts": True,
             "does_not_mutate_runtime_budget": True,
             "does_not_call_owner_bounded_execution": True,
@@ -205,6 +210,10 @@ def build_runtime_execution_attempt_reservation_preview(
     payload = intent.source_payload or {}
     intended_notional = _optional_decimal(payload.get("intended_notional"))
     proposed_quantity = _optional_decimal(payload.get("proposed_quantity"))
+    budget_reservation_amount, budget_reservation_basis, budget_reservation_warnings = (
+        _budget_reservation_amount(payload, intended_notional)
+    )
+    warnings.extend(budget_reservation_warnings)
 
     if preflight.status != RuntimeExecutionControlledSubmitPreflightStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER:
         blockers.append("controlled_submit_preflight_not_ready")
@@ -224,8 +233,10 @@ def build_runtime_execution_attempt_reservation_preview(
         intended_notional > runtime.boundary.max_notional_per_attempt
     ):
         blockers.append("candidate_exceeds_max_notional_per_attempt")
-    if intended_notional is not None and runtime.budget_remaining is not None and (
-        intended_notional > runtime.budget_remaining
+    if budget_reservation_amount is None:
+        blockers.append("budget_reservation_amount_missing")
+    if budget_reservation_amount is not None and runtime.budget_remaining is not None and (
+        budget_reservation_amount > runtime.budget_remaining
     ):
         blockers.append("candidate_exceeds_budget_remaining")
 
@@ -237,8 +248,11 @@ def build_runtime_execution_attempt_reservation_preview(
     budget_after = None
     if runtime.budget_remaining is not None:
         budget_after = runtime.budget_remaining
-        if intended_notional is not None:
-            budget_after = max(runtime.budget_remaining - intended_notional, Decimal("0"))
+        if budget_reservation_amount is not None:
+            budget_after = max(
+                runtime.budget_remaining - budget_reservation_amount,
+                Decimal("0"),
+            )
 
     status = (
         RuntimeExecutionAttemptReservationPreviewStatus.BLOCKED
@@ -273,6 +287,13 @@ def build_runtime_execution_attempt_reservation_preview(
         metadata={
             "scope": "runtime_execution_attempt_reservation_preview",
             "non_mutating_budget_gate": True,
+            "budget_reservation_basis": budget_reservation_basis,
+            "budget_reservation_amount": (
+                str(budget_reservation_amount)
+                if budget_reservation_amount is not None
+                else None
+            ),
+            "budget_reservation_prefers_max_loss_reference": True,
             "does_not_increment_attempts": True,
             "does_not_mutate_runtime_budget": True,
             "does_not_call_owner_bounded_execution": True,
@@ -293,6 +314,27 @@ def _optional_decimal(value: Any) -> Optional[Decimal]:
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def _budget_reservation_amount(
+    payload: dict[str, Any],
+    intended_notional: Optional[Decimal],
+) -> tuple[Optional[Decimal], str, list[str]]:
+    risk_preview = payload.get("risk_preview")
+    if not isinstance(risk_preview, dict):
+        risk_preview = {}
+    warnings: list[str] = []
+    max_loss_reference = _optional_decimal(
+        risk_preview.get("max_loss_reference") or payload.get("max_loss_reference")
+    )
+    if max_loss_reference is not None:
+        if intended_notional is not None and max_loss_reference > intended_notional:
+            warnings.append("max_loss_reference_exceeds_intended_notional")
+        return max_loss_reference, "max_loss_reference", warnings
+    if intended_notional is not None:
+        warnings.append("max_loss_reference_missing_using_intended_notional_budget_reservation")
+        return intended_notional, "intended_notional_fallback", warnings
+    return None, "missing", warnings
 
 
 def _dedupe(items: list[str]) -> list[str]:
