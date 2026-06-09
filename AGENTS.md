@@ -1,7 +1,7 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-06-08
-Current phase: BRC productized bounded-live operations system
+Last updated: 2026-06-09
+Current phase: BRC strategy runtime governance convergence
 
 ## Current Document Authority
 
@@ -9,13 +9,19 @@ When project documents conflict, follow this order:
 
 1. Owner explicit correction / decision
 2. Current tracked code + current git status
-3. Current verified reports
-4. ADR / decision records
-5. Historical docs
-6. Archived knowledge-pack v0
+3. `docs/canon/*` (canon files)
+4. Current verified reports
+5. ADR / decision records
+6. Historical docs / `docs/ops/*`
+7. Archived knowledge-pack v0
+
+Canon files (`docs/canon/`) are the primary agent reading source.
+They distill verified facts from knowledge-pack and code.
+If canon and knowledge-pack disagree, canon wins unless a newer Owner
+decision or code change supersedes it.
 
 Current project baseline starts from:
-`docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
+`docs/canon/PROJECT_BASELINE_CURRENT.md`
 
 Current agent execution baseline starts from:
 `docs/ops/agent-current-brc-baseline.md`
@@ -23,6 +29,14 @@ Current agent execution baseline starts from:
 Untracked files must never be described as integrated capabilities.
 Real live trading / real-funds order placement is prohibited unless Owner
 explicitly authorizes that live action.
+
+Current target semantics: BRC is strategy runtime governance. Owner
+authorization should ultimately authorize a bounded StrategyRuntimeInstance,
+not one immediate trade. Current one-shot OwnerBoundedExecution remains a
+valuable historical short path, not the final target architecture.
+
+Do not use docs/ops/ historical documents as current fact source when a
+canon file exists. Do not use docs/archive/ as current instructions.
 
 ## Operating Model
 
@@ -39,6 +53,15 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 ## Current Program SSOT
 
 **Current canon (start here)**:
+
+- `docs/canon/PROJECT_BASELINE_CURRENT.md`
+- `docs/canon/BRC_TARGET_SEMANTICS.md`
+- `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+- `docs/canon/TECH_DEBT_BASELINE.md`
+- `docs/canon/DOCUMENT_GOVERNANCE.md`
+- `docs/canon/AGENT_WORKSPACE_RULES.md`
+
+**Verified source canon (detailed evidence)**:
 
 - `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 - `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
@@ -64,7 +87,7 @@ Archived pre-reset material lives under:
 ## Current Product Direction
 
 The current target is an Owner-facing productized bounded-live trading
-operations system for fast small-capital trial-and-review Campaigns.
+operations system converging on strategy runtime governance.
 
 Do not interpret Trading Console or Owner Console as merely:
 
@@ -81,7 +104,7 @@ path, checking `FinalGate`, monitoring active position/protection, pausing or
 revoking autonomy or budget, reviewing completed trades, and feeding Review
 Ledger outcomes into promote / revise / park decisions.
 
-Current product chain:
+Current product chain (current code reality):
 
 ```text
 StrategyFamily / Carrier
@@ -97,6 +120,29 @@ StrategyFamily / Carrier
 -> Review Ledger
 -> promote / revise / park
 ```
+
+Target product chain (strategy runtime governance):
+
+```text
+StrategyFamily
+-> StrategyFamilyVersion
+-> AdmissionDecision
+-> OwnerRiskAcceptance
+-> TrialBinding
+-> StrategyRuntimeInstance
+-> SignalEvaluation
+-> OrderCandidate
+-> FinalGate
+-> ExecutionIntent
+-> OrderLifecycle
+-> Order / Position
+-> Reconciliation
+-> Review
+```
+
+One-shot OwnerBoundedExecution is a valuable historical short path for
+single-trade Owner authorization. It is not the final target architecture.
+See `docs/canon/BRC_TARGET_SEMANTICS.md` for the full status map.
 
 Read-only documents remain valid only for the specific namespace, report, or
 handoff they describe. They must not be generalized into "the product is

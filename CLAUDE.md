@@ -1,7 +1,7 @@
 # CLAUDE.md - Dingdingbot Claude Operating Guide
 
-Last updated: 2026-06-08
-Current phase: BRC productized bounded-live operations system
+Last updated: 2026-06-09
+Current phase: BRC strategy runtime governance convergence
 
 ## Role
 
@@ -15,7 +15,16 @@ System goals are capability goals. Annual return and max drawdown numbers are in
 
 ## Required Context
 
-Before starting work, read:
+Before starting work, read the canon files first:
+
+1. `docs/canon/PROJECT_BASELINE_CURRENT.md` — current project reality
+2. `docs/canon/BRC_TARGET_SEMANTICS.md` — target semantics and node status
+3. `docs/canon/RUNTIME_SAFETY_BOUNDARY.md` — execution safety boundaries
+4. `docs/canon/TECH_DEBT_BASELINE.md` — known debt classification
+5. `docs/canon/DOCUMENT_GOVERNANCE.md` — document authority and trust rules
+6. `docs/canon/AGENT_WORKSPACE_RULES.md` — agent operating rules
+
+Then read task-specific context:
 
 - `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md` — current product and execution-model canon
 - `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — current project baseline
@@ -31,8 +40,14 @@ Before starting work, read:
 - Any ADR referenced by the task card
 
 Do not use archived files as active instructions unless the task explicitly asks for historical context.
+Do not use docs/ops/ historical documents as current fact source when a canon file exists.
 
 ## Current Product Direction
+
+Current target semantics: BRC is strategy runtime governance. Owner
+authorization should ultimately authorize a bounded StrategyRuntimeInstance,
+not one immediate trade. Current one-shot OwnerBoundedExecution remains a
+valuable historical short path, not the final target architecture.
 
 The current system is an Owner-facing productized bounded-live operations
 system. Do not treat Trading Console or Owner Console as only a read-only
@@ -53,6 +68,29 @@ StrategyFamily / Carrier
 -> active position / TP/SL protection monitoring
 -> Review Ledger
 ```
+
+The target product path is:
+
+```text
+StrategyFamily
+-> StrategyFamilyVersion
+-> AdmissionDecision
+-> OwnerRiskAcceptance
+-> TrialBinding
+-> StrategyRuntimeInstance
+-> SignalEvaluation
+-> OrderCandidate
+-> FinalGate
+-> ExecutionIntent
+-> OrderLifecycle
+-> Order / Position
+-> Reconciliation
+-> Review
+```
+
+One-shot OwnerBoundedExecution is a valuable historical short path for
+single-trade Owner authorization. It is not the final target architecture.
+See `docs/canon/BRC_TARGET_SEMANTICS.md` for the full status map.
 
 Older read-only documents are scope-limited to the specific namespace, report,
 or handoff they describe. They do not globally prohibit scoped console/API,
