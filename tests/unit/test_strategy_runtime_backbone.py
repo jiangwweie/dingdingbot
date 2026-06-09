@@ -189,9 +189,75 @@ def test_strategy_runtime_invalid_transition_rejected():
         runtime.transition_to(StrategyRuntimeInstanceStatus.ACTIVE, now_ms=NOW_MS + 1)
 
 
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        StrategyRuntimeInstanceStatus.REVIEWED,
+        StrategyRuntimeInstanceStatus.EXHAUSTED,
+        StrategyRuntimeInstanceStatus.CLOSED,
+    ],
+)
+def test_strategy_runtime_terminal_statuses_cannot_reactivate(terminal_status):
+    runtime = _runtime(status=terminal_status)
+
+    with pytest.raises(ValueError, match="invalid runtime status transition"):
+        runtime.transition_to(StrategyRuntimeInstanceStatus.ACTIVE, now_ms=NOW_MS + 1)
+
+
+def test_strategy_runtime_paused_runtime_can_reactivate():
+    runtime = _runtime(status=StrategyRuntimeInstanceStatus.ACTIVE)
+
+    paused = runtime.transition_to(StrategyRuntimeInstanceStatus.PAUSED, now_ms=NOW_MS + 1)
+    active = paused.transition_to(StrategyRuntimeInstanceStatus.ACTIVE, now_ms=NOW_MS + 2)
+
+    assert paused.status == StrategyRuntimeInstanceStatus.PAUSED
+    assert active.status == StrategyRuntimeInstanceStatus.ACTIVE
+    assert active.execution_enabled is False
+    assert active.shadow_mode is True
+
+
 def test_strategy_runtime_boundary_rejects_attempt_overuse():
     with pytest.raises(ValueError, match="attempts_used cannot exceed"):
         StrategyRuntimeBoundary(max_attempts=1, attempts_used=2)
+
+
+def test_strategy_runtime_budget_remaining_is_none_without_total_budget():
+    runtime = _runtime(
+        boundary=StrategyRuntimeBoundary(
+            max_attempts=3,
+            attempts_used=1,
+            max_notional_per_attempt=Decimal("25"),
+            total_budget=None,
+            allowed_symbols=["ETH/USDT:USDT"],
+            allowed_sides=["long"],
+        )
+    )
+
+    assert runtime.budget_remaining is None
+
+
+def test_strategy_runtime_rejects_symbol_outside_boundary():
+    with pytest.raises(ValueError, match="runtime symbol must be allowed"):
+        _runtime(
+            symbol="BTC/USDT:USDT",
+            boundary=StrategyRuntimeBoundary(
+                max_attempts=1,
+                allowed_symbols=["ETH/USDT:USDT"],
+                allowed_sides=["long"],
+            ),
+        )
+
+
+def test_strategy_runtime_rejects_side_outside_boundary():
+    with pytest.raises(ValueError, match="runtime side must be allowed"):
+        _runtime(
+            side="short",
+            boundary=StrategyRuntimeBoundary(
+                max_attempts=1,
+                allowed_symbols=["ETH/USDT:USDT"],
+                allowed_sides=["long"],
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -240,6 +306,7 @@ async def test_service_lifecycle_transitions_do_not_create_execution_side_effect
     assert paused.status == StrategyRuntimeInstanceStatus.PAUSED
     assert revoked.status == StrategyRuntimeInstanceStatus.REVOKED
     assert all(event.metadata["execution_enabled"] is False for event in runtime_repo.events)
+    assert all(event.metadata["shadow_mode"] is True for event in runtime_repo.events)
 
 
 @pytest.mark.asyncio
