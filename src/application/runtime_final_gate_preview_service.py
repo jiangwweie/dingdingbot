@@ -6,6 +6,7 @@ It never creates executable records or mutates runtime/order state.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Optional, Protocol
 
 from src.domain.brc_audit_ids import BrcSemanticIds
@@ -137,6 +138,8 @@ class RuntimeFinalGatePreviewService:
         self._check_symbol(runtime, candidate, add_check)
         self._check_side(runtime, candidate, add_check)
         self._check_leverage(runtime, candidate, add_check)
+        self._check_margin(runtime, candidate, add_check)
+        self._check_liquidation_buffer(runtime, candidate, add_check)
         self._check_active_positions(runtime, active_positions_count, add_check)
         self._check_protection(runtime, candidate, add_check)
         self._check_review(runtime, owner_reviewed, add_check)
@@ -373,6 +376,169 @@ class RuntimeFinalGatePreviewService:
             ),
             "leverage_allowed" if leverage <= max_leverage else "candidate_exceeds_max_leverage",
             facts={"candidate_leverage": leverage, "max_leverage": max_leverage},
+        )
+
+    @staticmethod
+    def _check_margin(
+        runtime: StrategyRuntimeInstance,
+        candidate: OrderCandidate,
+        add_check: Any,
+    ) -> None:
+        leverage = candidate.risk_preview.leverage
+        leveraged = leverage is not None and leverage > Decimal("1")
+        margin_required = candidate.risk_preview.margin_required
+        max_margin = runtime.boundary.max_margin_per_attempt
+        if max_margin is None:
+            add_check(
+                "margin_usage",
+                (
+                    RuntimeFinalGatePreviewVerdict.BLOCK
+                    if leveraged
+                    else RuntimeFinalGatePreviewVerdict.WARN
+                ),
+                (
+                    "runtime_max_margin_per_attempt_missing"
+                    if leveraged
+                    else "runtime_margin_cap_missing"
+                ),
+                facts={
+                    "candidate_leverage": leverage,
+                    "margin_required": margin_required,
+                    "max_margin_per_attempt": max_margin,
+                },
+            )
+            return
+        if margin_required is None:
+            add_check(
+                "margin_usage",
+                RuntimeFinalGatePreviewVerdict.BLOCK,
+                "candidate_margin_required_missing",
+                facts={
+                    "candidate_leverage": leverage,
+                    "max_margin_per_attempt": max_margin,
+                },
+            )
+            return
+        add_check(
+            "margin_usage",
+            (
+                RuntimeFinalGatePreviewVerdict.PASS
+                if margin_required <= max_margin
+                else RuntimeFinalGatePreviewVerdict.BLOCK
+            ),
+            "margin_within_runtime_boundary"
+            if margin_required <= max_margin
+            else "candidate_exceeds_max_margin_per_attempt",
+            facts={
+                "candidate_leverage": leverage,
+                "margin_required": margin_required,
+                "max_margin_per_attempt": max_margin,
+            },
+        )
+
+    @staticmethod
+    def _check_liquidation_buffer(
+        runtime: StrategyRuntimeInstance,
+        candidate: OrderCandidate,
+        add_check: Any,
+    ) -> None:
+        leverage = candidate.risk_preview.leverage
+        leveraged = leverage is not None and leverage > Decimal("1")
+        min_buffer = runtime.boundary.min_liquidation_stop_buffer
+        liquidation_price = candidate.risk_preview.liquidation_price_reference
+        stop_price = candidate.protection_preview.stop_price_reference
+        explicit_buffer = candidate.risk_preview.liquidation_stop_buffer
+        needs_check = leveraged or min_buffer is not None
+        if not needs_check:
+            add_check(
+                "liquidation_stop_buffer",
+                RuntimeFinalGatePreviewVerdict.WARN,
+                "liquidation_buffer_requirement_missing",
+                facts={
+                    "candidate_leverage": leverage,
+                    "min_liquidation_stop_buffer": min_buffer,
+                },
+            )
+            return
+        if min_buffer is None:
+            add_check(
+                "liquidation_stop_buffer",
+                RuntimeFinalGatePreviewVerdict.BLOCK,
+                "runtime_liquidation_buffer_requirement_missing",
+                facts={
+                    "candidate_leverage": leverage,
+                    "liquidation_price_reference": liquidation_price,
+                    "stop_price_reference": stop_price,
+                },
+            )
+            return
+        missing: list[str] = []
+        if liquidation_price is None:
+            missing.append("liquidation_price_reference")
+        if stop_price is None:
+            missing.append("stop_price_reference")
+        if missing:
+            add_check(
+                "liquidation_stop_buffer",
+                RuntimeFinalGatePreviewVerdict.BLOCK,
+                "liquidation_stop_buffer_facts_missing",
+                facts={
+                    "missing": missing,
+                    "candidate_leverage": leverage,
+                    "min_liquidation_stop_buffer": min_buffer,
+                    "liquidation_price_reference": liquidation_price,
+                    "stop_price_reference": stop_price,
+                    "liquidation_stop_buffer": explicit_buffer,
+                },
+            )
+            return
+
+        assert liquidation_price is not None
+        assert stop_price is not None
+        side = candidate.side.lower()
+        if side == "long":
+            directional_buffer = stop_price - liquidation_price
+        else:
+            directional_buffer = liquidation_price - stop_price
+        if directional_buffer <= Decimal("0"):
+            add_check(
+                "liquidation_stop_buffer",
+                RuntimeFinalGatePreviewVerdict.BLOCK,
+                "liquidation_boundary_not_beyond_stop",
+                facts={
+                    "candidate_side": candidate.side,
+                    "liquidation_price_reference": liquidation_price,
+                    "stop_price_reference": stop_price,
+                    "directional_buffer": directional_buffer,
+                    "liquidation_stop_buffer": explicit_buffer,
+                    "min_liquidation_stop_buffer": min_buffer,
+                },
+            )
+            return
+
+        buffer = explicit_buffer if explicit_buffer is not None else directional_buffer
+        add_check(
+            "liquidation_stop_buffer",
+            (
+                RuntimeFinalGatePreviewVerdict.PASS
+                if buffer >= min_buffer
+                else RuntimeFinalGatePreviewVerdict.BLOCK
+            ),
+            "liquidation_buffer_within_runtime_boundary"
+            if buffer >= min_buffer
+            else "liquidation_buffer_below_runtime_requirement",
+            facts={
+                "candidate_side": candidate.side,
+                "candidate_leverage": leverage,
+                "liquidation_price_reference": liquidation_price,
+                "stop_price_reference": stop_price,
+                "directional_buffer": directional_buffer,
+                "liquidation_stop_buffer": buffer,
+                "buffer_source": "candidate_risk_preview"
+                if explicit_buffer is not None
+                else "derived_from_explicit_prices",
+                "min_liquidation_stop_buffer": min_buffer,
+            },
         )
 
     @staticmethod

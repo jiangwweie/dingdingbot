@@ -164,6 +164,8 @@ def _runtime() -> StrategyRuntimeInstance:
             allowed_symbols=["ETH/USDT:USDT"],
             allowed_sides=["long"],
             max_leverage=Decimal("1"),
+            max_margin_per_attempt=Decimal("10"),
+            min_liquidation_stop_buffer=Decimal("25"),
             requires_protection=True,
         ),
         execution_enabled=False,
@@ -309,6 +311,9 @@ async def test_strategy_signal_pair_can_reach_runtime_intent_draft_without_execu
         stop_price_reference=Decimal("2475"),
         max_loss_reference=Decimal("3"),
         leverage=Decimal("1"),
+        margin_required=Decimal("10"),
+        liquidation_price_reference=Decimal("2400"),
+        liquidation_stop_buffer=Decimal("75"),
         take_profit_references=[{"kind": "runner", "policy": "trailing_atr"}],
     )
 
@@ -337,6 +342,9 @@ async def test_strategy_signal_pair_blocks_when_local_active_position_source_is_
         stop_price_reference=Decimal("2475"),
         max_loss_reference=Decimal("3"),
         leverage=Decimal("1"),
+        margin_required=Decimal("10"),
+        liquidation_price_reference=Decimal("2400"),
+        liquidation_stop_buffer=Decimal("75"),
     )
 
     assert draft.status == RuntimeExecutionIntentDraftStatus.BLOCKED
@@ -362,6 +370,9 @@ async def test_strategy_signal_pair_stops_before_candidate_when_required_facts_m
             stop_price_reference=Decimal("2475"),
             max_loss_reference=Decimal("3"),
             leverage=Decimal("1"),
+            margin_required=Decimal("10"),
+            liquidation_price_reference=Decimal("2400"),
+            liquidation_stop_buffer=Decimal("75"),
         )
 
     assert store.candidate is None
@@ -421,6 +432,9 @@ async def test_strategy_signal_pair_records_pg_shadow_candidate_and_intent_draft
             stop_price_reference=Decimal("2475"),
             max_loss_reference=Decimal("3"),
             leverage=Decimal("1"),
+            margin_required=Decimal("10"),
+            liquidation_price_reference=Decimal("2400"),
+            liquidation_stop_buffer=Decimal("75"),
             take_profit_references=[{"kind": "runner", "policy": "trailing_atr"}],
         )
         stored_evaluations = await shadow_service.list_signal_evaluations(

@@ -46,6 +46,8 @@ class RuntimeFinalGateBoundarySnapshot(RuntimeFinalGatePreviewModel):
     allowed_symbols: list[str] = Field(default_factory=list)
     allowed_sides: list[str] = Field(default_factory=list)
     max_leverage: Optional[Decimal] = None
+    max_margin_per_attempt: Optional[Decimal] = None
+    min_liquidation_stop_buffer: Optional[Decimal] = None
     max_active_positions: int
     requires_protection: bool
     requires_review: bool
@@ -63,6 +65,9 @@ class RuntimeFinalGateCandidateSnapshot(RuntimeFinalGatePreviewModel):
     intended_notional: Optional[Decimal] = None
     entry_price_reference: Optional[Decimal] = None
     candidate_leverage: Optional[Decimal] = None
+    margin_required: Optional[Decimal] = None
+    liquidation_price_reference: Optional[Decimal] = None
+    liquidation_stop_buffer: Optional[Decimal] = None
     protection_required: bool
     protection_reference_present: bool
     shadow_mode: bool
@@ -118,6 +123,8 @@ def build_runtime_boundary_snapshot(
         allowed_symbols=list(boundary.allowed_symbols),
         allowed_sides=list(boundary.allowed_sides),
         max_leverage=boundary.max_leverage,
+        max_margin_per_attempt=boundary.max_margin_per_attempt,
+        min_liquidation_stop_buffer=boundary.min_liquidation_stop_buffer,
         max_active_positions=boundary.max_active_positions,
         requires_protection=boundary.requires_protection,
         requires_review=boundary.requires_review,
@@ -145,6 +152,9 @@ def build_runtime_candidate_snapshot(
         intended_notional=candidate.intended_notional,
         entry_price_reference=candidate.entry_price_reference,
         candidate_leverage=candidate_leverage,
+        margin_required=candidate.risk_preview.margin_required,
+        liquidation_price_reference=candidate.risk_preview.liquidation_price_reference,
+        liquidation_stop_buffer=candidate.risk_preview.liquidation_stop_buffer,
         protection_required=candidate.protection_preview.requires_protection,
         protection_reference_present=protection_reference_present,
         shadow_mode=candidate.shadow_mode,

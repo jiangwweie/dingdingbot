@@ -79,6 +79,9 @@ class OrderCandidateRiskPreview(SignalEvaluationModel):
     proposed_quantity: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     max_loss_reference: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     leverage: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    margin_required: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    liquidation_price_reference: Optional[Decimal] = None
+    liquidation_stop_buffer: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     notes: list[str] = Field(default_factory=list)
 
 

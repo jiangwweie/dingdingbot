@@ -46,6 +46,8 @@ def _runtime(**overrides) -> StrategyRuntimeInstance:
             allowed_symbols=["ETH/USDT:USDT"],
             allowed_sides=["long"],
             max_leverage=Decimal("3"),
+            max_margin_per_attempt=Decimal("20"),
+            min_liquidation_stop_buffer=Decimal("25"),
             requires_protection=True,
             requires_review=True,
         ),
@@ -73,11 +75,16 @@ def _candidate(**overrides) -> OrderCandidate:
         "risk_preview": OrderCandidateRiskPreview(
             intended_notional=Decimal("25"),
             proposed_quantity=Decimal("0.01"),
+            max_loss_reference=Decimal("5"),
             leverage=Decimal("2"),
+            margin_required=Decimal("12.5"),
+            liquidation_price_reference=Decimal("2400"),
+            liquidation_stop_buffer=Decimal("75"),
         ),
         "protection_preview": OrderCandidateProtectionPreview(
             requires_protection=True,
             stop_reference="shadow_stop_reference",
+            stop_price_reference=Decimal("2475"),
         ),
         "rationale": "candidate for preview",
         "created_at_ms": NOW_MS,
@@ -162,6 +169,8 @@ def test_runtime_final_gate_budget_check_prefers_max_loss_over_notional():
                 allowed_symbols=["ETH/USDT:USDT"],
                 allowed_sides=["long"],
                 max_leverage=Decimal("1"),
+                max_margin_per_attempt=Decimal("10"),
+                min_liquidation_stop_buffer=Decimal("1"),
                 requires_protection=True,
                 requires_review=True,
             )
@@ -173,6 +182,9 @@ def test_runtime_final_gate_budget_check_prefers_max_loss_over_notional():
                 proposed_quantity=Decimal("0.004"),
                 max_loss_reference=Decimal("3"),
                 leverage=Decimal("1"),
+                margin_required=Decimal("10"),
+                liquidation_price_reference=Decimal("2400"),
+                liquidation_stop_buffer=Decimal("75"),
             ),
         ),
         active_positions_count=0,
@@ -187,6 +199,57 @@ def test_runtime_final_gate_budget_check_prefers_max_loss_over_notional():
     assert budget_check.facts["budget_reservation_basis"] == "max_loss_reference"
     assert budget_check.facts["budget_reservation_amount"] == Decimal("3")
     assert budget_check.facts["intended_notional"] == Decimal("10")
+
+
+def test_runtime_final_gate_blocks_leveraged_candidate_missing_margin_and_liquidation_facts():
+    preview = _preview_service().preview(
+        runtime=_runtime(),
+        candidate=_candidate(
+            risk_preview=OrderCandidateRiskPreview(leverage=Decimal("2")),
+            protection_preview=OrderCandidateProtectionPreview(
+                requires_protection=True,
+                stop_reference="structure_stop",
+            ),
+        ),
+        active_positions_count=0,
+        owner_reviewed=True,
+    )
+
+    assert preview.verdict == RuntimeFinalGatePreviewVerdict.BLOCK
+    assert "candidate_margin_required_missing" in preview.blockers
+    assert "liquidation_stop_buffer_facts_missing" in preview.blockers
+    assert preview.execution_intent_created is False
+    assert preview.order_created is False
+    assert preview.exchange_called is False
+
+
+def test_runtime_final_gate_blocks_margin_excess_and_insufficient_liquidation_buffer():
+    preview = _preview_service().preview(
+        runtime=_runtime(),
+        candidate=_candidate(
+            risk_preview=OrderCandidateRiskPreview(
+                intended_notional=Decimal("25"),
+                proposed_quantity=Decimal("0.01"),
+                max_loss_reference=Decimal("5"),
+                leverage=Decimal("2"),
+                margin_required=Decimal("25"),
+                liquidation_price_reference=Decimal("2460"),
+            ),
+        ),
+        active_positions_count=0,
+        owner_reviewed=True,
+    )
+
+    assert preview.verdict == RuntimeFinalGatePreviewVerdict.BLOCK
+    assert "candidate_exceeds_max_margin_per_attempt" in preview.blockers
+    assert "liquidation_buffer_below_runtime_requirement" in preview.blockers
+    margin_check = next(check for check in preview.checks if check.name == "margin_usage")
+    liquidation_check = next(
+        check for check in preview.checks if check.name == "liquidation_stop_buffer"
+    )
+    assert margin_check.facts["margin_required"] == Decimal("25")
+    assert liquidation_check.facts["directional_buffer"] == Decimal("15")
+    assert liquidation_check.facts["buffer_source"] == "derived_from_explicit_prices"
 
 
 async def test_runtime_final_gate_preview_uses_local_active_position_source_when_query_missing():

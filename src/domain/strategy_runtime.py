@@ -86,6 +86,8 @@ class StrategyRuntimeBoundary(StrategyRuntimeModel):
     allowed_symbols: list[str] = Field(default_factory=list)
     allowed_sides: list[str] = Field(default_factory=list)
     max_leverage: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    max_margin_per_attempt: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    min_liquidation_stop_buffer: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     requires_protection: bool = True
     requires_review: bool = True
 

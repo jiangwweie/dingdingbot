@@ -177,6 +177,8 @@ def _runtime() -> StrategyRuntimeInstance:
             allowed_symbols=["ETH/USDT:USDT"],
             allowed_sides=["long"],
             max_leverage=Decimal("1"),
+            max_margin_per_attempt=Decimal("10"),
+            min_liquidation_stop_buffer=Decimal("25"),
             requires_protection=True,
         ),
         execution_enabled=False,
@@ -405,6 +407,9 @@ async def test_strategy_signal_planning_uses_overlay_before_runtime_draft_withou
         stop_price_reference=Decimal("2475"),
         max_loss_reference=Decimal("3"),
         leverage=Decimal("1"),
+        margin_required=Decimal("10"),
+        liquidation_price_reference=Decimal("2400"),
+        liquidation_stop_buffer=Decimal("75"),
     )
 
     assert draft.status == RuntimeExecutionIntentDraftStatus.READY_FOR_INTENT_CREATION
