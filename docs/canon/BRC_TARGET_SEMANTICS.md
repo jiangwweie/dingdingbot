@@ -203,12 +203,19 @@ Current local B0 implementation slice:
   coherent `StrategyFamilySignalInput` + `StrategyFamilySignalOutput` pair:
   the service builds StrategyEvaluationContext from read-only facts and then
   applies the same shadow-only RequiredFacts gate.
+- `src/application/strategy_runtime_fact_overlay_service.py` provides an
+  optional non-executing read-only overlay before B0 planning. When injected, it
+  replaces caller-provided account/position allow facts with trusted local or
+  read-only sources, marks unavailable/stale facts through SignalDataQuality,
+  and keeps missing trusted facts as B0 blockers instead of allowing manual
+  active-position counts to pass.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges the B0
   signal-pair path into the existing non-executing runtime planning path:
   strategy signal pair -> semantically bound shadow OrderCandidate ->
-  RuntimeExecutionPlan / RuntimeExecutionIntentDraft. It does not create a
-  recorded ExecutionIntent, local order, OrderLifecycle call, or exchange
-  request.
+  RuntimeExecutionPlan / RuntimeExecutionIntentDraft. It can apply the trusted
+  runtime fact overlay before semantic binding when explicitly configured. It
+  does not create a recorded ExecutionIntent, local order, OrderLifecycle call,
+  or exchange request.
 - This is not proven-alpha approval, not execution authority, and not a real
   OrderLifecycle adapter. Live fact readers, BRF/RMR concrete evaluator
   details, FCO funding/OI/crowding data coverage, and runtime promotion remain

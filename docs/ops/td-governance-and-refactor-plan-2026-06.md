@@ -121,6 +121,7 @@ python3 -m pytest -q tests/unit/test_b0_strategy_evaluation_context_builder.py \
 python3 -m compileall -q src/application/strategy_evaluation_context_builder.py \
   src/application/strategy_semantics_shadow_binding_service.py \
   src/application/runtime_strategy_signal_planning_service.py \
+  src/application/strategy_runtime_fact_overlay_service.py \
   src/application/runtime_final_gate_preview_service.py \
   src/domain/strategy_semantics.py \
   src/domain/runtime_execution_attempt_reservation.py \
@@ -131,6 +132,23 @@ python3 -m compileall -q src/application/strategy_evaluation_context_builder.py 
   tests/unit/test_td4_runtime_final_gate_preview.py \
   tests/unit/test_td5_runtime_execution_plan.py
 passed
+
+B0 trusted runtime fact overlay follow-up validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_fact_overlay.py \
+  tests/unit/test_b0_strategy_evaluation_context_builder.py \
+  tests/unit/test_b0_runtime_strategy_signal_planning.py \
+  tests/unit/test_td4_runtime_final_gate_preview.py \
+  tests/unit/test_td5_runtime_execution_plan.py
+103 passed
+
+python3 -m compileall -q src/application/strategy_runtime_fact_overlay_service.py \
+  src/application/runtime_strategy_signal_planning_service.py \
+  tests/unit/test_b0_strategy_runtime_fact_overlay.py
+passed
+
+git diff --check
+passed
 ```
 
 Deployment note:
@@ -138,7 +156,8 @@ Deployment note:
 ```text
 tokyo deployment: commit 415d398 / Alembic head 044
 local branch: codex/td3-signal-evaluation-order-candidate-shadow-v1
-local head: 651ec2aa
+local head: verify with `git log` before deployment; local Sprint 1-5/B0
+pre-integration commits are ahead of tokyo
 local working tree includes migrations 045, 046, 047, 048, 049, 050, 051, 052, 053, 054, 055, 056, 057, 058
 ```
 
@@ -537,12 +556,19 @@ Current local B0 implementation slice:
   accepts `StrategyFamilySignalInput` + `StrategyFamilySignalOutput`, builds
   StrategyEvaluationContext from read-only facts, and applies the same
   shadow-only gate.
+- `src/application/strategy_runtime_fact_overlay_service.py` provides a
+  trusted read-only fact overlay for B0 planning. It can replace caller-provided
+  account/position allow facts with injected local/read-only sources, mark
+  account/position facts missing or stale through SignalDataQuality when the
+  trusted source is unavailable, and preserve fail-closed RequiredFacts behavior
+  before semantic shadow candidate creation.
 - `src/application/runtime_strategy_signal_planning_service.py` bridges that B0
   signal-pair path into existing runtime planning: strategy signal pair ->
   semantic shadow OrderCandidate -> RuntimeExecutionPlan /
-  RuntimeExecutionIntentDraft. It remains non-executing and does not write
-  recorded ExecutionIntent rows, create local orders, call OrderLifecycle, or
-  call exchange.
+  RuntimeExecutionIntentDraft. It can apply the trusted runtime fact overlay
+  before semantic binding when explicitly configured. It remains non-executing
+  and does not write recorded ExecutionIntent rows, create local orders, call
+  OrderLifecycle, or call exchange.
 - `tests/unit/test_b0_strategy_semantics_binding.py` verifies catalog
   semantics, missing/stale fact blocking, BRF shadow candidate binding, RMR
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
@@ -563,15 +589,19 @@ Current local B0 implementation slice:
   creation when RequiredFacts are missing. It also verifies the PG-backed
   roundtrip through SignalEvaluation / OrderCandidate shadow repositories and
   RuntimeExecutionIntentDraft repository.
+- `tests/unit/test_b0_strategy_runtime_fact_overlay.py` verifies that the
+  trusted overlay replaces caller-supplied active-position counts, fails closed
+  when trusted position/account fact sources are missing, and can feed the
+  runtime draft path without creating ExecutionIntent records, local orders, or
+  exchange calls.
 
 Remaining B0 work:
 
 - Owner/Codex-gated BRF evaluator details;
 - RMR regime classifier implementation details;
-- live/runtime fact-source integration beyond current
-  StrategyFamilySignalInput / StrategyFamilySignalOutput /
-  StrategyRuntimeInstance snapshots, especially trusted account, active
-  position, funding, open-interest, and crowding readers;
+- live/runtime fact-source orchestration beyond the current injected trusted
+  account/active-position overlay, especially scheduler/runtime reader wiring
+  plus funding, open-interest, and crowding readers;
 - explicit real-submit attempt / budget release-or-consume acceptance before
   runtime promotion. Local reservation/mutation now uses a max-loss-first budget
   basis, but promotion still requires Owner/Codex confirmation of when

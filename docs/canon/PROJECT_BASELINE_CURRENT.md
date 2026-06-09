@@ -114,15 +114,23 @@ Key facts:
   inventing it. It intentionally blocks or downgrades cases such as missing 4h
   CPM context, observation-only account facts, BRF without explicit
   short-squeeze risk facts, and FCO without open-interest/crowding sources.
+- **StrategyRuntimeFactOverlayService** now exists as a local non-executing
+  read-only fact overlay before B0 strategy signal planning. When explicitly
+  injected, it replaces caller-provided account/position allow facts with
+  trusted local/read-only sources, marks missing/stale account or position
+  facts through `SignalDataQuality`, and lets B0 RequiredFacts fail closed
+  rather than trusting owner/user-supplied active-position counts.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signal pairs into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->
   StrategyEvaluationContext -> shadow OrderCandidate -> RuntimeExecutionPlan /
   RuntimeExecutionIntentDraft`, while preserving `not_order=true`,
   `not_execution_intent=true`, `execution_intent_created=false`,
-  `order_created=false`, and `exchange_called=false`. It does not expose
-  owner-supplied active-position counts as an allow fact; runtime FinalGate must
-  use configured local active-position facts or block when unavailable.
+  `order_created=false`, and `exchange_called=false`. If a trusted runtime fact
+  overlay is injected, it applies that overlay before semantic binding. It does
+  not expose owner-supplied active-position counts as an allow fact; runtime
+  FinalGate must use configured local active-position facts or block when
+  unavailable.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange. Its

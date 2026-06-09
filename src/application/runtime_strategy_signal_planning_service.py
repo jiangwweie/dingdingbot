@@ -23,6 +23,9 @@ from src.application.strategy_evaluation_context_builder import (
 from src.application.strategy_semantics_shadow_binding_service import (
     StrategySemanticsShadowBindingService,
 )
+from src.application.strategy_runtime_fact_overlay_service import (
+    StrategyRuntimeFactOverlayService,
+)
 from src.domain.runtime_execution_plan import (
     RuntimeExecutionIntentDraft,
     RuntimeExecutionPlan,
@@ -43,9 +46,11 @@ class RuntimeStrategySignalPlanningService:
         *,
         semantics_binding_service: StrategySemanticsShadowBindingService,
         runtime_execution_planning_service: RuntimeExecutionPlanningService,
+        runtime_fact_overlay_service: StrategyRuntimeFactOverlayService | None = None,
     ) -> None:
         self._semantics_binding_service = semantics_binding_service
         self._runtime_execution_planning_service = runtime_execution_planning_service
+        self._runtime_fact_overlay_service = runtime_fact_overlay_service
 
     async def create_order_candidate_from_strategy_signal_pair(
         self,
@@ -65,6 +70,12 @@ class RuntimeStrategySignalPlanningService:
         expires_at_ms: int | None = None,
         metadata: dict | None = None,
     ) -> OrderCandidate:
+        signal_input, metadata = await self._apply_runtime_fact_overlay(
+            signal_input,
+            output,
+            runtime=runtime,
+            metadata=metadata,
+        )
         return await self._semantics_binding_service.create_semantic_order_candidate_from_strategy_signal_pair(
             signal_input,
             output,
@@ -88,6 +99,28 @@ class RuntimeStrategySignalPlanningService:
                 **(metadata or {}),
             },
         )
+
+    async def _apply_runtime_fact_overlay(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        output: StrategyFamilySignalOutput,
+        *,
+        runtime: StrategyRuntimeInstance,
+        metadata: dict | None,
+    ) -> tuple[StrategyFamilySignalInput, dict]:
+        overlay = self._runtime_fact_overlay_service
+        if overlay is None:
+            return signal_input, dict(metadata or {})
+        result = await overlay.apply(signal_input, output=output, runtime=runtime)
+        return result.signal_input, {
+            **(metadata or {}),
+            "trusted_runtime_fact_overlay": {
+                "applied": result.applied,
+                "blockers": result.blockers,
+                "warnings": result.warnings,
+                "metadata": result.metadata,
+            },
+        }
 
     async def plan_strategy_signal_pair(
         self,
