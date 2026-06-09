@@ -1224,6 +1224,13 @@ Current local Sprint 7 slice:
   behavior. It also lists the Owner/Codex confirmation keys still needed for
   promotion. This readiness preview is exposed through a Trading Console GET
   endpoint and remains non-executing.
+- `ScriptRiskClassifier` now provides a static, non-executing classification
+  pass for `scripts/` entry points. It separates declared read-only research
+  scripts, credential-sensitive exchange reads, database/runtime-control
+  mutations, exchange-write/testnet rehearsal paths, live exchange-write paths,
+  and unknown scripts. Unknown scripts fail closed for review, and script
+  comments such as "dry-run", "read-only", or "Owner-approved" are treated as
+  classification evidence only, not as execution authorization.
 
 Required properties:
 

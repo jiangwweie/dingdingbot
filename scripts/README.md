@@ -7,6 +7,33 @@ Archived material:
 
 Only reintroduce scripts here when they serve the new baseline directly.
 
+## Static Risk Classification
+
+Before running or delegating any script in this directory, classify it as a
+static source artifact first. The classifier lives at:
+
+- `src/application/script_risk_classifier.py`
+
+The classifier reads script text only. It must not import or execute the target
+script. Unknown scripts fail closed as `unknown_review_required`.
+
+Risk levels:
+
+- `read_only`: declared read-only or research-only material.
+- `review_required`: exchange-read, credential-sensitive, or live-scope
+  preflight material.
+- `mutation_restricted`: database, runtime-control, config, or safety-state
+  mutation material.
+- `exchange_write_restricted`: exchange-write or controlled testnet execution
+  material.
+- `live_action_restricted`: live-scope exchange-write material.
+- `unknown_review_required`: no recognized safety or risk contract.
+
+Script comments such as "dry-run", "read-only", or "Owner-approved" are useful
+classification evidence, but they do not authorize execution. Real live trading
+or real-funds order placement still requires a separate explicit Owner
+authorization for the exact action.
+
 ## Runtime Safety Seeding
 
 - `seed_gks_state.py`: creates or updates the single PG Global Kill Switch row.
