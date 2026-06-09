@@ -6,6 +6,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppShell } from './components/Layout';
 import { AuthProvider, useAuth } from './lib/auth';
+import { ThemeProvider } from './lib/theme';
 import Dashboard from './pages/Dashboard';
 import AccountRisk from './pages/AccountRisk';
 import OrderLedger from './pages/OrderLedger';
@@ -26,7 +27,7 @@ function ProtectedShell() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 flex items-center justify-center text-sm">
+      <div className="console-surface flex min-h-screen items-center justify-center text-sm text-slate-600 dark:text-slate-300">
         正在确认登录状态...
       </div>
     );
@@ -41,33 +42,35 @@ function ProtectedShell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<ProtectedShell />}>
-            <Route index element={<Dashboard />} />
-            <Route path="strategy" element={<CarrierShelf />} />
-            <Route path="runtime" element={<AuthorizationState />} />
-            <Route path="trades" element={<OrderLedger />} />
-            <Route path="analysis" element={<ReviewState />} />
-            <Route path="incident" element={<RecoveryState />} />
-            <Route path="evidence" element={<AuditChain />} />
-            <Route path="account" element={<AccountRisk />} />
-            <Route path="ledger" element={<OrderLedger />} />
-            <Route path="protection" element={<ProtectionHealth />} />
-            <Route path="carrier" element={<CarrierShelf />} />
-            <Route path="authorization" element={<AuthorizationState />} />
-            <Route path="execution" element={<ExecutionControl />} />
-            <Route path="action-entry" element={<ActionEntry />} />
-            <Route path="recovery" element={<RecoveryState />} />
-            <Route path="review" element={<ReviewState />} />
-            <Route path="audit" element={<AuditChain />} />
-            <Route path="signals" element={<SignalMarkerFeed />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<ProtectedShell />}>
+              <Route index element={<Dashboard />} />
+              <Route path="strategy" element={<CarrierShelf />} />
+              <Route path="runtime" element={<AuthorizationState />} />
+              <Route path="trades" element={<OrderLedger />} />
+              <Route path="analysis" element={<ReviewState />} />
+              <Route path="incident" element={<RecoveryState />} />
+              <Route path="evidence" element={<AuditChain />} />
+              <Route path="account" element={<AccountRisk />} />
+              <Route path="ledger" element={<OrderLedger />} />
+              <Route path="protection" element={<ProtectionHealth />} />
+              <Route path="carrier" element={<CarrierShelf />} />
+              <Route path="authorization" element={<AuthorizationState />} />
+              <Route path="execution" element={<ExecutionControl />} />
+              <Route path="action-entry" element={<ActionEntry />} />
+              <Route path="recovery" element={<RecoveryState />} />
+              <Route path="review" element={<ReviewState />} />
+              <Route path="audit" element={<AuditChain />} />
+              <Route path="signals" element={<SignalMarkerFeed />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

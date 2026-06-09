@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
@@ -14,14 +14,13 @@ import {
   ListChecks,
   LogOut,
   Menu,
-  Moon,
   ShieldCheck,
-  Sun,
 } from 'lucide-react';
 import { DataStatusLine, FreshnessBadge, ReadModelErrorPanel } from './ui';
 import { useReadModel } from '@/lib/tradingConsoleApi';
 import { useAuth } from '@/lib/auth';
 import { StatusChip, type ConsoleTone } from './console/ConsolePrimitives';
+import { ThemeToggle } from './ThemeToggle';
 
 const NAV_ITEMS = [
   { name: '控制总览', path: '/', icon: Home },
@@ -53,42 +52,7 @@ function ownerStatusLabel(tone: ConsoleTone): string {
   return '当前无需操作';
 }
 
-function ThemeToggleButton({
-  darkMode,
-  onToggle,
-  compact = false,
-}: {
-  darkMode: boolean;
-  onToggle: () => void;
-  compact?: boolean;
-}) {
-  const Icon = darkMode ? Sun : Moon;
-  const label = darkMode ? '白天模式' : '暗黑模式';
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label={`切换到${label}`}
-      aria-pressed={darkMode}
-      title={`切换到${label}`}
-      className={cn(
-        'inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500',
-        compact && 'min-h-9 w-9 px-0',
-      )}
-    >
-      <Icon className="h-4 w-4" />
-      {!compact && <span>{label}</span>}
-    </button>
-  );
-}
-
 export function AppShell() {
-  const [darkMode, setDarkMode] = useState(() => {
-    const stored = window.localStorage.getItem('brc-console-theme');
-    if (stored === 'light') return false;
-    if (stored === 'dark') return true;
-    return true;
-  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { session, logout } = useAuth();
   const { envelope: envData, error } = useReadModel<any>('/api/trading-console/operations-cockpit?include_exchange=true');
@@ -102,15 +66,8 @@ export function AppShell() {
       : '未知';
   const ownerTone = ownerStatusTone(envData, error);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-    document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
-    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
-    window.localStorage.setItem('brc-console-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
-
   return (
-    <div className="console-surface min-h-screen flex flex-col text-slate-100 md:flex-row">
+    <div className="console-surface flex min-h-screen flex-col text-slate-100 md:flex-row">
 
       {/* Mobile Header */}
       <div className="md:hidden flex flex-col sticky top-0 z-20">
@@ -120,7 +77,7 @@ export function AppShell() {
             <div className="text-xs text-slate-500">策略运行账户 · {envLabel}</div>
           </div>
           <div className="flex items-center gap-2">
-            <ThemeToggleButton darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} compact />
+            <ThemeToggle compact />
             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="cursor-pointer rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300">
               <Menu className="w-4 h-4" />
             </button>
@@ -141,7 +98,7 @@ export function AppShell() {
               <div className="text-[10px] font-medium uppercase text-slate-500">Owner Console</div>
             </div>
           </div>
-          <ThemeToggleButton darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} compact />
+          <ThemeToggle compact />
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {NAV_ITEMS.map((item) => (
@@ -200,7 +157,7 @@ export function AppShell() {
             {overall.label && <span className="hidden truncate text-slate-300 md:inline">状态：{overall.label}</span>}
             <DataStatusLine envelope={envData} />
             {error && <span className="font-semibold text-rose-300">当前内容暂不可用</span>}
-            <ThemeToggleButton darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} />
+            <ThemeToggle />
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-xs font-semibold text-slate-200">
               OW
             </div>

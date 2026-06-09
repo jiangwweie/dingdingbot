@@ -79,7 +79,8 @@ Avoid:
 
 ## 4. Theme And Dark Mode
 
-Dark mode is a required product capability for Sprint 6, not an optional skin.
+Dark mode and light mode switching are required product capabilities for Sprint
+6, not optional skins.
 
 The default visual direction should support dark mode because the console is a
 risk and operations surface:
@@ -91,7 +92,8 @@ risk and operations surface:
 - evidence and technical detail should be readable without dominating the main
   operation surface.
 
-Dark mode should be implemented through theme tokens, not one-off page colors.
+Themes should be implemented through shared theme state and theme tokens, not
+one-off page colors.
 
 Minimum token groups:
 
@@ -110,8 +112,10 @@ Minimum token groups:
 - focus ring;
 - chart line/fill colors.
 
-Light mode can be deferred if Sprint 6 scope is tight, but the component model
-must not hard-code colors in a way that blocks a later light theme.
+Light mode must remain visually usable for the same Owner workflows. It can be
+quieter and less immersive than the dark graphite default, but it must preserve
+status contrast, evidence readability, disabled-state clarity, and refresh-safe
+theme persistence.
 
 ## 5. Visual References
 

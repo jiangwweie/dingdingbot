@@ -26,6 +26,24 @@
     --console-focus: #7ca7ff;
   }
 
+  html[data-theme='dark'] {
+    color-scheme: dark;
+    --console-bg: #0b1118;
+    --console-bg-elevated: #111923;
+    --console-bg-pane: #151d27;
+    --console-bg-rail: #0d141d;
+    --console-divider: #283342;
+    --console-text: #e6edf5;
+    --console-text-secondary: #a5b2c1;
+    --console-text-muted: #647386;
+    --console-normal: #7ddc96;
+    --console-attention: #f6bd55;
+    --console-intervention: #f27272;
+    --console-blocked: #ff6b81;
+    --console-unavailable: #8792a2;
+    --console-focus: #7ca7ff;
+  }
+
   html[data-theme='light'] {
     color-scheme: light;
     --console-bg: #f5f7fb;
@@ -93,7 +111,8 @@
   html[data-theme='light'] .console-surface .bg-slate-900\/80,
   html[data-theme='light'] .console-surface .bg-slate-900\/70,
   html[data-theme='light'] .console-surface .bg-slate-900\/55,
-  html[data-theme='light'] .console-surface .bg-slate-900\/50 {
+  html[data-theme='light'] .console-surface .bg-slate-900\/50,
+  html[data-theme='light'] .console-surface .bg-slate-900\/30 {
     background-color: rgb(255 255 255 / 0.88) !important;
   }
 
@@ -101,7 +120,8 @@
   html[data-theme='light'] .console-surface .bg-slate-800\/90,
   html[data-theme='light'] .console-surface .bg-slate-800\/80,
   html[data-theme='light'] .console-surface .bg-slate-800\/70,
-  html[data-theme='light'] .console-surface .bg-slate-800\/50 {
+  html[data-theme='light'] .console-surface .bg-slate-800\/50,
+  html[data-theme='light'] .console-surface .bg-slate-800\/40 {
     background-color: rgb(226 232 240 / 0.78) !important;
   }
 
@@ -122,7 +142,9 @@
   html[data-theme='light'] .console-surface .border-slate-700,
   html[data-theme='light'] .console-surface .border-slate-700\/70,
   html[data-theme='light'] .console-surface .border-slate-500\/35,
-  html[data-theme='light'] .console-surface .border-slate-500\/45 {
+  html[data-theme='light'] .console-surface .border-slate-500\/45,
+  html[data-theme='light'] .console-surface .border-slate-300,
+  html[data-theme='light'] .console-surface .border-slate-200 {
     border-color: var(--console-divider) !important;
   }
 

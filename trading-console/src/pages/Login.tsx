@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import { Badge, Card } from '@/components/ui';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { useAuth } from '@/lib/auth';
 
 type LocationState = {
@@ -45,7 +46,10 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-4">
+    <div className="console-surface flex min-h-screen items-center justify-center p-4 text-slate-900 dark:text-slate-100">
+      <div className="fixed right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md space-y-5">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">

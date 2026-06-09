@@ -41,6 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: 'GET',
         credentials: 'include',
       });
+      if (response.status === 401) {
+        setSession(null);
+        return;
+      }
       const payload = await parseSessionResponse(response);
       setSession(payload.authenticated ? payload : null);
     } catch (error) {
