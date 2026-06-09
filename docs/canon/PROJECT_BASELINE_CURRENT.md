@@ -130,10 +130,13 @@ Key facts:
   execution instructions.
 - **StrategyRuntimeFactOverlayService** now exists as a local non-executing
   read-only fact overlay before B0 strategy signal planning. When explicitly
-  injected, it replaces caller-provided account/position allow facts with
-  trusted local/read-only sources, marks missing/stale account or position
-  facts through `SignalDataQuality`, and lets B0 RequiredFacts fail closed
-  rather than trusting owner/user-supplied active-position counts.
+  injected, it replaces caller-provided account/position/market allow facts
+  with trusted local/read-only sources, marks missing/stale account, position,
+  funding, open-interest, or crowding facts through `SignalDataQuality`, and
+  lets B0 RequiredFacts fail closed rather than trusting owner/user-supplied
+  active-position counts or manually supplied derivative-market facts. This is
+  an injection point for trusted facts; live funding/OI/crowding reader
+  implementations and scheduler/runtime wiring are not yet productized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, BRF short-profile, and first real

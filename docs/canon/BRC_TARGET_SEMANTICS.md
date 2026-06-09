@@ -255,6 +255,9 @@ Current local B0 implementation slice:
   strategy signal pair -> semantically bound shadow OrderCandidate ->
   RuntimeExecutionPlan / RuntimeExecutionIntentDraft. It can apply the trusted
   runtime fact overlay before semantic binding when explicitly configured. It
+  can replace caller-provided account/position facts and trusted
+  funding/OI/crowding market facts with injected read-only overlays, and keeps
+  RequiredFacts fail-closed when those trusted sources are missing or stale. It
   does not create a recorded ExecutionIntent, local order, OrderLifecycle call,
   or exchange request.
 - `src/interfaces/api_trading_console.py` has an internal service factory that
@@ -262,9 +265,10 @@ Current local B0 implementation slice:
   and cached account facts. This is an application assembly point only; no
   public strategy-signal write endpoint is exposed by this slice.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. Live fact readers, BRF runtime-profile confirmation,
-  FCO funding/OI/crowding data coverage, and runtime promotion remain
-  Owner/Codex-gated before promotion beyond shadow binding.
+  OrderLifecycle adapter. Live fact reader implementations, scheduler/runtime
+  wiring, BRF runtime-profile confirmation, deployment-backed FCO
+  funding/OI/crowding coverage, and runtime promotion remain Owner/Codex-gated
+  before promotion beyond shadow binding.
 
 ProtectionPolicy and ExitPolicy must stay separate:
 

@@ -9,9 +9,9 @@ intents, orders, exchange payloads, or runtime mutations.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.application.trial_readiness_account_facts import (
     AccountFactsFreshnessStatus,
@@ -21,11 +21,13 @@ from src.application.trial_readiness_account_facts import (
 )
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
+    MarketSnapshot,
     SignalDataQuality,
     SignalDataQualityStatus,
     SignalSide,
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
+    reject_forbidden_execution_fields,
 )
 from src.domain.strategy_runtime import StrategyRuntimeInstance
 
@@ -33,6 +35,46 @@ from src.domain.strategy_runtime import StrategyRuntimeInstance
 class StrategyRuntimeFactActivePositionSource(Protocol):
     async def list_active(self, *, symbol: str | None = None, limit: int = 100) -> list[Any]:
         ...
+
+
+class StrategyRuntimeMarketFactSource(Protocol):
+    async def read_strategy_market_facts(
+        self,
+        *,
+        symbol: str,
+        generated_at_ms: int,
+    ) -> "StrategyRuntimeMarketFacts":
+        ...
+
+
+class StrategyRuntimeMarketFacts(BaseModel):
+    """Read-only derivative/market facts used by B0 strategy semantics."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(min_length=1, max_length=128)
+    timestamp_ms: int = Field(ge=0)
+    freshness: str = Field(default="fresh", max_length=64)
+    funding_rate: Decimal | None = None
+    next_funding_time_ms: int | None = Field(default=None, ge=0)
+    open_interest: Decimal | None = None
+    open_interest_notional: Decimal | None = None
+    open_interest_change_pct: Decimal | None = None
+    crowding_proxy: dict[str, Any] | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    stale_fields: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    read_only_guarantee: bool = True
+    external_call_type: str = Field(default="read_only_market_facts", max_length=128)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    not_order: Literal[True] = True
+    not_execution_intent: Literal[True] = True
+    not_execution_authority: Literal[True] = True
+
+    @model_validator(mode="after")
+    def _reject_execution_fields(self) -> "StrategyRuntimeMarketFacts":
+        reject_forbidden_execution_fields(self.model_dump(mode="python"), root="strategy_runtime_market_facts")
+        return self
 
 
 class StrategyRuntimeFactOverlayResult(BaseModel):
@@ -51,15 +93,25 @@ class StrategyRuntimeFactOverlayService:
         *,
         active_position_source: StrategyRuntimeFactActivePositionSource | None = None,
         account_facts_source: TrialReadinessAccountFactsSource | None = None,
+        market_fact_source: StrategyRuntimeMarketFactSource | None = None,
         position_limit: int = 100,
         require_trusted_position_source: bool = True,
         require_trusted_account_source: bool = True,
+        require_trusted_market_fact_source: bool = False,
+        market_fact_keys: tuple[str, ...] = (
+            "funding_rate",
+            "open_interest",
+            "crowding_proxy",
+        ),
     ) -> None:
         self._active_position_source = active_position_source
         self._account_facts_source = account_facts_source
+        self._market_fact_source = market_fact_source
         self._position_limit = position_limit
         self._require_trusted_position_source = require_trusted_position_source
         self._require_trusted_account_source = require_trusted_account_source
+        self._require_trusted_market_fact_source = require_trusted_market_fact_source
+        self._market_fact_keys = tuple(dict.fromkeys(market_fact_keys))
 
     async def apply(
         self,
@@ -88,6 +140,13 @@ class StrategyRuntimeFactOverlayService:
             missing_fields=missing_fields,
             stale_fields=stale_fields,
         )
+        market_snapshot, market_metadata = await self._market_snapshot(
+            signal_input,
+            blockers=blockers,
+            warnings=warnings,
+            missing_fields=missing_fields,
+            stale_fields=stale_fields,
+        )
         notes.append("trusted_runtime_fact_overlay_applied")
 
         updated_quality = SignalDataQuality(
@@ -109,6 +168,7 @@ class StrategyRuntimeFactOverlayService:
             "does_not_call_exchange_write": True,
             "position_fact_overlay": position_metadata,
             "account_fact_overlay": account_metadata,
+            "market_fact_overlay": market_metadata,
         }
         updated_runtime_safety = {
             **signal_input.runtime_safety_snapshot,
@@ -118,12 +178,18 @@ class StrategyRuntimeFactOverlayService:
             signal_input=signal_input.model_copy(
                 update={
                     "account_facts_snapshot": account_snapshot,
+                    "market_snapshot": market_snapshot,
                     "position_open_order_summary": position_summary,
                     "reconciliation_status": account_snapshot.reconciliation_status,
                     "runtime_safety_snapshot": updated_runtime_safety,
                     "input_quality": updated_quality,
                     "source": "trusted_runtime_fact_overlay",
-                    "freshness": _overlay_freshness(signal_input, account_snapshot),
+                    "freshness": _overlay_freshness(
+                        signal_input,
+                        account_snapshot,
+                        missing_fields=missing_fields,
+                        stale_fields=stale_fields,
+                    ),
                 },
                 deep=True,
             ),
@@ -243,6 +309,92 @@ class StrategyRuntimeFactOverlayService:
             "readiness_blockers": readiness_blockers,
         }
 
+    async def _market_snapshot(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        blockers: list[str],
+        warnings: list[str],
+        missing_fields: set[str],
+        stale_fields: set[str],
+    ) -> tuple[MarketSnapshot, dict[str, Any]]:
+        source = self._market_fact_source
+        if source is None or not hasattr(source, "read_strategy_market_facts"):
+            if self._require_trusted_market_fact_source:
+                blockers.append("trusted_market_fact_source_unavailable")
+                missing_fields.update(self._market_fact_keys)
+                return _market_snapshot_without_trusted_facts(
+                    signal_input,
+                    missing_keys=self._market_fact_keys,
+                    reason="trusted_market_fact_source_unavailable",
+                ), {
+                    "status": "missing",
+                    "reason": "trusted_market_fact_source_unavailable",
+                    "required_keys": list(self._market_fact_keys),
+                }
+            return signal_input.market_snapshot, {
+                "status": "unchanged",
+                "reason": "trusted_market_fact_source_not_required",
+            }
+
+        try:
+            facts = await source.read_strategy_market_facts(
+                symbol=signal_input.symbol,
+                generated_at_ms=signal_input.timestamp_ms,
+            )
+        except Exception as exc:
+            blockers.append("trusted_market_fact_read_failed")
+            missing_fields.update(self._market_fact_keys)
+            return _market_snapshot_without_trusted_facts(
+                signal_input,
+                missing_keys=self._market_fact_keys,
+                reason="trusted_market_fact_read_failed",
+            ), {
+                "status": "read_failed",
+                "error_type": type(exc).__name__,
+                "required_keys": list(self._market_fact_keys),
+            }
+
+        if not facts.read_only_guarantee:
+            blockers.append("trusted_market_fact_source_not_read_only")
+            missing_fields.update(self._market_fact_keys)
+            warnings.append("market_fact:source_not_read_only")
+            return _market_snapshot_without_trusted_facts(
+                signal_input,
+                missing_keys=self._market_fact_keys,
+                reason="trusted_market_fact_source_not_read_only",
+            ), {
+                "status": "not_read_only",
+                "source_id": facts.source_id,
+                "external_call_type": facts.external_call_type,
+            }
+
+        inferred_missing = _missing_market_fact_keys(facts, self._market_fact_keys)
+        missing_fields.update(inferred_missing)
+        missing_fields.update(facts.missing_fields)
+        stale_market_fields = set(facts.stale_fields)
+        if _freshness_is_stale(facts.freshness):
+            stale_market_fields.update(
+                key for key in self._market_fact_keys if key not in inferred_missing
+            )
+        stale_fields.update(stale_market_fields)
+        warnings.extend(f"market_fact:{warning}" for warning in facts.warnings)
+
+        return _market_snapshot_from_strategy_market_facts(
+            signal_input,
+            facts,
+            missing_keys=sorted({*inferred_missing, *facts.missing_fields}),
+        ), {
+            "status": "available" if not inferred_missing else "partial",
+            "source_id": facts.source_id,
+            "freshness": facts.freshness,
+            "read_only_guarantee": facts.read_only_guarantee,
+            "external_call_type": facts.external_call_type,
+            "missing_fields": sorted({*inferred_missing, *facts.missing_fields}),
+            "stale_fields": sorted(stale_market_fields),
+            "warnings": list(facts.warnings),
+        }
+
 
 def _account_snapshot_from_trial_facts(
     signal_input: StrategyFamilySignalInput,
@@ -294,11 +446,144 @@ def _unavailable_account_snapshot(
     )
 
 
+def _market_snapshot_from_strategy_market_facts(
+    signal_input: StrategyFamilySignalInput,
+    facts: StrategyRuntimeMarketFacts,
+    *,
+    missing_keys: list[str],
+) -> MarketSnapshot:
+    context = _market_context_without_overlay_facts(signal_input.market_snapshot.candle_context)
+    market_facts = dict(context.get("market_facts") or {})
+    if facts.open_interest is not None:
+        market_facts["open_interest"] = {
+            "open_interest": str(facts.open_interest),
+            "open_interest_notional": (
+                str(facts.open_interest_notional)
+                if facts.open_interest_notional is not None
+                else None
+            ),
+            "open_interest_change_pct": (
+                str(facts.open_interest_change_pct)
+                if facts.open_interest_change_pct is not None
+                else None
+            ),
+            "source_id": facts.source_id,
+        }
+    if facts.crowding_proxy is not None:
+        market_facts["crowding_proxy"] = {
+            **_jsonable(facts.crowding_proxy),
+            "source_id": facts.source_id,
+        }
+    if market_facts:
+        context["market_facts"] = market_facts
+    context["trusted_market_fact_overlay"] = {
+        "source_id": facts.source_id,
+        "timestamp_ms": facts.timestamp_ms,
+        "freshness": facts.freshness,
+        "read_only_guarantee": facts.read_only_guarantee,
+        "external_call_type": facts.external_call_type,
+        "missing_fields": list(missing_keys),
+        "stale_fields": list(facts.stale_fields),
+        "non_executing": True,
+        "does_not_create_orders": True,
+        "does_not_call_exchange_write": True,
+    }
+    return signal_input.market_snapshot.model_copy(
+        update={
+            "timestamp_ms": facts.timestamp_ms,
+            "source": "trusted_runtime_market_fact_overlay",
+            "freshness": facts.freshness,
+            "funding_rate": facts.funding_rate,
+            "next_funding_time_ms": facts.next_funding_time_ms,
+            "candle_context": context,
+            "missing_fields": sorted(
+                {
+                    *signal_input.market_snapshot.missing_fields,
+                    *missing_keys,
+                }
+            ),
+        },
+        deep=True,
+    )
+
+
+def _market_snapshot_without_trusted_facts(
+    signal_input: StrategyFamilySignalInput,
+    *,
+    missing_keys: tuple[str, ...],
+    reason: str,
+) -> MarketSnapshot:
+    context = _market_context_without_overlay_facts(signal_input.market_snapshot.candle_context)
+    context["trusted_market_fact_overlay"] = {
+        "status": "missing",
+        "reason": reason,
+        "missing_fields": list(missing_keys),
+        "non_executing": True,
+        "does_not_create_orders": True,
+        "does_not_call_exchange_write": True,
+    }
+    return signal_input.market_snapshot.model_copy(
+        update={
+            "source": "trusted_runtime_market_fact_overlay",
+            "freshness": "missing",
+            "funding_rate": None,
+            "next_funding_time_ms": None,
+            "candle_context": context,
+            "missing_fields": sorted(
+                {
+                    *signal_input.market_snapshot.missing_fields,
+                    *missing_keys,
+                }
+            ),
+        },
+        deep=True,
+    )
+
+
+def _market_context_without_overlay_facts(raw_context: dict[str, Any]) -> dict[str, Any]:
+    context = dict(raw_context or {})
+    market_facts = dict(context.get("market_facts") or {})
+    for key in ("open_interest", "crowding_proxy"):
+        market_facts.pop(key, None)
+    if market_facts:
+        context["market_facts"] = market_facts
+    else:
+        context.pop("market_facts", None)
+    for key in ("open_interest", "crowding_proxy", "trusted_market_fact_overlay"):
+        context.pop(key, None)
+    return context
+
+
+def _missing_market_fact_keys(
+    facts: StrategyRuntimeMarketFacts,
+    required_keys: tuple[str, ...],
+) -> set[str]:
+    missing: set[str] = set()
+    for key in required_keys:
+        if key == "funding_rate" and facts.funding_rate is None:
+            missing.add(key)
+        elif key == "open_interest" and facts.open_interest is None:
+            missing.add(key)
+        elif key == "crowding_proxy" and facts.crowding_proxy is None:
+            missing.add(key)
+    return missing
+
+
+def _freshness_is_stale(value: str | None) -> bool:
+    if not value:
+        return False
+    normalized = value.strip().lower()
+    return any(token in normalized for token in ("stale", "expired", "outdated"))
+
+
 def _overlay_freshness(
     signal_input: StrategyFamilySignalInput,
     account_snapshot: AccountFactsSnapshot,
+    *,
+    missing_fields: set[str],
+    stale_fields: set[str],
 ) -> str:
-    if account_snapshot.freshness in {"stale", "missing"}:
+    if account_snapshot.freshness in {"stale", "missing"} or missing_fields or stale_fields:
         return "degraded"
     return signal_input.freshness
 

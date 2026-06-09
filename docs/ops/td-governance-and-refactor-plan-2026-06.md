@@ -642,10 +642,13 @@ Current local B0 implementation slice:
   shadow-only gate.
 - `src/application/strategy_runtime_fact_overlay_service.py` provides a
   trusted read-only fact overlay for B0 planning. It can replace caller-provided
-  account/position allow facts with injected local/read-only sources, mark
-  account/position facts missing or stale through SignalDataQuality when the
-  trusted source is unavailable, and preserve fail-closed RequiredFacts behavior
-  before semantic shadow candidate creation.
+  account/position/market allow facts with injected local/read-only sources,
+  mark account/position facts and funding/open-interest/crowding facts missing
+  or stale through SignalDataQuality when the trusted source is unavailable or
+  stale, and preserve fail-closed RequiredFacts behavior before semantic shadow
+  candidate creation. The market-fact overlay is a non-executing injection
+  point only; live reader implementations and scheduler/runtime wiring remain
+  separate work.
 - `src/domain/strategy_runtime_promotion_gate.py` provides a pure non-executing
   promotion gate for Owner/Codex confirmations before promotion beyond
   shadow/preview work. It blocks missing strategy semantics, runtime profile,
@@ -718,10 +721,12 @@ Current local B0 implementation slice:
   RuntimeExecutionIntentDraft repository.
 - `tests/unit/test_b0_strategy_runtime_fact_overlay.py` verifies that the
   trusted overlay replaces caller-supplied active-position counts, fails closed
-  when trusted position/account fact sources are missing, and can feed the
-  runtime draft path without creating ExecutionIntent records, local orders, or
-  exchange calls. It also verifies Trading Console internal assembly wires the
-  overlay from PG positions plus cached account facts.
+  when trusted position/account/market fact sources are missing, marks stale
+  funding/open-interest/crowding facts stale, can satisfy FCO RequiredFacts when
+  a trusted read-only market fact source is injected, and can feed the runtime
+  draft path without creating ExecutionIntent records, local orders, or exchange
+  calls. It also verifies Trading Console internal assembly wires the overlay
+  from PG positions plus cached account facts.
 - `tests/unit/test_b0_strategy_runtime_promotion_gate.py` verifies that CPM
   remains blocked until Owner/Codex semantic/runtime confirmations exist, lack
   of proven alpha warns rather than blocking semantic promotion, BRF requires
@@ -780,9 +785,9 @@ Current local B0 implementation slice:
 Remaining B0 work:
 
 - live/runtime fact-source orchestration beyond the current injected trusted
-  account/active-position overlay and Trading Console internal assembly,
-  especially scheduler/runtime reader wiring plus funding, open-interest, and
-  crowding readers;
+  account/active-position/market-fact overlays and Trading Console internal
+  assembly, especially scheduler/runtime reader implementations and deployment
+  wiring for funding, open-interest, and crowding sources;
 - deeper review automation beyond the first Owner-record/API/Console and
   explicit right-tail-metrics slices, especially automatic account-equity
   baseline snapshots, closed-trade review packet generation, and strategy

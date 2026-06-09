@@ -17,6 +17,7 @@ from src.application.strategy_evaluation_context_builder import (
     build_strategy_evaluation_context,
 )
 from src.application.strategy_runtime_fact_overlay_service import (
+    StrategyRuntimeMarketFacts,
     StrategyRuntimeFactOverlayService,
 )
 from src.application.strategy_semantics_shadow_binding_service import (
@@ -77,13 +78,15 @@ def _candles(count: int) -> list[dict]:
 
 def _signal_input(
     *,
+    family_id: str = "CPM-RO-001",
+    version_id: str = "CPM-RO-001-v0",
     account_status: str = "normal",
     position_open_order_summary: dict | None = None,
 ) -> StrategyFamilySignalInput:
     return StrategyFamilySignalInput(
         evaluation_id="eval-cpm-runtime-fact-overlay",
-        strategy_family_id="CPM-RO-001",
-        strategy_family_version_id="CPM-RO-001-v0",
+        strategy_family_id=family_id,
+        strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
         primary_timeframe="1h",
@@ -215,6 +218,21 @@ class _PositionSource:
     async def list_active(self, *, symbol: str | None = None, limit: int = 100):
         self.calls.append({"symbol": symbol, "limit": limit})
         return list(self.positions)
+
+
+class _MarketFactSource:
+    def __init__(self, facts: StrategyRuntimeMarketFacts) -> None:
+        self.facts = facts
+        self.calls: list[dict] = []
+
+    async def read_strategy_market_facts(
+        self,
+        *,
+        symbol: str,
+        generated_at_ms: int,
+    ) -> StrategyRuntimeMarketFacts:
+        self.calls.append({"symbol": symbol, "generated_at_ms": generated_at_ms})
+        return self.facts
 
 
 class _ShadowAndCandidateStore:
@@ -361,6 +379,138 @@ async def test_overlay_replaces_caller_supplied_position_count_with_trusted_proj
     assert context.facts["account_facts"].status == FactAvailabilityStatus.AVAILABLE
     assert context.facts["position_projection"].status == FactAvailabilityStatus.AVAILABLE
     assert cpm.fact_check(context).status == StrategyFactCheckStatus.PASS
+
+
+async def test_overlay_injects_trusted_market_facts_for_fco_required_facts():
+    market_source = _MarketFactSource(
+        StrategyRuntimeMarketFacts(
+            source_id="unit_derivative_market_facts",
+            timestamp_ms=NOW_MS,
+            freshness="fresh",
+            funding_rate=Decimal("0.0002"),
+            next_funding_time_ms=NOW_MS + 28_800_000,
+            open_interest=Decimal("12345.67"),
+            open_interest_notional=Decimal("1300000"),
+            open_interest_change_pct=Decimal("1.25"),
+            crowding_proxy={
+                "status": "defined",
+                "long_short_ratio": "1.8",
+                "crowded_side": "long",
+                "definition": "unit_test_derivative_market_context",
+            },
+            read_only_guarantee=True,
+            external_call_type="read_only_derivatives_snapshot",
+        )
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_PositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+        market_fact_source=market_source,
+        require_trusted_market_fact_source=True,
+    )
+
+    result = await overlay.apply(
+        _signal_input(family_id="FCO-001", version_id="FCO-001-v0"),
+    )
+    context = build_strategy_evaluation_context(result.signal_input)
+    fco = initial_strategy_semantics_catalog().get_binding(
+        strategy_family_id="FCO-001",
+        strategy_family_version_id="FCO-001-v0",
+    )
+    fact_check = fco.fact_check(context)
+
+    assert result.blockers == []
+    assert market_source.calls == [
+        {"symbol": "ETH/USDT:USDT", "generated_at_ms": NOW_MS}
+    ]
+    assert result.signal_input.market_snapshot.funding_rate == Decimal("0.0002")
+    assert context.facts["funding_rate"].status == FactAvailabilityStatus.AVAILABLE
+    assert context.facts["open_interest"].status == FactAvailabilityStatus.AVAILABLE
+    assert context.facts["crowding_proxy"].status == FactAvailabilityStatus.AVAILABLE
+    assert fact_check.status == StrategyFactCheckStatus.PASS
+    assert (
+        context.facts["open_interest"].value_snapshot["value"]["open_interest"]
+        == "12345.67"
+    )
+    assert (
+        context.facts["crowding_proxy"].value_snapshot["value"]["status"]
+        == "defined"
+    )
+
+
+async def test_overlay_fails_closed_when_required_market_fact_source_is_missing():
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_PositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+        market_fact_source=None,
+        require_trusted_market_fact_source=True,
+    )
+    signal_input = _signal_input(family_id="FCO-001", version_id="FCO-001-v0")
+    signal_input.market_snapshot.candle_context["market_facts"] = {
+        "open_interest": {"open_interest": "999"},
+        "crowding_proxy": {"status": "caller_supplied"},
+    }
+
+    result = await overlay.apply(signal_input)
+    context = build_strategy_evaluation_context(result.signal_input)
+    fco = initial_strategy_semantics_catalog().get_binding(
+        strategy_family_id="FCO-001",
+        strategy_family_version_id="FCO-001-v0",
+    )
+    fact_check = fco.fact_check(context)
+
+    assert "trusted_market_fact_source_unavailable" in result.blockers
+    assert result.signal_input.market_snapshot.funding_rate is None
+    assert "market_facts" not in result.signal_input.market_snapshot.candle_context
+    assert context.facts["funding_rate"].status == FactAvailabilityStatus.MISSING
+    assert context.facts["open_interest"].status == FactAvailabilityStatus.MISSING
+    assert context.facts["crowding_proxy"].status == FactAvailabilityStatus.MISSING
+    assert fact_check.status == StrategyFactCheckStatus.BLOCK_MISSING_FACTS
+    assert set(fact_check.missing_facts) == {
+        "funding_rate",
+        "open_interest",
+        "crowding_proxy",
+    }
+
+
+async def test_overlay_marks_stale_market_facts_as_stale_required_facts():
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_PositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+        market_fact_source=_MarketFactSource(
+            StrategyRuntimeMarketFacts(
+                source_id="unit_derivative_market_facts",
+                timestamp_ms=NOW_MS - 86_400_000,
+                freshness="stale",
+                funding_rate=Decimal("0.0002"),
+                open_interest=Decimal("12345.67"),
+                crowding_proxy={"status": "defined"},
+                read_only_guarantee=True,
+            )
+        ),
+        require_trusted_market_fact_source=True,
+    )
+
+    result = await overlay.apply(
+        _signal_input(family_id="FCO-001", version_id="FCO-001-v0"),
+    )
+    context = build_strategy_evaluation_context(result.signal_input)
+    fco = initial_strategy_semantics_catalog().get_binding(
+        strategy_family_id="FCO-001",
+        strategy_family_version_id="FCO-001-v0",
+    )
+    fact_check = fco.fact_check(context)
+
+    assert result.blockers == []
+    assert context.facts["funding_rate"].status == FactAvailabilityStatus.STALE
+    assert context.facts["open_interest"].status == FactAvailabilityStatus.STALE
+    assert context.facts["crowding_proxy"].status == FactAvailabilityStatus.STALE
+    assert fact_check.status == StrategyFactCheckStatus.BLOCK_STALE_DATA
+    assert set(fact_check.stale_facts) == {
+        "funding_rate",
+        "open_interest",
+        "crowding_proxy",
+    }
 
 
 async def test_overlay_fails_closed_when_trusted_position_source_is_missing():
