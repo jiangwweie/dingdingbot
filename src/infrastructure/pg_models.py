@@ -849,6 +849,120 @@ class PGBrcLiveLifecycleReviewORM(PGCoreBase):
     )
 
 
+class PGStrategyRuntimeInstanceORM(PGCoreBase):
+    """Shadow StrategyRuntimeInstance governance record.
+
+    Rows in this table do not grant execution permission, create intents, place
+    orders, mutate exchange state, or replace one-shot OwnerBoundedExecution.
+    """
+
+    __tablename__ = "strategy_runtime_instances"
+
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    trial_binding_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_decision_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_risk_acceptance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    carrier_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    boundary_json: Mapped[dict] = mapped_column(
+        "boundary",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    policy_snapshot_json: Mapped[dict] = mapped_column(
+        "policy_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    review_requirement: Mapped[str] = mapped_column(String(32), nullable=False)
+    execution_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    shadow_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    activated_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    revoked_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    closed_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'paused', 'exhausted', 'expired', "
+            "'revoked', 'closed', 'reviewed')",
+            name="ck_strategy_runtime_instances_status",
+        ),
+        CheckConstraint(
+            "review_requirement IN ('required', 'optional', 'not_required')",
+            name="ck_strategy_runtime_instances_review_requirement",
+        ),
+        CheckConstraint(
+            "execution_enabled = false",
+            name="ck_strategy_runtime_instances_execution_disabled",
+        ),
+        CheckConstraint("shadow_mode = true", name="ck_strategy_runtime_instances_shadow_mode"),
+        Index(
+            "uq_strategy_runtime_instances_trial_binding",
+            "trial_binding_id",
+            unique=True,
+        ),
+        Index("idx_strategy_runtime_instances_status_time", "status", "updated_at_ms"),
+        Index(
+            "idx_strategy_runtime_instances_family_version",
+            "strategy_family_version_id",
+            "updated_at_ms",
+        ),
+        Index("idx_strategy_runtime_instances_symbol_status", "symbol", "status"),
+    )
+
+
+class PGStrategyRuntimeEventORM(PGCoreBase):
+    """Append-only event ledger for StrategyRuntimeInstance shadow lifecycle."""
+
+    __tablename__ = "strategy_runtime_events"
+
+    event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    previous_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    next_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "previous_status IS NULL OR previous_status IN "
+            "('draft', 'active', 'paused', 'exhausted', 'expired', 'revoked', "
+            "'closed', 'reviewed')",
+            name="ck_strategy_runtime_events_previous_status",
+        ),
+        CheckConstraint(
+            "next_status IN ('draft', 'active', 'paused', 'exhausted', 'expired', "
+            "'revoked', 'closed', 'reviewed')",
+            name="ck_strategy_runtime_events_next_status",
+        ),
+        Index("idx_strategy_runtime_events_runtime_time", "runtime_instance_id", "created_at_ms"),
+        Index("idx_strategy_runtime_events_type_time", "event_type", "created_at_ms"),
+    )
+
+
 class PGBrcLlmIntentORM(PGCoreBase):
     """Persisted normalized BRC LLM intent ledger."""
 
