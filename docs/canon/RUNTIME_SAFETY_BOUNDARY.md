@@ -20,9 +20,67 @@ This document defines the runtime safety boundaries for the BRC project.
 
 - Current code can reach the exchange order path through OwnerBoundedExecutionService.
 - All execution work must respect Owner authorization and FinalGate.
-- Documentation work must not run the project or call the exchange.
+- Runtime governance shadow/preview work must not create ExecutionIntent
+  submit-ready records, orders, exchange writes, or runtime execution triggers
+  unless a later task explicitly changes that boundary.
+- RuntimeExecutionPlan, RuntimeExecutionIntentDraft, RuntimeExecutionIntent
+  adapter preview, source-native recorded ExecutionIntent, and
+  RuntimeExecutionSubmitReadiness / RuntimeExecutionSubmitAuthorization /
+  RuntimeExecutionControlledSubmitPlan /
+  RuntimeExecutionControlledSubmitPreflight /
+  RuntimeExecutionControlledSubmitResult /
+  RuntimeExecutionAttemptReservationPreview /
+  RuntimeExecutionAttemptReservation /
+  RuntimeExecutionAttemptMutation /
+  RuntimeExecutionProtectionPlanPreview /
+  RuntimeExecutionProtectionPlan /
+  RuntimeExecutionOrderLifecycleHandoffDraft /
+  RuntimeExecutionOrderLifecycleAdapterPreview /
+  RuntimeExecutionSubmitAdapterPreview are non-submitting bridge layers. They
+  may record draft/intent/submit authorization/controlled-submit result/pending
+  attempt reservation/attempt mutation/protection plan/OrderLifecycle handoff
+  draft audit facts where explicitly scoped, and may preview whether an
+  authorized intent is ready for a future controlled submit adapter.
+  Draft and source-native intent audit payloads must preserve candidate entry,
+  risk, and protection snapshots.
+  The pre-submit FinalGate check uses local active-position facts and must not rely on owner-supplied
+  active-position counts as an allow signal. Controlled submit result recording
+  must consume that submit-time preflight and record `blocked` if it is not
+  ready. The attempt reservation preview may compute attempts/budget before and
+  after without mutating state. The pending attempt reservation audit record may
+  persist that intent to reserve as `pending_runtime_mutation`, but it must not
+  mutate runtime budget, consume an attempt, change ExecutionIntent status,
+  create orders, or call exchange. The attempt mutation may apply a pending
+  reservation to runtime state by incrementing `attempts_used` and
+  `budget_reserved`, but it must not change ExecutionIntent status, create
+  orders, call OwnerBoundedExecution, call OrderLifecycle, or call exchange.
+  The runtime protection plan preview/record is runtime-native and must not
+  reuse one-shot OwnerBounded authorization semantics as hidden execution
+  authority, create orders, or create exchange payloads. The submit adapter
+  readiness preview may expose missing concrete protection/OrderLifecycle inputs, but it must not mutate runtime budget,
+  consume attempts, or change ExecutionIntent status. The OrderLifecycle
+  handoff draft may freeze future adapter input facts and
+  Order-model-compatible draft snapshots, but it must keep
+  `order_lifecycle_adapter_implemented=false`, `order_created=false`,
+  `order_lifecycle_called=false`, and `exchange_called=false`. The
+  OrderLifecycle adapter preview may verify those facts, but it must keep
+  `local_order_registration_enabled=false`,
+  `local_order_registration_executed=false`, `order_created=false`,
+  `order_lifecycle_called=false`, and `exchange_called=false`. The submit adapter
+  boundary is default-disabled and not implemented for order placement; it must
+  not call OwnerBoundedExecution, call OrderLifecycle, submit orders, or call
+  exchange.
+- Documentation work must not run the project or call the exchange unless the
+  active task explicitly includes bounded read-only verification.
 - Real live trading / real-funds order placement requires separate explicit
   Owner authorization for each action.
+- Budgeted small losses can be acceptable under Owner-approved experimental
+  risk capital. System failure is budget breach, runaway behavior, missing
+  auditability, boundary expansion, or unauthorized exchange write.
+- Risk control targets loss of control, not every losing trade. Runtime safety
+  must bound max single-attempt loss, max attempts, max active positions,
+  notional, leverage, duplicate submits, stale account facts, missing
+  protection, and unauditable orders.
 
 ---
 
@@ -32,6 +90,8 @@ This document defines the runtime safety boundaries for the BRC project.
 | ---- | --------------- | ------ |
 | SignalPipeline -> ExecutionOrchestrator | Legacy real-time signal path | Legacy path; not connected to BRC StrategyFamily chain |
 | OwnerTrialFlow -> OwnerBoundedExecution | One-shot Owner-authorized trade execution | Active; current primary execution path |
+| StrategyRuntimeInstance -> SignalEvaluation -> OrderCandidate -> Runtime FinalGate preview | Runtime governance shadow / dry-run inspection | Active in local working tree; non-executable; not deployed |
+| RuntimeExecutionPlan -> RuntimeExecutionIntentDraft -> RuntimeExecutionIntent adapter preview -> ExecutionIntent(recorded) -> SubmitReadiness preview -> SubmitAuthorization(recorded) -> ControlledSubmitPlan preview -> SubmitPreflight preview -> ControlledSubmitResult(default-disabled) -> AttemptReservationPreview -> AttemptReservation(recorded pending mutation) -> AttemptMutation(applied/blocked) -> ProtectionPlanPreview -> ProtectionPlan(recorded) -> OrderLifecycleHandoffDraft(recorded) -> OrderLifecycleAdapterPreview -> SubmitAdapterPreview | Non-submitting bridge toward future execution | Active in local working tree; not deployed; records audit intent, Owner submit authorization, controlled-submit preview, submit-time FinalGate preflight, disabled/blocked/not-implemented adapter result, non-mutating attempt/budget readiness, pending reservation audit fact, controlled runtime attempt/budget mutation fact, runtime-native protection readiness/record, runtime OrderLifecycle handoff draft, non-executing local order registration gate, and non-executing adapter readiness only; result consumes submit-time preflight before any adapter boundary status |
 | Dev/test controlled paths | Testnet rehearsal and controlled testing | Active for scoped verification; no real funds |
 | Scripts direct exchange paths | Research / admin scripts | Not integrated; untracked |
 | Readmodel / preview paths | CandidateAction, BudgetedAutonomy, policy evaluation | Read-only; not executable |
@@ -67,6 +127,10 @@ The following are prohibited unless Owner explicitly authorizes a specific task:
 | TrialTradeIntent | non-executable evidence | Evidence record, not an execution trigger |
 | StrategyFamilyVersion | metadata | Strategy specification document; not bound to executable code |
 | AdmissionDecision | metadata | Classification and evidence; not an execution gate |
+| StrategyRuntimeInstance | shadow governance | Runtime identity and boundaries; execution_enabled=false / shadow_mode=true in current code |
+| SignalEvaluation | shadow governance | Per-runtime signal evaluation record; not an order and not an execution intent |
+| OrderCandidate | shadow governance | Pre-authorization candidate; candidate_executable=false and not_execution_intent=true |
+| RuntimeFinalGatePreview | dry-run inspection | Runtime-aware checks only; no mutation, no order, no exchange call |
 
 If code changes create executable paths for any of these, reclassify them.
 
@@ -84,6 +148,29 @@ If code changes create executable paths for any of these, reclassify them.
   protection plan, GKS/runtime guard state, and Operation Layer path.
 - Strategy evidence weakness is a warning, not a FinalGate hard blocker,
   after Owner acknowledgement.
+- Runtime execution must not rely on owner/user-supplied active position counts
+  as an allow signal. Active position facts must come from trusted local
+  projection / reconciliation / account-fact sources; unavailable or stale
+  facts must block execution.
+
+Before the first real runtime submit, the following must be explicitly
+confirmed:
+
+- symbol, side, max_notional_per_attempt, max_attempts, max_loss_budget,
+  max_leverage, and max_active_positions;
+- whether the profile is Owner-confirm-each-entry or budget-bounded automatic
+  attempts;
+- when an attempt is consumed;
+- when budget reservation is released or confirmed consumed;
+- how protection order creation failure is handled;
+- how duplicate submit is blocked and audited;
+- active position / account fact source and stale-fact behavior;
+- deployment readiness, including whether the path is still local-only or tokyo
+  has been verified.
+
+BRF / short-side runtime profiles must be more conservative than long-only CPM
+profiles until explicitly upgraded: lower leverage, smaller notional, mandatory
+hard stop, stricter max active positions, and Owner-confirm-each-entry.
 
 ---
 

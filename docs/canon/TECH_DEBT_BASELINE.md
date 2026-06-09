@@ -32,8 +32,9 @@ This document classifies known technical debt in the BRC project.
 | ---- | -------------------- | ---------------- | ----- |
 | Owner authorizes trade vs runtime instance | Owner authorizes single trade via BoundedLiveTrialAuthorization | Owner should authorize bounded StrategyRuntimeInstance | Core semantic gap |
 | StrategyFamilyVersion not executable | Strategy specification document, not bound to strategy implementation | Should be versioned executable strategy definition | Requires strategy runtime infrastructure |
-| TrialBinding is not runtime instance | Audit binding record | Should bind admitted strategy to running instance | Requires StrategyRuntimeInstance to exist |
-| Admission does not create runtime draft | Admission pass creates metadata record | Admission pass should create StrategyRuntimeInstanceDraft | Requires new code path |
+| Strategy semantics partially bound locally | CPM / BRF / RMR / FCO are now identified as initial reference/backlog candidates, and a local B0 pure model plus shadow binding service defines StrategyImplementationBinding, RequiredFacts, StrategyEvaluationContext, EntryPolicy, ProtectionPolicy, ExitPolicy, and right-tail review metrics; it can consume StrategyFamilySignalOutput and create semantically bound shadow OrderCandidates; concrete BRF/RMR evaluator details and runtime promotion remain incomplete | Controlled runtime execution should be gated by Strategy Semantics / Entry-Exit Policy Binding | B0 gate before real OrderLifecycle adapter or runtime submit |
+| TrialBinding is not runtime instance | Audit binding record; shadow StrategyRuntimeInstance now exists separately | Should bind admitted strategy to running instance | Runtime identity exists, but executable integration is not complete |
+| Admission does not create executable runtime | Admission pass can support shadow runtime draft/backbone work, but does not authorize execution | Admission should feed bounded StrategyRuntimeInstance governance | Runtime execution remains future work |
 
 ---
 
@@ -42,10 +43,18 @@ This document classifies known technical debt in the BRC project.
 | Debt | Impact | Notes |
 | ---- | ------ | ----- |
 | EntryPolicy / ExitPolicy not connected to BRC execution | Strategy exit decisions are ad-hoc, not part of strategy semantics | StrategyContractV2 is a candidate asset |
+| RequiredFacts / freshness / missing-fact behavior need runtime source integration | Local B0 semantics declare and test missing/stale behavior, but runtime fact sourcing is not fully wired into live evaluation | Each StrategyImplementation must declare required_facts, optional_facts, freshness_requirement, and missing_fact_behavior |
+| ProtectionPolicy and ExitPolicy are not yet integrated into execution binding | Local B0 semantics separates ProtectionPolicy and ExitPolicy, but real execution/protection handoff still needs controlled integration | ProtectionPolicy must bound loss; ExitPolicy must express profit-taking, runner, trailing, invalidation, time-stop, and lifecycle exits |
+| Short-side BRF profile not yet encoded | Doing short-side price action with long-side defaults would understate squeeze risk | BRF must start with lower leverage, smaller notional, mandatory hard stop, strict max_active_positions, and Owner-confirm-each-entry |
+| RMR classifier could become an over-strong filter | A broad hard regime filter could silently suppress strategies without reviewed confidence/freshness semantics | RMR starts as regime evidence / observe-only downgrade input, not execution authority |
+| attempt / budget confirmation not fully specified for real submit | Runtime budget could be reserved, consumed, or released inconsistently | First real submit must confirm attempt consumption, budget reservation/release, protection failure handling, duplicate-submit blocking, account facts, and deployment readiness |
 | Authorization is single-use | Cannot express multi-attempt strategy runtime | Current BoundedLiveTrialAuthorization is one-shot |
-| strategy_family_id / trial_binding_id not propagated to Order / Review | Review cannot trace full semantic chain | Requires adding semantic IDs to order lifecycle |
-| SignalPipeline and BRC StrategyFamily are dual-track | Legacy signal system not connected to BRC admission chain | SignalPipeline is candidate for SignalEvaluation engine |
+| runtime semantic IDs only partially propagated | Review cannot yet trace full runtime chain end-to-end | Nullable IDs and source-native recorded ExecutionIntent audit exist in the local working tree; order/review propagation is still incomplete |
+| SignalPipeline and BRC StrategyFamily are dual-track | Legacy signal system not connected as an executable StrategyRuntimeInstance trigger | SignalPipeline is candidate for SignalEvaluation engine |
+| Runtime-aware FinalGate has preview-only fact gaps | Runtime execution cannot safely rely on user-supplied active position counts | Active position facts must come from local projection/reconciliation or block when unavailable/stale |
+| Recorded runtime ExecutionIntent is not live-submit integrated | In the local working tree, runtime candidate can become an audit intent, Owner submit authorization, controlled-submit plan, submit-time FinalGate preflight, preflight-gated disabled/blocked/not-implemented result, non-mutating attempt reservation preview, pending attempt reservation audit record, controlled runtime attempt mutation record, runtime-native protection plan preview/record, runtime OrderLifecycle handoff draft record, non-executing OrderLifecycle adapter preview gate, and non-executing submit adapter preview; it still cannot create/register local orders, submit an order, or call OrderLifecycle | This is intentional until the controlled submit adapter, OrderLifecycle adapter, submit adapter, and reconciliation closure are explicitly designed |
 | BRC TP/SL exit projection may be incomplete | Protection logic exists but may not cover all edge cases | Needs audit when strategy runtime path is built |
+| Review lacks right-tail and capital-base semantics | Stable-yield metrics can misclassify low-win-rate asymmetric strategies or Owner withdrawals | Review should track MFE/MAE, payoff asymmetry, tail wins, bounded max loss, manual withdrawals, and capital base adjustments |
 
 ---
 
@@ -70,6 +79,9 @@ These are explicitly not current work:
 - Do not delete Admission metadata chain.
 - Do not large-refactor OrderLifecycle.
 - Do not batch-delete historical docs.
-- Do not implement StrategyRuntimeInstance without a Codex task card.
+- Do not promote shadow StrategyRuntimeInstance / SignalEvaluation /
+  OrderCandidate records into execution authority without an explicit Codex
+  task card and Owner-gated execution boundary.
+- Do not design automatic withdrawal, transfer, or fund movement.
 
 These items may become future work when Codex promotes them.

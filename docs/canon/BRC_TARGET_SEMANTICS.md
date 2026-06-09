@@ -33,6 +33,22 @@ single trade order
 The Owner should authorize a strategy running within risk boundaries, not one
 immediate trade.
 
+BRC uses small experimental risk capital to pursue right-tail asymmetric
+returns. Runtime governance should allow budgeted small losses and failed
+experiments while preventing loss of control, unauditable orders, boundary
+breach, and automatic asset management behavior.
+
+Strategy readiness is not a single yes/no gate:
+
+- Semantic Admission asks whether a strategy can be expressed, audited,
+  constrained, and reviewed. Lack of proven alpha is not a blocker here.
+- Economic Admission asks whether a strategy deserves larger budget, lower
+  Owner confirmation burden, or more autonomy. Lack of proven alpha restricts
+  this layer.
+- Execution Admission asks whether one concrete OrderCandidate can pass runtime
+  boundary, FinalGate, Owner authorization, protection readiness, account facts,
+  idempotency, and deployment readiness.
+
 ---
 
 ## 2. Target Chain
@@ -65,11 +81,11 @@ StrategyFamily
 | AdmissionDecision | partially implemented | Admission gate metadata operations (Phase 1-17) complete | Formal admission pass/fail with evidence |
 | OwnerRiskAcceptance | partially implemented | OwnerRiskAcknowledgement exists for single-use authorization | Owner acceptance of strategy runtime risk |
 | TrialBinding | metadata only | Audit binding record; not a running strategy instance | Binding between admitted strategy and runtime instance |
-| StrategyRuntimeInstance | missing | Does not exist in current code | Running bounded strategy instance that generates evaluations |
-| SignalEvaluation | missing | SignalPipeline exists as legacy real-time signal system; not connected to BRC StrategyFamily | Per-instance signal evaluation within risk boundaries |
-| OrderCandidate | readmodel only | CandidateAction is readmodel / preview / policy evaluation | Executable order candidate from signal evaluation |
-| FinalGate | implemented | FinalGate exists as hard execution gate | Pre-execution safety validation |
-| ExecutionIntent | partially implemented | Execution permission system has 5 levels; intent recording exists | Bounded execution intent from order candidate |
+| StrategyRuntimeInstance | shadow implemented | Shadow governance model, PG table, repository, lifecycle events, and readmodel/API inspection exist; execution is disabled and shadow_mode is enforced | Running bounded strategy instance that generates evaluations |
+| SignalEvaluation | shadow implemented | Shadow model, PG table, repository, service, and inspection API exist; no executable trigger | Per-instance signal evaluation within risk boundaries |
+| OrderCandidate | shadow implemented | Shadow candidate model and PG table exist; candidate_executable=false and not_execution_intent=true are enforced | Executable order candidate from signal evaluation |
+| FinalGate | implemented + runtime preview | FinalGate exists as hard one-shot execution gate; runtime-aware preview/dry-run exists for OrderCandidate inspection only | Pre-execution safety validation |
+| ExecutionIntent | partially implemented | Execution permission system has 5 levels; source-native recorded intent audit, Owner submit authorization record, controlled-submit plan, submit-time FinalGate preflight, preflight-gated controlled-submit result, non-mutating attempt reservation preview, pending attempt reservation audit record, controlled runtime attempt mutation record, runtime-native protection plan preview/record, runtime OrderLifecycle handoff draft record, non-executing OrderLifecycle adapter preview gate, and non-executing submit adapter preview exist in the local working tree for `brc_runtime_order_candidate`; `recorded` is not submit-ready, not deployed, and the bridge does not create orders, submit orders, or call OrderLifecycle | Bounded execution intent from order candidate |
 | OrderLifecycle | implemented | Order lifecycle service handles order placement and tracking | Order lifecycle management with strategy semantic IDs |
 | Order / Position | implemented | Order and position management through exchange gateway | Live order and position tracking |
 | Reconciliation | implemented | Reconciliation service exists | PG / exchange consistency verification |
@@ -78,6 +94,8 @@ StrategyFamily
 Status legend:
 
 - **implemented**: exists in tracked code and functional
+- **shadow implemented**: exists in tracked code as non-executable
+  governance/inspection state only
 - **partially implemented**: exists but incomplete or scoped
 - **metadata only**: data model exists but no runtime behavior
 - **readmodel only**: read-only projection, not executable
@@ -98,6 +116,8 @@ OwnerBoundedExecutionService is a valuable one-shot execution asset:
   runtime path is built.
 - It does not generate signals or order candidates from a running strategy
   instance.
+- It must not be deleted or behaviorally changed merely because the runtime
+  path exists in shadow form.
 
 ---
 
@@ -114,6 +134,73 @@ OwnerBoundedExecutionService is a valuable one-shot execution asset:
   BRC runtime by itself.
 - **BudgetedAutonomy** has multiple attempted boundary models, but current
   code is metadata_only / action_allowed=False.
+- Runtime budget semantics should express trial capital: max_attempts,
+  max_loss_budget / total_budget, budget_reserved, max_notional_per_attempt,
+  max_active_positions, max_leverage, protection requirement, and review
+  requirement. The purpose is bounded loss and no runaway, not avoiding every
+  loss.
+
+Before controlled runtime execution, BRC must pass a Strategy Semantics /
+Entry-Exit Policy Binding gate:
+
+```text
+StrategyFamilyVersion
+  -> StrategyImplementation
+  -> RequiredFacts
+  -> StrategyEvaluationContext
+  -> EntryPolicy
+  -> ProtectionPolicy
+  -> ExitPolicy
+  -> OrderCandidate
+```
+
+Every StrategyImplementation must declare `required_facts`, `optional_facts`,
+`freshness_requirement`, and `missing_fact_behavior`. Missing or stale facts
+must resolve explicitly to `NO_ACTION`, `OBSERVE_ONLY`,
+`BLOCK_MISSING_FACTS`, or `BLOCK_STALE_DATA`. The system must not infer missing
+price, volume, funding, open-interest, account, position, or runtime facts to
+allow execution.
+
+Initial strategy-semantics reference candidates:
+
+- `CPM-001`: long-only pullback-continuation price-action reference
+  implementation candidate; not a proven-alpha production strategy.
+- `BRF-001`: short-side bear-rally-failure price-action reference
+  implementation candidate; not a proven-alpha production strategy. BRF uses a
+  more conservative profile than CPM: lower leverage, smaller notional,
+  mandatory hard stop, strict `max_active_positions`, and
+  Owner-confirm-each-entry until explicitly upgraded.
+- `RMR-001`: range/chop regime classifier first, not the first trading
+  strategy. RMR may downgrade CPM/BRF to observe-only or raise review
+  requirements, but stale or missing RMR output must not act as execution
+  authority.
+- `FCO-001`: funding / open-interest / crowding backlog family until data
+  facts and freshness semantics are available.
+
+Current local B0 implementation slice:
+
+- `src/domain/strategy_semantics.py` defines StrategyImplementationBinding,
+  StrategyEvaluationContext, RequiredFacts, fact freshness/missing behavior,
+  ProtectionPolicy, ExitPolicy, initial CPM / BRF / RMR / FCO semantics, and
+  right-tail review metrics.
+- `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
+  SignalEvaluation against those semantics and can create only a shadow
+  OrderCandidate through SignalEvaluationShadowService. It can also consume a
+  `StrategyFamilySignalOutput`, persist a shadow SignalEvaluation, and then
+  create a semantically bound shadow OrderCandidate when the output is
+  `WOULD_ENTER`, the side is supported, RequiredFacts pass, and concrete
+  protection is present.
+- This is not proven-alpha approval, not execution authority, and not a real
+  OrderLifecycle adapter. BRF/RMR concrete evaluator details remain
+  Owner/Codex-gated before promotion beyond shadow binding.
+
+ProtectionPolicy and ExitPolicy must stay separate:
+
+- ProtectionPolicy is the bounded-loss / no-runaway safety boundary.
+- ExitPolicy is the strategy-owned profit-taking, runner, trailing,
+  invalidation, time-stop, or lifecycle exit behavior.
+- Generic fixed TP/SL must not silently replace strategy exit semantics or
+  prematurely cap right-tail winners.
 
 ---
 
@@ -134,3 +221,14 @@ Review
 
 Current Review Ledger does not carry strategy semantic IDs through the chain.
 This is a known gap (see `docs/canon/TECH_DEBT_BASELINE.md`).
+
+Future Review should distinguish trading PnL from Owner manual withdrawal,
+capital injection, capital base reset, and strategy performance. Manual profit
+withdrawal is a review/account-baseline fact, not a strategy loss or automatic
+fund movement instruction.
+
+Future Review should emphasize right-tail asymmetric evaluation, including
+MFE, MAE, R multiple, tail win size, small loss count, winner hold time, runner
+giveback, whether the runner was capped too early, stop effectiveness, and
+whether the attempt deserved continuation. Review must not reduce strategy
+performance to win rate, average return, or short-term PnL only.

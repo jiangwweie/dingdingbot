@@ -1,12 +1,33 @@
 ---
 title: BRC_STRATEGY_ADMISSION_TRIALBINDING_S0_AUDIT
-status: AUDIT_REPORT
-authority: claude-semantic-audit
+status: HISTORICAL_AUDIT_REPORT_PARTIALLY_SUPERSEDED
+authority: claude-semantic-audit + tracked-code-verification
 date: 2026-06-09
 scope: S0 semantic debt audit of BRC strategy-family admission and trial-binding lifecycle
 ---
 
 # BRC Strategy / Admission / TrialBinding S0 Audit
+
+## 0. Current Use Note
+
+This audit preserves the pre-Sprint-1 evidence that justified introducing a
+first-class StrategyRuntimeInstance. It is partially superseded by tracked code
+verified on 2026-06-09:
+
+- StrategyRuntimeInstance exists in the local working tree as a shadow
+  governance model, PG table, repository, lifecycle event record, and Trading
+  Console inspection surface.
+- SignalEvaluation / OrderCandidate exist in the local working tree as shadow
+  records.
+- Runtime-aware FinalGate preview exists in the local working tree as read-only
+  dry-run inspection.
+
+The remaining current debt is not "StrategyRuntimeInstance is missing"; it is
+"StrategyRuntimeInstance is shadow-only and not yet integrated into controlled
+runtime execution, trusted active-position facts, ExecutionIntent creation,
+OrderLifecycle, Reconciliation, and Review." Use
+`docs/canon/PROJECT_BASELINE_CURRENT.md` and
+`docs/canon/BRC_TARGET_SEMANTICS.md` for current status.
 
 ## 1. Executive Summary
 
