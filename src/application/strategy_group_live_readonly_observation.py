@@ -15,6 +15,10 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
+from src.application.runtime_strategy_signal_scheduler_assembly import (
+    RuntimeStrategySignalSchedulerAssemblyService,
+    RuntimeStrategySignalSchedulerReadinessStatus,
+)
 from src.domain.cpm_historical_evaluator import CPMRO001HistoricalEvaluator
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
@@ -43,6 +47,7 @@ MI_RETURN_THRESHOLD = Decimal("3")
 class StrategyGroupObservationCandidate(BaseModel):
     candidate_id: str
     strategy_group_id: str
+    strategy_family_version_id: str | None = None
     symbol: str
     side: str
     observation_role: str
@@ -56,6 +61,7 @@ class StrategyGroupObservationCandidate(BaseModel):
     blockers: list[str] = Field(default_factory=list)
     not_allowed_now: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
+    runtime_signal_planning_readiness: dict[str, Any] = Field(default_factory=dict)
 
 
 class StrategyGroupLiveReadOnlyObservationResponse(BaseModel):
@@ -78,6 +84,7 @@ class StrategyGroupLiveReadOnlyObservationResponse(BaseModel):
     review_hook_summary: dict[str, Any] = Field(default_factory=dict)
     runner_mapping: dict[str, Any] = Field(default_factory=dict)
     observation_chain_summary: dict[str, Any] = Field(default_factory=dict)
+    runtime_signal_planning_summary: dict[str, Any] = Field(default_factory=dict)
     non_permissions: dict[str, bool] = Field(default_factory=dict)
     live_observation_active: Literal[False] = False
     live_ready: Literal[False] = False
@@ -87,6 +94,7 @@ class StrategyGroupObservationRecord(BaseModel):
     record_id: str
     candidate_id: str
     strategy_group_id: str
+    strategy_family_version_id: str | None = None
     symbol: str
     side: str
     evaluated_at_ms: int
@@ -106,6 +114,7 @@ class StrategyGroupObservationRecord(BaseModel):
     review_windows: list[str] = Field(default_factory=list)
     review_status_by_window: dict[str, str] = Field(default_factory=dict)
     input_refs: dict[str, Any] = Field(default_factory=dict)
+    runtime_signal_planning_readiness: dict[str, Any] = Field(default_factory=dict)
     sink_status: str = "preview_not_recorded"
     not_order: Literal[True] = True
     not_execution_intent: Literal[True] = True
@@ -407,8 +416,10 @@ def _observation_specs() -> list[_ObservationSpec]:
 def _evaluate_observation_candidate(
     spec: _ObservationSpec,
     market_source: StrategyGroupMarketBarSource,
+    runtime_signal_planning_assembly: RuntimeStrategySignalSchedulerAssemblyService,
 ) -> tuple[StrategyGroupObservationRecord | None, StrategyGroupObservationCandidate, list[str]]:
     blockers: list[str] = []
+    runtime_signal_planning_readiness: dict[str, Any] = {}
     try:
         one_hour = market_source.latest_closed_candles(
             symbol=spec.symbol,
@@ -445,11 +456,17 @@ def _evaluate_observation_candidate(
             freshness="latest_available_closed_bar",
         )
         output = spec.evaluator.evaluate(signal_input)
+        runtime_signal_planning_readiness = runtime_signal_planning_assembly.preview(
+            signal_input,
+            output,
+            candidate_id=spec.candidate_id,
+        ).model_dump(mode="json")
         record = _observation_record_from_output(
             spec,
             output,
             getattr(market_source, "source_id", "unknown"),
             getattr(market_source, "source_type", None),
+            runtime_signal_planning_readiness=runtime_signal_planning_readiness,
         )
         preview = _signal_preview(output)
     except Exception as exc:
@@ -464,6 +481,24 @@ def _evaluate_observation_candidate(
             "not_execution_intent": True,
             "symbol": spec.symbol,
         }
+        runtime_signal_planning_readiness = {
+            "candidate_id": spec.candidate_id,
+            "strategy_family_id": spec.strategy_group_id,
+            "strategy_family_version_id": spec.strategy_family_version_id,
+            "symbol": spec.symbol,
+            "status": RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED.value,
+            "blockers": sorted(set(blockers)),
+            "planner_call_performed": False,
+            "signal_evaluation_created": False,
+            "order_candidate_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+            "not_order": True,
+            "not_execution_intent": True,
+            "not_execution_authority": True,
+        }
 
     readiness_status = (
         "one_shot_observation_ready_pg_sink_gap"
@@ -474,6 +509,7 @@ def _evaluate_observation_candidate(
     candidate = StrategyGroupObservationCandidate(
         candidate_id=spec.candidate_id,
         strategy_group_id=spec.strategy_group_id,
+        strategy_family_version_id=spec.strategy_family_version_id,
         symbol=spec.symbol,
         side=spec.side_label,
         observation_role=spec.observation_role,
@@ -486,6 +522,7 @@ def _evaluate_observation_candidate(
         blockers=all_blockers,
         not_allowed_now=_not_allowed_now(),
         source_refs=list(spec.source_refs),
+        runtime_signal_planning_readiness=runtime_signal_planning_readiness,
     )
     return record, candidate, blockers
 
@@ -495,6 +532,7 @@ def _observation_record_from_output(
     output: StrategyFamilySignalOutput,
     market_source_id: str,
     source_type: str | None = None,
+    runtime_signal_planning_readiness: dict[str, Any] | None = None,
 ) -> StrategyGroupObservationRecord:
     review_status = {
         window: (
@@ -508,6 +546,7 @@ def _observation_record_from_output(
         record_id=f"{spec.candidate_id}:{output.signal_id}:{output.timestamp_ms}",
         candidate_id=spec.candidate_id,
         strategy_group_id=spec.strategy_group_id,
+        strategy_family_version_id=output.strategy_family_version_id,
         symbol=output.symbol,
         side=output.side.value,
         evaluated_at_ms=output.timestamp_ms,
@@ -528,6 +567,7 @@ def _observation_record_from_output(
         review_windows=list(spec.review_windows),
         review_status_by_window=review_status,
         input_refs=output.input_refs.model_dump(mode="json"),
+        runtime_signal_planning_readiness=dict(runtime_signal_planning_readiness or {}),
     )
 
 
@@ -536,6 +576,7 @@ def build_strategy_group_live_readonly_observation_v1(
     market_source: StrategyGroupMarketBarSource | None = None,
     sink: StrategyGroupObservationSink | None = None,
     record_observation: bool = False,
+    runtime_signal_planning_assembly: RuntimeStrategySignalSchedulerAssemblyService | None = None,
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
     """Return current observation v1 status without starting runtime.
 
@@ -546,12 +587,20 @@ def build_strategy_group_live_readonly_observation_v1(
 
     source = market_source or SampleStrategyGroupMarketBarSource()
     observation_sink = sink or _DEFAULT_OBSERVATION_SINK
+    planning_assembly = (
+        runtime_signal_planning_assembly
+        or RuntimeStrategySignalSchedulerAssemblyService()
+    )
     candidates: list[StrategyGroupObservationCandidate] = []
     current_signals: list[StrategyGroupObservationRecord] = []
     source_blockers: list[str] = []
 
     for spec in _observation_specs():
-        record, candidate, blockers = _evaluate_observation_candidate(spec, source)
+        record, candidate, blockers = _evaluate_observation_candidate(
+            spec,
+            source,
+            planning_assembly,
+        )
         source_blockers.extend(blockers)
         if record is not None:
             if record_observation:
@@ -627,6 +676,7 @@ def build_strategy_group_live_readonly_observation_v1(
             "signal_history_available": bool(history),
             "main_blocker": "scheduler_and_pg_observation_sink_not_bound",
         },
+        runtime_signal_planning_summary=_runtime_signal_planning_summary(candidates),
         non_permissions={
             "no_trial_start": True,
             "no_execution_intent": True,
@@ -642,6 +692,7 @@ def run_strategy_group_live_readonly_observation_once(
     *,
     market_source: StrategyGroupMarketBarSource | None = None,
     sink: StrategyGroupObservationSink | None = None,
+    runtime_signal_planning_assembly: RuntimeStrategySignalSchedulerAssemblyService | None = None,
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
     """Evaluate and record one observe-only snapshot for MI/CPM candidates."""
 
@@ -649,6 +700,7 @@ def run_strategy_group_live_readonly_observation_once(
         market_source=market_source,
         sink=sink,
         record_observation=True,
+        runtime_signal_planning_assembly=runtime_signal_planning_assembly,
     )
 
 
@@ -862,6 +914,39 @@ def _not_allowed_now() -> list[str]:
         "execution permission grant",
         "automatic strategy routing",
     ]
+
+
+def _runtime_signal_planning_summary(
+    candidates: list[StrategyGroupObservationCandidate],
+) -> dict[str, Any]:
+    readiness_items = [
+        candidate.runtime_signal_planning_readiness
+        for candidate in candidates
+        if candidate.runtime_signal_planning_readiness
+    ]
+    statuses: dict[str, int] = {}
+    blockers: set[str] = set()
+    for item in readiness_items:
+        status = str(item.get("status") or "unknown")
+        statuses[status] = statuses.get(status, 0) + 1
+        blockers.update(str(blocker) for blocker in item.get("blockers") or [])
+    return {
+        "source": "runtime_strategy_signal_scheduler_assembly",
+        "scheduler_level_readiness": True,
+        "candidate_count": len(readiness_items),
+        "status_counts": statuses,
+        "blockers": sorted(blockers),
+        "planner_call_performed": False,
+        "signal_evaluation_created": False,
+        "order_candidate_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "exchange_called": False,
+        "not_order": True,
+        "not_execution_intent": True,
+        "not_execution_authority": True,
+    }
 
 
 def _stable_suffix(value: str) -> str:

@@ -30,6 +30,7 @@ ObservationWriteAction = Literal["inserted", "skipped_duplicate", "failed"]
 class ScheduledObservationCandidateResult(BaseModel):
     candidate_id: str
     strategy_group_id: str | None = None
+    strategy_family_version_id: str | None = None
     symbol: str | None = None
     side: str | None = None
     signal_type: str | None = None
@@ -41,6 +42,7 @@ class ScheduledObservationCandidateResult(BaseModel):
     existing_record_id: str | None = None
     action: ObservationWriteAction
     reason: str | None = None
+    runtime_signal_planning_readiness: dict = Field(default_factory=dict)
     not_order: bool = True
     not_execution_intent: bool = True
     no_execution_permission: bool = True
@@ -152,6 +154,7 @@ def _candidate_result(
     return ScheduledObservationCandidateResult(
         candidate_id=record.candidate_id,
         strategy_group_id=record.strategy_group_id,
+        strategy_family_version_id=record.strategy_family_version_id,
         symbol=record.symbol,
         side=record.side,
         signal_type=record.signal_type,
@@ -163,6 +166,9 @@ def _candidate_result(
         existing_record_id=existing_record_id,
         action=action,
         reason=reason,
+        runtime_signal_planning_readiness=dict(
+            record.runtime_signal_planning_readiness
+        ),
         not_order=record.not_order,
         not_execution_intent=record.not_execution_intent,
         no_execution_permission=record.no_execution_permission,

@@ -122,6 +122,15 @@ class PgStrategyGroupObservationRepository:
 
     @staticmethod
     def _apply_payload(row: PGBrcStrategyGroupObservationORM, payload: dict) -> None:
+        evidence_payload = dict(payload["evidence_payload"])
+        if payload.get("runtime_signal_planning_readiness"):
+            evidence_payload["_runtime_signal_planning_readiness"] = dict(
+                payload["runtime_signal_planning_readiness"]
+            )
+        if payload.get("strategy_family_version_id"):
+            evidence_payload["_strategy_family_version_id"] = payload[
+                "strategy_family_version_id"
+            ]
         row.observed_at_ms = payload["evaluated_at_ms"]
         row.strategy_group_id = payload["strategy_group_id"]
         row.candidate_id = payload["candidate_id"]
@@ -130,7 +139,7 @@ class PgStrategyGroupObservationRepository:
         row.signal_type = payload["signal_type"]
         row.confidence = Decimal(str(payload["confidence"]))
         row.reason_codes_json = list(payload["reason_codes"])
-        row.evidence_payload_json = dict(payload["evidence_payload"])
+        row.evidence_payload_json = evidence_payload
         row.signal_snapshot_json = dict(payload["signal_snapshot"])
         row.invalidation_conditions_json = list(payload.get("invalidation_conditions") or [])
         row.human_summary = payload["human_summary"]
@@ -150,10 +159,19 @@ class PgStrategyGroupObservationRepository:
 
     @staticmethod
     def _to_record(row: PGBrcStrategyGroupObservationORM) -> StrategyGroupObservationRecord:
+        evidence_payload = dict(row.evidence_payload_json or {})
+        runtime_signal_planning_readiness = dict(
+            evidence_payload.pop("_runtime_signal_planning_readiness", {}) or {}
+        )
+        strategy_family_version_id = evidence_payload.pop(
+            "_strategy_family_version_id",
+            None,
+        )
         return StrategyGroupObservationRecord(
             record_id=row.observation_id,
             candidate_id=row.candidate_id,
             strategy_group_id=row.strategy_group_id,
+            strategy_family_version_id=strategy_family_version_id,
             symbol=row.symbol,
             side=row.side,
             evaluated_at_ms=row.observed_at_ms,
@@ -167,12 +185,13 @@ class PgStrategyGroupObservationRepository:
             confidence=str(row.confidence),
             reason_codes=list(row.reason_codes_json or []),
             human_summary=row.human_summary,
-            evidence_payload=dict(row.evidence_payload_json or {}),
+            evidence_payload=evidence_payload,
             signal_snapshot=dict(row.signal_snapshot_json or {}),
             invalidation_conditions=list(row.invalidation_conditions_json or []),
             review_windows=list(row.review_windows_json or []),
             review_status_by_window=dict(row.review_status_json or {}),
             input_refs=dict(row.input_refs_json or {}),
+            runtime_signal_planning_readiness=runtime_signal_planning_readiness,
             sink_status="recorded_pg",
             not_order=True,
             not_execution_intent=True,

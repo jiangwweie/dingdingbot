@@ -135,8 +135,21 @@ def test_live_readonly_observation_v1_exposes_mi_and_cpm_without_execution_field
     assert payload.sink_summary["pg_observation_sink"] == "blocked_schema_gap_no_live_observation_table_found"
     assert payload.input_source_summary["external_exchange_write"] is False
     assert payload.review_hook_summary["review_hook_status"] == "records_include_pending_forward_outcome_windows"
+    assert payload.runtime_signal_planning_summary["scheduler_level_readiness"] is True
+    assert payload.runtime_signal_planning_summary["planner_call_performed"] is False
+    assert payload.runtime_signal_planning_summary["order_candidate_created"] is False
+    assert payload.runtime_signal_planning_summary["execution_intent_created"] is False
+    assert payload.runtime_signal_planning_summary["exchange_called"] is False
+    assert payload.runtime_signal_planning_summary["not_execution_authority"] is True
+    assert "runtime_instance_required_for_scheduler_planning" in (
+        payload.runtime_signal_planning_summary["blockers"]
+    )
     assert payload.non_permissions["no_execution_intent"] is True
     assert payload.non_permissions["no_order_permission"] is True
+    assert all(
+        candidate.runtime_signal_planning_readiness
+        for candidate in payload.candidates
+    )
 
     raw = payload.model_dump(mode="json")
     text = str(raw)
@@ -159,6 +172,11 @@ def test_run_once_records_observe_only_signal_history_without_runtime_effect():
     assert all(record.not_order is True for record in payload.signal_history)
     assert all(record.not_execution_intent is True for record in payload.signal_history)
     assert all(record.no_runtime_start is True for record in payload.signal_history)
+    assert all(record.runtime_signal_planning_readiness for record in payload.signal_history)
+    assert all(
+        record.runtime_signal_planning_readiness["planner_call_performed"] is False
+        for record in payload.signal_history
+    )
 
 
 def test_binance_public_kline_source_returns_only_closed_public_bars():
@@ -293,12 +311,18 @@ async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observ
     assert second.skipped_duplicate_count == 3
     assert second.failed_count == 0
     assert all(item.existing_record_id for item in second.candidate_results)
+    assert all(item.runtime_signal_planning_readiness for item in first.candidate_results)
+    assert all(
+        item.runtime_signal_planning_readiness["order_candidate_created"] is False
+        for item in first.candidate_results
+    )
 
     recent = await observation_repo.list_recent(limit=10)
     assert len(recent) == 3
     assert all(record.not_order is True for record in recent)
     assert all(record.not_execution_intent is True for record in recent)
     assert all(record.no_order_permission is True for record in recent)
+    assert all(record.runtime_signal_planning_readiness for record in recent)
 
 
 @pytest.mark.asyncio

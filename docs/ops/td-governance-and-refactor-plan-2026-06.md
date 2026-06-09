@@ -706,6 +706,17 @@ Current local B0 implementation slice:
   the Binance public derivative market fact source with
   `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`; the default remains off
   so normal Console reads do not acquire a new public-network dependency.
+- `src/application/runtime_strategy_signal_scheduler_assembly.py` adds the
+  scheduler-level readiness gate before any automatic runtime signal binding.
+  It previews whether a `StrategyFamilySignalInput` +
+  `StrategyFamilySignalOutput` pair has B0 semantics, a matching shadow
+  runtime, trusted active-position/account facts, and strategy-required trusted
+  market facts before a scheduler may hand it to the B0 runtime signal planner.
+  Read-only strategy group observation and scheduled observation now surface
+  `runtime_signal_planning_readiness` / `runtime_signal_planning_summary`.
+  This gate does not call RuntimeStrategySignalPlanningService, create
+  SignalEvaluation records, create OrderCandidate records, create
+  ExecutionIntent records, create orders, call OrderLifecycle, or call exchange.
 - `tests/unit/test_b0_strategy_semantics_binding.py` verifies catalog
   semantics, missing/stale fact blocking, BRF shadow candidate binding, RMR
   non-trading classifier behavior, mandatory concrete stop enforcement, CPM
@@ -740,6 +751,15 @@ Current local B0 implementation slice:
   source is missing, wires Trading Console internal assembly from PG positions
   plus cached account facts, and only enables the Binance public derivative
   market fact source behind an explicit environment switch.
+- `tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py` verifies
+  scheduler-level readiness blocks without a runtime or trusted sources, can
+  reach `ready_for_non_executing_planner` when a matching shadow runtime and
+  trusted sources are configured, requires a trusted market source for FCO
+  required facts, and keeps no-action signals observe-only without creating
+  candidates, intents, orders, OrderLifecycle calls, or exchange calls. Strategy
+  group observation tests verify the readiness appears in observation and
+  scheduled-run outputs and survives PG observation roundtrip through existing
+  JSON payload storage.
 - `tests/unit/test_binance_usdm_derivative_market_fact_source.py` verifies the
   Binance public derivative market fact source parses funding, open-interest,
   notional, and crowding proxy facts; marks missing/stale facts explicitly; and
@@ -804,8 +824,10 @@ Remaining B0 work:
 
 - live/runtime fact-source orchestration beyond the current injected trusted
   account/active-position/market-fact overlays and Trading Console internal
-  assembly, especially scheduler-level automatic evaluation binding and
-  deployment enablement for funding, open-interest, and crowding sources;
+  assembly. Scheduler-level readiness now exposes the automatic-evaluation
+  binding gate, but automatic planner invocation remains disabled until Owner /
+  Codex promotion gates are satisfied. Deployment enablement for funding,
+  open-interest, and crowding sources remains open;
 - deeper review automation beyond the first Owner-record/API/Console and
   explicit right-tail-metrics slices, especially automatic account-equity
   baseline snapshots, closed-trade review packet generation, and strategy

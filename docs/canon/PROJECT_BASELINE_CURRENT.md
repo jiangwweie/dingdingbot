@@ -140,8 +140,9 @@ Key facts:
   `BinanceUsdmDerivativeMarketFactSource` can supply trusted public/read-only
   funding, open-interest, and global long/short account-ratio crowding facts,
   and Trading Console can opt into that source via
-  `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`. Scheduler/runtime
-  automatic wiring and deployment enablement are not yet productized.
+  `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`. Scheduler-level readiness
+  now exists for automatic evaluation binding, but scheduler/runtime automatic
+  planner invocation and deployment enablement are not yet productized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, BRF short-profile, and first real
@@ -170,6 +171,17 @@ Key facts:
   unavailable. Trading Console now has an internal non-endpoint service factory
   that wires this planner with PG active-position facts and cached account facts;
   it does not expose a new strategy-signal write endpoint.
+- **RuntimeStrategySignalSchedulerAssemblyService** now exists as a pure
+  non-executing scheduler-level readiness layer. It evaluates whether a
+  `StrategyFamilySignalInput` + `StrategyFamilySignalOutput` pair has strategy
+  semantics, a matching shadow runtime, trusted active-position/account fact
+  sources, and strategy-required trusted market facts before a scheduler may
+  hand it to the existing B0 runtime signal planner. The read-only strategy
+  group observation and scheduled observation outputs now include
+  `runtime_signal_planning_readiness` / `runtime_signal_planning_summary`.
+  This layer does not call RuntimeStrategySignalPlanningService, create
+  SignalEvaluation records, create OrderCandidate records, create
+  ExecutionIntent records, create orders, call OrderLifecycle, or call exchange.
 - **RightTailReview** now exists as pure review logic plus Trading Console
   read-only presentation. It calculates MFE, MAE, R multiple, tail-win size,
   small-loss count, winner hold time, runner giveback / early cap, stop

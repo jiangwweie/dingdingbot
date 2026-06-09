@@ -273,11 +273,20 @@ Current local B0 implementation slice:
   `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true` for public/read-only
   funding, open-interest, and crowding facts. This is an application assembly
   point only; no public strategy-signal write endpoint is exposed by this slice.
+- `src/application/runtime_strategy_signal_scheduler_assembly.py` provides the
+  scheduler-level readiness gate before automatic runtime signal binding. It
+  previews whether a strategy signal pair has B0 semantics, a matching shadow
+  runtime, trusted active-position/account fact sources, and
+  strategy-required trusted market facts. Read-only strategy group observation
+  and scheduled observation outputs now surface this readiness, but the gate
+  does not call the runtime planner, create SignalEvaluation or OrderCandidate
+  records, create ExecutionIntent records, create orders, call OrderLifecycle,
+  or call exchange.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. Scheduler-level fact-source orchestration, BRF
-  runtime-profile confirmation, deployment-backed FCO funding/OI/crowding
-  coverage, and runtime promotion remain Owner/Codex-gated before promotion
-  beyond shadow binding.
+  OrderLifecycle adapter. Scheduler-level fact-source readiness is now visible,
+  but automatic runtime planner invocation, BRF runtime-profile confirmation,
+  deployment-backed FCO funding/OI/crowding coverage, and runtime promotion
+  remain Owner/Codex-gated before promotion beyond shadow binding.
 
 ProtectionPolicy and ExitPolicy must stay separate:
 
