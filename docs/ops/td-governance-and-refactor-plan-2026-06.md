@@ -624,6 +624,13 @@ Current local B0 implementation slice:
   order/execution permissions. `StrategyEvaluationContextBuilder` can map
   RMR-001 classifier output into `range_structure`, `volatility_state`, and
   `market_state` facts.
+- `src/domain/brf_price_action_evaluator.py` implements the first concrete
+  BRF-001 closed-candle bear-rally-failure evaluator. It can emit a short-side
+  `StrategyFamilySignalOutput` with explicit `price_action_structure` and
+  `short_squeeze_risk` facts so B0 required-fact binding can pass when the
+  review evidence is present. It remains `required_execution_mode=observe_only`,
+  `not_order=true`, and `not_execution_intent=true`, and it carries no sizing,
+  leverage, venue, route, order, or execution instruction fields.
 - `src/application/strategy_semantics_shadow_binding_service.py` can create
   only shadow OrderCandidate records after RequiredFacts pass. It can now
   consume `StrategyFamilySignalOutput`, persist a shadow SignalEvaluation, and
@@ -724,6 +731,11 @@ Current local B0 implementation slice:
 - `tests/unit/test_rmr_regime_classifier.py` verifies trend/chop classification,
   insufficient closed-candle behavior, forbidden execution-field rejection, and
   absence of execution/order methods.
+- `tests/unit/test_brf_price_action_evaluator.py` verifies BRF would-enter
+  short evidence, explicit short-squeeze facts, B0 fact-check PASS, semantic
+  shadow candidate creation without execution authority, invalid missing
+  candle behavior, no-action rejection-missing behavior, wrong-family rejection,
+  and absence of forbidden execution/order keys.
 - `tests/unit/test_b0_strategy_runtime_promotion_gate_service.py` verifies the
   application service evaluates CPM/BRF by StrategyFamilyVersion and does not
   guess unknown strategy bindings. It also verifies the Trading Console
@@ -767,7 +779,6 @@ Current local B0 implementation slice:
 
 Remaining B0 work:
 
-- Owner/Codex-gated BRF evaluator details;
 - live/runtime fact-source orchestration beyond the current injected trusted
   account/active-position overlay and Trading Console internal assembly,
   especially scheduler/runtime reader wiring plus funding, open-interest, and

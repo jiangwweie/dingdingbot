@@ -121,6 +121,13 @@ Key facts:
   `volatility_state`, and `market_state` facts. RMR output is observe/downgrade
   evidence only: it is not an order candidate, execution intent, hard execution
   filter, or trading authority.
+- **BRF Price Action Evaluator** now exists as a pure closed-candle
+  bear-rally-failure evaluator for `BRF-001` / `BRF-001-v0`. It can emit
+  short-side `StrategyFamilySignalOutput` review evidence with explicit
+  `price_action_structure` and `short_squeeze_risk` facts, allowing B0
+  required-fact checks to pass when the evidence is present. It remains
+  observe-only and cannot create sizing, leverage, venue, route, order, or
+  execution instructions.
 - **StrategyRuntimeFactOverlayService** now exists as a local non-executing
   read-only fact overlay before B0 strategy signal planning. When explicitly
   injected, it replaces caller-provided account/position allow facts with

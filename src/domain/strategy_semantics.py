@@ -383,7 +383,7 @@ def _brf_binding() -> StrategyImplementationBinding:
         implementation_id="brf-price-action-reference-v0",
         implementation_kind=StrategyImplementationKind.PRICE_ACTION,
         candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
-        source_ref="docs/ops/srd-001-strategy-research-direction-refresh.md",
+        source_ref="src/domain/brf_price_action_evaluator.py",
         supported_sides=["short"],
         required_facts=[
             *_price_action_required_facts(),

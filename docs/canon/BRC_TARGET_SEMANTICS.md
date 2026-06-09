@@ -212,6 +212,13 @@ Current local B0 implementation slice:
   `not_execution_authority=true`, `hard_filter=false`, and no order/execution
   permissions. `StrategyEvaluationContextBuilder` can use that output for
   RMR-001 `range_structure`, `volatility_state`, and `market_state` facts.
+- `src/domain/brf_price_action_evaluator.py` evaluates explicit closed-candle
+  bear-rally-failure evidence for `BRF-001` / `BRF-001-v0`. It can emit
+  observe-only short-side `StrategyFamilySignalOutput` evidence with
+  `price_action_structure` and `short_squeeze_risk` facts so B0 semantics can
+  distinguish reviewed short-side squeeze risk from missing facts. It is not an
+  execution source and carries no sizing, leverage, venue, route, order, or
+  execution instruction fields.
 - `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
   SignalEvaluation against those semantics and can create only a shadow
   OrderCandidate through SignalEvaluationShadowService. It can also consume a
@@ -255,7 +262,7 @@ Current local B0 implementation slice:
   and cached account facts. This is an application assembly point only; no
   public strategy-signal write endpoint is exposed by this slice.
 - This is not proven-alpha approval, not execution authority, and not a real
-  OrderLifecycle adapter. Live fact readers, BRF concrete evaluator details,
+  OrderLifecycle adapter. Live fact readers, BRF runtime-profile confirmation,
   FCO funding/OI/crowding data coverage, and runtime promotion remain
   Owner/Codex-gated before promotion beyond shadow binding.
 
