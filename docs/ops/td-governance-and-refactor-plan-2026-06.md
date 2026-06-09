@@ -221,9 +221,17 @@ python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate.py \
   tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
 16 passed
 
+python3 -m pytest -q tests/unit/test_strategy_runtime_safety_readiness.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
+21 passed
+
 python3 -m compileall -q src/domain/strategy_runtime_promotion_gate.py \
+  src/domain/strategy_runtime_safety_readiness.py \
   src/application/strategy_runtime_promotion_gate_service.py \
+  src/application/strategy_runtime_safety_readiness_service.py \
   src/interfaces/api_trading_console.py \
+  tests/unit/test_strategy_runtime_safety_readiness.py \
   tests/unit/test_b0_strategy_runtime_promotion_gate.py \
   tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
 passed
@@ -1209,6 +1217,13 @@ Current local Sprint 7 slice:
   explicit opt-in query facts. Missing values remain blockers, so the UI/API
   cannot collapse “runtime profile confirmed” into leverage/margin/liquidation
   readiness.
+- `StrategyRuntimeSafetyReadiness` now inspects the runtime boundary itself and
+  returns concrete boundary-fact readiness for symbol/side, attempts, loss
+  budget, notional, active-position limit, leverage, margin, liquidation
+  buffer, protection, review, trusted fact-source requirements, and stale-fact
+  behavior. It also lists the Owner/Codex confirmation keys still needed for
+  promotion. This readiness preview is exposed through a Trading Console GET
+  endpoint and remains non-executing.
 
 Required properties:
 

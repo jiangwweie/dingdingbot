@@ -64,6 +64,7 @@ from src.domain.strategy_runtime_promotion_gate import (
     StrategyRuntimePromotionScope,
     StrategySemanticsConfirmationFacts,
 )
+from src.domain.strategy_runtime_safety_readiness import StrategyRuntimeSafetyReadiness
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
 
@@ -303,8 +304,10 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
     right_tail_review_metrics_confirmed: bool = False,
     runtime_profile_confirmed: bool = False,
     owner_confirmation_mode_confirmed: bool = False,
+    symbol_side_boundary_confirmed: bool = False,
     max_loss_budget_confirmed: bool = False,
     max_notional_boundary_confirmed: bool = False,
+    max_active_positions_boundary_confirmed: bool = False,
     max_leverage_boundary_confirmed: bool = False,
     margin_usage_boundary_confirmed: bool = False,
     liquidation_buffer_boundary_confirmed: bool = False,
@@ -345,8 +348,12 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
         right_tail_review_metrics_confirmed=right_tail_review_metrics_confirmed,
         runtime_profile_confirmed=runtime_profile_confirmed,
         owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+        symbol_side_boundary_confirmed=symbol_side_boundary_confirmed,
         max_loss_budget_confirmed=max_loss_budget_confirmed,
         max_notional_boundary_confirmed=max_notional_boundary_confirmed,
+        max_active_positions_boundary_confirmed=(
+            max_active_positions_boundary_confirmed
+        ),
         max_leverage_boundary_confirmed=max_leverage_boundary_confirmed,
         margin_usage_boundary_confirmed=margin_usage_boundary_confirmed,
         liquidation_buffer_boundary_confirmed=liquidation_buffer_boundary_confirmed,
@@ -378,6 +385,29 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
 
 
 @router.get(
+    "/strategy-runtimes/{runtime_instance_id}/safety-readiness",
+    response_model=StrategyRuntimeSafetyReadiness,
+)
+async def runtime_strategy_safety_readiness_preview(
+    runtime_instance_id: str,
+) -> StrategyRuntimeSafetyReadiness:
+    try:
+        from src.application.strategy_runtime_safety_readiness_service import (
+            StrategyRuntimeSafetyReadinessService,
+        )
+
+        service = StrategyRuntimeSafetyReadinessService(
+            runtime_service=await _strategy_runtime_service(),
+        )
+        return await service.preview(runtime_instance_id=runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
     "/strategy-runtime-promotion-gate",
     response_model=StrategyRuntimePromotionGateResult,
 )
@@ -397,8 +427,10 @@ async def runtime_strategy_promotion_gate_preview(
     right_tail_review_metrics_confirmed: bool = False,
     runtime_profile_confirmed: bool = False,
     owner_confirmation_mode_confirmed: bool = False,
+    symbol_side_boundary_confirmed: bool = False,
     max_loss_budget_confirmed: bool = False,
     max_notional_boundary_confirmed: bool = False,
+    max_active_positions_boundary_confirmed: bool = False,
     max_leverage_boundary_confirmed: bool = False,
     margin_usage_boundary_confirmed: bool = False,
     liquidation_buffer_boundary_confirmed: bool = False,
@@ -438,8 +470,12 @@ async def runtime_strategy_promotion_gate_preview(
             runtime_confirmations=RuntimeExecutionConfirmationFacts(
                 runtime_profile_confirmed=runtime_profile_confirmed,
                 owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+                symbol_side_boundary_confirmed=symbol_side_boundary_confirmed,
                 max_loss_budget_confirmed=max_loss_budget_confirmed,
                 max_notional_boundary_confirmed=max_notional_boundary_confirmed,
+                max_active_positions_boundary_confirmed=(
+                    max_active_positions_boundary_confirmed
+                ),
                 max_leverage_boundary_confirmed=max_leverage_boundary_confirmed,
                 margin_usage_boundary_confirmed=margin_usage_boundary_confirmed,
                 liquidation_buffer_boundary_confirmed=(

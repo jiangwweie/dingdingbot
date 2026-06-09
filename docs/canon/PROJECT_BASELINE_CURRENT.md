@@ -160,6 +160,15 @@ Key facts:
   that resolves `StrategyFamilyVersion` from `StrategyRuntimeInstance`; it does
   not record strategy signals, create candidates, create intents, or authorize
   execution.
+- **StrategyRuntimeSafetyReadiness** now exists as a pure non-executing runtime
+  boundary fact-readiness model and Trading Console GET endpoint. It inspects a
+  `StrategyRuntimeInstance.boundary` and reports whether symbol/side,
+  attempts, max-loss budget, max notional, max active positions, max leverage,
+  max margin, liquidation buffer, protection requirement, review requirement,
+  trusted fact-source needs, and stale-fact behavior are present or still need
+  Owner/Codex confirmation. It does not confirm those facts by itself, mutate
+  runtime state, create candidates, create intents, create orders, or call
+  exchange.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signal pairs into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->

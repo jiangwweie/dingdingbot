@@ -53,8 +53,10 @@ class StrategySemanticsConfirmationFacts(StrategyRuntimePromotionGateModel):
 class RuntimeExecutionConfirmationFacts(StrategyRuntimePromotionGateModel):
     runtime_profile_confirmed: bool = False
     owner_confirmation_mode_confirmed: bool = False
+    symbol_side_boundary_confirmed: bool = False
     max_loss_budget_confirmed: bool = False
     max_notional_boundary_confirmed: bool = False
+    max_active_positions_boundary_confirmed: bool = False
     max_leverage_boundary_confirmed: bool = False
     margin_usage_boundary_confirmed: bool = False
     liquidation_buffer_boundary_confirmed: bool = False
@@ -205,8 +207,12 @@ def _check_runtime_confirmations(
     required = {
         "runtime_profile_confirmed": facts.runtime_profile_confirmed,
         "owner_confirmation_mode_confirmed": facts.owner_confirmation_mode_confirmed,
+        "symbol_side_boundary_confirmed": facts.symbol_side_boundary_confirmed,
         "max_loss_budget_confirmed": facts.max_loss_budget_confirmed,
         "max_notional_boundary_confirmed": facts.max_notional_boundary_confirmed,
+        "max_active_positions_boundary_confirmed": (
+            facts.max_active_positions_boundary_confirmed
+        ),
         "max_leverage_boundary_confirmed": facts.max_leverage_boundary_confirmed,
         "margin_usage_boundary_confirmed": facts.margin_usage_boundary_confirmed,
         "liquidation_buffer_boundary_confirmed": (

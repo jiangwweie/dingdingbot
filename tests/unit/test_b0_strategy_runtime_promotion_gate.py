@@ -39,8 +39,10 @@ def _runtime_confirmed(
     return RuntimeExecutionConfirmationFacts(
         runtime_profile_confirmed=True,
         owner_confirmation_mode_confirmed=True,
+        symbol_side_boundary_confirmed=True,
         max_loss_budget_confirmed=True,
         max_notional_boundary_confirmed=True,
+        max_active_positions_boundary_confirmed=True,
         max_leverage_boundary_confirmed=True,
         margin_usage_boundary_confirmed=True,
         liquidation_buffer_boundary_confirmed=True,
@@ -73,7 +75,11 @@ def test_cpm_blocks_until_owner_semantic_and_runtime_confirmations_exist():
 
     assert result.status == StrategyRuntimePromotionGateStatus.BLOCKED
     assert "semantic_strategy_family_confirmed_missing" in result.blockers
+    assert "runtime_symbol_side_boundary_confirmed_missing" in result.blockers
     assert "runtime_max_loss_budget_confirmed_missing" in result.blockers
+    assert "runtime_max_active_positions_boundary_confirmed_missing" in (
+        result.blockers
+    )
     assert "runtime_liquidation_buffer_boundary_confirmed_missing" in result.blockers
     assert "runtime_protection_readiness_source_confirmed_missing" in result.blockers
     assert "runtime_stale_fact_behavior_confirmed_missing" in result.blockers
