@@ -103,7 +103,8 @@
   html[data-theme='light'] .console-surface .bg-slate-950,
   html[data-theme='light'] .console-surface .bg-slate-950\/95,
   html[data-theme='light'] .console-surface .bg-slate-950\/70,
-  html[data-theme='light'] .console-surface .bg-slate-950\/45 {
+  html[data-theme='light'] .console-surface .bg-slate-950\/45,
+  html[data-theme='light'] .console-surface .bg-slate-950\/30 {
     background-color: rgb(248 250 252 / 0.96) !important;
   }
 
@@ -112,6 +113,8 @@
   html[data-theme='light'] .console-surface .bg-slate-900\/70,
   html[data-theme='light'] .console-surface .bg-slate-900\/55,
   html[data-theme='light'] .console-surface .bg-slate-900\/50,
+  html[data-theme='light'] .console-surface .bg-slate-900\/45,
+  html[data-theme='light'] .console-surface .bg-slate-900\/40,
   html[data-theme='light'] .console-surface .bg-slate-900\/30 {
     background-color: rgb(255 255 255 / 0.88) !important;
   }
@@ -120,8 +123,10 @@
   html[data-theme='light'] .console-surface .bg-slate-800\/90,
   html[data-theme='light'] .console-surface .bg-slate-800\/80,
   html[data-theme='light'] .console-surface .bg-slate-800\/70,
+  html[data-theme='light'] .console-surface .bg-slate-800\/60,
   html[data-theme='light'] .console-surface .bg-slate-800\/50,
-  html[data-theme='light'] .console-surface .bg-slate-800\/40 {
+  html[data-theme='light'] .console-surface .bg-slate-800\/40,
+  html[data-theme='light'] .console-surface .bg-slate-800\/30 {
     background-color: rgb(226 232 240 / 0.78) !important;
   }
 
