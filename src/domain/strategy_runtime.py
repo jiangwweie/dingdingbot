@@ -79,6 +79,7 @@ ALLOWED_RUNTIME_TRANSITIONS: dict[
 class StrategyRuntimeBoundary(StrategyRuntimeModel):
     max_attempts: int = Field(ge=1)
     attempts_used: int = Field(default=0, ge=0)
+    budget_reserved: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
     max_active_positions: int = Field(default=1, ge=0)
     max_notional_per_attempt: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     total_budget: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
@@ -92,6 +93,8 @@ class StrategyRuntimeBoundary(StrategyRuntimeModel):
     def _attempts_cannot_exceed_max(self) -> "StrategyRuntimeBoundary":
         if self.attempts_used > self.max_attempts:
             raise ValueError("attempts_used cannot exceed max_attempts")
+        if self.total_budget is not None and self.budget_reserved > self.total_budget:
+            raise ValueError("budget_reserved cannot exceed total_budget")
         return self
 
     @property
@@ -102,10 +105,7 @@ class StrategyRuntimeBoundary(StrategyRuntimeModel):
     def budget_remaining(self) -> Optional[Decimal]:
         if self.total_budget is None:
             return None
-        if self.max_notional_per_attempt is None:
-            return self.total_budget
-        used = self.max_notional_per_attempt * Decimal(self.attempts_used)
-        return max(self.total_budget - used, Decimal("0"))
+        return max(self.total_budget - self.budget_reserved, Decimal("0"))
 
 
 class StrategyRuntimePolicySnapshot(StrategyRuntimeModel):

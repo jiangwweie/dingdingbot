@@ -15,6 +15,10 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstanceStatus,
     StrategyRuntimePolicySnapshot,
 )
+from src.domain.runtime_execution_attempt_mutation import (
+    RuntimeExecutionAttemptMutation,
+    RuntimeExecutionAttemptMutationStatus,
+)
 
 
 def _now_ms() -> int:
@@ -212,6 +216,44 @@ class StrategyRuntimeInstanceService:
     ) -> list[StrategyRuntimeInstance]:
         return await self._runtime_repo.list(status=status, limit=limit)
 
+    async def apply_runtime_attempt_mutation(
+        self,
+        *,
+        previous_runtime: StrategyRuntimeInstance,
+        updated_runtime: StrategyRuntimeInstance,
+        mutation: RuntimeExecutionAttemptMutation,
+    ) -> StrategyRuntimeInstance:
+        if mutation.status != RuntimeExecutionAttemptMutationStatus.APPLIED:
+            raise StrategyRuntimeError("only applied attempt mutation can update runtime")
+        if previous_runtime.runtime_instance_id != updated_runtime.runtime_instance_id:
+            raise StrategyRuntimeError("runtime mutation previous/updated runtime mismatch")
+        if mutation.runtime_instance_id != updated_runtime.runtime_instance_id:
+            raise StrategyRuntimeError("runtime mutation target mismatch")
+        if updated_runtime.execution_enabled or not updated_runtime.shadow_mode:
+            raise StrategyRuntimeError("runtime mutation cannot enable execution")
+        saved = await self._runtime_repo.update_status(updated_runtime)
+        await self._record_event(
+            saved,
+            previous_status=previous_runtime.status,
+            actor="system",
+            reason="runtime attempt and budget reserved from controlled reservation",
+            event_type="runtime_attempt_mutated",
+            metadata={
+                "mutation_id": mutation.mutation_id,
+                "reservation_id": mutation.reservation_id,
+                "authorization_id": mutation.authorization_id,
+                "attempts_used_before": mutation.attempts_used_before,
+                "attempts_used_after": mutation.attempts_used_after,
+                "budget_reserved_before": str(mutation.budget_reserved_before),
+                "budget_reserved_after": str(mutation.budget_reserved_after),
+                "runtime_budget_mutated": mutation.runtime_budget_mutated,
+                "attempt_consumed": mutation.attempt_consumed,
+                "order_created": mutation.order_created,
+                "exchange_called": mutation.exchange_called,
+            },
+        )
+        return saved
+
     async def _transition(
         self,
         runtime_instance_id: str,
@@ -239,16 +281,23 @@ class StrategyRuntimeInstanceService:
         previous_status: Optional[StrategyRuntimeInstanceStatus],
         actor: str = "system",
         reason: str,
+        event_type: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         event = StrategyRuntimeEvent(
             event_id=_id("strategy-runtime-event"),
             runtime_instance_id=runtime.runtime_instance_id,
-            event_type="status_transition" if previous_status is not None else "created",
+            event_type=event_type
+            or ("status_transition" if previous_status is not None else "created"),
             previous_status=previous_status,
             next_status=runtime.status,
             actor=actor,
             reason=reason,
-            metadata={"execution_enabled": runtime.execution_enabled, "shadow_mode": runtime.shadow_mode},
+            metadata={
+                "execution_enabled": runtime.execution_enabled,
+                "shadow_mode": runtime.shadow_mode,
+                **(metadata or {}),
+            },
             created_at_ms=_now_ms(),
         )
         await self._runtime_repo.record_event(event)

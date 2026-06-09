@@ -14,12 +14,46 @@ from src.application.readmodels.trading_console import (
     TradingConsoleReadModelResponse,
     TradingConsoleReadModelService,
 )
+from src.domain.execution_intent import ExecutionIntent
+from src.domain.runtime_execution_controlled_submit import (
+    RuntimeExecutionControlledSubmitPlan,
+    RuntimeExecutionControlledSubmitPreflight,
+    RuntimeExecutionControlledSubmitResult,
+)
 from src.domain.signal_evaluation import (
     OrderCandidate,
     OrderCandidateStatus,
     SignalEvaluation,
     SignalEvaluationStatus,
 )
+from src.domain.runtime_execution_intent_adapter import (
+    RuntimeExecutionIntentCreationPreview,
+    RuntimeExecutionSubmitReadiness,
+)
+from src.domain.runtime_execution_submit_authorization import (
+    RuntimeExecutionSubmitAuthorization,
+)
+from src.domain.runtime_execution_submit_adapter import (
+    RuntimeExecutionSubmitAdapterPreview,
+)
+from src.domain.runtime_execution_protection_plan import (
+    RuntimeExecutionProtectionPlan,
+    RuntimeExecutionProtectionPlanPreview,
+)
+from src.domain.runtime_execution_order_lifecycle_handoff import (
+    RuntimeExecutionOrderLifecycleHandoffDraft,
+)
+from src.domain.runtime_execution_order_lifecycle_adapter import (
+    RuntimeExecutionOrderLifecycleAdapterPreview,
+)
+from src.domain.runtime_execution_attempt_reservation import (
+    RuntimeExecutionAttemptReservation,
+    RuntimeExecutionAttemptReservationPreview,
+)
+from src.domain.runtime_execution_attempt_mutation import (
+    RuntimeExecutionAttemptMutation,
+)
+from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, RuntimeExecutionPlan
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
@@ -106,6 +140,7 @@ class StrategyRuntimeBoundaryView(BaseModel):
     attempts_used: int
     attempts_remaining: int
     max_active_positions: int
+    budget_reserved: str | None = None
     max_notional_per_attempt: str | None = None
     total_budget: str | None = None
     budget_remaining: str | None = None
@@ -348,6 +383,386 @@ async def runtime_final_gate_preview_for_order_candidate(
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-plans/order-candidates/{order_candidate_id}",
+    response_model=RuntimeExecutionPlan,
+)
+async def runtime_execution_plan_for_order_candidate(
+    order_candidate_id: str,
+    active_positions_count: Optional[int] = Query(default=None, ge=0),
+    owner_reviewed: bool = Query(default=False),
+) -> RuntimeExecutionPlan:
+    service = await _runtime_execution_planning_service()
+    try:
+        return await service.plan_order_candidate(
+            order_candidate_id=order_candidate_id,
+            active_positions_count=active_positions_count,
+            owner_reviewed=owner_reviewed,
+        )
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
+    response_model=RuntimeExecutionIntentDraft,
+)
+async def runtime_execution_intent_draft_for_order_candidate(
+    order_candidate_id: str,
+    active_positions_count: Optional[int] = Query(default=None, ge=0),
+    owner_reviewed: bool = Query(default=False),
+    owner_confirmed_for_intent: bool = Query(default=False),
+) -> RuntimeExecutionIntentDraft:
+    service = await _runtime_execution_planning_service()
+    try:
+        return await service.intent_draft_for_order_candidate(
+            order_candidate_id=order_candidate_id,
+            active_positions_count=active_positions_count,
+            owner_reviewed=owner_reviewed,
+            owner_confirmed_for_intent=owner_confirmed_for_intent,
+        )
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
+    response_model=RuntimeExecutionIntentDraft,
+)
+async def record_runtime_execution_intent_draft_for_order_candidate(
+    order_candidate_id: str,
+    active_positions_count: Optional[int] = Query(default=None, ge=0),
+    owner_reviewed: bool = Query(default=False),
+    owner_confirmed_for_intent: bool = Query(default=False),
+) -> RuntimeExecutionIntentDraft:
+    service = await _runtime_execution_planning_service()
+    try:
+        return await service.record_intent_draft_for_order_candidate(
+            order_candidate_id=order_candidate_id,
+            active_positions_count=active_positions_count,
+            owner_reviewed=owner_reviewed,
+            owner_confirmed_for_intent=owner_confirmed_for_intent,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-intent-adapter-preview/drafts/{runtime_execution_intent_draft_id}",
+    response_model=RuntimeExecutionIntentCreationPreview,
+)
+async def runtime_execution_intent_adapter_preview_for_draft(
+    runtime_execution_intent_draft_id: str,
+) -> RuntimeExecutionIntentCreationPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.preview_from_draft(runtime_execution_intent_draft_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-intents/drafts/{runtime_execution_intent_draft_id}",
+    response_model=ExecutionIntent,
+)
+async def record_runtime_execution_intent_for_draft(
+    runtime_execution_intent_draft_id: str,
+) -> ExecutionIntent:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.create_recorded_intent_from_draft(
+            runtime_execution_intent_draft_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-submit-readiness/intents/{execution_intent_id}",
+    response_model=RuntimeExecutionSubmitReadiness,
+)
+async def runtime_execution_submit_readiness_for_intent(
+    execution_intent_id: str,
+) -> RuntimeExecutionSubmitReadiness:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.submit_readiness_for_intent(execution_intent_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-protection-plan-previews/intents/{execution_intent_id}",
+    response_model=RuntimeExecutionProtectionPlanPreview,
+)
+async def runtime_execution_protection_plan_preview_for_intent(
+    execution_intent_id: str,
+) -> RuntimeExecutionProtectionPlanPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.protection_plan_preview_for_intent(execution_intent_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-protection-plans/intents/{execution_intent_id}",
+    response_model=RuntimeExecutionProtectionPlan,
+)
+async def record_runtime_execution_protection_plan_for_intent(
+    execution_intent_id: str,
+) -> RuntimeExecutionProtectionPlan:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_protection_plan_for_intent(execution_intent_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-submit-authorizations/intents/{execution_intent_id}",
+    response_model=RuntimeExecutionSubmitAuthorization,
+)
+async def record_runtime_execution_submit_authorization_for_intent(
+    execution_intent_id: str,
+    owner_confirmed_for_submit: bool = Query(default=False),
+) -> RuntimeExecutionSubmitAuthorization:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.create_submit_authorization_for_intent(
+            execution_intent_id,
+            owner_confirmed_for_submit=owner_confirmed_for_submit,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-controlled-submit-plans/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionControlledSubmitPlan,
+)
+async def runtime_execution_controlled_submit_plan_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionControlledSubmitPlan:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.controlled_submit_plan_for_authorization(authorization_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-controlled-submit-preflights/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionControlledSubmitPreflight,
+)
+async def runtime_execution_controlled_submit_preflight_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionControlledSubmitPreflight:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.controlled_submit_preflight_for_authorization(authorization_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-submit-adapter-previews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionSubmitAdapterPreview,
+)
+async def runtime_execution_submit_adapter_preview_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionSubmitAdapterPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.controlled_submit_adapter_preview_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-attempt-reservation-previews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionAttemptReservationPreview,
+)
+async def runtime_execution_attempt_reservation_preview_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionAttemptReservationPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.attempt_reservation_preview_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-attempt-reservations/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionAttemptReservation,
+)
+async def record_runtime_execution_attempt_reservation_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionAttemptReservation:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_attempt_reservation_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-attempt-mutations/reservations/{reservation_id}",
+    response_model=RuntimeExecutionAttemptMutation,
+)
+async def apply_runtime_execution_attempt_mutation_for_reservation(
+    reservation_id: str,
+) -> RuntimeExecutionAttemptMutation:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.apply_attempt_mutation_for_reservation(
+            reservation_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-order-lifecycle-handoff-drafts/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionOrderLifecycleHandoffDraft,
+)
+async def record_runtime_execution_order_lifecycle_handoff_draft_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionOrderLifecycleHandoffDraft:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_order_lifecycle_handoff_draft_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-order-lifecycle-adapter-previews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionOrderLifecycleAdapterPreview,
+)
+async def runtime_execution_order_lifecycle_adapter_preview_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionOrderLifecycleAdapterPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.order_lifecycle_adapter_preview_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-controlled-submit/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionControlledSubmitResult,
+)
+async def runtime_execution_controlled_submit_for_authorization(
+    authorization_id: str,
+    submit_enabled: bool = False,
+) -> RuntimeExecutionControlledSubmitResult:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_controlled_submit_result_for_authorization(
+            authorization_id,
+            submit_enabled=submit_enabled,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
 
@@ -868,8 +1283,86 @@ async def _runtime_final_gate_preview_service() -> Any:
     service = RuntimeFinalGatePreviewService(
         runtime_service=await _strategy_runtime_service(),
         signal_evaluation_service=await _signal_evaluation_shadow_service(),
+        active_position_source=_cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        ),
     )
     setattr(api_module, "_runtime_final_gate_preview_service", service)
+    return service
+
+
+async def _runtime_execution_planning_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_execution_planning_service", None)
+    if injected is not None:
+        return injected
+    from src.application.runtime_execution_planning_service import (
+        RuntimeExecutionPlanningService,
+    )
+    from src.infrastructure.pg_runtime_execution_intent_draft_repository import (
+        PgRuntimeExecutionIntentDraftRepository,
+    )
+
+    service = RuntimeExecutionPlanningService(
+        runtime_service=await _strategy_runtime_service(),
+        signal_evaluation_service=await _signal_evaluation_shadow_service(),
+        final_gate_preview_service=await _runtime_final_gate_preview_service(),
+        intent_draft_repository=PgRuntimeExecutionIntentDraftRepository(),
+    )
+    setattr(api_module, "_runtime_execution_planning_service", service)
+    return service
+
+
+async def _runtime_execution_intent_adapter_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_execution_intent_adapter_service", None)
+    if injected is not None:
+        return injected
+    from src.application.runtime_execution_intent_adapter_service import (
+        RuntimeExecutionIntentAdapterService,
+    )
+    from src.infrastructure.pg_execution_intent_repository import (
+        PgExecutionIntentRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_intent_draft_repository import (
+        PgRuntimeExecutionIntentDraftRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_submit_authorization_repository import (
+        PgRuntimeExecutionSubmitAuthorizationRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_controlled_submit_result_repository import (
+        PgRuntimeExecutionControlledSubmitResultRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_attempt_reservation_repository import (
+        PgRuntimeExecutionAttemptReservationRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_attempt_mutation_repository import (
+        PgRuntimeExecutionAttemptMutationRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_protection_plan_repository import (
+        PgRuntimeExecutionProtectionPlanRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_order_lifecycle_handoff_repository import (
+        PgRuntimeExecutionOrderLifecycleHandoffRepository,
+    )
+
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=PgRuntimeExecutionIntentDraftRepository(),
+        intent_repository=PgExecutionIntentRepository(),
+        submit_authorization_repository=PgRuntimeExecutionSubmitAuthorizationRepository(),
+        controlled_submit_result_repository=PgRuntimeExecutionControlledSubmitResultRepository(),
+        attempt_reservation_repository=PgRuntimeExecutionAttemptReservationRepository(),
+        attempt_mutation_repository=PgRuntimeExecutionAttemptMutationRepository(),
+        protection_plan_repository=PgRuntimeExecutionProtectionPlanRepository(),
+        order_lifecycle_handoff_repository=PgRuntimeExecutionOrderLifecycleHandoffRepository(),
+        final_gate_preview_service=await _runtime_final_gate_preview_service(),
+        runtime_service=await _strategy_runtime_service(),
+    )
+    setattr(api_module, "_runtime_execution_intent_adapter_service", service)
     return service
 
 
@@ -893,6 +1386,7 @@ def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspection
             attempts_used=boundary.attempts_used,
             attempts_remaining=boundary.attempts_remaining,
             max_active_positions=boundary.max_active_positions,
+            budget_reserved=_decimal_string(boundary.budget_reserved),
             max_notional_per_attempt=_decimal_string(boundary.max_notional_per_attempt),
             total_budget=_decimal_string(boundary.total_budget),
             budget_remaining=_decimal_string(boundary.budget_remaining),

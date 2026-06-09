@@ -104,6 +104,30 @@ def _preview_service() -> RuntimeFinalGatePreviewService:
     )
 
 
+def _preview_service_with_positions(active_positions) -> RuntimeFinalGatePreviewService:
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == "runtime-1"
+            return _runtime()
+
+    class _SignalService:
+        async def get_order_candidate(self, order_candidate_id: str) -> OrderCandidate:
+            assert order_candidate_id == "order-candidate-1"
+            return _candidate()
+
+    class _PositionSource:
+        async def list_active(self, *, symbol: str | None = None, limit: int = 100):
+            assert symbol == "ETH/USDT:USDT"
+            assert limit == 100
+            return list(active_positions)
+
+    return RuntimeFinalGatePreviewService(
+        runtime_service=_RuntimeService(),
+        signal_evaluation_service=_SignalService(),
+        active_position_source=_PositionSource(),
+    )
+
+
 def test_runtime_final_gate_preview_passes_with_complete_safe_shadow_facts():
     preview = _preview_service().preview(
         runtime=_runtime(),
@@ -123,6 +147,31 @@ def test_runtime_final_gate_preview_passes_with_complete_safe_shadow_facts():
     assert preview.order_created is False
     assert preview.exchange_called is False
     assert preview.runtime_state_mutated is False
+
+
+async def test_runtime_final_gate_preview_uses_local_active_position_source_when_query_missing():
+    preview = await _preview_service_with_positions([]).preview_order_candidate(
+        order_candidate_id="order-candidate-1",
+        owner_reviewed=True,
+    )
+
+    assert preview.verdict == RuntimeFinalGatePreviewVerdict.PASS
+    assert preview.active_positions_count == 0
+    assert preview.metadata["active_positions_count_source"] == "local_position_projection"
+    assert preview.execution_intent_created is False
+    assert preview.order_created is False
+
+
+async def test_runtime_final_gate_preview_blocks_when_local_active_positions_exhaust_capacity():
+    preview = await _preview_service_with_positions([object()]).preview_order_candidate(
+        order_candidate_id="order-candidate-1",
+        owner_reviewed=True,
+    )
+
+    assert preview.verdict == RuntimeFinalGatePreviewVerdict.BLOCK
+    assert preview.active_positions_count == 1
+    assert "active_position_capacity_exhausted" in preview.blockers
+    assert preview.metadata["active_positions_count_source"] == "local_position_projection"
 
 
 def test_runtime_final_gate_preview_blocks_runtime_boundary_violations():
@@ -168,7 +217,7 @@ def test_runtime_final_gate_preview_blocks_runtime_boundary_violations():
     assert "owner_review_required" in preview.blockers
 
 
-def test_runtime_final_gate_preview_warns_when_optional_facts_are_missing():
+def test_runtime_final_gate_preview_blocks_when_active_position_fact_is_missing():
     runtime = _runtime(
         boundary=StrategyRuntimeBoundary(
             max_attempts=2,
@@ -192,11 +241,10 @@ def test_runtime_final_gate_preview_warns_when_optional_facts_are_missing():
         owner_reviewed=False,
     )
 
-    assert preview.verdict == RuntimeFinalGatePreviewVerdict.WARN
-    assert preview.blockers == []
+    assert preview.verdict == RuntimeFinalGatePreviewVerdict.BLOCK
+    assert "active_positions_count_not_available" in preview.blockers
     assert "candidate_notional_missing" in preview.warnings
     assert "runtime_max_leverage_missing" in preview.warnings
-    assert "active_positions_count_not_available" in preview.warnings
 
 
 def test_runtime_final_gate_preview_blocks_incomplete_audit_id_spine():

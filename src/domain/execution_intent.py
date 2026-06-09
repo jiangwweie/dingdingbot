@@ -14,10 +14,10 @@ ExecutionOrchestrator MVP 第一步：最小执行意图模型
 """
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.domain.brc_audit_ids import BrcSemanticIds
 from src.domain.models import SignalResult, Order, OrderStrategy
@@ -25,6 +25,7 @@ from src.domain.models import SignalResult, Order, OrderStrategy
 
 class ExecutionIntentStatus(str, Enum):
     """执行意图状态"""
+    RECORDED = "recorded"        # 已记录；尚未授权进入提交链路
     PENDING = "pending"          # 等待执行
     BLOCKED = "blocked"          # 被 CapitalProtection 拦截
     SUBMITTED = "submitted"      # 已提交到交易所
@@ -38,11 +39,22 @@ class ExecutionIntent(BaseModel):
     """
     执行意图
 
-    记录信号到订单的执行意图和状态
+    记录执行意图和状态。
+
+    Legacy one-shot execution still uses SignalResult. Runtime governance
+    intents may instead use source_type/source_id/source_payload without
+    projecting an OrderCandidate into a fake SignalResult.
     """
     id: str = Field(..., description="执行意图 ID")
-    signal_id: str = Field(..., description="信号 ID（用于关联 SignalResult）")
-    signal: SignalResult = Field(..., description="原始信号")
+    symbol: Optional[str] = Field(default=None, description="交易标的")
+    signal_id: Optional[str] = Field(
+        default=None,
+        description="Legacy signal ID when source_type is legacy SignalResult.",
+    )
+    signal: Optional[SignalResult] = Field(
+        default=None,
+        description="Legacy SignalResult snapshot when applicable.",
+    )
     status: ExecutionIntentStatus = Field(
         default=ExecutionIntentStatus.PENDING,
         description="执行状态"
@@ -62,6 +74,26 @@ class ExecutionIntent(BaseModel):
     authorization_id: Optional[str] = Field(
         None,
         description="Owner bounded live-trial authorization ID, when intent is created from Owner execution.",
+    )
+    source_type: Optional[str] = Field(
+        None,
+        description=(
+            "Additive source discriminator for intent origin, e.g. "
+            "legacy_signal_result, owner_bounded_authorization, or "
+            "brc_runtime_order_candidate."
+        ),
+    )
+    source_id: Optional[str] = Field(
+        None,
+        description="Additive source object ID for the intent origin.",
+    )
+    source_payload: Optional[dict[str, Any]] = Field(
+        None,
+        description="Optional source snapshot for non-legacy intent origins.",
+    )
+    runtime_execution_intent_draft_id: Optional[str] = Field(
+        None,
+        description="Optional non-executable runtime intent draft audit ID.",
     )
     runtime_instance_id: Optional[str] = Field(
         None,
@@ -115,5 +147,24 @@ class ExecutionIntent(BaseModel):
         default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000),
         description="更新时间"
     )
+
+    @model_validator(mode="after")
+    def _validate_source_shape(self) -> "ExecutionIntent":
+        if self.symbol is None and self.signal is not None:
+            self.symbol = self.signal.symbol
+        if not self.symbol:
+            raise ValueError("ExecutionIntent requires symbol")
+        if self.signal is not None and not self.signal_id:
+            raise ValueError("legacy signal ExecutionIntent requires signal_id")
+        if self.signal_id and self.signal is None:
+            raise ValueError("signal_id requires signal payload")
+        if self.signal is not None and self.signal.symbol != self.symbol:
+            raise ValueError("ExecutionIntent symbol must match signal.symbol")
+        if self.signal is None:
+            if not self.source_type or not self.source_id:
+                raise ValueError("source-native ExecutionIntent requires source_type and source_id")
+            if self.status != ExecutionIntentStatus.RECORDED:
+                raise ValueError("source-native ExecutionIntent must start as recorded")
+        return self
 
     model_config = {"use_enum_values": True}

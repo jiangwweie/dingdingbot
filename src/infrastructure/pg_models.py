@@ -52,7 +52,7 @@ class PGOrderORM(PGCoreBase):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    signal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    signal_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
     order_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -129,7 +129,7 @@ class PGExecutionIntentORM(PGCoreBase):
     __tablename__ = "execution_intents"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    signal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    signal_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     order_id: Mapped[Optional[str]] = mapped_column(
@@ -141,6 +141,14 @@ class PGExecutionIntentORM(PGCoreBase):
         ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    source_payload_json: Mapped[Optional[dict]] = mapped_column(
+        "source_payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    runtime_execution_intent_draft_id: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
     runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -151,9 +159,9 @@ class PGExecutionIntentORM(PGCoreBase):
     blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     blocked_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    signal_payload: Mapped[dict] = mapped_column(
+    signal_payload: Mapped[Optional[dict]] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"),
-        nullable=False,
+        nullable=True,
     )
     strategy_payload: Mapped[Optional[dict]] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"),
@@ -164,7 +172,7 @@ class PGExecutionIntentORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'blocked', 'submitted', 'failed', "
+            "status IN ('recorded', 'pending', 'blocked', 'submitted', 'failed', "
             "'protecting', 'partially_protected', 'completed')",
             name="ck_execution_intents_status",
         ),
@@ -172,6 +180,8 @@ class PGExecutionIntentORM(PGCoreBase):
         Index("idx_execution_intents_symbol", "symbol"),
         Index("idx_execution_intents_created_at", "created_at"),
         Index("idx_execution_intents_authorization_id", "authorization_id"),
+        Index("idx_execution_intents_source", "source_type", "source_id"),
+        Index("idx_execution_intents_runtime_draft", "runtime_execution_intent_draft_id"),
         Index("idx_execution_intents_runtime_instance_id", "runtime_instance_id"),
         Index("idx_execution_intents_trial_binding_id", "trial_binding_id"),
         Index(
@@ -1172,6 +1182,835 @@ class PGOrderCandidateORM(PGCoreBase):
         Index("idx_order_candidates_family_version", "strategy_family_version_id"),
         Index("idx_order_candidates_symbol_status", "symbol", "status"),
         Index("idx_order_candidates_status_time", "status", "updated_at_ms"),
+    )
+
+
+class PGRuntimeExecutionIntentDraftORM(PGCoreBase):
+    """Non-executable runtime ExecutionIntent draft audit record.
+
+    Draft rows are Owner-review artifacts only. They must not be treated as
+    ExecutionIntent records or order authority.
+    """
+
+    __tablename__ = "runtime_execution_intent_drafts"
+
+    draft_id: Mapped[str] = mapped_column(String(180), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    order_candidate_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    signal_evaluation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    candidate_order_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposed_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    intended_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    entry_price_reference: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    risk_preview_json: Mapped[dict] = mapped_column(
+        "risk_preview",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    protection_preview_json: Mapped[dict] = mapped_column(
+        "protection_preview",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    owner_reviewed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_confirmed_for_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_plan_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    final_gate_verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    owner_confirmation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    preview_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_intent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    execution_intent_repository_write_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'owner_confirmation_required', "
+            "'ready_for_intent_creation')",
+            name="ck_runtime_execution_intent_drafts_status",
+        ),
+        CheckConstraint(
+            "source_plan_status IN ('blocked', 'owner_review_required', "
+            "'ready_for_intent_draft')",
+            name="ck_runtime_execution_intent_drafts_plan_status",
+        ),
+        CheckConstraint(
+            "final_gate_verdict IN ('PASS', 'BLOCK', 'WARN')",
+            name="ck_runtime_execution_intent_drafts_final_gate_verdict",
+        ),
+        CheckConstraint(
+            "owner_confirmation_required = true",
+            name="ck_runtime_execution_intent_drafts_owner_confirmation_required",
+        ),
+        CheckConstraint("dry_run = true", name="ck_runtime_execution_intent_drafts_dry_run"),
+        CheckConstraint("preview_only = true", name="ck_runtime_execution_intent_drafts_preview_only"),
+        CheckConstraint("not_order = true", name="ck_runtime_execution_intent_drafts_not_order"),
+        CheckConstraint(
+            "not_execution_intent = true",
+            name="ck_runtime_execution_intent_drafts_not_execution_intent",
+        ),
+        CheckConstraint(
+            "execution_intent_repository_write_enabled = false",
+            name="ck_runtime_execution_intent_drafts_no_intent_repo_write",
+        ),
+        CheckConstraint(
+            "execution_intent_created = false",
+            name="ck_runtime_execution_intent_drafts_no_intent_created",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_intent_drafts_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_intent_drafts_no_exchange_called",
+        ),
+        Index(
+            "idx_runtime_execution_intent_drafts_candidate_time",
+            "order_candidate_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_intent_drafts_runtime_time",
+            "runtime_instance_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_intent_drafts_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionSubmitAuthorizationORM(PGCoreBase):
+    """Owner submit authorization for a recorded runtime ExecutionIntent.
+
+    This row is an Owner authorization record only. It must not be treated as an
+    order, exchange request, or proof that submit has occurred.
+    """
+
+    __tablename__ = "runtime_execution_submit_authorizations"
+
+    authorization_id: Mapped[str] = mapped_column(String(220), primary_key=True)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_execution_intent_draft_id: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    owner_confirmed_for_submit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    owner_submit_authorized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    submit_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('approved_pending_controlled_submit')",
+            name="ck_runtime_execution_submit_authorizations_status",
+        ),
+        CheckConstraint(
+            "owner_confirmed_for_submit = true",
+            name="ck_runtime_execution_submit_authorizations_owner_confirmed",
+        ),
+        CheckConstraint(
+            "owner_submit_authorized = true",
+            name="ck_runtime_execution_submit_authorizations_owner_authorized",
+        ),
+        CheckConstraint(
+            "submit_executed = false",
+            name="ck_runtime_execution_submit_authorizations_no_submit_executed",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_submit_authorizations_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_submit_authorizations_no_exchange_called",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_runtime_execution_submit_authorizations_no_owner_bounded_execution",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_runtime_execution_submit_authorizations_no_order_lifecycle",
+        ),
+        Index(
+            "idx_runtime_execution_submit_auth_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_submit_auth_runtime_time",
+            "runtime_instance_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_submit_auth_source",
+            "source_type",
+            "source_id",
+        ),
+    )
+
+
+class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
+    """Audit record for the runtime controlled-submit adapter boundary.
+
+    Disabled/blocked/not-implemented submit attempts are recorded here. Rows in
+    this table are not orders and must not imply exchange interaction.
+    """
+
+    __tablename__ = "runtime_execution_controlled_submit_results"
+
+    result_id: Mapped[str] = mapped_column(String(260), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    preflight_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    preflight_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    final_gate_verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submit_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    submit_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'submit_adapter_not_enabled', "
+            "'submit_adapter_not_implemented')",
+            name="ck_runtime_execution_controlled_submit_results_status",
+        ),
+        CheckConstraint(
+            "preflight_status IN ('blocked', 'ready_for_controlled_submit_adapter')",
+            name="ck_runtime_execution_controlled_submit_results_preflight_status",
+        ),
+        CheckConstraint(
+            "final_gate_verdict IN ('PASS', 'WARN', 'BLOCK')",
+            name="ck_runtime_execution_controlled_submit_results_final_gate_verdict",
+        ),
+        CheckConstraint(
+            "submit_executed = false",
+            name="ck_runtime_execution_controlled_submit_results_no_submit_executed",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_controlled_submit_results_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_controlled_submit_results_no_exchange_called",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_runtime_execution_controlled_submit_results_no_owner_bounded_execution",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_runtime_execution_controlled_submit_results_no_order_lifecycle",
+        ),
+        Index(
+            "idx_runtime_execution_controlled_submit_results_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_controlled_submit_results_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_controlled_submit_results_preflight",
+            "preflight_id",
+        ),
+        Index(
+            "idx_runtime_execution_controlled_submit_results_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionAttemptReservationORM(PGCoreBase):
+    """Audit record for a pending runtime attempt/budget reservation.
+
+    A row here is a pre-submit commitment artifact only. It does not increment
+    attempts_used and does not mutate runtime budget.
+    """
+
+    __tablename__ = "runtime_execution_attempt_reservations"
+
+    reservation_id: Mapped[str] = mapped_column(String(260), primary_key=True)
+    reservation_preview_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    preflight_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    proposed_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    intended_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    attempts_used_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_remaining_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_remaining_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    budget_remaining_before: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    budget_remaining_after: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    max_notional_per_attempt: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    total_budget: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    max_active_positions: Mapped[int] = mapped_column(Integer, nullable=False)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    reservation_recorded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    runtime_mutation_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    runtime_budget_mutated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    attempt_consumed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_status_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'pending_runtime_mutation')",
+            name="ck_runtime_execution_attempt_reservations_status",
+        ),
+        CheckConstraint(
+            "reservation_recorded = true",
+            name="ck_runtime_execution_attempt_reservations_recorded",
+        ),
+        CheckConstraint(
+            "runtime_budget_mutated = false",
+            name="ck_runtime_execution_attempt_reservations_no_budget_mutation",
+        ),
+        CheckConstraint(
+            "attempt_consumed = false",
+            name="ck_runtime_execution_attempt_reservations_no_attempt_consumed",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_runtime_execution_attempt_reservations_no_intent_status_change",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_attempt_reservations_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_attempt_reservations_no_exchange_called",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_runtime_execution_attempt_reservations_no_owner_bounded_execution",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_runtime_execution_attempt_reservations_no_order_lifecycle",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_reservations_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_reservations_runtime_time",
+            "runtime_instance_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_reservations_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_reservations_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionAttemptMutationORM(PGCoreBase):
+    """Audit record for applying a pending attempt reservation to runtime state."""
+
+    __tablename__ = "runtime_execution_attempt_mutations"
+
+    mutation_id: Mapped[str] = mapped_column(String(320), primary_key=True)
+    reservation_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    reservation_preview_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_status_before: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_status_after: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    proposed_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    intended_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    attempts_used_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_used_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_remaining_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_remaining_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    budget_reserved_before: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    budget_reserved_after: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    budget_remaining_before: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    budget_remaining_after: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    reservation_budget_remaining_after: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    max_notional_per_attempt: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    total_budget: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    max_active_positions: Mapped[int] = mapped_column(Integer, nullable=False)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    reservation_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    reservation_recorded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    runtime_mutation_pending_before: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    runtime_budget_mutated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    attempt_consumed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    execution_intent_status_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'applied')",
+            name="ck_runtime_execution_attempt_mutations_status",
+        ),
+        CheckConstraint(
+            "reservation_recorded = true",
+            name="ck_runtime_execution_attempt_mutations_reservation_recorded",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_runtime_execution_attempt_mutations_no_intent_status_change",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_attempt_mutations_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_attempt_mutations_no_exchange_called",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_runtime_execution_attempt_mutations_no_owner_bounded_execution",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_runtime_execution_attempt_mutations_no_order_lifecycle",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_mutations_reservation",
+            "reservation_id",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_mutations_runtime_time",
+            "runtime_instance_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_attempt_mutations_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionProtectionPlanORM(PGCoreBase):
+    """Runtime-native protection plan audit record.
+
+    This is a submit-adapter input fact only. It is not an order, exchange
+    payload, or one-shot OwnerBounded authorization.
+    """
+
+    __tablename__ = "runtime_execution_protection_plans"
+
+    protection_plan_id: Mapped[str] = mapped_column(String(260), primary_key=True)
+    protection_plan_preview_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_execution_intent_draft_id: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    proposed_quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    intended_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    entry_price_reference: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    requires_protection: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    stop_reference: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    stop_price_reference: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    take_profit_references_json: Mapped[list] = mapped_column(
+        "take_profit_references",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    risk_preview_json: Mapped[dict] = mapped_column(
+        "risk_preview",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    protection_preview_json: Mapped[dict] = mapped_column(
+        "protection_preview",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    protection_plan_recorded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_exchange_payload: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    execution_intent_status_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_submit_adapter')",
+            name="ck_runtime_execution_protection_plans_status",
+        ),
+        CheckConstraint(
+            "protection_plan_recorded = true",
+            name="ck_runtime_execution_protection_plans_recorded",
+        ),
+        CheckConstraint(
+            "not_order = true",
+            name="ck_runtime_execution_protection_plans_not_order",
+        ),
+        CheckConstraint(
+            "not_exchange_payload = true",
+            name="ck_runtime_execution_protection_plans_not_exchange_payload",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_runtime_execution_protection_plans_no_intent_status_change",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_protection_plans_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_protection_plans_no_exchange_called",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_runtime_execution_protection_plans_no_owner_bounded_execution",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_runtime_execution_protection_plans_no_order_lifecycle",
+        ),
+        Index(
+            "idx_runtime_execution_protection_plans_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_protection_plans_source",
+            "source_type",
+            "source_id",
+        ),
+        Index(
+            "idx_runtime_execution_protection_plans_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionOrderLifecycleHandoffDraftORM(PGCoreBase):
+    """Runtime OrderLifecycle handoff draft audit record.
+
+    This records adapter input facts only. It must not create orders or call
+    OrderLifecycle.
+    """
+
+    __tablename__ = "runtime_execution_order_lifecycle_handoff_drafts"
+
+    handoff_draft_id: Mapped[str] = mapped_column(String(360), primary_key=True)
+    preflight_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempt_mutation_id: Mapped[str] = mapped_column(String(320), nullable=False)
+    protection_plan_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    entry_order_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    entry_order_role: Mapped[str] = mapped_column(String(16), nullable=False)
+    requested_qty: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    intended_notional: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    entry_price_reference: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    stop_price_reference: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    take_profit_references_json: Mapped[list] = mapped_column(
+        "take_profit_references",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    entry_order_draft_json: Mapped[dict] = mapped_column(
+        "entry_order_draft",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    protection_order_drafts_json: Mapped[list] = mapped_column(
+        "protection_order_drafts",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    order_model_drafts_json: Mapped[list] = mapped_column(
+        "order_model_drafts",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    preflight_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempt_mutation_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    protection_plan_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    order_lifecycle_method: Mapped[str] = mapped_column(String(128), nullable=False)
+    handoff_draft_recorded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    requires_order_lifecycle_adapter: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    order_lifecycle_adapter_implemented: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_status_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_order_lifecycle_adapter')",
+            name="ck_runtime_execution_order_lifecycle_handoff_status",
+        ),
+        CheckConstraint(
+            "handoff_draft_recorded = true",
+            name="ck_runtime_execution_order_lifecycle_handoff_recorded",
+        ),
+        CheckConstraint(
+            "requires_order_lifecycle_adapter = true",
+            name="ck_runtime_execution_order_lifecycle_handoff_requires_adapter",
+        ),
+        CheckConstraint(
+            "order_lifecycle_adapter_implemented = false",
+            name="ck_runtime_execution_order_lifecycle_handoff_adapter_disabled",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_runtime_execution_order_lifecycle_handoff_no_intent_status_change",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_runtime_execution_order_lifecycle_handoff_no_order_created",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_runtime_execution_order_lifecycle_handoff_no_exchange_called",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_runtime_execution_order_lifecycle_handoff_no_owner_bounded_execution",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_runtime_execution_order_lifecycle_handoff_no_order_lifecycle",
+        ),
+        Index(
+            "idx_runtime_execution_order_lifecycle_handoff_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_order_lifecycle_handoff_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_runtime_execution_order_lifecycle_handoff_status_time",
+            "status",
+            "created_at_ms",
+        ),
     )
 
 

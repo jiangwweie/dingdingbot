@@ -34,6 +34,11 @@ class RuntimeFinalGateCandidatePort(Protocol):
         ...
 
 
+class RuntimeFinalGateActivePositionPort(Protocol):
+    async def list_active(self, *, symbol: str | None = None, limit: int = 100) -> list[Any]:
+        ...
+
+
 class RuntimeFinalGatePreviewService:
     """Build inspection-only runtime FinalGate previews."""
 
@@ -42,9 +47,11 @@ class RuntimeFinalGatePreviewService:
         *,
         runtime_service: RuntimeFinalGateRuntimePort,
         signal_evaluation_service: RuntimeFinalGateCandidatePort,
+        active_position_source: RuntimeFinalGateActivePositionPort | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._signal_evaluation_service = signal_evaluation_service
+        self._active_position_source = active_position_source
 
     async def preview_order_candidate(
         self,
@@ -59,13 +66,38 @@ class RuntimeFinalGatePreviewService:
             runtime = None
         else:
             runtime = await self._runtime_service.get_runtime(candidate.runtime_instance_id)
+        resolved_active_positions_count = active_positions_count
+        resolved_metadata = dict(metadata or {})
+        if runtime is not None and active_positions_count is None:
+            resolved_active_positions_count = await self._local_active_positions_count(
+                runtime.symbol
+            )
+            resolved_metadata["active_positions_count_source"] = (
+                "local_position_projection"
+                if resolved_active_positions_count is not None
+                else "local_position_projection_unavailable"
+            )
+        elif active_positions_count is not None:
+            resolved_metadata["active_positions_count_source"] = (
+                "explicit_query_inspection_fact"
+            )
         return self.preview(
             candidate=candidate,
             runtime=runtime,
-            active_positions_count=active_positions_count,
+            active_positions_count=resolved_active_positions_count,
             owner_reviewed=owner_reviewed,
-            metadata=metadata,
+            metadata=resolved_metadata,
         )
+
+    async def _local_active_positions_count(self, symbol: str) -> Optional[int]:
+        source = self._active_position_source
+        if source is None or not hasattr(source, "list_active"):
+            return None
+        try:
+            positions = await source.list_active(symbol=symbol, limit=100)
+        except Exception:
+            return None
+        return len(list(positions))
 
     def preview(
         self,
@@ -330,7 +362,7 @@ class RuntimeFinalGatePreviewService:
         if active_positions_count is None:
             add_check(
                 "active_positions_count",
-                RuntimeFinalGatePreviewVerdict.WARN,
+                RuntimeFinalGatePreviewVerdict.BLOCK,
                 "active_positions_count_not_available",
                 facts={"max_active_positions": max_active},
             )

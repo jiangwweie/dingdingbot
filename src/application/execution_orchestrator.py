@@ -160,6 +160,7 @@ class ExecutionOrchestrator:
             return True
 
         allowed = {
+            ExecutionIntentStatus.RECORDED: set(),
             ExecutionIntentStatus.PENDING: {
                 ExecutionIntentStatus.BLOCKED,
                 ExecutionIntentStatus.FAILED,

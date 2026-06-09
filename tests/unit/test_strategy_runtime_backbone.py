@@ -61,6 +61,7 @@ def _runtime(**overrides) -> StrategyRuntimeInstance:
         "boundary": StrategyRuntimeBoundary(
             max_attempts=3,
             attempts_used=1,
+            budget_reserved=Decimal("25"),
             max_active_positions=1,
             max_notional_per_attempt=Decimal("25"),
             total_budget=Decimal("100"),

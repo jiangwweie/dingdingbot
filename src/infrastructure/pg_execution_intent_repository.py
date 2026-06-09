@@ -129,12 +129,18 @@ class PgExecutionIntentRepository:
         return PGExecutionIntentORM(
             id=intent.id,
             signal_id=intent.signal_id,
-            symbol=intent.signal.symbol,
+            symbol=intent.symbol,
             status=status_value,
-            signal_payload=intent.signal.model_dump(mode="json"),
+            signal_payload=(
+                intent.signal.model_dump(mode="json") if intent.signal is not None else None
+            ),
             strategy_payload=intent.strategy.model_dump(mode="json") if intent.strategy else None,
             order_id=intent.order_id,
             authorization_id=intent.authorization_id,
+            source_type=intent.source_type,
+            source_id=intent.source_id,
+            source_payload_json=intent.source_payload,
+            runtime_execution_intent_draft_id=intent.runtime_execution_intent_draft_id,
             runtime_instance_id=intent.runtime_instance_id,
             trial_binding_id=intent.trial_binding_id,
             strategy_family_id=intent.strategy_family_id,
@@ -151,7 +157,11 @@ class PgExecutionIntentRepository:
 
     @staticmethod
     def _to_domain(orm: PGExecutionIntentORM) -> ExecutionIntent:
-        signal = SignalResult.model_validate(orm.signal_payload)
+        signal = (
+            SignalResult.model_validate(orm.signal_payload)
+            if orm.signal_payload is not None
+            else None
+        )
         strategy = (
             OrderStrategy.model_validate(orm.strategy_payload)
             if orm.strategy_payload
@@ -159,12 +169,17 @@ class PgExecutionIntentRepository:
         )
         return ExecutionIntent(
             id=orm.id,
+            symbol=orm.symbol,
             signal_id=orm.signal_id,
             signal=signal,
             status=ExecutionIntentStatus(orm.status),
             strategy=strategy,
             order_id=orm.order_id,
             authorization_id=orm.authorization_id,
+            source_type=orm.source_type,
+            source_id=orm.source_id,
+            source_payload=orm.source_payload_json,
+            runtime_execution_intent_draft_id=orm.runtime_execution_intent_draft_id,
             runtime_instance_id=orm.runtime_instance_id,
             trial_binding_id=orm.trial_binding_id,
             strategy_family_id=orm.strategy_family_id,
