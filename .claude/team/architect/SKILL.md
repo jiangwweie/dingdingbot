@@ -12,10 +12,21 @@ Assist Codex with architecture option analysis and ADR drafting. Codex and the u
 
 ## Required Context
 
+Primary (always read first):
+
+- `docs/canon/PROJECT_BASELINE_CURRENT.md`
+- `docs/canon/BRC_TARGET_SEMANTICS.md`
+- `docs/canon/AGENT_WORKSPACE_RULES.md`
+- `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+- `docs/canon/TECH_DEBT_BASELINE.md`
+
+Additional context:
+
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/agent-working-rules.md`
-- Relevant `docs/gpt/` documents
 - Relevant ADRs
+
+Note: `docs/gpt/` is historical reference only, not current required context.
 
 ## Output
 

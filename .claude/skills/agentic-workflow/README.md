@@ -1,3 +1,16 @@
+> [!CAUTION]
+> **SUPERSEDED_AGENT_SKILL** — This skill describes a previous agentic workflow and does not represent current project instructions.
+>
+> Current authoritative instructions are:
+>
+> * `AGENTS.md`
+> * `CLAUDE.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+>
+> This file is preserved only as historical skill reference.
+
 # Agentic Workflow - 高阶技能设计
 
 > **创建日期**: 2026-04-01

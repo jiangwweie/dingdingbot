@@ -1,3 +1,18 @@
+> [!CAUTION]
+> **SUPERSEDED_AGENT_TEAM_REFERENCE** — This file describes a previous agent-team workflow and no longer represents current project instructions.
+>
+> Current authoritative instructions are:
+>
+> * `AGENTS.md`
+> * `CLAUDE.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+>
+> This file is preserved only as historical reference.
+
+---
+
 # Agent Team 快速开始指南
 
 > **最后更新**: 2026-03-25

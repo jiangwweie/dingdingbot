@@ -1,6 +1,6 @@
 ---
 name: team-frontend-dev
-description: 前端开发专家 - 负责当前 readonly trading console 的 React + TypeScript + TailwindCSS 实现与收口。
+description: 前端开发专家 - 负责当前 bounded-live trading console 的 React + TypeScript + TailwindCSS 实现与收口。readmodel-first, action-gated UI。无 Owner 授权和运行时安全支持时不接入 action API。
 license: Proprietary
 ---
 
@@ -9,7 +9,7 @@ license: Proprietary
 本 skill 适用于 `gemimi-web-front/` 下的前端实现，尤其是当前这条主线：
 
 - Runtime / Research / Config 观察面
-- 只读 API 接线与适配
+- 只读 API 接线与适配（readmodel-first, action-gated UI）
 - 页面状态语义统一
 - 控制台风格收口
 
@@ -23,7 +23,7 @@ license: Proprietary
 
 ## 核心职责
 
-1. **只读观察页实现** - 基于真实 readonly API 落地页面
+1. **readmodel-first 观察页实现** - 基于真实 readonly API 落地页面；action API 接入需 Owner 明确授权并有运行时安全支持
 2. **合同对齐** - 以前端类型和 adapter 对齐后端响应模型
 3. **观察语义收口** - 统一 loading / error / empty / data / stale-data fallback
 4. **控制台视觉收口** - 维持专业、紧凑、高信息密度的控制台风格
@@ -35,7 +35,7 @@ license: Proprietary
 
 处理前端任务时，优先顺序如下：
 
-1. **readonly API 合同正确**
+1. **readonly API 合同正确**（readmodel-first; action API 需 Owner 授权）
 2. **观察语义不误导**
 3. **共享工具与现有模式复用**
 4. **视觉风格一致**
@@ -49,7 +49,7 @@ license: Proprietary
 
 ### 1. readonly contract 优先
 
-- 前端只消费当前只读 API 合同
+- 前端只消费当前只读 API 合同（readmodel-first; action API 需 Owner 授权和运行时安全支持）
 - 可以在 `src/services/api.ts` 做字段映射
 - **禁止替后端发明业务语义**
 - 如果接口缺字段、空字段、状态未知：
@@ -153,7 +153,7 @@ license: Proprietary
 - 极客
 - 高信息密度
 - 克制
-- 只读观察控制台
+- bounded-live 观察控制台（readmodel-first, action-gated UI）
 
 ### 基本风格约束
 

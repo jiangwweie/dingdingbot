@@ -1,3 +1,22 @@
+> [!CAUTION]
+> **QUARANTINED_AGENT_INSTRUCTION** — This file contains outdated AI agent instructions.
+> It describes a previous project phase and does **not** reflect the current BRC strategy runtime governance target.
+>
+> **Do not use this file as current agent configuration.**
+>
+> Current authoritative instructions are:
+>
+> * `AGENTS.md`
+> * `CLAUDE.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+> * `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+>
+> This file is preserved only as historical context.
+
+---
+
 # MCP 编排配置 - 团队技能与权限分配
 
 > **创建日期**: 2026-04-01

@@ -1,65 +1,72 @@
 ---
-name: 项目核心记忆
-description: Live-safe v1 工作方式、角色边界、质量红线
+name: project-core-memory
+description: BRC project identity, code reality, target semantics, agent reading rules
 type: project
 ---
 
 # Project Core Memory
 
-Updated: 2026-04-29
+Updated: 2026-06-09
 
-## Current Phase
+## Current Project Identity
 
-The project is in Live-safe v1 replanning and execution-safety hardening.
+This project is a personal quant BRC / Owner-controlled bounded-live research
+and execution system.
 
-The current target is to move from Sim-ready toward full-auto small-live safety. The next work is execution safety, account-level risk, reconciliation, observability, and runtime guardrails.
+Current target semantics: BRC is strategy runtime governance.
 
-Long-term direction: evolve from an ETH single-strategy research system into a full-auto, multi-asset, multi-direction, low-frequency portfolio platform.
+Owner authorization should ultimately authorize a bounded
+StrategyRuntimeInstance, not one immediate trade.
 
-Return and drawdown numbers are investor preference signals and evaluation dimensions. They must not become hard-coded architecture constraints, runtime rules, or agent instructions.
+## Current Code Reality
 
-## Operating Model
+- Current executable path is one-shot Owner authorization:
+  OwnerRiskAcknowledgement -> AuthorizationDraft ->
+  BoundedLiveTrialAuthorization -> FinalGate ->
+  OwnerBoundedExecutionService -> Entry / TP / SL ->
+  Order / Reconciliation / Review.
+- BoundedLiveTrialAuthorization is single-use trade authorization.
+- Current code does not yet implement StrategyRuntimeInstance.
+- StrategyFamily / Admission exists as metadata / admission / evidence chain.
+- TrialBinding is not yet a running strategy instance.
+- CandidateAction and BudgetedAutonomy are readmodel / preview / policy
+  evaluation unless code proves otherwise.
+- SignalPipeline is legacy real-time signal system and candidate future
+  SignalEvaluation engine.
+- OwnerBoundedExecutionService is a valuable one-shot execution asset, not the
+  final target architecture.
 
-Codex owns:
+## Target Direction
 
-- Requirements analysis.
-- Planning and sequencing.
-- Architecture decisions and ADRs.
-- Core implementation and skeleton development.
-- Review and merge readiness.
+```text
+StrategyFamily
+-> StrategyFamilyVersion
+-> AdmissionDecision
+-> OwnerRiskAcceptance
+-> TrialBinding
+-> StrategyRuntimeInstance
+-> SignalEvaluation
+-> OrderCandidate
+-> FinalGate
+-> ExecutionIntent
+-> OrderLifecycle
+-> Order / Position
+-> Reconciliation
+-> Review
+```
 
-Claude Code owns:
+## Agent Reading Rule
 
-- Bounded implementation from Codex task cards.
-- Scoped tests.
-- Local docs updates when requested.
+- Always read AGENTS.md / CLAUDE.md and docs/canon/ first.
+- Do not use docs/archive, docs/ops historical files, docs/gpt,
+  docs/product/v2, or quarantined agent instructions as current truth.
+- If memory conflicts with docs/canon, docs/canon wins.
 
-Claude does not own global direction or architecture.
+## Do Not Misread
 
-## Active Planning Files
-
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-findings.md`
-- `docs/ops/live-safe-v1-progress.md`
-- `docs/ops/agent-working-rules.md`
-- `docs/adr/`
-
-The old global `docs/planning/*` workflow is not active unless explicitly requested.
-
-## Durable Quality Rules
-
-- `domain/` must not import I/O frameworks such as `ccxt`, `aiohttp`, `requests`, `fastapi`, or `yaml`.
-- Financial calculations must use `decimal.Decimal`.
-- Sensitive values must be masked in logs.
-- Core parameters should use named Pydantic models where practical.
-- Live/runtime profile changes require explicit user approval and a separate task.
-
-## Live-safe v1 Non-goals
-
-- Do not optimize strategy returns.
-- Do not tune ETH Pinbar parameters.
-- Do not expand multi-asset support.
-- Do not activate real funds.
-- Do not rewrite the architecture.
-- Do not hard-code fixed annual return or max drawdown targets as system constraints.
+- Do not treat one-shot OwnerBoundedExecution as final architecture.
+- Do not treat TrialBinding as currently running strategy instance.
+- Do not treat StrategyFamilyVersion as executable strategy code.
+- Do not treat CandidateAction as executable.
+- Do not treat BudgetedAutonomy as auto trading.
+- Do not infer current state from old "盯盘狗 v3.0" documents.

@@ -12,8 +12,16 @@ user-invocable: true
 - `docs/ops/agent-current-brc-baseline.md`
 - `docs/ops/live-safe-v1-program.md`
 - `docs/ops/agent-working-rules.md`
-- Relevant `docs/gpt/` evidence
+- `docs/canon/PROJECT_BASELINE_CURRENT.md`
+- `docs/canon/BRC_TARGET_SEMANTICS.md`
+- `docs/canon/AGENT_WORKSPACE_RULES.md`
+- `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
+- `docs/canon/TECH_DEBT_BASELINE.md`
+- `docs/canon/DOCUMENT_GOVERNANCE.md`
 - Relevant `docs/adr/`
+
+Current required context is `docs/canon/*`.
+`docs/gpt/*` is historical reference only and must not be used as current project truth.
 
 ## Role
 

@@ -103,7 +103,7 @@ Backend Developer:
 
 Frontend Developer:
 - Implements only scoped console/UI changes.
-- Preserves readonly trading-console semantics.
+- Preserves bounded-live operating surface semantics.
 
 QA Tester:
 - Designs and implements scoped tests.

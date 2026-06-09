@@ -1,3 +1,18 @@
+> [!CAUTION]
+> **SUPERSEDED_AGENT_TEAM_REFERENCE** — This file describes a previous agent-team workflow and no longer represents current project instructions.
+>
+> Current authoritative instructions are:
+>
+> * `AGENTS.md`
+> * `CLAUDE.md`
+> * `docs/canon/AGENT_WORKSPACE_RULES.md`
+> * `docs/canon/PROJECT_BASELINE_CURRENT.md`
+> * `docs/canon/BRC_TARGET_SEMANTICS.md`
+>
+> This file is preserved only as historical reference.
+
+---
+
 # 盯盘狗 Agent Team 快速参考
 
 > **用途**: 快速查阅 MCP 调用权限、文件边界、验证命令
