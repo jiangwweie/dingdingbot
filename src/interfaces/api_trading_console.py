@@ -14,6 +14,12 @@ from src.application.readmodels.trading_console import (
     TradingConsoleReadModelResponse,
     TradingConsoleReadModelService,
 )
+from src.domain.signal_evaluation import (
+    OrderCandidate,
+    OrderCandidateStatus,
+    SignalEvaluation,
+    SignalEvaluationStatus,
+)
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
 
@@ -137,6 +143,61 @@ class StrategyRuntimeInspectionView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SignalEvaluationInspectionView(BaseModel):
+    signal_evaluation_id: str
+    runtime_instance_id: str | None = None
+    trial_binding_id: str | None = None
+    strategy_family_id: str | None = None
+    strategy_family_version_id: str | None = None
+    source_signal_id: str | None = None
+    symbol: str
+    side: str
+    status: SignalEvaluationStatus
+    decision: str
+    reason_codes: list[str] = Field(default_factory=list)
+    rationale: str
+    evidence_snapshot: dict[str, Any] = Field(default_factory=dict)
+    policy_snapshot: dict[str, Any] = Field(default_factory=dict)
+    evaluated_at_ms: int
+    expires_at_ms: int | None = None
+    shadow_mode: bool
+    execution_enabled: bool
+    not_order: bool
+    not_execution_intent: bool
+    created_at_ms: int
+    updated_at_ms: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OrderCandidateInspectionView(BaseModel):
+    order_candidate_id: str
+    signal_evaluation_id: str
+    runtime_instance_id: str | None = None
+    trial_binding_id: str | None = None
+    strategy_family_id: str | None = None
+    strategy_family_version_id: str | None = None
+    symbol: str
+    side: str
+    status: OrderCandidateStatus
+    candidate_order_type: str
+    proposed_quantity: str | None = None
+    intended_notional: str | None = None
+    entry_price_reference: str | None = None
+    risk_preview: dict[str, Any] = Field(default_factory=dict)
+    protection_preview: dict[str, Any] = Field(default_factory=dict)
+    rationale: str
+    evidence_refs: list[str] = Field(default_factory=list)
+    shadow_mode: bool
+    execution_enabled: bool
+    candidate_executable: bool
+    not_order: bool
+    not_execution_intent: bool
+    created_at_ms: int
+    updated_at_ms: int
+    expires_at_ms: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("/dashboard-state", response_model=TradingConsoleReadModelResponse)
 async def dashboard_state(
     symbol: Optional[str] = Query(default=None),
@@ -171,6 +232,94 @@ async def get_strategy_runtime(
     service = await _strategy_runtime_service()
     try:
         return _runtime_view(await service.get_runtime(runtime_instance_id))
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/signal-evaluations",
+    response_model=list[SignalEvaluationInspectionView],
+)
+async def list_signal_evaluations(
+    runtime_instance_id: Optional[str] = Query(default=None),
+    trial_binding_id: Optional[str] = Query(default=None),
+    strategy_family_id: Optional[str] = Query(default=None),
+    strategy_family_version_id: Optional[str] = Query(default=None),
+    status: Optional[SignalEvaluationStatus] = Query(default=None),
+    symbol: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[SignalEvaluationInspectionView]:
+    service = await _signal_evaluation_shadow_service()
+    evaluations = await service.list_signal_evaluations(
+        runtime_instance_id=runtime_instance_id,
+        trial_binding_id=trial_binding_id,
+        strategy_family_id=strategy_family_id,
+        strategy_family_version_id=strategy_family_version_id,
+        status=status,
+        symbol=symbol,
+        limit=limit,
+    )
+    return [_signal_evaluation_view(item) for item in evaluations]
+
+
+@router.get(
+    "/signal-evaluations/{signal_evaluation_id}",
+    response_model=SignalEvaluationInspectionView,
+)
+async def get_signal_evaluation(
+    signal_evaluation_id: str,
+) -> SignalEvaluationInspectionView:
+    service = await _signal_evaluation_shadow_service()
+    try:
+        return _signal_evaluation_view(await service.get_signal_evaluation(signal_evaluation_id))
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/order-candidates",
+    response_model=list[OrderCandidateInspectionView],
+)
+async def list_order_candidates(
+    runtime_instance_id: Optional[str] = Query(default=None),
+    trial_binding_id: Optional[str] = Query(default=None),
+    strategy_family_id: Optional[str] = Query(default=None),
+    strategy_family_version_id: Optional[str] = Query(default=None),
+    signal_evaluation_id: Optional[str] = Query(default=None),
+    status: Optional[OrderCandidateStatus] = Query(default=None),
+    symbol: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[OrderCandidateInspectionView]:
+    service = await _signal_evaluation_shadow_service()
+    candidates = await service.list_order_candidates(
+        runtime_instance_id=runtime_instance_id,
+        trial_binding_id=trial_binding_id,
+        strategy_family_id=strategy_family_id,
+        strategy_family_version_id=strategy_family_version_id,
+        signal_evaluation_id=signal_evaluation_id,
+        status=status,
+        symbol=symbol,
+        limit=limit,
+    )
+    return [_order_candidate_view(item) for item in candidates]
+
+
+@router.get(
+    "/order-candidates/{order_candidate_id}",
+    response_model=OrderCandidateInspectionView,
+)
+async def get_order_candidate(
+    order_candidate_id: str,
+) -> OrderCandidateInspectionView:
+    service = await _signal_evaluation_shadow_service()
+    try:
+        return _order_candidate_view(await service.get_order_candidate(order_candidate_id))
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
@@ -654,6 +803,33 @@ async def _strategy_runtime_service() -> Any:
     return service
 
 
+async def _signal_evaluation_shadow_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_signal_evaluation_shadow_service", None)
+    if injected is not None:
+        return injected
+    try:
+        from src.application.signal_evaluation_shadow_service import (
+            SignalEvaluationShadowService,
+        )
+        from src.infrastructure.pg_signal_evaluation_repository import (
+            PgSignalEvaluationRepository,
+        )
+
+        service = SignalEvaluationShadowService(
+            repository=PgSignalEvaluationRepository(),
+        )
+        await service.initialize()
+    except Exception as exc:  # pragma: no cover - configuration-specific fail-closed path
+        raise HTTPException(
+            status_code=503,
+            detail="Signal evaluation repository unavailable; persistent PG facts are required.",
+        ) from exc
+    setattr(api_module, "_signal_evaluation_shadow_service", service)
+    return service
+
+
 def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspectionView:
     boundary = runtime.boundary
     return StrategyRuntimeInspectionView(
@@ -695,6 +871,65 @@ def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspection
         revoked_at_ms=runtime.revoked_at_ms,
         closed_at_ms=runtime.closed_at_ms,
         metadata=dict(runtime.metadata),
+    )
+
+
+def _signal_evaluation_view(evaluation: SignalEvaluation) -> SignalEvaluationInspectionView:
+    return SignalEvaluationInspectionView(
+        signal_evaluation_id=evaluation.signal_evaluation_id,
+        runtime_instance_id=evaluation.runtime_instance_id,
+        trial_binding_id=evaluation.trial_binding_id,
+        strategy_family_id=evaluation.strategy_family_id,
+        strategy_family_version_id=evaluation.strategy_family_version_id,
+        source_signal_id=evaluation.source_signal_id,
+        symbol=evaluation.symbol,
+        side=evaluation.side,
+        status=evaluation.status,
+        decision=evaluation.decision.value,
+        reason_codes=list(evaluation.reason_codes),
+        rationale=evaluation.rationale,
+        evidence_snapshot=dict(evaluation.evidence_snapshot),
+        policy_snapshot=dict(evaluation.policy_snapshot),
+        evaluated_at_ms=evaluation.evaluated_at_ms,
+        expires_at_ms=evaluation.expires_at_ms,
+        shadow_mode=evaluation.shadow_mode,
+        execution_enabled=evaluation.execution_enabled,
+        not_order=evaluation.not_order,
+        not_execution_intent=evaluation.not_execution_intent,
+        created_at_ms=evaluation.created_at_ms,
+        updated_at_ms=evaluation.updated_at_ms,
+        metadata=dict(evaluation.metadata),
+    )
+
+
+def _order_candidate_view(candidate: OrderCandidate) -> OrderCandidateInspectionView:
+    return OrderCandidateInspectionView(
+        order_candidate_id=candidate.order_candidate_id,
+        signal_evaluation_id=candidate.signal_evaluation_id,
+        runtime_instance_id=candidate.runtime_instance_id,
+        trial_binding_id=candidate.trial_binding_id,
+        strategy_family_id=candidate.strategy_family_id,
+        strategy_family_version_id=candidate.strategy_family_version_id,
+        symbol=candidate.symbol,
+        side=candidate.side,
+        status=candidate.status,
+        candidate_order_type=candidate.candidate_order_type,
+        proposed_quantity=_decimal_string(candidate.proposed_quantity),
+        intended_notional=_decimal_string(candidate.intended_notional),
+        entry_price_reference=_decimal_string(candidate.entry_price_reference),
+        risk_preview=candidate.risk_preview.model_dump(mode="json"),
+        protection_preview=candidate.protection_preview.model_dump(mode="json"),
+        rationale=candidate.rationale,
+        evidence_refs=list(candidate.evidence_refs),
+        shadow_mode=candidate.shadow_mode,
+        execution_enabled=candidate.execution_enabled,
+        candidate_executable=candidate.candidate_executable,
+        not_order=candidate.not_order,
+        not_execution_intent=candidate.not_execution_intent,
+        created_at_ms=candidate.created_at_ms,
+        updated_at_ms=candidate.updated_at_ms,
+        expires_at_ms=candidate.expires_at_ms,
+        metadata=dict(candidate.metadata),
     )
 
 
