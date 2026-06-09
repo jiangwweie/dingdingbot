@@ -116,7 +116,7 @@ python3 -m pytest -q tests/unit/test_b0_strategy_evaluation_context_builder.py \
   tests/unit/test_td4_runtime_final_gate_preview.py \
   tests/unit/test_td5_runtime_execution_plan.py \
   tests/unit/test_strategy_runtime_backbone.py
-132 passed
+133 passed
 
 python3 -m compileall -q src/application/strategy_evaluation_context_builder.py \
   src/application/strategy_semantics_shadow_binding_service.py \
@@ -560,7 +560,9 @@ Current local B0 implementation slice:
   complete CPM signal input/output pair can reach a ready
   RuntimeExecutionIntentDraft without execution, blocks when local
   active-position facts are unavailable, and stops before OrderCandidate
-  creation when RequiredFacts are missing.
+  creation when RequiredFacts are missing. It also verifies the PG-backed
+  roundtrip through SignalEvaluation / OrderCandidate shadow repositories and
+  RuntimeExecutionIntentDraft repository.
 
 Remaining B0 work:
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from src.application.runtime_execution_planning_service import (
     RuntimeExecutionPlanningService,
@@ -13,6 +15,7 @@ from src.application.runtime_final_gate_preview_service import (
 from src.application.runtime_strategy_signal_planning_service import (
     RuntimeStrategySignalPlanningService,
 )
+from src.application.signal_evaluation_shadow_service import SignalEvaluationShadowService
 from src.application.strategy_semantics_shadow_binding_service import (
     StrategySemanticsBindingError,
     StrategySemanticsShadowBindingService,
@@ -37,6 +40,15 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstance,
     StrategyRuntimeInstanceStatus,
 )
+from src.infrastructure.pg_models import (
+    PGOrderCandidateORM,
+    PGSignalEvaluationORM,
+    PGRuntimeExecutionIntentDraftORM,
+)
+from src.infrastructure.pg_runtime_execution_intent_draft_repository import (
+    PgRuntimeExecutionIntentDraftRepository,
+)
+from src.infrastructure.pg_signal_evaluation_repository import PgSignalEvaluationRepository
 
 
 NOW_MS = 1781000000000
@@ -272,6 +284,18 @@ def _service(
     )
 
 
+async def _repo_engine(*tables):
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        for table in tables:
+            await conn.run_sync(table.create)
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
 async def test_strategy_signal_pair_can_reach_runtime_intent_draft_without_execution():
     draft = await _service(active_positions=[]).intent_draft_for_strategy_signal_pair(
         _signal_input(),
@@ -341,3 +365,83 @@ async def test_strategy_signal_pair_stops_before_candidate_when_required_facts_m
         )
 
     assert store.candidate is None
+
+
+async def test_strategy_signal_pair_records_pg_shadow_candidate_and_intent_draft():
+    engine, session_maker = await _repo_engine(
+        PGSignalEvaluationORM.__table__,
+        PGOrderCandidateORM.__table__,
+        PGRuntimeExecutionIntentDraftORM.__table__,
+    )
+    shadow_service = SignalEvaluationShadowService(
+        repository=PgSignalEvaluationRepository(session_maker=session_maker)
+    )
+    draft_repo = PgRuntimeExecutionIntentDraftRepository(session_maker=session_maker)
+    runtime = _runtime()
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == runtime.runtime_instance_id
+            return runtime
+
+    class _PositionSource:
+        async def list_active(self, *, symbol: str | None = None, limit: int = 100):
+            assert symbol == runtime.symbol
+            assert limit == 100
+            return []
+
+    final_gate = RuntimeFinalGatePreviewService(
+        runtime_service=_RuntimeService(),
+        signal_evaluation_service=shadow_service,
+        active_position_source=_PositionSource(),
+    )
+    planning = RuntimeExecutionPlanningService(
+        runtime_service=_RuntimeService(),
+        signal_evaluation_service=shadow_service,
+        final_gate_preview_service=final_gate,
+        intent_draft_repository=draft_repo,
+    )
+    service = RuntimeStrategySignalPlanningService(
+        semantics_binding_service=StrategySemanticsShadowBindingService(
+            shadow_service=shadow_service,
+        ),
+        runtime_execution_planning_service=planning,
+    )
+
+    try:
+        draft = await service.record_intent_draft_for_strategy_signal_pair(
+            _signal_input(),
+            _output(),
+            runtime=runtime,
+            owner_reviewed=True,
+            owner_confirmed_for_intent=True,
+            proposed_quantity=Decimal("0.004"),
+            intended_notional=Decimal("10"),
+            entry_price_reference=Decimal("2525"),
+            stop_price_reference=Decimal("2475"),
+            max_loss_reference=Decimal("3"),
+            leverage=Decimal("1"),
+            take_profit_references=[{"kind": "runner", "policy": "trailing_atr"}],
+        )
+        stored_evaluations = await shadow_service.list_signal_evaluations(
+            strategy_family_id="CPM-RO-001"
+        )
+        stored_candidates = await shadow_service.list_order_candidates(
+            signal_evaluation_id=draft.signal_evaluation_id
+        )
+        stored_draft = await draft_repo.get(draft.draft_id)
+
+        assert len(stored_evaluations) == 1
+        assert stored_evaluations[0].not_order is True
+        assert stored_evaluations[0].not_execution_intent is True
+        assert len(stored_candidates) == 1
+        assert stored_candidates[0].metadata["adapter_scope"] == "b0_shadow_only"
+        assert stored_candidates[0].risk_preview.max_loss_reference == Decimal("3")
+        assert stored_draft is not None
+        assert stored_draft.status == RuntimeExecutionIntentDraftStatus.READY_FOR_INTENT_CREATION
+        assert stored_draft.order_candidate_id == stored_candidates[0].order_candidate_id
+        assert stored_draft.execution_intent_created is False
+        assert stored_draft.order_created is False
+        assert stored_draft.exchange_called is False
+    finally:
+        await engine.dispose()
