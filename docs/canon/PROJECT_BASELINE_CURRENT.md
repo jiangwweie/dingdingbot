@@ -198,6 +198,13 @@ Key facts:
   Console `right_tail_review.closed_trade_review_packets`. It does not create
   orders, ExecutionIntent records, exchange calls, runtime-budget mutations,
   strategy-PnL mutations, or withdrawal instructions.
+- **Position runtime semantic ID propagation** now exists as an additive local
+  slice. `Position` and PG `positions` can carry nullable runtime / trial /
+  strategy-version / signal-evaluation / order-candidate IDs; entry-fill
+  projection inherits them from the entry `Order` while preserving existing
+  IDs when a later entry update lacks them; Trading Console position readmodels
+  surface these IDs for active-position and review traceability. This does not
+  create orders, call exchange, or alter one-shot execution authority.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange. Its

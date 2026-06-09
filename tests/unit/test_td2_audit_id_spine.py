@@ -17,7 +17,7 @@ from src.application.readmodels.trading_console import (
 )
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.domain.live_lifecycle_review import BrcLiveLifecycleReviewRecord
-from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, SignalResult
+from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType, Position, SignalResult
 from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 from src.infrastructure.pg_live_lifecycle_review_repository import (
     PgLiveLifecycleReviewRepository,
@@ -26,10 +26,12 @@ from src.infrastructure.pg_models import (
     PGBrcLiveLifecycleReviewORM,
     PGExecutionIntentORM,
     PGOrderORM,
+    PGPositionORM,
     PGReconciliationReadModelMismatchORM,
     PGReconciliationReadModelReportORM,
 )
 from src.infrastructure.pg_order_repository import PgOrderRepository
+from src.infrastructure.pg_position_repository import PgPositionRepository
 from src.infrastructure.pg_reconciliation_read_model_repository import (
     PgReconciliationReadModelRepository,
 )
@@ -117,6 +119,24 @@ def _review(**overrides) -> BrcLiveLifecycleReviewRecord:
     return BrcLiveLifecycleReviewRecord(**values)
 
 
+def _position(**overrides) -> Position:
+    values = {
+        "id": "pos-1",
+        "signal_id": "signal-1",
+        "symbol": "ETH/USDT:USDT",
+        "direction": Direction.LONG,
+        "entry_price": Decimal("2500"),
+        "current_qty": Decimal("0.01"),
+        "watermark_price": Decimal("2500"),
+        "realized_pnl": Decimal("0"),
+        "total_fees_paid": Decimal("0"),
+        "opened_at": NOW_MS,
+        "is_closed": False,
+    }
+    values.update(overrides)
+    return Position(**values)
+
+
 def test_execution_intent_audit_ids_are_optional_and_carriable():
     legacy = _intent()
     traced = _intent(**AUDIT_VALUES)
@@ -145,6 +165,16 @@ def test_live_lifecycle_review_audit_ids_are_optional_and_carriable():
     assert traced.runtime_instance_id == "runtime-1"
     assert traced.order_candidate_id == "order-candidate-1"
     assert traced.places_order is False
+
+
+def test_position_audit_ids_are_optional_and_carriable():
+    legacy = _position()
+    traced = _position(**AUDIT_VALUES)
+
+    assert legacy.runtime_instance_id is None
+    assert legacy.semantic_ids.runtime_instance_id is None
+    assert traced.runtime_instance_id == "runtime-1"
+    assert traced.semantic_ids.order_candidate_id == "order-candidate-1"
 
 
 def test_migration_adds_nullable_audit_columns_and_keeps_old_inserts_valid():
@@ -217,6 +247,60 @@ def test_migration_adds_nullable_audit_columns_and_keeps_old_inserts_valid():
             assert by_name[column_name]["nullable"] is True
 
 
+def test_position_migration_adds_nullable_audit_columns_and_keeps_old_inserts_valid():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-09-060_add_position_runtime_audit_ids.py"
+    )
+    spec = importlib.util.spec_from_file_location("td2_position_audit_id_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    def _create_old_positions(sync_conn):
+        metadata = MetaData()
+        Table(
+            "positions",
+            metadata,
+            Column("id", String(64), primary_key=True),
+            Column("signal_id", String(64), nullable=True),
+        )
+        metadata.create_all(sync_conn)
+
+    async def _run() -> list[dict]:
+        async with engine.begin() as conn:
+            await conn.run_sync(_create_old_positions)
+
+            def upgrade(sync_conn):
+                old_op = migration.op
+                migration.op = Operations(MigrationContext.configure(sync_conn))
+                try:
+                    migration.upgrade()
+                    return inspect(sync_conn).get_columns("positions")
+                finally:
+                    migration.op = old_op
+
+            columns = await conn.run_sync(upgrade)
+            await conn.execute(
+                text("INSERT INTO positions (id, signal_id) VALUES ('pos-old', 'signal-old')")
+            )
+            return columns
+
+    columns = asyncio.run(_run())
+    asyncio.run(engine.dispose())
+
+    by_name = {column["name"]: column for column in columns}
+    for column_name in AUDIT_COLUMNS:
+        assert column_name in by_name
+        assert by_name[column_name]["nullable"] is True
+
+
 async def _repo_engine(*tables):
     engine = create_async_engine(
         "sqlite+aiosqlite://",
@@ -259,6 +343,31 @@ async def test_order_repository_persists_null_and_present_audit_ids():
         assert legacy is not None and legacy.runtime_instance_id is None
         assert traced is not None and traced.runtime_instance_id == "runtime-1"
         assert traced.signal_evaluation_id == "signal-eval-1"
+    finally:
+        await engine.dispose()
+
+
+async def test_position_repository_persists_null_and_present_audit_ids():
+    engine, session_maker = await _repo_engine(PGPositionORM.__table__)
+    repo = PgPositionRepository(session_maker=session_maker)
+    try:
+        await repo.save(_position(id="pos-legacy"))
+        await repo.save(
+            _position(
+                id="pos-traced",
+                signal_id="signal-2",
+                symbol="BTC/USDT:USDT",
+                **AUDIT_VALUES,
+            )
+        )
+
+        legacy = await repo.get("pos-legacy")
+        traced = await repo.get("pos-traced")
+
+        assert legacy is not None and legacy.runtime_instance_id is None
+        assert traced is not None and traced.runtime_instance_id == "runtime-1"
+        assert traced.order_candidate_id == "order-candidate-1"
+        assert traced.semantic_ids.signal_evaluation_id == "signal-eval-1"
     finally:
         await engine.dispose()
 
@@ -326,6 +435,7 @@ async def test_reconciliation_readmodel_repository_persists_audit_ids_without_ma
 async def test_trading_console_readmodel_exposes_and_filters_audit_ids():
     traced_order = _order(**AUDIT_VALUES)
     traced_intent = _intent(order_id=traced_order.id, **AUDIT_VALUES)
+    traced_position = _position(**AUDIT_VALUES)
 
     class _OrderRepo:
         async def get_orders(self, symbol=None, limit=50, offset=0):
@@ -338,16 +448,24 @@ async def test_trading_console_readmodel_exposes_and_filters_audit_ids():
         async def list(self):
             return [traced_intent]
 
+    class _PositionRepo:
+        async def list_active(self, symbol=None, limit=200):
+            return [traced_position]
+
     service = TradingConsoleReadModelService(
         TradingConsoleDependencies(
             order_repo=_OrderRepo(),
             execution_intent_repo=_IntentRepo(),
+            position_repo=_PositionRepo(),
         )
     )
 
+    dashboard = await service.dashboard_state(symbol="ETH/USDT:USDT")
     order_ledger = await service.order_ledger(symbol="ETH/USDT:USDT", limit=10)
     audit_chain = await service.audit_chain(runtime_instance_id="runtime-1", limit=10)
 
+    assert dashboard.data["positions"]["pg"][0]["runtime_instance_id"] == "runtime-1"
+    assert dashboard.data["positions"]["pg"][0]["order_candidate_id"] == "order-candidate-1"
     assert order_ledger.data["orders"][0]["runtime_instance_id"] == "runtime-1"
     assert order_ledger.data["orders"][0]["order_candidate_id"] == "order-candidate-1"
     assert audit_chain.data["orders"][0]["runtime_instance_id"] == "runtime-1"

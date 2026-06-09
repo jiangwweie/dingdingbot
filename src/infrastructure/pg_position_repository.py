@@ -168,6 +168,12 @@ class PgPositionRepository:
             is_closed=_closed_flag(position.is_closed),
             created_at=_db_timestamp(opened_at),
             updated_at=_db_timestamp(_now_ms()),
+            runtime_instance_id=position.runtime_instance_id,
+            trial_binding_id=position.trial_binding_id,
+            strategy_family_id=position.strategy_family_id,
+            strategy_family_version_id=position.strategy_family_version_id,
+            signal_evaluation_id=position.signal_evaluation_id,
+            order_candidate_id=position.order_candidate_id,
         )
 
     @staticmethod
@@ -185,4 +191,10 @@ class PgPositionRepository:
             opened_at=_domain_timestamp(orm.created_at),
             closed_at=None,
             is_closed=_is_closed(orm.is_closed),
+            runtime_instance_id=orm.runtime_instance_id,
+            trial_binding_id=orm.trial_binding_id,
+            strategy_family_id=orm.strategy_family_id,
+            strategy_family_version_id=orm.strategy_family_version_id,
+            signal_evaluation_id=orm.signal_evaluation_id,
+            order_candidate_id=orm.order_candidate_id,
         )

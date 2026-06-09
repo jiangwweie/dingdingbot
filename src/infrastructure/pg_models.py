@@ -215,6 +215,12 @@ class PGPositionORM(PGCoreBase):
     is_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
     __table_args__ = (
         CheckConstraint("direction IN ('LONG', 'SHORT')", name="ck_positions_direction"),
@@ -222,6 +228,9 @@ class PGPositionORM(PGCoreBase):
         Index("idx_positions_is_closed", "is_closed"),
         Index("idx_positions_signal_id", "signal_id"),
         Index("idx_positions_updated_at", "updated_at"),
+        Index("idx_positions_runtime_instance_id", "runtime_instance_id"),
+        Index("idx_positions_strategy_family_version_id", "strategy_family_version_id"),
+        Index("idx_positions_order_candidate_id", "order_candidate_id"),
     )
 
 

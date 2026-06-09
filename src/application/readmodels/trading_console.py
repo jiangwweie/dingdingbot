@@ -5637,6 +5637,12 @@ def _position_item(position: Any, *, source: str) -> dict[str, Any]:
             "margin_mode": position.get("margin_mode") or position.get("marginMode") or info.get("marginType"),
             "is_closed": position.get("is_closed"),
             "updated_at": position.get("updated_at") or position.get("timestamp"),
+            "runtime_instance_id": position.get("runtime_instance_id"),
+            "trial_binding_id": position.get("trial_binding_id"),
+            "strategy_family_id": position.get("strategy_family_id"),
+            "strategy_family_version_id": position.get("strategy_family_version_id"),
+            "signal_evaluation_id": position.get("signal_evaluation_id"),
+            "order_candidate_id": position.get("order_candidate_id"),
             "source": source,
         }
     return {
@@ -5653,6 +5659,12 @@ def _position_item(position: Any, *, source: str) -> dict[str, Any]:
         "margin_mode": getattr(position, "margin_mode", None),
         "is_closed": getattr(position, "is_closed", None),
         "updated_at": getattr(position, "updated_at", None),
+        "runtime_instance_id": getattr(position, "runtime_instance_id", None),
+        "trial_binding_id": getattr(position, "trial_binding_id", None),
+        "strategy_family_id": getattr(position, "strategy_family_id", None),
+        "strategy_family_version_id": getattr(position, "strategy_family_version_id", None),
+        "signal_evaluation_id": getattr(position, "signal_evaluation_id", None),
+        "order_candidate_id": getattr(position, "order_candidate_id", None),
         "source": source,
     }
 

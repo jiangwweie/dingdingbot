@@ -15,6 +15,8 @@ def test_pg_position_select_uses_deployed_current_qty_schema():
     assert "positions.current_qty" in sql
     assert "positions.highest_price_since_entry" in sql
     assert "positions.created_at" in sql
+    assert "positions.runtime_instance_id" in sql
+    assert "positions.order_candidate_id" in sql
     assert "positions.quantity" not in sql
     assert "positions.position_payload" not in sql
     assert "positions.opened_at" not in sql
@@ -44,6 +46,8 @@ def test_pg_position_repository_maps_deployed_schema_to_domain_position():
     assert position.total_fees_paid == Decimal("0.02")
     assert position.opened_at == 1780550000000
     assert position.is_closed is False
+    assert position.runtime_instance_id is None
+    assert position.order_candidate_id is None
 
 
 def test_pg_position_repository_persists_domain_position_to_deployed_schema():
@@ -59,6 +63,12 @@ def test_pg_position_repository_persists_domain_position_to_deployed_schema():
         total_fees_paid=Decimal("0.02"),
         opened_at=1780550000000,
         is_closed=True,
+        runtime_instance_id="runtime-1",
+        trial_binding_id="trial-1",
+        strategy_family_id="family-1",
+        strategy_family_version_id="version-1",
+        signal_evaluation_id="signal-eval-1",
+        order_candidate_id="candidate-1",
     )
 
     orm = PgPositionRepository._to_orm(position)
@@ -69,3 +79,9 @@ def test_pg_position_repository_persists_domain_position_to_deployed_schema():
     assert orm.total_fees_paid == "0.02"
     assert orm.created_at == 1780550000
     assert orm.is_closed == 1
+    assert orm.runtime_instance_id == "runtime-1"
+    assert orm.trial_binding_id == "trial-1"
+    assert orm.strategy_family_id == "family-1"
+    assert orm.strategy_family_version_id == "version-1"
+    assert orm.signal_evaluation_id == "signal-eval-1"
+    assert orm.order_candidate_id == "candidate-1"

@@ -824,6 +824,12 @@ Current local B0 implementation slice:
   order-candidate, and execution-intent IDs, mark missing semantic trace
   explicitly, and cannot create orders, intents, exchange calls, budget/PnL
   mutations, or withdrawal instructions.
+- `Position` / PG `positions` now carry nullable runtime semantic IDs, and
+  `PositionProjectionService.project_entry_fill()` propagates IDs from entry
+  orders into local active-position projection while preserving existing IDs if
+  later entry updates lack them. Trading Console position readmodels surface
+  those IDs for active-position / review traceability without creating orders,
+  exchange calls, or execution authority.
 - `tests/unit/test_right_tail_review.py` and Trading Console readmodel tests
   verify long/short right-tail metrics, missing-input behavior, payoff
   asymmetry, and no-action guarantees.
@@ -839,8 +845,8 @@ Remaining B0 work:
 - deeper review automation beyond the first Owner-record/API/Console,
   explicit right-tail-metrics, and non-executing semantic-packet slices,
   especially automatic account-equity baseline snapshots, automated
-  order/exchange-to-review source orchestration, and strategy semantic ID
-  propagation through order / position records;
+  order/position/exchange-to-review source orchestration, and full closed-trade
+  review packet automation from reconciled facts;
 - explicit Owner/Codex confirmation values for the promotion gate, especially
   first-real-submit attempt / budget release-or-consume acceptance. Local
   reservation/mutation now uses a max-loss-first budget basis, and the

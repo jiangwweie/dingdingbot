@@ -1225,6 +1225,26 @@ class Position(FinancialModel):
     closed_at: Optional[int] = Field(default=None, description="平仓时间戳（毫秒）")
     is_closed: bool = False      # current_qty 归零时标记为 True
 
+    # TD runtime semantic trace metadata. These fields are nullable and do not
+    # alter exchange state; they let active/closed positions remain reviewable.
+    runtime_instance_id: Optional[str] = None
+    trial_binding_id: Optional[str] = None
+    strategy_family_id: Optional[str] = None
+    strategy_family_version_id: Optional[str] = None
+    signal_evaluation_id: Optional[str] = None
+    order_candidate_id: Optional[str] = None
+
+    @property
+    def semantic_ids(self) -> BrcSemanticIds:
+        return BrcSemanticIds(
+            runtime_instance_id=self.runtime_instance_id,
+            trial_binding_id=self.trial_binding_id,
+            strategy_family_id=self.strategy_family_id,
+            strategy_family_version_id=self.strategy_family_version_id,
+            signal_evaluation_id=self.signal_evaluation_id,
+            order_candidate_id=self.order_candidate_id,
+        )
+
 
 # ============================================================
 # v3.0 Phase 4: 订单编排模型

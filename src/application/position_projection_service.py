@@ -10,10 +10,32 @@ from typing import Dict, Optional, List
 
 from src.domain.models import Direction
 from src.domain.models import Order, Position
+from src.domain.brc_audit_ids import BrcSemanticIds
 from src.infrastructure.logger import logger
 from src.infrastructure.repository_ports import PositionRepositoryPort
 
 POSITION_CLOSE_DUST_LIMIT = Decimal("0.00000001")
+
+
+def _merge_semantic_ids(
+    *,
+    preferred: BrcSemanticIds,
+    fallback: BrcSemanticIds,
+) -> BrcSemanticIds:
+    return BrcSemanticIds(
+        runtime_instance_id=preferred.runtime_instance_id or fallback.runtime_instance_id,
+        trial_binding_id=preferred.trial_binding_id or fallback.trial_binding_id,
+        strategy_family_id=preferred.strategy_family_id or fallback.strategy_family_id,
+        strategy_family_version_id=(
+            preferred.strategy_family_version_id
+            or fallback.strategy_family_version_id
+        ),
+        signal_evaluation_id=(
+            preferred.signal_evaluation_id
+            or fallback.signal_evaluation_id
+        ),
+        order_candidate_id=preferred.order_candidate_id or fallback.order_candidate_id,
+    )
 
 
 @dataclass(frozen=True)
@@ -81,6 +103,7 @@ class PositionProjectionService:
             closed_at = None
             projected_exit_fills = {}
             projected_exit_fees = {}
+            semantic_ids = entry_order.semantic_ids
 
             if existing is not None:
                 current_qty = max(existing.current_qty, entry_order.filled_qty)
@@ -92,6 +115,10 @@ class PositionProjectionService:
                 closed_at = existing.closed_at
                 projected_exit_fills = dict(existing.projected_exit_fills)
                 projected_exit_fees = dict(existing.projected_exit_fees)
+                semantic_ids = _merge_semantic_ids(
+                    preferred=entry_order.semantic_ids,
+                    fallback=existing.semantic_ids,
+                )
 
             if current_qty > Decimal("0"):
                 is_closed = False
@@ -117,6 +144,12 @@ class PositionProjectionService:
                 opened_at=opened_at,
                 closed_at=closed_at,
                 is_closed=is_closed,
+                runtime_instance_id=semantic_ids.runtime_instance_id,
+                trial_binding_id=semantic_ids.trial_binding_id,
+                strategy_family_id=semantic_ids.strategy_family_id,
+                strategy_family_version_id=semantic_ids.strategy_family_version_id,
+                signal_evaluation_id=semantic_ids.signal_evaluation_id,
+                order_candidate_id=semantic_ids.order_candidate_id,
             )
             await self._repository.save(position)
         if cleanup_after_save:
