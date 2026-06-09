@@ -115,6 +115,8 @@ class StrategyRuntimeInspectionView(BaseModel):
     admission_decision_id: str
     strategy_family_id: str
     strategy_family_version_id: str
+    signal_evaluation_id: str | None = None
+    order_candidate_id: str | None = None
     owner_risk_acceptance_id: str | None = None
     carrier_id: str | None = None
     symbol: str
@@ -262,6 +264,12 @@ async def review_state(
 @router.get("/audit-chain", response_model=TradingConsoleReadModelResponse)
 async def audit_chain(
     authorization_id: Optional[str] = Query(default=None),
+    runtime_instance_id: Optional[str] = Query(default=None),
+    trial_binding_id: Optional[str] = Query(default=None),
+    strategy_family_id: Optional[str] = Query(default=None),
+    strategy_family_version_id: Optional[str] = Query(default=None),
+    signal_evaluation_id: Optional[str] = Query(default=None),
+    order_candidate_id: Optional[str] = Query(default=None),
     intent_id: Optional[str] = Query(default=None),
     order_id: Optional[str] = Query(default=None),
     exchange_order_id: Optional[str] = Query(default=None),
@@ -270,6 +278,12 @@ async def audit_chain(
 ) -> TradingConsoleReadModelResponse:
     return await _service(include_exchange=False).audit_chain(
         authorization_id=authorization_id,
+        runtime_instance_id=runtime_instance_id,
+        trial_binding_id=trial_binding_id,
+        strategy_family_id=strategy_family_id,
+        strategy_family_version_id=strategy_family_version_id,
+        signal_evaluation_id=signal_evaluation_id,
+        order_candidate_id=order_candidate_id,
         intent_id=intent_id,
         order_id=order_id,
         exchange_order_id=exchange_order_id,
@@ -648,6 +662,8 @@ def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspection
         admission_decision_id=runtime.admission_decision_id,
         strategy_family_id=runtime.strategy_family_id,
         strategy_family_version_id=runtime.strategy_family_version_id,
+        signal_evaluation_id=None,
+        order_candidate_id=None,
         owner_risk_acceptance_id=runtime.owner_risk_acceptance_id,
         carrier_id=runtime.carrier_id,
         symbol=runtime.symbol,

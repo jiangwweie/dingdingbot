@@ -463,6 +463,12 @@ class TradingConsoleReadModelService:
         self,
         *,
         authorization_id: Optional[str] = None,
+        runtime_instance_id: Optional[str] = None,
+        trial_binding_id: Optional[str] = None,
+        strategy_family_id: Optional[str] = None,
+        strategy_family_version_id: Optional[str] = None,
+        signal_evaluation_id: Optional[str] = None,
+        order_candidate_id: Optional[str] = None,
         intent_id: Optional[str] = None,
         order_id: Optional[str] = None,
         exchange_order_id: Optional[str] = None,
@@ -474,10 +480,22 @@ class TradingConsoleReadModelService:
             snap.pg_orders,
             order_id=order_id,
             exchange_order_id=exchange_order_id,
+            runtime_instance_id=runtime_instance_id,
+            trial_binding_id=trial_binding_id,
+            strategy_family_id=strategy_family_id,
+            strategy_family_version_id=strategy_family_version_id,
+            signal_evaluation_id=signal_evaluation_id,
+            order_candidate_id=order_candidate_id,
         )
         chain_intents = self._filter_chain_intents(
             snap.pg_intents,
             authorization_id=authorization_id,
+            runtime_instance_id=runtime_instance_id,
+            trial_binding_id=trial_binding_id,
+            strategy_family_id=strategy_family_id,
+            strategy_family_version_id=strategy_family_version_id,
+            signal_evaluation_id=signal_evaluation_id,
+            order_candidate_id=order_candidate_id,
             intent_id=intent_id,
             order_ids={str(item.get("order_id")) for item in chain_orders if item.get("order_id")},
             exchange_order_ids={
@@ -498,6 +516,12 @@ class TradingConsoleReadModelService:
             data={
                 "query": {
                     "authorization_id": authorization_id,
+                    "runtime_instance_id": runtime_instance_id,
+                    "trial_binding_id": trial_binding_id,
+                    "strategy_family_id": strategy_family_id,
+                    "strategy_family_version_id": strategy_family_version_id,
+                    "signal_evaluation_id": signal_evaluation_id,
+                    "order_candidate_id": order_candidate_id,
                     "intent_id": intent_id,
                     "order_id": order_id,
                     "exchange_order_id": exchange_order_id,
@@ -2005,8 +2029,25 @@ class TradingConsoleReadModelService:
         *,
         order_id: Optional[str],
         exchange_order_id: Optional[str],
+        runtime_instance_id: Optional[str],
+        trial_binding_id: Optional[str],
+        strategy_family_id: Optional[str],
+        strategy_family_version_id: Optional[str],
+        signal_evaluation_id: Optional[str],
+        order_candidate_id: Optional[str],
     ) -> list[dict[str, Any]]:
-        if not order_id and not exchange_order_id:
+        semantic_filters = {
+            "runtime_instance_id": runtime_instance_id,
+            "trial_binding_id": trial_binding_id,
+            "strategy_family_id": strategy_family_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "signal_evaluation_id": signal_evaluation_id,
+            "order_candidate_id": order_candidate_id,
+        }
+        active_semantic_filters = {
+            key: value for key, value in semantic_filters.items() if value is not None
+        }
+        if not order_id and not exchange_order_id and not active_semantic_filters:
             return orders
         matched = []
         parent_ids = set()
@@ -2014,6 +2055,10 @@ class TradingConsoleReadModelService:
             if (
                 (order_id and order.get("order_id") == order_id)
                 or (exchange_order_id and str(order.get("exchange_order_id")) == str(exchange_order_id))
+                or any(
+                    str(order.get(key)) == str(value)
+                    for key, value in active_semantic_filters.items()
+                )
             ):
                 matched.append(order)
                 if order.get("parent_order_id"):
@@ -2033,15 +2078,42 @@ class TradingConsoleReadModelService:
         intents: list[dict[str, Any]],
         *,
         authorization_id: Optional[str],
+        runtime_instance_id: Optional[str],
+        trial_binding_id: Optional[str],
+        strategy_family_id: Optional[str],
+        strategy_family_version_id: Optional[str],
+        signal_evaluation_id: Optional[str],
+        order_candidate_id: Optional[str],
         intent_id: Optional[str],
         order_ids: set[str],
         exchange_order_ids: set[str],
     ) -> list[dict[str, Any]]:
-        if not authorization_id and not intent_id and not order_ids and not exchange_order_ids:
+        semantic_filters = {
+            "runtime_instance_id": runtime_instance_id,
+            "trial_binding_id": trial_binding_id,
+            "strategy_family_id": strategy_family_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "signal_evaluation_id": signal_evaluation_id,
+            "order_candidate_id": order_candidate_id,
+        }
+        active_semantic_filters = {
+            key: value for key, value in semantic_filters.items() if value is not None
+        }
+        if (
+            not authorization_id
+            and not intent_id
+            and not order_ids
+            and not exchange_order_ids
+            and not active_semantic_filters
+        ):
             return intents
         return [
             intent for intent in intents
             if (authorization_id and intent.get("authorization_id") == authorization_id)
+            or any(
+                str(intent.get(key)) == str(value)
+                for key, value in active_semantic_filters.items()
+            )
             or (intent_id and intent.get("intent_id") == intent_id)
             or (intent.get("order_id") and str(intent.get("order_id")) in order_ids)
             or (
@@ -5189,6 +5261,12 @@ def _order_item(order: Any) -> dict[str, Any]:
         "exchange_order_id": getattr(order, "exchange_order_id", None),
         "parent_order_id": getattr(order, "parent_order_id", None),
         "oco_group_id": getattr(order, "oco_group_id", None),
+        "runtime_instance_id": getattr(order, "runtime_instance_id", None),
+        "trial_binding_id": getattr(order, "trial_binding_id", None),
+        "strategy_family_id": getattr(order, "strategy_family_id", None),
+        "strategy_family_version_id": getattr(order, "strategy_family_version_id", None),
+        "signal_evaluation_id": getattr(order, "signal_evaluation_id", None),
+        "order_candidate_id": getattr(order, "order_candidate_id", None),
         "exit_reason": getattr(order, "exit_reason", None),
         "filled_at": getattr(order, "filled_at", None),
         "created_at": getattr(order, "created_at", None),
@@ -5296,6 +5374,12 @@ def _intent_item(intent: Any) -> dict[str, Any]:
         "status": _enum_value(getattr(intent, "status", None)),
         "order_id": getattr(intent, "order_id", None),
         "authorization_id": getattr(intent, "authorization_id", None),
+        "runtime_instance_id": getattr(intent, "runtime_instance_id", None),
+        "trial_binding_id": getattr(intent, "trial_binding_id", None),
+        "strategy_family_id": getattr(intent, "strategy_family_id", None),
+        "strategy_family_version_id": getattr(intent, "strategy_family_version_id", None),
+        "signal_evaluation_id": getattr(intent, "signal_evaluation_id", None),
+        "order_candidate_id": getattr(intent, "order_candidate_id", None),
         "exchange_order_id": getattr(intent, "exchange_order_id", None),
         "blocked_reason": getattr(intent, "blocked_reason", None),
         "blocked_message": getattr(intent, "blocked_message", None),
