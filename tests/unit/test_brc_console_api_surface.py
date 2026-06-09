@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from decimal import Decimal
 from types import SimpleNamespace
@@ -10,25 +11,38 @@ from fastapi.testclient import TestClient
 
 from src.interfaces.operator_auth import create_password_hash
 
+_TEST_AUTH_USERNAME = "owner"
+_TEST_AUTH_PASSWORD = "pw"
+_TEST_AUTH_TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+_TEST_AUTH_SESSION_SECRET = "session-secret-for-unit-test"
+
+
+def _install_test_auth_env() -> None:
+    os.environ["BRC_OPERATOR_USERNAME"] = _TEST_AUTH_USERNAME
+    os.environ["BRC_OPERATOR_PASSWORD_HASH"] = create_password_hash(_TEST_AUTH_PASSWORD)
+    os.environ["BRC_OPERATOR_TOTP_SECRET"] = _TEST_AUTH_TOTP_SECRET
+    os.environ["BRC_OPERATOR_SESSION_SECRET"] = _TEST_AUTH_SESSION_SECRET
+
 
 def _configure_auth(monkeypatch):
-    monkeypatch.setenv("BRC_OPERATOR_USERNAME", "owner")
-    monkeypatch.setenv("BRC_OPERATOR_PASSWORD_HASH", create_password_hash("pw"))
-    monkeypatch.setenv("BRC_OPERATOR_TOTP_SECRET", "JBSWY3DPEHPK3PXP")
-    monkeypatch.setenv("BRC_OPERATOR_SESSION_SECRET", "session-secret-for-unit-test")
+    monkeypatch.setenv("BRC_OPERATOR_USERNAME", _TEST_AUTH_USERNAME)
+    monkeypatch.setenv("BRC_OPERATOR_PASSWORD_HASH", create_password_hash(_TEST_AUTH_PASSWORD))
+    monkeypatch.setenv("BRC_OPERATOR_TOTP_SECRET", _TEST_AUTH_TOTP_SECRET)
+    monkeypatch.setenv("BRC_OPERATOR_SESSION_SECRET", _TEST_AUTH_SESSION_SECRET)
 
 
 def _totp() -> str:
     from src.interfaces.operator_auth import _hotp
     import time
 
-    return _hotp("JBSWY3DPEHPK3PXP", int(time.time() // 30))
+    return _hotp(_TEST_AUTH_TOTP_SECRET, int(time.time() // 30))
 
 
 def _login(client: TestClient):
+    _install_test_auth_env()
     return client.post(
         "/api/auth/login",
-        json={"username": "owner", "password": "pw", "totp_code": _totp()},
+        json={"username": _TEST_AUTH_USERNAME, "password": _TEST_AUTH_PASSWORD, "totp_code": _totp()},
     )
 
 
@@ -361,6 +375,70 @@ def test_brc_operations_api_switch_playbook_flow(monkeypatch):
         operation_items = [item for item in audit_payload["timeline"] if item["type"] == "operation"]
         assert operation_items[0]["id"] == preflight_payload["operation_id"]
         assert audit_payload["operation_results"][0]["campaign_refs"]
+
+
+def test_brc_operation_preflight_reads_runtime_safety_readiness_by_runtime_id(monkeypatch):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces import api_brc_console
+    from src.interfaces.api import app
+    from tests.unit.test_brc_operation_layer import _phase18_signal_evaluated_context
+    from tests.unit.test_strategy_runtime_safety_readiness import _runtime
+
+    class _RuntimeService:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def get_runtime(self, runtime_instance_id: str):
+            self.calls.append(runtime_instance_id)
+            runtime = _runtime(complete_boundary=False)
+            return runtime.model_copy(update={"runtime_instance_id": runtime_instance_id})
+
+    runtime_service = _RuntimeService()
+    admission, engine, binding, service, brc_repo, _ = asyncio.run(
+        _phase18_signal_evaluated_context(
+            runtime_safety_readiness=api_brc_console._operation_runtime_safety_readiness,
+        )
+    )
+    monkeypatch.setattr(api_module, "_brc_operation_service", service)
+    monkeypatch.setattr(api_module, "_brc_campaign_service", getattr(service, "_brc"))
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", runtime_service, raising=False)
+
+    try:
+        with TestClient(app) as client:
+            assert _login(client).status_code == 200
+            response = client.post(
+                "/api/brc/operations/preflight",
+                json={
+                    "operation_type": "record_trial_trade_intent_from_signal_evaluation",
+                    "requested_by": "owner",
+                    "input_params": {
+                        "campaign_id": brc_repo.campaign.campaign_id,
+                        "binding_id": binding.binding_id,
+                        "runtime_instance_id": "runtime-api-safety-readiness",
+                        "intended_action": "entry",
+                        "symbol": "ETH/USDT:USDT",
+                        "side": "long",
+                    },
+                    "source": {"kind": "unit"},
+                },
+            )
+    finally:
+        asyncio.run(engine.dispose())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert runtime_service.calls == ["runtime-api-safety-readiness"]
+    assert payload["decision"] == "block"
+    readiness = payload["runtime_summary"]["runtime_safety_readiness"]
+    assert readiness["runtime_instance_id"] == "runtime-api-safety-readiness"
+    assert readiness["status"] == "blocked"
+    assert "max_loss_budget_present" in readiness["blockers"]
+    assert payload["after"]["execution_permission_resolution"]["runtime_safety_permission"] == "signal_only"
+    blockers = "; ".join(payload["risk_summary"]["blockers"])
+    assert "runtime safety readiness blocks intent recording" in blockers
+    assert payload["trade_intent_summary"]["execution_intent_created"] is False
+    assert payload["trade_intent_summary"]["order_created"] is False
 
 
 def test_brc_readiness_standalone_returns_owner_safe_summary(monkeypatch):
