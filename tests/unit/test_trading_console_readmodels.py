@@ -14,6 +14,10 @@ from src.domain.owner_capital_adjustment import (
     OwnerCapitalAdjustmentRecord,
     OwnerCapitalAdjustmentType,
 )
+from src.domain.owner_capital_baseline_snapshot import (
+    OwnerCapitalBaselineSnapshot,
+    OwnerCapitalBaselineSnapshotSource,
+)
 from src.interfaces.operator_auth import create_password_hash
 
 
@@ -384,6 +388,18 @@ class _FakeOwnerCapitalAdjustmentRepo:
         return items[:limit]
 
 
+class _FakeOwnerCapitalBaselineSnapshotRepo:
+    def __init__(self, snapshots=None):
+        self.snapshots = [] if snapshots is None else list(snapshots)
+
+    async def list(self, *, currency=None, limit=50):
+        items = [
+            item for item in self.snapshots
+            if currency is None or item.currency == currency
+        ]
+        return items[:limit]
+
+
 class _FakeExchangeGateway:
     def __init__(self, *, positions=None, normal_orders=None, stop_orders=None):
         self._positions = [] if positions is None else list(positions)
@@ -448,6 +464,7 @@ def _patch_deps(
     campaign_state_status: str = "observe",
     budget_authorization_status: str | None = "active_metadata_only",
     owner_capital_adjustment_repo=None,
+    owner_capital_baseline_snapshot_repo=None,
     live_lifecycle_review_repo=None,
 ):
     from src.interfaces import api as api_module
@@ -502,6 +519,12 @@ def _patch_deps(
         api_module,
         "_owner_capital_adjustment_repo",
         owner_capital_adjustment_repo or _FakeOwnerCapitalAdjustmentRepo(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_owner_capital_baseline_snapshot_repo",
+        owner_capital_baseline_snapshot_repo or _FakeOwnerCapitalBaselineSnapshotRepo(),
         raising=False,
     )
     monkeypatch.setattr(api_module, "_global_kill_switch_service", _FakeGks())
@@ -4114,6 +4137,77 @@ def test_review_state_separates_owner_withdrawal_from_strategy_pnl(monkeypatch):
     assert review["no_action_guarantee"]["creates_withdrawal_instruction"] is False
     assert review["no_action_guarantee"]["creates_transfer_instruction"] is False
     assert review["no_action_guarantee"]["creates_order_instruction"] is False
+    assert review["no_action_guarantee"]["calls_exchange"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+
+
+def test_owner_capital_review_uses_latest_baseline_snapshot_for_missing_inputs(monkeypatch):
+    _configure_auth(monkeypatch)
+    owner_withdrawal = OwnerCapitalAdjustmentRecord(
+        adjustment_id="owner-withdrawal-review-baseline-1",
+        adjustment_type=OwnerCapitalAdjustmentType.OWNER_MANUAL_WITHDRAWAL,
+        amount=Decimal("30"),
+        reason="Owner manually withdrew profit outside the system.",
+        occurred_at_ms=1780496666000,
+        recorded_by="owner",
+        evidence_refs=["owner-note://withdrawal-review-baseline-1"],
+    )
+    baseline = OwnerCapitalBaselineSnapshot(
+        snapshot_id="capital-baseline-review-1",
+        currency="USDT",
+        account_equity=Decimal("130"),
+        capital_base=Decimal("130"),
+        available_balance=Decimal("120"),
+        unrealized_pnl=Decimal("0"),
+        source=OwnerCapitalBaselineSnapshotSource.OWNER_RECORDED,
+        reason="Owner recorded capital baseline before manual profit extraction review.",
+        occurred_at_ms=1780496600000,
+        recorded_by="owner",
+        evidence_refs=["owner-note://capital-baseline-review-1"],
+    )
+    _patch_deps(
+        monkeypatch,
+        exchange=_FakeExchangeGateway(),
+        owner_capital_adjustment_repo=_FakeOwnerCapitalAdjustmentRepo(
+            [owner_withdrawal]
+        ),
+        owner_capital_baseline_snapshot_repo=_FakeOwnerCapitalBaselineSnapshotRepo(
+            [baseline]
+        ),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-capital-review"
+            "?current_account_equity=100"
+            "&realized_trading_pnl=0"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    review = payload["data"]
+    assert review["status"] == "reviewed"
+    assert review["classification"] == "explained_by_owner_capital_events"
+    assert review["baseline_snapshot"]["snapshot_id"] == "capital-baseline-review-1"
+    assert review["baseline_snapshot_count"] == 1
+    assert review["input_facts"]["previous_account_equity"] == "130"
+    assert review["input_facts"]["starting_capital_base"] == "130"
+    assert (
+        review["input_facts"]["previous_account_equity_source"]
+        == "latest_owner_capital_baseline_snapshot"
+    )
+    assert (
+        review["input_facts"]["starting_capital_base_source"]
+        == "latest_owner_capital_baseline_snapshot"
+    )
+    assert review["input_facts"]["current_account_equity_source"] == "query"
+    assert review["review_result"]["owner_equity_flow_delta"] == "-30"
+    assert review["review_result"]["ending_capital_base"] == "100"
+    assert review["review_result"]["owner_capital_events_are_strategy_pnl"] is False
+    assert review["no_action_guarantee"]["creates_withdrawal_instruction"] is False
     assert review["no_action_guarantee"]["calls_exchange"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["mutates_pg"] is False

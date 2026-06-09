@@ -337,15 +337,25 @@ Current local review/account-baseline implementation slice:
   `059` persist Owner capital adjustment records with hard no-withdrawal,
   no-transfer, no-order, no-exchange, no-runtime-budget, no-strategy-PnL, and
   no-risk-event constraints.
+- `src/domain/owner_capital_baseline_snapshot.py`,
+  `src/infrastructure/pg_owner_capital_baseline_snapshot_repository.py`, and
+  migration `061` persist account-equity / capital-base baseline snapshots for
+  review. These snapshots can supply previous account equity and starting
+  capital base to Trading Console review when the Owner does not provide query
+  inputs, but they cannot create withdrawal, transfer, order, exchange,
+  runtime-budget, strategy-PnL, or risk-event instructions.
 - `src/interfaces/api_brc_console.py` exposes narrow
-  `/api/brc/owner-capital-adjustments` record/list APIs for Owner external
-  capital facts only. They do not initiate withdrawal, transfer, order,
-  exchange call, runtime budget mutation, strategy PnL mutation, or risk event.
+  `/api/brc/owner-capital-adjustments` and
+  `/api/brc/owner-capital-baseline-snapshots` record/list APIs for Owner
+  external capital facts and review baseline facts only. They do not initiate
+  withdrawal, transfer, order, exchange call, runtime budget mutation, strategy
+  PnL mutation, or risk event.
 - `src/application/readmodels/trading_console.py` and
   `trading-console/src/pages/ReviewState.tsx` surface Owner capital records and
   withdrawal-adjusted capital-base review in the Trading Console analysis page.
-  Missing account-equity / capital-base inputs remain explicit instead of being
-  inferred.
+  If query inputs are absent, the readmodel can use the latest recorded baseline
+  snapshot for previous account equity and starting capital base; missing
+  current account-equity facts remain explicit instead of being inferred.
 - `src/domain/right_tail_review.py` defines pure right-tail trade-path review
   metrics for explicit trade facts: MFE, MAE, R multiple, tail win size, small
   loss count, winner hold time, runner giveback / early cap, stop
@@ -377,19 +387,25 @@ Current local review/account-baseline implementation slice:
   missing Owner records leave equity drops unresolved, and no withdrawal,
   transfer, order, or exchange instruction is created.
 - `tests/unit/test_owner_capital_adjustment_repository.py` verifies PG
-  persistence roundtrip preserves no-action flags. Trading Console readmodel
-  tests verify recorded Owner withdrawal can explain equity drop without
-  strategy loss attribution.
+  persistence roundtrip preserves no-action flags.
+  `tests/unit/test_owner_capital_baseline_snapshot_repository.py` verifies
+  baseline snapshot persistence, BRC API record/list behavior, and no-action
+  flags. Trading Console readmodel tests verify recorded Owner withdrawal can
+  explain equity drop without strategy loss attribution and that latest
+  baseline snapshots can supply missing previous-equity / starting-base review
+  inputs.
 - `tests/unit/test_right_tail_review.py` verifies long/short right-tail metrics,
   payoff asymmetry, explicit missing-input behavior, and no-action guarantees.
   Trading Console readmodel tests verify explicit lifecycle metadata can surface
   right-tail review without creating any action authority.
 
-Future Review still needs automatic account-equity baseline snapshots, fuller
-review-source orchestration, and richer source readers. Order, review, and
-position records now have local nullable semantic-ID support, but end-to-end
-source orchestration from real order/position/exchange facts into review packets
+Future Review still needs automatic scheduled account-equity baseline capture,
+fuller review-source orchestration, and richer source readers. The first
+baseline snapshot repository/API/readmodel slice now exists, but automatic
+capture from account facts remains future work. Order, review, and position
+records now have local nullable semantic-ID support, but end-to-end source
+orchestration from real order/position/exchange facts into review packets
 remains incomplete. Closed-trade semantic packet generation now exists as a
 non-executing first slice, but it remains explicit-metadata/readmodel driven
-rather than automated from order/exchange facts. Review must not reduce
-strategy performance to win rate, average return, or short-term PnL only.
+rather than automated from order/exchange facts. Review must not reduce strategy
+performance to win rate, average return, or short-term PnL only.

@@ -138,11 +138,18 @@ from src.domain.owner_capital_adjustment import (
     OwnerCapitalAdjustmentRecord,
     OwnerCapitalAdjustmentType,
 )
+from src.domain.owner_capital_baseline_snapshot import (
+    OwnerCapitalBaselineSnapshot,
+    OwnerCapitalBaselineSnapshotSource,
+)
 from src.interfaces.operator_auth import OperatorSessionDependency, require_operator_session
 from src.interfaces import api_console_runtime as runtime
 from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
 from src.infrastructure.pg_owner_capital_adjustment_repository import (
     PgOwnerCapitalAdjustmentRepository,
+)
+from src.infrastructure.pg_owner_capital_baseline_snapshot_repository import (
+    PgOwnerCapitalBaselineSnapshotRepository,
 )
 
 
@@ -266,6 +273,50 @@ class OwnerCapitalAdjustmentResponse(BaseModel):
 
 class OwnerCapitalAdjustmentListResponse(BaseModel):
     adjustments: list[dict[str, Any]]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_withdrawal_instruction": False,
+            "creates_transfer_instruction": False,
+            "creates_order_instruction": False,
+            "calls_exchange": False,
+            "mutates_runtime_budget": False,
+            "mutates_strategy_pnl": False,
+            "creates_risk_event": False,
+        }
+    )
+
+
+class OwnerCapitalBaselineSnapshotCreateRequest(BaseModel):
+    snapshot_id: Optional[str] = Field(default=None, max_length=128)
+    currency: str = Field(default="USDT", min_length=1, max_length=16)
+    account_equity: Decimal = Field(ge=Decimal("0"))
+    capital_base: Decimal = Field(ge=Decimal("0"))
+    available_balance: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    unrealized_pnl: Optional[Decimal] = None
+    source: OwnerCapitalBaselineSnapshotSource = OwnerCapitalBaselineSnapshotSource.OWNER_RECORDED
+    reason: str = Field(min_length=1, max_length=512)
+    occurred_at_ms: Optional[int] = Field(default=None, ge=0)
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OwnerCapitalBaselineSnapshotResponse(BaseModel):
+    snapshot: dict[str, Any]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "creates_withdrawal_instruction": False,
+            "creates_transfer_instruction": False,
+            "creates_order_instruction": False,
+            "calls_exchange": False,
+            "mutates_runtime_budget": False,
+            "mutates_strategy_pnl": False,
+            "creates_risk_event": False,
+        }
+    )
+
+
+class OwnerCapitalBaselineSnapshotListResponse(BaseModel):
+    snapshots: list[dict[str, Any]]
     no_action_guarantee: dict[str, bool] = Field(
         default_factory=lambda: {
             "creates_withdrawal_instruction": False,
@@ -6608,6 +6659,13 @@ def _owner_capital_adjustment_repository() -> PgOwnerCapitalAdjustmentRepository
     return PgOwnerCapitalAdjustmentRepository()
 
 
+def _owner_capital_baseline_snapshot_repository() -> PgOwnerCapitalBaselineSnapshotRepository:
+    injected = getattr(_api_module(), "_owner_capital_baseline_snapshot_repo", None)
+    if injected is not None:
+        return injected
+    return PgOwnerCapitalBaselineSnapshotRepository()
+
+
 def _default_live_lifecycle_review_id(authorization_id: str, status: str) -> str:
     safe_auth = re.sub(r"[^A-Za-z0-9_.:-]+", "-", authorization_id).strip("-")
     return f"live-review-{safe_auth}-{status}"
@@ -6618,6 +6676,13 @@ def _default_owner_capital_adjustment_id(
     occurred_at_ms: int,
 ) -> str:
     return f"owner-capital-{adjustment_type.value}-{occurred_at_ms}"
+
+
+def _default_owner_capital_baseline_snapshot_id(
+    source: OwnerCapitalBaselineSnapshotSource,
+    occurred_at_ms: int,
+) -> str:
+    return f"owner-capital-baseline-{source.value}-{occurred_at_ms}"
 
 
 @router.post(
@@ -6667,6 +6732,58 @@ async def list_owner_capital_adjustments(
     records = await repo.list(currency=currency, limit=limit)
     return OwnerCapitalAdjustmentListResponse(
         adjustments=[record.model_dump(mode="json") for record in records]
+    )
+
+
+@router.post(
+    "/owner-capital-baseline-snapshots",
+    response_model=OwnerCapitalBaselineSnapshotResponse,
+)
+async def create_owner_capital_baseline_snapshot(
+    body: OwnerCapitalBaselineSnapshotCreateRequest,
+    session: OperatorSessionDependency,
+) -> OwnerCapitalBaselineSnapshotResponse:
+    occurred_at_ms = body.occurred_at_ms or int(time.time() * 1000)
+    snapshot = OwnerCapitalBaselineSnapshot(
+        snapshot_id=body.snapshot_id
+        or _default_owner_capital_baseline_snapshot_id(body.source, occurred_at_ms),
+        currency=body.currency,
+        account_equity=body.account_equity,
+        capital_base=body.capital_base,
+        available_balance=body.available_balance,
+        unrealized_pnl=body.unrealized_pnl,
+        source=body.source,
+        reason=body.reason,
+        occurred_at_ms=occurred_at_ms,
+        recorded_by=session.username,
+        evidence_refs=body.evidence_refs,
+        metadata={
+            **body.metadata,
+            "ledger_write_path": "official_api_brc_owner_capital_baseline_snapshots",
+            "capital_base_review_fact_only": True,
+            "automatic_withdrawal": False,
+            "automatic_transfer": False,
+        },
+    )
+    repo = _owner_capital_baseline_snapshot_repository()
+    await repo.initialize()
+    saved = await repo.append(snapshot)
+    return OwnerCapitalBaselineSnapshotResponse(snapshot=saved.model_dump(mode="json"))
+
+
+@router.get(
+    "/owner-capital-baseline-snapshots",
+    response_model=OwnerCapitalBaselineSnapshotListResponse,
+)
+async def list_owner_capital_baseline_snapshots(
+    currency: Optional[str] = Query(default=None, min_length=1, max_length=16),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> OwnerCapitalBaselineSnapshotListResponse:
+    repo = _owner_capital_baseline_snapshot_repository()
+    await repo.initialize()
+    snapshots = await repo.list(currency=currency, limit=limit)
+    return OwnerCapitalBaselineSnapshotListResponse(
+        snapshots=[snapshot.model_dump(mode="json") for snapshot in snapshots]
     )
 
 

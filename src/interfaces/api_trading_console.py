@@ -1424,6 +1424,17 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
             "_trading_console_pg_owner_capital_adjustment_repo",
             _build_pg_owner_capital_adjustment_repo,
         )
+    owner_capital_baseline_snapshot_repo = getattr(
+        api_module,
+        "_owner_capital_baseline_snapshot_repo",
+        None,
+    )
+    if owner_capital_baseline_snapshot_repo is None:
+        owner_capital_baseline_snapshot_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_owner_capital_baseline_snapshot_repo",
+            _build_pg_owner_capital_baseline_snapshot_repo,
+        )
 
     return TradingConsoleDependencies(
         runtime_bound=bool(api_module.get_runtime_context() is not None),
@@ -1445,6 +1456,7 @@ def _dependencies(*, include_exchange: bool = False) -> TradingConsoleDependenci
         campaign_state_service=getattr(api_module, "_campaign_state_service", None),
         multi_carrier_budget_authorization_service=_multi_carrier_budget_authorization_service(),
         owner_capital_adjustment_repo=owner_capital_adjustment_repo,
+        owner_capital_baseline_snapshot_repo=owner_capital_baseline_snapshot_repo,
         global_kill_switch_service=getattr(api_module, "_global_kill_switch_service", None),
         startup_trading_guard_service=getattr(api_module, "_startup_trading_guard_service", None),
         startup_reconciliation_summary=getattr(api_module, "_startup_reconciliation_summary", None),
@@ -1968,6 +1980,14 @@ def _build_pg_owner_capital_adjustment_repo() -> Any:
     )
 
     return PgOwnerCapitalAdjustmentRepository()
+
+
+def _build_pg_owner_capital_baseline_snapshot_repo() -> Any:
+    from src.infrastructure.pg_owner_capital_baseline_snapshot_repository import (
+        PgOwnerCapitalBaselineSnapshotRepository,
+    )
+
+    return PgOwnerCapitalBaselineSnapshotRepository()
 
 
 def _owner_trial_flow_service() -> Optional[Any]:

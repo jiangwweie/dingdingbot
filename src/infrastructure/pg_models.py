@@ -1002,6 +1002,111 @@ class PGOwnerCapitalAdjustmentORM(PGCoreBase):
     )
 
 
+class PGOwnerCapitalBaselineSnapshotORM(PGCoreBase):
+    """Owner/account baseline facts for capital-base review."""
+
+    __tablename__ = "owner_capital_baseline_snapshots"
+
+    snapshot_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USDT")
+    account_equity: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    capital_base: Mapped[Decimal] = mapped_column(Numeric(36, 18), nullable=False)
+    available_balance: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    unrealized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(36, 18), nullable=True)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    evidence_refs: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    records_account_equity_fact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    creates_withdrawal_instruction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    creates_transfer_instruction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    creates_order_instruction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    calls_exchange: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mutates_runtime_budget: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mutates_strategy_pnl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    creates_risk_event: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('owner_recorded', 'trading_console_read_model', "
+            "'startup_account_fact', 'read_only_account_fact', 'manual_review')",
+            name="ck_owner_capital_baseline_snapshots_source",
+        ),
+        CheckConstraint(
+            "account_equity >= 0",
+            name="ck_owner_capital_baseline_snapshots_nonnegative_equity",
+        ),
+        CheckConstraint(
+            "capital_base >= 0",
+            name="ck_owner_capital_baseline_snapshots_nonnegative_base",
+        ),
+        CheckConstraint(
+            "available_balance IS NULL OR available_balance >= 0",
+            name="ck_owner_capital_baseline_snapshots_nonnegative_available",
+        ),
+        CheckConstraint(
+            "records_account_equity_fact = true",
+            name="ck_owner_capital_baseline_snapshots_records_fact",
+        ),
+        CheckConstraint(
+            "creates_withdrawal_instruction = false",
+            name="ck_owner_capital_baseline_snapshots_no_withdrawal_instruction",
+        ),
+        CheckConstraint(
+            "creates_transfer_instruction = false",
+            name="ck_owner_capital_baseline_snapshots_no_transfer_instruction",
+        ),
+        CheckConstraint(
+            "creates_order_instruction = false",
+            name="ck_owner_capital_baseline_snapshots_no_order_instruction",
+        ),
+        CheckConstraint(
+            "calls_exchange = false",
+            name="ck_owner_capital_baseline_snapshots_no_exchange_call",
+        ),
+        CheckConstraint(
+            "mutates_runtime_budget = false",
+            name="ck_owner_capital_baseline_snapshots_no_runtime_budget_mutation",
+        ),
+        CheckConstraint(
+            "mutates_strategy_pnl = false",
+            name="ck_owner_capital_baseline_snapshots_no_strategy_pnl_mutation",
+        ),
+        CheckConstraint(
+            "creates_risk_event = false",
+            name="ck_owner_capital_baseline_snapshots_no_risk_event",
+        ),
+        Index(
+            "idx_owner_capital_baseline_snapshots_currency_time",
+            "currency",
+            "occurred_at_ms",
+        ),
+        Index(
+            "idx_owner_capital_baseline_snapshots_source_time",
+            "source",
+            "occurred_at_ms",
+        ),
+        Index(
+            "idx_owner_capital_baseline_snapshots_recorded_by_time",
+            "recorded_by",
+            "occurred_at_ms",
+        ),
+    )
+
+
 class PGStrategyRuntimeInstanceORM(PGCoreBase):
     """Shadow StrategyRuntimeInstance governance record.
 

@@ -675,11 +675,19 @@ Current local B0 implementation slice:
   Owner capital adjustment records with hard no-withdrawal, no-transfer,
   no-order, no-exchange, no-runtime-budget, no-strategy-PnL, and no-risk-event
   constraints.
+- `src/domain/owner_capital_baseline_snapshot.py`,
+  `src/infrastructure/pg_owner_capital_baseline_snapshot_repository.py`, and
+  `migrations/versions/2026-06-10-061_create_owner_capital_baseline_snapshots.py`
+  persist account-equity / capital-base baseline snapshots for review. These
+  records can provide previous-equity and starting-capital-base facts to review
+  without initiating withdrawal, transfer, order, exchange, runtime-budget,
+  strategy-PnL, or risk-event instructions.
 - `src/interfaces/api_brc_console.py` exposes narrow
-  `/api/brc/owner-capital-adjustments` record/list APIs for external Owner
-  capital facts only. These APIs do not initiate withdrawals, transfers, orders,
-  exchange calls, runtime budget mutations, strategy PnL mutations, or risk
-  events.
+  `/api/brc/owner-capital-adjustments` and
+  `/api/brc/owner-capital-baseline-snapshots` record/list APIs for external
+  Owner capital facts and review baseline facts only. These APIs do not
+  initiate withdrawals, transfers, orders, exchange calls, runtime budget
+  mutations, strategy PnL mutations, or risk events.
 - `src/interfaces/api_trading_console.py` exposes a read-only
   `/strategy-runtime-promotion-gate` preview endpoint backed by that service.
   It also exposes
@@ -797,13 +805,18 @@ Current local B0 implementation slice:
   `review-state.owner_capital_base_review` plus
   `/api/trading-console/owner-capital-review`; `trading-console/src/pages/ReviewState.tsx`
   surfaces Owner records, Owner equity flow, trading PnL, unexplained equity
-  delta, and withdrawal-adjusted capital base in the analysis page. Missing
-  account-equity / capital-base facts stay visible rather than inferred.
+  delta, and withdrawal-adjusted capital base in the analysis page. If query
+  previous-equity / starting-capital-base inputs are absent, the readmodel can
+  use the latest recorded baseline snapshot; missing current account-equity
+  facts stay visible rather than inferred.
 - `tests/unit/test_owner_capital_adjustment_repository.py` verifies PG
-  persistence roundtrip and no-action flags. Trading Console readmodel tests
-  verify a recorded Owner withdrawal can explain an equity drop without
-  strategy-loss attribution or any withdrawal/transfer/order/exchange
-  instruction.
+  persistence roundtrip and no-action flags.
+  `tests/unit/test_owner_capital_baseline_snapshot_repository.py` verifies
+  baseline snapshot persistence, BRC API record/list behavior, and no-action
+  flags. Trading Console readmodel tests verify a recorded Owner withdrawal can
+  explain an equity drop without strategy-loss attribution and can use latest
+  baseline snapshots for missing previous-equity / starting-base inputs without
+  any withdrawal/transfer/order/exchange instruction.
 - `src/domain/right_tail_review.py` defines pure right-tail trade-path metrics:
   MFE, MAE, R multiple, tail win size, small loss count, winner hold time,
   runner giveback / early cap, stop effectiveness, and attempt-continuation
@@ -844,9 +857,11 @@ Remaining B0 work:
   open-interest, and crowding sources remains open;
 - deeper review automation beyond the first Owner-record/API/Console,
   explicit right-tail-metrics, and non-executing semantic-packet slices,
-  especially automatic account-equity baseline snapshots, automated
+  especially automatic scheduled account-equity baseline capture, automated
   order/position/exchange-to-review source orchestration, and full closed-trade
-  review packet automation from reconciled facts;
+  review packet automation from reconciled facts. The first baseline snapshot
+  repository/API/readmodel slice exists, but automatic capture from account
+  facts is still disabled;
 - explicit Owner/Codex confirmation values for the promotion gate, especially
   first-real-submit attempt / budget release-or-consume acceptance. Local
   reservation/mutation now uses a max-loss-first budget basis, and the

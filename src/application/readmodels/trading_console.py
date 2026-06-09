@@ -48,6 +48,7 @@ from src.domain.owner_capital_adjustment import (
     OwnerCapitalBaseReviewInput,
     review_owner_capital_base_movement,
 )
+from src.domain.owner_capital_baseline_snapshot import OwnerCapitalBaselineSnapshot
 from src.domain.live_lifecycle_review import BrcLiveLifecycleReviewRecord
 from src.domain.right_tail_review import (
     RightTailTradePathFacts,
@@ -115,6 +116,7 @@ class TradingConsoleDependencies:
     campaign_state_service: Optional[Any] = None
     multi_carrier_budget_authorization_service: Optional[Any] = None
     owner_capital_adjustment_repo: Optional[Any] = None
+    owner_capital_baseline_snapshot_repo: Optional[Any] = None
     global_kill_switch_service: Optional[Any] = None
     startup_trading_guard_service: Optional[Any] = None
     startup_reconciliation_summary: Optional[dict[str, Any]] = None
@@ -1552,6 +1554,34 @@ class TradingConsoleReadModelService:
             )
             return []
 
+    async def _read_owner_capital_baseline_snapshots(
+        self,
+        *,
+        currency: str,
+        limit: int,
+        unavailable: list[dict[str, Any]],
+    ) -> list[OwnerCapitalBaselineSnapshot]:
+        repo = self._deps.owner_capital_baseline_snapshot_repo
+        if repo is None or not hasattr(repo, "list"):
+            unavailable.append(
+                {
+                    "source": "owner_capital_baseline_snapshots",
+                    "code": "repo_unavailable",
+                }
+            )
+            return []
+        try:
+            return list(await repo.list(currency=currency, limit=limit))
+        except Exception as exc:
+            unavailable.append(
+                {
+                    "source": "owner_capital_baseline_snapshots",
+                    "code": "read_failed",
+                    "error": str(exc),
+                }
+            )
+            return []
+
     async def _owner_capital_base_review(
         self,
         *,
@@ -1569,11 +1599,29 @@ class TradingConsoleReadModelService:
             limit=limit,
             unavailable=snap.unavailable,
         )
+        baseline_snapshots = await self._read_owner_capital_baseline_snapshots(
+            currency=currency,
+            limit=1,
+            unavailable=snap.unavailable,
+        )
+        latest_baseline = baseline_snapshots[0] if baseline_snapshots else None
+        previous_equity_source = "query" if previous_account_equity is not None else "missing"
+        starting_capital_base_source = "query" if starting_capital_base is not None else "missing"
+        if previous_account_equity is None and latest_baseline is not None:
+            previous_account_equity = latest_baseline.account_equity
+            previous_equity_source = "latest_owner_capital_baseline_snapshot"
+        if starting_capital_base is None and latest_baseline is not None:
+            starting_capital_base = latest_baseline.capital_base
+            starting_capital_base_source = "latest_owner_capital_baseline_snapshot"
         current_equity = current_account_equity
+        current_equity_source = "query" if current_account_equity is not None else "missing"
         if current_equity is None:
             current_equity = _decimal_or_none(
                 snap.account_snapshot_summary.get("total_balance")
             )
+            current_equity_source = str(
+                snap.account_snapshot_summary.get("status") or "account_snapshot_summary"
+            ) if current_equity is not None else "missing"
         required_inputs = []
         if previous_account_equity is None:
             required_inputs.append("previous_account_equity")
@@ -1587,6 +1635,12 @@ class TradingConsoleReadModelService:
             "currency": currency,
             "record_count": len(records),
             "records": [record.model_dump(mode="json") for record in records],
+            "baseline_snapshot": (
+                latest_baseline.model_dump(mode="json")
+                if latest_baseline is not None
+                else None
+            ),
+            "baseline_snapshot_count": len(baseline_snapshots),
             "required_inputs": required_inputs,
             "input_facts": {
                 "previous_account_equity": _scalar(previous_account_equity),
@@ -1594,11 +1648,9 @@ class TradingConsoleReadModelService:
                 "starting_capital_base": _scalar(starting_capital_base),
                 "realized_trading_pnl": _scalar(realized_trading_pnl),
                 "tolerance": _scalar(tolerance),
-                "current_account_equity_source": (
-                    "query"
-                    if current_account_equity is not None
-                    else snap.account_snapshot_summary.get("status")
-                ),
+                "previous_account_equity_source": previous_equity_source,
+                "current_account_equity_source": current_equity_source,
+                "starting_capital_base_source": starting_capital_base_source,
             },
             "review_principle": "owner_capital_events_are_not_strategy_pnl",
             "no_action_guarantee": {
