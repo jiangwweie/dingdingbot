@@ -306,4 +306,78 @@ class ExecutionPermissionResolver:
         if runtime.get("live_ready") is True or metadata.get("live_ready") is True:
             blockers.append("live execution path is already marked ready")
             return ExecutionPermission.SIGNAL_ONLY
+        readiness = _extract_runtime_safety_readiness(metadata=metadata, runtime=runtime)
+        if readiness:
+            unsafe_flags = [
+                key
+                for key in (
+                    "execution_intent_created",
+                    "runtime_state_mutated",
+                    "order_created",
+                    "exchange_called",
+                )
+                if readiness.get(key) is True
+            ]
+            readiness_blockers = _string_list(readiness.get("blockers"))
+            missing_boundary_facts = _string_list(readiness.get("missing_boundary_facts"))
+            readiness_status = str(readiness.get("status") or "").lower()
+            if (
+                readiness_status in {"blocked", "block"}
+                or readiness_blockers
+                or missing_boundary_facts
+                or unsafe_flags
+            ):
+                detail = _runtime_safety_readiness_block_detail(
+                    status=readiness_status,
+                    blockers=readiness_blockers,
+                    missing_boundary_facts=missing_boundary_facts,
+                    unsafe_flags=unsafe_flags,
+                )
+                blockers.append(f"runtime safety readiness blocks intent recording{detail}")
+                return ExecutionPermission.SIGNAL_ONLY
         return ExecutionPermission.INTENT_RECORDING
+
+
+def _extract_runtime_safety_readiness(
+    *, metadata: dict[str, Any], runtime: dict[str, Any]
+) -> dict[str, Any]:
+    for source in (
+        runtime.get("runtime_safety_readiness"),
+        runtime.get("safety_readiness"),
+        metadata.get("runtime_safety_readiness"),
+        metadata.get("safety_readiness"),
+    ):
+        if hasattr(source, "model_dump"):
+            dumped = source.model_dump(mode="json")
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        if isinstance(source, dict):
+            return dict(source)
+    return {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None and str(item)]
+    if value is None:
+        return []
+    text = str(value)
+    return [text] if text else []
+
+
+def _runtime_safety_readiness_block_detail(
+    *,
+    status: str,
+    blockers: list[str],
+    missing_boundary_facts: list[str],
+    unsafe_flags: list[str],
+) -> str:
+    parts: list[str] = []
+    if status:
+        parts.append(f"status={status}")
+    if blockers:
+        parts.append("blockers=" + ",".join(blockers[:4]))
+    if missing_boundary_facts:
+        parts.append("missing_boundary_facts=" + ",".join(missing_boundary_facts[:4]))
+    if unsafe_flags:
+        parts.append("unsafe_flags=" + ",".join(unsafe_flags))
+    return f": {'; '.join(parts)}" if parts else ""

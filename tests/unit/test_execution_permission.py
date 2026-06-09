@@ -96,6 +96,87 @@ def test_configured_max_intent_recording_allows_intent_if_other_contributors_all
     assert not result.blockers
 
 
+def test_runtime_safety_readiness_blockers_downgrade_intent_recording():
+    resolver = ExecutionPermissionResolver(
+        configured_max_permission=ExecutionPermission.INTENT_RECORDING,
+    )
+
+    result = resolver.resolve(
+        requested_permission=ExecutionPermission.INTENT_RECORDING,
+        operation_type="record_trial_trade_intent_from_signal_evaluation",
+        operation_permission=ExecutionPermission.INTENT_RECORDING,
+        account_facts={
+            "source": "exchange_testnet",
+            "truth_level": "exchange_read",
+            "reconciliation_status": {"status": "clean"},
+            "unknown_unmanaged_counts": {"orders": 0, "positions": 0},
+        },
+        constraints_check={"complete": True, "constraints_snapshot_exists": True},
+        campaign_metadata={},
+        runtime_summary={
+            "current_runtime_state": "observe",
+            "live_ready": False,
+            "runtime_safety_readiness": {
+                "status": "blocked",
+                "blockers": ["max_loss_budget_present"],
+                "missing_boundary_facts": ["max_loss_budget_present"],
+                "not_execution_authority": True,
+                "execution_intent_created": False,
+                "runtime_state_mutated": False,
+                "order_created": False,
+                "exchange_called": False,
+            },
+        },
+    )
+
+    assert result.runtime_safety_permission == ExecutionPermission.SIGNAL_ONLY
+    assert result.final_permission == ExecutionPermission.SIGNAL_ONLY
+    assert any(
+        "runtime safety readiness blocks intent recording" in blocker
+        and "max_loss_budget_present" in blocker
+        for blocker in result.blockers
+    )
+
+
+def test_runtime_safety_readiness_ready_preserves_intent_recording_cap():
+    resolver = ExecutionPermissionResolver(
+        configured_max_permission=ExecutionPermission.INTENT_RECORDING,
+    )
+
+    result = resolver.resolve(
+        requested_permission=ExecutionPermission.INTENT_RECORDING,
+        operation_type="record_trial_trade_intent_from_signal_evaluation",
+        operation_permission=ExecutionPermission.INTENT_RECORDING,
+        account_facts={
+            "source": "exchange_testnet",
+            "truth_level": "exchange_read",
+            "reconciliation_status": {"status": "clean"},
+            "unknown_unmanaged_counts": {"orders": 0, "positions": 0},
+        },
+        constraints_check={"complete": True, "constraints_snapshot_exists": True},
+        campaign_metadata={},
+        runtime_summary={
+            "current_runtime_state": "observe",
+            "live_ready": False,
+            "runtime_safety_readiness": {
+                "status": "ready_for_owner_codex_confirmation",
+                "blockers": [],
+                "missing_boundary_facts": [],
+                "warnings": ["trusted_fact_sources_required"],
+                "not_execution_authority": True,
+                "execution_intent_created": False,
+                "runtime_state_mutated": False,
+                "order_created": False,
+                "exchange_called": False,
+            },
+        },
+    )
+
+    assert result.runtime_safety_permission == ExecutionPermission.INTENT_RECORDING
+    assert result.final_permission == ExecutionPermission.INTENT_RECORDING
+    assert not result.blockers
+
+
 def test_account_facts_unavailable_downgrades_and_blocks_intent_recording():
     resolver = ExecutionPermissionResolver(
         configured_max_permission=ExecutionPermission.INTENT_RECORDING,

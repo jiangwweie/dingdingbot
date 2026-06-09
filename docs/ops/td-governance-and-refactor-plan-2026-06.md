@@ -1231,6 +1231,12 @@ Current local Sprint 7 slice:
   and unknown scripts. Unknown scripts fail closed for review, and script
   comments such as "dry-run", "read-only", or "Owner-approved" are treated as
   classification evidence only, not as execution authorization.
+- `ExecutionPermissionResolver` now consumes runtime-safety-readiness summaries
+  when provided by the Operation Layer/runtime summary. Blocked readiness,
+  missing boundary facts, or unsafe readiness flags downgrade runtime safety to
+  `signal_only`, while ready-for-confirmation still caps at non-executing
+  `intent_recording`. This aligns execution-permission resolution with the
+  Sprint 7 runtime boundary facts without granting order authority.
 
 Required properties:
 
