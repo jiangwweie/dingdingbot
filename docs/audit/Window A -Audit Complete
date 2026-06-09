@@ -1,0 +1,41 @@
+Audit Complete
+
+Branch: codex/brc-product-backbone-sprint
+Commit: 322aa533
+File created: docs/canon/BRC_STRATEGY_ADMISSION_TRIALBINDING_S0_AUDIT.md
+
+---
+S0 Verdict: S0_CONFIRMED
+
+Top 5 Confirmed Debts
+
+┌──────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┬──────────┐
+│    ID    │                                                                   Title                                                                    │ Severity │
+├──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────┤
+│ S0-A-001 │ StrategyRuntimeInstance missing — zero references in codebase                                                                              │ CRITICAL │
+├──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────┤
+│ S0-A-002 │ AdmissionTrialBinding overloaded as runtime identity (8 lifecycle states, accumulates campaign_id/carrier_id)                              │ CRITICAL │
+├──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────┤
+│ S0-A-003 │ Two parallel risk acceptance systems: OwnerRiskAcceptance (admission) vs OwnerRiskAcknowledgement+BoundedLiveTrialAuthorization (one-shot) │ HIGH     │
+├──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────┤
+│ S0-A-004 │ AdmissionDecision lacks lifecycle status, expiry enforcement, and supersession                                                             │ HIGH     │
+├──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼──────────┤
+│ S0-A-005 │ TrialTradeIntent explicitly non-executable but carries execution_mode — ambiguous semantic zone                                            │ MEDIUM   │
+└──────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────────┘
+
+StrategyRuntimeInstance: MISSING
+
+Confirmed absent from all code. AdmissionTrialBinding is implicitly carrying runtime responsibilities (campaign_id, runtime_carrier_id, status progression through 8+ states) but was designed as a planning/binding fact. BoundedRiskCampaign is a risk-budget container, not a strategy runtime identity. A first-class StrategyRuntimeInstance is needed to separate planning from execution and provide a stable identity for the signal→intent→order→review chain.
+
+Files Inspected
+
+- src/domain/brc_admission.py — all 10 domain models
+- src/infrastructure/pg_models.py — all ORM tables
+- src/application/brc_admission_service.py — BrcAdmissionService (4400+ lines)
+- src/application/brc_operation_layer.py — BrcOperationService (17 phases)
+- src/application/owner_trial_flow.py — parallel one-shot authorization system
+- src/domain/strategy_family_registry.py — duplicate status enum
+- src/domain/bounded_risk_campaign.py — campaign lifecycle
+- tests/unit/test_brc_admission_phase1.py
+- tests/unit/test_brc_operation_layer.py
+- docs/canon/BRC_TARGET_SEMANTICS.md

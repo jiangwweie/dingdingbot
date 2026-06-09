@@ -1,0 +1,576 @@
+Window E — Runtime Profile / Config / Safety / Script Bypass Audit
+
+A. Executive Verdict
+
+FAIL_SCRIPT_BYPASS_RISK
+
+The runtime boundary for the main application (signal → execute_signal() → exchange) is well-designed and largely fail-closed. However, the system has significant script-level bypass paths and structural gaps in ExecutionPermission/CapitalProtection coverage that prevent a clean PASS.
+
+Key reasons:
+- 1 CRITICAL script can deactivate GKS with a single command and no runtime guard
+- 1 HIGH script directly calls Binance REST API with raw HMAC, bypassing the entire application stack
+- ExecutionPermission is not a system-wide gate — 9 code paths reach the exchange without checking it
+- max_leverage is stored in CapitalProtectionConfig but never enforced by pre_order_check()
+- Owner-bounded execution path bypasses CapitalProtection entirely
+- Config has 4-tier precedence with 6 sources, creating multi-track ambiguity risk
+
+---
+B. Runtime Boundary Map
+
+Area: Runtime Profile resolution
+Current Implementation: RuntimeConfigResolver.resolve_startup() with 3-tier fallback: env var → PG active → default
+Source of Truth: PG-backed RuntimeProfileRepository
+Fail-closed?: YES for live: raises ValueError if no active PG profile. NO for dev: silently falls back to sim1_eth_runtime
+Bypass Risk: LOW
+Evidence Path: src/application/runtime_config.py:384-411
+────────────────────────────────────────
+Area: TRADING_ENV default
+Current Implementation: Defaults to "simulation"
+Source of Truth: Env var TRADING_ENV
+Fail-closed?: YES
+Bypass Risk: LOW
+Evidence Path: src/application/runtime_config.py:419
+────────────────────────────────────────
+Area: EXCHANGE_TESTNET default
+Current Implementation: Defaults to True
+Source of Truth: Env var EXCHANGE_TESTNET
+Fail-closed?: YES
+Bypass Risk: LOW
+Evidence Path: src/application/runtime_config.py:421
+────────────────────────────────────────
+Area: ExecutionPermission
+Current Implementation: IntEnum 0-4, min-of-contributors resolution
+Source of Truth: Env var BRC_EXECUTION_PERMISSION_MAX, defaults to READ_ONLY
+Fail-closed?: YES for main signal path. NO for owner-bounded, close, reconciliation, SL/TP replacement paths
+Bypass Risk: HIGH — 9 paths bypass
+Evidence Path: src/application/execution_permission.py:17-55
+────────────────────────────────────────
+Area: StartupGuard
+Current Implementation: In-memory armed=False default, checked per-execution in execute_signal()
+Source of Truth: Process-local memory only, no PG persistence
+Fail-closed?: YES — defaults unarmed, must be explicitly armed
+Bypass Risk: LOW for entries (correctly blocks). MEDIUM for close (correctly exempt)
+Evidence Path: src/application/startup_trading_guard.py:27-174
+────────────────────────────────────────
+Area: GlobalKillSwitch
+Current Implementation: PG-backed single-row with in-memory cache, checked per-execution in execute_signal()
+Source of Truth: PostgreSQL global_kill_switch_state table
+Fail-closed?: YES — constructor defaults active=True before initialize(). All failure modes remain active
+Bypass Risk: HIGH — seed_gks_state.py --inactive bypasses with single command
+Evidence Path: src/application/global_kill_switch.py:45-257
+────────────────────────────────────────
+Area: CapitalProtection
+Current Implementation: pre_order_check() with 11 checks
+Source of Truth: CapitalProtectionConfig derived from risk config
+Fail-closed?: PARTIAL — checks min_notional, loss, position, daily limits. Does NOT check max_leverage or max_notional
+Bypass Risk: HIGH — Owner-bounded path bypasses entirely. Scripts can inject _NoopCapitalProtection
+Evidence Path: src/application/capital_protection.py:86
+────────────────────────────────────────
+Area: ExchangeGateway
+Current Implementation: Lowest-level exchange interface via CCXT
+Source of Truth: N/A
+Fail-closed?: NO — no safety checks at this layer
+Bypass Risk: CRITICAL if any caller bypasses upstream gates
+Evidence Path: src/infrastructure/exchange_gateway.py:1030
+────────────────────────────────────────
+Area: Live environment policy
+Current Implementation: EnvironmentRuntimeConfig.validate_mainline_environment_policy() rejects live + EXECUTION_INTENT_ALLOWED
+Source of Truth: Pydantic model validator
+Fail-closed?: YES
+Bypass Risk: LOW
+Evidence Path: src/application/runtime_config.py:53-78
+────────────────────────────────────────
+Area: PG startup validation
+Current Implementation: validate_pg_core_configuration() rejects RUNTIME_PROFILE env var in live
+Source of Truth: src/infrastructure/database.py:192-248
+Fail-closed?: YES
+Bypass Risk: LOW
+Evidence Path: src/infrastructure/database.py:244-248
+
+---
+C. Config Precedence Map
+
+Priority 1 (highest): Runtime Profile (PG-backed)
+  ↓ overrides market, strategy, risk, execution config
+  ↓ source: RuntimeProfileRepository → ResolvedRuntimeConfig
+  ↓ evidence: main.py:1031-1087
+
+Priority 2: Environment Variables
+  ↓ controls: PG_DATABASE_URL, EXCHANGE_API_KEY/SECRET, TRADING_ENV,
+  ↓           EXCHANGE_TESTNET, BRC_EXECUTION_PERMISSION_MAX, BACKEND_PORT
+  ↓ source: .env → .env.local (override=True)
+  ↓ evidence: src/main.py:28-31, runtime_config.py:413-429
+
+Priority 3: SQLite Database (ConfigManager)
+  ↓ controls: risk params, system config, strategies, exchange config
+  ↓ source: data/v3_dev.db via ConfigManager
+  ↓ evidence: src/application/config_manager.py:258-263
+
+Priority 4 (lowest): Hardcoded Defaults
+  ↓ ema_period=60, max_loss=1%, max_leverage=10x, max_exposure=80%
+  ↓ exchange=binance testnet, symbols=BTC/ETH/SOL/BNB
+  ↓ source: _apply_hardcoded_defaults(), _build_default_core_config()
+  ↓ evidence: config_manager.py:660-738, 908-927
+
+Additional config tracks (not in main precedence):
+- config_entries_v2 KV store (strategy params, backtest configs) — profile-scoped, separate from main config
+- YAML files — import/export only, not live source
+- CLI args — none exist; RUNTIME_PROFILE env var serves as equivalent
+
+---
+D. Script Bypass Inventory
+
+Script/Path: scripts/seed_gks_state.py
+Capability: GKS deactivation
+Touches Exchange?: No
+Touches DB Runtime State?: YES — writes global_kill_switch_state
+Checks Profile?: No
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: IS the GKS writer
+Default Dry-run?: No
+Risk Level: CRITICAL
+────────────────────────────────────────
+Script/Path: scripts/run_001d4_multi_cycle_stress.sh
+Capability: Raw exchange flatten + GKS disable
+Touches Exchange?: YES — raw HMAC REST calls to Binance
+Touches DB Runtime State?: Indirectly via API
+Checks Profile?: Requires EXCHANGE_TESTNET=true
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: Disables GKS via API each cycle
+Default Dry-run?: No
+Risk Level: HIGH
+────────────────────────────────────────
+Script/Path: scripts/owner_authorized_bnb_close.py
+Capability: Live market close orders
+Touches Exchange?: YES — direct ExchangeGateway
+Touches DB Runtime State?: YES — order status, audit logs
+Checks Profile?: Env guards (TRADING_ENV=live)
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: HIGH
+────────────────────────────────────────
+Script/Path: scripts/budgeted_autonomy_v01_cycle.py
+Capability: Full authorization + GKS clearance + execution
+Touches Exchange?: Indirectly via API
+Touches DB Runtime State?: Indirectly via API
+Checks Profile?: Env guards (TRADING_ENV=live)
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: Self-clears GKS via API
+Default Dry-run?: No
+Risk Level: HIGH
+────────────────────────────────────────
+Script/Path: scripts/owner_bounded_api_request.py
+Capability: BNB bounded execution via API
+Touches Exchange?: Indirectly via API
+Touches DB Runtime State?: Indirectly via API
+Checks Profile?: Env guards (BRC_EXECUTION_PERMISSION_MAX=read_only)
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: HIGH
+────────────────────────────────────────
+Script/Path: scripts/probe_trend_execute_server_readiness.py
+Capability: Trend execution probe
+Touches Exchange?: Indirectly via API
+Touches DB Runtime State?: Indirectly via API
+Checks Profile?: Strong env guards
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: HIGH
+────────────────────────────────────────
+Script/Path: scripts/start_brc_local_testnet.sh
+Capability: Starts full runtime + seeds profile
+Touches Exchange?: Indirectly
+Touches DB Runtime State?: YES — seeds profile, enables control API
+Checks Profile?: No explicit guard
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: No
+Risk Level: HIGH
+────────────────────────────────────────
+Script/Path: scripts/brc_record_scoped_runtime_safety_clearance.py
+Capability: GKS/startup guard clearance writer
+Touches Exchange?: No
+Touches DB Runtime State?: YES — writes clearance rows to PG
+Checks Profile?: Requires matching authorization
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: No
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/seed_tiny_live_profile.py
+Capability: Seeds active live profile
+Touches Exchange?: No
+Touches DB Runtime State?: YES — upserts profile as active
+Checks Profile?: No
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/seed_brc_profile.py
+Capability: Seeds testnet profile
+Touches Exchange?: No
+Touches DB Runtime State?: YES
+Checks Profile?: No
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/seed_prelive_bnb_readonly_profile.py
+Capability: Seeds readonly live profile
+Touches Exchange?: No
+Touches DB Runtime State?: YES
+Checks Profile?: Strong (OWNER_APPROVED_*)
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/reset_bnb_testnet_daily_gate.py
+Capability: Resets daily trade counter
+Touches Exchange?: No
+Touches DB Runtime State?: YES — resets PG trade count
+Checks Profile?: Refuses live
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: No
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/probe_exchange_credential_preflight.py
+Capability: Exchange credential probe
+Touches Exchange?: YES (read-only)
+Touches DB Runtime State?: No
+Checks Profile?: No
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/import_sqlite_klines_to_pg.py
+Capability: Data import
+Touches Exchange?: No
+Touches DB Runtime State?: YES — writes klines
+Checks Profile?: No
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: No
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: scripts/run_cpm1_2021_oos.py / run_cpm1_2022_oos.py
+Capability: Backtest data fetch
+Touches Exchange?: YES (empty keys, public data)
+Touches DB Runtime State?: No
+Checks Profile?: No
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: N/A
+Risk Level: MEDIUM
+────────────────────────────────────────
+Script/Path: 14 LOW-risk scripts
+Capability: Read-only inspection, research, smoke tests
+Touches Exchange?: No
+Touches DB Runtime State?: Minimal
+Checks Profile?: Varies
+Checks ExecutionPerm?: No
+Checks GKS/StartupGuard?: No
+Default Dry-run?: YES
+Risk Level: LOW
+
+Summary:
+- 44 scripts total
+- 16 default to dry-run; 28 execute immediately
+- 6 scripts can reach the exchange (4 directly, 2 via API)
+- 3 scripts can disable GKS
+- 0 scripts check ExecutionPermission
+- 0 scripts check StartupGuard (correctly — close/exit is exempt)
+
+---
+E. Safety Invariant Gaps
+
+GAP-S0-001: GKS Single-Command Deactivation
+
+┌───────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│       Field       │                                                                                      Value                                                                                      │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID            │ S0-001                                                                                                                                                                          │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description       │ scripts/seed_gks_state.py --inactive deactivates GKS with a single command, no confirmation prompt, no env-var gate, and no PG-side authorization check.                        │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence          │ scripts/seed_gks_state.py:28-30 — --inactive flag has only a help-text warning. Line 54 calls PgGlobalKillSwitchRepository.set_state() directly.                                │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity          │ S0                                                                                                                                                                              │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters    │ GKS is the last-resort emergency stop. A single-command bypass with no runtime guard defeats its purpose. Any process or cron that can run this script can silently disable the │
+│                   │  kill switch.                                                                                                                                                                   │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant  │ GKS deactivation must require multi-factor confirmation: (1) explicit env-var authorization, (2) PG-side authorization record, (3) confirmation prompt or interactive TTY       │
+│                   │ check.                                                                                                                                                                          │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future  │ Add OWNER_APPROVED_GKS_DEACTIVATION env-var guard to seed_gks_state.py. Add PG-side gks_deactivation_authorization table requiring explicit owner approval row before           │
+│ fix               │ set_state(active=False) is accepted by the repository.                                                                                                                          │
+└───────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S0-002: Raw Exchange API Bypass in Stress Script
+
+┌───────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│       Field       │                                                                                      Value                                                                                      │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID            │ S0-002                                                                                                                                                                          │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description       │ scripts/run_001d4_multi_cycle_stress.sh contains force_exchange_flat() (lines 185-263) that directly calls Binance REST API (/fapi/v1/order, /fapi/v2/positionRisk) with raw    │
+│                   │ HMAC signing, bypassing the entire application stack.                                                                                                                           │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence          │ scripts/run_001d4_multi_cycle_stress.sh:185-263 — inline Python with hmac.new(), requests.post(), direct Binance endpoints.                                                     │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity          │ S0                                                                                                                                                                              │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters    │ If run with live credentials instead of testnet, this directly flattens live positions with zero application-level safety checks — no ExecutionPermission, no                   │
+│                   │ CapitalProtection, no GKS, no StartupGuard, no audit trail.                                                                                                                     │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant  │ No script may contain raw exchange API calls outside the application's ExchangeGateway abstraction.                                                                             │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future  │ Remove inline exchange API calls from shell scripts. Replace with application-layer API endpoints or CLI commands that go through the full safety gate chain. Add a pre-commit  │
+│ fix               │ linter that rejects raw Binance/CCXT API patterns in scripts/.                                                                                                                  │
+└───────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S1-001: ExecutionPermission Not System-Wide
+
+┌─────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│      Field      │                                                                                       Value                                                                                       │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID          │ S1-001                                                                                                                                                                            │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description     │ ExecutionPermission only gates execute_signal() and BRC operation preflight. Nine code paths reach gateway.place_order() or gateway.cancel_order() without checking               │
+│                 │ ExecutionPermission.                                                                                                                                                              │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence        │ owner_bounded_execution.py:211,231,256 (submit_entry/TP/SL), execution_orchestrator.py:547-628 (controlled_close), execution_orchestrator.py:860,1609,1959,2059 (SL restore, TP   │
+│                 │ mount, partially filled), reconciliation.py:755,887 (cancel_order)                                                                                                                │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity        │ S1                                                                                                                                                                                │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters  │ ExecutionPermission is presented as the system-wide execution depth control, but it only gates ~30% of exchange-touching paths. An operator who sets                              │
+│                 │ BRC_EXECUTION_PERMISSION_MAX=read_only expects all execution to stop, but owner-bounded, close, reconciliation, and SL/TP replacement paths still operate.                        │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target          │ Every path that calls gateway.place_order() or gateway.cancel_order() must pass through a unified ExecutionPermission gate, or the permission model must explicitly document      │
+│ invariant       │ which paths are exempt and why.                                                                                                                                                   │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested       │ Introduce ExecutionPermissionGate at the ExchangeGateway level — a decorator or middleware that checks permission before every place_order() / cancel_order() call.               │
+│ future fix      │ Alternatively, move to a RuntimeSafetyContext that is required by the gateway constructor.                                                                                        │
+└─────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S1-002: max_leverage Stored But Never Enforced
+
+┌───────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│       Field       │                                                                                      Value                                                                                      │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID            │ S1-002                                                                                                                                                                          │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description       │ CapitalProtectionConfig.account["max_leverage"] is populated from risk config but CapitalProtectionManager.pre_order_check() never reads or validates it.                       │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence          │ src/domain/models.py:1978 defines max_leverage in config. src/application/capital_protection.py:176 (pre_order_check) has no leverage validation logic.                         │
+│                   │ src/application/config_manager.py:368 and runtime_config.py:238 populate the value.                                                                                             │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity          │ S1                                                                                                                                                                              │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters    │ A signal could request 125x leverage and pass all capital protection checks. Leverage enforcement exists only at the Owner authorization scope level                            │
+│                   │ (owner_bounded_execution.py:1412), not at the exchange boundary.                                                                                                                │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant  │ pre_order_check() must validate requested leverage against max_leverage before allowing order placement.                                                                        │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future  │ Add _check_max_leverage() to CapitalProtectionManager.pre_order_check() that compares the order's effective leverage against config.account["max_leverage"]. Reject if          │
+│ fix               │ exceeded.                                                                                                                                                                       │
+└───────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S1-003: Owner-Bounded Path Bypasses CapitalProtection
+
+┌────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│     Field      │                                                                                       Value                                                                                        │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID         │ S1-003                                                                                                                                                                             │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description    │ ExchangeGatewayBoundedOrderExecutor.submit_entry() (and submit_take_profit/stop_loss) calls gateway.place_order() directly with no CapitalProtectionManager.pre_order_check().     │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence       │ src/application/owner_bounded_execution.py:211-278 — submit_entry() calls self._gateway.place_order() with no capital protection reference anywhere in the class.                  │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity       │ S1                                                                                                                                                                                 │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                │ The Owner-bounded path has its own authorization gates (BoundedLiveTrialAuthorization), but these do not include the 11 runtime checks that pre_order_check() performs             │
+│ Why it matters │ (min_notional, price reasonability, single trade loss, position limit, daily loss, daily trade count, min balance, etc.). If authorization is granted, a position could exceed     │
+│                │ daily loss limits or minimum balance thresholds.                                                                                                                                   │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target         │ Every exchange-touching execution path must pass through CapitalProtection, or the exemption must be documented with compensating controls.                                        │
+│ invariant      │                                                                                                                                                                                    │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested      │ Either (a) inject CapitalProtectionManager into ExchangeGatewayBoundedOrderExecutor and call pre_order_check() before submit_entry(), or (b) add a CapitalProtectionGate at the    │
+│ future fix     │ ExchangeGateway level.                                                                                                                                                             │
+└────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S1-004: Scripts Can Inject Noop CapitalProtection
+
+┌────────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│       Field        │                                                                                     Value                                                                                      │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID             │ S1-004                                                                                                                                                                         │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description        │ ExecutionOrchestrator accepts any object as capital_protection without type enforcement. Scripts can inject _NoopCapitalProtection().                                          │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence           │ scripts/owner_authorized_bnb_close.py:48-50 defines _NoopCapitalProtection, injected at line 330-331.                                                                          │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity           │ S1                                                                                                                                                                             │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters     │ Any script that instantiates ExecutionOrchestrator can bypass all capital protection by passing a no-op. The constructor does not enforce that capital_protection is a real    │
+│                    │ CapitalProtectionManager instance.                                                                                                                                             │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant   │ ExecutionOrchestrator constructor must validate that capital_protection is an instance of CapitalProtectionManager or a registered interface.                                  │
+├────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future   │ Add isinstance(capital_protection, CapitalProtectionManager) check in ExecutionOrchestrator.__init__(), or use a Protocol with runtime isinstance check.                       │
+│ fix                │                                                                                                                                                                                │
+└────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S2-001: CapitalProtectionConfig Inner Dicts Untyped
+
+┌──────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│        Field         │                                                                Value                                                                │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID               │ S2-001                                                                                                                              │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description          │ CapitalProtectionConfig.single_trade, daily, and account are Dict[str, Any] — inner values are not individually Pydantic-validated. │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence             │ src/domain/models.py:1930-1981 — outer model is typed Pydantic, but inner dicts are Dict[str, Any].                                 │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity             │ S2                                                                                                                                  │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters       │ Invalid values (e.g., max_loss_percent: "ten", max_leverage: -5) would pass config loading and only fail at runtime when accessed.  │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant     │ Safety-critical config values should be individually typed Pydantic models.                                                         │
+├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future fix │ Replace Dict[str, Any] with typed Pydantic sub-models: SingleTradeLimits, DailyLimits, AccountLimits.                               │
+└──────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S2-002: Strategy Trigger/Filter Params Untyped
+
+┌──────────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│        Field         │                                                               Value                                                                │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID               │ S2-002                                                                                                                             │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description          │ Strategy trigger and filter configs are stored as JSON blobs with Dict[str, Any] params, not schema-validated at config load time. │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence             │ src/application/config_manager.py:1037-1088 — corrupted strategies are skipped with warning, not rejected.                         │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity             │ S2                                                                                                                                 │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters       │ Invalid strategy parameters could produce unexpected behavior at signal generation time.                                           │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant     │ Strategy configs should be validated against a schema at load time.                                                                │
+├──────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future fix │ Define Pydantic models for each strategy type's parameters. Validate at load time.                                                 │
+└──────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S2-003: StartupGuard Not PG-Persisted
+
+┌───────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│       Field       │                                                                                      Value                                                                                      │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID            │ S2-003                                                                                                                                                                          │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description       │ StartupGuard state is process-local in-memory only. Every restart resets to armed=False.                                                                                        │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence          │ src/application/startup_trading_guard.py:30-51 — no repository injection, no PG writes.                                                                                         │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity          │ S2                                                                                                                                                                              │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Why it matters    │ This is by design (startup guard should re-arm on each restart after startup checks pass), but it means a crash-restart loop could leave the guard unarmed indefinitely if the  │
+│                   │ arming logic fails. GKS provides the persistent backstop.                                                                                                                       │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target invariant  │ StartupGuard in-memory-only design is acceptable as long as GKS (PG-backed) remains the persistent safety net. Document this intentional asymmetry.                             │
+├───────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested future  │ No code fix needed. Add architectural documentation that StartupGuard is intentionally transient and GKS is the persistent safety net.                                          │
+│ fix               │                                                                                                                                                                                 │
+└───────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+GAP-S2-004: Config Precedence Multi-Track Ambiguity
+
+┌─────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│      Field      │                                                                                       Value                                                                                       │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Gap ID          │ S2-004                                                                                                                                                                            │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Description     │ Safety config values (max_leverage, max_loss, risk limits) can come from 4 different sources with different values: Runtime Profile (PG), SQLite DB (ConfigManager), env vars, or │
+│                 │  hardcoded defaults.                                                                                                                                                              │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Evidence        │ main.py:1031-1087 shows runtime config provider overrides ConfigManager, with fallback warning. config_manager.py:660-738 applies hardcoded defaults. runtime_config.py:413-429   │
+│                 │ reads env vars.                                                                                                                                                                   │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Severity        │ S2                                                                                                                                                                                │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                 │ In non-live environments, it is possible for the Runtime Profile to say max_leverage=5x while the SQLite DB says max_leverage=10x. The Runtime Profile wins, but the operator may │
+│ Why it matters  │  not realize the SQLite value is inert. In the current system this is mitigated by the fact that Runtime Profile is the intended single source, but the fallback path introduces  │
+│                 │ ambiguity.                                                                                                                                                                        │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Target          │ Safety config should have a single authoritative source. When a Runtime Profile is active, ConfigManager-sourced safety values should be explicitly marked as shadow/inert.       │
+│ invariant       │                                                                                                                                                                                   │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Suggested       │ Add a startup log line that explicitly states which source provided each safety-critical value and whether fallback sources were consulted.                                       │
+│ future fix      │                                                                                                                                                                                   │
+└─────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+---
+F. Recommended Target Design
+
+Minimal Unification Model
+
+┌─────────────────────────────────────────────────┐
+│              RuntimeSafetyContext                 │
+│  (frozen at startup, required by all gates)      │
+│  - profile: ResolvedRuntimeConfig                │
+│  - permission: ExecutionPermission               │
+│  - config_hash: str                              │
+└──────────────┬──────────────────────────────────┘
+               │
+    ┌──────────┴──────────────────────────────────┐
+    │         ExecutionPermissionGate               │
+    │  Single check point for ALL exchange calls    │
+    │  Wraps ExchangeGateway.place_order() and      │
+    │  cancel_order() with permission verification  │
+    └──────────┬──────────────────────────────────┘
+               │
+    ┌──────────┴──────────────────────────────────┐
+    │         GlobalKillSwitchGate                  │
+    │  PG-backed, checked before every new entry    │
+    │  GKS deactivation requires multi-factor auth  │
+    └──────────┬──────────────────────────────────┘
+               │
+    ┌──────────┴──────────────────────────────────┐
+    │         CapitalProtectionGate                 │
+    │  Extends pre_order_check() to include:        │
+    │  - max_leverage enforcement                   │
+    │  - max_notional enforcement                   │
+    │  Required by ALL entry paths (not just        │
+    │  execute_signal)                              │
+    └──────────┬──────────────────────────────────┘
+               │
+    ┌──────────┴──────────────────────────────────┐
+    │         ScriptSafetyBootstrap                 │
+    │  All scripts must call bootstrap() before     │
+    │  any exchange/DB-runtime-state operation      │
+    │  Validates: profile, permission, GKS, env     │
+    │  Fails closed if any check missing            │
+    └─────────────────────────────────────────────┘
+
+Key design principles:
+
+1. RuntimeSafetyContext — Created once at startup, frozen, passed to all safety gates. Eliminates multi-track config ambiguity by resolving all values once.
+2. ExecutionPermissionGate — Wraps ExchangeGateway at the constructor level. Every place_order() / cancel_order() call passes through it. Scripts cannot bypass by instantiating their own gateway.
+3. GlobalKillSwitchGate — GKS deactivation requires: (a) OWNER_APPROVED_GKS_DEACTIVATION env var, (b) PG authorization record, (c) confirmation prompt. Repository rejects set_state(active=False) without authorization.
+4. CapitalProtectionGate — Extends pre_order_check() to include max_leverage and max_notional. Required by ExecutionPermissionGate — no way to bypass by injecting a no-op.
+5. ScriptSafetyBootstrap — A bootstrap_safety_context() function that scripts call before any operation. Validates environment, profile, permission, GKS state. Returns a RuntimeSafetyContext or raises. Scripts that skip bootstrap cannot obtain a gateway instance.
+
+---
+G. No Fixes Performed
+
+This is an audit-only report. No code was modified, no migrations were added, no scripts were run, and no exchange APIs were cal

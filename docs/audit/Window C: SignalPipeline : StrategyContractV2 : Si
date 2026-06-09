@@ -1,0 +1,670 @@
+Window C: SignalPipeline / StrategyContractV2 / SignalEvaluation Bridge Semantic Audit
+
+1. Current Object Map
+
+SignalPipeline
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/application/signal_pipeline.py (lines 35-1176)                                                                                                                                  │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Application-layer orchestrator: receives K-line data, runs DynamicStrategyRunner, deduplicates signals, calculates risk via RiskCalculator, manages cooldown, sends notifications,  │
+│                │ persists SignalAttempt/SignalResult to repository, and optionally triggers execution via signal_executor callback                                                                   │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ main.py (creates singleton), ConfigManager, KlineData from WebSocket, RuntimeConfig (hot-reload observer)                                                                           │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ DynamicStrategyRunner (runs strategies), RiskCalculator (calculates risk), SignalRepository (persists), NotificationService (alerts), ExecutionOrchestrator.execute_signal          │
+│                │ (optional execution callback), PatternStrategySignalObserveWriter (v2 sidecar)                                                                                                      │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Conflicting — can directly trigger execution via signal_executor, has no BRC contract awareness                                                                                     │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+DynamicStrategyRunner
+
+┌────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                      │
+├────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/strategy_engine.py (lines 641-844)                                                                                                                        │
+├────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Domain engine: runs multiple strategies with independent filter chains, short-circuit evaluation, shared EMA cache, TraceEvent tracking. Returns List[SignalAttempt] │
+├────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ create_dynamic_runner() factory (line 1097), StrategyWithFilters, PinbarStrategy, EngulfingStrategy, FilterFactory, EMACache                                         │
+├────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ SignalPipeline._run_strategy() (live), Backtester._run_dynamic_strategy_loop() (backtest)                                                                            │
+├────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — pure domain logic, no I/O, no execution awareness                                                                                                         │
+└────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+PinbarStrategy
+
+┌────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                        │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/strategy_engine.py (line 178)                                                                                                                               │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Pattern detector: detect(kline, atr_value) -> Optional[PatternResult]. Identifies pinbar candle patterns. Does not compute entry, stop, TP, position size, or leverage │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ PinbarConfig, KlineData, ATR value                                                                                                                                     │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ DynamicStrategyRunner.run_all()                                                                                                                                        │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — pure signal pattern producer                                                                                                                                │
+└────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+EngulfingStrategy
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/strategies/engulfing_strategy.py (line 15)                                                                                                                               │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Pattern detector: detect(kline, prev_kline, atr_value) -> Optional[PatternResult]. Identifies engulfing candle patterns. Does not compute entry, stop, TP, position size, or        │
+│                │ leverage                                                                                                                                                                            │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ PinbarConfig (inherits), KlineData, ATR value                                                                                                                                       │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ DynamicStrategyRunner.run_all()                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — pure signal pattern producer                                                                                                                                             │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+PatternResult
+
+┌────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                            │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/models.py (lines 511-517)                                                                       │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Dataclass holding: strategy_name: str, direction: Direction, score: Decimal, details: dict                 │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ PinbarStrategy.detect(), EngulfingStrategy.detect()                                                        │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ SignalAttempt.pattern, PatternResultToStrategySignalV2Adapter.adapt(), RiskCalculator (via SignalPipeline) │
+├────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — minimal raw signal output, no execution semantics                                               │
+└────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+SignalAttempt
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/models.py (lines 533-564)                                                                                                                                                │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Dataclass recording one strategy evaluation: strategy_name, pattern: Optional[PatternResult], filter_results: List[Tuple[str, FilterResult]], final_result: str (SIGNAL_FIRED /     │
+│                │ NO_PATTERN / FILTERED)                                                                                                                                                              │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ DynamicStrategyRunner.run_all()                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ SignalPipeline (decision logic), PatternStrategySignalObserveWriter (v2 sidecar), Backtester                                                                                        │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — evaluation record, no execution semantics                                                                                                                                │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+SignalResult
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/models.py (lines 142-163)                                                                                                                                                │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Pydantic model carrying: symbol, timeframe, direction, entry_price, suggested_stop_loss, suggested_position_size, current_leverage, tags, risk_reward_info, status, pnl_ratio,      │
+│                │ kline_timestamp, strategy_name, score, take_profit_levels                                                                                                                           │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ RiskCalculator.calculate_signal_result()                                                                                                                                            │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ SignalPipeline (cooldown, persistence), SignalStatusTracker, ExecutionOrchestrator.execute_signal(), ExecutionIntent.signal                                                         │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Conflicting — conflates signal identity with execution-adjacent semantics (entry_price, stop_loss, position_size, leverage). Serves as both signal record and execution input       │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+StrategySignalV2
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/strategy_contract_v2.py (lines 186-202)                                                                                                                                  │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Pure type contract: strategy_id, strategy_family, symbol, timeframe, direction, entry_policy, stop_policy, take_profit_policy, lifecycle_exit_policy, required_history, score,      │
+│                │ metadata, created_at_ms, source_context_id                                                                                                                                          │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ PatternResultToStrategySignalV2Adapter.adapt()                                                                                                                                      │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ PatternStrategySignalObserveWriter (JSONL sidecar only)                                                                                                                             │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — well-designed pure contract, but currently only used as observe-only sidecar. Missing strategy_family_id, strategy_family_version_id, contract_version,                  │
+│                │ trial_binding_id, runtime_instance_id                                                                                                                                               │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+EntryPolicy / StopPolicy / TakeProfitPolicy / LifecycleExitPolicy
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/strategy_contract_v2.py (lines 119-176)                                                                                                                                  │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Explicit structured policy value objects, composing into StrategySignalV2. Well-typed enums (EntryPolicyKind, StopPolicyKind, TakeProfitPolicyKind, LifecycleExitPolicyKind). Each  │
+│                │ has formal semantics documented in docstrings                                                                                                                                       │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ Constructed by PatternResultToStrategySignalV2Adapter (hardcoded observe-only values)                                                                                               │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ Embedded in StrategySignalV2                                                                                                                                                        │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — well-designed, explicit contract. Currently only populated with hardcoded no-op values by the observe adapter                                                            │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+StrategyFamilySignalInput / StrategyFamilySignalOutput
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/strategy_family_signal.py (lines 166-241)                                                                                                                                │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                │ BRC-level signal contract with contract_version, strategy_family_id, strategy_family_version_id, evaluation_id, MarketSnapshot, AccountFactsSnapshot, SignalDataQuality,            │
+│ Responsibility │ SignalInputRefs, SignalReviewPlan, expected_risk_shape, invalidation_conditions, evidence_payload. Includes not_order: Literal[True] and not_execution_intent: Literal[True] safety │
+│                │  literals                                                                                                                                                                           │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ None (not connected to live flow)                                                                                                                                                   │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ HistoricalSignalOutputRecord (historical evaluation service)                                                                                                                        │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable but disconnected — defines the correct target contract shape but is not wired into any live signal flow                                                                    │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+HistoricalSignalEvaluation* (family)
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/historical_signal_evaluation.py                                                                                                                                          │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Historical research models: HistoricalSignalEvaluationRun, HistoricalSignalOutputRecord, HistoricalForwardOutcome, HistoricalSignalEvaluationSummary,                               │
+│                │ HistoricalSignalEvaluationOwnerReport, HistoricalRegimeWindowReport, HistoricalRegimeSplitComparisonReport. All have reject_forbidden_execution_fields() validators                 │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ HistoricalSignalEvaluationService, CPMHistoricalExperimentRunner, PG repository                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ Owner reports, regime split reports                                                                                                                                                 │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Reusable — strictly historical research, explicitly non-executing. Has not_order and not_execution_intent safety literals                                                           │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ExecutionIntent
+
+┌────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                │                                                                                                                                                                                     │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File           │ src/domain/execution_intent.py (lines 25-83)                                                                                                                                        │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Responsibility │ Tracks signal-to-order execution lifecycle: PENDING -> BLOCKED/SUBMITTED -> PROTECTING/PARTIALLY_PROTECTED -> COMPLETED. Contains signal: SignalResult, order_id,                   │
+│                │ exchange_order_id, authorization_id                                                                                                                                                 │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Upstream       │ ExecutionOrchestrator.execute_signal()                                                                                                                                              │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Downstream     │ ExecutionIntentRepositoryPort, API console runtime endpoints                                                                                                                        │
+├────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status     │ Execution-adjacent — downstream boundary of Window C, belongs to execution window                                                                                                   │
+└────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+OrderCandidate
+
+┌────────────┬────────────────────────────────────────────────────────────────────────────────────────────┐
+│            │                                                                                            │
+├────────────┼────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File       │ Does not exist anywhere in the codebase                                                    │
+├────────────┼────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status │ Missing — required by target architecture between SignalEvaluation and Owner Authorization │
+└────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
+
+StrategyContractV2
+
+┌────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│            │                                                                                                                                                               │
+├────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ File       │ Does not exist as a class — the module strategy_contract_v2.py contains the types, but there is no aggregate StrategyContractV2 wrapper class                 │
+├────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BRC Status │ Missing as a concept — StrategySignalV2 serves as root aggregate, but no explicit contract object ties strategy family identity, version, and policy together │
+└────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+StrategyRuntimeInstance
+
+┌────────────┬─────────────────────────────────────────────────────────────────┐
+│            │                                                                 │
+├────────────┼─────────────────────────────────────────────────────────────────┤
+│ File       │ Does not exist anywhere in the codebase                         │
+├────────────┼─────────────────────────────────────────────────────────────────┤
+│ BRC Status │ Missing — required by target architecture but not yet conceived │
+└────────────┴─────────────────────────────────────────────────────────────────┘
+
+BRC Admission Chain (reference)
+
+┌───────────────────────┬─────────────────────────────────┬────────┐
+│        Object         │              File               │ Status │
+├───────────────────────┼─────────────────────────────────┼────────┤
+│ StrategyFamilyVersion │ src/domain/brc_admission.py:111 │ Exists │
+├───────────────────────┼─────────────────────────────────┼────────┤
+│ AdmissionDecision     │ src/domain/brc_admission.py:197 │ Exists │
+├───────────────────────┼─────────────────────────────────┼────────┤
+│ AdmissionTrialBinding │ src/domain/brc_admission.py:265 │ Exists │
+└───────────────────────┴─────────────────────────────────┴────────┘
+
+These exist but are not connected to the signal flow.
+
+---
+2. Current Flow Diagram
+
+Live Signal Flow (actual code)
+
+KlineData (WebSocket)
+  |
+  v
+SignalPipeline.process_kline()               [src/application/signal_pipeline.py:521]
+  |
+  +---> DynamicStrategyRunner.update_state()  [src/domain/strategy_engine.py:668]
+  +---> DynamicStrategyRunner.run_all()       [src/domain/strategy_engine.py:698]
+  |       |
+  |       +---> PinbarStrategy.detect()       [src/domain/strategy_engine.py:188]
+  |       |       -> Optional[PatternResult]
+  |       |
+  |       +---> EngulfingStrategy.detect()    [src/domain/strategies/engulfing_strategy.py:43]
+  |               -> Optional[PatternResult]
+  |       |
+  |       +---> FilterChain (EMA, ATR, MTF, etc.)  [src/domain/filter_factory.py]
+  |       |
+  |       v
+  |     List[SignalAttempt]  (SIGNAL_FIRED / FILTERED / NO_PATTERN)
+  |
+  +---> _apply_runtime_direction_policy()     [signal_pipeline.py:697]
+  |
+  +---> _calculate_risk()                     [signal_pipeline.py:849]
+  |       |
+  |       +---> RiskCalculator.calculate_signal_result()  [src/domain/risk_calculator.py:348]
+  |               -> SignalResult (entry_price, stop_loss, position_size, leverage, TP levels)
+  |
+  +---> _check_cover()                        [signal_pipeline.py:1011]
+  +---> _check_opposing_signal()              [signal_pipeline.py:1083]
+  +---> Cooldown check
+  +---> SignalStatusTracker.track_signal()
+  +---> SignalRepository.persist()
+  +---> NotificationService.notify()
+  |
+  +---> PatternStrategySignalObserveWriter    [observe-only JSONL sidecar]
+  |       |
+  |       +---> PatternResultToStrategySignalV2Adapter.adapt()
+  |       |       -> StrategySignalV2 (hardcoded policies, observe-only)
+  |       |
+  |       +---> StrategySignalV2ObserveSink.write()
+  |               -> logs/runtime/strategy_signal_v2_observe.jsonl
+  |
+  +---> signal_executor(signal, strategy)     [OPTIONAL, wired in main.py]
+          |
+          v
+        ExecutionOrchestrator.execute_signal()  [src/application/execution_orchestrator.py:1048]
+          |
+          +---> ExecutionIntent(PENDING)
+          +---> BRC permission / startup guard / GKS / circuit breaker / account risk
+          +---> CapitalProtection.pre_order_check()
+          +---> OrderLifecycleService.create_order()
+          +---> ExchangeGateway.place_order()
+          +---> OrderLifecycleService.submit_order()
+          |
+          v
+        ExecutionIntent(BLOCKED | SUBMITTED | FAILED | COMPLETED)
+
+BRC Contract Layer (separate, disconnected)
+
+StrategyFamilySignalInput                    [src/domain/strategy_family_signal.py:166]
+  (MarketSnapshot, AccountFactsSnapshot, contract_version,
+   strategy_family_id, strategy_family_version_id, binding_id...)
+  |
+  |  NOT CONNECTED TO LIVE SIGNAL FLOW
+  |
+  v
+StrategyFamilySignalOutput                   [src/domain/strategy_family_signal.py:199]
+  (signal_type, side, confidence, expected_risk_shape,
+   evidence_payload, review_plan, not_order=True, not_execution_intent=True...)
+  |
+  |  Only consumed by HistoricalSignalEvaluationService (offline research)
+  |
+  v
+HistoricalSignalOutputRecord                 [src/domain/historical_signal_evaluation.py:77]
+
+Historical Evaluation Flow (offline only)
+
+HistoricalSignalEvaluationService            [src/application/historical_signal_evaluation_service.py]
+  |
+  +---> HistoricalSignalEvaluationRun (strategy_family_id, strategy_family_version_id, symbols, time range)
+  +---> StrategyFamilySignalOutput[] (produced per bar in historical range)
+  +---> HistoricalSignalOutputRecord[] (compacted evidence)
+  +---> HistoricalForwardOutcome[] (MFE/MAE/follow-through analysis)
+  +---> HistoricalSignalEvaluationSummary (verdict: CONTINUE/PARK/NEEDS_REFINEMENT)
+  +---> HistoricalSignalEvaluationOwnerReport (advisory only)
+
+Key Gap: Two Parallel Universes
+
+LIVE WORLD:   KlineData -> DynamicStrategyRunner -> PatternResult -> SignalResult -> ExecutionIntent
+              (no BRC contract awareness, no strategy_family_id, no evaluation engine)
+
+BRC WORLD:    StrategyFamilySignalInput -> StrategyFamilySignalOutput -> HistoricalSignalOutputRecord
+              (offline research only, not connected to live flow)
+
+BRIDGE:       PatternResult -> PatternResultToStrategySignalV2Adapter -> StrategySignalV2 -> JSONL sidecar
+              (observe-only, hardcoded policies, no BRC identity fields)
+
+---
+3. Semantic Classification
+
+┌─────────────────────────────┬────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│           Object            │         Classification         │                                                              Rationale                                                               │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ PinbarStrategy              │ Signal pattern / entry trigger │ Detects pinbar pattern only; returns PatternResult with direction + score. No entry/stop/TP/size logic                               │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ EngulfingStrategy           │ Signal pattern / entry trigger │ Detects engulfing pattern only; returns PatternResult with direction + score. No entry/stop/TP/size logic                            │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ PatternResult               │ Raw signal producer output     │ Minimal dataclass: strategy_name, direction, score, details. Closest to RawSignal                                                    │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ DynamicStrategyRunner       │ Signal evaluation engine       │ Runs strategies + filter chains + short-circuit evaluation. Produces SignalAttempt with pass/fail. Missing: BRC identity, contract   │
+│                             │ (partial)                      │ version, evidence snapshots                                                                                                          │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ SignalAttempt               │ Signal evaluation record       │ Records per-strategy evaluation result: pattern detected? filters passed? final verdict. Closest to an evaluation record but lacks   │
+│                             │                                │ BRC identity                                                                                                                         │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ SignalPipeline              │ Execution-adjacent             │ Mixed responsibilities: signal orchestration + risk calculation + cooldown + persistence + execution trigger. Conflates signal       │
+│                             │ orchestrator                   │ evaluation with execution initiation                                                                                                 │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ SignalResult                │ Candidate trade proposal       │ Contains both signal identity (symbol, direction, score) AND execution parameters (entry_price, stop_loss, position_size, leverage). │
+│                             │ (conflated)                    │  Closer to TradeIntent than RawSignal or OrderCandidate                                                                              │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ StrategySignalV2            │ Strategy contract component    │ Pure value-object contract with structured policies. Currently observe-only. Closest to target EvaluatedSignal but missing BRC       │
+│                             │                                │ identity fields                                                                                                                      │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ EntryPolicy                 │ Strategy contract component    │ Explicit, well-typed entry semantics                                                                                                 │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ StopPolicy                  │ Strategy contract component    │ Explicit, well-typed stop semantics                                                                                                  │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ TakeProfitPolicy            │ Strategy contract component    │ Explicit, well-typed TP semantics                                                                                                    │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ LifecycleExitPolicy         │ Strategy contract component    │ Explicit, well-typed lifecycle exit semantics                                                                                        │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ StrategyFamilySignalInput   │ Strategy contract component    │ BRC-level input contract with market snapshot, account facts, permission resolution. Disconnected from live flow                     │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ StrategyFamilySignalOutput  │ Signal evaluation record (BRC) │ BRC-level output contract with signal_type, confidence, evidence, review plan. Disconnected from live flow                           │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ HistoricalSignalEvaluation* │ Signal evaluation record       │ Historical research models, explicitly non-executing                                                                                 │
+│                             │ (historical)                   │                                                                                                                                      │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ExecutionIntent             │ Execution-adjacent object      │ Tracks signal-to-order lifecycle with exchange/authorization state                                                                   │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ OrderCandidate              │ Missing                        │ Does not exist; required between evaluation and authorization                                                                        │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ StrategyContractV2          │ Missing                        │ No aggregate contract class; module name only                                                                                        │
+├─────────────────────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ StrategyRuntimeInstance     │ Missing                        │ Does not exist anywhere                                                                                                              │
+└─────────────────────────────┴────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+---
+4. Gap Against Target BRC SignalEvaluation Engine
+
+Target Flow (Window C scope)
+
+MarketData
+  -> SignalProducer
+  -> RawSignal / StrategySignalV2
+  -> SignalEvaluationEngine
+  -> SignalEvaluation
+  -> OrderCandidate
+  -> [Window boundary: Owner Authorization / FinalGate / ExecutionIntent]
+
+Gap Analysis
+
+┌─────┬───────────────────────────────────────┬──────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Gap │              Description              │ Severity │                                                               Current State                                                               │
+│  ID │                                       │          │                                                                                                                                           │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│     │                                       │          │ DynamicStrategyRunner is a strategy engine but not an evaluation engine. It produces SignalAttempt (pattern + filter verdicts) but does   │
+│ G1  │ No SignalEvaluationEngine             │ S0       │ not produce a formal SignalEvaluation with evaluation_status, invalidation_reason, policy pass/fail details, evidence_snapshot, or        │
+│     │                                       │          │ forward-review anchor. The gap between SignalAttempt and a BRC SignalEvaluation is the central missing piece                              │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G2  │ No OrderCandidate                     │ S0       │ Does not exist. SignalResult jumps directly to ExecutionOrchestrator.execute_signal(). There is no intermediate pre-authorization         │
+│     │                                       │          │ candidate object that contains proposed trade info without execution semantics                                                            │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G3  │ No StrategyRuntimeInstance            │ S0       │ Does not exist. The target architecture requires runtime instance tracking (which AdmissionTrialBinding creates and which carries         │
+│     │                                       │          │ runtime_carrier_id), but no object binds a strategy family version to a live runtime evaluation context                                   │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G4  │ Missing BRC identity fields on        │ S1       │ StrategySignalV2 lacks: strategy_family_id (has strategy_family enum only), strategy_family_version_id, contract_version,                 │
+│     │ StrategySignalV2                      │          │ trial_binding_id, runtime_instance_id. The BRC StrategyFamilySignalInput/Output contract has these but is disconnected                    │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│     │ SignalPipeline mixes evaluation and   │          │ SignalPipeline is responsible for: (a) running strategies, (b) calculating risk/position sizing, (c) managing cooldown, (d) persisting    │
+│ G5  │ execution                             │ S0       │ signals, AND (e) optionally triggering execution via signal_executor callback. Roles (a)-(d) are signal evaluation; role (e) is execution │
+│     │                                       │          │  initiation. They must be separated                                                                                                       │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│     │ SignalResult conflates signal and     │          │ SignalResult carries both signal identity (symbol, direction, score, strategy_name) and execution parameters (entry_price,                │
+│ G6  │ execution semantics                   │ S0       │ suggested_stop_loss, suggested_position_size, current_leverage, take_profit_levels). In BRC, these belong to separate layers: the signal  │
+│     │                                       │          │ contract should describe the strategy intent; the OrderCandidate should describe the proposed trade parameters                            │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G7  │ No bridge between StrategySignalV2    │ S1       │ Two parallel contract systems exist: StrategySignalV2 (older, observe-only) and StrategyFamilySignalOutput (newer, BRC-aligned). Neither  │
+│     │ and StrategyFamilySignalOutput        │          │ feeds into the other. The PatternResultToStrategySignalV2Adapter targets the older contract only                                          │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G8  │ Policies are hardcoded in observe     │ S1       │ The PatternResultToStrategySignalV2Adapter always sets: entry=MARKET_AFTER_CONFIRMED_CLOSE, stop=NONE, TP=MULTI_TP_RR (empty),            │
+│     │ adapter                               │          │ lifecycle_exit=NONE. These are placeholder values. A real SignalEvaluationEngine must derive these from the actual strategy contract      │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G9  │ No evaluation_status or               │ S1       │ SignalAttempt.final_result is limited to SIGNAL_FIRED/NO_PATTERN/FILTERED. There is no formal evaluation_status                           │
+│     │ invalidation_reason                   │          │ (PENDING/EVALUATED/INVALIDATED/EXPIRED) or structured invalidation_reason                                                                 │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G10 │ No evidence_snapshot                  │ S1       │ PatternResult.details is an opaque dict. SignalAttempt.filter_results is a flat list. Neither produces a structured evidence_snapshot     │
+│     │                                       │          │ with market snapshot, account snapshot, permission resolution, or data quality assessment as required by StrategyFamilySignalOutput       │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G11 │ No forward-review anchor              │ S2       │ StrategySignalV2.metadata is unstructured. StrategyFamilySignalOutput.review_plan exists but is disconnected. No live signal carries a    │
+│     │                                       │          │ formal forward-review anchor                                                                                                              │
+├─────┼───────────────────────────────────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ G12 │ BRC admission chain not connected to  │ S1       │ StrategyFamilyVersion, AdmissionDecision, and AdmissionTrialBinding exist in brc_admission.py but are not referenced by SignalPipeline,   │
+│     │ signal flow                           │          │ DynamicStrategyRunner, or any signal object. The admission chain and the signal chain are parallel, unconnected systems                   │
+└─────┴───────────────────────────────────────┴──────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+---
+5. Risk Findings
+
+S0: Semantic Conflicts Blocking BRC Integration
+
+┌──────┬───────────────────────────────┬──────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  ID  │            Finding            │         File(s)          │                                                             Evidence                                                             │
+├──────┼───────────────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ SignalPipeline can directly   │ signal_pipeline.py:52,   │ signal_executor callback is wired to ExecutionOrchestrator.execute_signal in main.py:522-539. This means the signal pipeline is  │
+│ S0-1 │ trigger execution             │ 660-668                  │ not purely an evaluation component — it can initiate execution. In BRC, evaluation must produce an OrderCandidate that goes      │
+│      │                               │                          │ through Owner Authorization before any execution occurs                                                                          │
+├──────┼───────────────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ SignalResult contains         │                          │ SignalResult carries entry_price, suggested_stop_loss, suggested_position_size, current_leverage, take_profit_levels. These are  │
+│ S0-2 │ execution parameters          │ models.py:142-163        │ execution/order semantics embedded in what should be a signal-level object. ExecutionOrchestrator.execute_signal() consumes      │
+│      │                               │                          │ SignalResult directly as its input                                                                                               │
+├──────┼───────────────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │                               │                          │ The entire codebase has zero references to OrderCandidate. The flow goes directly from SignalResult to ExecutionIntent via       │
+│ S0-3 │ No OrderCandidate exists      │ N/A                      │ ExecutionOrchestrator.execute_signal(). This bypasses the target architecture's evaluation -> OrderCandidate -> Owner            │
+│      │                               │                          │ Authorization boundary                                                                                                           │
+├──────┼───────────────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ No live SignalEvaluation      │                          │ SignalAttempt records per-strategy evaluation but is ephemeral (in-memory, not persisted). There is no persisted                 │
+│ S0-4 │ concept                       │ N/A                      │ SignalEvaluation with evaluation_status, invalidation_reason, evidence_snapshot. The only SignalEvaluation* types are historical │
+│      │                               │                          │  research models (HistoricalSignalEvaluationRun etc.) which are explicitly offline                                               │
+├──────┼───────────────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S0-5 │ No StrategyRuntimeInstance    │ N/A                      │ The BRC target flow requires StrategyRuntimeInstance as the evaluation context. It does not exist. Without it, signals have no   │
+│      │                               │                          │ traceability back to which admitted trial binding or runtime carrier produced them                                               │
+└──────┴───────────────────────────────┴──────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+S1: Serious Ambiguity
+
+┌──────┬─────────────────────────────────────────────────────┬───────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐
+│  ID  │                       Finding                       │                File(s)                │                                           Evidence                                            │
+├──────┼─────────────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │                                                     │ strategy_contract_v2.py,              │ StrategySignalV2 (observe-only, older) and StrategyFamilySignalOutput (BRC-aligned, newer)    │
+│ S1-1 │ Two parallel unconnected contract systems           │ strategy_family_signal.py             │ define overlapping but incompatible signal contracts. No adapter bridges them.                │
+│      │                                                     │                                       │ CONTRACT_VERSION = "brc-strategy-family-signal-v1" exists only in the newer module            │
+├──────┼─────────────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ SignalPipeline._build_execution_strategy() derives  │                                       │ Risk calculation and OrderStrategy derivation happen inside the signal pipeline, not at the   │
+│ S1-2 │ execution strategy from signal                      │ signal_pipeline.py:490                │ evaluation/order boundary. This means the signal pipeline makes execution-relevant decisions  │
+│      │                                                     │                                       │ (TP/SL ratios, leverage) before any authorization checkpoint                                  │
+├──────┼─────────────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ BRC admission chain is disconnected from signal     │ brc_admission.py,                     │ StrategyFamilyVersion, AdmissionDecision, AdmissionTrialBinding exist and are well-designed   │
+│ S1-3 │ flow                                                │ brc_admission_service.py              │ but are never referenced by SignalPipeline, DynamicStrategyRunner, or any signal model. The   │
+│      │                                                     │                                       │ admission -> signal -> evaluation -> authorization chain is broken at the signal boundary     │
+├──────┼─────────────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ PatternResultToStrategySignalV2Adapter hardcodes    │                                       │ Entry=MARKET_AFTER_CONFIRMED_CLOSE, stop=NONE, TP=empty, lifecycle_exit=NONE. These are not   │
+│ S1-4 │ all policies                                        │ pattern_strategy_signal_adapter.py    │ derived from the actual strategy definition. If this adapter were promoted from observe-only  │
+│      │                                                     │                                       │ to production, it would produce signals with meaningless policy values                        │
+├──────┼─────────────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│      │ SignalResult.current_leverage embeds leverage in    │                                       │ Leverage is an execution/risk parameter, not a signal property. Its presence in SignalResult  │
+│ S1-5 │ signal                                              │ models.py:150                         │ means the signal layer makes leverage assumptions that should belong to the authorization or  │
+│      │                                                     │                                       │ execution layer                                                                               │
+└──────┴─────────────────────────────────────────────────────┴───────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+S2: Cleanup / Naming / Documentation Debt
+
+┌──────┬─────────────────────────────────────────────┬─────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  ID  │                   Finding                   │         File(s)         │                                                       Evidence                                                       │
+├──────┼─────────────────────────────────────────────┼─────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S2-1 │ StrategyContractV2 name ambiguity           │ strategy_contract_v2.py │ The module is named strategy_contract_v2 but contains no class named StrategyContractV2. The top-level type is       │
+│      │                                             │                         │ StrategySignalV2. This creates confusion about what "the contract" is                                                │
+├──────┼─────────────────────────────────────────────┼─────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S2-2 │ SignalResult.suggested_* naming             │ models.py:148-149       │ suggested_stop_loss and suggested_position_size use suggested_ prefix, signaling these are proposals. But they are   │
+│      │                                             │                         │ consumed directly by the execution orchestrator as if they were confirmed values                                     │
+├──────┼─────────────────────────────────────────────┼─────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S2-3 │ SignalResult.take_profit_levels is          │ models.py:160-163       │ Unstructured dict instead of typed TakeProfitLevel model. The v2 contract has TakeProfitPolicy.levels:               │
+│      │ List[Dict[str, str]]                        │                         │ list[TakeProfitLevel] with typed rr and position_ratio fields. The legacy model uses stringly-typed dicts            │
+└──────┴─────────────────────────────────────────────┴─────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+---
+6. Recommended Target Model
+
+Window C Decomposition
+
+┌──────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────┐
+│              Component               │                                         One Responsibility                                          │                      Must Not Do                      │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│ SignalProducer (PinbarStrategy,      │ Detect market patterns and produce RawSignal / PatternResult with direction, score, and details.    │ Must not compute entry price, stop loss, position     │
+│ EngulfingStrategy, future            │ Pure pattern recognition                                                                            │ size, leverage, or risk parameters. Must not know     │
+│ strategies)                          │                                                                                                     │ about execution, orders, or exchange                  │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│ RawSignal / PatternResult            │ Minimal data transfer object: strategy_name, direction, score, details. The "what pattern was       │ Must not carry entry_price, stop_loss, position_size, │
+│                                      │ detected"                                                                                           │  leverage, or any execution parameter                 │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│ StrategyContractV2 (new aggregate)   │ Bind strategy_family_id + strategy_family_version_id + policy set (EntryPolicy, StopPolicy,         │ Must not evaluate signals, produce orders, or trigger │
+│                                      │ TakeProfitPolicy, LifecycleExitPolicy) + RequiredHistory into a single versioned contract instance  │  execution. Pure type contract                        │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│ StrategySignalV2 (existing,          │ Carry a signal instance with full BRC identity: strategy_family_id, strategy_family_version_id,     │ Must not trigger execution. Must not contain exchange │
+│ enhanced)                            │ contract_version, trial_binding_id, runtime_instance_id + the existing policy fields                │  order parameters. Must not bypass evaluation         │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│                                      │ Take StrategySignalV2 + market/account context -> produce SignalEvaluation with evaluation_status,  │ Must not create orders, submit to exchange, or manage │
+│ SignalEvaluationEngine (new)         │ policy pass/fail details, evidence_snapshot, invalidation_reason. This is the bridge between signal │  positions. Must not override Owner Authorization     │
+│                                      │  detection and order candidacy                                                                      │                                                       │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│                                      │ Persisted evaluation record: evaluation_id, strategy_family_id, strategy_family_version_id,         │ Must not contain execution semantics (no entry_price, │
+│ SignalEvaluation (new)               │ runtime_instance_id, evaluation_status (EVALUATED/INVALIDATED/EXPIRED), policy_pass_details,        │  no order routing). Must not be the same object as    │
+│                                      │ evidence_snapshot, invalidation_reason, forward_review_anchor                                       │ ExecutionIntent                                       │
+├──────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────┤
+│                                      │ Pre-authorization trade proposal: evaluation_id, symbol, direction, entry_policy (with price),      │ Must not create orders, submit to exchange, or mutate │
+│ OrderCandidate (new)                 │ stop_policy (with price), TP policy (with levels), position sizing proposal, leverage proposal. All │  positions. Must not bypass Owner Authorization or    │
+│                                      │  "what the owner should review"                                                                     │ FinalGate                                             │
+└──────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────┘
+
+Relationship to Existing Objects
+
+┌─────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────┐
+│               Existing Object               │                                     Maps To Target                                     │                            Action                            │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ PinbarStrategy / EngulfingStrategy          │ SignalProducer                                                                         │ Reuse as-is. They already produce minimal PatternResult      │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ PatternResult                               │ RawSignal                                                                              │ Reuse as-is or rename                                        │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ DynamicStrategyRunner                       │ Partial SignalEvaluationEngine                                                         │ Extract: strategy running + filter evaluation is reusable.   │
+│                                             │                                                                                        │ Remove: any connection to risk calculation or execution      │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ SignalAttempt                               │ Partial SignalEvaluation                                                               │ Extend with BRC identity, evaluation_status,                 │
+│                                             │                                                                                        │ evidence_snapshot                                            │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ SignalPipeline                              │ Decompose into: (a) signal orchestration (keep), (b) risk calculation (move to         │                                                              │
+│                                             │ OrderCandidate stage), (c) execution trigger (remove; belongs to post-authorization)   │                                                              │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ SignalResult                                │ Split: signal identity stays in StrategySignalV2; execution parameters (entry_price,   │                                                              │
+│                                             │ stop_loss, position_size, leverage) move to OrderCandidate                             │                                                              │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ StrategySignalV2 (existing)                 │ Enhance with BRC identity fields. Keep existing policy structure                       │                                                              │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ StrategyFamilySignalOutput                  │ Bridge to StrategySignalV2 or replace the adapter target                               │                                                              │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ EntryPolicy / StopPolicy / TakeProfitPolicy │ Reuse as-is. Well-designed                                                             │                                                              │
+│  / LifecycleExitPolicy                      │                                                                                        │                                                              │
+├─────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ HistoricalSignalEvaluation*                 │ Keep for offline research. Connect StrategyFamilySignalOutput to historical evaluation │                                                              │
+│                                             │  service                                                                               │                                                              │
+└─────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
+
+---
+7. No-Code Migration Plan
+
+Phase C1: Classify and Annotate Legacy Signal Objects
+
+Goal: Establish a shared classification map so all agents know what each object is and what role it will play.
+
+- Annotate PatternResult, SignalAttempt, SignalResult, SignalPipeline with BRC role comments (not code changes, just documentation/ADR)
+- Create a classification document mapping legacy objects to target BRC roles
+- Identify which SignalResult fields are "signal identity" vs "execution parameters"
+- Document that SignalPipeline.signal_executor is the primary S0 finding: the execution trigger must be separated
+- Deliverable: ADR or classification table in docs/canon/
+
+Phase C2: Introduce or Clarify StrategyContractV2
+
+Goal: Create an explicit aggregate contract object that binds strategy family identity to policy.
+
+- Decide whether StrategyContractV2 should be a new class wrapping StrategySignalV2 + identity fields, or whether StrategySignalV2 itself should be extended with strategy_family_id, strategy_family_version_id, contract_version, trial_binding_id
+- Bridge StrategyFamilySignalInput / StrategyFamilySignalOutput identity fields into the v2 contract (either via adapter enhancement or schema merge)
+- Enhance PatternResultToStrategySignalV2Adapter to populate at least strategy_family_id and contract_version (currently hardcoded to StrategyFamily.PATTERN)
+- Deliverable: Updated strategy_contract_v2.py with BRC identity fields; updated adapter
+
+Phase C3: Make SignalEvaluation Explicit and Non-Executing
+
+Goal: Create a persisted SignalEvaluation type that records evaluation outcomes without execution semantics.
+
+- Define SignalEvaluation domain model: evaluation_id, strategy_family_id, strategy_family_version_id, runtime_instance_id (when available), evaluation_status, policy_pass_details, evidence_snapshot, invalidation_reason, forward_review_anchor
+- Define EvaluationStatus enum: PENDING, EVALUATED, INVALIDATED, EXPIRED
+- Refactor DynamicStrategyRunner.run_all() to return enriched SignalAttempt that includes filter pass/fail details (it already does — formalize the structure)
+- Create SignalEvaluationEngine service that takes StrategySignalV2 + market/account context and produces SignalEvaluation
+- Ensure SignalEvaluation has not_order: Literal[True] safety invariant (following HistoricalSignalOutputRecord pattern)
+- Deliverable: New domain model in src/domain/, new service in src/application/
+
+Phase C4: Make OrderCandidate Pre-Authorization Only
+
+Goal: Create OrderCandidate as the boundary between evaluation and authorization.
+
+- Define OrderCandidate domain model: evaluation_id, symbol, direction, entry_policy (with concrete price), stop_policy (with concrete price), TP policy (with levels), position_size_proposal, leverage_proposal, risk_reward_summary
+- Refactor RiskCalculator.calculate_signal_result() — currently it produces SignalResult with execution parameters. Split: risk calculation produces OrderCandidate parameters, signal identity stays in StrategySignalV2
+- Define OrderCandidate lifecycle: PROPOSED -> UNDER_REVIEW -> AUTHORIZED -> EXPIRED
+- Ensure OrderCandidate has no exchange order fields (no order_id, no exchange_order_id)
+- Deliverable: New domain model, refactored risk calculator output
+
+Phase C5: Connect to Owner Authorization (Outside Window C)
+
+Goal: Hand off OrderCandidate to Owner Authorization / FinalGate.
+
+- This phase is outside Window C scope but defines the handoff contract
+- OrderCandidate (produced by SignalEvaluationEngine) -> Owner Authorization -> FinalGate -> ExecutionIntent
+- Remove SignalPipeline.signal_executor direct execution path (or gate it behind a legacy flag)
+- Wire OrderCandidate into the BRC admission chain: connect AdmissionTrialBinding -> StrategyRuntimeInstance (to be created) -> SignalEvaluationEngine
+- Deliverable: Handoff contract specification; signal_executor deprecation plan
+
+---
+End of Window C Audit Report
+
+No files were modified.
+
+✻ Crunched for 11m 51s
+
+⏺ Agent "Find Pinbar Engulfing strategies" completed · 8m 12s
+
+  Thought for 5s
+
+The background exploration agent has completed — its findings are consistent with and already incorporated into the audit report above.
+
+The Window C audit is complete. Key takeaways:
+
+- 5 S0 findings block BRC integration: SignalPipeline can directly trigger execution, SignalResult conflates signal/execution semantics, OrderCandidate does not exist, no live SignalEvaluation concept exists, and StrategyRuntimeInstance is missing
+- 5 S1 findings describe serious ambiguities: two disconnected contract systems (StrategySignalV2 vs StrategyFamilySignalOutput), hardcoded policies in the observe adapter, disconnected BRC admission chain, leverage embedded in signal, and risk calculation inside the signal pipeline
+- The central gap is the missing SignalEvaluationEngine — the component that would bridge DynamicStrategyRunner's pattern+filter evaluation into a formal, persisted, BRC-identified evaluation record, and then produce an OrderCandidate for Owner Authorization
+- The existing strategy_contract_v2.py policy types and DynamicStrategyRunner engine logic are reusable; the decomposition centers on separating SignalPipeline's mixed responsibilities

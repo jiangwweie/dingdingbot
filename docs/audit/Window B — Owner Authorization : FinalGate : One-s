@@ -1,0 +1,316 @@
+Window B — Owner Authorization / FinalGate / One-shot Execution Semantic Audit
+
+Scope: Owner authorization and FinalGate path only. No code changes, no migrations, no live execution. Semantic debt discovery.
+
+---
+1. Current Chain Diagram
+
+OwnerRiskAcknowledgement (acknowledgement_id, carrier_id, strategy_family_id)
+   ↓  acknowledges strategy warnings
+BoundedLiveTrialAuthorizationDraft (draft_id, carrier_id, strategy_family_id,
+                                    symbol, side, max_notional, quantity, leverage,
+                                    single_use=TRUE, consumed=False)
+   ↓  Owner explicitly authorizes
+BoundedLiveTrialAuthorization (authorization_id, draft_id, carrier_id,
+                               strategy_family_id, symbol, side, max_notional,
+                               quantity, leverage, single_use=TRUE, consumed=False,
+                               hard_blockers=[...], metadata_only=TRUE)
+   ↓  OwnerBoundedExecutionService.execute_authorization()
+   ↓  _pre_adapter_blockers() — checks: consumed, single_use, expired, duplicate intent
+   ↓  _rerun_final_gate()  ← BnbLiveExecutionBridgeDryRunService.run_action_spec()
+      FinalGate checks:
+        - authorization scope match (symbol, side, quantity, leverage, cap, protection)
+        - single_use enforcement
+        - consumed flag
+        - environment checks (permission mode)
+        - fact snapshot (account, market, open orders, active position)
+        - PG table readiness
+        - startup guard / GKS status
+   ↓  adapter.execute()
+   ↓  _build_execution_intent(authorization, protection_plan)
+      ExecutionIntent (id, signal_id, signal, authorization_id, status=PENDING)
+   ↓  Order submission → TP/SL protection → mark authorization consumed
+
+---
+2. Target Chain Diagram
+
+StrategyFamily
+  → StrategyFamilyVersion  [versioned executable definition]
+  → AdmissionDecision  [formal ADMIT / ADMIT_WITH_CONSTRAINTS / REJECT / PARK]
+  → OwnerRiskAcceptance  [Owner accepts strategy runtime risk]
+  → TrialBinding  [binding between admitted strategy + runtime constraints]
+  → StrategyRuntimeInstance  [RUNNING bounded strategy instance]
+      - strategy_family_id, strategy_family_version_id, trial_binding_id,
+        runtime_instance_id
+      - budget_envelope, max_attempts, max_active_positions
+      - allowed symbols/sides, protection policy, review requirement
+      - expiration / revocation conditions
+      - lifecycle state: ACTIVE / PAUSED / EXHAUSTED / EXPIRED / REVOKED
+  → SignalEvaluation  [per-instance signal evaluation within risk boundaries]
+  → OrderCandidate  [executable order candidate from signal]
+  → FinalGate  [per-attempt pre-execution safety validation]
+      - runtime lifecycle state
+      - attempts used vs max_attempts
+      - active position count vs max_active_positions
+      - budget remaining
+      - previous attempt history
+      - trial_binding_id verification
+  → ExecutionIntent  [single-use execution ticket]
+  → OrderLifecycle → Order / Position → Reconciliation → Review
+
+---
+3. Gap Table
+
+┌─────┬──────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────┬──────────┐
+│  #  │                   Gap                    │                                        Current State                                         │               Target State               │ Severity │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│ G1  │ StrategyRuntimeInstance does not exist   │ No running strategy instance. One-shot authorization is the entire lifecycle.                │ Runtime instance with lifecycle state,   │ S0       │
+│     │                                          │                                                                                              │ budget tracking, attempt counter.        │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │ BoundedLiveTrialAuthorization is         │ Authorizes one concrete trade with single_use=TRUE hardcoded. consumed flag is the terminal  │ Authorizes a bounded runtime that can    │          │
+│ G2  │ one-shot, not runtime-scoped             │ state.                                                                                       │ produce multiple signal evaluations and  │ S0       │
+│     │                                          │                                                                                              │ order candidates.                        │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │                                          │ max_attempts exists only on RiskEnvelope / BoundedRiskCampaign (domain model). The           │ max_attempts belongs to                  │          │
+│ G3  │ No max_attempts on the one-shot path     │ OwnerTrialFlow authorization path has no max_attempts field at all.                          │ StrategyRuntimeInstance; FinalGate       │ S1       │
+│     │                                          │                                                                                              │ enforces per-attempt.                    │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │                                          │ BoundedLiveTrialAuthorization carries strategy_family_id but NOT strategy_family_version_id, │ All semantic IDs must propagate through  │          │
+│ G4  │ Semantic IDs not propagated              │  trial_binding_id, or runtime_instance_id. ExecutionIntent carries only authorization_id —   │ authorization → FinalGate →              │ S1       │
+│     │                                          │ no strategy chain IDs.                                                                       │ ExecutionIntent → Order boundary.        │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │ AdmissionDecision / OwnerRiskAcceptance  │ These exist in src/domain/brc_admission.py and src/application/brc_admission_service.py.     │ Hard-bound: TrialBinding must be the     │          │
+│ G5  │ / TrialBinding disconnected from         │ They are a parallel subsystem. The one-shot OwnerTrialFlow path creates its own              │ source of truth for runtime              │ S1       │
+│     │ one-shot path                            │ OwnerRiskAcknowledgement (different model) and does NOT reference AdmissionDecision,         │ authorization.                           │          │
+│     │                                          │ OwnerRiskAcceptance, or AdmissionTrialBinding.                                               │                                          │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │ FinalGate does not evaluate runtime      │ FinalGate checks authorization scope, account facts, environment, and reconciliation. It     │ FinalGate must evaluate full runtime     │          │
+│ G6  │ lifecycle context                        │ does NOT check: attempts used, active position count (relative to runtime cap), budget       │ context per attempt.                     │ S1       │
+│     │                                          │ remaining, previous attempt history, or trial_binding_id.                                    │                                          │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │ OwnerTrialFlow is a short orchestration  │ OwnerTrialFlowService manages a linear Ack → Draft → Authorization → Consumed state machine. │ StrategyRuntimeInstance lifecycle        │          │
+│ G7  │ flow, not a lifecycle service            │  There is no concept of a persisting runtime instance that can be paused, resumed,           │ management must exist.                   │ S1       │
+│     │                                          │ exhausted, or revoked.                                                                       │                                          │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │ AuthorizationDraft is a trade draft, not │ BoundedLiveTrialAuthorizationDraft contains symbol, side, max_notional, quantity, leverage — │ AuthorizationDraft should bind runtime   │          │
+│ G8  │  a runtime authorization draft           │  concrete trade parameters. No max_attempts, max_active_positions, allowed_symbols[],        │ parameters, not trade parameters.        │ S1       │
+│     │                                          │ protection_policy, review_requirement, expiration/revocation_conditions.                     │                                          │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │                                          │ OwnerRiskAcknowledgement (in owner_trial_flow.py) is a lightweight warning acknowledgement.  │ OwnerRiskAcceptance (admission path)     │          │
+│ G9  │ OwnerRiskAcceptance is a separate model, │ OwnerRiskAcceptance (in brc_admission.py) is a full risk acceptance with risk_profile,       │ should be the source; acknowledgement    │ S2       │
+│     │  not linked                              │ policy_snapshot, constraint_snapshot, etc. They are unrelated models with no reference       │ should be deprecated or merged.          │          │
+│     │                                          │ between them.                                                                                │                                          │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │ max_attempts=1 enforced in bridge, not   │ bnb_live_execution_bridge.py:529-530 hard-blocks if action_spec.max_attempts != 1. The       │ max_attempts belongs on the              │          │
+│ G10 │ in authorization                         │ bridge itself constrains to one attempt. Authorization model has no max_attempts field.      │ authorization/runtime model, not         │ S2       │
+│     │                                          │                                                                                              │ hard-coded in the adapter.               │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│ G11 │ No max_active_positions anywhere on the  │ Not a field on BoundedLiveTrialAuthorization or BoundedLiveTrialAuthorizationDraft.          │ Must exist on StrategyRuntimeInstance;   │ S2       │
+│     │ one-shot path                            │                                                                                              │ FinalGate must enforce.                  │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│ G12 │ consumed is a boolean, not a lifecycle   │ consumed: bool on authorization. Once True, execution is permanently blocked. No concept of  │ Runtime instance lifecycle state enum.   │ S2       │
+│     │ state                                    │ paused, exhausted-by-attempts, or revoked.                                                   │                                          │          │
+├─────┼──────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼──────────┤
+│     │                                          │ Multiple models (BoundedLiveTrialAuthorization, ScopedRuntimeSafetyClearance,                │ Clear separation: authorization models   │          │
+│ G13 │ metadata_only: Literal[True] pattern     │ OwnerRiskAcknowledgement) carry metadata_only=TRUE as a literal. This appears to be a safety │ ARE executable-gate models; metadata     │ S2       │
+│     │                                          │  guardrail asserting "this model does not by itself enable execution" — but it makes the     │ models are separate.                     │          │
+│     │                                          │ models semantically confusing.                                                               │                                          │          │
+└─────┴──────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────┴──────────┘
+
+---
+4. Object Responsibility Table
+
+┌────────────────────────────────────┬─────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────┐
+│               Object               │         Current Responsibility          │                      Target Responsibility                       │                 Rename/Re-scope?                 │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ OwnerRiskAcknowledgement           │ Owner acknowledges strategy warnings    │ Deprecated — absorbed by OwnerRiskAcceptance from admission path │ Merge into OwnerRiskAcceptance                   │
+│                                    │ (metadata)                              │                                                                  │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ BoundedLiveTrialAuthorizationDraft │ Draft of one concrete trade             │ Draft of runtime authorization (binding runtime parameters, not  │ Re-scope + rename →                              │
+│                                    │ authorization                           │ trade parameters)                                                │ StrategyRuntimeAuthorizationDraft                │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│                                    │ Single-use trade authorization;         │ Bounded runtime authorization binding strategy_family_id,        │ Re-scope + rename → StrategyRuntimeAuthorization │
+│ BoundedLiveTrialAuthorization      │ consumed after one execution            │ strategy_family_version_id, trial_binding_id, budget envelope,   │  or fold into StrategyRuntimeInstance            │
+│                                    │                                         │ max_attempts, max_active_positions                               │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ OwnerTrialFlowService              │ Linear Ack→Draft→Authorization→Execute  │ Keep as legacy path; target path goes through                    │ Keep as historical short path                    │
+│                                    │ orchestration                           │ BrcAdmissionService → TrialBinding → StrategyRuntimeInstance     │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ OwnerBoundedExecutionService       │ Consumes one-shot authorization →       │ Per-attempt executor that reads runtime instance state, runs     │ Re-scope to per-attempt, not per-authorization   │
+│                                    │ FinalGate → order → consume             │ FinalGate, produces ExecutionIntent                              │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ FinalGate (adapter)                │ Validates authorization scope +         │ Must additionally validate runtime lifecycle state, attempts     │ Extend                                           │
+│                                    │ account/environment facts               │ remaining, budget remaining, active position cap                 │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│                                    │                                         │ Must carry authorization_id, trial_binding_id,                   │                                                  │
+│ ExecutionIntent                    │ Carries authorization_id only           │ strategy_family_id, strategy_family_version_id,                  │ Extend                                           │
+│                                    │                                         │ runtime_instance_id                                              │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ AdmissionDecision                  │ Parallel admission subsystem; not       │ Source of truth for admission into runtime                       │ Keep; bridge to runtime path                     │
+│                                    │ linked to one-shot path                 │                                                                  │                                                  │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ OwnerRiskAcceptance                │ Parallel admission subsystem            │ Source of truth for Owner risk acceptance                        │ Keep; bridge to runtime path                     │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ AdmissionTrialBinding              │ Parallel admission subsystem            │ Source of truth for trial binding to runtime                     │ Keep; bridge to runtime path                     │
+├────────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ StrategyRuntimeInstance            │ Does not exist                          │ Core new object: running bounded strategy instance               │ Must create                                      │
+└────────────────────────────────────┴─────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────┘
+
+---
+5. Audit Questions Answered
+
+Q1: What exactly does AuthorizationDraft contain?
+
+It is a trade draft, not a runtime authorization draft. BoundedLiveTrialAuthorizationDraft (owner_trial_flow.py:79) contains concrete trade parameters: symbol, side, max_notional, quantity, leverage, protection_plan_type. It has no max_attempts, max_active_positions, allowed_symbols[], protection_policy, or review_requirement. The single_use=Literal[True] and consumed=False fields confirm it is designed for one-shot use.
+
+There is also a variant AuthorizationDraftProposal in production_strategy_family_admission.py used in the admission pipeline — but this is also a draft proposal in the pipeline, not a runtime authorization concept.
+
+Q2: What exactly does BoundedLiveTrialAuthorization authorize?
+
+One concrete trade. It carries symbol, side, max_notional, quantity, leverage — the exact parameters for one order. single_use=Literal[True] is hardcoded. consumed: bool marks it terminal after one execution. There is no concept of a strategy instance that can produce multiple evaluations.
+
+Q3: Where is single_use enforced?
+
+Enforced at three layers, all on the parent authorization, not on the execution attempt:
+
+1. Model level: single_use: Literal[True] = True on both BoundedLiveTrialAuthorizationDraft (line 91) and BoundedLiveTrialAuthorization (line 139) — it cannot be set to False.
+2. Application level: owner_bounded_execution.py:835-836 — _pre_adapter_blockers blocks if not authorization.single_use.
+3. DB constraint: pg_models.py:2019, 2127 — CheckConstraint("single_use IS TRUE") on both draft and authorization ORM tables.
+4. Bridge level: bnb_live_execution_bridge.py:287-288 — blocks if not authorization.single_use.
+
+The execution attempt (ExecutionIntent) has no single_use field. The single-use constraint is entirely on the parent authorization object.
+
+Q4: Where is max_attempts stored and consumed?
+
+NOT on the one-shot authorization path. max_attempts exists in:
+
+- RiskEnvelope (domain model, bounded_risk_campaign.py:127) — max_attempts: int = Field(default=2, ge=1)
+- BrcCampaign (domain model, line 204) — campaign tracks attempt_count vs max_attempts
+- BoundedRiskCampaignService (application, lines 2693-2694, 2747) — gate check and terminal check
+- BudgetedAutonomy (application, line 40) — max_attempts: int = Field(ge=1)
+- BudgetRecommendation (application, lines 66, 82, 148)
+
+In the live execution bridge: bnb_live_execution_bridge.py:529-530 hard-blocks if action_spec.max_attempts != 1 — enforcing single-attempt at the adapter level.
+
+Bottom line: max_attempts is a concept from the BoundedRiskCampaign subsystem, which is a parallel system. The one-shot OwnerTrialFlow path has no max_attempts field on its models and no attempt counting.
+
+Q5: Does OwnerBoundedExecutionService consume the authorization directly to execute one trade?
+
+Yes. execute_authorization() (line 737):
+1. Loads the authorization by authorization_id
+2. Runs _pre_adapter_blockers (checks consumed, single_use, expired, duplicate intent)
+3. Re-runs FinalGate
+4. Builds one ExecutionIntent from the authorization (line 1432)
+5. Submits the order
+6. Marks authorization consumed=True (line 800)
+
+It is a direct authorization→consume pipeline. No intermediate runtime instance.
+
+Q6: Does OwnerTrialFlow persist a runtime lifecycle, or only orchestrate a short flow?
+
+Only a short linear flow. OwnerTrialFlowService manages:
+1. create_risk_acknowledgement() → saves OwnerRiskAcknowledgement
+2. create_authorization_draft() → saves BoundedLiveTrialAuthorizationDraft
+3. activate_live_authorization() → creates BoundedLiveTrialAuthorization
+
+There is no lifecycle state machine, no pause/resume, no exhaustion tracking, no revocation mechanism. The OwnerTrialFlowCurrentResponse reflects a snapshot of this linear state.
+
+Q7: Does FinalGate evaluate runtime context?
+
+No. The FinalGate (BnbLiveExecutionBridgeDryRunService.run_action_spec() and _rerun_final_gate()) evaluates:
+
+- Authorization scope match (symbol, side, quantity, leverage, cap, protection)
+- single_use enforcement
+- consumed flag
+- Environment checks (permission mode)
+- Fact snapshot (account balance, market metadata, open orders, active positions)
+- PG table readiness
+- Startup guard / GKS status
+
+It does NOT evaluate:
+- Attempts used vs max_attempts (no max_attempts on the authorization)
+- Active position count vs max_active_positions (no such cap)
+- Budget remaining (no budget envelope concept)
+- Previous attempt history
+- trial_binding_id (not present on the authorization)
+- Strategy runtime lifecycle state
+
+Q8: Are semantic IDs preserved through the authorization → FinalGate → ExecutionIntent boundary?
+
+No. Here is what each object carries:
+
+┌───────────────────────────────────┬─────────────────────┬────────────────────────────┬──────────────────┬─────────────────────┬──────────────────┐
+│              Object               │ strategy_family_id  │ strategy_family_version_id │ trial_binding_id │ runtime_instance_id │ authorization_id │
+├───────────────────────────────────┼─────────────────────┼────────────────────────────┼──────────────────┼─────────────────────┼──────────────────┤
+│ OwnerRiskAcknowledgement          │ carrier.strategy_id │             —              │        —         │          —          │        —         │
+├───────────────────────────────────┼─────────────────────┼────────────────────────────┼──────────────────┼─────────────────────┼──────────────────┤
+│ BoundedLiveTrialAuthorization     │ carrier.strategy_id │             —              │        —         │          —          │   auth-{uuid}    │
+├───────────────────────────────────┼─────────────────────┼────────────────────────────┼──────────────────┼─────────────────────┼──────────────────┤
+│ ExecutionIntent (from owner path) │          —          │             —              │        —         │          —          │   auth-{uuid}    │
+├───────────────────────────────────┼─────────────────────┼────────────────────────────┼──────────────────┼─────────────────────┼──────────────────┤
+│ FinalGate input                   │ carrier.strategy_id │             —              │        —         │          —          │        —         │
+└───────────────────────────────────┴─────────────────────┴────────────────────────────┴──────────────────┴─────────────────────┴──────────────────┘
+
+strategy_family_id is set from carrier.strategy_id (a catalog lookup), not from a persisted admission record. strategy_family_version_id, trial_binding_id, and runtime_instance_id are completely absent from the one-shot execution path.
+
+Q9: Is AdmissionDecision / OwnerRiskAcceptance / TrialBinding hard-bound to the live authorization path, or only metadata?
+
+Completely disconnected. The admission subsystem (brc_admission.py, brc_admission_service.py) creates AdmissionDecision, OwnerRiskAcceptance, and AdmissionTrialBinding as a parallel pipeline. The one-shot OwnerTrialFlow path creates its own OwnerRiskAcknowledgement (a simpler model with just carrier_id, acknowledged_warning_codes, owner_id) and its own BoundedLiveTrialAuthorizationDraft / BoundedLiveTrialAuthorization.
+
+There is zero reference from OwnerTrialFlow objects to AdmissionDecision, OwnerRiskAcceptance, or AdmissionTrialBinding. They are two separate subsystems that happen to coexist.
+
+Q10: What schema/API changes would be required to support StrategyRuntimeInstance authorization?
+
+Major changes required (no code changes, just semantic planning):
+
+1. New domain model: StrategyRuntimeInstance with runtime_instance_id, strategy_family_id, strategy_family_version_id, trial_binding_id, budget_envelope, max_attempts, max_active_positions, allowed_symbols, allowed_sides, protection_policy, review_requirement, lifecycle_state (ACTIVE/PAUSED/EXHAUSTED/EXPIRED/REVOKED), expiration_conditions, revocation_conditions.
+2. Extend BoundedLiveTrialAuthorization or replace it: Either evolve BoundedLiveTrialAuthorization into a runtime-scoped authorization (add max_attempts, max_active_positions, lifecycle state), or replace it with StrategyRuntimeAuthorization that binds to a StrategyRuntimeInstance.
+3. Extend ExecutionIntent: Add trial_binding_id, strategy_family_version_id, runtime_instance_id fields.
+4. Extend FinalGate: Add runtime lifecycle context checks (attempts remaining, budget remaining, active position count vs cap).
+5. Bridge admission path to execution path: AdmissionTrialBinding must be the entry point for creating a StrategyRuntimeInstance. The current OwnerTrialFlow short path should either become a thin wrapper that delegates to the admission path, or remain as a separate legacy manual-execution path.
+6. API surface: New endpoints for runtime lifecycle management (create, pause, resume, revoke, list attempts, review).
+7. PG schema: New table(s) for StrategyRuntimeInstance, migration to add semantic ID columns to execution_intents.
+
+---
+6. Should BoundedLiveTrialAuthorization Be Renamed, Split, or Re-scoped?
+
+Recommendation: Re-scope, not rename yet.
+
+- BoundedLiveTrialAuthorization should be understood as the legacy one-shot authorization object — valuable for manual Owner-operated single trade execution.
+- In the target architecture, a new StrategyRuntimeAuthorization (or the StrategyRuntimeInstance itself carrying authorization state) should be created for runtime-scoped authorization.
+- The current object does not need to be renamed until the runtime path exists, to avoid breaking the active execution pipeline.
+- When the runtime path is ready, the one-shot path should be preserved as OwnerManualTradeAuthorization (or similar) to keep the historical short path available.
+
+---
+7. Recommended Minimum Migration Path (No Live Behavior Change)
+
+Phase 0 — Semantic alignment (this audit)
+- Document current state vs target state (this report).
+
+Phase 1 — Create StrategyRuntimeInstance domain model
+- New src/domain/strategy_runtime_instance.py with the model.
+- No service, no API, no PG table yet. Pure domain model with invariants.
+
+Phase 2 — Bridge admission path
+- Ensure AdmissionTrialBinding can produce a StrategyRuntimeInstance draft (application layer only).
+- Do not change OwnerTrialFlow or OwnerBoundedExecutionService.
+
+Phase 3 — Add semantic IDs to ExecutionIntent
+- Add trial_binding_id, strategy_family_version_id, runtime_instance_id as Optional[str] fields to ExecutionIntent.
+- These are additive, backward-compatible.
+
+Phase 4 — PG persistence for StrategyRuntimeInstance
+- New table. No changes to existing tables.
+
+Phase 5 — Extend FinalGate with runtime context
+- Add optional runtime context checks (attempts remaining, budget remaining).
+- FinalGate remains backward-compatible: if no runtime instance, falls back to current behavior.
+
+Phase 6 — Wire runtime path to execution
+- OwnerBoundedExecutionService (or a new service) can accept a runtime_instance_id instead of authorization_id.
+- One-shot path remains available.
+
+Each phase is independently deployable and does not break the existing one-shot execution pipeline.
+
+---
+End of Window B audit. No code changes were made. No migrations. No live execution. No safety gate bypass. Semantic debt discovery only.

@@ -1,0 +1,375 @@
+Window D — Order / Position / Reconciliation / Review S1 Audit
+
+Scope: Read-only architecture and code audit. No code changes.
+Evidence grade: Code fact (verified by reading tracked source).
+Date: 2026-06-09
+
+---
+A. Current Chain Map
+
+BoundedLiveTrialAuthorization (authorization_id, carrier_id, strategy_family_id)
+  │
+  ▼
+ExecutionIntent (id, authorization_id, signal_id)
+  │  [execution_intents table — no strategy_family_id, no trial_binding_id]
+  │
+  ▼
+OrderLifecycleService.create_order() → Order (ENTRY role)
+  │  [orders table — signal_id only; no authorization_id, no execution_intent_id]
+  │
+  ▼
+OrderStateMachine: CREATED → SUBMITTED → OPEN → PARTIALLY_FILLED → FILLED
+  │  (Formal state machine with 9 states, transition guards, audit events)
+  │
+  ▼
+PositionProjectionService.project_entry_fill() → Position
+  │  [positions table — pos_{signal_id}; no governance IDs]
+  │
+  ▼
+OrderManager.create_order_chain() → TP1..TP5 + SL orders
+  │  [each Order has parent_order_id, oco_group_id, order_role]
+  │
+  ▼
+OrderLifecycleService monitors TP/SL fills via WebSocket
+  │
+  ▼
+PositionProjectionService.project_exit_fill() → realized_pnl + close
+  │  [Exit outcome inferred from order_role + FILLED status — no ExitOutcome entity]
+  │
+  ▼
+ReconciliationService.build_read_model() + periodic loop (300s)
+  │  [keyed by symbol + order_id only; no governance IDs in findings]
+  │
+  ▼
+BrcLiveLifecycleReviewRecord (append-only evidence)
+  + ReviewLedger dict (mutable in-memory, not persisted as event chain)
+
+Critical gap: The chain splits at the Order table. authorization_id is on ExecutionIntent and BrcLiveLifecycleReviewRecord, but NOT on Order or Position. The link between orders and intent is a reverse FK: execution_intents.order_id → orders.id. Orders cannot be queried forward from authorization.
+
+---
+B. ID Propagation Matrix
+
+┌────────────────────────────────────────┬────────────────────┬──────────────────┬──────────────────┬─────────────────────┬──────────────────┬───────────────────────────┬───────────┬────────────────┐
+│             Object / Table             │ strategy_family_id │ trial_binding_id │ authorization_id │ execution_intent_id │     order_id     │     exchange_order_id     │ review_id │     status     │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ ExecutionIntent (execution_intents)    │ ❌                 │ ❌               │ ✅               │ ✅ (self PK)        │ ✅ (FK,          │ ✅ (nullable)             │ ❌        │ ✅ (7 states)  │
+│                                        │                    │                  │                  │                     │ nullable)        │                           │           │                │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ Order (orders)                         │ ❌                 │ ❌               │ ❌               │ ❌                  │ ✅ (self PK)     │ ✅ (nullable, unique      │ ❌        │ ✅ (9 states)  │
+│                                        │                    │                  │                  │                     │                  │ partial idx)              │           │                │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ Position (positions)                   │ ❌                 │ ❌               │ ❌               │ ❌                  │ ❌               │ ❌                        │ ❌        │ is_closed:     │
+│                                        │                    │                  │                  │                     │                  │                           │           │ bool only      │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ BrcLiveLifecycleReviewRecord           │                    │                  │                  │                     │ ✅               │ ✅                        │ ✅ (self  │                │
+│ (brc_live_lifecycle_reviews)           │ ✅ (nullable)      │ ❌               │ ✅               │ ✅ (nullable)       │ (entry_order_id, │ (entry_exchange_order_id, │ PK)       │ ✅ (3 states)  │
+│                                        │                    │                  │                  │                     │  nullable)       │  nullable)                │           │                │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ ReconciliationReport                   │ ❌                 │ ❌               │ ❌               │ ❌                  │ ❌               │ ❌                        │ ❌        │ is_consistent: │
+│ (reconciliation_reports)               │                    │                  │                  │                     │                  │                           │           │  bool          │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ ReconciliationDetail                   │ ❌                 │ ❌               │ ❌               │ ❌                  │ ❌               │ ❌                        │ ❌        │ resolved: bool │
+│ (reconciliation_details)               │                    │                  │                  │                     │                  │                           │           │                │
+├────────────────────────────────────────┼────────────────────┼──────────────────┼──────────────────┼─────────────────────┼──────────────────┼───────────────────────────┼───────────┼────────────────┤
+│ ReconciliationReadModelMismatch        │ ❌                 │ ❌               │ ❌               │ ❌                  │ ❌               │ ❌                        │ ❌        │ severity       │
+│ (reconciliation_read_model_mismatches) │                    │                  │                  │                     │                  │                           │           │ string         │
+└────────────────────────────────────────┴────────────────────┴──────────────────┴──────────────────┴─────────────────────┴──────────────────┴───────────────────────────┴───────────┴────────────────┘
+
+Orphan ID: trial_binding_id does not exist in ANY execution-after-authorization table.
+
+Broken forward path: Order → ExecutionIntent requires querying execution_intents WHERE order_id = ?. No Order.execution_intent_id exists. Order → Authorization requires: Order → (reverse lookup) ExecutionIntent → authorization_id. Two hops, no index on execution_intents.order_id (only unique partial on execution_intents.order_id WHERE NOT NULL).
+
+---
+C. Lifecycle State Coverage
+
+ExecutionIntent (7 states)
+
+┌─────────────────────┬─────────┬───────────┬──────────────────────────────────────┐
+│        State        │ Present │ Terminal? │                Notes                 │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ PENDING             │ ✅      │           │ Initial state                        │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ BLOCKED             │ ✅      │ ✅        │ CapitalProtection intercepted        │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ SUBMITTED           │ ✅      │           │ Entry order sent to exchange         │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ PROTECTING          │ ✅      │           │ Entry filled, mounting TP/SL         │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ PARTIALLY_PROTECTED │ ✅      │           │ TP or SL submission failed           │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ FAILED              │ ✅      │ ✅        │ Submission failure                   │
+├─────────────────────┼─────────┼───────────┼──────────────────────────────────────┤
+│ COMPLETED           │ ✅      │ ✅        │ Entry + all protection orders placed │
+└─────────────────────┴─────────┴───────────┴──────────────────────────────────────┘
+
+Missing: No state for "position closed" or "reconciled" or "reviewed". ExecutionIntent is terminal at COMPLETED but the position may live for hours/days. The intent does not track post-COMPLETED lifecycle.
+
+Order (9 states)
+
+┌──────────────────┬─────────┬───────────┬───────┐
+│      State       │ Present │ Terminal? │ Notes │
+├──────────────────┼─────────┼───────────┼───────┤
+│ CREATED          │ ✅      │           │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ SUBMITTED        │ ✅      │           │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ PENDING          │ ✅      │           │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ OPEN             │ ✅      │           │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ PARTIALLY_FILLED │ ✅      │           │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ FILLED           │ ✅      │ ✅        │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ CANCELED         │ ✅      │ ✅        │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ REJECTED         │ ✅      │ ✅        │       │
+├──────────────────┼─────────┼───────────┼───────┤
+│ EXPIRED          │ ✅      │ ✅        │       │
+└──────────────────┴─────────┴───────────┴───────┘
+
+Coverage is good. Missing: no "REPLACED" state for order repair; no "STALE" detection state.
+
+PositionProjection
+
+┌─────────────────────────┬─────────┬───────┐
+│          State          │ Present │ Notes │
+├─────────────────────────┼─────────┼───────┤
+│ Open (is_closed=False)  │ ✅      │       │
+├─────────────────────────┼─────────┼───────┤
+│ Closed (is_closed=True) │ ✅      │       │
+└─────────────────────────┴─────────┴───────┘
+
+Missing: No protecting, partially_exited, externally_closed, liquidated states. Protection status is in a separate personal_campaign.py subsystem, not in the execution projection.
+
+Reconciliation
+
+No lifecycle states. Reconciliation is periodic/triggered, has no state machine.
+
+Review
+
+┌───────────────────┬─────────┬─────────────────────────────────────┐
+│       State       │ Present │                Notes                │
+├───────────────────┼─────────┼─────────────────────────────────────┤
+│ pending_open      │ ✅      │ Position active, protection mounted │
+├───────────────────┼─────────┼─────────────────────────────────────┤
+│ closed_reviewed   │ ✅      │ Position closed, owner reviewed     │
+├───────────────────┼─────────┼─────────────────────────────────────┤
+│ recovery_required │ ✅      │ Reconciliation detected an issue    │
+└───────────────────┴─────────┴─────────────────────────────────────┘
+
+Missing: closed_unreviewed, externally_closed_no_pnl, partially_closed.
+
+---
+D. Debt Classification
+
+S1-Critical (5 items)
+
+┌───────┬───────────────────────────┬───────────────────────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────┐
+│   #   │           Debt            │                                      Impact                                       │                                  Evidence                                  │
+├───────┼───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│       │                           │ Cannot distinguish TP hit vs SL hit vs manual close vs liquidation at the review  │ execution_orchestrator.py:452-466 emits different CampaignRuntimeEvents    │
+│ S1-C1 │ No ExitOutcome entity     │ layer. tp_sl_result in ReviewLedger dict conflates to "tp_or_sl_filled".          │ but does not persist an exit outcome. Review ledger at                     │
+│       │                           │ Backtester has explicit exit reasons but live runtime does not.                   │ owner_bounded_execution.py:1760 scans order status without role            │
+│       │                           │                                                                                   │ discrimination.                                                            │
+├───────┼───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│       │                           │ Cannot query orders by authorization_id, execution_intent_id, trial_binding_id,   │                                                                            │
+│ S1-C2 │ Order table has zero      │ or strategy_family_id. Forward path from authorization to orders requires         │ pg_models.py:49-113 (PGOrderORM has only signal_id as foreign key). No     │
+│       │ governance IDs            │ reverse-lookup through execution_intents.order_id. Reconciliation findings are    │ migration adds any governance column to orders.                            │
+│       │                           │ unlinked from authorization chain.                                                │                                                                            │
+├───────┼───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│       │ External/liquidation      │ mark_external_close_unresolved() sets current_qty=0 with                          │ position_projection_service.py:260-300. Review ledger reports pnl_status:  │
+│ S1-C3 │ close loses PnL           │ "unresolved_no_reliable_fill" — no fill price, no PnL. A liquidation appears as   │ "unresolved_no_reliable_fill".                                             │
+│       │ permanently               │ an external close with no distinction.                                            │                                                                            │
+├───────┼───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│       │ No duplicate entry        │ If two ENTRY orders are created for the same intent (e.g., retry after timeout),  │ Searched all reconciliation code — no logic checks for multiple active     │
+│ S1-C4 │ detection in              │ reconciliation cannot detect the duplicate.                                       │ ENTRY orders per signal/intent.                                            │
+│       │ reconciliation            │                                                                                   │                                                                            │
+├───────┼───────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│       │ Reconciliation findings   │ All findings are keyed by symbol + order_id only. Cannot trace a reconciliation   │ reconciliation.py:70 (ReconciliationMismatch has local_ref/exchange_ref    │
+│ S1-C5 │ carry no governance IDs   │ mismatch back to which authorization or intent it belongs to.                     │ strings, no governance fields). No governance ID in any reconciliation     │
+│       │                           │                                                                                   │ repository or table.                                                       │
+└───────┴───────────────────────────┴───────────────────────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────┘
+
+S1-Important (7 items)
+
+┌───────┬─────────────────────────────────┬────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────┐
+│   #   │              Debt               │                                   Impact                                   │                                   Evidence                                   │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│ S1-I1 │ trial_binding_id absent from    │ No path from admission trial binding to live lifecycle review, orders,     │ Searched all ORM models, migrations, repositories — trial_binding_id does    │
+│       │ all execution tables            │ positions, or reconciliation.                                              │ not exist in any execution-after-authorization table.                        │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│ S1-I2 │ client_order_id not persisted   │ Cannot trace exchange acknowledgments back to local orders after restart.  │ pg_order_repository.py:564 returns None. trading_console.py:305 hardcodes    │
+│       │ on orders                       │ Console readmodel hardcodes "not_available".                               │ "not_available".                                                             │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│ S1-I3 │ ReviewLedger is untyped dict,   │ No schema validation, no versioning contract, can silently drop fields.    │ owner_bounded_execution.py:1740 returns raw dict. No class                   │
+│       │ not a Pydantic model            │                                                                            │ ReviewLedger(BaseModel) exists.                                              │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│ S1-I4 │ ReviewLedger dict is not        │ Reconstructed from PG order rows on each read. No historical snapshot of   │ _post_action_review_ledger at trading_console.py:3054 rebuilds from current  │
+│       │ persisted as event chain        │ the review state at each lifecycle point.                                  │ state.                                                                       │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│       │ Position has no close_reason    │ Cannot determine why a position closed (TP, SL, manual, liquidation) from  │ Position at models.py:1145-1204 — no close_reason, no exit_type.             │
+│ S1-I5 │ field                           │ the position record itself.                                                │ Order.exit_reason is only set for hygiene operations                         │
+│       │                                 │                                                                            │ (EXTERNAL_CLOSE_LOCAL_HYGIENE).                                              │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│ S1-I6 │ No time-based stale order       │ Reconciliation detects status mismatches but not orders that have been     │ reconciliation.py checks status, not age. StartupReconciliationService       │
+│       │ detection                       │ OPEN/PENDING for an abnormal duration.                                     │ advances state but does not flag by timestamp.                               │
+├───────┼─────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤
+│       │ No "authorization consumed but  │ If authorization is marked consumed but no order was actually placed       │ No reconciliation code references authorization_id. BudgetedAutonomy tracks  │
+│ S1-I7 │ no order" reconciliation        │ (e.g., crash after authorization write, before order creation),            │ budget separately.                                                           │
+│       │                                 │ reconciliation cannot detect this.                                         │                                                                              │
+└───────┴─────────────────────────────────┴────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────┘
+
+Cleanup / Naming / Duplication (4 items)
+
+┌───────┬───────────────────────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│   #   │                           Debt                            │                                                              Notes                                                              │
+├───────┼───────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S1-D1 │ signal_id as primary link key                             │ Governance chain should use execution_intent_id as primary link; signal_id is a legacy from the signal-pipeline path.           │
+├───────┼───────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S1-D2 │ Two pairs of reconciliation tables                        │ reconciliation_reports/details (startup, mutable) vs reconciliation_read_model_reports/mismatches (periodic, PG-only). Could be │
+│       │                                                           │  unified.                                                                                                                       │
+├───────┼───────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S1-D3 │ SQLite vs PG index divergence                             │ SQLite has idx_orders_order_role (single); PG has idx_orders_parent_role (composite). Missing idx_orders_filled_at in PG.       │
+├───────┼───────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ S1-D4 │ ExecutionIntent has no strategy_family_id or              │ These should be on the intent if it is the lifecycle root. Currently only authorization_id is carried.                          │
+│       │ trial_binding_id                                          │                                                                                                                                 │
+└───────┴───────────────────────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+---
+E. Recommended Target Model
+
+Minimal structural additions, not a rewrite. Preserve existing models; add governance columns and one new entity.
+
+1. ExecutionIntent as lifecycle root
+
+Add to execution_intents table:
++ strategy_family_id    (nullable, from authorization)
++ trial_binding_id      (nullable, from authorization)
+ExecutionIntent remains terminal at COMPLETED for the execution phase. Post-COMPLETED lifecycle (position open, reconciliation, review) is tracked via the Position and Review records that carry execution_intent_id.
+
+2. Order role model — add governance columns
+
+Add to orders table:
++ execution_intent_id   (nullable FK, indexed)
++ authorization_id      (nullable, denormalized from intent for query convenience)
+This enables:
+- SELECT * FROM orders WHERE authorization_id = ?
+- SELECT * FROM orders WHERE execution_intent_id = ?
+- Reconciliation findings can join back to governance chain.
+
+Also persist client_order_id (nullable string) on orders for exchange-trace parity.
+
+3. PositionProjection — add governance and exit fields
+
+Add to positions table:
++ execution_intent_id   (nullable FK)
++ authorization_id      (nullable, denormalized)
++ close_reason          (nullable enum: TP_HIT, SL_HIT, MANUAL_CLOSE, EXTERNAL_CLOSE, LIQUIDATION, TIME_EXIT, UNKNOWN)
+
+4. ExitOutcome — new first-class entity
+
+class ExitOutcome(BaseModel):
+    exit_id: str                    # PK
+    position_id: str                # FK to positions
+    execution_intent_id: str        # FK
+    authorization_id: str           # denormalized
+    strategy_family_id: Optional[str]
+    exit_type: ExitType             # TP_HIT, SL_HIT, MANUAL_CLOSE, EXTERNAL_CLOSE, LIQUIDATION, TIME_EXIT
+    triggering_order_id: str        # the TP/SL/EXIT order that triggered close
+    triggering_order_role: OrderRole
+    close_price: Optional[Decimal]
+    close_qty: Decimal
+    realized_pnl: Optional[Decimal]  # None if external close with no fill data
+    close_fee: Optional[Decimal]
+    close_timestamp_ms: int
+    metadata: dict                  # extensible (e.g., exchange transaction IDs)
+
+Persisted as exit_outcomes table (append-only). Created by:
+- PositionProjectionService.project_exit_fill() when just_closed=True — exit_type derived from order_role
+- ExternalCloseMonitor.mark_external_close_unresolved() — exit_type = EXTERNAL_CLOSE
+- Future: explicit liquidation detection — exit_type = LIQUIDATION
+
+5. ReconciliationFinding — add governance link
+
+Add to reconciliation_read_model_mismatches:
++ execution_intent_id   (nullable)
++ authorization_id      (nullable)
++ strategy_family_id    (nullable)
+Populated by joining orders.signal_id → execution_intents.signal_id when building the read model.
+
+6. ReviewLedger event chain
+
+Convert the dict-shaped ledger to a typed Pydantic model persisted as append-only events:
+
+class ReviewLedgerEvent(BaseModel):
+    event_id: str                   # PK
+    review_id: str                  # FK to brc_live_lifecycle_reviews
+    authorization_id: str
+    execution_intent_id: Optional[str]
+    strategy_family_id: Optional[str]
+    event_type: str                 # ENTRY_PLACED, PROTECTION_MOUNTED, EXIT_FILL, RECONCILIATION_CHECK, CLOSE_CONFIRMED, OWNER_REVIEWED
+    event_data: dict                # typed per event_type
+    created_at_ms: int
+
+Table: review_ledger_events (append-only, no update/delete).
+
+This preserves the current append-only semantics of BrcLiveLifecycleReviewRecord but adds event-level granularity. The current ReviewLedger dict builder continues to work as a projection over these events.
+
+---
+F. No-Code-Change Conclusion
+
+Verdict: PARTIAL
+
+The execution-after-authorization chain is structurally functional for the current one-shot OwnerBoundedExecution path. The state machines are sound, idempotency is protected, and reconciliation detects the major positional/order mismatches. However, the chain has five critical gaps that prevent full semantic traceability and audit-grade review.
+
+Top 5 Debts
+
+1. S1-C1: No ExitOutcome entity — Cannot distinguish TP hit vs SL hit vs manual close vs liquidation at the review layer. This is the single largest evidence gap.
+2. S1-C2: Order table has zero governance IDs — The orders table is an island; cannot be queried by authorization, intent, trial binding, or strategy family. This breaks the entire downstream audit chain.
+3. S1-C3: External/liquidation close loses PnL permanently — mark_external_close_unresolved() produces pnl_status: "unresolved_no_reliable_fill" with no recovery path.
+4. S1-C1+I1: trial_binding_id absent from all execution tables — No link from admission binding to any execution, order, position, reconciliation, or review record.
+5. S1-C5: Reconciliation findings carry no governance IDs — Cannot trace a reconciliation mismatch back to which authorization or strategy it belongs to.
+
+Suggested Next Sprint Boundary
+
+A single sprint to add governance ID propagation (S1-C2, S1-C5, S1-D4) and the ExitOutcome entity (S1-C1) would close the three most impactful gaps:
+
+- Sprint scope: Add execution_intent_id and authorization_id columns to orders and positions tables. Create exit_outcomes table. Add governance ID columns to execution_intents (strategy_family_id, trial_binding_id). Add governance ID columns to reconciliation mismatch tables.
+- Not in sprint: ReviewLedger event chain (S1-I4), client_order_id persistence (S1-I2), stale order detection (S1-I6), authorization-consumed reconciliation (S1-I7). These are lower-priority and can follow.
+
+---
+Safety Proof
+
+- No code was modified.
+- No live trading was executed.
+- No exchange connections were made.
+- No migrations were changed.
+- All evidence is derived from reading tracked source files, with file paths and line numbers cited.
+
+Files Inspected (read-only)
+
+- src/domain/execution_intent.py
+- src/domain/models.py (Order, Position, OrderRole, OrderStatus)
+- src/domain/order_state_machine.py
+- src/domain/live_lifecycle_review.py
+- src/application/execution_orchestrator.py
+- src/application/owner_bounded_execution.py
+- src/application/order_lifecycle_service.py
+- src/application/position_projection_service.py
+- src/application/reconciliation.py
+- src/application/periodic_reconciliation.py
+- src/application/startup_reconciliation_service.py
+- src/application/external_close_monitor.py
+- src/infrastructure/pg_models.py
+- src/infrastructure/pg_order_repository.py
+- src/infrastructure/pg_execution_intent_repository.py
+- src/infrastructure/pg_live_lifecycle_review_repository.py
+- src/infrastructure/pg_reconciliation_repository.py
+- src/infrastructure/pg_reconciliation_read_model_repository.py
+- src/infrastructure/repository_ports.py
+- migrations/versions/2026-06-02-033_create_execution_intents_table.py
+- docs/canon/PROJECT_BASELINE_CURRENT.md
+- docs/canon/BRC_TARGET_SEMANTICS.md
+- docs/canon/TECH_DEBT_BASELINE.md
+- docs/canon/RUNTIME_SAFETY_BOUNDARY.md
