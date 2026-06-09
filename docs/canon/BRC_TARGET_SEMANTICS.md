@@ -142,6 +142,18 @@ OwnerBoundedExecutionService is a valuable one-shot execution asset:
   `budget_reserved` should prefer concrete max-loss evidence
   (`risk_preview.max_loss_reference`) and use notional only as a conservative
   fallback when loss-budget evidence is absent.
+- Leverage is a risk amplifier and margin-efficiency tool, not a
+  loss-budget expansion mechanism. StrategyFamily / StrategyImplementation may
+  propose leverage-sensitive risk semantics, stop/invalidation, expected risk
+  shape, and protection requirements, but runtime risk and FinalGate own the
+  final leverage decision. Leveraged candidates must satisfy all active runtime
+  constraints at once: `max_loss_reference <= max_loss_per_attempt`,
+  `intended_notional <= max_notional_per_attempt`, `proposed_leverage <=
+  max_leverage`, margin usage remains within the runtime/account cap, the
+  liquidation boundary remains beyond the hard stop with buffer, and protection
+  is concrete and submit-ready. A strategy must never use leverage to enlarge
+  allowed loss, bypass protection, self-authorize execution, or expand runtime
+  budget.
 
 Before controlled runtime execution, BRC must pass a Strategy Semantics /
 Entry-Exit Policy Binding gate:

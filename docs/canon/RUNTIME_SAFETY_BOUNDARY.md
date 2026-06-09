@@ -81,6 +81,11 @@ This document defines the runtime safety boundaries for the BRC project.
   must bound max single-attempt loss, max attempts, max active positions,
   notional, leverage, duplicate submits, stale account facts, missing
   protection, and unauditable orders.
+- Leverage must not expand the loss budget. It may be used only when loss,
+  notional, leverage, margin usage, liquidation distance, active-position,
+  account-fact, and protection checks all pass together. Runtime risk and
+  FinalGate must treat leverage as an amplifier of uncontrolled-loss risk, not
+  as permission to increase `max_loss_budget` or skip hard stops.
 
 ---
 
@@ -144,8 +149,9 @@ If code changes create executable paths for any of these, reclassify them.
   must route the action.
 - FinalGate should verify: Owner authorization, environment, account,
   symbol, side, quantity, leverage, budget, attempts, active exposure,
-  open orders, fresh account facts, reconciliation, market rules,
-  protection plan, GKS/runtime guard state, and Operation Layer path.
+  margin usage, liquidation distance versus hard stop with buffer, open
+  orders, fresh account facts, reconciliation, market rules, protection plan,
+  GKS/runtime guard state, and Operation Layer path.
 - Strategy evidence weakness is a warning, not a FinalGate hard blocker,
   after Owner acknowledgement.
 - Runtime execution must not rely on owner/user-supplied active position counts
@@ -156,12 +162,17 @@ If code changes create executable paths for any of these, reclassify them.
   `max_notional_per_attempt` checks candidate notional, while runtime budget
   remaining prefers concrete max-loss evidence and falls back to notional only
   when loss-budget evidence is missing.
+- Runtime leverage checks must be conjunctive, not substitutive:
+  `max_loss_reference`, intended notional, proposed leverage, margin required,
+  liquidation buffer, and protection readiness must all pass. Passing one of
+  those checks must never compensate for failing another.
 
 Before the first real runtime submit, the following must be explicitly
 confirmed:
 
 - symbol, side, max_notional_per_attempt, max_attempts, max_loss_budget,
-  max_leverage, and max_active_positions;
+  max_leverage, max margin usage / max_margin_per_attempt, liquidation buffer
+  requirement, and max_active_positions;
 - budget reservation basis: prefer concrete max-loss evidence for
   `budget_reserved`, and use notional only as a conservative fallback when
   loss-budget evidence is missing;

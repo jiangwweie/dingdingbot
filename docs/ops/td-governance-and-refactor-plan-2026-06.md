@@ -1045,12 +1045,21 @@ Scope:
 - Runtime Profile / ConfigManager multi-track governance;
 - ExecutionPermission coverage;
 - CapitalProtection enforcement review;
+- leverage / margin / liquidation-buffer participation in runtime risk;
 - scripts bypass containment.
 
 Required properties:
 
 - Consolidate authority boundaries without changing live runtime profile or
   live trading config by default.
+- Encode the leverage principle: leverage is a risk amplifier and
+  margin-efficiency tool, not a loss-budget expansion mechanism.
+- Require runtime profiles and FinalGate risk checks to evaluate loss budget,
+  notional, leverage, margin usage, liquidation boundary versus hard stop with
+  buffer, active-position facts, account freshness, and protection readiness
+  together. Passing leverage or notional checks must not compensate for missing
+  max-loss evidence, excessive margin usage, liquidation risk, or missing
+  protection.
 - Identify gaps between permission, capital protection, runtime profile, and
   script entry points.
 - Contain bypass risk before broad cleanup.
@@ -1097,6 +1106,87 @@ Required properties:
 - Canon remains the current fact source.
 - Historical evidence remains available but cannot override canon.
 - Agent instruction files are not re-authorized by physical movement.
+
+### Post-Sprint Continuous Optimization Tracks
+
+When the easier foundational sprints are complete, Codex should not stop at
+architecture convergence. The next objective is to evolve the system from
+boundary-bounded live capability into boundary-bounded continuous trial,
+learning, and optimization.
+
+Owner operating direction:
+
+- The Binance subaccount risk capital is already Owner-isolated experimental
+  capital for live validation.
+- Testnet may be used for flow validation, but final validation is expected to
+  be real live trading inside the authorized subaccount / runtime boundary.
+- Codex may proactively download data, add tables, build data models, and open
+  deeper strategy/data design work when those changes advance runtime
+  governance, strategy implementation, or review quality.
+- Do not over-optimize for capital preservation during project progress.
+  Runtime safety should prevent runaway, unauditable orders, duplicate submits,
+  missing protection, stale facts, boundary breach, and uncontrolled
+  leverage/margin/liquidation risk. It should not try to avoid every bounded
+  strategy loss.
+
+Optimization tracks:
+
+1. **Strategy data model**
+   Build the durable fact layer needed by strategy families: multi-timeframe
+   OHLCV, volume, volatility / ATR, funding, open interest, crowding,
+   liquidation/orderbook facts where useful, regime snapshots, RequiredFacts,
+   freshness, and missing-fact behavior.
+
+2. **Strategy family expansion**
+   Complete CPM long, BRF short, and RMR regime-classifier semantics first.
+   Keep FCO funding/open-interest/crowding as a data-dependent backlog family.
+   Later strategy families may include mean reversion, breakout failure, and
+   momentum continuation when their facts and review semantics are explicit.
+
+3. **Exit-system optimization**
+   Support fixed TP1/TP2, TP1 plus runner, trailing stop, break-even stop,
+   time stop, structure-invalidation exit, and funding-aware exit as strategy
+   semantics. Hard protection remains mandatory; exit optimization must not
+   remove bounded-loss protection.
+
+4. **Right-tail review module**
+   Build review metrics for MFE, MAE, R multiple, tail winner contribution,
+   small-loss count, winner hold time, runner giveback, early runner cap,
+   stop effectiveness, and whether a runtime attempt deserves continuation.
+   Review must distinguish strategy performance from Owner capital movement.
+
+5. **Data download and feature warehouse**
+   Add tables and loaders where needed for market facts, strategy features,
+   funding snapshots, open-interest snapshots, regime snapshots,
+   signal-evaluation inputs, and trade-review metrics. Prefer explicit
+   freshness and source metadata over inferred facts.
+
+6. **Execution recovery**
+   Design and implement recovery handling for partial fills, rejects,
+   protection-order failure, uncertain exchange responses, process restart,
+   local/exchange mismatch, manual close detection, and recovery playbooks.
+
+7. **Risk profile evolution**
+   Add runtime profile templates, strategy-specific envelopes, symbol-level
+   throttles, account-level exposure caps, leverage/margin/liquidation-buffer
+   rules, budget release/consume rules, and automatic pause/resume conditions.
+   Leverage must never expand loss budget.
+
+8. **Console product depth**
+   Continue productizing strategy library, runtime governance, trades and
+   positions, analysis, incident intervention, evidence, Owner notes, and
+   withdrawal-adjusted capital base. The console should remain an Owner
+   operation surface, not a raw API/debug browser.
+
+9. **Live learning loop**
+   Produce review packets after trades, connect outcomes to promote / revise /
+   park decisions, version strategy changes, and suggest budget/profile
+   changes. The system may recommend expansion, but must not automatically
+   expand capital authority without explicit Owner approval.
+
+These tracks may run iteratively after the foundation is stable. They are not a
+license for unbounded execution; they are the path from "can trade inside a
+boundary" to "can keep trying, learning, and improving inside a boundary."
 
 ---
 
