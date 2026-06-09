@@ -146,6 +146,8 @@ def _runtime() -> StrategyRuntimeInstance:
             allowed_symbols=["BNB/USDT:USDT"],
             allowed_sides=["long"],
             max_leverage=Decimal("2"),
+            max_margin_per_attempt=Decimal("5"),
+            min_liquidation_stop_buffer=Decimal("25"),
             requires_protection=True,
             requires_review=True,
         ),
@@ -172,10 +174,14 @@ def _candidate(**overrides) -> OrderCandidate:
             intended_notional=Decimal("6"),
             proposed_quantity=Decimal("0.01"),
             leverage=Decimal("1"),
+            margin_required=Decimal("3"),
+            liquidation_price_reference=Decimal("500"),
+            liquidation_stop_buffer=Decimal("25"),
         ),
         "protection_preview": OrderCandidateProtectionPreview(
             requires_protection=True,
             stop_reference="bounded_loss_reference",
+            stop_price_reference=Decimal("594"),
         ),
         "rationale": "small risk-capital chain integrity candidate",
         "created_at_ms": NOW_MS,
@@ -1661,7 +1667,7 @@ async def test_runtime_execution_submit_readiness_requires_owner_submit_authoriz
     assert readiness.order_lifecycle_called is False
 
 
-async def test_runtime_execution_protection_plan_preview_blocks_missing_concrete_stop():
+async def test_runtime_execution_protection_plan_preview_accepts_bounded_loss_stop_without_order():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -1676,8 +1682,8 @@ async def test_runtime_execution_protection_plan_preview_blocks_missing_concrete
 
     preview = await service.protection_plan_preview_for_intent(intent.id)
 
-    assert preview.status == RuntimeExecutionProtectionPlanPreviewStatus.BLOCKED
-    assert "concrete_stop_price_missing" in preview.blockers
+    assert preview.status == RuntimeExecutionProtectionPlanPreviewStatus.READY_FOR_SUBMIT_ADAPTER
+    assert preview.blockers == []
     assert "take_profit_or_exit_policy_snapshot_missing" in preview.warnings
     assert preview.entry_price_reference == Decimal("600")
     assert preview.risk_preview["intended_notional"] == "6"
@@ -1774,7 +1780,7 @@ async def test_runtime_execution_protection_plan_records_ready_candidate_prices(
     assert plan.order_lifecycle_called is False
 
 
-async def test_runtime_execution_protection_plan_records_blocked_missing_concrete_stop():
+async def test_runtime_execution_protection_plan_records_bounded_loss_stop_without_order():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -1790,8 +1796,9 @@ async def test_runtime_execution_protection_plan_records_blocked_missing_concret
 
     plan = await service.record_protection_plan_for_intent(intent.id)
 
-    assert plan.status == RuntimeExecutionProtectionPlanStatus.BLOCKED
-    assert "concrete_stop_price_missing" in plan.blockers
+    assert plan.status == RuntimeExecutionProtectionPlanStatus.READY_FOR_SUBMIT_ADAPTER
+    assert plan.blockers == []
+    assert plan.stop_price_reference == Decimal("594")
     assert plan.protection_plan_recorded is True
     assert plan.not_order is True
     assert plan.not_exchange_payload is True
@@ -2132,7 +2139,7 @@ async def test_runtime_execution_controlled_submit_preflight_blocks_final_gate_b
     assert preflight.exchange_called is False
 
 
-async def test_runtime_execution_submit_adapter_preview_blocks_missing_concrete_protection():
+async def test_runtime_execution_submit_adapter_preview_inputs_ready_but_not_implemented():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -2157,8 +2164,8 @@ async def test_runtime_execution_submit_adapter_preview_blocks_missing_concrete_
         authorization.authorization_id
     )
 
-    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.BLOCKED
-    assert "concrete_stop_price_missing" in preview.blockers
+    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    assert preview.blockers == []
     assert "take_profit_or_exit_policy_snapshot_missing" in preview.warnings
     assert preview.entry_price_reference == Decimal("600")
     assert preview.risk_preview["intended_notional"] == "6"
@@ -2210,6 +2217,11 @@ async def test_runtime_execution_attempt_reservation_preview_checks_budget_witho
     assert preview.attempts_remaining_after == 1
     assert preview.budget_remaining_before == Decimal("20")
     assert preview.budget_remaining_after == Decimal("14")
+    assert "max_loss_reference_missing_using_intended_notional_budget_reservation" in (
+        preview.warnings
+    )
+    assert preview.metadata["budget_reservation_basis"] == "intended_notional_fallback"
+    assert preview.metadata["budget_reservation_amount"] == "6"
     assert preview.reservation_recorded is False
     assert preview.runtime_budget_mutated is False
     assert preview.attempt_consumed is False
@@ -2257,6 +2269,11 @@ async def test_runtime_execution_attempt_reservation_is_recorded_as_pending_with
     assert reservation.attempts_remaining_after == 1
     assert reservation.budget_remaining_before == Decimal("20")
     assert reservation.budget_remaining_after == Decimal("14")
+    assert "max_loss_reference_missing_using_intended_notional_budget_reservation" in (
+        reservation.warnings
+    )
+    assert reservation.metadata["budget_reservation_basis"] == "intended_notional_fallback"
+    assert reservation.metadata["budget_reservation_amount"] == "6"
 
 
 async def test_runtime_execution_attempt_reservation_repository_roundtrips_pending_record():
@@ -2358,6 +2375,11 @@ async def test_runtime_execution_attempt_mutation_applies_runtime_budget_and_att
     assert mutation.budget_remaining_before == Decimal("20")
     assert mutation.budget_remaining_after == Decimal("14")
     assert mutation.reservation_budget_remaining_after == Decimal("14")
+    assert "max_loss_reference_missing_using_intended_notional_budget_reservation" in (
+        mutation.warnings
+    )
+    assert mutation.metadata["budget_reservation_basis"] == "intended_notional_fallback"
+    assert mutation.metadata["budget_reservation_amount"] == "6"
     assert runtime_service.runtime.boundary.attempts_used == 1
     assert runtime_service.runtime.boundary.budget_reserved == Decimal("6")
     assert runtime_service.runtime.budget_remaining == Decimal("14")
@@ -2372,6 +2394,9 @@ async def test_runtime_execution_attempt_budget_prefers_max_loss_reference_over_
             proposed_quantity=Decimal("0.01"),
             max_loss_reference=Decimal("2"),
             leverage=Decimal("1"),
+            margin_required=Decimal("3"),
+            liquidation_price_reference=Decimal("500"),
+            liquidation_stop_buffer=Decimal("25"),
         ),
     )
     draft = await _planning_service(
@@ -2649,10 +2674,9 @@ async def test_runtime_execution_order_lifecycle_handoff_blocks_when_protection_
         authorization.authorization_id
     )
 
-    assert handoff.status == RuntimeExecutionOrderLifecycleHandoffStatus.BLOCKED
-    assert "runtime_protection_plan_not_ready" in handoff.blockers
-    assert "concrete_stop_price_missing" in handoff.blockers
-    assert "stop_price_reference_missing" in handoff.blockers
+    assert handoff.status == RuntimeExecutionOrderLifecycleHandoffStatus.READY_FOR_ORDER_LIFECYCLE_ADAPTER
+    assert handoff.blockers == []
+    assert handoff.stop_price_reference == Decimal("594")
     assert handoff.order_lifecycle_adapter_implemented is False
     assert handoff.order_created is False
     assert handoff.exchange_called is False
@@ -2779,17 +2803,18 @@ async def test_runtime_execution_order_lifecycle_adapter_preview_inputs_ready_bu
     assert preview.order_lifecycle_called is False
 
 
-async def test_runtime_execution_order_lifecycle_adapter_preview_blocks_unready_handoff():
+async def test_runtime_execution_order_lifecycle_adapter_preview_inputs_ready_but_disabled_from_default_candidate():
     service, authorization, handoff, _handoff_repo = await _order_lifecycle_handoff_setup()
 
     preview = await service.order_lifecycle_adapter_preview_for_authorization(
         authorization.authorization_id
     )
 
-    assert handoff.status == RuntimeExecutionOrderLifecycleHandoffStatus.BLOCKED
-    assert preview.status == RuntimeExecutionOrderLifecycleAdapterPreviewStatus.BLOCKED
-    assert "order_lifecycle_handoff_not_ready" in preview.blockers
-    assert "runtime_protection_plan_not_ready" in preview.blockers
+    assert handoff.status == RuntimeExecutionOrderLifecycleHandoffStatus.READY_FOR_ORDER_LIFECYCLE_ADAPTER
+    assert preview.status == (
+        RuntimeExecutionOrderLifecycleAdapterPreviewStatus.INPUTS_READY_REGISTRATION_NOT_ENABLED
+    )
+    assert preview.blockers == []
     assert preview.local_order_registration_enabled is False
     assert preview.order_created is False
     assert preview.exchange_called is False
@@ -3291,8 +3316,8 @@ async def test_trading_console_runtime_execution_protection_plan_preview_endpoin
 
     preview = await runtime_execution_protection_plan_preview_for_intent(intent.id)
 
-    assert preview.status == RuntimeExecutionProtectionPlanPreviewStatus.BLOCKED
-    assert "concrete_stop_price_missing" in preview.blockers
+    assert preview.status == RuntimeExecutionProtectionPlanPreviewStatus.READY_FOR_SUBMIT_ADAPTER
+    assert preview.blockers == []
     assert preview.order_created is False
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False
@@ -3499,8 +3524,8 @@ async def test_trading_console_runtime_execution_submit_adapter_preview_endpoint
         authorization.authorization_id
     )
 
-    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.BLOCKED
-    assert "concrete_stop_price_missing" in preview.blockers
+    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    assert preview.blockers == []
     assert preview.order_created is False
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False
