@@ -345,6 +345,12 @@ class ReconciliationReadModelReport:
     warning_count: int = 0
     is_fetch_failure: bool = False
     fetch_failure_reason: Optional[str] = None
+    runtime_instance_id: Optional[str] = None
+    trial_binding_id: Optional[str] = None
+    strategy_family_id: Optional[str] = None
+    strategy_family_version_id: Optional[str] = None
+    signal_evaluation_id: Optional[str] = None
+    order_candidate_id: Optional[str] = None
     created_at: int = 0
 
 
@@ -359,6 +365,12 @@ class ReconciliationReadModelMismatch:
     reason: str
     local_ref: Optional[str] = None
     exchange_ref: Optional[str] = None
+    runtime_instance_id: Optional[str] = None
+    trial_binding_id: Optional[str] = None
+    strategy_family_id: Optional[str] = None
+    strategy_family_version_id: Optional[str] = None
+    signal_evaluation_id: Optional[str] = None
+    order_candidate_id: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
     created_at: int = 0
 

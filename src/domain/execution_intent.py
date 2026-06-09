@@ -19,6 +19,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from src.domain.brc_audit_ids import BrcSemanticIds
 from src.domain.models import SignalResult, Order, OrderStrategy
 
 
@@ -62,6 +63,41 @@ class ExecutionIntent(BaseModel):
         None,
         description="Owner bounded live-trial authorization ID, when intent is created from Owner execution.",
     )
+    runtime_instance_id: Optional[str] = Field(
+        None,
+        description="Optional StrategyRuntimeInstance audit ID; trace metadata only.",
+    )
+    trial_binding_id: Optional[str] = Field(
+        None,
+        description="Optional admission trial binding audit ID; trace metadata only.",
+    )
+    strategy_family_id: Optional[str] = Field(
+        None,
+        description="Optional strategy family audit ID; trace metadata only.",
+    )
+    strategy_family_version_id: Optional[str] = Field(
+        None,
+        description="Optional strategy family version audit ID; trace metadata only.",
+    )
+    signal_evaluation_id: Optional[str] = Field(
+        None,
+        description="Optional future SignalEvaluation audit ID; trace metadata only.",
+    )
+    order_candidate_id: Optional[str] = Field(
+        None,
+        description="Optional future OrderCandidate audit ID; trace metadata only.",
+    )
+
+    @property
+    def semantic_ids(self) -> BrcSemanticIds:
+        return BrcSemanticIds(
+            runtime_instance_id=self.runtime_instance_id,
+            trial_binding_id=self.trial_binding_id,
+            strategy_family_id=self.strategy_family_id,
+            strategy_family_version_id=self.strategy_family_version_id,
+            signal_evaluation_id=self.signal_evaluation_id,
+            order_candidate_id=self.order_candidate_id,
+        )
 
     # 拦截原因（被 CapitalProtection 拦截时填充）
     blocked_reason: Optional[str] = Field(None, description="拦截原因代码")

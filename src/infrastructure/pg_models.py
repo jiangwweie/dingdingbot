@@ -78,6 +78,12 @@ class PGOrderORM(PGCoreBase):
     oco_group_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     exit_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     filled_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
@@ -110,6 +116,10 @@ class PGOrderORM(PGCoreBase):
         Index("idx_orders_created_at", "created_at"),
         Index("idx_orders_symbol_status", "symbol", "status"),
         Index("idx_orders_parent_role", "parent_order_id", "order_role"),
+        Index("idx_orders_runtime_instance_id", "runtime_instance_id"),
+        Index("idx_orders_trial_binding_id", "trial_binding_id"),
+        Index("idx_orders_strategy_family_version_id", "strategy_family_version_id"),
+        Index("idx_orders_order_candidate_id", "order_candidate_id"),
     )
 
 
@@ -131,6 +141,12 @@ class PGExecutionIntentORM(PGCoreBase):
         ForeignKey("brc_bounded_live_trial_authorizations.authorization_id", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     exchange_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     blocked_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -156,6 +172,13 @@ class PGExecutionIntentORM(PGCoreBase):
         Index("idx_execution_intents_symbol", "symbol"),
         Index("idx_execution_intents_created_at", "created_at"),
         Index("idx_execution_intents_authorization_id", "authorization_id"),
+        Index("idx_execution_intents_runtime_instance_id", "runtime_instance_id"),
+        Index("idx_execution_intents_trial_binding_id", "trial_binding_id"),
+        Index(
+            "idx_execution_intents_strategy_family_version_id",
+            "strategy_family_version_id",
+        ),
+        Index("idx_execution_intents_order_candidate_id", "order_candidate_id"),
     )
 
 
@@ -766,6 +789,11 @@ class PGBrcLiveLifecycleReviewORM(PGCoreBase):
     authorization_id: Mapped[str] = mapped_column(String(128), nullable=False)
     carrier_id: Mapped[str] = mapped_column(String(128), nullable=False)
     strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     side: Mapped[str] = mapped_column(String(16), nullable=False)
     quantity: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -846,6 +874,12 @@ class PGBrcLiveLifecycleReviewORM(PGCoreBase):
         Index("idx_brc_live_lifecycle_reviews_auth_time", "authorization_id", "created_at_ms"),
         Index("idx_brc_live_lifecycle_reviews_symbol_time", "symbol", "created_at_ms"),
         Index("idx_brc_live_lifecycle_reviews_status_time", "review_status", "created_at_ms"),
+        Index("idx_brc_live_lifecycle_reviews_runtime", "runtime_instance_id"),
+        Index("idx_brc_live_lifecycle_reviews_trial_binding", "trial_binding_id"),
+        Index(
+            "idx_brc_live_lifecycle_reviews_strategy_version",
+            "strategy_family_version_id",
+        ),
     )
 
 
@@ -3291,12 +3325,20 @@ class PGReconciliationReadModelReportORM(PGCoreBase):
     warning_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_fetch_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fetch_failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
 
     __table_args__ = (
         Index("idx_reconciliation_read_model_reports_symbol_time", "symbol", "checked_at_ms"),
         Index("idx_reconciliation_read_model_reports_consistent", "is_consistent"),
         Index("idx_reconciliation_read_model_reports_time", "checked_at_ms"),
+        Index("idx_reconciliation_read_model_reports_runtime", "runtime_instance_id"),
+        Index("idx_reconciliation_read_model_reports_trial_binding", "trial_binding_id"),
     )
 
 
@@ -3317,6 +3359,12 @@ class PGReconciliationReadModelMismatchORM(PGCoreBase):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     local_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     exchange_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     metadata_json: Mapped[Optional[dict]] = mapped_column(
         "metadata",
         JSONB().with_variant(JSON(), "sqlite"),
@@ -3328,6 +3376,8 @@ class PGReconciliationReadModelMismatchORM(PGCoreBase):
         Index("idx_reconciliation_read_model_mismatches_report", "report_id"),
         Index("idx_reconciliation_read_model_mismatches_type", "mismatch_type"),
         Index("idx_reconciliation_read_model_mismatches_severity", "severity"),
+        Index("idx_reconciliation_read_model_mismatches_runtime", "runtime_instance_id"),
+        Index("idx_reconciliation_read_model_mismatches_trial_binding", "trial_binding_id"),
     )
 
 

@@ -76,6 +76,12 @@ class ReconciliationMismatch:
     reason: str
     local_ref: Optional[str] = None
     exchange_ref: Optional[str] = None
+    runtime_instance_id: Optional[str] = None
+    trial_binding_id: Optional[str] = None
+    strategy_family_id: Optional[str] = None
+    strategy_family_version_id: Optional[str] = None
+    signal_evaluation_id: Optional[str] = None
+    order_candidate_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

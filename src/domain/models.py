@@ -9,6 +9,8 @@ from typing import Optional, List, Dict, Any, Union, Annotated, Literal
 from enum import Enum
 from datetime import datetime, timezone
 
+from src.domain.brc_audit_ids import BrcSemanticIds
+
 
 # ============================================================
 # Enum Types
@@ -1073,6 +1075,15 @@ class Order(FinancialModel):
     parent_order_id: Optional[str] = None  # 父订单 ID (用于订单链)
     oco_group_id: Optional[str] = None     # OCO 组 ID (同一组的订单互斥)
 
+    # TD-2 Audit ID Spine: optional strategy runtime semantic trace metadata.
+    # These fields are nullable and do not alter order placement payloads.
+    runtime_instance_id: Optional[str] = None
+    trial_binding_id: Optional[str] = None
+    strategy_family_id: Optional[str] = None
+    strategy_family_version_id: Optional[str] = None
+    signal_evaluation_id: Optional[str] = None
+    order_candidate_id: Optional[str] = None
+
     # T4 - 订单持久化扩展
     filled_at: Optional[int] = None  # 成交时间戳（毫秒），用于回测记录订单实际成交时间
 
@@ -1080,6 +1091,17 @@ class Order(FinancialModel):
     actual_filled: Optional[Decimal] = None    # 本次实际成交量（防超卖截断后的真实值）
     close_pnl: Optional[Decimal] = None        # 本次出场的净 PnL（gross_pnl - fee）
     close_fee: Optional[Decimal] = None        # 本次出场的手续费
+
+    @property
+    def semantic_ids(self) -> BrcSemanticIds:
+        return BrcSemanticIds(
+            runtime_instance_id=self.runtime_instance_id,
+            trial_binding_id=self.trial_binding_id,
+            strategy_family_id=self.strategy_family_id,
+            strategy_family_version_id=self.strategy_family_version_id,
+            signal_evaluation_id=self.signal_evaluation_id,
+            order_candidate_id=self.order_candidate_id,
+        )
 
 
 # ============================================================
@@ -1493,6 +1515,12 @@ class OrderMismatch(FinancialModel):
     order_id: str = Field(..., description="订单 ID")
     local_status: OrderStatus = Field(..., description="本地状态")
     exchange_status: str = Field(..., description="交易所状态")
+    runtime_instance_id: Optional[str] = None
+    trial_binding_id: Optional[str] = None
+    strategy_family_id: Optional[str] = None
+    strategy_family_version_id: Optional[str] = None
+    signal_evaluation_id: Optional[str] = None
+    order_candidate_id: Optional[str] = None
 
 
 class GhostOrder(FinancialModel):

@@ -47,6 +47,12 @@ class PgReconciliationReadModelRepository:
                     warning_count=report.warning_count,
                     is_fetch_failure=report.is_fetch_failure,
                     fetch_failure_reason=report.fetch_failure_reason,
+                    runtime_instance_id=report.runtime_instance_id,
+                    trial_binding_id=report.trial_binding_id,
+                    strategy_family_id=report.strategy_family_id,
+                    strategy_family_version_id=report.strategy_family_version_id,
+                    signal_evaluation_id=report.signal_evaluation_id,
+                    order_candidate_id=report.order_candidate_id,
                     created_at=report.created_at,
                 )
                 session.add(report_row)
@@ -61,6 +67,12 @@ class PgReconciliationReadModelRepository:
                             reason=mismatch.reason,
                             local_ref=mismatch.local_ref,
                             exchange_ref=mismatch.exchange_ref,
+                            runtime_instance_id=mismatch.runtime_instance_id,
+                            trial_binding_id=mismatch.trial_binding_id,
+                            strategy_family_id=mismatch.strategy_family_id,
+                            strategy_family_version_id=mismatch.strategy_family_version_id,
+                            signal_evaluation_id=mismatch.signal_evaluation_id,
+                            order_candidate_id=mismatch.order_candidate_id,
                             metadata_json=mismatch.metadata,
                             created_at=mismatch.created_at,
                         )
@@ -108,6 +120,12 @@ class PgReconciliationReadModelRepository:
             warning_count=row.warning_count,
             is_fetch_failure=row.is_fetch_failure,
             fetch_failure_reason=row.fetch_failure_reason,
+            runtime_instance_id=row.runtime_instance_id,
+            trial_binding_id=row.trial_binding_id,
+            strategy_family_id=row.strategy_family_id,
+            strategy_family_version_id=row.strategy_family_version_id,
+            signal_evaluation_id=row.signal_evaluation_id,
+            order_candidate_id=row.order_candidate_id,
             created_at=row.created_at,
         )
 
@@ -123,6 +141,12 @@ class PgReconciliationReadModelRepository:
             reason=row.reason,
             local_ref=row.local_ref,
             exchange_ref=row.exchange_ref,
+            runtime_instance_id=row.runtime_instance_id,
+            trial_binding_id=row.trial_binding_id,
+            strategy_family_id=row.strategy_family_id,
+            strategy_family_version_id=row.strategy_family_version_id,
+            signal_evaluation_id=row.signal_evaluation_id,
+            order_candidate_id=row.order_candidate_id,
             metadata=row.metadata_json,
             created_at=row.created_at,
         )

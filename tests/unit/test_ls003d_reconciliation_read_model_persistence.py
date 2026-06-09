@@ -378,7 +378,7 @@ def test_alembic_single_head():
     config = Config(str(Path("alembic.ini").resolve()))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["008"]
+    assert script.get_heads() == ["046"]
 
 
 def test_clean_temp_db_migration_upgrade_downgrade_upgrade(tmp_path):
