@@ -185,7 +185,12 @@ Key facts:
   non-executing shadow planner. Missing, ineligible, expired, side-mismatched,
   or ambiguous runtime matches do not call the planner. Tokyo autonomous
   scheduling / triggering remains disabled unless separately wired and
-  authorized.
+  authorized. The local scheduled-observation CLI remains observation-only by
+  default; it can opt into this non-executing resolver/planner wiring with
+  `--shadow-plan`, and can only allow shadow candidate creation with the
+  additional `--allow-shadow-candidate-creation` flag. If no trusted account
+  facts source is configured, shadow planning blocks instead of fabricating
+  readiness.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, runtime safety boundary,
