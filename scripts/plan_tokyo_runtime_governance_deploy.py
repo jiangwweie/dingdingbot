@@ -30,9 +30,9 @@ DEFAULT_VENV_PYTHON = (
 )
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_PREVIOUS_RELEASE = (
-    "/home/ubuntu/brc-deploy/releases/brc-jit-lifecycle-audit-415d3985-20260608"
+    "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ae9b209e-20260610T061250Z"
 )
-DEFAULT_EXPECTED_DEPLOYED_HEAD = "415d398509872cb25bf969319e29732764f9615b"
+DEFAULT_EXPECTED_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
 )
@@ -265,11 +265,16 @@ def _plan_phases(
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/prepare_tokyo_runtime_governance_release.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/audit_tokyo_runtime_governance_migration_gap.py --json",
+                "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
+                "--base-revision 064 --head-revision 064 "
+                "--expected-revision-count 0",
+                f"cd {q(str(repo_root))} && {local_python} "
+                "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
             ],
             "stop_if": [
                 "ready_for_packaging is not true",
                 "ready_for_controlled_migration_preflight is not true",
+                "scheduled-observation shadow-planning rehearsal does not pass",
             ],
         },
         {

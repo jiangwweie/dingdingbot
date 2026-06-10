@@ -399,9 +399,12 @@ Key facts:
   runtime semantic audit IDs and source-native ExecutionIntent metadata have
   been added to selected execution and review tables. Runtime execution submit
   has not yet been integrated.
-- **Tokyo deployment note:** current tokyo deployment was verified still on
-  commit `415d398` / Alembic head `044`, so it does not yet contain the local
-  Sprint 1-4 runtime governance shadow code.
+- **Tokyo deployment note:** current tokyo deployment was verified on
+  commit `ae9b209e` / Alembic head
+  `2026-06-10-064_add_runtime_profile_proposal_snapshot.py` with
+  `runtime_bound=true` and `live_ready=false`. This is a non-executing
+  runtime-governance deployment; it is not live-submit authorization, not order
+  authority, and not an Owner approval for real-funds trading.
 
 ---
 

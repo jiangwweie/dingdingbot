@@ -52,9 +52,9 @@ def test_deploy_plan_requires_artifact_and_manifest():
         api_base="http://127.0.0.1:18080",
         previous_release=(
             "/home/ubuntu/brc-deploy/releases/"
-            "brc-jit-lifecycle-audit-415d3985-20260608"
+            "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
-        expected_deployed_head="415d398509872cb25bf969319e29732764f9615b",
+        expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),
@@ -103,9 +103,9 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
         api_base="http://127.0.0.1:18080",
         previous_release=(
             "/home/ubuntu/brc-deploy/releases/"
-            "brc-jit-lifecycle-audit-415d3985-20260608"
+            "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
-        expected_deployed_head="415d398509872cb25bf969319e29732764f9615b",
+        expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),
@@ -145,6 +145,9 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "ln -sfn" in all_commands
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
     assert "systemctl start brc-owner-console-backend.service" in all_commands
+    assert "--base-revision 064 --head-revision 064" in all_commands
+    assert "--expected-revision-count 0" in all_commands
+    assert "verify_strategy_observation_shadow_planning_rehearsal.py --json" in all_commands
     assert "--expected-current-head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
 
@@ -180,9 +183,9 @@ def test_deploy_plan_blocks_manifest_head_mismatch(tmp_path: Path):
         api_base="http://127.0.0.1:18080",
         previous_release=(
             "/home/ubuntu/brc-deploy/releases/"
-            "brc-jit-lifecycle-audit-415d3985-20260608"
+            "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
-        expected_deployed_head="415d398509872cb25bf969319e29732764f9615b",
+        expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),

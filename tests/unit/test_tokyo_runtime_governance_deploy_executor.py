@@ -81,9 +81,9 @@ def _ready_plan(tmp_path: Path) -> dict:
         api_base="http://127.0.0.1:18080",
         previous_release=(
             "/home/ubuntu/brc-deploy/releases/"
-            "brc-jit-lifecycle-audit-415d3985-20260608"
+            "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
-        expected_deployed_head="415d398509872cb25bf969319e29732764f9615b",
+        expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),

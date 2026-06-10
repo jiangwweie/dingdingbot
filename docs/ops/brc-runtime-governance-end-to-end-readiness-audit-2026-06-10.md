@@ -12,12 +12,16 @@ Local worktree:
 
 - path: `/Users/jiangwei/Documents/final-sprint6-integration`
 - branch: `release/tokyo-runtime-governance-20260610`
-- current local baseline before this stage: `3450c647`
+- current local baseline before this stage: `3f5dd229`
 - audited deployed backend candidate: `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
 - stage commits:
   - `cfd66143 chore(ops): add gated tokyo deploy executor`
   - `6533e066 docs(ops): add authenticated tokyo console evidence`
   - `3450c647 feat(brc): hand scheduled observations to shadow planner`
+  - `737ca3b8 feat(console): expose scheduled strategy observation run`
+  - `30f4a85d feat(brc): add scheduled shadow planning cli wiring`
+  - `cbd22c44 feat(brc): resolve runtimes for scheduled signal planning`
+  - `3f5dd229 test(brc): add shadow planning rehearsal verifier`
 
 Current local code is ahead of the deployed backend by non-executing
 readiness, scheduler handoff, docs, and verifier commits. The actual deployed
@@ -176,9 +180,11 @@ Observed result:
 ```text
 status=ready_for_controlled_deploy_preflight
 blockers=[]
-warnings=[]
-current_head=415d398509872cb25bf969319e29732764f9615b
-migration_count=44
+warnings=[remote_release_identity_from_manifest_without_git_status]
+current_head=ae9b209e33cd287273491f2e93dfdff3b6a814fd
+current_status=release_manifest_without_git_status
+migration_count=64
+latest_migration=2026-06-10-064_add_runtime_profile_proposal_snapshot.py
 health.status=ok
 health.runtime_bound=true
 health.live_ready=false
@@ -208,6 +214,11 @@ order_lifecycle_called=false
 owner_bounded_execution_called=false
 withdrawal_or_transfer_created=false
 ```
+
+Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
+deployment plan requires local packaging readiness, a `064 -> 064` migration
+gap audit with zero expected revisions, and the local scheduled-observation
+shadow-planning rehearsal before any Owner-authorized remote mutation phase.
 
 ## 6. Focused Test Evidence
 

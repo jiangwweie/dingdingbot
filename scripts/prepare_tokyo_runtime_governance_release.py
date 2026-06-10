@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_DEPLOYED_HEAD = "415d398509872cb25bf969319e29732764f9615b"
+DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
 DEFAULT_EXPECTED_MIN_MIGRATIONS = 64
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"

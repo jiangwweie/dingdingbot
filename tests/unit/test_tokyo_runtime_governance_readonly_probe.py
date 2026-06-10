@@ -29,12 +29,12 @@ def _ready_facts() -> dict:
         "user": "ubuntu",
         "current_realpath": (
             "/home/ubuntu/brc-deploy/releases/"
-            "brc-jit-lifecycle-audit-415d3985-20260608"
+            "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
-        "current_head": "415d398509872cb25bf969319e29732764f9615b",
+        "current_head": "ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         "current_status": "## HEAD (no branch)",
-        "migration_count": "44",
-        "latest_migration": "2026-06-08-044_create_live_lifecycle_reviews.py",
+        "migration_count": "64",
+        "latest_migration": "2026-06-10-064_add_runtime_profile_proposal_snapshot.py",
         "health": {
             "http_status": 200,
             "body": (
@@ -62,9 +62,9 @@ def test_tokyo_probe_checks_ready_remote_predeploy_baseline():
 
     checks = module.evaluate_probe_checks(
         facts=_ready_facts(),
-        expected_current_head="415d398509872cb25bf969319e29732764f9615b",
-        expected_migration_count=44,
-        expected_latest_migration="2026-06-08-044_create_live_lifecycle_reviews.py",
+        expected_current_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
+        expected_migration_count=64,
+        expected_latest_migration="2026-06-10-064_add_runtime_profile_proposal_snapshot.py",
     )
 
     assert checks["ready_for_controlled_deploy_preflight"] is True
@@ -93,9 +93,9 @@ def test_tokyo_probe_blocks_dirty_remote_release_and_live_ready_health():
 
     checks = module.evaluate_probe_checks(
         facts=facts,
-        expected_current_head="415d398509872cb25bf969319e29732764f9615b",
-        expected_migration_count=44,
-        expected_latest_migration="2026-06-08-044_create_live_lifecycle_reviews.py",
+        expected_current_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
+        expected_migration_count=64,
+        expected_latest_migration="2026-06-10-064_add_runtime_profile_proposal_snapshot.py",
     )
 
     assert checks["ready_for_controlled_deploy_preflight"] is False
@@ -117,9 +117,9 @@ def test_tokyo_probe_blocks_unexpected_remote_head_and_schema_drift():
 
     checks = module.evaluate_probe_checks(
         facts=facts,
-        expected_current_head="415d398509872cb25bf969319e29732764f9615b",
-        expected_migration_count=44,
-        expected_latest_migration="2026-06-08-044_create_live_lifecycle_reviews.py",
+        expected_current_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
+        expected_migration_count=64,
+        expected_latest_migration="2026-06-10-064_add_runtime_profile_proposal_snapshot.py",
     )
 
     assert checks["ready_for_controlled_deploy_preflight"] is False
@@ -142,23 +142,23 @@ def test_tokyo_probe_builds_report_with_fake_runner_and_home_expanding_paths():
         if "readlink -f" in remote:
             return module.CommandResult(
                 "/home/ubuntu/brc-deploy/releases/"
-                "brc-jit-lifecycle-audit-415d3985-20260608\n",
+                "brc-runtime-governance-ae9b209e-20260610T061250Z\n",
                 "",
                 0,
             )
         if "git rev-parse HEAD" in remote:
             return module.CommandResult(
-                "415d398509872cb25bf969319e29732764f9615b\n",
+                "ae9b209e33cd287273491f2e93dfdff3b6a814fd\n",
                 "",
                 0,
             )
         if "git status --short --branch" in remote:
             return module.CommandResult("## HEAD (no branch)\n", "", 0)
         if "wc -l" in remote:
-            return module.CommandResult("44\n", "", 0)
+            return module.CommandResult("64\n", "", 0)
         if "tail -1" in remote:
             return module.CommandResult(
-                "2026-06-08-044_create_live_lifecycle_reviews.py\n",
+                "2026-06-10-064_add_runtime_profile_proposal_snapshot.py\n",
                 "",
                 0,
             )
@@ -182,9 +182,9 @@ def test_tokyo_probe_builds_report_with_fake_runner_and_home_expanding_paths():
         host="tokyo",
         deploy_root="~/brc-deploy",
         api_base="http://127.0.0.1:18080",
-        expected_current_head="415d398509872cb25bf969319e29732764f9615b",
-        expected_migration_count=44,
-        expected_latest_migration="2026-06-08-044_create_live_lifecycle_reviews.py",
+        expected_current_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
+        expected_migration_count=64,
+        expected_latest_migration="2026-06-10-064_add_runtime_profile_proposal_snapshot.py",
         connect_timeout_seconds=8,
         runner=runner,
     )
