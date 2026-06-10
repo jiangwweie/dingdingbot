@@ -148,6 +148,8 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "--base-revision 064 --head-revision 064" in all_commands
     assert "--expected-revision-count 0" in all_commands
     assert "verify_strategy_observation_shadow_planning_rehearsal.py --json" in all_commands
+    assert "verify_runtime_submit_rehearsal_pre_live_packet.py --json" in all_commands
+    assert "--skip-current-head-deployed-check" in all_commands
     assert "--expected-current-head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
 

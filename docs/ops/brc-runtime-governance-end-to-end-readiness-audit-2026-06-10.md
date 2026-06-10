@@ -245,8 +245,9 @@ submit_adapter_preview_status=inputs_ready_adapter_not_implemented
 
 Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
 deployment plan requires local packaging readiness, a `064 -> 064` migration
-gap audit with zero expected revisions, and the local scheduled-observation
-shadow-planning rehearsal before any Owner-authorized remote mutation phase.
+gap audit with zero expected revisions, the local scheduled-observation
+shadow-planning rehearsal, and the local runtime submit pre-live packet
+technical rehearsal before any Owner-authorized remote mutation phase.
 
 ## 6. Focused Test Evidence
 
