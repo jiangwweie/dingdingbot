@@ -85,7 +85,7 @@ def _ready_plan(tmp_path: Path) -> dict:
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+            "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py"
         ),
     )
 

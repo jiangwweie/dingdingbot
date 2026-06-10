@@ -119,7 +119,8 @@ stage because it must cover:
 
 - clean release artifact creation from the current local branch or pushed commit;
 - dependency install / virtualenv compatibility;
-- Alembic migration planning from Tokyo release `044` to local head `064`;
+- Alembic migration planning from current Tokyo release `064` to local head
+  `065`;
 - database backup before migration;
 - backend restart method;
 - post-restart health smoke;
@@ -138,4 +139,3 @@ This check did not:
 - create orders;
 - call OrderLifecycle;
 - call exchange write APIs.
-

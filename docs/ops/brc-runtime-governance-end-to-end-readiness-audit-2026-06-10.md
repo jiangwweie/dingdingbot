@@ -24,8 +24,9 @@ Local worktree:
   - `3f5dd229 test(brc): add shadow planning rehearsal verifier`
 
 Current local code is ahead of the deployed backend by non-executing
-readiness, scheduler handoff, docs, and verifier commits. The actual deployed
-runtime code remains `ae9b209e`.
+readiness, scheduler handoff, docs, verifier commits, and local live-runtime
+enablement persistence support. The actual deployed runtime code remains
+`ae9b209e`.
 
 Current remote Tokyo fact:
 
@@ -75,7 +76,7 @@ The current local code and docs preserve this direction:
 | CPM/BRF planning | CPM long uses pullback-low or ATR stop; BRF short uses rally-high or ATR stop; both include TP1 1R partial and runner/trailing metadata | local non-executing ready |
 | Trusted facts | `StrategyRuntimeFactOverlayService` can replace caller-supplied account/position/market allow facts and block missing trusted sources | local non-executing ready |
 | Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; scheduled observations preserve signal input snapshots and can call the shadow planner only after `allow_shadow_candidate_creation=true` plus a unique ACTIVE shadow runtime resolved from `StrategyRuntimeInstanceService`; the local CLI defaults to observation-only and requires explicit `--shadow-plan` / `--allow-shadow-candidate-creation` flags; Trading Console exposes an operator-auth manual scheduled run POST for this non-executing wiring; a local in-memory rehearsal verifier proves one CPM shadow candidate can be created with all execution/order/exchange flags false | local non-executing ready |
-| Runtime safety | Promotion, readiness, and live-enablement preview gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, deployment, Owner live-runtime enablement, and Owner real-submit confirmations | local non-executing ready |
+| Runtime safety | Promotion, readiness, and live-enablement preview gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, deployment, Owner live-runtime enablement, and Owner real-submit confirmations; a local live-runtime enablement mutation can flip only runtime governance flags after a ready preview and explicit authorization IDs | local runtime-flag mutation ready, no submit |
 | Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist; local pre-live packet verifier reaches the non-executing submit adapter boundary and now embeds StrategyRuntimeLiveEnablementPreview blockers | local non-submitting bridge only |
 | Console productization | Trading Console exposes runtime governance, strategy observation/planning, promotion/readiness, right-tail review, capital-base/withdrawal-adjusted review, and theme toggle surfaces | local UI/API verified previously |
 | Deployment | Tokyo backend and Trading Console static frontend are deployed; postdeploy verifier passed with authenticated endpoints expected to require login | deployed non-executing runtime governance |
@@ -250,8 +251,8 @@ submit_adapter_preview_status=inputs_ready_adapter_not_implemented
 ```
 
 Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
-deployment plan requires local packaging readiness, a `064 -> 064` migration
-gap audit with zero expected revisions, the local scheduled-observation
+deployment plan requires local packaging readiness, a `064 -> 065` migration
+gap audit with one expected revision, the local scheduled-observation
 shadow-planning rehearsal, and the local runtime submit pre-live packet
 technical rehearsal before any Owner-authorized remote mutation phase. The
 pre-live packet may pass its technical rehearsal while still reporting live
@@ -353,8 +354,9 @@ The following are not complete and must not be silently inferred:
 3. FCO remains blocked until deployment-backed funding/OI/crowding fact coverage
    and Owner-confirmed semantics exist.
 4. Runtime profiles are proposals / confirmation evidence only until Owner/Codex
-   confirms exact live profile values and materializes the allowed shadow
-   runtime path.
+   confirms exact live profile values and materializes the allowed runtime path.
+   Local code can now apply a live-runtime flag mutation after the live
+   enablement gate, but Tokyo has not been deployed to that local 065 target.
 5. First real runtime submit still requires explicit confirmations for attempt
    consumption, budget reservation/release/consume, protection failure
    handling, duplicate-submit blocking, account/active-position facts,

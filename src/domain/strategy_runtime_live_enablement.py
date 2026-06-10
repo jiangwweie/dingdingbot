@@ -38,6 +38,11 @@ class StrategyRuntimeLiveEnablementPreviewStatus(str, Enum):
     )
 
 
+class StrategyRuntimeLiveEnablementMutationStatus(str, Enum):
+    BLOCKED = "blocked"
+    APPLIED = "applied"
+
+
 class StrategyRuntimeLiveEnablementPreview(StrategyRuntimeLiveEnablementModel):
     runtime_instance_id: str
     strategy_family_id: str
@@ -60,6 +65,38 @@ class StrategyRuntimeLiveEnablementPreview(StrategyRuntimeLiveEnablementModel):
     forbidden_execution_flags: list[str] = Field(default_factory=list)
     not_execution_authority: Literal[True] = True
     runtime_state_mutated: Literal[False] = False
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    exchange_called: Literal[False] = False
+    owner_bounded_execution_called: Literal[False] = False
+    order_lifecycle_called: Literal[False] = False
+    withdrawal_instruction_created: Literal[False] = False
+    transfer_instruction_created: Literal[False] = False
+
+
+class StrategyRuntimeLiveEnablementMutation(StrategyRuntimeLiveEnablementModel):
+    mutation_id: str = Field(min_length=1, max_length=180)
+    runtime_instance_id: str
+    strategy_family_id: str
+    strategy_family_version_id: str
+    symbol: str
+    side: str
+    status: StrategyRuntimeLiveEnablementMutationStatus
+    blockers: list[str] = Field(default_factory=list)
+    previous_runtime_snapshot: StrategyRuntimeInstance
+    updated_runtime_snapshot: StrategyRuntimeInstance | None = None
+    preview_snapshot: StrategyRuntimeLiveEnablementPreview
+    owner_live_runtime_enablement_authorization_id: str | None = Field(
+        default=None,
+        max_length=180,
+    )
+    owner_real_submit_authorization_id: str | None = Field(
+        default=None,
+        max_length=180,
+    )
+    created_at_ms: int = Field(ge=0)
+    runtime_state_mutated: bool = False
+    not_order_authority: Literal[True] = True
     execution_intent_created: Literal[False] = False
     order_created: Literal[False] = False
     exchange_called: Literal[False] = False
@@ -153,6 +190,74 @@ def build_strategy_runtime_live_enablement_preview(
         submit_technical_rehearsal_passed=submit_technical_rehearsal_passed,
         submit_adapter_implemented=submit_adapter_implemented,
         forbidden_execution_flags=forbidden_flags,
+    )
+
+
+def build_strategy_runtime_live_enablement_mutation(
+    *,
+    runtime: StrategyRuntimeInstance,
+    preview: StrategyRuntimeLiveEnablementPreview,
+    mutation_id: str,
+    owner_live_runtime_enablement_authorization_id: str,
+    owner_real_submit_authorization_id: str,
+    now_ms: int,
+) -> StrategyRuntimeLiveEnablementMutation:
+    blockers: list[str] = []
+    if preview.runtime_instance_id != runtime.runtime_instance_id:
+        blockers.append("live_enablement_preview_runtime_mismatch")
+    if preview.status != (
+        StrategyRuntimeLiveEnablementPreviewStatus.READY_FOR_LIVE_RUNTIME_ENABLEMENT_MUTATION_DESIGN
+    ):
+        blockers.append("live_enablement_preview_not_ready")
+        blockers.extend(preview.blockers)
+    if (
+        preview.current_runtime_shadow_mode != runtime.shadow_mode
+        or preview.current_runtime_execution_enabled != runtime.execution_enabled
+        or preview.current_runtime_status != runtime.status
+    ):
+        blockers.append("live_enablement_preview_stale_runtime_state")
+    if not owner_live_runtime_enablement_authorization_id.strip():
+        blockers.append("owner_live_runtime_enablement_authorization_id_missing")
+    if not owner_real_submit_authorization_id.strip():
+        blockers.append("owner_real_submit_authorization_id_missing")
+
+    updated_runtime: StrategyRuntimeInstance | None = None
+    if not blockers:
+        try:
+            updated_runtime = runtime.enable_live_execution(
+                now_ms=now_ms,
+                mutation_id=mutation_id,
+                owner_live_runtime_enablement_authorization_id=(
+                    owner_live_runtime_enablement_authorization_id
+                ),
+                owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            )
+        except ValueError as exc:
+            blockers.append(f"runtime_live_enablement_model_rejected:{exc}")
+
+    status = (
+        StrategyRuntimeLiveEnablementMutationStatus.APPLIED
+        if updated_runtime is not None and not blockers
+        else StrategyRuntimeLiveEnablementMutationStatus.BLOCKED
+    )
+    return StrategyRuntimeLiveEnablementMutation(
+        mutation_id=mutation_id,
+        runtime_instance_id=runtime.runtime_instance_id,
+        strategy_family_id=runtime.strategy_family_id,
+        strategy_family_version_id=runtime.strategy_family_version_id,
+        symbol=runtime.symbol,
+        side=runtime.side,
+        status=status,
+        blockers=_dedupe_sorted(blockers),
+        previous_runtime_snapshot=runtime,
+        updated_runtime_snapshot=updated_runtime,
+        preview_snapshot=preview,
+        owner_live_runtime_enablement_authorization_id=(
+            owner_live_runtime_enablement_authorization_id or None
+        ),
+        owner_real_submit_authorization_id=owner_real_submit_authorization_id or None,
+        created_at_ms=now_ms,
+        runtime_state_mutated=status == StrategyRuntimeLiveEnablementMutationStatus.APPLIED,
     )
 
 

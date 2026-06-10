@@ -34,11 +34,22 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstanceStatus,
     StrategyRuntimePolicySnapshot,
 )
-from src.domain.strategy_runtime_promotion_gate import (
-    RuntimeExecutionConfirmationFacts,
-    StrategyRuntimePromotionGateConfirmationRecord,
-    StrategySemanticsConfirmationFacts,
+from src.domain.strategy_runtime_live_enablement import (
+    build_strategy_runtime_live_enablement_preview,
 )
+from src.domain.strategy_runtime_promotion_gate import (
+    FirstRealSubmitConfirmationFacts,
+    RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateInput,
+    StrategyRuntimePromotionGateConfirmationRecord,
+    StrategyRuntimePromotionScope,
+    StrategySemanticsConfirmationFacts,
+    evaluate_strategy_runtime_promotion_gate,
+)
+from src.domain.strategy_runtime_safety_readiness import (
+    evaluate_strategy_runtime_safety_readiness,
+)
+from src.domain.strategy_semantics import initial_strategy_semantics_catalog
 from src.infrastructure.pg_models import (
     PGStrategyRuntimeEventORM,
     PGStrategyRuntimeInstanceORM,
@@ -262,6 +273,29 @@ def test_strategy_runtime_rejects_execution_enabled():
         _runtime(execution_enabled=True)
 
 
+def test_strategy_runtime_can_enable_live_execution_with_audit_metadata():
+    runtime = _runtime(status=StrategyRuntimeInstanceStatus.ACTIVE)
+
+    live = runtime.enable_live_execution(
+        now_ms=NOW_MS + 1,
+        mutation_id="live-enable-mutation-1",
+        owner_live_runtime_enablement_authorization_id="owner-live-runtime-auth-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+    )
+
+    assert live.execution_enabled is True
+    assert live.shadow_mode is False
+    assert live.updated_at_ms == NOW_MS + 1
+    assert live.metadata["live_runtime_enablement_mutation_id"] == (
+        "live-enable-mutation-1"
+    )
+    assert live.metadata["creates_execution_intent"] is False
+    assert live.metadata["order_created"] is False
+    assert live.metadata["exchange_called"] is False
+    assert live.metadata["owner_bounded_execution_called"] is False
+    assert live.metadata["order_lifecycle_called"] is False
+
+
 def test_strategy_runtime_invalid_transition_rejected():
     runtime = _runtime(status=StrategyRuntimeInstanceStatus.REVOKED)
 
@@ -467,6 +501,91 @@ async def test_service_lifecycle_transitions_do_not_create_execution_side_effect
 
 
 @pytest.mark.asyncio
+async def test_service_enables_live_runtime_from_ready_preview_without_orders():
+    runtime_repo = _FakeRuntimeRepo()
+    service = StrategyRuntimeInstanceService(
+        runtime_repository=runtime_repo,
+        admission_repository=_FakeAdmissionRepo(),
+    )
+    runtime = await service.create_draft_from_trial_binding(
+        "binding-1",
+        side="long",
+        max_attempts=3,
+        max_notional_per_attempt=Decimal("10"),
+        total_budget=Decimal("3"),
+        max_leverage=Decimal("1"),
+    )
+    active = await service.activate_runtime(runtime.runtime_instance_id)
+    active = active.model_copy(
+        update={
+            "boundary": active.boundary.model_copy(
+                update={
+                    "max_margin_per_attempt": Decimal("10"),
+                    "min_liquidation_stop_buffer": Decimal("25"),
+                }
+            )
+        }
+    )
+    runtime_repo.items[active.runtime_instance_id] = active
+    preview = _ready_live_enablement_preview(active)
+
+    mutation = await service.enable_live_runtime_from_preview(
+        active.runtime_instance_id,
+        preview=preview,
+        owner_live_runtime_enablement_authorization_id="owner-live-runtime-auth-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+    )
+
+    saved = runtime_repo.items[active.runtime_instance_id]
+    assert mutation.runtime_state_mutated is True
+    assert mutation.updated_runtime_snapshot is not None
+    assert saved.execution_enabled is True
+    assert saved.shadow_mode is False
+    assert saved.metadata["live_runtime_enablement_mutation_id"] == mutation.mutation_id
+    assert runtime_repo.events[-1].event_type == "live_runtime_enabled"
+    assert runtime_repo.events[-1].metadata["runtime_state_mutated"] is True
+    assert runtime_repo.events[-1].metadata["execution_intent_created"] is False
+    assert runtime_repo.events[-1].metadata["order_created"] is False
+    assert runtime_repo.events[-1].metadata["exchange_called"] is False
+    assert runtime_repo.events[-1].metadata["owner_bounded_execution_called"] is False
+    assert runtime_repo.events[-1].metadata["order_lifecycle_called"] is False
+
+
+@pytest.mark.asyncio
+async def test_service_blocks_live_runtime_enablement_from_blocked_preview():
+    runtime_repo = _FakeRuntimeRepo()
+    service = StrategyRuntimeInstanceService(
+        runtime_repository=runtime_repo,
+        admission_repository=_FakeAdmissionRepo(),
+    )
+    runtime = await service.create_draft_from_trial_binding("binding-1", side="long")
+    active = await service.activate_runtime(runtime.runtime_instance_id)
+    blocked_preview = build_strategy_runtime_live_enablement_preview(
+        runtime=active,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(active),
+        promotion_gate_result=_promotion_gate(active, confirmed=False),
+        current_head_deployed=False,
+        owner_live_runtime_enablement_authorized=False,
+        owner_real_submit_authorization_present=False,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=False,
+        forbidden_execution_flags=[],
+    )
+
+    with pytest.raises(StrategyRuntimeError, match="live runtime enablement blocked"):
+        await service.enable_live_runtime_from_preview(
+            active.runtime_instance_id,
+            preview=blocked_preview,
+            owner_live_runtime_enablement_authorization_id="",
+            owner_real_submit_authorization_id="",
+        )
+
+    saved = runtime_repo.items[active.runtime_instance_id]
+    assert saved.execution_enabled is False
+    assert saved.shadow_mode is True
+
+
+@pytest.mark.asyncio
 async def test_service_expired_or_revoked_runtime_cannot_activate():
     runtime_repo = _FakeRuntimeRepo()
     service = StrategyRuntimeInstanceService(
@@ -504,6 +623,17 @@ async def test_repository_persists_runtime_status_and_events():
         found = await repo.find_by_trial_binding_id("binding-1")
         assert found is not None
         assert found.status == StrategyRuntimeInstanceStatus.ACTIVE
+        live = found.enable_live_execution(
+            now_ms=NOW_MS + 2,
+            mutation_id="live-enable-repo-mutation-1",
+            owner_live_runtime_enablement_authorization_id="owner-live-runtime-auth-1",
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        )
+        await repo.update_status(live)
+        live_reloaded = await repo.get(found.runtime_instance_id)
+        assert live_reloaded is not None
+        assert live_reloaded.execution_enabled is True
+        assert live_reloaded.shadow_mode is False
 
         event = await repo.record_event(
             StrategyRuntimeEvent(
@@ -515,7 +645,7 @@ async def test_repository_persists_runtime_status_and_events():
                 actor="unit-test",
                 reason="repository test",
                 metadata={"execution_enabled": False, "shadow_mode": True},
-                created_at_ms=NOW_MS + 2,
+                created_at_ms=NOW_MS + 3,
             )
         )
         assert event.runtime_instance_id == found.runtime_instance_id
@@ -562,6 +692,24 @@ def test_migration_creates_strategy_runtime_shadow_tables():
 
     assert "strategy_runtime_instances" in tables
     assert "strategy_runtime_events" in tables
+
+
+def test_migration_065_only_relaxes_strategy_runtime_live_flags():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/"
+        / "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py"
+    )
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'revision: str = "065"' in text
+    assert 'down_revision: Union[str, None] = "064"' in text
+    assert "ck_strategy_runtime_instances_execution_disabled" in text
+    assert "ck_strategy_runtime_instances_shadow_mode" in text
+    assert "drop_constraint" in text
+    assert "create_table" not in text
+    assert "orders" not in text
+    assert "exchange" not in text
 
 
 @pytest.mark.asyncio
@@ -614,3 +762,47 @@ def test_existing_bounded_live_trial_authorization_stays_single_use_metadata_onl
     assert authorization.order_created is False
     assert authorization.next_executable is False
     assert authorization.metadata_only is True
+
+
+def _ready_live_enablement_preview(runtime: StrategyRuntimeInstance):
+    return build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(runtime),
+        promotion_gate_result=_promotion_gate(runtime, confirmed=True),
+        current_head_deployed=True,
+        owner_live_runtime_enablement_authorized=True,
+        owner_real_submit_authorization_present=True,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=True,
+        forbidden_execution_flags=[],
+    )
+
+
+def _promotion_gate(runtime: StrategyRuntimeInstance, *, confirmed: bool):
+    binding = initial_strategy_semantics_catalog().get_binding(
+        strategy_family_id="CPM-001",
+        strategy_family_version_id="CPM-001-v0",
+    )
+    return evaluate_strategy_runtime_promotion_gate(
+        StrategyRuntimePromotionGateInput(
+            binding=binding,
+            scope=StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW,
+            semantic_confirmations=(
+                _semantic_confirmed() if confirmed else StrategySemanticsConfirmationFacts()
+            ),
+            runtime_confirmations=(
+                _runtime_confirmed() if confirmed else RuntimeExecutionConfirmationFacts()
+            ),
+            first_real_submit_confirmations=(
+                FirstRealSubmitConfirmationFacts(
+                    budget_release_or_consume_rule_confirmed=True,
+                    protection_creation_failure_policy_confirmed=True,
+                    duplicate_submit_policy_confirmed=True,
+                    deployment_readiness_confirmed=True,
+                    explicit_owner_real_submit_authorization=True,
+                )
+                if confirmed
+                else FirstRealSubmitConfirmationFacts()
+            ),
+        )
+    )

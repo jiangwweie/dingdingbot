@@ -98,12 +98,17 @@ Key facts:
 
 - **BoundedLiveTrialAuthorization** is single-use trade authorization. It is
   not a strategy runtime authorization.
-- **StrategyRuntimeInstance** now exists as a local working-tree shadow governance
-  record with PG persistence and lifecycle events. It is not executable:
-  `execution_enabled=false` and `shadow_mode=true` are enforced by domain and
-  migration constraints. The application service can create a shadow runtime
-  draft from a TrialBinding plus a fully confirmed runtime profile proposal
-  snapshot, copying the proposal boundary while keeping execution disabled.
+- **StrategyRuntimeInstance** now exists as a local working-tree runtime
+  governance record with PG persistence and lifecycle events. It defaults to a
+  non-executing shadow record (`execution_enabled=false`, `shadow_mode=true`).
+  A 065 migration and domain/service mutation path now allow an Owner/Codex
+  gated live-runtime enablement mutation to flip an ACTIVE runtime to
+  `execution_enabled=true`, `shadow_mode=false`; that mutation is not order
+  authority and still does not create candidates, intents, orders,
+  OrderLifecycle calls, or exchange calls. The application service can create a
+  shadow runtime draft from a TrialBinding plus a fully confirmed runtime
+  profile proposal snapshot, copying the proposal boundary while keeping
+  execution disabled.
   The BRC Console exposes a narrow operator-auth API for this draft creation
   path under
   `/api/brc/strategy-runtime-promotion-confirmations/{confirmation_id}/runtime-drafts`;
@@ -398,10 +403,15 @@ Key facts:
   enablement authorization, Owner real-submit authorization, submit rehearsal
   status, submit-adapter implementation status, and forbidden execution flags
   into explicit blockers. A ready result means only
-  `ready_for_live_runtime_enablement_mutation_design`; it does not mutate
-  `StrategyRuntimeInstance`, enable `execution_enabled`, create
+  `ready_for_live_runtime_enablement_mutation_design`; it does not by itself
+  mutate `StrategyRuntimeInstance`, enable `execution_enabled`, create
   ExecutionIntent/order records, call OwnerBoundedExecution, call OrderLifecycle,
-  call exchange, or authorize real-funds submit.
+  call exchange, or authorize real-funds submit. A separate
+  `StrategyRuntimeLiveEnablementMutation` domain/application path can now apply
+  the live-runtime flag transition after a ready preview and explicit Owner
+  live-runtime plus real-submit authorization IDs. The mutation records a
+  `live_runtime_enabled` runtime event and flips only the runtime governance
+  flags; it preserves no-order/no-exchange/no-OrderLifecycle invariants.
 - **StrategyFamily / Admission** exists as metadata, admission classification,
   and evidence chain. It does not bind to executable strategy code.
 - **CandidateAction / BudgetedAutonomy** are readmodel / preview / policy
@@ -415,12 +425,14 @@ Key facts:
   runtime semantic audit IDs and source-native ExecutionIntent metadata have
   been added to selected execution and review tables. Runtime execution submit
   has not yet been integrated.
-- **Tokyo deployment note:** current tokyo deployment was verified on
+- **Tokyo deployment note:** current Tokyo deployment was verified on
   commit `ae9b209e` / Alembic head
   `2026-06-10-064_add_runtime_profile_proposal_snapshot.py` with
   `runtime_bound=true` and `live_ready=false`. This is a non-executing
   runtime-governance deployment; it is not live-submit authorization, not order
-  authority, and not an Owner approval for real-funds trading.
+  authority, and not an Owner approval for real-funds trading. Local release
+  work after that deployment now includes migration 065 for Owner-gated
+  live-runtime flag persistence; it is not deployed to Tokyo yet.
 
 ---
 

@@ -8,7 +8,9 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstanceStatus,
 )
 from src.domain.strategy_runtime_live_enablement import (
+    StrategyRuntimeLiveEnablementMutationStatus,
     StrategyRuntimeLiveEnablementPreviewStatus,
+    build_strategy_runtime_live_enablement_mutation,
     build_strategy_runtime_live_enablement_preview,
 )
 from src.domain.strategy_runtime_promotion_gate import (
@@ -154,6 +156,81 @@ def test_live_enablement_preview_can_be_ready_without_runtime_mutation():
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False
     assert preview.order_lifecycle_called is False
+
+
+def test_live_enablement_mutation_applies_only_after_ready_preview():
+    runtime = _runtime()
+    preview = build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(runtime),
+        promotion_gate_result=_promotion_result(runtime),
+        current_head_deployed=True,
+        owner_live_runtime_enablement_authorized=True,
+        owner_real_submit_authorization_present=True,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=True,
+        forbidden_execution_flags=[],
+    )
+
+    mutation = build_strategy_runtime_live_enablement_mutation(
+        runtime=runtime,
+        preview=preview,
+        mutation_id="live-enable-mutation-1",
+        owner_live_runtime_enablement_authorization_id="owner-live-runtime-auth-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        now_ms=NOW_MS + 1,
+    )
+
+    assert mutation.status == StrategyRuntimeLiveEnablementMutationStatus.APPLIED
+    assert mutation.blockers == []
+    assert mutation.runtime_state_mutated is True
+    assert mutation.updated_runtime_snapshot is not None
+    assert mutation.updated_runtime_snapshot.execution_enabled is True
+    assert mutation.updated_runtime_snapshot.shadow_mode is False
+    assert mutation.updated_runtime_snapshot.metadata[
+        "owner_live_runtime_enablement_authorization_id"
+    ] == "owner-live-runtime-auth-1"
+    assert mutation.not_order_authority is True
+    assert mutation.execution_intent_created is False
+    assert mutation.order_created is False
+    assert mutation.exchange_called is False
+    assert mutation.owner_bounded_execution_called is False
+    assert mutation.order_lifecycle_called is False
+
+
+def test_live_enablement_mutation_blocks_when_preview_not_ready():
+    runtime = _runtime()
+    preview = build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(runtime),
+        promotion_gate_result=_promotion_result(runtime),
+        current_head_deployed=False,
+        owner_live_runtime_enablement_authorized=False,
+        owner_real_submit_authorization_present=False,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=False,
+        forbidden_execution_flags=[],
+    )
+
+    mutation = build_strategy_runtime_live_enablement_mutation(
+        runtime=runtime,
+        preview=preview,
+        mutation_id="live-enable-mutation-blocked",
+        owner_live_runtime_enablement_authorization_id="",
+        owner_real_submit_authorization_id="",
+        now_ms=NOW_MS + 1,
+    )
+
+    assert mutation.status == StrategyRuntimeLiveEnablementMutationStatus.BLOCKED
+    assert mutation.updated_runtime_snapshot is None
+    assert mutation.runtime_state_mutated is False
+    assert "live_enablement_preview_not_ready" in mutation.blockers
+    assert "owner_live_runtime_enablement_authorization_id_missing" in (
+        mutation.blockers
+    )
+    assert "owner_real_submit_authorization_id_missing" in mutation.blockers
+    assert mutation.order_created is False
+    assert mutation.exchange_called is False
 
 
 def test_live_enablement_preview_blocks_missing_operational_owner_and_adapter_gates():

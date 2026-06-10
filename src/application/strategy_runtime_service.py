@@ -19,6 +19,12 @@ from src.domain.runtime_execution_attempt_mutation import (
     RuntimeExecutionAttemptMutation,
     RuntimeExecutionAttemptMutationStatus,
 )
+from src.domain.strategy_runtime_live_enablement import (
+    StrategyRuntimeLiveEnablementMutation,
+    StrategyRuntimeLiveEnablementMutationStatus,
+    StrategyRuntimeLiveEnablementPreview,
+    build_strategy_runtime_live_enablement_mutation,
+)
 from src.domain.strategy_runtime_promotion_gate import (
     StrategyRuntimePromotionGateConfirmationRecord,
     StrategyRuntimePromotionGateStatus,
@@ -374,6 +380,64 @@ class StrategyRuntimeInstanceService:
             },
         )
         return saved
+
+    async def enable_live_runtime_from_preview(
+        self,
+        runtime_instance_id: str,
+        *,
+        preview: StrategyRuntimeLiveEnablementPreview,
+        owner_live_runtime_enablement_authorization_id: str,
+        owner_real_submit_authorization_id: str,
+        actor: str = "owner",
+    ) -> StrategyRuntimeLiveEnablementMutation:
+        runtime = await self._require_runtime(runtime_instance_id)
+        mutation = build_strategy_runtime_live_enablement_mutation(
+            runtime=runtime,
+            preview=preview,
+            mutation_id=_id("strategy-runtime-live-enable"),
+            owner_live_runtime_enablement_authorization_id=(
+                owner_live_runtime_enablement_authorization_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            now_ms=_now_ms(),
+        )
+        if mutation.status != StrategyRuntimeLiveEnablementMutationStatus.APPLIED:
+            raise StrategyRuntimeError(
+                "live runtime enablement blocked: "
+                + ", ".join(mutation.blockers)
+            )
+        if mutation.updated_runtime_snapshot is None:
+            raise StrategyRuntimeError("live runtime enablement missing updated runtime")
+        saved = await self._runtime_repo.update_status(
+            mutation.updated_runtime_snapshot
+        )
+        mutation = mutation.model_copy(update={"updated_runtime_snapshot": saved})
+        await self._record_event(
+            saved,
+            previous_status=runtime.status,
+            actor=actor,
+            reason=(
+                "live runtime enabled after Owner/Codex gates; no order submitted"
+            ),
+            event_type="live_runtime_enabled",
+            metadata={
+                "mutation_id": mutation.mutation_id,
+                "owner_live_runtime_enablement_authorization_id": (
+                    owner_live_runtime_enablement_authorization_id
+                ),
+                "owner_real_submit_authorization_id": owner_real_submit_authorization_id,
+                "runtime_state_mutated": mutation.runtime_state_mutated,
+                "execution_intent_created": mutation.execution_intent_created,
+                "order_created": mutation.order_created,
+                "exchange_called": mutation.exchange_called,
+                "owner_bounded_execution_called": (
+                    mutation.owner_bounded_execution_called
+                ),
+                "order_lifecycle_called": mutation.order_lifecycle_called,
+                "not_order_authority": mutation.not_order_authority,
+            },
+        )
+        return mutation
 
     async def _transition(
         self,

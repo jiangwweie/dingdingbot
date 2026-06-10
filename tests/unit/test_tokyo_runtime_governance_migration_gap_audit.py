@@ -82,6 +82,33 @@ def test_current_gap_evidence_names_revision_053_and_062_review_items():
     assert all(item["operation"] == "execute" for item in data_touching)
 
 
+def test_incremental_live_enablement_gap_is_reviewable_from_064_to_065():
+    module = _load_module()
+
+    report = module.build_migration_gap_report(
+        repo_root=REPO_ROOT,
+        base_revision="064",
+        head_revision="065",
+        expected_revision_count=1,
+    )
+
+    checks = report["checks"]
+    assert report["status"] == "ready_for_controlled_migration_preflight"
+    assert checks["ready_for_controlled_migration_preflight"] is True
+    assert checks["blockers"] == []
+    assert checks["chain_length"] == 1
+    assert checks["first_revision"] == "065"
+    assert checks["last_revision"] == "065"
+    assert "non_additive_schema_ops_present" in checks["warnings"]
+    assert report["chain"][0]["filename"] == (
+        "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py"
+    )
+    non_additive = report["review_evidence"]["non_additive_schema_ops"]
+    assert {item["operation"] for item in non_additive} == {"drop_constraint"}
+    assert "strategy_runtime_instances" in {item["table"] for item in non_additive}
+    assert all(value is False for value in report["safety_invariants"].values())
+
+
 def test_gap_audit_blocks_missing_chain_base():
     module = _load_module()
 

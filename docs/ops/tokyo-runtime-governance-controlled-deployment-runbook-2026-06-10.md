@@ -26,7 +26,8 @@ Current Tokyo baseline from the read-only fact check:
 - deployed release: `brc-jit-lifecycle-audit-415d3985-20260608`
 - deployed HEAD: `415d398509872cb25bf969319e29732764f9615b`
 - latest deployed migration file: `044_create_live_lifecycle_reviews`
-- local latest migration file: `064_add_runtime_profile_proposal_snapshot`
+- local latest migration file:
+  `065_relax_strategy_runtime_live_enablement_constraints`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 Last local release-prep dry-run for code-bearing candidate `4f939207` reported:
@@ -34,17 +35,17 @@ Last local release-prep dry-run for code-bearing candidate `4f939207` reported:
 - `ready_for_packaging=true`
 - deployed head is an ancestor of local `HEAD`
 - `commits_ahead_of_deployed=97`
-- local migration count `64`
+- local migration count `65`
 - latest local migration
-  `2026-06-10-064_add_runtime_profile_proposal_snapshot.py`
+  `2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py`
 - no tracked secret-candidate files
 - only warning:
   `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
 
-Last local migration-gap audit for `044 -> 064` reported:
+Last local migration-gap audit for `064 -> 065` reported:
 
 - `ready_for_controlled_migration_preflight=true`
-- chain length `20`, first revision `045`, last revision `064`
+- chain length `1`, first revision `065`, last revision `065`
 - no `data_destructive_upgrade_ops`
 - warnings:
   - `non_additive_schema_ops_present`
@@ -190,7 +191,7 @@ Before applying migrations:
 1. Create a database backup using the existing remote backup path, or an
    equivalent PG-native backup command.
 2. Record the backup filename in a deployment evidence note.
-3. Inspect the migration path from deployed `044` to local `064`.
+3. Inspect the migration path from deployed `064` to local `065`.
 4. Run migration planning in a staging/dry-run context when available.
 5. Apply migrations only after the release artifact and rollback target are
    known.
@@ -207,7 +208,7 @@ Local static audit command:
 The output must show:
 
 - `ready_for_controlled_migration_preflight=true`;
-- chain length `20` for `045` through `064`;
+- chain length `1` for `065`;
 - no `data_destructive_upgrade_ops`.
 
 The output is allowed to warn about non-additive / data-touching review items,
@@ -247,7 +248,7 @@ BRC_LLM_ENABLED=false
 Restart should be a deliberate backend restart with immediate health checks.
 Do not rely on a dirty release tree or an unknown long-running process.
 
-For the `044 -> 064` jump, the planned order is:
+For the `064 -> 065` jump, the planned order is:
 
 1. Run local and remote read-only preflights.
 2. Upload archive and manifest.

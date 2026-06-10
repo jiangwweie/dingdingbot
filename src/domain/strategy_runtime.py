@@ -171,11 +171,27 @@ class StrategyRuntimeInstance(StrategyRuntimeModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _shadow_runtime_cannot_execute(self) -> "StrategyRuntimeInstance":
+    def _runtime_execution_mode_is_explicit(self) -> "StrategyRuntimeInstance":
+        if self.execution_enabled and self.shadow_mode:
+            raise ValueError("StrategyRuntimeInstance cannot enable execution while shadow_mode")
+        if not self.execution_enabled and not self.shadow_mode:
+            raise ValueError("non-executing StrategyRuntimeInstance must remain shadow_mode")
         if self.execution_enabled:
-            raise ValueError("StrategyRuntimeInstance shadow path cannot enable execution")
-        if not self.shadow_mode:
-            raise ValueError("StrategyRuntimeInstance must remain shadow_mode in TD-1")
+            if self.status == StrategyRuntimeInstanceStatus.DRAFT:
+                raise ValueError("draft StrategyRuntimeInstance cannot enable execution")
+            required_live_metadata = {
+                "live_runtime_enablement_mutation_id",
+                "owner_live_runtime_enablement_authorization_id",
+                "owner_real_submit_authorization_id",
+            }
+            missing_live_metadata = sorted(
+                key for key in required_live_metadata if not self.metadata.get(key)
+            )
+            if missing_live_metadata:
+                raise ValueError(
+                    "live StrategyRuntimeInstance missing enablement metadata: "
+                    + ", ".join(missing_live_metadata)
+                )
         normalized_side = self.side.lower()
         if self.boundary.allowed_sides and normalized_side not in {
             item.lower() for item in self.boundary.allowed_sides
@@ -218,6 +234,42 @@ class StrategyRuntimeInstance(StrategyRuntimeModel):
             values["revoked_at_ms"] = now_ms
         elif next_status == StrategyRuntimeInstanceStatus.CLOSED:
             values["closed_at_ms"] = now_ms
+        return StrategyRuntimeInstance.model_validate(values)
+
+    def enable_live_execution(
+        self,
+        *,
+        now_ms: int,
+        mutation_id: str,
+        owner_live_runtime_enablement_authorization_id: str,
+        owner_real_submit_authorization_id: str,
+        reason: str = "live runtime enabled after Owner/Codex gate",
+    ) -> "StrategyRuntimeInstance":
+        if self.status != StrategyRuntimeInstanceStatus.ACTIVE:
+            raise ValueError("only active runtime can enable live execution")
+        if self.execution_enabled or not self.shadow_mode:
+            raise ValueError("runtime live execution is already enabled")
+        metadata = {
+            **self.metadata,
+            "live_runtime_enablement_mutation_id": mutation_id,
+            "owner_live_runtime_enablement_authorization_id": (
+                owner_live_runtime_enablement_authorization_id
+            ),
+            "owner_real_submit_authorization_id": owner_real_submit_authorization_id,
+            "live_runtime_enabled_at_ms": now_ms,
+            "live_runtime_enablement_reason": reason,
+            "runtime_bounded_auto_attempts_allowed": True,
+            "creates_execution_intent": False,
+            "order_created": False,
+            "exchange_called": False,
+            "owner_bounded_execution_called": False,
+            "order_lifecycle_called": False,
+        }
+        values = self.model_dump()
+        values["execution_enabled"] = True
+        values["shadow_mode"] = False
+        values["updated_at_ms"] = now_ms
+        values["metadata"] = metadata
         return StrategyRuntimeInstance.model_validate(values)
 
 

@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_BASE_REVISION = "044"
-DEFAULT_HEAD_REVISION = "064"
-DEFAULT_EXPECTED_REVISION_COUNT = 20
+DEFAULT_BASE_REVISION = "064"
+DEFAULT_HEAD_REVISION = "065"
+DEFAULT_EXPECTED_REVISION_COUNT = 1
 
 DATA_DESTRUCTIVE_UPGRADE_OPS = {
     "drop_table",
@@ -339,7 +339,14 @@ def _migration_op_from_call(
     node: ast.Call,
     constants: dict[str, str],
 ) -> MigrationOp:
-    table = _literal_or_constant_string(node.args[0], constants) if node.args else None
+    table_arg_index = 0
+    if name in {"create_check_constraint", "drop_constraint"}:
+        table_arg_index = 1
+    table = (
+        _literal_or_constant_string(node.args[table_arg_index], constants)
+        if len(node.args) > table_arg_index
+        else None
+    )
     column = None
     nullable = None
     has_server_default = False

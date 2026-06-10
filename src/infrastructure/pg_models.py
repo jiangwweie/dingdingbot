@@ -1108,10 +1108,11 @@ class PGOwnerCapitalBaselineSnapshotORM(PGCoreBase):
 
 
 class PGStrategyRuntimeInstanceORM(PGCoreBase):
-    """Shadow StrategyRuntimeInstance governance record.
+    """StrategyRuntimeInstance governance record.
 
-    Rows in this table do not grant execution permission, create intents, place
-    orders, mutate exchange state, or replace one-shot OwnerBoundedExecution.
+    Live-enabled rows authorize only bounded runtime candidate attempts. They
+    do not create intents, place orders, mutate exchange state, or replace the
+    downstream submit gates.
     """
 
     __tablename__ = "strategy_runtime_instances"
@@ -1164,11 +1165,6 @@ class PGStrategyRuntimeInstanceORM(PGCoreBase):
             "review_requirement IN ('required', 'optional', 'not_required')",
             name="ck_strategy_runtime_instances_review_requirement",
         ),
-        CheckConstraint(
-            "execution_enabled = false",
-            name="ck_strategy_runtime_instances_execution_disabled",
-        ),
-        CheckConstraint("shadow_mode = true", name="ck_strategy_runtime_instances_shadow_mode"),
         Index(
             "uq_strategy_runtime_instances_trial_binding",
             "trial_binding_id",
