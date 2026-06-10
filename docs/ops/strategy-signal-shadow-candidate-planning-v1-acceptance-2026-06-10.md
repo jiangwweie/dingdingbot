@@ -49,10 +49,10 @@ Current branch:
 release/tokyo-runtime-governance-20260610
 ```
 
-Current HEAD at acceptance:
+Current code identity:
 
 ```text
-cac1289510b7f98ce59b37bd89bf11ae93860aeb
+verify with: git rev-parse HEAD
 ```
 
 Relevant implementation evidence:
@@ -73,6 +73,15 @@ Relevant implementation evidence:
   - creates only shadow `SignalEvaluation` and shadow `OrderCandidate`;
   - returns `execution_intent_created=false`, `order_created=false`,
     `order_lifecycle_called=false`, and `exchange_called=false`.
+- `tests/unit/test_b0_runtime_strategy_signal_planning.py`
+  - proves CPM long creates a shadow candidate with pullback-low stop,
+    notional/leverage/margin/max-loss proposal, TP1 1R partial, and runner
+    metadata;
+  - proves BRF short creates a shadow candidate with rally-high stop and
+    runner metadata;
+  - proves CPM short-side mismatch, RMR/FCO non-trading modes, missing trusted
+    account facts, and missing trusted active-position projection all block
+    before shadow records are created.
 - `src/application/strategy_semantics_shadow_binding_service.py`
   - creates the shadow records only after B0 strategy semantics checks pass;
   - preserves `not_order=true` and `not_execution_intent=true`.
@@ -103,7 +112,7 @@ Focused test command:
 Result:
 
 ```text
-48 passed
+49 passed
 ```
 
 Local rehearsal command:

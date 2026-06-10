@@ -858,6 +858,43 @@ async def test_runtime_signal_input_blocks_missing_trusted_account_facts_before_
     assert result.exchange_called is False
 
 
+async def test_runtime_signal_input_blocks_missing_trusted_active_position_source_before_candidate():
+    runtime = _runtime_for_strategy(
+        family_id="CPM-RO-001",
+        version_id="CPM-RO-001-v0",
+        side="long",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=None,
+        account_facts_source=_ready_account_source(),
+    )
+    service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_reclaim_1h(),
+            four_hour=_cpm_uptrend_4h(),
+            last_price=Decimal("104.2"),
+            atr=Decimal("3"),
+            side="long",
+        ),
+        runtime=runtime,
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.BLOCKED
+    assert "trusted_position_projection_source_unavailable" in result.blockers
+    assert result.candidate is None
+    assert result.proposal is None
+    assert store.evaluation is None
+    assert store.candidate is None
+    assert result.signal_evaluation_created is False
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.exchange_called is False
+
+
 async def test_strategy_signal_pair_blocks_when_local_active_position_source_is_missing():
     draft = await _service(include_position_source=False).intent_draft_for_strategy_signal_pair(
         _signal_input(),
