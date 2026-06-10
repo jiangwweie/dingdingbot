@@ -36,11 +36,13 @@ This document defines the runtime safety boundaries for the BRC project.
   RuntimeExecutionProtectionPlan /
   RuntimeExecutionOrderLifecycleHandoffDraft /
   RuntimeExecutionOrderLifecycleAdapterPreview /
-  RuntimeExecutionSubmitAdapterPreview are non-submitting bridge layers. They
+  RuntimeExecutionSubmitAdapterPreview /
+  RuntimeExecutionSubmitRehearsal are non-submitting bridge layers. They
   may record draft/intent/submit authorization/controlled-submit result/pending
   attempt reservation/attempt mutation/protection plan/OrderLifecycle handoff
   draft audit facts where explicitly scoped, and may preview whether an
-  authorized intent is ready for a future controlled submit adapter.
+  authorized intent is ready for a future controlled submit adapter, or
+  aggregate existing previews into one non-mutating rehearsal result.
   Draft and source-native intent audit payloads must preserve candidate entry,
   risk, and protection snapshots.
   The pre-submit FinalGate check uses local active-position facts and must not rely on owner-supplied
@@ -67,7 +69,10 @@ This document defines the runtime safety boundaries for the BRC project.
   `local_order_registration_enabled=false`,
   `local_order_registration_executed=false`, `order_created=false`,
   `order_lifecycle_called=false`, and `exchange_called=false`. The submit adapter
-  boundary is default-disabled and not implemented for order placement; it must
+  rehearsal may summarize readiness and blockers across these gates, but it
+  must not record reservations, apply attempt mutations, record protection
+  plans, record OrderLifecycle handoff drafts, or call order/exchange services.
+  The submit adapter boundary is default-disabled and not implemented for order placement; it must
   not call OwnerBoundedExecution, call OrderLifecycle, submit orders, or call
   exchange.
 - Documentation work must not run the project or call the exchange unless the
@@ -96,7 +101,7 @@ This document defines the runtime safety boundaries for the BRC project.
 | SignalPipeline -> ExecutionOrchestrator | Legacy real-time signal path | Legacy path; not connected to BRC StrategyFamily chain |
 | OwnerTrialFlow -> OwnerBoundedExecution | One-shot Owner-authorized trade execution | Active; current primary execution path |
 | StrategyRuntimeInstance -> SignalEvaluation -> OrderCandidate -> Runtime FinalGate preview | Runtime governance shadow / dry-run inspection | Active in local working tree; non-executable; not deployed; includes max-loss-first budget checks plus conjunctive max leverage / max margin / stop-vs-liquidation buffer checks when those runtime/candidate facts are present or required |
-| RuntimeExecutionPlan -> RuntimeExecutionIntentDraft -> RuntimeExecutionIntent adapter preview -> ExecutionIntent(recorded) -> SubmitReadiness preview -> SubmitAuthorization(recorded) -> ControlledSubmitPlan preview -> SubmitPreflight preview -> ControlledSubmitResult(default-disabled) -> AttemptReservationPreview -> AttemptReservation(recorded pending mutation) -> AttemptMutation(applied/blocked) -> ProtectionPlanPreview -> ProtectionPlan(recorded) -> OrderLifecycleHandoffDraft(recorded) -> OrderLifecycleAdapterPreview -> SubmitAdapterPreview | Non-submitting bridge toward future execution | Active in local working tree; not deployed; records audit intent, Owner submit authorization, controlled-submit preview, submit-time FinalGate preflight, disabled/blocked/not-implemented adapter result, non-mutating attempt/budget readiness, pending reservation audit fact, controlled runtime attempt/budget mutation fact, runtime-native protection readiness/record, runtime OrderLifecycle handoff draft, non-executing local order registration gate, and non-executing adapter readiness only; result consumes submit-time preflight before any adapter boundary status |
+| RuntimeExecutionPlan -> RuntimeExecutionIntentDraft -> RuntimeExecutionIntent adapter preview -> ExecutionIntent(recorded) -> SubmitReadiness preview -> SubmitAuthorization(recorded) -> ControlledSubmitPlan preview -> SubmitPreflight preview -> ControlledSubmitResult(default-disabled) -> AttemptReservationPreview -> AttemptReservation(recorded pending mutation) -> AttemptMutation(applied/blocked) -> ProtectionPlanPreview -> ProtectionPlan(recorded) -> OrderLifecycleHandoffDraft(recorded) -> OrderLifecycleAdapterPreview -> SubmitAdapterPreview -> SubmitRehearsal aggregate | Non-submitting bridge toward future execution | Active in local working tree; not deployed; records audit intent, Owner submit authorization, controlled-submit preview, submit-time FinalGate preflight, disabled/blocked/not-implemented adapter result, non-mutating attempt/budget readiness, pending reservation audit fact, controlled runtime attempt/budget mutation fact, runtime-native protection readiness/record, runtime OrderLifecycle handoff draft, non-executing local order registration gate, non-executing adapter readiness, and non-mutating rehearsal aggregation only; result consumes submit-time preflight before any adapter boundary status |
 | Dev/test controlled paths | Testnet rehearsal and controlled testing | Active for scoped verification; no real funds |
 | Scripts direct exchange paths | Research / admin scripts | Not integrated; untracked |
 | Readmodel / preview paths | CandidateAction, BudgetedAutonomy, policy evaluation | Read-only; not executable |

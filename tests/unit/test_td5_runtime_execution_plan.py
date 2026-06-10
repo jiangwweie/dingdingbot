@@ -39,6 +39,9 @@ from src.domain.runtime_execution_submit_authorization import (
 from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreviewStatus,
 )
+from src.domain.runtime_execution_submit_rehearsal import (
+    RuntimeExecutionSubmitRehearsalStatus,
+)
 from src.domain.runtime_execution_protection_plan import (
     RuntimeExecutionProtectionPlanStatus,
     RuntimeExecutionProtectionPlanPreviewStatus,
@@ -85,6 +88,7 @@ from src.interfaces.api_trading_console import (
     runtime_execution_attempt_reservation_preview_for_authorization,
     runtime_execution_protection_plan_preview_for_intent,
     runtime_execution_submit_adapter_preview_for_authorization,
+    runtime_execution_submit_rehearsal_for_authorization,
     runtime_execution_submit_readiness_for_intent,
     runtime_execution_intent_adapter_preview_for_draft,
     runtime_execution_intent_draft_for_order_candidate,
@@ -2186,6 +2190,114 @@ async def test_runtime_execution_submit_adapter_preview_inputs_ready_but_not_imp
     assert preview.order_lifecycle_called is False
 
 
+async def test_runtime_execution_submit_rehearsal_aggregates_ready_non_mutating_path():
+    draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
+        order_candidate_id="candidate-1",
+        owner_reviewed=True,
+        owner_confirmed_for_intent=True,
+    )
+    runtime_service = _RuntimeMutator()
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftLookup({draft.draft_id: draft}),
+        intent_repository=_IntentRecorder(),
+        submit_authorization_repository=_SubmitAuthorizationRecorder(),
+        final_gate_preview_service=_ready_final_gate_lookup(),
+        runtime_service=runtime_service,
+    )
+    intent = await service.create_recorded_intent_from_draft(draft.draft_id)
+    authorization = await service.create_submit_authorization_for_intent(
+        intent.id,
+        owner_confirmed_for_submit=True,
+    )
+
+    rehearsal = await service.submit_rehearsal_for_authorization(
+        authorization.authorization_id
+    )
+
+    assert rehearsal.status == (
+        RuntimeExecutionSubmitRehearsalStatus
+        .READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
+    )
+    assert rehearsal.safe_stop_stage == "inputs_ready_adapter_not_implemented"
+    assert rehearsal.next_required_gate == (
+        "controlled_submit_adapter_implementation_gate"
+    )
+    assert rehearsal.blockers == []
+    assert rehearsal.submit_readiness.status == (
+        RuntimeExecutionSubmitReadinessStatus.OWNER_SUBMIT_AUTHORIZATION_REQUIRED
+    )
+    assert rehearsal.controlled_submit_plan.status == (
+        RuntimeExecutionControlledSubmitPlanStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER
+    )
+    assert rehearsal.controlled_submit_preflight.status == (
+        RuntimeExecutionControlledSubmitPreflightStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER
+    )
+    assert rehearsal.protection_plan_preview.status == (
+        RuntimeExecutionProtectionPlanPreviewStatus.READY_FOR_SUBMIT_ADAPTER
+    )
+    assert rehearsal.attempt_reservation_preview.status == (
+        RuntimeExecutionAttemptReservationPreviewStatus.READY_TO_RESERVE_ATTEMPT
+    )
+    assert rehearsal.submit_adapter_preview.status == (
+        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    )
+    assert rehearsal.attempt_reservation_preview.attempts_remaining_before == 2
+    assert rehearsal.attempt_reservation_preview.attempts_remaining_after == 1
+    assert rehearsal.attempt_reservation_preview.budget_remaining_before == Decimal("20")
+    assert rehearsal.attempt_reservation_preview.budget_remaining_after == Decimal("14")
+    assert rehearsal.non_mutating_rehearsal is True
+    assert rehearsal.runtime_budget_mutated is False
+    assert rehearsal.attempt_consumed is False
+    assert rehearsal.execution_intent_status_changed is False
+    assert rehearsal.order_created is False
+    assert rehearsal.exchange_called is False
+    assert rehearsal.owner_bounded_execution_called is False
+    assert rehearsal.order_lifecycle_called is False
+    assert runtime_service.runtime.boundary.attempts_used == 0
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
+    assert runtime_service.events == []
+
+
+async def test_runtime_execution_submit_rehearsal_blocks_final_gate_drift():
+    draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
+        order_candidate_id="candidate-1",
+        owner_reviewed=True,
+        owner_confirmed_for_intent=True,
+    )
+    runtime_service = _RuntimeMutator()
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftLookup({draft.draft_id: draft}),
+        intent_repository=_IntentRecorder(),
+        submit_authorization_repository=_SubmitAuthorizationRecorder(),
+        final_gate_preview_service=_blocked_final_gate_lookup(),
+        runtime_service=runtime_service,
+    )
+    intent = await service.create_recorded_intent_from_draft(draft.draft_id)
+    authorization = await service.create_submit_authorization_for_intent(
+        intent.id,
+        owner_confirmed_for_submit=True,
+    )
+
+    rehearsal = await service.submit_rehearsal_for_authorization(
+        authorization.authorization_id
+    )
+
+    assert rehearsal.status == RuntimeExecutionSubmitRehearsalStatus.BLOCKED
+    assert rehearsal.safe_stop_stage == "blocked_before_submit_adapter"
+    assert "runtime_final_gate_execution_check_not_passed" in rehearsal.blockers
+    assert "active_position_capacity_exhausted" in rehearsal.blockers
+    assert "submit_adapter_preview_not_ready" in rehearsal.blockers
+    assert rehearsal.controlled_submit_preflight.status == (
+        RuntimeExecutionControlledSubmitPreflightStatus.BLOCKED
+    )
+    assert rehearsal.runtime_budget_mutated is False
+    assert rehearsal.attempt_consumed is False
+    assert rehearsal.order_created is False
+    assert rehearsal.exchange_called is False
+    assert runtime_service.runtime.boundary.attempts_used == 0
+    assert runtime_service.events == []
+
+
 async def test_runtime_execution_attempt_reservation_preview_checks_budget_without_mutation():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
@@ -3530,6 +3642,56 @@ async def test_trading_console_runtime_execution_submit_adapter_preview_endpoint
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False
     assert preview.order_lifecycle_called is False
+
+
+async def test_trading_console_runtime_execution_submit_rehearsal_endpoint_is_non_mutating(
+    monkeypatch,
+):
+    draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
+        order_candidate_id="candidate-1",
+        owner_reviewed=True,
+        owner_confirmed_for_intent=True,
+    )
+    runtime_service = _RuntimeMutator()
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftLookup({draft.draft_id: draft}),
+        intent_repository=_IntentRecorder(),
+        submit_authorization_repository=_SubmitAuthorizationRecorder(),
+        final_gate_preview_service=_ready_final_gate_lookup(),
+        runtime_service=runtime_service,
+    )
+    intent = await service.create_recorded_intent_from_draft(draft.draft_id)
+    authorization = await service.create_submit_authorization_for_intent(
+        intent.id,
+        owner_confirmed_for_submit=True,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_execution_intent_adapter_service",
+        service,
+        raising=False,
+    )
+
+    rehearsal = await runtime_execution_submit_rehearsal_for_authorization(
+        authorization.authorization_id
+    )
+
+    assert rehearsal.status == (
+        RuntimeExecutionSubmitRehearsalStatus
+        .READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
+    )
+    assert rehearsal.submit_adapter_preview.status == (
+        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    )
+    assert rehearsal.runtime_budget_mutated is False
+    assert rehearsal.attempt_consumed is False
+    assert rehearsal.order_created is False
+    assert rehearsal.exchange_called is False
+    assert rehearsal.owner_bounded_execution_called is False
+    assert rehearsal.order_lifecycle_called is False
+    assert runtime_service.runtime.boundary.attempts_used == 0
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
+    assert runtime_service.events == []
 
 
 async def test_trading_console_runtime_execution_attempt_reservation_preview_endpoint_is_non_mutating(

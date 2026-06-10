@@ -32,6 +32,10 @@ from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreview,
     build_runtime_execution_submit_adapter_preview,
 )
+from src.domain.runtime_execution_submit_rehearsal import (
+    RuntimeExecutionSubmitRehearsal,
+    build_runtime_execution_submit_rehearsal,
+)
 from src.domain.runtime_execution_protection_plan import (
     RuntimeExecutionProtectionPlan,
     RuntimeExecutionProtectionPlanPreview,
@@ -406,6 +410,65 @@ class RuntimeExecutionIntentAdapterService:
             preflight=preflight,
             intent=intent,
             attempt_reservation_preview=attempt_reservation_preview,
+            now_ms=_now_ms(),
+        )
+
+    async def submit_rehearsal_for_authorization(
+        self,
+        authorization_id: str,
+    ) -> RuntimeExecutionSubmitRehearsal:
+        if self._intent_repository is None:
+            raise RuntimeError("runtime_execution_intent_repository_unavailable")
+        if self._submit_authorization_repository is None:
+            raise RuntimeError("runtime_execution_submit_authorization_repository_unavailable")
+        authorization = await self._submit_authorization_repository.get(authorization_id)
+        if authorization is None:
+            raise ValueError("RuntimeExecutionSubmitAuthorization not found")
+        intent = await self._intent_repository.get(authorization.execution_intent_id)
+        if intent is None:
+            raise ValueError("ExecutionIntent not found")
+
+        submit_readiness = build_runtime_execution_submit_readiness(
+            intent=intent,
+            now_ms=_now_ms(),
+        )
+        plan = build_runtime_execution_controlled_submit_plan(
+            authorization=authorization,
+            intent=intent,
+            now_ms=_now_ms(),
+        )
+        preflight = await self.controlled_submit_preflight_for_authorization(
+            authorization_id
+        )
+        protection_plan_preview = build_runtime_execution_protection_plan_preview(
+            intent=intent,
+            now_ms=_now_ms(),
+        )
+        if self._runtime_service is None:
+            raise RuntimeError("runtime_service_unavailable")
+        if not intent.runtime_instance_id:
+            raise ValueError("ExecutionIntent runtime_instance_id missing")
+        runtime = await self._runtime_service.get_runtime(intent.runtime_instance_id)
+        attempt_reservation_preview = build_runtime_execution_attempt_reservation_preview(
+            preflight=preflight,
+            intent=intent,
+            runtime=runtime,
+            now_ms=_now_ms(),
+        )
+        submit_adapter_preview = build_runtime_execution_submit_adapter_preview(
+            preflight=preflight,
+            intent=intent,
+            attempt_reservation_preview=attempt_reservation_preview,
+            now_ms=_now_ms(),
+        )
+        return build_runtime_execution_submit_rehearsal(
+            intent=intent,
+            submit_readiness=submit_readiness,
+            controlled_submit_plan=plan,
+            controlled_submit_preflight=preflight,
+            protection_plan_preview=protection_plan_preview,
+            attempt_reservation_preview=attempt_reservation_preview,
+            submit_adapter_preview=submit_adapter_preview,
             now_ms=_now_ms(),
         )
 

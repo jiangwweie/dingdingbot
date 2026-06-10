@@ -1154,6 +1154,14 @@ Current execution pre-integration status already present locally:
   `concrete_stop_price_missing`, and does not mutate runtime budget, consume an
   attempt, change ExecutionIntent status, create orders, call
   OwnerBoundedExecution, call OrderLifecycle, or call exchange.
+- `RuntimeExecutionSubmitRehearsal` exists as a non-mutating aggregate preview.
+  It summarizes submit-readiness, controlled-submit plan, submit-time preflight,
+  protection preview, attempt reservation preview, and submit adapter preview
+  for one Owner-authorized runtime intent. It may report
+  `ready_for_non_executing_submit_adapter_boundary`, but it does not record
+  reservations, apply attempt mutations, record protection plans, record
+  OrderLifecycle handoff drafts, create orders, call OwnerBoundedExecution, call
+  OrderLifecycle, or call exchange.
 - `RuntimeExecutionProtectionPlanPreview` exists as a runtime-native,
   non-executing protection readiness preview. It is derived from the recorded
   runtime intent source payload, not from one-shot `BoundedLiveTrialAuthorization`,

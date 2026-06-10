@@ -38,6 +38,9 @@ from src.domain.runtime_execution_submit_authorization import (
 from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreview,
 )
+from src.domain.runtime_execution_submit_rehearsal import (
+    RuntimeExecutionSubmitRehearsal,
+)
 from src.domain.runtime_execution_protection_plan import (
     RuntimeExecutionProtectionPlan,
     RuntimeExecutionProtectionPlanPreview,
@@ -927,6 +930,25 @@ async def runtime_execution_submit_adapter_preview_for_authorization(
         return await service.controlled_submit_adapter_preview_for_authorization(
             authorization_id
         )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-submit-rehearsals/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionSubmitRehearsal,
+)
+async def runtime_execution_submit_rehearsal_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionSubmitRehearsal:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.submit_rehearsal_for_authorization(authorization_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:

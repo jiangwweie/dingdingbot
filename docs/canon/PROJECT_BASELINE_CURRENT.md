@@ -282,7 +282,8 @@ Key facts:
   runtime attempt reservation audit record / runtime attempt mutation record /
   runtime-native protection plan preview / runtime-native protection plan audit
   record / runtime OrderLifecycle handoff draft audit record / non-executing
-  OrderLifecycle adapter preview gate / submit adapter readiness preview** now
+  OrderLifecycle adapter preview gate / submit adapter readiness preview /
+  runtime submit rehearsal aggregate** now
   exist in the local working tree as non-submitting bridge layers. They are not
   deployed to tokyo.
   RuntimeExecutionIntentDraft has its own audit table. The adapter can record
@@ -335,8 +336,14 @@ Key facts:
   `order_created=false`, `exchange_called=false`,
   `owner_bounded_execution_called=false`, and `order_lifecycle_called=false`.
   RuntimeExecutionSubmitAdapterPreview exposes missing OrderLifecycle/protection
-  inputs without mutating runtime budget or creating orders. These layers do not
-  call OwnerBoundedExecution, call OrderLifecycle, place orders, or call the
+  inputs without mutating runtime budget or creating orders.
+  RuntimeExecutionSubmitRehearsal aggregates submit-readiness, controlled-submit
+  plan, submit-time preflight, protection preview, attempt reservation preview,
+  and submit adapter preview into one operator-facing non-mutating rehearsal
+  result. It does not record reservations, apply attempt mutations, record
+  protection plans, record OrderLifecycle handoff drafts, create orders, call
+  OwnerBoundedExecution, call OrderLifecycle, or call exchange. These layers do
+  not call OwnerBoundedExecution, call OrderLifecycle, place orders, or call the
   exchange.
 - **StrategyFamily / Admission** exists as metadata, admission classification,
   and evidence chain. It does not bind to executable strategy code.
