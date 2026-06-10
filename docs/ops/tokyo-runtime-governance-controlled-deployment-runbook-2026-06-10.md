@@ -13,9 +13,12 @@ Target branch:
 
 - `codex/sprint6-console-runtime-integration`
 
-Current local deployment candidate at the time this runbook was written:
+Current local deployment candidate must be taken from
+`scripts/prepare_tokyo_runtime_governance_release.py --json` immediately before
+packaging or deployment. Last locally verified candidate after adding this
+runbook and its regression coverage:
 
-- `83f563f6 docs(ops): record tokyo deployment readiness facts`
+- `1e0dd98e test(ops): cover tokyo release readiness prep`
 
 Current Tokyo baseline from the read-only fact check:
 
@@ -190,4 +193,3 @@ Record these in a deployment evidence note after the deployment:
   - runtime control disabled;
   - no order created;
   - no exchange write called.
-
