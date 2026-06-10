@@ -1272,6 +1272,12 @@ Current local Sprint 6 slice:
   `/api/brc/strategy-runtime-promotion-confirmations` record/list API through
   the Trading Console proxy, displays no-action flags, and does not generalize
   the console proxy into arbitrary BRC write access.
+- The Strategy Library page now surfaces the read-only strategy observation
+  chain from the narrow
+  `/api/brc/strategy-groups/live-readonly-observation/v1` GET proxy. This makes
+  CPM / BRF observation candidates visible in the Owner surface while preserving
+  `live_ready=false`, no runtime start, no ExecutionIntent, no order, and no
+  exchange write semantics.
 - Dark and light theme switching is implemented with shared theme state,
   `data-theme`, and local persistence. It is a Sprint 6 product capability, not
   a one-off page skin.
@@ -1302,6 +1308,9 @@ Playwright local browser validation:
   `/api/brc/strategy-runtime-promotion-confirmations` GET/POST surface. With
   local PG unavailable, POST/GET return explicit 503 JSON instead of 500, so
   the UI fails closed without implying Owner/Codex confirmation.
+- /strategy displays the read-only strategy observation chain, including BRF
+  short-side observation candidates, and the proxy allows only GET for that
+  exact observation API.
 ```
 
 ### Sprint 7: Runtime / Config / Safety Boundary Consolidation

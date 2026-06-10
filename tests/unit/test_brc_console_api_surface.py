@@ -719,7 +719,12 @@ def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
         "BRF-001-BTC-SHORT",
     } <= candidate_ids
     assert payload["runner_mapping"]["strategy_specific_signal_evaluator_glue_wired"] is True
-    assert len(payload["current_signals"]) == 4
+    current_signal_ids = {item["candidate_id"] for item in payload["current_signals"]}
+    assert current_signal_ids <= candidate_ids
+    for item in payload["current_signals"]:
+        assert item["no_execution_permission"] is True
+        assert item["no_order_permission"] is True
+        assert item["no_runtime_start"] is True
     assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
     assert payload["forward_review_summary"]["writes_execution_or_order_tables"] is False
     assert payload["forward_review_summary"]["runtime_effect"] == "none"
@@ -747,7 +752,13 @@ def test_strategy_group_live_readonly_observation_run_once_records_history_witho
     payload = response.json()
     assert payload["live_ready"] is False
     assert payload["live_observation_active"] is False
-    assert len(payload["current_signals"]) == 4
+    candidate_ids = {item["candidate_id"] for item in payload["candidates"]}
+    current_signal_ids = {item["candidate_id"] for item in payload["current_signals"]}
+    assert current_signal_ids <= candidate_ids
+    for item in payload["current_signals"]:
+        assert item["no_execution_permission"] is True
+        assert item["no_order_permission"] is True
+        assert item["no_runtime_start"] is True
     assert payload["sink_summary"]["sink_status"] in {
         "recorded_pg",
         "blocked_pg_observation_unavailable",

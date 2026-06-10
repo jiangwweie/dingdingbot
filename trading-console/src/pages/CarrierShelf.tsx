@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   FileSearch,
@@ -47,12 +47,56 @@ type StrategyCandidateView = {
   may_execute_live?: boolean;
 };
 
+type ObservationCandidateView = {
+  candidate_id?: string;
+  strategy_group_id?: string;
+  strategy_family_version_id?: string | null;
+  symbol?: string;
+  side?: string;
+  observation_role?: string;
+  evaluator_glue_status?: string;
+  signal_contract?: string[];
+  review_windows?: string[];
+  readiness_status?: string;
+  blockers?: string[];
+  not_allowed_now?: string[];
+  runtime_signal_planning_readiness?: Record<string, any>;
+};
+
+type ObservationSignalView = {
+  candidate_id?: string;
+  strategy_group_id?: string;
+  strategy_family_version_id?: string | null;
+  symbol?: string;
+  side?: string;
+  signal_type?: string;
+  confidence?: string;
+  human_summary?: string;
+  reason_codes?: string[];
+  no_execution_permission?: boolean;
+  no_order_permission?: boolean;
+  no_runtime_start?: boolean;
+};
+
+type ReadOnlyObservationView = {
+  generated_from?: string;
+  candidates?: ObservationCandidateView[];
+  current_signals?: ObservationSignalView[];
+  runner_mapping?: Record<string, any>;
+  observation_chain_summary?: Record<string, any>;
+  runtime_signal_planning_summary?: Record<string, any>;
+  non_permissions?: Record<string, boolean>;
+  live_observation_active?: boolean;
+  live_ready?: boolean;
+};
+
 export default function CarrierShelf() {
   const carrierState = useReadModel<any>('/api/trading-console/carrier-availability?include_exchange=false');
   const admissionState = useReadModel<any>('/api/trading-console/strategy-family-admission-state');
   const runtimeState = useReadModel<any>('/api/trading-console/strategy-runtimes?limit=10');
   const signalState = useReadModel<any>('/api/trading-console/signal-evaluations?limit=10');
   const candidateState = useReadModel<any>('/api/trading-console/order-candidates?limit=10');
+  const observationState = useReadOnlyObservation();
 
   const carriers = asArray<CarrierView>(carrierState.envelope?.data?.carriers);
   const admission = admissionState.envelope?.data || {};
@@ -63,12 +107,16 @@ export default function CarrierShelf() {
   const runtimes = asArray<any>(runtimeState.envelope);
   const signalEvaluations = asArray<any>(signalState.envelope);
   const orderCandidates = asArray<any>(candidateState.envelope);
+  const observation = observationState.payload || {};
+  const observationCandidates = asArray<ObservationCandidateView>(observation.candidates);
+  const observationSignals = asArray<ObservationSignalView>(observation.current_signals);
   const pageErrors = [
     carrierState.error,
     admissionState.error,
     runtimeState.error,
     signalState.error,
     candidateState.error,
+    observationState.error,
   ].filter(Boolean) as string[];
   const loading = carrierState.loading && admissionState.loading;
 
@@ -81,9 +129,9 @@ export default function CarrierShelf() {
   }
 
   const l3Count = strategyCandidates.filter((item) => item.admission_level === 'L3').length;
-  const executableCount = strategyCandidates.filter((item) => item.frontend_action_enabled || item.may_execute_live).length;
   const blockerCount = admissionBlockers.length + carriers.reduce((total, item) => total + asArray(item.blocked_reasons).length, 0);
   const activeBindingCount = carriers.filter((item) => item.authorization?.authorization_id || item.status).length;
+  const shortObservationCount = observationCandidates.filter((item) => String(item.side || '').toLowerCase() === 'short').length;
   const pageTone: ConsoleTone = pageErrors.length > 0
     ? 'intervention'
     : blockerCount > 0
@@ -102,6 +150,14 @@ export default function CarrierShelf() {
       title: '未证明 alpha 不是架构禁入条件',
       body: '策略弱证据会作为风险披露和预算限制，不会阻止语义建模；但它会限制预算、自动化强度和确认要求。',
       tone: 'normal' as ConsoleTone,
+    },
+    {
+      title: observationCandidates.length > 0 ? '只读观察链已接入' : '只读观察链待接入',
+      body: observationCandidates.length > 0
+        ? `当前有 ${observationCandidates.length} 个观察候选，包含 ${shortObservationCount} 个短侧候选。它们可进入证据和复盘语义，但不是订单或 Runtime 启动权限。`
+        : 'CPM / BRF 等策略观察链暂未返回候选；策略库不会从空数据推断可执行。',
+      tone: observationCandidates.length > 0 ? 'normal' as ConsoleTone : 'unavailable' as ConsoleTone,
+      action: <StrategySoftButton to="/runtime">查看运行治理</StrategySoftButton>,
     },
     {
       title: activeBindingCount > 0 ? '存在当前 Carrier 绑定' : '暂无运行绑定',
@@ -169,12 +225,18 @@ export default function CarrierShelf() {
           <MetricRailItem label="策略资产" value={strategyCandidates.length} tone={strategyCandidates.length > 0 ? 'normal' : 'unavailable'} sub="可展示 / 提案 / 候选" />
           <MetricRailItem label="L3 候选" value={l3Count} tone={l3Count > 0 ? 'attention' : 'unavailable'} sub="仍需安全门禁" />
           <MetricRailItem label="当前绑定" value={activeBindingCount} tone={activeBindingCount > 0 ? 'attention' : 'unavailable'} sub="Carrier / 授权事实" />
-          <MetricRailItem label="可执行" value={executableCount} tone={executableCount > 0 ? 'attention' : 'unavailable'} sub="当前前端入口" />
+          <MetricRailItem label="只读观察" value={observationCandidates.length} tone={observationCandidates.length > 0 ? 'normal' : 'unavailable'} sub={`${shortObservationCount} 个短侧候选`} />
         </div>
       </ConsolePanel>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
+          <ReadOnlyObservationPanel
+            loading={observationState.loading}
+            observation={observation}
+            candidates={observationCandidates}
+            signals={observationSignals}
+          />
           <StrategyAssetPanel candidates={strategyCandidates} />
           <CurrentCarrierPanel carriers={carriers} />
           <AdmissionGatePanel blockers={admissionBlockers} scopeReview={admission.scope_review || {}} />
@@ -199,6 +261,11 @@ export default function CarrierShelf() {
         <pre className="overflow-auto font-mono text-xs leading-5">
           {JSON.stringify({
             candidate_output: strategyCandidates,
+            live_readonly_observation: {
+              candidates: observationCandidates,
+              current_signals: observationSignals,
+              non_permissions: observation.non_permissions,
+            },
             scope_review: admission.scope_review,
             blockers: admissionBlockers.slice(0, 20),
             no_action_guarantee: admissionState.envelope?.no_action_guarantee,
@@ -206,6 +273,127 @@ export default function CarrierShelf() {
         </pre>
       </TechnicalDetails>
     </div>
+  );
+}
+
+function useReadOnlyObservation(): {
+  payload: ReadOnlyObservationView | null;
+  loading: boolean;
+  error: string | null;
+} {
+  const [payload, setPayload] = useState<ReadOnlyObservationView | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const path = '/api/brc/strategy-groups/live-readonly-observation/v1';
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(path, {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (response.status === 401) {
+          window.dispatchEvent(new Event('trading-console:unauthorized'));
+        }
+        if (!response.ok) throw new Error(`GET ${path} returned HTTP ${response.status}`);
+        const data = await response.json();
+        if (active) setPayload(data);
+      } catch (err) {
+        console.error('Trading Console strategy observation API error', { path, error: err });
+        if (active) {
+          setPayload(null);
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return { payload, loading, error };
+}
+
+function ReadOnlyObservationPanel({
+  loading,
+  observation,
+  candidates,
+  signals,
+}: {
+  loading: boolean;
+  observation: ReadOnlyObservationView;
+  candidates: ObservationCandidateView[];
+  signals: ObservationSignalView[];
+}) {
+  const unsafe = observation.live_ready === true
+    || observation.live_observation_active === true
+    || Object.values(observation.non_permissions || {}).some((value) => value !== true);
+
+  return (
+    <ConsolePanel
+      title="只读观察链"
+      caption="CPM / BRF 等策略语义可以进入证据和复盘，但不是执行权限"
+      action={<StatusChip tone={unsafe ? 'blocked' : candidates.length > 0 ? 'normal' : 'unavailable'}>{loading ? '读取中' : unsafe ? '需核查' : '非执行'}</StatusChip>}
+    >
+      {loading ? (
+        <div className="px-4 py-6 text-sm text-slate-500">正在读取策略观察链...</div>
+      ) : candidates.length === 0 ? (
+        <EntityRow
+          title="暂无观察候选"
+          subtitle="等待 read-only strategy observation API 返回候选"
+          tone="unavailable"
+          cells={[
+            { label: 'CPM', value: '待接入' },
+            { label: 'BRF', value: '待接入' },
+            { label: '信号', value: '暂无' },
+            { label: '执行', value: '未授予' },
+          ]}
+          action={<StatusChip tone="unavailable">空</StatusChip>}
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+            <GateCell label="观察候选" value={String(candidates.length)} tone="normal" />
+            <GateCell label="当前信号" value={String(signals.length)} tone={signals.length > 0 ? 'attention' : 'unavailable'} />
+            <GateCell label="Live ready" value={observation.live_ready ? '异常' : '否'} tone={observation.live_ready ? 'blocked' : 'normal'} />
+            <GateCell label="执行权限" value={unsafe ? '需核查' : '未授予'} tone={unsafe ? 'blocked' : 'unavailable'} />
+          </div>
+          <div className="divide-y divide-slate-800/90 border-t border-slate-800">
+            {candidates.map((candidate) => {
+              const signal = signals.find((item) => item.candidate_id === candidate.candidate_id);
+              return (
+                <div key={candidate.candidate_id || `${candidate.strategy_group_id}-${candidate.symbol}`}>
+                  <EntityRow
+                    title={displayValue(candidate.candidate_id, '观察候选')}
+                    subtitle={`${displayValue(candidate.strategy_group_id, '策略族')} · ${displayValue(candidate.strategy_family_version_id, '版本待定')}`}
+                    tone={observationCandidateTone(candidate, signal)}
+                    cells={[
+                      { label: '标的', value: displayValue(candidate.symbol, '暂无') },
+                      { label: '方向', value: sideLabel(candidate.side) },
+                      { label: '角色', value: observationRoleLabel(candidate.observation_role) },
+                      { label: '信号', value: signalTypeLabel(signal?.signal_type) },
+                    ]}
+                    action={<StatusChip tone={observationCandidateTone(candidate, signal)}>{signal?.no_execution_permission === false ? '需核查' : '非执行'}</StatusChip>}
+                  />
+                  <div className="border-t border-slate-800/70 bg-slate-950/30 px-4 py-3 text-xs leading-5 text-slate-500">
+                    {signal?.human_summary || observationBlockerSummary(candidate)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </ConsolePanel>
   );
 }
 
@@ -472,6 +660,40 @@ function ownerDecisionLabel(candidate: StrategyCandidateView): string {
     return '需要 Owner 风险接受；接受风险只处理策略弱证据，不会绕过执行安全门禁。';
   }
   return displayValue(candidate.owner_decision_text, '暂无 Owner 处理说明。');
+}
+
+function observationCandidateTone(candidate: ObservationCandidateView, signal?: ObservationSignalView): ConsoleTone {
+  if (signal?.no_execution_permission === false || signal?.no_order_permission === false || signal?.no_runtime_start === false) return 'blocked';
+  if (asArray(candidate.blockers).length > 0 || asArray(candidate.not_allowed_now).length > 0) return 'attention';
+  if (signal?.signal_type === 'would_enter') return 'attention';
+  return 'normal';
+}
+
+function observationRoleLabel(value?: string): string {
+  const map: Record<string, string> = {
+    owner_special_observation: 'Owner 特别观察',
+    short_side_bear_rally_failure_reference: '熊市反弹失败短侧',
+    price_action_observation: '价格行为观察',
+  };
+  return map[String(value || '')] || displayValue(value, '观察');
+}
+
+function signalTypeLabel(value?: string): string {
+  const map: Record<string, string> = {
+    no_action: '无动作',
+    would_enter: '会入场候选',
+    invalid: '输入无效',
+  };
+  return map[String(value || '')] || displayValue(value, '暂无');
+}
+
+function observationBlockerSummary(candidate: ObservationCandidateView): string {
+  const blockers = [
+    ...asArray<string>(candidate.blockers),
+    ...asArray<string>(candidate.not_allowed_now),
+  ];
+  if (blockers.length === 0) return '观察链保持非执行；可用于证据、信号和后续复盘语义。';
+  return blockers.slice(0, 3).join(' / ');
 }
 
 function carrierAvailabilityLabel(value?: string): string {

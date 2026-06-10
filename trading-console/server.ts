@@ -126,6 +126,17 @@ async function startServer() {
     await proxyJsonRequest(req, res);
   });
 
+  app.all('/api/brc/strategy-groups/live-readonly-observation/v1', async (req, res) => {
+    if (req.method !== 'GET') {
+      res.status(405).json({
+        error: 'trading_console_strategy_observation_proxy_method_not_allowed',
+        message: 'Trading Console forwards only read-only strategy observation requests.',
+      });
+      return;
+    }
+    await proxyJsonRequest(req, res);
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
