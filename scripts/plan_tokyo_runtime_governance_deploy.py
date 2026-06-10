@@ -329,7 +329,10 @@ def _plan_phases(
                     (
                         "set -eu; umask 077; set -a; "
                         f". {q(env_path)}; set +a; "
-                        f"pg_dump \"$DATABASE_URL\" -Fc -f {q(backup_path)}"
+                        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
+                        'test -n "$DB_URL" || '
+                        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
+                        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}"
                     ),
                 ),
                 _ssh(
