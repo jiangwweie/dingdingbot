@@ -344,10 +344,15 @@ Key facts:
   `ready_for_controlled_submit_adapter`. RuntimeExecutionControlledSubmitPreflight
   reruns runtime-aware FinalGate at submit time using local active-position
   facts. RuntimeExecutionControlledSubmitResult consumes that submit-time
-  preflight: it returns `blocked` when the preflight is not ready, otherwise
-  `submit_adapter_not_enabled` by default and `submit_adapter_not_implemented`
-  if enabled before implementation. Controlled submit results are recorded in
-  their own audit table. RuntimeExecutionProtectionPlanPreview is derived from
+  preflight: it returns `blocked` when the preflight is not ready,
+  `submit_adapter_not_enabled` by default, and
+  `order_lifecycle_adapter_disabled` if explicit submit is requested before
+  the OrderLifecycle adapter is enabled. Controlled submit results are recorded
+  in their own audit table. RuntimeExecutionSubmitAdapterPreview now reaches
+  `inputs_ready_dry_run_adapter_only` when submit inputs are complete, while
+  keeping `real_submit_enabled=false`, `order_lifecycle_adapter_enabled=false`,
+  `order_created=false`, `order_lifecycle_called=false`, and
+  `exchange_called=false`. RuntimeExecutionProtectionPlanPreview is derived from
   recorded runtime intent source payload rather than one-shot authorization, and
   exposes whether concrete stop price / candidate protection facts are present.
   RuntimeExecutionProtectionPlan can record ready or blocked runtime-native

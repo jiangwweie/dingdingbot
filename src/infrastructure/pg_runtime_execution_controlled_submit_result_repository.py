@@ -17,7 +17,7 @@ from src.infrastructure.pg_models import PGRuntimeExecutionControlledSubmitResul
 
 
 class PgRuntimeExecutionControlledSubmitResultRepository:
-    """Persist disabled/blocked/not-implemented controlled-submit results."""
+    """Persist disabled/blocked/dry-run-only controlled-submit results."""
 
     def __init__(
         self,
@@ -61,6 +61,7 @@ class PgRuntimeExecutionControlledSubmitResultRepository:
             blockers_json=list(result.blockers),
             warnings_json=list(result.warnings),
             submit_enabled=result.submit_enabled,
+            order_lifecycle_adapter_enabled=result.order_lifecycle_adapter_enabled,
             submit_executed=result.submit_executed,
             order_created=result.order_created,
             exchange_called=result.exchange_called,
@@ -88,6 +89,7 @@ class PgRuntimeExecutionControlledSubmitResultRepository:
             blockers=list(row.blockers_json or []),
             warnings=list(row.warnings_json or []),
             submit_enabled=row.submit_enabled,
+            order_lifecycle_adapter_enabled=row.order_lifecycle_adapter_enabled,
             submit_executed=row.submit_executed,
             order_created=row.order_created,
             exchange_called=row.exchange_called,

@@ -72,9 +72,10 @@ This document defines the runtime safety boundaries for the BRC project.
   rehearsal may summarize readiness and blockers across these gates, but it
   must not record reservations, apply attempt mutations, record protection
   plans, record OrderLifecycle handoff drafts, or call order/exchange services.
-  The submit adapter boundary is default-disabled and not implemented for order placement; it must
-  not call OwnerBoundedExecution, call OrderLifecycle, submit orders, or call
-  exchange.
+  The submit adapter boundary can reach dry-run readiness, but real order
+  placement remains disabled until a separate OrderLifecycle adapter enablement
+  gate; it must not call OwnerBoundedExecution, call OrderLifecycle, submit
+  orders, or call exchange.
 - Documentation work must not run the project or call the exchange unless the
   active task explicitly includes bounded read-only verification.
 - Real live trading / real-funds order placement requires separate explicit

@@ -238,21 +238,20 @@ operational_blockers=[
 ]
 implementation_blockers=[
   runtime_not_live_execution_enabled,
-  controlled_submit_adapter_not_implemented
+  order_lifecycle_adapter_disabled
 ]
 live_enablement_blockers include:
   current_head_not_deployed_to_tokyo,
   owner_live_runtime_enablement_authorization_missing,
-  owner_real_submit_authorization_missing,
-  controlled_submit_adapter_not_implemented
+  owner_real_submit_authorization_missing
 forbidden_execution_flags=[]
 submit_rehearsal_status=ready_for_non_executing_submit_adapter_boundary
-submit_adapter_preview_status=inputs_ready_adapter_not_implemented
+submit_adapter_preview_status=inputs_ready_dry_run_adapter_only
 ```
 
 Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
-deployment plan requires local packaging readiness, a `064 -> 065` migration
-gap audit with one expected revision, the local scheduled-observation
+deployment plan requires local packaging readiness, a `064 -> 066` migration
+gap audit with two expected revisions, the local scheduled-observation
 shadow-planning rehearsal, and the local runtime submit pre-live packet
 technical rehearsal before any Owner-authorized remote mutation phase. The
 pre-live packet may pass its technical rehearsal while still reporting live

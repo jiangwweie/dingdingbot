@@ -120,7 +120,7 @@ stage because it must cover:
 - clean release artifact creation from the current local branch or pushed commit;
 - dependency install / virtualenv compatibility;
 - Alembic migration planning from current Tokyo release `064` to local head
-  `065`;
+  `066`;
 - database backup before migration;
 - backend restart method;
 - post-restart health smoke;

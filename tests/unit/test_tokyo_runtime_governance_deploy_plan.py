@@ -56,7 +56,7 @@ def test_deploy_plan_requires_artifact_and_manifest():
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py"
+            "2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py"
         ),
     )
 
@@ -107,7 +107,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py"
+            "2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py"
         ),
     )
 
@@ -145,9 +145,9 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "ln -sfn" in all_commands
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
     assert "systemctl start brc-owner-console-backend.service" in all_commands
-    assert "--base-revision 064 --head-revision 065" in all_commands
-    assert "--expected-revision-count 1" in all_commands
-    assert "--expected-migration-count 65" in all_commands
+    assert "--base-revision 064 --head-revision 066" in all_commands
+    assert "--expected-revision-count 2" in all_commands
+    assert "--expected-migration-count 66" in all_commands
     assert "verify_strategy_observation_shadow_planning_rehearsal.py --json" in all_commands
     assert "verify_runtime_submit_rehearsal_pre_live_packet.py --json" in all_commands
     assert "--skip-current-head-deployed-check" in all_commands
@@ -190,7 +190,7 @@ def test_deploy_plan_blocks_manifest_head_mismatch(tmp_path: Path):
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py"
+            "2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py"
         ),
     )
 

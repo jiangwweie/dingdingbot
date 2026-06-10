@@ -810,6 +810,142 @@ def test_runtime_execution_controlled_submit_result_preflight_fact_migration():
     assert "final_gate_verdict" in columns
 
 
+def test_runtime_execution_controlled_submit_result_order_lifecycle_disabled_migration():
+    base_migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-09-052_create_runtime_execution_controlled_submit_results.py"
+    )
+    preflight_migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-09-053_add_controlled_submit_preflight_facts.py"
+    )
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py"
+    )
+    base_spec = importlib.util.spec_from_file_location(
+        "td5_controlled_submit_result_base_066",
+        base_migration_path,
+    )
+    preflight_spec = importlib.util.spec_from_file_location(
+        "td5_controlled_submit_result_preflight_066",
+        preflight_migration_path,
+    )
+    spec = importlib.util.spec_from_file_location(
+        "td5_controlled_submit_result_order_lifecycle_disabled",
+        migration_path,
+    )
+    assert base_spec is not None and base_spec.loader is not None
+    assert preflight_spec is not None and preflight_spec.loader is not None
+    assert spec is not None and spec.loader is not None
+    base_migration = importlib.util.module_from_spec(base_spec)
+    preflight_migration = importlib.util.module_from_spec(preflight_spec)
+    migration = importlib.util.module_from_spec(spec)
+    base_spec.loader.exec_module(base_migration)
+    preflight_spec.loader.exec_module(preflight_migration)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    async def _run() -> set[str]:
+        async with engine.begin() as conn:
+            def upgrade(sync_conn):
+                base_old_op = base_migration.op
+                preflight_old_op = preflight_migration.op
+                old_op = migration.op
+                operations = Operations(MigrationContext.configure(sync_conn))
+                base_migration.op = operations
+                preflight_migration.op = operations
+                migration.op = operations
+                try:
+                    base_migration.upgrade()
+                    preflight_migration.upgrade()
+                    migration.upgrade()
+                    inspector = inspect(sync_conn)
+                    columns = {
+                        column["name"]
+                        for column in inspector.get_columns("runtime_execution_controlled_submit_results")
+                    }
+                    sync_conn.exec_driver_sql(
+                        """
+                        INSERT INTO runtime_execution_controlled_submit_results (
+                            result_id,
+                            plan_id,
+                            preflight_id,
+                            authorization_id,
+                            execution_intent_id,
+                            preflight_status,
+                            final_gate_verdict,
+                            status,
+                            blockers,
+                            warnings,
+                            submit_enabled,
+                            order_lifecycle_adapter_enabled,
+                            submit_executed,
+                            order_created,
+                            exchange_called,
+                            owner_bounded_execution_called,
+                            order_lifecycle_called,
+                            created_at_ms,
+                            metadata
+                        ) VALUES (
+                            'result-order-lifecycle-disabled',
+                            'plan-1',
+                            'preflight-1',
+                            'auth-1',
+                            'intent-1',
+                            'ready_for_controlled_submit_adapter',
+                            'PASS',
+                            'order_lifecycle_adapter_disabled',
+                            '["order_lifecycle_adapter_disabled"]',
+                            '[]',
+                            1,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            '{}'
+                        )
+                        """
+                    )
+                    sync_conn.exec_driver_sql(
+                        """
+                        UPDATE runtime_execution_controlled_submit_results
+                        SET status = 'submit_adapter_not_enabled',
+                            submit_enabled = 0
+                        WHERE result_id = 'result-order-lifecycle-disabled'
+                        """
+                    )
+                    migration.downgrade()
+                    inspector = inspect(sync_conn)
+                    downgraded_columns = {
+                        column["name"]
+                        for column in inspector.get_columns("runtime_execution_controlled_submit_results")
+                    }
+                    assert "order_lifecycle_adapter_enabled" not in downgraded_columns
+                    preflight_migration.downgrade()
+                    base_migration.downgrade()
+                    return columns
+                finally:
+                    base_migration.op = base_old_op
+                    preflight_migration.op = preflight_old_op
+                    migration.op = old_op
+
+            return await conn.run_sync(upgrade)
+
+    columns = asyncio.run(_run())
+    asyncio.run(engine.dispose())
+
+    assert "order_lifecycle_adapter_enabled" in columns
+
+
 def test_runtime_execution_intent_draft_candidate_snapshot_migration():
     base_migration_path = (
         Path(__file__).resolve().parents[2]
@@ -2143,7 +2279,7 @@ async def test_runtime_execution_controlled_submit_preflight_blocks_final_gate_b
     assert preflight.exchange_called is False
 
 
-async def test_runtime_execution_submit_adapter_preview_inputs_ready_but_not_implemented():
+async def test_runtime_execution_submit_adapter_preview_inputs_ready_for_dry_run_only():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -2168,8 +2304,13 @@ async def test_runtime_execution_submit_adapter_preview_inputs_ready_but_not_imp
         authorization.authorization_id
     )
 
-    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
     assert preview.blockers == []
+    assert preview.submit_adapter_implemented is True
+    assert preview.dry_run_only is True
+    assert preview.real_submit_enabled is False
+    assert preview.order_lifecycle_adapter_enabled is False
+    assert preview.requires_explicit_real_submit_enablement is True
     assert "take_profit_or_exit_policy_snapshot_missing" in preview.warnings
     assert preview.entry_price_reference == Decimal("600")
     assert preview.risk_preview["intended_notional"] == "6"
@@ -2218,9 +2359,9 @@ async def test_runtime_execution_submit_rehearsal_aggregates_ready_non_mutating_
         RuntimeExecutionSubmitRehearsalStatus
         .READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
     )
-    assert rehearsal.safe_stop_stage == "inputs_ready_adapter_not_implemented"
+    assert rehearsal.safe_stop_stage == "inputs_ready_dry_run_adapter_only"
     assert rehearsal.next_required_gate == (
-        "controlled_submit_adapter_implementation_gate"
+        "order_lifecycle_adapter_enablement_gate"
     )
     assert rehearsal.blockers == []
     assert rehearsal.submit_readiness.status == (
@@ -2239,8 +2380,10 @@ async def test_runtime_execution_submit_rehearsal_aggregates_ready_non_mutating_
         RuntimeExecutionAttemptReservationPreviewStatus.READY_TO_RESERVE_ATTEMPT
     )
     assert rehearsal.submit_adapter_preview.status == (
-        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
     )
+    assert rehearsal.submit_adapter_preview.submit_adapter_implemented is True
+    assert rehearsal.submit_adapter_preview.order_lifecycle_adapter_enabled is False
     assert rehearsal.attempt_reservation_preview.attempts_remaining_before == 2
     assert rehearsal.attempt_reservation_preview.attempts_remaining_after == 1
     assert rehearsal.attempt_reservation_preview.budget_remaining_before == Decimal("20")
@@ -3004,6 +3147,7 @@ async def test_runtime_execution_controlled_submit_result_defaults_to_adapter_di
     assert result.final_gate_verdict.value == "PASS"
     assert "controlled_submit_adapter_disabled" in result.blockers
     assert result.submit_enabled is False
+    assert result.order_lifecycle_adapter_enabled is False
     assert result.submit_executed is False
     assert result.order_created is False
     assert result.exchange_called is False
@@ -3045,6 +3189,7 @@ async def test_runtime_execution_controlled_submit_result_repository_roundtrips_
         assert loaded.final_gate_verdict.value == "PASS"
         assert "controlled_submit_adapter_disabled" in loaded.blockers
         assert loaded.submit_enabled is False
+        assert loaded.order_lifecycle_adapter_enabled is False
         assert loaded.submit_executed is False
         assert loaded.order_created is False
         assert loaded.exchange_called is False
@@ -3080,12 +3225,13 @@ async def test_runtime_execution_controlled_submit_result_is_recorded_for_audit(
 
     assert result_repo.items == [result]
     assert result.status == RuntimeExecutionControlledSubmitResultStatus.SUBMIT_ADAPTER_NOT_ENABLED
+    assert result.order_lifecycle_adapter_enabled is False
     assert result.submit_executed is False
     assert result.order_created is False
     assert result.exchange_called is False
 
 
-async def test_runtime_execution_controlled_submit_result_blocks_enabled_until_adapter_exists():
+async def test_runtime_execution_controlled_submit_result_blocks_enabled_until_order_lifecycle_adapter_enabled():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -3110,9 +3256,10 @@ async def test_runtime_execution_controlled_submit_result_blocks_enabled_until_a
         submit_enabled=True,
     )
 
-    assert result.status == RuntimeExecutionControlledSubmitResultStatus.SUBMIT_ADAPTER_NOT_IMPLEMENTED
-    assert "controlled_submit_adapter_not_implemented" in result.blockers
+    assert result.status == RuntimeExecutionControlledSubmitResultStatus.ORDER_LIFECYCLE_ADAPTER_DISABLED
+    assert "order_lifecycle_adapter_disabled" in result.blockers
     assert result.submit_enabled is True
+    assert result.order_lifecycle_adapter_enabled is False
     assert result.submit_executed is False
     assert result.order_created is False
     assert result.exchange_called is False
@@ -3636,8 +3783,10 @@ async def test_trading_console_runtime_execution_submit_adapter_preview_endpoint
         authorization.authorization_id
     )
 
-    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
     assert preview.blockers == []
+    assert preview.submit_adapter_implemented is True
+    assert preview.order_lifecycle_adapter_enabled is False
     assert preview.order_created is False
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False
@@ -3681,7 +3830,7 @@ async def test_trading_console_runtime_execution_submit_rehearsal_endpoint_is_no
         .READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
     )
     assert rehearsal.submit_adapter_preview.status == (
-        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
     )
     assert rehearsal.runtime_budget_mutated is False
     assert rehearsal.attempt_consumed is False

@@ -82,11 +82,14 @@ Codex verified the local working tree on 2026-06-09:
   facts and return `inputs_ready_registration_not_enabled` or `blocked` while
   keeping `local_order_registration_enabled=false`,
   `order_lifecycle_adapter_implemented=false`, `order_created=false`,
-  `order_lifecycle_called=false`, and `exchange_called=false`. The adapter boundary returns
-  `submit_adapter_not_enabled` by default and `submit_adapter_not_implemented`
-  if explicitly enabled before implementation, but the result now consumes the
-  submit-time FinalGate preflight and records `blocked` when that preflight is
-  not ready. It does not submit orders or call exchange.
+  `order_lifecycle_called=false`, and `exchange_called=false`. The submit
+  adapter boundary now reaches `inputs_ready_dry_run_adapter_only` when all
+  submit inputs are complete, while keeping real submit and OrderLifecycle
+  adapter enablement off. Controlled-submit result returns
+  `submit_adapter_not_enabled` by default, `order_lifecycle_adapter_disabled`
+  if explicit submit is requested before OrderLifecycle enablement, and
+  `blocked` when the submit-time FinalGate preflight is not ready. It does not
+  submit orders or call exchange.
 
 Validation performed:
 
@@ -1167,19 +1170,22 @@ Current execution pre-integration status already present locally:
   calling exchange.
 - `RuntimeExecutionControlledSubmitResult` exists as the default-disabled
   submit adapter boundary. It returns `submit_adapter_not_enabled` by default
-  and `submit_adapter_not_implemented` if `submit_enabled=true` is requested
-  before implementation only after the submit-time FinalGate preflight is ready.
-  If the preflight is blocked, the result records `blocked` with the preflight
-  status and FinalGate verdict. It does not execute submit, create orders, call
-  OwnerBoundedExecution, call OrderLifecycle, or call exchange. Controlled submit
-  results can be recorded in `runtime_execution_controlled_submit_results` so
-  disabled / blocked / not-implemented submit attempts are auditable.
+  and `order_lifecycle_adapter_disabled` if `submit_enabled=true` is requested
+  before OrderLifecycle adapter enablement only after the submit-time FinalGate
+  preflight is ready. If the preflight is blocked, the result records `blocked`
+  with the preflight status and FinalGate verdict. It does not execute submit,
+  create orders, call OwnerBoundedExecution, call OrderLifecycle, or call
+  exchange. Controlled submit results can be recorded in
+  `runtime_execution_controlled_submit_results` so disabled / blocked /
+  OrderLifecycle-disabled submit attempts are auditable.
 - `RuntimeExecutionSubmitAdapterPreview` exists as a non-executing adapter
   readiness preview. It consumes the submit-time preflight and recorded intent
   source payload, exposes missing OrderLifecycle/protection inputs such as
   `concrete_stop_price_missing`, and does not mutate runtime budget, consume an
   attempt, change ExecutionIntent status, create orders, call
-  OwnerBoundedExecution, call OrderLifecycle, or call exchange.
+  OwnerBoundedExecution, call OrderLifecycle, or call exchange. When inputs are
+  complete it returns `inputs_ready_dry_run_adapter_only`, not live submit
+  authority.
 - `RuntimeExecutionSubmitRehearsal` exists as a non-mutating aggregate preview.
   It summarizes submit-readiness, controlled-submit plan, submit-time preflight,
   protection preview, attempt reservation preview, and submit adapter preview

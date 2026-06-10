@@ -134,7 +134,7 @@ def build_runtime_execution_submit_rehearsal(
 
     if (
         submit_adapter_preview.status
-        != RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+        != RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
     ):
         blockers.append("submit_adapter_preview_not_ready")
     blockers = _dedupe(blockers)
@@ -157,12 +157,12 @@ def build_runtime_execution_submit_rehearsal(
             else RuntimeExecutionSubmitRehearsalStatus.BLOCKED
         ),
         safe_stop_stage=(
-            "inputs_ready_adapter_not_implemented"
+            "inputs_ready_dry_run_adapter_only"
             if ready
             else "blocked_before_submit_adapter"
         ),
         next_required_gate=(
-            "controlled_submit_adapter_implementation_gate"
+            "order_lifecycle_adapter_enablement_gate"
             if ready
             else "resolve_rehearsal_blockers"
         ),
@@ -178,6 +178,8 @@ def build_runtime_execution_submit_rehearsal(
         metadata={
             "scope": "runtime_execution_submit_rehearsal",
             "aggregates_existing_non_executing_gates": True,
+            "dry_run_submit_adapter_ready": True,
+            "real_submit_still_disabled": True,
             "does_not_record_attempt_reservation": True,
             "does_not_apply_attempt_mutation": True,
             "does_not_record_protection_plan": True,

@@ -1748,7 +1748,7 @@ class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
 class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
     """Audit record for the runtime controlled-submit adapter boundary.
 
-    Disabled/blocked/not-implemented submit attempts are recorded here. Rows in
+    Disabled/blocked/dry-run-only submit attempts are recorded here. Rows in
     this table are not orders and must not imply exchange interaction.
     """
 
@@ -1775,6 +1775,11 @@ class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
         default=list,
     )
     submit_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_adapter_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
     submit_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -1791,6 +1796,7 @@ class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
     __table_args__ = (
         CheckConstraint(
             "status IN ('blocked', 'submit_adapter_not_enabled', "
+            "'order_lifecycle_adapter_disabled', "
             "'submit_adapter_not_implemented')",
             name="ck_runtime_execution_controlled_submit_results_status",
         ),

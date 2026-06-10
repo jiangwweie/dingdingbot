@@ -358,11 +358,13 @@ class RuntimeExecutionIntentAdapterService:
         authorization_id: str,
         *,
         submit_enabled: bool = False,
+        order_lifecycle_adapter_enabled: bool = False,
     ) -> RuntimeExecutionControlledSubmitResult:
         preflight = await self.controlled_submit_preflight_for_authorization(authorization_id)
         return build_runtime_execution_controlled_submit_result(
             preflight=preflight,
             submit_enabled=submit_enabled,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
             now_ms=_now_ms(),
         )
 
@@ -501,12 +503,14 @@ class RuntimeExecutionIntentAdapterService:
         authorization_id: str,
         *,
         submit_enabled: bool = False,
+        order_lifecycle_adapter_enabled: bool = False,
     ) -> RuntimeExecutionControlledSubmitResult:
         if self._controlled_submit_result_repository is None:
             raise RuntimeError("runtime_execution_controlled_submit_result_repository_unavailable")
         result = await self.controlled_submit_for_authorization(
             authorization_id,
             submit_enabled=submit_enabled,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
         )
         return await self._controlled_submit_result_repository.create(result)
 

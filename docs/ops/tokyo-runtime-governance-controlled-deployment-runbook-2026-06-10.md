@@ -27,38 +27,32 @@ Current Tokyo baseline from the read-only fact check:
 - deployed HEAD: `415d398509872cb25bf969319e29732764f9615b`
 - latest deployed migration file: `044_create_live_lifecycle_reviews`
 - local latest migration file:
-  `065_relax_strategy_runtime_live_enablement_constraints`
+  `066_add_order_lifecycle_adapter_disabled_submit_status`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
 
-Last local release-prep dry-run for code-bearing candidate `4f939207` reported:
+Local release-prep for the next code-bearing candidate should report:
 
 - `ready_for_packaging=true`
 - deployed head is an ancestor of local `HEAD`
-- `commits_ahead_of_deployed=97`
-- local migration count `65`
+- local migration count `66`
 - latest local migration
-  `2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py`
+  `2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py`
 - no tracked secret-candidate files
 - only warning:
   `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
 
-Last local migration-gap audit for `064 -> 065` reported:
+Last local migration-gap audit for `064 -> 066` reported:
 
 - `ready_for_controlled_migration_preflight=true`
-- chain length `1`, first revision `065`, last revision `065`
+- chain length `2`, first revision `065`, last revision `066`
 - no `data_destructive_upgrade_ops`
 - warnings:
   - `non_additive_schema_ops_present`
-  - `data_touching_upgrade_ops_present`
-  - `not_null_columns_added_to_existing_table`
 - review items:
-  - revision `050` updates the `execution_intents` status constraint and makes
-    legacy signal fields nullable for source-native intents;
-  - revision `053` adds `preflight_id`, `preflight_status`, and
-    `final_gate_verdict` as not-null fields to
-    `runtime_execution_controlled_submit_results`;
-  - revision `062` backfills / aligns the existing `positions` table for the
-    runtime read model.
+  - revision `065` relaxes `strategy_runtime_instances` check constraints so an
+    explicitly authorized runtime can leave shadow-only flags;
+  - revision `066` adds `order_lifecycle_adapter_enabled=false` and permits the
+    controlled-submit audit status `order_lifecycle_adapter_disabled`.
 
 Last Tokyo read-only probe for the same stage reported:
 
@@ -248,7 +242,7 @@ BRC_LLM_ENABLED=false
 Restart should be a deliberate backend restart with immediate health checks.
 Do not rely on a dirty release tree or an unknown long-running process.
 
-For the `064 -> 065` jump, the planned order is:
+For the `064 -> 066` jump, the planned order is:
 
 1. Run local and remote read-only preflights.
 2. Upload archive and manifest.

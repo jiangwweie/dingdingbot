@@ -251,6 +251,8 @@ async def build_pre_live_packet(
         implementation_blockers.append("runtime_not_live_execution_enabled")
     if not rehearsal.submit_adapter_preview.submit_adapter_implemented:
         implementation_blockers.append("controlled_submit_adapter_not_implemented")
+    if not rehearsal.submit_adapter_preview.order_lifecycle_adapter_enabled:
+        implementation_blockers.append("order_lifecycle_adapter_disabled")
 
     technical_rehearsal_passed = _technical_rehearsal_passed(
         plan=plan,
@@ -385,7 +387,7 @@ async def build_pre_live_packet(
         "notes": [
             "This packet uses in-memory repositories for rehearsal evidence only.",
             "The recorded ExecutionIntent is an in-memory audit artifact, not a persistent executable submit.",
-            "The submit adapter remains not implemented for order placement.",
+            "The dry-run submit adapter is ready; real order placement remains blocked by OrderLifecycle enablement.",
         ],
     }
 
@@ -510,7 +512,7 @@ def _technical_rehearsal_passed(
         and rehearsal.controlled_submit_preflight.status
         == RuntimeExecutionControlledSubmitPreflightStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER
         and rehearsal.submit_adapter_preview.status
-        == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+        == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
         and rehearsal.status
         == RuntimeExecutionSubmitRehearsalStatus.READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
     )

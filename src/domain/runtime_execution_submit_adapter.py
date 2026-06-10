@@ -37,7 +37,7 @@ class RuntimeExecutionSubmitAdapterModel(BaseModel):
 
 class RuntimeExecutionSubmitAdapterPreviewStatus(str, Enum):
     BLOCKED = "blocked"
-    INPUTS_READY_ADAPTER_NOT_IMPLEMENTED = "inputs_ready_adapter_not_implemented"
+    INPUTS_READY_DRY_RUN_ADAPTER_ONLY = "inputs_ready_dry_run_adapter_only"
 
 
 class RuntimeExecutionSubmitAdapterPreview(RuntimeExecutionSubmitAdapterModel):
@@ -64,7 +64,11 @@ class RuntimeExecutionSubmitAdapterPreview(RuntimeExecutionSubmitAdapterModel):
     requires_runtime_budget_mutation: Literal[True] = True
     requires_order_lifecycle_adapter: Literal[True] = True
     requires_concrete_protection_plan: Literal[True] = True
-    submit_adapter_implemented: Literal[False] = False
+    submit_adapter_implemented: Literal[True] = True
+    dry_run_only: Literal[True] = True
+    real_submit_enabled: Literal[False] = False
+    order_lifecycle_adapter_enabled: Literal[False] = False
+    requires_explicit_real_submit_enablement: Literal[True] = True
     runtime_budget_mutated: Literal[False] = False
     attempt_consumed: Literal[False] = False
     execution_intent_status_changed: Literal[False] = False
@@ -89,6 +93,12 @@ class RuntimeExecutionSubmitAdapterPreview(RuntimeExecutionSubmitAdapterModel):
         for key in _walk_keys({"metadata": self.metadata}):
             if key.lower() in forbidden:
                 raise ValueError(f"submit adapter preview contains forbidden execution field: {key}")
+        if (
+            self.status
+            == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
+            and self.blockers
+        ):
+            raise ValueError("ready submit adapter preview cannot have blockers")
         return self
 
 
@@ -144,7 +154,7 @@ def build_runtime_execution_submit_adapter_preview(
     status = (
         RuntimeExecutionSubmitAdapterPreviewStatus.BLOCKED
         if blockers
-        else RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+        else RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
     )
     return RuntimeExecutionSubmitAdapterPreview(
         adapter_preview_id=f"runtime-submit-adapter-preview-{preflight.authorization_id}",
@@ -171,6 +181,10 @@ def build_runtime_execution_submit_adapter_preview(
         metadata={
             "scope": "runtime_execution_submit_adapter_preview",
             "non_executing_adapter_design_boundary": True,
+            "dry_run_submit_adapter_ready": True,
+            "real_submit_enabled": False,
+            "order_lifecycle_adapter_enabled": False,
+            "requires_explicit_real_submit_enablement": True,
             "does_not_mutate_runtime_budget": True,
             "does_not_change_execution_intent_status": True,
             "does_not_call_owner_bounded_execution": True,
