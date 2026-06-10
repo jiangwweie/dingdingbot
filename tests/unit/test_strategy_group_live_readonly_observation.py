@@ -123,15 +123,29 @@ async def test_forward_review_repository_initialize_only_creates_forward_review_
     ]
 
 
-def test_live_readonly_observation_v1_exposes_mi_and_cpm_without_execution_fields():
+def test_live_readonly_observation_v1_exposes_mi_cpm_and_brf_without_execution_fields():
     payload = build_strategy_group_live_readonly_observation_v1()
 
     candidate_ids = {item.candidate_id for item in payload.candidates}
-    assert {"MI-001-SOL-LONG", "MI-001-BNB-LONG", "CPM-RO-001"} <= candidate_ids
+    assert {
+        "MI-001-SOL-LONG",
+        "MI-001-BNB-LONG",
+        "CPM-RO-001",
+        "BRF-001-BTC-SHORT",
+    } <= candidate_ids
     assert payload.runner_mapping["strategy_specific_signal_evaluator_glue_wired"] is True
     assert payload.live_observation_active is False
     assert payload.live_ready is False
-    assert len(payload.current_signals) == 3
+    assert len(payload.current_signals) == 4
+    brf = next(
+        record
+        for record in payload.current_signals
+        if record.candidate_id == "BRF-001-BTC-SHORT"
+    )
+    assert brf.side == "short"
+    assert brf.signal_type == "would_enter"
+    assert brf.not_order is True
+    assert brf.not_execution_intent is True
     assert payload.sink_summary["pg_observation_sink"] == "blocked_schema_gap_no_live_observation_table_found"
     assert payload.input_source_summary["external_exchange_write"] is False
     assert payload.review_hook_summary["review_hook_status"] == "records_include_pending_forward_outcome_windows"
@@ -165,8 +179,8 @@ def test_run_once_records_observe_only_signal_history_without_runtime_effect():
         sink=sink,
     )
 
-    assert len(payload.current_signals) == 3
-    assert len(payload.signal_history) == 3
+    assert len(payload.current_signals) == 4
+    assert len(payload.signal_history) == 4
     assert payload.sink_summary["sink_status"] == "process_local_sink_recording_enabled"
     assert payload.sink_summary["writes_execution_or_order_tables"] is False
     assert all(record.not_order is True for record in payload.signal_history)
@@ -252,7 +266,7 @@ def test_live_market_source_records_observe_only_history_with_live_source_metada
         sink=InMemoryStrategyGroupObservationSink(),
     )
 
-    assert len(payload.current_signals) == 3
+    assert len(payload.current_signals) == 4
     assert payload.input_source_summary["source_type"] == "live_market_read_only"
     assert payload.input_source_summary["is_live_read_only"] is True
     assert payload.input_source_summary["fallback_used"] is False
@@ -274,14 +288,20 @@ async def test_pg_observation_repository_round_trip(observation_repo):
 
     recent = await observation_repo.list_recent(limit=10)
     current = await observation_repo.list_current_by_candidate(
-        candidate_ids=["MI-001-SOL-LONG", "MI-001-BNB-LONG", "CPM-RO-001"],
+        candidate_ids=[
+            "MI-001-SOL-LONG",
+            "MI-001-BNB-LONG",
+            "CPM-RO-001",
+            "BRF-001-BTC-SHORT",
+        ],
     )
 
-    assert len(recent) == 3
+    assert len(recent) == 4
     assert [record.candidate_id for record in current] == [
         "MI-001-SOL-LONG",
         "MI-001-BNB-LONG",
         "CPM-RO-001",
+        "BRF-001-BTC-SHORT",
     ]
     assert all(record.sink_status == "recorded_pg" for record in recent)
     assert all(record.not_order is True for record in recent)
@@ -304,11 +324,11 @@ async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observ
         repository=observation_repo,
     )
 
-    assert first.inserted_count == 3
+    assert first.inserted_count == 4
     assert first.skipped_duplicate_count == 0
     assert first.failed_count == 0
     assert second.inserted_count == 0
-    assert second.skipped_duplicate_count == 3
+    assert second.skipped_duplicate_count == 4
     assert second.failed_count == 0
     assert all(item.existing_record_id for item in second.candidate_results)
     assert all(item.runtime_signal_planning_readiness for item in first.candidate_results)
@@ -318,7 +338,7 @@ async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observ
     )
 
     recent = await observation_repo.list_recent(limit=10)
-    assert len(recent) == 3
+    assert len(recent) == 4
     assert all(record.not_order is True for record in recent)
     assert all(record.not_execution_intent is True for record in recent)
     assert all(record.no_order_permission is True for record in recent)

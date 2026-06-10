@@ -1,7 +1,7 @@
 """Read-only strategy-group observation v1 for Owner review.
 
-This module wires strategy-specific signal evaluator glue for MI-001 and
-CPM-RO-001 without starting a runtime loop, creating execution intents,
+This module wires strategy-specific signal evaluator glue for MI-001,
+CPM-RO-001, and BRF-001 without starting a runtime loop, creating execution intents,
 placing orders, or granting execution permission.
 """
 
@@ -19,6 +19,7 @@ from src.application.runtime_strategy_signal_scheduler_assembly import (
     RuntimeStrategySignalSchedulerAssemblyService,
     RuntimeStrategySignalSchedulerReadinessStatus,
 )
+from src.domain.brf_price_action_evaluator import BRF001PriceActionEvaluator
 from src.domain.cpm_historical_evaluator import CPMRO001HistoricalEvaluator
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
@@ -40,6 +41,8 @@ MI001_FAMILY_ID = "MI-001"
 MI001_VERSION_ID = "MI-001-smoke-v0"
 CPM_FAMILY_ID = "CPM-RO-001"
 CPM_VERSION_ID = "CPM-RO-001-v0"
+BRF_FAMILY_ID = "BRF-001"
+BRF_VERSION_ID = "BRF-001-v0"
 MI_LOOKBACK_BARS = 12
 MI_RETURN_THRESHOLD = Decimal("3")
 
@@ -188,7 +191,11 @@ class SampleStrategyGroupMarketBarSource:
     source_id = "sample_closed_candle_source_display_model_only"
 
     def latest_closed_candles(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
-        if symbol == "ETH/USDT:USDT" and timeframe == "4h":
+        if symbol == "BTC/USDT:USDT" and timeframe == "4h":
+            raw = _sample_brf_candles_4h()
+        elif symbol == "BTC/USDT:USDT":
+            raw = _sample_brf_candles_1h()
+        elif symbol == "ETH/USDT:USDT" and timeframe == "4h":
             raw = _sample_cpm_candles_4h()
         elif symbol == "ETH/USDT:USDT":
             raw = _sample_cpm_candles_1h()
@@ -309,6 +316,16 @@ class CPMRO001LiveReadOnlyEvaluator:
         return self._delegate.evaluate(signal_input)
 
 
+class BRF001LiveReadOnlyEvaluator:
+    """Read-only BRF wrapper over the pure bear-rally-failure evaluator."""
+
+    def __init__(self) -> None:
+        self._delegate = BRF001PriceActionEvaluator()
+
+    def evaluate(self, signal_input: StrategyFamilySignalInput) -> StrategyFamilySignalOutput:
+        return self._delegate.evaluate(signal_input)
+
+
 @dataclass(frozen=True)
 class _ObservationSpec:
     candidate_id: str
@@ -410,6 +427,35 @@ def _observation_specs() -> list[_ObservationSpec]:
             ],
             evaluator=CPMRO001LiveReadOnlyEvaluator(),
         ),
+        _ObservationSpec(
+            candidate_id="BRF-001-BTC-SHORT",
+            strategy_group_id=BRF_FAMILY_ID,
+            strategy_family_version_id=BRF_VERSION_ID,
+            playbook_id="BRF-001-BTC-SHORT-OBS-001",
+            symbol="BTC/USDT:USDT",
+            side=SignalSide.SHORT,
+            side_label="short",
+            observation_role="short_side_bear_rally_failure_reference",
+            review_windows=["4h", "24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "htf_context",
+                "rally_extension_confirmed",
+                "rejection_confirmed",
+                "price_action_structure",
+                "short_squeeze_risk",
+            ],
+            source_refs=[
+                "src/domain/brf_price_action_evaluator.py",
+                "docs/ops/td-governance-and-refactor-plan-2026-06.md",
+            ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "BRF is a short-side reference implementation, not proven alpha",
+                "short-side runtime profile confirmation required before execution",
+            ],
+            evaluator=BRF001LiveReadOnlyEvaluator(),
+        ),
     ]
 
 
@@ -424,14 +470,14 @@ def _evaluate_observation_candidate(
         one_hour = market_source.latest_closed_candles(
             symbol=spec.symbol,
             timeframe="1h",
-            limit=96 if spec.strategy_group_id == CPM_FAMILY_ID else 30,
+            limit=96 if _needs_four_hour_context(spec.strategy_group_id) else 30,
         )
         four_hour = (
             market_source.latest_closed_candles(symbol=spec.symbol, timeframe="4h", limit=40)
-            if spec.strategy_group_id == CPM_FAMILY_ID
+            if _needs_four_hour_context(spec.strategy_group_id)
             else []
         )
-        if spec.strategy_group_id == CPM_FAMILY_ID and not four_hour:
+        if _needs_four_hour_context(spec.strategy_group_id) and not four_hour:
             blockers.append("missing_4h_candle_context")
         if not one_hour:
             blockers.append("missing_1h_candle_context")
@@ -653,7 +699,7 @@ def build_strategy_group_live_readonly_observation_v1(
         },
         review_hook_summary={
             "review_windows": ["24h", "72h", "7d"],
-            "cpm_extra_windows": ["4h"],
+            "price_action_extra_windows": ["4h"],
             "review_hook_status": "records_include_pending_forward_outcome_windows",
             "review_calculation_status": "pending_future_outcome_capture",
             "not_runtime_source_of_truth": True,
@@ -671,6 +717,7 @@ def build_strategy_group_live_readonly_observation_v1(
         observation_chain_summary={
             "MI-001": "MI evaluator glue can evaluate SOL and BNB from read-only closed candle snapshots.",
             "CPM-RO-001": "CPM evaluator glue can evaluate ETH 1h/4h read-only closed candle snapshots.",
+            "BRF-001": "BRF evaluator glue can evaluate BTC 1h/4h read-only closed candle snapshots.",
             "active_live_readonly_observation": False,
             "current_signal_available": bool(current_signals),
             "signal_history_available": bool(history),
@@ -694,7 +741,7 @@ def run_strategy_group_live_readonly_observation_once(
     sink: StrategyGroupObservationSink | None = None,
     runtime_signal_planning_assembly: RuntimeStrategySignalSchedulerAssemblyService | None = None,
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
-    """Evaluate and record one observe-only snapshot for MI/CPM candidates."""
+    """Evaluate and record one observe-only snapshot for MI/CPM/BRF candidates."""
 
     return build_strategy_group_live_readonly_observation_v1(
         market_source=market_source,
@@ -879,6 +926,40 @@ def _sample_cpm_candles_4h() -> list[dict[str, Any]]:
     return candles
 
 
+def _sample_brf_candles_1h() -> list[dict[str, Any]]:
+    raw = [
+        ("101", "102", "99", "100"),
+        ("100", "103", "99", "102"),
+        ("102", "105", "101", "104"),
+        ("104", "106", "103", "105"),
+        ("105", "108", "104", "107"),
+        ("107", "109", "106", "108"),
+        ("108", "110", "107", "109"),
+        ("109", "111", "108", "110"),
+        ("110", "112", "109", "111"),
+        ("111", "113", "110", "112"),
+        ("112", "113", "109", "111"),
+        ("111", "114", "105", "106"),
+    ]
+    return [
+        _raw_ohlcv_candle(index, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
+def _sample_brf_candles_4h() -> list[dict[str, Any]]:
+    raw = [
+        ("122", "123", "119", "120"),
+        ("120", "121", "117", "118"),
+        ("118", "119", "115", "116"),
+        ("116", "117", "113", "114"),
+    ]
+    return [
+        _raw_ohlcv_candle(index * 4, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
 def _raw_candle(index: int, close: Decimal) -> dict[str, Any]:
     timestamp_ms = 1770000000000 + index * 60 * 60 * 1000
     return {
@@ -887,6 +968,24 @@ def _raw_candle(index: int, close: Decimal) -> dict[str, Any]:
         "high": str(close + Decimal("0.4")),
         "low": str(close - Decimal("0.5")),
         "close": str(close),
+        "volume": "1000",
+    }
+
+
+def _raw_ohlcv_candle(
+    index: int,
+    open_: str,
+    high: str,
+    low: str,
+    close: str,
+) -> dict[str, Any]:
+    timestamp_ms = 1770000000000 + index * 60 * 60 * 1000
+    return {
+        "open_time_ms": timestamp_ms,
+        "open": open_,
+        "high": high,
+        "low": low,
+        "close": close,
         "volume": "1000",
     }
 
@@ -914,6 +1013,10 @@ def _not_allowed_now() -> list[str]:
         "execution permission grant",
         "automatic strategy routing",
     ]
+
+
+def _needs_four_hour_context(strategy_group_id: str) -> bool:
+    return strategy_group_id in {CPM_FAMILY_ID, BRF_FAMILY_ID}
 
 
 def _runtime_signal_planning_summary(

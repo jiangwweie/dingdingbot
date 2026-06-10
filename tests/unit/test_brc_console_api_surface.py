@@ -712,9 +712,14 @@ def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
     assert payload["live_ready"] is False
     assert payload["live_observation_active"] is False
     candidate_ids = {item["candidate_id"] for item in payload["candidates"]}
-    assert {"MI-001-SOL-LONG", "MI-001-BNB-LONG", "CPM-RO-001"} <= candidate_ids
+    assert {
+        "MI-001-SOL-LONG",
+        "MI-001-BNB-LONG",
+        "CPM-RO-001",
+        "BRF-001-BTC-SHORT",
+    } <= candidate_ids
     assert payload["runner_mapping"]["strategy_specific_signal_evaluator_glue_wired"] is True
-    assert len(payload["current_signals"]) == 3
+    assert len(payload["current_signals"]) == 4
     assert payload["sink_summary"]["writes_execution_or_order_tables"] is False
     assert payload["forward_review_summary"]["writes_execution_or_order_tables"] is False
     assert payload["forward_review_summary"]["runtime_effect"] == "none"
@@ -742,7 +747,7 @@ def test_strategy_group_live_readonly_observation_run_once_records_history_witho
     payload = response.json()
     assert payload["live_ready"] is False
     assert payload["live_observation_active"] is False
-    assert len(payload["current_signals"]) == 3
+    assert len(payload["current_signals"]) == 4
     assert payload["sink_summary"]["sink_status"] in {
         "recorded_pg",
         "blocked_pg_observation_unavailable",
