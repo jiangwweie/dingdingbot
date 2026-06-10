@@ -303,6 +303,18 @@ registration draft / controlled-submit endpoints, and that generic Trading
 Console POSTs remain blocked. It uses `include_exchange=false` for Trading
 Console checks.
 
+Preferred post-deployment acceptance packet:
+
+```bash
+/opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_postdeploy_acceptance_packet.py \
+  --json \
+  --expected-current-head <deployed-commit>
+```
+
+This packet must report `postdeploy_acceptance_ready=true`. It proves the
+deployed release reached the expected HEAD and schema while first real runtime
+submit remains blocked. It is not live-submit authorization.
+
 Minimum console checks:
 
 - Owner login still works.
