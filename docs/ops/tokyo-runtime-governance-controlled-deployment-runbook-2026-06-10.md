@@ -254,6 +254,18 @@ curl -fsS http://127.0.0.1:18080/api/trading-console/strategy-runtimes?limit=1
 curl -fsS http://127.0.0.1:18080/api/trading-console/strategy-runtime-profile-proposals?strategy_family_id=CPM-RO-001\&strategy_family_version_id=CPM-RO-001-v0\&symbol=BNB/USDT:USDT\&side=long
 ```
 
+Preferred post-deployment read-only verifier:
+
+```bash
+/opt/homebrew/bin/python3 scripts/verify_tokyo_runtime_governance_postdeploy.py \
+  --json \
+  --expected-current-head <deployed-commit>
+```
+
+This verifier checks release identity, migration-file state, health invariants,
+key runtime-governance read endpoints, and that generic Trading Console POSTs
+remain blocked. It uses `include_exchange=false` for Trading Console checks.
+
 Minimum console checks:
 
 - Owner login still works.

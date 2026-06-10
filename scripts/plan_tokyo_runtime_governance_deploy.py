@@ -369,6 +369,11 @@ def _plan_phases(
                     "--expected-migration-count 64 "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
+                (
+                    f"cd {q(str(repo_root))} && {local_python} "
+                    "scripts/verify_tokyo_runtime_governance_postdeploy.py --json "
+                    f"--expected-current-head {q(head)}"
+                ),
                 _ssh(
                     host,
                     (

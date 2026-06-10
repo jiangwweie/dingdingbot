@@ -119,6 +119,23 @@ def test_tokyo_deploy_plan_is_planning_only_not_mutating() -> None:
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
+def test_tokyo_postdeploy_verifier_is_readonly_review_required_not_write() -> None:
+    result = classify_script_path(
+        REPO_ROOT / "scripts/verify_tokyo_runtime_governance_postdeploy.py"
+    )
+
+    assert result.level == ScriptRiskLevel.REVIEW_REQUIRED
+    assert result.default_allowed is False
+    assert result.live_action_possible is False
+    assert result.exchange_write_possible is False
+    assert result.database_write_possible is False
+    assert result.runtime_control_possible is False
+    assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
+    assert ScriptRiskCategory.LIVE_SCOPE in result.categories
+    assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
+    assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
+
+
 def test_testnet_daily_gate_reset_is_database_mutation_restricted() -> None:
     result = classify_script_path(REPO_ROOT / "scripts/reset_bnb_testnet_daily_gate.py")
 

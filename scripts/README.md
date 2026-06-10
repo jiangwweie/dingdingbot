@@ -77,3 +77,11 @@ authorization for the exact action.
   scp, database, migration, restart, order, OrderLifecycle, or exchange actions.
   Remote mutation remains gated by the explicit confirmation phrase printed in
   the plan.
+
+- `verify_tokyo_runtime_governance_postdeploy.py`: remote read-only
+  post-deploy verifier. It checks release identity, migration-file state,
+  health invariants, key runtime-governance read endpoints, and that a generic
+  Trading Console POST remains blocked. Trading Console checks force
+  `include_exchange=false`. It does not write remote files, source env files,
+  read secrets, connect directly to PG, run migrations, restart services, create
+  execution records, create orders, call OrderLifecycle, or call exchange APIs.

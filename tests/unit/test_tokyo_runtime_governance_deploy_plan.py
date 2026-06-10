@@ -143,6 +143,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
     assert "systemctl start brc-owner-console-backend.service" in all_commands
     assert "--expected-current-head" in all_commands
+    assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
 
 
 def test_deploy_plan_blocks_manifest_head_mismatch(tmp_path: Path):
