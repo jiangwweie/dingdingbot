@@ -51,3 +51,12 @@ authorization for the exact action.
   OrderLifecycle, or call exchange APIs. Use `--write-artifacts` only when a
   local `git archive` and manifest are needed for a controlled deployment
   package.
+
+- `probe_tokyo_runtime_governance_readonly.py`: remote read-only fact probe for
+  the Tokyo runtime-governance deployment stage. It uses SSH to inspect the
+  current release symlink, current release git head/status, migration-file
+  count/latest file, `/api/health`, and a bounded process snapshot. It does not
+  source env files, read secrets, write remote files, deploy, run migrations,
+  restart services, create execution records, create orders, call
+  OrderLifecycle, or call exchange APIs. Because it references live-scope
+  readiness facts such as `live_ready`, classify and review it before running.
