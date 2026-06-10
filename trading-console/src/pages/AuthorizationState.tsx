@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -74,6 +74,21 @@ type OrderCandidateView = {
   candidate_executable?: boolean;
   not_order?: boolean;
   not_execution_intent?: boolean;
+};
+
+type PromotionGateView = {
+  status?: string;
+  scope?: string;
+  blockers?: string[];
+  warnings?: string[];
+  missing_owner_decisions?: string[];
+  binding_candidate_mode?: string;
+  implementation_kind?: string;
+  proven_alpha?: boolean;
+  not_execution_authority?: boolean;
+  execution_intent_created?: boolean;
+  order_created?: boolean;
+  exchange_called?: boolean;
 };
 
 type RuntimeSafetyTone = 'normal' | 'warning' | 'danger' | 'muted';
@@ -213,6 +228,7 @@ export default function AuthorizationState() {
           <RuntimeActivityPanel signals={signals} candidates={candidates} />
           <AuthorizationBridgePanel envelope={authState.envelope} data={authData} error={authState.error} />
           <RuntimeSafetyReadinessPanel runtimes={runtimes} />
+          <RuntimePromotionGatePanel runtimes={runtimes} />
         </div>
 
         <InspectorPanel
@@ -429,6 +445,153 @@ function RuntimeSafetyReadinessPanel({ runtimes }: { runtimes: RuntimeView[] }) 
   }
 
   return <RuntimeSafetyReadinessDetail runtimeId={String(runtime.runtime_instance_id)} />;
+}
+
+function RuntimePromotionGatePanel({ runtimes }: { runtimes: RuntimeView[] }) {
+  const runtime = runtimes[0];
+
+  if (!runtime?.runtime_instance_id) {
+    return (
+      <ConsolePanel title="首次实盘门禁" caption="进入真实 submit 前必须显式补齐的 Owner / Codex 决策">
+        <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-3">
+          <BoundaryCell label="运行实例" value="暂无实例" tone="blocked" />
+          <BoundaryCell label="门禁状态" value="等待 Runtime" tone="attention" />
+          <BoundaryCell label="执行权限" value="未授予" tone="unavailable" />
+        </div>
+        <div className="border-t border-slate-800 px-4 py-3 text-xs leading-5 text-slate-500">
+          没有 Runtime 时不会请求 promotion gate，也不会从单次授权推断真实 submit 准备度。
+        </div>
+      </ConsolePanel>
+    );
+  }
+
+  return <RuntimePromotionGateDetail runtimeId={String(runtime.runtime_instance_id)} />;
+}
+
+function RuntimePromotionGateDetail({ runtimeId }: { runtimeId: string }) {
+  const path = `/api/trading-console/strategy-runtimes/${encodeURIComponent(runtimeId)}/promotion-gate?scope=first_real_submit_gate_review`;
+  const { gate, loading, error } = usePromotionGatePreview(path);
+  const blockers = asArray<string>(gate.blockers);
+  const warnings = asArray<string>(gate.warnings);
+  const decisions = asArray<string>(gate.missing_owner_decisions);
+  const blocked = Boolean(error || blockers.length > 0 || gate.not_execution_authority !== true);
+
+  return (
+    <ConsolePanel
+      title="首次实盘门禁"
+      caption="真实 submit 前的只读 promotion gate；显示缺口，不授权交易"
+      action={<StatusChip tone={blocked ? 'blocked' : 'attention'}>{loading ? '读取中' : promotionGateStatusLabel(error ? 'unavailable' : gate.status)}</StatusChip>}
+    >
+      {loading ? (
+        <div className="px-4 py-6 text-sm text-slate-500">正在读取首次实盘门禁...</div>
+      ) : error ? (
+        <div className="px-4 py-4">
+          <GuidanceLine tone="intervention" title="promotion gate 暂不可用" body={error} />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+            <BoundaryCell label="门禁状态" value={promotionGateStatusLabel(gate.status)} tone={blockers.length > 0 ? 'blocked' : 'attention'} />
+            <BoundaryCell label="阻断" value={String(blockers.length)} tone={blockers.length > 0 ? 'blocked' : 'normal'} />
+            <BoundaryCell label="待决策" value={String(decisions.length)} tone={decisions.length > 0 ? 'attention' : 'normal'} />
+            <BoundaryCell label="执行权限" value={gate.not_execution_authority ? '未授予' : '异常'} tone={gate.not_execution_authority ? 'unavailable' : 'blocked'} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-4 lg:grid-cols-2">
+            <RuntimeSafetyList
+              title="当前阻断"
+              empty="已具备进入门禁审查的前置事实"
+              items={blockers}
+              tone="danger"
+              mapLabel={promotionGateBlockerLabel}
+            />
+            <RuntimeSafetyList
+              title="Owner / Codex 待确认"
+              empty="暂无待确认项"
+              items={decisions}
+              tone="warning"
+              mapLabel={promotionGateDecisionLabel}
+            />
+          </div>
+
+          <div className="border-t border-slate-800 px-4 py-3 text-xs leading-5 text-slate-500">
+            这个面板只回答“离首次真实 submit 门禁还缺什么”。即使状态变为可审查，也仍然不是下单、撤单、平仓、提现或自动复利权限。
+          </div>
+
+          <TechnicalDetails title="First real submit gate facts">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <ScopeFact label="Scope" value={displayValue(gate.scope, 'first_real_submit_gate_review')} />
+              <ScopeFact label="Strategy mode" value={displayValue(gate.binding_candidate_mode, '暂无')} />
+              <ScopeFact label="Implementation" value={displayValue(gate.implementation_kind, '暂无')} />
+              <ScopeFact label="Proven alpha" value={gate.proven_alpha === true ? '已证明' : '未证明 / 限制预算与自动化'} />
+              <ScopeFact label="ExecutionIntent" value={gate.execution_intent_created ? '已创建' : '未创建'} />
+              <ScopeFact label="Order" value={gate.order_created ? '已创建' : '未创建'} />
+              <ScopeFact label="Exchange" value={gate.exchange_called ? '已调用' : '未调用'} />
+              <ScopeFact label="Authority" value={gate.not_execution_authority ? '非执行授权' : '需核查'} />
+            </div>
+            {warnings.length > 0 && (
+              <div className="mt-3 text-amber-700 dark:text-amber-300">
+                {warnings.map(promotionGateBlockerLabel).join(' / ')}
+              </div>
+            )}
+          </TechnicalDetails>
+        </>
+      )}
+    </ConsolePanel>
+  );
+}
+
+function usePromotionGatePreview(path: string): {
+  gate: PromotionGateView;
+  loading: boolean;
+  error: string | null;
+} {
+  const [gate, setGate] = useState<PromotionGateView>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(path, {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (response.status === 401) {
+          window.dispatchEvent(new Event('trading-console:unauthorized'));
+        }
+        if (!response.ok) throw new Error(`GET ${path} returned HTTP ${response.status}`);
+        const payload = await response.json();
+        if (active) setGate(payload || {});
+      } catch (err) {
+        console.error('Trading Console promotion gate API error', { path, error: err });
+        if (active) {
+          setGate({});
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    if (!path.startsWith('/api/trading-console/')) {
+      setGate({});
+      setError(`Forbidden Trading Console API path: ${path}`);
+      setLoading(false);
+      return;
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [path]);
+
+  return { gate, loading, error };
 }
 
 function RuntimeSafetyReadinessDetail({ runtimeId }: { runtimeId: string }) {
@@ -758,4 +921,68 @@ function runtimeSafetyConfirmationLabel(code: string): string {
     stale_fact_behavior_confirmed: '确认过期事实阻断',
   };
   return map[code] || code;
+}
+
+function promotionGateStatusLabel(status?: string): string {
+  const map: Record<string, string> = {
+    blocked: '阻断',
+    ready_for_controlled_runtime_execution_design: '可进入受控执行设计审查',
+    ready_for_first_real_submit_gate_review: '可进入首次实盘门禁审查',
+    unavailable: '不可用',
+  };
+  return map[String(status || '')] || displayValue(status, '无法确认');
+}
+
+function promotionGateDecisionLabel(code: string): string {
+  const map: Record<string, string> = {
+    strategy_family_confirmed: '确认首批策略族',
+    implementation_source_confirmed: '确认策略实现来源',
+    required_facts_confirmed: '确认 RequiredFacts',
+    entry_policy_confirmed: '确认入场策略',
+    exit_policy_confirmed: '确认出场策略',
+    protection_policy_confirmed: '确认保护策略',
+    eligible_for_runtime_execution_confirmed: '确认可进入 runtime 执行候选',
+    right_tail_review_metrics_confirmed: '确认右尾复盘指标',
+    runtime_profile_confirmed: '确认 runtime profile',
+    owner_confirmation_mode_confirmed: '确认 Owner 逐单 / 预算内自动模式',
+    symbol_side_boundary_confirmed: '确认标的 / 方向边界',
+    max_loss_budget_confirmed: '确认最大亏损预算',
+    max_notional_boundary_confirmed: '确认单次名义金额',
+    max_active_positions_boundary_confirmed: '确认最大活跃仓位',
+    max_leverage_boundary_confirmed: '确认最大杠杆',
+    margin_usage_boundary_confirmed: '确认保证金边界',
+    liquidation_buffer_boundary_confirmed: '确认强平缓冲',
+    protection_readiness_source_confirmed: '确认保护事实来源',
+    stale_fact_behavior_confirmed: '确认过期事实阻断',
+    attempt_consumption_rule_confirmed: '确认 attempt 消耗规则',
+    budget_reservation_rule_confirmed: '确认预算预留规则',
+    trusted_active_position_source_confirmed: '确认仓位事实来源',
+    trusted_account_fact_source_confirmed: '确认账户事实来源',
+    short_side_conservative_profile_confirmed: '确认短侧保守 profile',
+    budget_release_or_consume_rule_confirmed: '确认预算释放 / 确认消耗规则',
+    protection_creation_failure_policy_confirmed: '确认保护创建失败处理',
+    duplicate_submit_policy_confirmed: '确认重复 submit 阻断策略',
+    deployment_readiness_confirmed: '确认部署 readiness',
+    explicit_owner_real_submit_authorization: 'Owner 明确授权首次真实 submit',
+  };
+  return map[code] || code;
+}
+
+function promotionGateBlockerLabel(code: string): string {
+  const normalized = code
+    .replace(/^semantic_/, '')
+    .replace(/^runtime_/, '')
+    .replace(/^first_real_submit_/, '')
+    .replace(/_missing$/, '');
+  const direct = promotionGateDecisionLabel(normalized);
+  if (direct !== normalized) return direct;
+  const map: Record<string, string> = {
+    strategy_binding_not_trade_candidate: '策略绑定不是交易候选',
+    regime_classifier_not_runtime_trade_strategy: 'RMR 仍是 regime classifier',
+    data_backlog_not_runtime_trade_strategy: '数据依赖策略仍在 backlog',
+    strategy_not_proven_alpha_limits_economic_and_autonomy_admission: '未证明 alpha：限制预算和自动化强度',
+    reference_implementation_not_proven_production_strategy: '参考实现：不是 proven-alpha 生产策略',
+    short_side_conservative_profile_confirmed: '短侧保守 profile 未确认',
+  };
+  return map[code] || map[normalized] || code;
 }

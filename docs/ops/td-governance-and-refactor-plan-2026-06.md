@@ -1219,6 +1219,44 @@ Required properties:
 - Product wording must not overclaim capabilities not implemented in tracked
   code.
 
+Current local Sprint 6 slice:
+
+- Trading Console product IA now routes the Owner through 控制总览, 策略库,
+  运行治理, 交易与仓位, 分析, 异常介入, and 证据 instead of legacy
+  implementation-shaped routes.
+- Runtime governance UI surfaces runtime shelf, runtime boundary,
+  SignalEvaluation, OrderCandidate, one-shot authorization short-path state,
+  runtime safety readiness, and first-real-submit promotion gate state.
+- The first-real-submit promotion gate panel calls only the read-only
+  `/api/trading-console/strategy-runtimes/{runtime_instance_id}/promotion-gate`
+  or generic promotion-gate preview path. It displays missing Owner/Codex
+  decisions and preserves `not_execution_authority`, `order_created=false`, and
+  `exchange_called=false`.
+- Dark and light theme switching is implemented with shared theme state,
+  `data-theme`, and local persistence. It is a Sprint 6 product capability, not
+  a one-off page skin.
+
+Sprint 6 UI/API validation performed locally:
+
+```text
+npm run lint
+passed
+
+npm run build
+passed
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py
+16 passed
+
+Playwright local browser validation:
+- /runtime displays the first-real-submit gate panel.
+- Generic promotion-gate preview returns status=blocked,
+  scope=first_real_submit_gate_review, not_execution_authority=true,
+  order_created=false, exchange_called=false.
+- /runtime dark-mode layout has no horizontal overflow.
+```
+
 ### Sprint 7: Runtime / Config / Safety Boundary Consolidation
 
 Scope:
