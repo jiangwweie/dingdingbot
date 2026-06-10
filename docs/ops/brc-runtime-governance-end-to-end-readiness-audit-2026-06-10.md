@@ -12,15 +12,16 @@ Local worktree:
 
 - path: `/Users/jiangwei/Documents/final-sprint6-integration`
 - branch: `release/tokyo-runtime-governance-20260610`
-- current local HEAD: `6533e066`
+- current local baseline before this stage: `3450c647`
 - audited deployed backend candidate: `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
 - stage commits:
   - `cfd66143 chore(ops): add gated tokyo deploy executor`
   - `6533e066 docs(ops): add authenticated tokyo console evidence`
+  - `3450c647 feat(brc): hand scheduled observations to shadow planner`
 
-Current local HEAD is ahead of the deployed backend only by deploy-verifier and
-docs-only evidence commits. The actual deployed runtime code remains
-`ae9b209e`.
+Current local code is ahead of the deployed backend by non-executing
+readiness, scheduler handoff, docs, and verifier commits. The actual deployed
+runtime code remains `ae9b209e`.
 
 Current remote Tokyo fact:
 
@@ -69,7 +70,7 @@ The current local code and docs preserve this direction:
 | Strategy signal planning | `RuntimeStrategySignalPlanningService` evaluates raw `StrategyFamilySignalInput` through `RuntimeStrategySignalEvaluationService` and creates only shadow `SignalEvaluation` / `OrderCandidate` when `READY_FOR_SEMANTIC_BINDING` | local non-executing ready |
 | CPM/BRF planning | CPM long uses pullback-low or ATR stop; BRF short uses rally-high or ATR stop; both include TP1 1R partial and runner/trailing metadata | local non-executing ready |
 | Trusted facts | `StrategyRuntimeFactOverlayService` can replace caller-supplied account/position/market allow facts and block missing trusted sources | local non-executing ready |
-| Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; shadow planning requires `allow_shadow_candidate_creation=true` | local non-executing ready |
+| Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; scheduled observations preserve signal input snapshots and can call the shadow planner only after `allow_shadow_candidate_creation=true` plus a unique ACTIVE shadow runtime resolved from `StrategyRuntimeInstanceService` | local non-executing ready |
 | Runtime safety | Promotion and readiness gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, and deployment confirmations | local non-executing ready |
 | Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist | local non-submitting bridge only |
 | Console productization | Trading Console exposes runtime governance, strategy observation/planning, promotion/readiness, right-tail review, capital-base/withdrawal-adjusted review, and theme toggle surfaces | local UI/API verified previously |
@@ -225,6 +226,7 @@ Scheduler / API / trusted-overlay tests:
 
 ```bash
 /opt/homebrew/bin/pytest -q \
+  tests/unit/test_strategy_group_live_readonly_observation.py \
   tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py \
   tests/unit/test_b0_strategy_runtime_fact_overlay.py \
   tests/unit/test_trading_console_readmodels.py
@@ -233,7 +235,7 @@ Scheduler / API / trusted-overlay tests:
 Observed result:
 
 ```text
-62 passed
+82 passed
 ```
 
 Runtime bridge / FinalGate / promotion readiness tests:
@@ -261,8 +263,9 @@ bridge preview, and readiness surfaces. They do not prove live trading behavior.
 The following are not complete and must not be silently inferred:
 
 1. Scheduler-backed strategy signal handoff is now productized locally as an
-   injectable, non-executing scheduled-observation-to-shadow-planner bridge.
-   Tokyo autonomous scheduling / triggering is still not enabled.
+   injectable, non-executing scheduled-observation-to-shadow-planner bridge
+   with a runtime-service-backed unique ACTIVE shadow runtime resolver. Tokyo
+   autonomous scheduling / triggering is still not enabled.
 2. Hard authenticated API `200` evidence for each Trading Console endpoint is
    still limited by local Chrome client blocking direct `/api/*` navigation.
    Authenticated UI read-model rendering has been verified; a follow-up should

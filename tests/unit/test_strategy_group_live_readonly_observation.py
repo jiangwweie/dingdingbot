@@ -34,7 +34,11 @@ from src.application.strategy_group_forward_review import (
     StrategyGroupForwardReviewRecord,
     calculate_forward_reviews_for_observation,
 )
-from src.domain.strategy_family_signal import SignalSide, SignalType
+from src.domain.strategy_family_signal import (
+    SignalSide,
+    SignalType,
+    StrategyFamilySignalInput,
+)
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
     StrategyRuntimeInstance,
@@ -46,6 +50,8 @@ from src.infrastructure.pg_strategy_group_forward_review_repository import PgStr
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
 from src.application.strategy_group_observation_case_queue import build_observation_case_queue
 from src.application.strategy_group_readonly_observation_scheduler import (
+    StrategyRuntimeObservationResolutionError,
+    StrategyRuntimeObservationResolver,
     run_scheduled_readonly_observation_once,
 )
 
@@ -458,6 +464,184 @@ async def test_scheduled_observation_can_handoff_to_non_executing_shadow_planner
 
 
 @pytest.mark.asyncio
+async def test_scheduled_observation_resolves_active_shadow_runtime_before_handoff(
+    observation_repo,
+):
+    preview = build_strategy_group_live_readonly_observation_v1(
+        market_source=SampleStrategyGroupMarketBarSource()
+    )
+    matching_record = next(
+        record
+        for record in preview.current_signals
+        if record.candidate_id == "CPM-RO-001"
+    )
+    signal_input = StrategyFamilySignalInput.model_validate(
+        matching_record.signal_input_snapshot
+    )
+    matching_runtime = _shadow_runtime_for_signal(
+        signal_input,
+        side=matching_record.side,
+    )
+
+    class _RuntimeService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def list_runtimes(self, *, status=None, limit=100):
+            self.calls.append({"status": status, "limit": limit})
+            return [matching_runtime]
+
+    class _PlanningService:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def plan_signal_input_if_ready(self, signal_input, **kwargs):
+            runtime = kwargs["runtime"]
+            self.calls.append(signal_input.evaluation_id)
+            return RuntimeStrategySignalSchedulerPlanningResult(
+                planning_id=f"scheduled-plan-{signal_input.evaluation_id}",
+                runtime_instance_id=runtime.runtime_instance_id,
+                strategy_family_id=signal_input.strategy_family_id,
+                strategy_family_version_id=signal_input.strategy_family_version_id,
+                symbol=signal_input.symbol,
+                status=(
+                    RuntimeStrategySignalSchedulerPlanningStatus.SHADOW_CANDIDATE_CREATED
+                ),
+                readiness=RuntimeStrategySignalSchedulerReadiness(
+                    candidate_id=kwargs["candidate_id"],
+                    evaluation_id=signal_input.evaluation_id,
+                    signal_id=f"scheduled-signal-{signal_input.evaluation_id}",
+                    strategy_family_id=signal_input.strategy_family_id,
+                    strategy_family_version_id=signal_input.strategy_family_version_id,
+                    symbol=signal_input.symbol,
+                    side=runtime.side,
+                    signal_type="would_enter",
+                    status=(
+                        RuntimeStrategySignalSchedulerReadinessStatus.READY_FOR_NON_EXECUTING_PLANNER
+                    ),
+                    runtime_instance_id=runtime.runtime_instance_id,
+                    runtime_bound=True,
+                    scheduler_can_call_runtime_planner=True,
+                ),
+                planner_call_performed=True,
+                signal_evaluation_created=True,
+                order_candidate_created=True,
+            )
+
+    runtime_service = _RuntimeService()
+    resolver = StrategyRuntimeObservationResolver(
+        runtime_service=runtime_service,
+        now_ms_source=lambda: signal_input.timestamp_ms,
+    )
+    planning_service = _PlanningService()
+
+    result = await run_scheduled_readonly_observation_once(
+        source_name="local_sqlite_fallback",
+        market_source=SampleStrategyGroupMarketBarSource(),
+        repository=observation_repo,
+        runtime_resolver=resolver,
+        runtime_signal_planning_service=planning_service,
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert runtime_service.calls
+    assert all(
+        call["status"] == StrategyRuntimeInstanceStatus.ACTIVE
+        for call in runtime_service.calls
+    )
+    assert planning_service.calls == [signal_input.evaluation_id]
+    created = [
+        item
+        for item in result.candidate_results
+        if item.shadow_planning_action == "shadow_candidate_created"
+    ]
+    blocked = [
+        item
+        for item in result.candidate_results
+        if item.shadow_planning_action == "runtime_not_resolved"
+    ]
+    assert len(created) == 1
+    assert created[0].candidate_id == "CPM-RO-001"
+    assert created[0].runtime_instance_id == matching_runtime.runtime_instance_id
+    assert len(blocked) == 7
+    assert all(item.planner_call_performed is False for item in blocked)
+    assert all(item.execution_intent_created is False for item in result.candidate_results)
+    assert all(item.order_created is False for item in result.candidate_results)
+    assert all(item.exchange_called is False for item in result.candidate_results)
+
+
+@pytest.mark.asyncio
+async def test_observation_runtime_resolver_ignores_ineligible_runtime_states():
+    record = next(
+        record
+        for record in build_strategy_group_live_readonly_observation_v1(
+            market_source=SampleStrategyGroupMarketBarSource()
+        ).current_signals
+        if record.candidate_id == "CPM-RO-001"
+    )
+    signal_input = StrategyFamilySignalInput.model_validate(record.signal_input_snapshot)
+    matching_runtime = _shadow_runtime_for_signal(signal_input, side=record.side)
+
+    class _RuntimeService:
+        def __init__(self, runtimes):
+            self.runtimes = runtimes
+
+        async def list_runtimes(self, *, status=None, limit=100):
+            return self.runtimes
+
+    paused_runtime = matching_runtime.model_copy(
+        update={"status": StrategyRuntimeInstanceStatus.PAUSED}
+    )
+    expired_runtime = matching_runtime.model_copy(
+        update={"runtime_instance_id": "runtime-expired", "expires_at_ms": 10}
+    )
+    wrong_side_runtime = matching_runtime.model_copy(
+        update={"runtime_instance_id": "runtime-short", "side": "short"}
+    )
+    resolver = StrategyRuntimeObservationResolver(
+        runtime_service=_RuntimeService(
+            [paused_runtime, expired_runtime, wrong_side_runtime]
+        ),
+        now_ms_source=lambda: 11,
+    )
+
+    resolved = await resolver.resolve_runtime_for_signal(signal_input, record)
+
+    assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_observation_runtime_resolver_fails_on_ambiguous_active_runtime():
+    record = next(
+        record
+        for record in build_strategy_group_live_readonly_observation_v1(
+            market_source=SampleStrategyGroupMarketBarSource()
+        ).current_signals
+        if record.candidate_id == "CPM-RO-001"
+    )
+    signal_input = StrategyFamilySignalInput.model_validate(record.signal_input_snapshot)
+    matching_runtime = _shadow_runtime_for_signal(signal_input, side=record.side)
+    duplicate_runtime = matching_runtime.model_copy(
+        update={"runtime_instance_id": "runtime-duplicate"}
+    )
+
+    class _RuntimeService:
+        async def list_runtimes(self, *, status=None, limit=100):
+            return [matching_runtime, duplicate_runtime]
+
+    resolver = StrategyRuntimeObservationResolver(
+        runtime_service=_RuntimeService(),
+        now_ms_source=lambda: signal_input.timestamp_ms,
+    )
+
+    with pytest.raises(
+        StrategyRuntimeObservationResolutionError,
+        match="multiple_matching_active_shadow_runtimes",
+    ):
+        await resolver.resolve_runtime_for_signal(signal_input, record)
+
+
+@pytest.mark.asyncio
 async def test_scheduled_observation_planner_requires_runtime_resolver(observation_repo):
     class _PlanningService:
         async def plan_signal_input_if_ready(self, signal_input, **kwargs):
@@ -743,7 +927,8 @@ def test_mi001_readonly_evaluator_returns_invalid_for_missing_context():
     assert output.not_execution_intent is True
 
 
-def _shadow_runtime_for_signal(signal_input):
+def _shadow_runtime_for_signal(signal_input, *, side: str | None = None):
+    selected_side = side or signal_input.trial_constraints_snapshot.get("side", "long")
     return StrategyRuntimeInstance(
         runtime_instance_id=f"runtime-{signal_input.strategy_family_id}-{signal_input.symbol}",
         trial_binding_id=f"trial-{signal_input.strategy_family_id}",
@@ -751,7 +936,7 @@ def _shadow_runtime_for_signal(signal_input):
         strategy_family_id=signal_input.strategy_family_id,
         strategy_family_version_id=signal_input.strategy_family_version_id,
         symbol=signal_input.symbol,
-        side=signal_input.trial_constraints_snapshot.get("side", "long"),
+        side=selected_side,
         status=StrategyRuntimeInstanceStatus.ACTIVE,
         boundary=StrategyRuntimeBoundary(
             max_attempts=3,
@@ -761,7 +946,7 @@ def _shadow_runtime_for_signal(signal_input):
             max_notional_per_attempt=Decimal("10"),
             total_budget=Decimal("9"),
             allowed_symbols=[signal_input.symbol],
-            allowed_sides=[signal_input.trial_constraints_snapshot.get("side", "long")],
+            allowed_sides=[selected_side],
             max_leverage=Decimal("1"),
             max_margin_per_attempt=Decimal("10"),
             min_liquidation_stop_buffer=Decimal("25"),

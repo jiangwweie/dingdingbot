@@ -8,6 +8,7 @@ paths.
 
 from __future__ import annotations
 
+import time
 from inspect import isawaitable
 from typing import Any, Callable, Literal, Protocol
 
@@ -23,7 +24,10 @@ from src.application.strategy_group_live_readonly_observation import (
     build_strategy_group_live_readonly_observation_v1,
 )
 from src.domain.strategy_family_signal import StrategyFamilySignalInput
-from src.domain.strategy_runtime import StrategyRuntimeInstance
+from src.domain.strategy_runtime import (
+    StrategyRuntimeInstance,
+    StrategyRuntimeInstanceStatus,
+)
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
@@ -67,6 +71,69 @@ class ObservationRuntimeResolver(Protocol):
         observation: StrategyGroupObservationRecord,
     ) -> StrategyRuntimeInstance | None:
         ...
+
+
+class StrategyRuntimeListService(Protocol):
+    async def list_runtimes(
+        self,
+        *,
+        status: StrategyRuntimeInstanceStatus | None = None,
+        limit: int = 100,
+    ) -> list[StrategyRuntimeInstance]:
+        ...
+
+
+class StrategyRuntimeObservationResolutionError(RuntimeError):
+    """Raised when a signal maps to more than one active shadow runtime."""
+
+
+class StrategyRuntimeObservationResolver:
+    """Resolve a scheduled observation signal to one trusted active runtime.
+
+    This resolver is intentionally narrow: it only chooses an already-active
+    shadow runtime for the observed strategy/version/symbol/side. Downstream
+    scheduler and planning gates remain responsible for semantic readiness,
+    attempts, budgets, active position facts, and protection facts.
+    """
+
+    def __init__(
+        self,
+        *,
+        runtime_service: StrategyRuntimeListService,
+        limit: int = 100,
+        now_ms_source: Callable[[], int] | None = None,
+    ) -> None:
+        if limit <= 0:
+            raise ValueError("runtime resolver limit must be positive")
+        self._runtime_service = runtime_service
+        self._limit = limit
+        self._now_ms_source = now_ms_source or _now_ms
+
+    async def resolve_runtime_for_signal(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        observation: StrategyGroupObservationRecord,
+    ) -> StrategyRuntimeInstance | None:
+        runtimes = await self._runtime_service.list_runtimes(
+            status=StrategyRuntimeInstanceStatus.ACTIVE,
+            limit=self._limit,
+        )
+        now_ms = self._now_ms_source()
+        matches = [
+            runtime
+            for runtime in runtimes
+            if _runtime_matches_observed_signal(
+                runtime,
+                signal_input,
+                observation,
+                now_ms=now_ms,
+            )
+        ]
+        if len(matches) > 1:
+            raise StrategyRuntimeObservationResolutionError(
+                "multiple_matching_active_shadow_runtimes"
+            )
+        return matches[0] if matches else None
 
 
 class ScheduledObservationCandidateResult(BaseModel):
@@ -125,6 +192,10 @@ class ScheduledReadonlyObservationRunResult(BaseModel):
             "no_exchange_write": True,
         }
     )
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 async def run_scheduled_readonly_observation_once(
@@ -368,3 +439,40 @@ def _planning_action(
     }:
         return value  # type: ignore[return-value]
     return "failed"
+
+
+def _runtime_matches_observed_signal(
+    runtime: StrategyRuntimeInstance,
+    signal_input: StrategyFamilySignalInput,
+    observation: StrategyGroupObservationRecord,
+    *,
+    now_ms: int,
+) -> bool:
+    if runtime.status != StrategyRuntimeInstanceStatus.ACTIVE:
+        return False
+    if runtime.execution_enabled or not runtime.shadow_mode:
+        return False
+    if runtime.expires_at_ms is not None and runtime.expires_at_ms <= now_ms:
+        return False
+    if runtime.strategy_family_id != signal_input.strategy_family_id:
+        return False
+    if runtime.strategy_family_version_id != signal_input.strategy_family_version_id:
+        return False
+    if observation.strategy_family_version_id is not None and (
+        runtime.strategy_family_version_id != observation.strategy_family_version_id
+    ):
+        return False
+    if runtime.symbol != signal_input.symbol or runtime.symbol != observation.symbol:
+        return False
+    side = _observed_signal_side(signal_input, observation)
+    if side and runtime.side.lower() != side:
+        return False
+    return True
+
+
+def _observed_signal_side(
+    signal_input: StrategyFamilySignalInput,
+    observation: StrategyGroupObservationRecord,
+) -> str:
+    side = observation.side or signal_input.trial_constraints_snapshot.get("side") or ""
+    return str(side).lower()

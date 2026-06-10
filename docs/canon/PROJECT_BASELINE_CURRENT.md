@@ -179,10 +179,13 @@ Key facts:
   explicit non-executing shadow-plan POST for server-side strategy signal
   evaluation and optional shadow candidate creation. The scheduled read-only
   observation runner can now preserve the full signal input snapshot and, when
-  explicitly injected with a runtime resolver plus scheduler-planning service,
-  hand the just-observed signal to the non-executing shadow planner. Tokyo
-  autonomous scheduling / triggering remains disabled unless separately wired
-  and authorized.
+  explicitly injected with `StrategyRuntimeObservationResolver` plus
+  scheduler-planning service, resolve exactly one ACTIVE shadow runtime from
+  `StrategyRuntimeInstanceService` before handing the observed signal to the
+  non-executing shadow planner. Missing, ineligible, expired, side-mismatched,
+  or ambiguous runtime matches do not call the planner. Tokyo autonomous
+  scheduling / triggering remains disabled unless separately wired and
+  authorized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, runtime safety boundary,
