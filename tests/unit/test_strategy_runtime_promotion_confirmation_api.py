@@ -4,6 +4,9 @@ import time
 
 from fastapi.testclient import TestClient
 
+from src.domain.experimental_runtime_profile_proposal import (
+    build_experimental_runtime_profile_proposal,
+)
 from src.interfaces.operator_auth import create_password_hash
 
 
@@ -159,6 +162,61 @@ def test_promotion_confirmation_api_records_gate_snapshot_without_action(monkeyp
     assert listed.json()["confirmations"][0]["confirmation_id"] == (
         "promotion-confirmation-api-1"
     )
+
+
+def test_promotion_confirmation_api_records_profile_proposal_snapshot(monkeypatch):
+    _configure_auth(monkeypatch)
+    repo = _FakePromotionConfirmationRepo()
+    from src.interfaces import api_brc_console
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_runtime_promotion_confirmation_repository",
+        lambda: repo,
+    )
+    from src.interfaces.api import app
+
+    profile_proposal = build_experimental_runtime_profile_proposal(
+        strategy_family_id="BRF-001",
+        strategy_family_version_id="BRF-001-v0",
+        symbol="BNB/USDT:USDT",
+        side="short",
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/strategy-runtime-promotion-confirmations",
+            json={
+                "confirmation_id": "promotion-confirmation-api-profile-1",
+                "strategy_family_id": "BRF-001",
+                "strategy_family_version_id": "BRF-001-v0",
+                "semantic_confirmations": _semantic_confirmed(),
+                "runtime_confirmations": {
+                    **_runtime_confirmed(),
+                    "short_side_conservative_profile_confirmed": True,
+                },
+                "runtime_profile_proposal_snapshot": profile_proposal.model_dump(
+                    mode="json"
+                ),
+                "reason": "Owner confirms BRF conservative 30U proposal snapshot.",
+                "evidence_refs": ["runtime-profile-proposal://BRF-001-v0"],
+                "created_at_ms": NOW_MS,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    snapshot = payload["confirmation"]["runtime_profile_proposal_snapshot"]
+    assert snapshot["strategy_family_id"] == "BRF-001"
+    assert snapshot["profile_kind"] == "small_capital_conservative_short"
+    assert snapshot["total_loss_budget"] == "6.00"
+    assert snapshot["not_execution_authority"] is True
+    assert snapshot["order_created"] is False
+    assert payload["confirmation"]["metadata"]["runtime_profile_proposal_attached"] is True
+    assert payload["confirmation"]["runtime_mutation_created"] is False
+    assert payload["no_action_guarantee"]["creates_order"] is False
+    assert repo.records[0].runtime_profile_proposal_snapshot is not None
 
 
 def test_promotion_confirmation_api_rejects_execution_metadata(monkeypatch):

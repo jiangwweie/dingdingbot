@@ -186,7 +186,10 @@ Key facts:
   promotion-gate preview endpoint for this result, including a runtime-id route
   that resolves `StrategyFamilyVersion` from `StrategyRuntimeInstance`; it does
   not record strategy signals, create candidates, create intents, or authorize
-  execution.
+  execution. `StrategyRuntimePromotionGateConfirmationRecord` can now freeze an
+  accepted runtime profile proposal snapshot as structured audit evidence while
+  preserving no-action flags; the snapshot still does not create a runtime,
+  mutate live config, or authorize submit.
 - **StrategyRuntimeSafetyReadiness** now exists as a pure non-executing runtime
   boundary fact-readiness model and Trading Console GET endpoint. It inspects a
   `StrategyRuntimeInstance.boundary` and reports whether symbol/side,

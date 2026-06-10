@@ -729,8 +729,12 @@ Current local B0 implementation slice:
   snapshot and explicitly remains `not_execution_authority=true`,
   `execution_intent_created=false`, `order_created=false`,
   `exchange_called=false`, `owner_bounded_execution_called=false`,
-  `order_lifecycle_called=false`, and `runtime_mutation_created=false`.
+  `order_lifecycle_called=false`, and `runtime_mutation_created=false`. It can
+  also carry a structured `runtime_profile_proposal_snapshot` so an accepted
+  30U proposal is traceable as confirmation evidence without creating a runtime,
+  mutating live config, or authorizing submit.
 - `migrations/versions/2026-06-10-063_create_strategy_runtime_promotion_confirmations.py`
+  / `migrations/versions/2026-06-10-064_add_runtime_profile_proposal_snapshot.py`
   and
   `src/infrastructure/pg_strategy_runtime_promotion_confirmation_repository.py`
   persist those confirmation records with database-level no-action constraints.

@@ -147,6 +147,9 @@ from src.domain.owner_capital_baseline_snapshot import (
     OwnerCapitalBaselineSnapshot,
     OwnerCapitalBaselineSnapshotSource,
 )
+from src.domain.experimental_runtime_profile_proposal import (
+    ExperimentalRuntimeProfileProposal,
+)
 from src.domain.strategy_runtime_promotion_gate import (
     FirstRealSubmitConfirmationFacts,
     RuntimeExecutionConfirmationFacts,
@@ -362,6 +365,9 @@ class StrategyRuntimePromotionConfirmationCreateRequest(BaseModel):
     first_real_submit_confirmations: FirstRealSubmitConfirmationFacts = Field(
         default_factory=FirstRealSubmitConfirmationFacts
     )
+    runtime_profile_proposal_snapshot: Optional[
+        ExperimentalRuntimeProfileProposal
+    ] = None
     reason: str = Field(min_length=1, max_length=512)
     evidence_refs: list[str] = Field(default_factory=list)
     created_at_ms: Optional[int] = Field(default=None, ge=0)
@@ -6887,6 +6893,7 @@ async def create_strategy_runtime_promotion_confirmation(
             semantic_confirmations=body.semantic_confirmations,
             runtime_confirmations=body.runtime_confirmations,
             first_real_submit_confirmations=body.first_real_submit_confirmations,
+            runtime_profile_proposal_snapshot=body.runtime_profile_proposal_snapshot,
             recorded_by=session.username,
             reason=body.reason,
             evidence_refs=body.evidence_refs,
@@ -6899,6 +6906,9 @@ async def create_strategy_runtime_promotion_confirmation(
                 "non_executing_record": True,
                 "bounded_small_risk_capital": True,
                 "prevents_runaway_not_budgeted_losses": True,
+                "runtime_profile_proposal_attached": (
+                    body.runtime_profile_proposal_snapshot is not None
+                ),
             },
         )
         record = _strategy_runtime_promotion_gate_service().with_result_snapshot(record)

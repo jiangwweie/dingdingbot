@@ -7,6 +7,9 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.domain.experimental_runtime_profile_proposal import (
+    ExperimentalRuntimeProfileProposal,
+)
 from src.domain.strategy_runtime_promotion_gate import (
     FirstRealSubmitConfirmationFacts,
     RuntimeExecutionConfirmationFacts,
@@ -120,6 +123,11 @@ class PgStrategyRuntimePromotionConfirmationRepository:
                 if record.promotion_gate_result_snapshot is not None
                 else None
             ),
+            runtime_profile_proposal_snapshot_json=(
+                record.runtime_profile_proposal_snapshot.model_dump(mode="json")
+                if record.runtime_profile_proposal_snapshot is not None
+                else None
+            ),
             recorded_by=record.recorded_by,
             reason=record.reason,
             evidence_refs=list(record.evidence_refs),
@@ -149,6 +157,11 @@ class PgStrategyRuntimePromotionConfirmationRepository:
             result_snapshot = StrategyRuntimePromotionGateResult(
                 **dict(row.promotion_gate_result_snapshot_json)
             )
+        profile_proposal_snapshot = None
+        if row.runtime_profile_proposal_snapshot_json is not None:
+            profile_proposal_snapshot = ExperimentalRuntimeProfileProposal(
+                **dict(row.runtime_profile_proposal_snapshot_json)
+            )
         return StrategyRuntimePromotionGateConfirmationRecord(
             confirmation_id=row.confirmation_id,
             runtime_instance_id=row.runtime_instance_id,
@@ -164,6 +177,7 @@ class PgStrategyRuntimePromotionConfirmationRepository:
             first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
                 **dict(row.first_real_submit_confirmations_json or {})
             ),
+            runtime_profile_proposal_snapshot=profile_proposal_snapshot,
             promotion_gate_result_snapshot=result_snapshot,
             recorded_by=row.recorded_by,
             reason=row.reason,

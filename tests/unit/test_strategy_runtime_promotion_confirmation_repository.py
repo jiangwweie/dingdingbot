@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -7,6 +9,9 @@ from sqlalchemy.pool import StaticPool
 
 from src.application.strategy_runtime_promotion_gate_service import (
     StrategyRuntimePromotionGateService,
+)
+from src.domain.experimental_runtime_profile_proposal import (
+    build_experimental_runtime_profile_proposal,
 )
 from src.domain.strategy_runtime_promotion_gate import (
     RuntimeExecutionConfirmationFacts,
@@ -85,6 +90,12 @@ async def test_promotion_confirmation_repository_roundtrip(
         strategy_family_version_id="CPM-RO-001-v0",
         semantic_confirmations=_semantic_confirmed(),
         runtime_confirmations=_runtime_confirmed(),
+        runtime_profile_proposal_snapshot=build_experimental_runtime_profile_proposal(
+            strategy_family_id="CPM-RO-001",
+            strategy_family_version_id="CPM-RO-001-v0",
+            symbol="BNB/USDT:USDT",
+            side="long",
+        ),
         reason="Owner accepts bounded trial semantics for small risk capital.",
         evidence_refs=["owner-note://promotion-confirmation-repo-1"],
         created_at_ms=NOW_MS,
@@ -104,6 +115,10 @@ async def test_promotion_confirmation_repository_roundtrip(
     assert loaded.strategy_family_id == "CPM-RO-001"
     assert loaded.semantic_confirmations.entry_policy_confirmed is True
     assert loaded.runtime_confirmations.max_loss_budget_confirmed is True
+    assert loaded.runtime_profile_proposal_snapshot is not None
+    assert loaded.runtime_profile_proposal_snapshot.total_loss_budget == Decimal("9.00")
+    assert loaded.runtime_profile_proposal_snapshot.not_execution_authority is True
+    assert loaded.runtime_profile_proposal_snapshot.order_created is False
     assert loaded.promotion_gate_result_snapshot is not None
     assert (
         loaded.promotion_gate_result_snapshot.status
@@ -119,3 +134,24 @@ async def test_promotion_confirmation_repository_roundtrip(
     assert loaded.runtime_mutation_created is False
     assert loaded.withdrawal_instruction_created is False
     assert loaded.transfer_instruction_created is False
+
+
+def test_promotion_confirmation_rejects_mismatched_profile_proposal_snapshot():
+    with pytest.raises(ValueError, match="strategy_family_id mismatch"):
+        StrategyRuntimePromotionGateConfirmationRecord(
+            confirmation_id="promotion-confirmation-profile-mismatch",
+            strategy_family_id="BRF-001",
+            strategy_family_version_id="BRF-001-v0",
+            semantic_confirmations=_semantic_confirmed(),
+            runtime_confirmations=_runtime_confirmed(),
+            runtime_profile_proposal_snapshot=(
+                build_experimental_runtime_profile_proposal(
+                    strategy_family_id="CPM-RO-001",
+                    strategy_family_version_id="CPM-RO-001-v0",
+                    symbol="BNB/USDT:USDT",
+                    side="long",
+                )
+            ),
+            reason="Mismatched proposal snapshot must not confirm runtime profile.",
+            created_at_ms=NOW_MS,
+        )

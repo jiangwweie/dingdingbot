@@ -286,6 +286,11 @@ Current local B0 implementation slice:
   confirmation keys. The Trading Console preview endpoint returns those
   proposal facts only; it does not create a runtime, confirm a profile, create
   an ExecutionIntent, create orders, or call exchange.
+- `StrategyRuntimePromotionGateConfirmationRecord` can carry a structured
+  `runtime_profile_proposal_snapshot` for the Owner/Codex-confirmed proposal
+  evidence. The domain rejects blocked or mismatched proposal snapshots. This is
+  audit evidence only; it does not turn the proposal into runtime creation,
+  submit authorization, or exchange authority.
 - `src/application/strategy_runtime_promotion_gate_service.py` exposes that
   gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
   for unknown bindings and remains non-executing.

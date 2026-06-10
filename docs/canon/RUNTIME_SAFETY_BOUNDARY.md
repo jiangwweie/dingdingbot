@@ -86,6 +86,9 @@ This document defines the runtime safety boundaries for the BRC project.
   for Owner/Codex review, but they are not confirmed runtime profiles, not
   StrategyRuntimeInstance records, not live-profile changes, not submit
   authorization, and not exchange/order authority.
+- Promotion confirmation records may store an accepted profile proposal
+  snapshot as structured audit evidence. That snapshot is not a live config
+  mutation, not a runtime mutation, and not submit authorization.
 - Risk control targets loss of control, not every losing trade. Runtime safety
   must bound max single-attempt loss, max attempts, max active positions,
   notional, leverage, duplicate submits, stale account facts, missing

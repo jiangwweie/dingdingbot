@@ -1654,6 +1654,11 @@ class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
     )
+    runtime_profile_proposal_snapshot_json: Mapped[Optional[dict]] = mapped_column(
+        "runtime_profile_proposal_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
     recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_refs: Mapped[list] = mapped_column(

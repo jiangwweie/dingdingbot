@@ -13,6 +13,10 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.experimental_runtime_profile_proposal import (
+    ExperimentalRuntimeProfileProposal,
+    ExperimentalRuntimeProfileProposalStatus,
+)
 from src.domain.strategy_semantics import (
     StrategyCandidateMode,
     StrategyImplementationBinding,
@@ -135,6 +139,9 @@ class StrategyRuntimePromotionGateConfirmationRecord(
     first_real_submit_confirmations: FirstRealSubmitConfirmationFacts = Field(
         default_factory=FirstRealSubmitConfirmationFacts
     )
+    runtime_profile_proposal_snapshot: Optional[
+        ExperimentalRuntimeProfileProposal
+    ] = None
     promotion_gate_result_snapshot: Optional[StrategyRuntimePromotionGateResult] = None
     recorded_by: str = Field(default="owner", min_length=1, max_length=128)
     reason: str = Field(min_length=1, max_length=512)
@@ -156,6 +163,12 @@ class StrategyRuntimePromotionGateConfirmationRecord(
     def _reject_execution_metadata(
         self,
     ) -> "StrategyRuntimePromotionGateConfirmationRecord":
+        if self.runtime_profile_proposal_snapshot is not None:
+            _validate_runtime_profile_proposal_snapshot(
+                self.runtime_profile_proposal_snapshot,
+                strategy_family_id=self.strategy_family_id,
+                strategy_family_version_id=self.strategy_family_version_id,
+            )
         forbidden = {
             "client_order_id",
             "exchange_order_id",
@@ -360,6 +373,32 @@ def _binding_requires_short_side_conservative_profile(
     if "short" in supported_sides:
         return True
     return bool(binding.metadata.get("short_side_conservative_profile_required"))
+
+
+def _validate_runtime_profile_proposal_snapshot(
+    proposal: ExperimentalRuntimeProfileProposal,
+    *,
+    strategy_family_id: str,
+    strategy_family_version_id: str,
+) -> None:
+    if proposal.status != (
+        ExperimentalRuntimeProfileProposalStatus.READY_FOR_OWNER_CODEX_CONFIRMATION
+    ):
+        raise ValueError("runtime profile proposal snapshot is not ready")
+    if proposal.strategy_family_id != strategy_family_id:
+        raise ValueError("runtime profile proposal strategy_family_id mismatch")
+    if proposal.strategy_family_version_id != strategy_family_version_id:
+        raise ValueError("runtime profile proposal strategy_family_version_id mismatch")
+    if proposal.blockers:
+        raise ValueError("runtime profile proposal snapshot has blockers")
+    if (
+        not proposal.not_execution_authority
+        or proposal.creates_runtime
+        or proposal.creates_execution_intent
+        or proposal.order_created
+        or proposal.exchange_called
+    ):
+        raise ValueError("runtime profile proposal snapshot contains action authority")
 
 
 def _walk_keys(value: Any) -> list[str]:
