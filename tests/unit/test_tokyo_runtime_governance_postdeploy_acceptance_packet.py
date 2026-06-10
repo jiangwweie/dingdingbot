@@ -35,9 +35,9 @@ def _postdeploy_report(*, live_ready: bool = False, head: str = EXPECTED_HEAD) -
                 "source": "release_manifest",
                 "head": head,
             },
-            "migration_count": "67",
+            "migration_count": "68",
             "latest_migration": (
-                "2026-06-10-067_allow_created_order_status.py"
+                "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
             ),
             "http_checks": [
                 {

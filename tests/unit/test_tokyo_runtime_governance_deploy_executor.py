@@ -85,7 +85,7 @@ def _ready_plan(tmp_path: Path) -> dict:
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-067_allow_created_order_status.py"
+            "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
         ),
     )
 

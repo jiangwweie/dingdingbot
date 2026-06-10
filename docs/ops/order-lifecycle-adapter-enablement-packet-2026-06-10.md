@@ -3,8 +3,9 @@
 Date: 2026-06-10
 
 Status: accepted as a non-executing readiness packet. Follow-up implementation
-slice added a default-disabled OrderLifecycle adapter result skeleton and a
-schema-readiness migration for local `CREATED` order registration.
+slices added a default-disabled OrderLifecycle adapter result skeleton,
+schema-readiness for local `CREATED` order registration, and a PG-backed
+persistent duplicate-submit lock/result table.
 
 ## Purpose
 
@@ -61,8 +62,9 @@ Remaining runtime enablement blockers include:
 ```text
 runtime_not_live_execution_enabled
 order_lifecycle_adapter_disabled
-persistent_duplicate_submit_lock_not_implemented
 execution_intent_status_transition_after_registration_not_implemented
+local_order_registration_runtime_enablement_disabled
+order_lifecycle_adapter_runtime_enablement_disabled
 protection_order_failure_recovery_not_implemented
 owner_real_submit_authorization_missing
 owner_live_runtime_enablement_authorization_missing
@@ -85,11 +87,13 @@ adapter skeleton:
 - default call returns `order_lifecycle_adapter_disabled`;
 - no `Order` objects are constructed by default;
 - no local orders are registered by default;
-- explicit adapter enablement, local-registration enablement, and duplicate
-  submit lock evidence are required before registration;
+- explicit adapter enablement, local-registration enablement, and PG-backed
+  duplicate-submit lock acquisition are required before registration;
 - when explicitly enabled in application tests, it constructs local
   `Order(status=CREATED)` objects from typed registration drafts and calls
   `OrderLifecycleService.register_created_order`;
+- duplicate calls for the same authorization replay the stored adapter result
+  instead of registering local orders again;
 - it still does not submit exchange orders, call exchange, change
   ExecutionIntent status, or create withdrawal/transfer instructions.
 
@@ -98,6 +102,13 @@ table status check with the current domain/ORM status model so future local
 registration of `Order(status=CREATED)` does not fail at the PG constraint
 layer. This migration is schema readiness only; it does not enable runtime
 adapter registration, submit, exchange access, or live trading.
+
+Migration `068_create_runtime_order_lifecycle_adapter_results` adds the
+`runtime_execution_order_lifecycle_adapter_results` table. Its unique
+`authorization_id` constraint is the persistent duplicate-submit lock for the
+future local registration path. The table is still constrained to forbid
+exchange submit/call, OwnerBoundedExecution calls, ExecutionIntent status
+mutation, and withdrawal/transfer creation.
 
 ## Safety Boundary
 
@@ -108,6 +119,8 @@ The packet does not:
 - change ExecutionIntent status;
 - construct Order objects by default;
 - register local orders by default;
+- acquire the duplicate-submit lock unless the adapter and local registration
+  gates are both explicitly enabled;
 - call OwnerBoundedExecution;
 - call OrderLifecycle by default;
 - call exchange;
@@ -129,12 +142,12 @@ Command:
 Result:
 
 ```text
-29 passed
+33 passed
 ```
 
 Additional focused verification for the adapter skeleton, migration gap, and
 Tokyo deploy/postdeploy planning guards:
 
 ```text
-55 passed
+51 passed
 ```

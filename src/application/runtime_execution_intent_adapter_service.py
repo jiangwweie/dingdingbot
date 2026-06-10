@@ -56,6 +56,7 @@ from src.domain.runtime_execution_order_registration_draft import (
 )
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
+    build_runtime_execution_order_lifecycle_adapter_lock_result,
     build_runtime_execution_order_lifecycle_adapter_result,
     build_runtime_execution_orders_for_registration,
 )
@@ -200,6 +201,20 @@ class RuntimeExecutionOrderLifecycleServicePort(Protocol):
         ...
 
 
+class RuntimeExecutionOrderLifecycleAdapterResultRepositoryPort(Protocol):
+    async def acquire_registration_lock(
+        self,
+        result: RuntimeExecutionOrderLifecycleAdapterResult,
+    ) -> tuple[bool, RuntimeExecutionOrderLifecycleAdapterResult]:
+        ...
+
+    async def complete_registration(
+        self,
+        result: RuntimeExecutionOrderLifecycleAdapterResult,
+    ) -> RuntimeExecutionOrderLifecycleAdapterResult:
+        ...
+
+
 class RuntimeExecutionIntentAdapterService:
     """Build non-executing previews for future ExecutionIntent creation."""
 
@@ -229,6 +244,9 @@ class RuntimeExecutionIntentAdapterService:
         order_lifecycle_service: (
             RuntimeExecutionOrderLifecycleServicePort | None
         ) = None,
+        order_lifecycle_adapter_result_repository: (
+            RuntimeExecutionOrderLifecycleAdapterResultRepositoryPort | None
+        ) = None,
         final_gate_preview_service: RuntimeFinalGatePreviewPort | None = None,
         runtime_service: RuntimeExecutionRuntimeServicePort | None = None,
     ) -> None:
@@ -241,6 +259,9 @@ class RuntimeExecutionIntentAdapterService:
         self._protection_plan_repository = protection_plan_repository
         self._order_lifecycle_handoff_repository = order_lifecycle_handoff_repository
         self._order_lifecycle_service = order_lifecycle_service
+        self._order_lifecycle_adapter_result_repository = (
+            order_lifecycle_adapter_result_repository
+        )
         self._final_gate_preview_service = final_gate_preview_service
         self._runtime_service = runtime_service
 
@@ -669,9 +690,27 @@ class RuntimeExecutionIntentAdapterService:
         should_register = (
             order_lifecycle_adapter_enabled
             and local_order_registration_enabled
-            and duplicate_submit_lock_acquired
             and not registration_preview.blockers
         )
+        if should_register and self._order_lifecycle_service is None:
+            raise RuntimeError("order_lifecycle_service_unavailable")
+        if (
+            should_register
+            and self._order_lifecycle_adapter_result_repository is not None
+        ):
+            lock_result = build_runtime_execution_order_lifecycle_adapter_lock_result(
+                registration_preview=registration_preview,
+                now_ms=_now_ms(),
+            )
+            acquired, existing = (
+                await self._order_lifecycle_adapter_result_repository
+                .acquire_registration_lock(lock_result)
+            )
+            if not acquired:
+                return existing
+            duplicate_submit_lock_acquired = True
+
+        should_register = should_register and duplicate_submit_lock_acquired
         if not should_register:
             return build_runtime_execution_order_lifecycle_adapter_result(
                 registration_preview=registration_preview,
@@ -680,8 +719,6 @@ class RuntimeExecutionIntentAdapterService:
                 duplicate_submit_lock_acquired=duplicate_submit_lock_acquired,
                 now_ms=_now_ms(),
             )
-        if self._order_lifecycle_service is None:
-            raise RuntimeError("order_lifecycle_service_unavailable")
 
         registered_orders: list[Order] = []
         orders = build_runtime_execution_orders_for_registration(
@@ -704,7 +741,7 @@ class RuntimeExecutionIntentAdapterService:
             )
             registered_orders.append(registered)
 
-        return build_runtime_execution_order_lifecycle_adapter_result(
+        result = build_runtime_execution_order_lifecycle_adapter_result(
             registration_preview=registration_preview,
             order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
             local_order_registration_enabled=local_order_registration_enabled,
@@ -712,6 +749,12 @@ class RuntimeExecutionIntentAdapterService:
             registered_orders=registered_orders,
             now_ms=_now_ms(),
         )
+        if self._order_lifecycle_adapter_result_repository is not None:
+            result = await (
+                self._order_lifecycle_adapter_result_repository
+                .complete_registration(result)
+            )
+        return result
 
 
 def _now_ms() -> int:

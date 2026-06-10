@@ -78,11 +78,13 @@ This document defines the runtime safety boundaries for the BRC project.
   default-disabled adapter skeleton. By default it returns
   `order_lifecycle_adapter_disabled` and does not construct or register orders.
   Only when an application caller explicitly provides adapter enablement, local
-  registration enablement, and duplicate-submit lock evidence may it construct
-  local `Order(status=CREATED)` objects from typed registration drafts and call
-  `OrderLifecycleService.register_created_order`. Even then it must not submit
-  exchange orders, call exchange, call OwnerBoundedExecution, change
-  ExecutionIntent status, or create withdrawal/transfer instructions. The submit adapter
+  registration enablement, and acquires the PG-backed duplicate-submit lock may
+  it construct local `Order(status=CREATED)` objects from typed registration
+  drafts and call `OrderLifecycleService.register_created_order`. A repeated
+  call for the same authorization must replay the stored adapter result instead
+  of registering local orders again. Even then it must not submit exchange
+  orders, call exchange, call OwnerBoundedExecution, change ExecutionIntent
+  status, or create withdrawal/transfer instructions. The submit adapter
   rehearsal may summarize readiness and blockers across these gates, but it
   must not record reservations, apply attempt mutations, record protection
   plans, record OrderLifecycle handoff drafts, or call order/exchange services.

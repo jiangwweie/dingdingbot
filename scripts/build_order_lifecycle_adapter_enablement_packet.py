@@ -44,7 +44,7 @@ ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "order_object_construction_boundary_implemented": True,
     "local_order_registration_write_path_implemented": True,
     "order_lifecycle_adapter_invocation_implemented": True,
-    "persistent_duplicate_submit_lock_implemented": False,
+    "persistent_duplicate_submit_lock_implemented": True,
     "execution_intent_status_transition_after_registration_implemented": False,
     "protection_order_failure_recovery_implemented": False,
 }

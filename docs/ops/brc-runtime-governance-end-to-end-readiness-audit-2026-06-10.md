@@ -254,8 +254,8 @@ order_registration_draft_preview_status=inputs_ready_registration_draft_only
 ```
 
 Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
-deployment plan requires local packaging readiness, a `064 -> 066` migration
-gap audit with two expected revisions, the local scheduled-observation
+deployment plan requires local packaging readiness, a `064 -> 068` migration
+gap audit with four expected revisions, the local scheduled-observation
 shadow-planning rehearsal, and the local runtime submit pre-live packet
 technical rehearsal plus non-registration order draft chain before any
 Owner-authorized remote mutation phase. The

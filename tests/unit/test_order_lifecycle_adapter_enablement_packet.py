@@ -88,7 +88,7 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert "local_order_registration_write_path_not_enabled" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
-    assert "persistent_duplicate_submit_lock_not_implemented" in (
+    assert "persistent_duplicate_submit_lock_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "execution_intent_status_transition_after_registration_not_implemented" in (
@@ -133,7 +133,10 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "order_lifecycle_adapter_invocation_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
-    assert "persistent_duplicate_submit_lock_not_implemented" in (
+    assert "persistent_duplicate_submit_lock_not_implemented" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "execution_intent_status_transition_after_registration_not_implemented" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
 

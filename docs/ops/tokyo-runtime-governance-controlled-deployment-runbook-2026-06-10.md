@@ -28,24 +28,24 @@ Current Tokyo baseline from the read-only fact check:
 - latest deployed migration file:
   `064_add_runtime_profile_proposal_snapshot`
 - local latest migration file:
-  `066_add_order_lifecycle_adapter_disabled_submit_status`
+  `068_create_runtime_order_lifecycle_adapter_results`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 Local release-prep for the next code-bearing candidate should report:
 
 - `ready_for_packaging=true`
 - deployed head is an ancestor of local `HEAD`
-- local migration count `66`
+- local migration count `68`
 - latest local migration
-  `2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py`
+  `2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py`
 - no tracked secret-candidate files
 - only warning:
   `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
 
-Last local migration-gap audit for `064 -> 066` reported:
+Last local migration-gap audit for `064 -> 068` reported:
 
 - `ready_for_controlled_migration_preflight=true`
-- chain length `2`, first revision `065`, last revision `066`
+- chain length `4`, first revision `065`, last revision `068`
 - no `data_destructive_upgrade_ops`
 - warnings:
   - `non_additive_schema_ops_present`
@@ -53,7 +53,11 @@ Last local migration-gap audit for `064 -> 066` reported:
   - revision `065` relaxes `strategy_runtime_instances` check constraints so an
     explicitly authorized runtime can leave shadow-only flags;
   - revision `066` adds `order_lifecycle_adapter_enabled=false` and permits the
-    controlled-submit audit status `order_lifecycle_adapter_disabled`.
+    controlled-submit audit status `order_lifecycle_adapter_disabled`;
+  - revision `067` allows local `Order(status=CREATED)` registration through
+    the historical orders status check;
+  - revision `068` adds the runtime OrderLifecycle adapter-result table whose
+    unique `authorization_id` is the persistent duplicate-submit lock.
 
 Last Tokyo read-only probe for the same stage reported:
 
@@ -91,9 +95,9 @@ The output must show:
 
 - `ready_for_packaging=true`;
 - deployed head is an ancestor of local `HEAD`;
-- migration count is at least `66`;
+- migration count is at least `68`;
 - latest migration is
-  `2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py`;
+  `2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py`;
 - no tracked secret-candidate files;
 - no tracked worktree changes.
 
@@ -226,7 +230,7 @@ Before applying migrations:
 1. Create a database backup using the existing remote backup path, or an
    equivalent PG-native backup command.
 2. Record the backup filename in a deployment evidence note.
-3. Inspect the migration path from deployed `064` to local `066`.
+3. Inspect the migration path from deployed `064` to local `068`.
 4. Run migration planning in a staging/dry-run context when available.
 5. Apply migrations only after the release artifact and rollback target are
    known.
@@ -243,7 +247,7 @@ Local static audit command:
 The output must show:
 
 - `ready_for_controlled_migration_preflight=true`;
-- chain length `2` for `065 -> 066`;
+- chain length `4` for `065 -> 068`;
 - no `data_destructive_upgrade_ops`.
 
 The output is allowed to warn about non-additive / data-touching review items,
@@ -254,7 +258,9 @@ but those warnings require concrete deployment handling:
 - revision `065` relaxes runtime shadow-only constraints only after explicit
   live-runtime enablement authorization is proven;
 - revision `066` adds the OrderLifecycle-adapter disabled submit status and
-  must not be interpreted as enabling the real adapter.
+  must not be interpreted as enabling the real adapter;
+- revision `067` only permits local `Order(status=CREATED)` persistence;
+- revision `068` only adds the persistent adapter-result duplicate-submit lock.
 
 ## Release Procedure Shape
 
@@ -284,7 +290,7 @@ BRC_LLM_ENABLED=false
 Restart should be a deliberate backend restart with immediate health checks.
 Do not rely on a dirty release tree or an unknown long-running process.
 
-For the `064 -> 066` jump, the planned order is:
+For the `064 -> 068` jump, the planned order is:
 
 1. Run local and remote read-only preflights.
 2. Upload archive and manifest.

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import importlib.util
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import inspect
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from src.application.runtime_execution_intent_adapter_service import (
     RuntimeExecutionIntentAdapterService,
@@ -11,12 +18,20 @@ from src.domain.brc_audit_ids import BrcSemanticIds
 from src.domain.models import Direction, OrderRole, OrderStatus, OrderType
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResultStatus,
+    build_runtime_execution_order_lifecycle_adapter_lock_result,
+    build_runtime_execution_order_lifecycle_adapter_result,
     build_runtime_execution_orders_for_registration,
 )
 from src.domain.runtime_execution_order_registration_draft import (
     RuntimeExecutionLocalOrderRegistrationDraft,
     RuntimeExecutionOrderRegistrationDraftPreview,
     RuntimeExecutionOrderRegistrationDraftPreviewStatus,
+)
+from src.infrastructure.pg_models import (
+    PGRuntimeExecutionOrderLifecycleAdapterResultORM,
+)
+from src.infrastructure.pg_runtime_execution_order_lifecycle_adapter_result_repository import (
+    PgRuntimeExecutionOrderLifecycleAdapterResultRepository,
 )
 
 
@@ -35,6 +50,25 @@ class _Lifecycle:
     async def register_created_order(self, order, *, metadata=None):
         self.calls.append({"order": order, "metadata": metadata or {}})
         return order
+
+
+class _AdapterResultRepo:
+    def __init__(self) -> None:
+        self.stored = None
+        self.acquire_calls = 0
+        self.complete_calls = 0
+
+    async def acquire_registration_lock(self, result):
+        self.acquire_calls += 1
+        if self.stored is None:
+            self.stored = result
+            return True, result
+        return False, self.stored
+
+    async def complete_registration(self, result):
+        self.complete_calls += 1
+        self.stored = result
+        return result
 
 
 def _registration_preview() -> RuntimeExecutionOrderRegistrationDraftPreview:
@@ -113,10 +147,15 @@ def _registration_preview() -> RuntimeExecutionOrderRegistrationDraftPreview:
     )
 
 
-def _service_with_preview(preview, lifecycle=None) -> RuntimeExecutionIntentAdapterService:
+def _service_with_preview(
+    preview,
+    lifecycle=None,
+    adapter_result_repo=None,
+) -> RuntimeExecutionIntentAdapterService:
     service = RuntimeExecutionIntentAdapterService(
         draft_repository=_DraftRepo(),
         order_lifecycle_service=lifecycle,
+        order_lifecycle_adapter_result_repository=adapter_result_repo,
     )
 
     async def _preview_for_authorization(authorization_id: str):
@@ -226,3 +265,247 @@ async def test_adapter_result_registers_created_local_orders_when_explicitly_ena
     assert all(
         call["metadata"]["exchange_called"] is False for call in lifecycle.calls
     )
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_persistent_lock_replays_without_second_registration():
+    preview = _registration_preview()
+    lifecycle = _Lifecycle()
+    adapter_result_repo = _AdapterResultRepo()
+    service = _service_with_preview(
+        preview,
+        lifecycle=lifecycle,
+        adapter_result_repo=adapter_result_repo,
+    )
+
+    first = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+    )
+    second = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+    )
+
+    assert (
+        first.status
+        == RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .REGISTERED_CREATED_LOCAL_ORDERS
+    )
+    assert second == first
+    assert adapter_result_repo.acquire_calls == 2
+    assert adapter_result_repo.complete_calls == 1
+    assert [call["order"].id for call in lifecycle.calls] == first.local_order_ids
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_does_not_acquire_persistent_lock_without_lifecycle_service():
+    preview = _registration_preview()
+    adapter_result_repo = _AdapterResultRepo()
+    service = _service_with_preview(
+        preview,
+        lifecycle=None,
+        adapter_result_repo=adapter_result_repo,
+    )
+
+    with pytest.raises(RuntimeError, match="order_lifecycle_service_unavailable"):
+        await service.order_lifecycle_adapter_result_for_authorization(
+            "auth-1",
+            order_lifecycle_adapter_enabled=True,
+            local_order_registration_enabled=True,
+        )
+
+    assert adapter_result_repo.acquire_calls == 0
+    assert adapter_result_repo.complete_calls == 0
+    assert adapter_result_repo.stored is None
+
+
+@pytest.mark.asyncio
+async def test_pg_adapter_result_repository_acquires_unique_authorization_lock():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(PGRuntimeExecutionOrderLifecycleAdapterResultORM.__table__.create)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    repo = PgRuntimeExecutionOrderLifecycleAdapterResultRepository(
+        session_maker=session_maker
+    )
+    preview = _registration_preview()
+    lock_result = build_runtime_execution_order_lifecycle_adapter_lock_result(
+        registration_preview=preview,
+        now_ms=NOW_MS,
+    )
+
+    acquired_first, stored_first = await repo.acquire_registration_lock(lock_result)
+    acquired_second, stored_second = await repo.acquire_registration_lock(lock_result)
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+    final_result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=preview,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        registered_orders=orders,
+        now_ms=NOW_MS + 1,
+    )
+    await repo.complete_registration(final_result)
+    loaded = await repo.get_by_authorization_id("auth-1")
+
+    await engine.dispose()
+
+    assert acquired_first is True
+    assert stored_first.status == (
+        RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .LOCAL_REGISTRATION_LOCK_ACQUIRED
+    )
+    assert acquired_second is False
+    assert stored_second.adapter_result_id == lock_result.adapter_result_id
+    assert loaded is not None
+    assert loaded.status == (
+        RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .REGISTERED_CREATED_LOCAL_ORDERS
+    )
+    assert loaded.local_order_ids == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert loaded.exchange_called is False
+    assert loaded.exchange_order_submitted is False
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_migration_creates_unique_authorization_lock_table():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "runtime_order_lifecycle_adapter_result_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        def upgrade(sync_conn):
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration.upgrade()
+                inspector = inspect(sync_conn)
+                assert inspector.has_table(
+                    "runtime_execution_order_lifecycle_adapter_results"
+                )
+                columns = {
+                    column["name"]
+                    for column in inspector.get_columns(
+                        "runtime_execution_order_lifecycle_adapter_results"
+                    )
+                }
+                unique_constraints = {
+                    constraint["name"]
+                    for constraint in inspector.get_unique_constraints(
+                        "runtime_execution_order_lifecycle_adapter_results"
+                    )
+                }
+                sync_conn.exec_driver_sql(
+                    """
+                    INSERT INTO runtime_execution_order_lifecycle_adapter_results (
+                        adapter_result_id,
+                        registration_preview_id,
+                        adapter_preview_id,
+                        handoff_draft_id,
+                        preflight_id,
+                        authorization_id,
+                        execution_intent_id,
+                        runtime_instance_id,
+                        source_type,
+                        source_id,
+                        status,
+                        symbol,
+                        side,
+                        local_order_ids,
+                        entry_order_ids,
+                        protection_order_ids,
+                        registered_order_count,
+                        blockers,
+                        warnings,
+                        order_lifecycle_adapter_enabled,
+                        local_order_registration_enabled,
+                        duplicate_submit_lock_acquired,
+                        order_objects_constructed,
+                        local_order_registration_executed,
+                        execution_intent_status_changed,
+                        exchange_order_submitted,
+                        exchange_called,
+                        owner_bounded_execution_called,
+                        order_lifecycle_called,
+                        withdrawal_or_transfer_created,
+                        created_at_ms,
+                        metadata
+                    ) VALUES (
+                        'adapter-result-1',
+                        'registration-preview-1',
+                        'adapter-preview-1',
+                        'handoff-1',
+                        'preflight-1',
+                        'auth-1',
+                        'intent-1',
+                        'runtime-1',
+                        'brc_runtime_order_candidate',
+                        'candidate-1',
+                        'local_registration_lock_acquired',
+                        'BNB/USDT:USDT',
+                        'long',
+                        '[]',
+                        '[]',
+                        '[]',
+                        0,
+                        '[]',
+                        '[]',
+                        1,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1781090000000,
+                        '{}'
+                    )
+                    """
+                )
+                migration.downgrade()
+                inspector = inspect(sync_conn)
+                assert not inspector.has_table(
+                    "runtime_execution_order_lifecycle_adapter_results"
+                )
+                return columns, unique_constraints
+            finally:
+                migration.op = old_op
+
+        columns, unique_constraints = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert "adapter_result_id" in columns
+    assert "authorization_id" in columns
+    assert "duplicate_submit_lock_acquired" in columns
+    assert "order_lifecycle_called" in columns
+    assert "exchange_called" in columns
+    assert "uq_rt_ol_adapter_result_authorization" in unique_constraints

@@ -33,6 +33,7 @@ class RuntimeExecutionOrderLifecycleAdapterResultStatus(str, Enum):
     ORDER_LIFECYCLE_ADAPTER_DISABLED = "order_lifecycle_adapter_disabled"
     LOCAL_ORDER_REGISTRATION_DISABLED = "local_order_registration_disabled"
     DUPLICATE_SUBMIT_LOCK_REQUIRED = "duplicate_submit_lock_required"
+    LOCAL_REGISTRATION_LOCK_ACQUIRED = "local_registration_lock_acquired"
     REGISTERED_CREATED_LOCAL_ORDERS = "registered_created_local_orders"
 
 
@@ -112,6 +113,16 @@ class RuntimeExecutionOrderLifecycleAdapterResult(
         else:
             if self.order_lifecycle_called or self.local_order_registration_executed:
                 raise ValueError("non-registered adapter result cannot call lifecycle")
+        if (
+            self.status
+            == RuntimeExecutionOrderLifecycleAdapterResultStatus.LOCAL_REGISTRATION_LOCK_ACQUIRED
+        ):
+            if not self.order_lifecycle_adapter_enabled:
+                raise ValueError("lock result requires adapter enablement")
+            if not self.local_order_registration_enabled:
+                raise ValueError("lock result requires local registration enablement")
+            if not self.duplicate_submit_lock_acquired:
+                raise ValueError("lock result requires duplicate-submit lock")
         return self
 
 
@@ -215,6 +226,62 @@ def build_runtime_execution_order_lifecycle_adapter_result(
             "scope": "runtime_execution_order_lifecycle_adapter_result",
             "local_created_order_registration_only": True,
             "requires_persistent_duplicate_submit_lock": True,
+            "does_not_submit_exchange_order": True,
+            "does_not_call_exchange": True,
+            "does_not_call_owner_bounded_execution": True,
+            "does_not_change_execution_intent_status": True,
+            "does_not_create_withdrawal_or_transfer": True,
+        },
+    )
+
+
+def build_runtime_execution_order_lifecycle_adapter_lock_result(
+    *,
+    registration_preview: RuntimeExecutionOrderRegistrationDraftPreview,
+    now_ms: int,
+) -> RuntimeExecutionOrderLifecycleAdapterResult:
+    if (
+        registration_preview.status
+        != RuntimeExecutionOrderRegistrationDraftPreviewStatus.INPUTS_READY_REGISTRATION_DRAFT_ONLY
+    ):
+        raise ValueError("order_registration_draft_preview_not_ready")
+    if registration_preview.blockers:
+        raise ValueError("order_registration_draft_preview_has_blockers")
+    return RuntimeExecutionOrderLifecycleAdapterResult(
+        adapter_result_id=(
+            "runtime-order-lifecycle-adapter-result-"
+            f"{registration_preview.authorization_id}"
+        ),
+        registration_preview_id=registration_preview.registration_preview_id,
+        adapter_preview_id=registration_preview.adapter_preview_id,
+        handoff_draft_id=registration_preview.handoff_draft_id,
+        preflight_id=registration_preview.preflight_id,
+        authorization_id=registration_preview.authorization_id,
+        execution_intent_id=registration_preview.execution_intent_id,
+        runtime_instance_id=registration_preview.runtime_instance_id,
+        source_type=registration_preview.source_type,
+        source_id=registration_preview.source_id,
+        semantic_ids=registration_preview.semantic_ids,
+        status=(
+            RuntimeExecutionOrderLifecycleAdapterResultStatus
+            .LOCAL_REGISTRATION_LOCK_ACQUIRED
+        ),
+        symbol=registration_preview.symbol,
+        side=registration_preview.side,
+        registered_order_count=0,
+        blockers=[],
+        warnings=list(registration_preview.warnings),
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        order_objects_constructed=False,
+        local_order_registration_executed=False,
+        order_lifecycle_called=False,
+        created_at_ms=now_ms,
+        metadata={
+            "scope": "runtime_execution_order_lifecycle_adapter_result",
+            "persistent_duplicate_submit_lock": True,
+            "local_created_order_registration_pending": True,
             "does_not_submit_exchange_order": True,
             "does_not_call_exchange": True,
             "does_not_call_owner_bounded_execution": True,

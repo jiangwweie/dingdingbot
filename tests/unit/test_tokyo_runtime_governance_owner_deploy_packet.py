@@ -38,8 +38,8 @@ def _release_report() -> dict:
             "commits_ahead_of_deployed": 20,
         },
         "migrations": {
-            "count": 67,
-            "latest": "2026-06-10-067_allow_created_order_status.py",
+            "count": 68,
+            "latest": "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py",
         },
         "release_checks": {
             "ready_for_packaging": True,

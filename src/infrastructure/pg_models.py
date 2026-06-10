@@ -33,6 +33,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -2356,6 +2357,154 @@ class PGRuntimeExecutionOrderLifecycleHandoffDraftORM(PGCoreBase):
         ),
         Index(
             "idx_runtime_execution_order_lifecycle_handoff_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
+    """Runtime OrderLifecycle adapter local-registration lock/result.
+
+    This table is the persistent duplicate-submit boundary before a runtime
+    authorization may register local CREATED orders through OrderLifecycle. It
+    must not record exchange submits, exchange calls, withdrawal/transfer
+    instructions, or ExecutionIntent status changes.
+    """
+
+    __tablename__ = "runtime_execution_order_lifecycle_adapter_results"
+
+    adapter_result_id: Mapped[str] = mapped_column(String(420), primary_key=True)
+    registration_preview_id: Mapped[str] = mapped_column(String(380), nullable=False)
+    adapter_preview_id: Mapped[str] = mapped_column(String(360), nullable=False)
+    handoff_draft_id: Mapped[str] = mapped_column(String(360), nullable=False)
+    preflight_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    local_order_ids_json: Mapped[list] = mapped_column(
+        "local_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    entry_order_ids_json: Mapped[list] = mapped_column(
+        "entry_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    protection_order_ids_json: Mapped[list] = mapped_column(
+        "protection_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    registered_order_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    order_lifecycle_adapter_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    local_order_registration_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    duplicate_submit_lock_acquired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_objects_constructed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    local_order_registration_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_status_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_order_submitted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_ol_adapter_result_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'order_lifecycle_adapter_disabled', "
+            "'local_order_registration_disabled', 'duplicate_submit_lock_required', "
+            "'local_registration_lock_acquired', 'registered_created_local_orders')",
+            name="ck_rt_ol_adapter_result_status",
+        ),
+        CheckConstraint(
+            "registered_order_count >= 0",
+            name="ck_rt_ol_adapter_result_registered_count",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_ol_adapter_result_no_intent_status",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_ol_adapter_result_no_exchange_submit",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_ol_adapter_result_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_ol_adapter_result_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_ol_adapter_result_no_withdrawal",
+        ),
+        CheckConstraint(
+            "status != 'registered_created_local_orders' OR local_order_registration_executed = true",
+            name="ck_rt_ol_adapter_result_registered_exec",
+        ),
+        CheckConstraint(
+            "status != 'registered_created_local_orders' OR order_lifecycle_called = true",
+            name="ck_rt_ol_adapter_result_registered_lifecycle",
+        ),
+        CheckConstraint(
+            "status = 'registered_created_local_orders' OR local_order_registration_executed = false",
+            name="ck_rt_ol_adapter_result_nonreg_no_exec",
+        ),
+        CheckConstraint(
+            "status = 'registered_created_local_orders' OR order_lifecycle_called = false",
+            name="ck_rt_ol_adapter_result_nonreg_no_lifecycle",
+        ),
+        Index(
+            "idx_rt_ol_adapter_result_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_ol_adapter_result_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_ol_adapter_result_status_time",
             "status",
             "created_at_ms",
         ),

@@ -1954,6 +1954,9 @@ async def _runtime_execution_intent_adapter_service() -> Any:
     from src.infrastructure.pg_runtime_execution_order_lifecycle_handoff_repository import (
         PgRuntimeExecutionOrderLifecycleHandoffRepository,
     )
+    from src.infrastructure.pg_runtime_execution_order_lifecycle_adapter_result_repository import (
+        PgRuntimeExecutionOrderLifecycleAdapterResultRepository,
+    )
 
     service = RuntimeExecutionIntentAdapterService(
         draft_repository=PgRuntimeExecutionIntentDraftRepository(),
@@ -1964,6 +1967,9 @@ async def _runtime_execution_intent_adapter_service() -> Any:
         attempt_mutation_repository=PgRuntimeExecutionAttemptMutationRepository(),
         protection_plan_repository=PgRuntimeExecutionProtectionPlanRepository(),
         order_lifecycle_handoff_repository=PgRuntimeExecutionOrderLifecycleHandoffRepository(),
+        order_lifecycle_adapter_result_repository=(
+            PgRuntimeExecutionOrderLifecycleAdapterResultRepository()
+        ),
         final_gate_preview_service=await _runtime_final_gate_preview_service(),
         runtime_service=await _strategy_runtime_service(),
     )
