@@ -83,7 +83,12 @@ def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
                 0,
             )
         if "/api/trading-console/" in remote or "/api/brc/" in remote:
-            return module.CommandResult('{"ok":true}\nHTTP_STATUS:200\n', "", 0)
+            return module.CommandResult(
+                '{"error_code":"401","message":"Operator login required"}'
+                "\nHTTP_STATUS:401\n",
+                "",
+                0,
+            )
         raise AssertionError(f"unexpected command: {remote}")
 
     return runner
@@ -111,6 +116,18 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     ]
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
     assert len(report["facts"]["http_checks"]) == 11
+    auth_checks = [
+        item
+        for item in report["facts"]["http_checks"]
+        if item["method"] == "GET"
+        and (
+            item["url"].startswith("http://127.0.0.1:18080/api/trading-console/")
+            or item["url"].startswith("http://127.0.0.1:18080/api/brc/")
+        )
+    ]
+    assert auth_checks
+    assert all(item["expected_status"] == 401 for item in auth_checks)
+    assert all(item["http_status"] == 401 for item in auth_checks)
     assert all(value is False for value in report["safety_invariants"].values())
 
 

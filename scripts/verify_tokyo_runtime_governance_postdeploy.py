@@ -247,7 +247,7 @@ def _http_checks(
             "name": "trading_console_strategy_runtimes",
             "method": "GET",
             "path": "/api/trading-console/strategy-runtimes?limit=1",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
@@ -260,14 +260,14 @@ def _http_checks(
                 "&symbol=BNB/USDT:USDT"
                 "&side=long"
             ),
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
             "name": "trading_console_strategy_family_admission_state",
             "method": "GET",
             "path": "/api/trading-console/strategy-family-admission-state",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
@@ -278,42 +278,42 @@ def _http_checks(
                 "?strategy_family_id=CPM-RO-001"
                 "&strategy_family_version_id=CPM-RO-001-v0"
             ),
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
             "name": "trading_console_owner_capital_review",
             "method": "GET",
             "path": "/api/trading-console/owner-capital-review?include_exchange=false&limit=1",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
             "name": "trading_console_right_tail_review",
             "method": "GET",
             "path": "/api/trading-console/right-tail-review?include_exchange=false&limit=1",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
             "name": "brc_strategy_runtime_promotion_confirmations",
             "method": "GET",
             "path": "/api/brc/strategy-runtime-promotion-confirmations?limit=1",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
             "name": "brc_owner_capital_adjustments",
             "method": "GET",
             "path": "/api/brc/owner-capital-adjustments?limit=1",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
             "name": "brc_owner_capital_baseline_snapshots",
             "method": "GET",
             "path": "/api/brc/owner-capital-baseline-snapshots?limit=1",
-            "expected_status": 200,
+            "expected_status": 401,
             "expect_json": True,
         },
         {
