@@ -1,8 +1,9 @@
 """Read-only strategy-group observation v1 for Owner review.
 
 This module wires strategy-specific signal evaluator glue for MI-001,
-CPM-RO-001, and BRF-001 without starting a runtime loop, creating execution intents,
-placing orders, or granting execution permission.
+CPM-RO-001, BRF-001, and the B0/P1-P3 price-action reference candidates
+without starting a runtime loop, creating execution intents, placing orders, or
+granting execution permission.
 """
 
 from __future__ import annotations
@@ -21,6 +22,12 @@ from src.application.runtime_strategy_signal_scheduler_assembly import (
 )
 from src.domain.brf_price_action_evaluator import BRF001PriceActionEvaluator
 from src.domain.cpm_historical_evaluator import CPMRO001HistoricalEvaluator
+from src.domain.reference_price_action_evaluators import (
+    BTPC001PriceActionEvaluator,
+    LSR001PriceActionEvaluator,
+    RBR001PriceActionEvaluator,
+    VCB001PriceActionEvaluator,
+)
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
     ExpectedRiskShape,
@@ -43,6 +50,14 @@ CPM_FAMILY_ID = "CPM-RO-001"
 CPM_VERSION_ID = "CPM-RO-001-v0"
 BRF_FAMILY_ID = "BRF-001"
 BRF_VERSION_ID = "BRF-001-v0"
+BTPC_FAMILY_ID = "BTPC-001"
+BTPC_VERSION_ID = "BTPC-001-v0"
+LSR_FAMILY_ID = "LSR-001"
+LSR_VERSION_ID = "LSR-001-v0"
+RBR_FAMILY_ID = "RBR-001"
+RBR_VERSION_ID = "RBR-001-v0"
+VCB_FAMILY_ID = "VCB-001"
+VCB_VERSION_ID = "VCB-001-v0"
 MI_LOOKBACK_BARS = 12
 MI_RETURN_THRESHOLD = Decimal("3")
 
@@ -191,7 +206,23 @@ class SampleStrategyGroupMarketBarSource:
     source_id = "sample_closed_candle_source_display_model_only"
 
     def latest_closed_candles(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
-        if symbol == "BTC/USDT:USDT" and timeframe == "4h":
+        if symbol == "AVAX/USDT:USDT" and timeframe == "4h":
+            raw = _sample_down_context_4h()
+        elif symbol == "AVAX/USDT:USDT":
+            raw = _sample_btpc_candles_1h()
+        elif symbol == "XRP/USDT:USDT" and timeframe == "4h":
+            raw = _sample_mixed_context_4h()
+        elif symbol == "XRP/USDT:USDT":
+            raw = _sample_lsr_candles_1h()
+        elif symbol == "ADA/USDT:USDT" and timeframe == "4h":
+            raw = _sample_mixed_context_4h()
+        elif symbol == "ADA/USDT:USDT":
+            raw = _sample_rbr_candles_1h()
+        elif symbol == "LINK/USDT:USDT" and timeframe == "4h":
+            raw = _sample_mixed_context_4h()
+        elif symbol == "LINK/USDT:USDT":
+            raw = _sample_vcb_candles_1h()
+        elif symbol == "BTC/USDT:USDT" and timeframe == "4h":
             raw = _sample_brf_candles_4h()
         elif symbol == "BTC/USDT:USDT":
             raw = _sample_brf_candles_1h()
@@ -456,6 +487,116 @@ def _observation_specs() -> list[_ObservationSpec]:
             ],
             evaluator=BRF001LiveReadOnlyEvaluator(),
         ),
+        _ObservationSpec(
+            candidate_id="BTPC-001-AVAX-SHORT",
+            strategy_group_id=BTPC_FAMILY_ID,
+            strategy_family_version_id=BTPC_VERSION_ID,
+            playbook_id="BTPC-001-AVAX-SHORT-OBS-001",
+            symbol="AVAX/USDT:USDT",
+            side=SignalSide.SHORT,
+            side_label="short",
+            observation_role="short_side_bear_trend_pullback_reference",
+            review_windows=["4h", "24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "htf_context",
+                "entry_pattern",
+                "price_action_structure",
+                "candidate_semantics",
+            ],
+            source_refs=[
+                "src/domain/reference_price_action_evaluators.py",
+                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+            ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "BTPC is a reference candidate, not proven alpha",
+                "short-side runtime profile confirmation required before execution",
+            ],
+            evaluator=BTPC001PriceActionEvaluator(),
+        ),
+        _ObservationSpec(
+            candidate_id="LSR-001-XRP-LONG",
+            strategy_group_id=LSR_FAMILY_ID,
+            strategy_family_version_id=LSR_VERSION_ID,
+            playbook_id="LSR-001-XRP-LONG-OBS-001",
+            symbol="XRP/USDT:USDT",
+            side=SignalSide.LONG,
+            side_label="long_or_short",
+            observation_role="liquidity_sweep_reversal_reference",
+            review_windows=["4h", "24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "range_structure",
+                "price_action_structure",
+                "candidate_semantics",
+            ],
+            source_refs=[
+                "src/domain/reference_price_action_evaluators.py",
+                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+            ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "LSR is a reference candidate, not proven alpha",
+                "mean-reversion attempt/time-stop semantics require Owner review",
+            ],
+            evaluator=LSR001PriceActionEvaluator(),
+        ),
+        _ObservationSpec(
+            candidate_id="RBR-001-ADA-SHORT",
+            strategy_group_id=RBR_FAMILY_ID,
+            strategy_family_version_id=RBR_VERSION_ID,
+            playbook_id="RBR-001-ADA-SHORT-OBS-001",
+            symbol="ADA/USDT:USDT",
+            side=SignalSide.SHORT,
+            side_label="long_or_short",
+            observation_role="range_boundary_reversion_reference",
+            review_windows=["4h", "24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "range_structure",
+                "volatility_state",
+                "price_action_structure",
+                "candidate_semantics",
+            ],
+            source_refs=[
+                "src/domain/reference_price_action_evaluators.py",
+                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+            ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "RBR is a reference candidate, not proven alpha",
+                "range-boundary runtime profile and time-stop semantics require Owner review",
+            ],
+            evaluator=RBR001PriceActionEvaluator(),
+        ),
+        _ObservationSpec(
+            candidate_id="VCB-001-LINK-LONG",
+            strategy_group_id=VCB_FAMILY_ID,
+            strategy_family_version_id=VCB_VERSION_ID,
+            playbook_id="VCB-001-LINK-LONG-OBS-001",
+            symbol="LINK/USDT:USDT",
+            side=SignalSide.LONG,
+            side_label="long_or_short",
+            observation_role="volatility_compression_breakout_reference",
+            review_windows=["4h", "24h", "72h", "7d"],
+            evidence_payload_fields=[
+                "volatility_state",
+                "price_action_structure",
+                "candidate_semantics",
+            ],
+            source_refs=[
+                "src/domain/reference_price_action_evaluators.py",
+                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+            ],
+            candidate_blockers=[
+                "scheduled live read-only observation not started",
+                "PG observation sink schema gap",
+                "VCB is a reference candidate, not proven alpha",
+                "breakout failure and runner semantics require Owner review",
+            ],
+            evaluator=VCB001PriceActionEvaluator(),
+        ),
     ]
 
 
@@ -718,6 +859,10 @@ def build_strategy_group_live_readonly_observation_v1(
             "MI-001": "MI evaluator glue can evaluate SOL and BNB from read-only closed candle snapshots.",
             "CPM-RO-001": "CPM evaluator glue can evaluate ETH 1h/4h read-only closed candle snapshots.",
             "BRF-001": "BRF evaluator glue can evaluate BTC 1h/4h read-only closed candle snapshots.",
+            "BTPC-001": "BTPC evaluator glue can evaluate short-side bear-trend pullback continuation snapshots.",
+            "LSR-001": "LSR evaluator glue can evaluate liquidity-sweep reversal snapshots.",
+            "RBR-001": "RBR evaluator glue can evaluate range-boundary reversion snapshots.",
+            "VCB-001": "VCB evaluator glue can evaluate volatility-compression breakout snapshots.",
             "active_live_readonly_observation": False,
             "current_signal_available": bool(current_signals),
             "signal_history_available": bool(history),
@@ -741,7 +886,7 @@ def run_strategy_group_live_readonly_observation_once(
     sink: StrategyGroupObservationSink | None = None,
     runtime_signal_planning_assembly: RuntimeStrategySignalSchedulerAssemblyService | None = None,
 ) -> StrategyGroupLiveReadOnlyObservationResponse:
-    """Evaluate and record one observe-only snapshot for MI/CPM/BRF candidates."""
+    """Evaluate and record one observe-only snapshot for strategy candidates."""
 
     return build_strategy_group_live_readonly_observation_v1(
         market_source=market_source,
@@ -960,6 +1105,96 @@ def _sample_brf_candles_4h() -> list[dict[str, Any]]:
     ]
 
 
+def _sample_btpc_candles_1h() -> list[dict[str, Any]]:
+    raw = [
+        ("110", "111", "108", "109"),
+        ("109", "110", "107", "108"),
+        ("108", "109", "106", "107"),
+        ("107", "108", "105", "106"),
+        ("106", "107", "104", "105"),
+        ("105", "106", "103", "104"),
+        ("104", "105", "102", "103"),
+        ("103", "104", "101", "102"),
+        ("102", "104", "100", "103"),
+        ("103", "105", "101", "104"),
+        ("104", "106", "102", "105"),
+        ("105", "106", "100", "101"),
+        ("101", "102", "99", "100"),
+        ("100", "101", "95", "96"),
+    ]
+    return [
+        _raw_ohlcv_candle(index, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
+def _sample_lsr_candles_1h() -> list[dict[str, Any]]:
+    raw = [("104", "110", "100", "105") for _ in range(13)]
+    raw.append(("101", "106", "98", "103"))
+    return [
+        _raw_ohlcv_candle(index, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
+def _sample_rbr_candles_1h() -> list[dict[str, Any]]:
+    raw = [("105", "110", "100", "106") for _ in range(13)]
+    raw.append(("109", "110.2", "106", "108"))
+    return [
+        _raw_ohlcv_candle(index, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
+def _sample_vcb_candles_1h() -> list[dict[str, Any]]:
+    raw = [
+        ("100", "103", "99", "102"),
+        ("101", "105", "99", "103"),
+        ("102", "106", "100", "104"),
+        ("103", "107", "101", "105"),
+        ("104", "108", "102", "106"),
+        ("105", "109", "103", "107"),
+        ("106", "110", "104", "108"),
+        ("107.0", "107.8", "106.8", "107.2"),
+        ("107.2", "108.0", "107.0", "107.4"),
+        ("107.4", "108.2", "107.2", "107.6"),
+        ("107.6", "108.4", "107.4", "107.8"),
+        ("107.8", "108.5", "107.5", "108.0"),
+        ("108.0", "108.6", "107.6", "108.2"),
+        ("108.4", "111", "108.2", "110"),
+    ]
+    return [
+        _raw_ohlcv_candle(index, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
+def _sample_down_context_4h() -> list[dict[str, Any]]:
+    raw = [
+        ("122", "123", "119", "120"),
+        ("120", "121", "117", "118"),
+        ("118", "119", "115", "116"),
+        ("116", "117", "113", "114"),
+    ]
+    return [
+        _raw_ohlcv_candle(index * 4, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
+def _sample_mixed_context_4h() -> list[dict[str, Any]]:
+    raw = [
+        ("100", "103", "98", "101"),
+        ("101", "104", "99", "102"),
+        ("102", "105", "100", "101"),
+        ("101", "104", "99", "102"),
+    ]
+    return [
+        _raw_ohlcv_candle(index * 4, open_, high, low, close)
+        for index, (open_, high, low, close) in enumerate(raw)
+    ]
+
+
 def _raw_candle(index: int, close: Decimal) -> dict[str, Any]:
     timestamp_ms = 1770000000000 + index * 60 * 60 * 1000
     return {
@@ -1016,7 +1251,14 @@ def _not_allowed_now() -> list[str]:
 
 
 def _needs_four_hour_context(strategy_group_id: str) -> bool:
-    return strategy_group_id in {CPM_FAMILY_ID, BRF_FAMILY_ID}
+    return strategy_group_id in {
+        CPM_FAMILY_ID,
+        BRF_FAMILY_ID,
+        BTPC_FAMILY_ID,
+        LSR_FAMILY_ID,
+        RBR_FAMILY_ID,
+        VCB_FAMILY_ID,
+    }
 
 
 def _runtime_signal_planning_summary(

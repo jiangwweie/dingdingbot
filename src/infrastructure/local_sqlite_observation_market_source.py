@@ -9,6 +9,18 @@ from pathlib import Path
 from src.application.strategy_group_live_readonly_observation import RecentCandle
 
 
+_SAMPLE_FALLBACK_SYMBOLS = {
+    "SOL/USDT:USDT",
+    "BNB/USDT:USDT",
+    "ETH/USDT:USDT",
+    "BTC/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "XRP/USDT:USDT",
+    "ADA/USDT:USDT",
+    "LINK/USDT:USDT",
+}
+
+
 class LocalSqliteObservationMarketSource:
     """Read closed candles from the local research SQLite database.
 
@@ -17,16 +29,25 @@ class LocalSqliteObservationMarketSource:
     """
 
     source_id = "local_sqlite_v3_dev_closed_klines_read_only"
+    source_type = "local_sqlite_fallback"
 
     def __init__(self, db_path: str | Path = "data/v3_dev.db") -> None:
         self._db_path = Path(db_path)
+        self.fallback_used = False
 
     def latest_closed_candles(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
         if limit <= 0:
             return []
-        if timeframe == "4h":
-            return self._latest_4h_from_1h(symbol=symbol, limit=limit)
-        return self._latest_from_db(symbol=symbol, timeframe=timeframe, limit=limit)
+        try:
+            if timeframe == "4h":
+                return self._latest_4h_from_1h(symbol=symbol, limit=limit)
+            return self._latest_from_db(symbol=symbol, timeframe=timeframe, limit=limit)
+        except Exception:
+            fallback = self._sample_fallback(symbol=symbol, timeframe=timeframe, limit=limit)
+            if fallback:
+                self.fallback_used = True
+                return fallback
+            raise
 
     def _latest_from_db(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
         if not self._db_path.exists():
@@ -76,3 +97,16 @@ class LocalSqliteObservationMarketSource:
             )
             for bucket in buckets[-limit:]
         ]
+
+    def _sample_fallback(self, *, symbol: str, timeframe: str, limit: int) -> list[RecentCandle]:
+        if symbol not in _SAMPLE_FALLBACK_SYMBOLS:
+            return []
+        from src.application.strategy_group_live_readonly_observation import (
+            SampleStrategyGroupMarketBarSource,
+        )
+
+        return SampleStrategyGroupMarketBarSource().latest_closed_candles(
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=limit,
+        )

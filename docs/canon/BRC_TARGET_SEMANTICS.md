@@ -245,7 +245,8 @@ Current local B0 implementation slice:
   compression breakout. Their outputs may carry typed `candidate_semantics`
   snapshots but remain observe-only strategy-family signals: no sizing,
   leverage, venue, route, order, candidate creation, intent creation, or
-  exchange calls.
+  exchange calls. The Trading Console read-only observation surface now includes
+  these four reference candidates with scheduler-level readiness metadata.
 - `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
   SignalEvaluation against those semantics and can create only a shadow
   OrderCandidate through SignalEvaluationShadowService. It can also consume a

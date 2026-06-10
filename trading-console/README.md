@@ -1,13 +1,18 @@
 # Trading Console Frontend
 
-Read-only React frontend for the Trading Console Gate 2 handoff.
+Owner-facing React frontend for the Trading Console Gate 2 handoff.
 
 ## Runtime Contract
 
-- Truth source: `GET /api/trading-console/*`
+- Truth source: `GET /api/trading-console/*`, plus the explicit
+  non-executing strategy shadow-plan POST listed below.
 - Forbidden truth sources: `/api/brc/*`, `/api/runtime/*`, `/api/dev/testnet/brc/*`
 - The frontend proxy forwards `GET /api/trading-console/*` to the configured backend.
-- Non-GET requests to the proxy are rejected with `405`.
+- The frontend proxy also forwards only
+  `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans`.
+  This endpoint may create shadow SignalEvaluation / OrderCandidate planning
+  records only; it is not execution authority.
+- Other non-GET requests to the proxy are rejected with `405`.
 - Action slots are displayed as disabled future/deferred states only.
 
 ## Local Run

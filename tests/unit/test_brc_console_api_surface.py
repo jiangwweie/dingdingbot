@@ -717,10 +717,29 @@ def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):
         "MI-001-BNB-LONG",
         "CPM-RO-001",
         "BRF-001-BTC-SHORT",
+        "BTPC-001-AVAX-SHORT",
+        "LSR-001-XRP-LONG",
+        "RBR-001-ADA-SHORT",
+        "VCB-001-LINK-LONG",
     } <= candidate_ids
     assert payload["runner_mapping"]["strategy_specific_signal_evaluator_glue_wired"] is True
+    assert payload["observation_chain_summary"]["BTPC-001"].startswith("BTPC evaluator")
+    assert payload["observation_chain_summary"]["LSR-001"].startswith("LSR evaluator")
+    assert payload["observation_chain_summary"]["RBR-001"].startswith("RBR evaluator")
+    assert payload["observation_chain_summary"]["VCB-001"].startswith("VCB evaluator")
     current_signal_ids = {item["candidate_id"] for item in payload["current_signals"]}
     assert current_signal_ids <= candidate_ids
+    reference_signals = [
+        item for item in payload["current_signals"]
+        if item["candidate_id"] in {
+            "BTPC-001-AVAX-SHORT",
+            "LSR-001-XRP-LONG",
+            "RBR-001-ADA-SHORT",
+            "VCB-001-LINK-LONG",
+        }
+    ]
+    assert len(reference_signals) == 4
+    assert all("candidate_semantics" in item["evidence_payload"] for item in reference_signals)
     for item in payload["current_signals"]:
         assert item["no_execution_permission"] is True
         assert item["no_order_permission"] is True

@@ -151,7 +151,9 @@ Key facts:
   profile, and quality. Trend/right-tail strategies use TP1 + runner semantics;
   range/mean-reversion strategies use fixed RR/range-target semantics. They do
   not prove alpha, size orders, choose leverage, create candidates by
-  themselves, create intents, or call exchange.
+  themselves, create intents, or call exchange. Trading Console read-only
+  strategy observation now surfaces BTPC / LSR / RBR / VCB candidates and their
+  typed `candidate_semantics` snapshots alongside CPM / BRF readiness.
 - **StrategyRuntimeFactOverlayService** now exists as a local non-executing
   read-only fact overlay before B0 strategy signal planning. When explicitly
   injected, it replaces caller-provided account/position/market allow facts

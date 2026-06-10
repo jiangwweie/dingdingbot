@@ -1275,15 +1275,22 @@ Current local Sprint 6 slice:
 - The Strategy Library page now surfaces the read-only strategy observation
   chain from the narrow
   `/api/brc/strategy-groups/live-readonly-observation/v1` GET proxy. This makes
-  CPM / BRF observation candidates visible in the Owner surface while preserving
-  `live_ready=false`, no runtime start, no ExecutionIntent, no order, and no
-  exchange write semantics.
+  CPM / BRF / BTPC / LSR / RBR / VCB observation candidates visible in the
+  Owner surface while preserving `live_ready=false`, no runtime start, no
+  ExecutionIntent, no order, and no exchange write semantics. BTPC / LSR / RBR
+  / VCB signals expose typed `candidate_semantics` snapshots for strategy
+  review, not order instructions.
 - The Strategy Library observation panel also displays scheduler-level runtime
   signal planning readiness. It shows whether the observation is observe-only,
   blocked, or ready only for the non-executing planner, and it keeps
   `planner_call_performed=false`, `signal_evaluation_created=false`,
   `order_candidate_created=false`, `execution_intent_created=false`, and
   `order_created=false` visible before any future shadow promotion.
+- The Trading Console frontend proxy remains GET-only for generic
+  `/api/trading-console/*` readmodels, with one explicit exception:
+  `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans`.
+  That exception forwards only the non-executing shadow-plan endpoint and does
+  not generalize the proxy into arbitrary write access.
 - Dark and light theme switching is implemented with shared theme state,
   `data-theme`, and local persistence. It is a Sprint 6 product capability, not
   a one-off page skin.
@@ -1301,6 +1308,13 @@ python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.
   tests/unit/test_b0_strategy_runtime_promotion_gate.py
 16 passed
 
+python3 -m pytest -q tests/unit/test_brc_console_api_surface.py::test_strategy_group_live_readonly_observation_v1_api_is_safe \
+  tests/unit/test_brc_console_api_surface.py::test_strategy_group_live_readonly_observation_run_once_records_history_without_execution \
+  tests/unit/test_reference_price_action_evaluators.py \
+  tests/unit/test_runtime_strategy_signal_evaluation_service.py \
+  tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py
+22 passed
+
 Playwright local browser validation:
 - /runtime displays the first-real-submit gate panel.
 - /runtime displays the promotion-confirmation ledger panel.
@@ -1315,11 +1329,18 @@ Playwright local browser validation:
   local PG unavailable, POST/GET return explicit 503 JSON instead of 500, so
   the UI fails closed without implying Owner/Codex confirmation.
 - /strategy displays the read-only strategy observation chain, including BRF
-  short-side observation candidates, and the proxy allows only GET for that
-  exact observation API.
+  short-side and BTPC / LSR / RBR / VCB reference observation candidates, and
+  the proxy allows only GET for that exact observation API.
 - /strategy displays scheduler-level observation-to-shadow planning readiness
   without calling the planner or creating SignalEvaluation / OrderCandidate
   rows.
+- /strategy production-server Playwright smoke displays BTPC / LSR / RBR / VCB
+  reference observation candidates, preserves "非执行" wording, has no
+  horizontal overflow at 1200px, and light-mode toggle persists
+  `data-theme=light` plus `localStorage=light`.
+- Trading Console frontend proxy forwards only GET readmodels plus the exact
+  non-executing shadow-plan POST; ordinary `/api/trading-console/*` POST
+  remains 405.
 ```
 
 ### Sprint 7: Runtime / Config / Safety Boundary Consolidation

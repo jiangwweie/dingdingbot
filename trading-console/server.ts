@@ -5,6 +5,8 @@ import { createServer as createViteServer } from 'vite';
 const PORT = Number(process.env.PORT || 3000);
 const READ_MODEL_API_BASE = process.env.TRADING_CONSOLE_API_BASE || 'http://127.0.0.1:8000';
 const OPERATOR_SESSION = process.env.TRADING_CONSOLE_OPERATOR_SESSION || '';
+const STRATEGY_SIGNAL_SHADOW_PLAN_PATH =
+  /^\/api\/trading-console\/strategy-runtimes\/[^/]+\/strategy-signal-shadow-plans$/;
 
 function targetUrl(originalUrl: string): string {
   return new URL(originalUrl, READ_MODEL_API_BASE).toString();
@@ -72,10 +74,17 @@ async function startServer() {
   });
 
   app.all('/api/trading-console/*', async (req, res) => {
+    const allowedShadowPlanningPost =
+      req.method === 'POST' && STRATEGY_SIGNAL_SHADOW_PLAN_PATH.test(req.path);
+    if (allowedShadowPlanningPost) {
+      await proxyJsonRequest(req, res);
+      return;
+    }
     if (req.method !== 'GET') {
       res.status(405).json({
         error: 'trading_console_frontend_proxy_get_only',
-        message: 'Trading Console frontend proxy forwards read-model GET requests only.',
+        message:
+          'Trading Console frontend proxy forwards read-model GET requests and the explicit non-executing strategy shadow-plan POST only.',
       });
       return;
     }
