@@ -24,6 +24,10 @@ from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     build_runtime_execution_order_lifecycle_adapter_result,
     build_runtime_execution_orders_for_registration,
 )
+from src.domain.runtime_execution_local_registration_gate import (
+    RuntimeExecutionLocalRegistrationGateStatus,
+    build_runtime_execution_local_registration_gate,
+)
 from src.domain.runtime_execution_order_registration_draft import (
     RuntimeExecutionLocalOrderRegistrationDraft,
     RuntimeExecutionOrderRegistrationDraftPreview,
@@ -152,6 +156,20 @@ def _registration_preview() -> RuntimeExecutionOrderRegistrationDraftPreview:
     )
 
 
+def _ready_gate(preview: RuntimeExecutionOrderRegistrationDraftPreview):
+    return build_runtime_execution_local_registration_gate(
+        registration_preview=preview,
+        current_head_deployed=True,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        runtime_live_execution_enabled=True,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_action_authorized=True,
+        now_ms=NOW_MS,
+    )
+
+
 def _service_with_preview(
     preview,
     lifecycle=None,
@@ -194,6 +212,45 @@ def test_registration_preview_maps_to_order_objects_with_runtime_semantics():
     assert orders[1].parent_order_id == "runtime-order-draft-auth-1-entry"
 
 
+def test_local_registration_gate_blocks_until_all_first_submit_facts_are_present():
+    preview = _registration_preview()
+
+    gate = build_runtime_execution_local_registration_gate(
+        registration_preview=preview,
+        now_ms=NOW_MS,
+    )
+
+    assert gate.status == RuntimeExecutionLocalRegistrationGateStatus.BLOCKED
+    assert "current_head_not_deployed_to_tokyo" in gate.blockers
+    assert "owner_real_submit_authorization_missing" in gate.blockers
+    assert "owner_live_runtime_enablement_authorization_missing" in gate.blockers
+    assert "runtime_not_live_execution_enabled" in gate.blockers
+    assert "order_lifecycle_adapter_disabled" in gate.blockers
+    assert "local_order_registration_disabled" in gate.blockers
+    assert "local_registration_action_authorization_missing" in gate.blockers
+    assert gate.not_real_submit_authority is True
+    assert gate.exchange_called is False
+    assert gate.execution_intent_status_changed is False
+
+
+def test_local_registration_gate_can_be_ready_without_execution_authority():
+    preview = _registration_preview()
+
+    gate = _ready_gate(preview)
+
+    assert (
+        gate.status
+        == RuntimeExecutionLocalRegistrationGateStatus
+        .READY_FOR_LOCAL_CREATED_ORDER_REGISTRATION
+    )
+    assert gate.blockers == []
+    assert gate.not_real_submit_authority is True
+    assert gate.not_exchange_order_authority is True
+    assert gate.local_order_registration_executed is False
+    assert gate.exchange_order_submitted is False
+    assert gate.exchange_called is False
+
+
 @pytest.mark.asyncio
 async def test_adapter_result_default_disabled_does_not_call_lifecycle():
     preview = _registration_preview()
@@ -218,7 +275,7 @@ async def test_adapter_result_default_disabled_does_not_call_lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_adapter_result_requires_duplicate_submit_lock_before_registration():
+async def test_adapter_result_requires_ready_local_registration_gate_before_registration():
     preview = _registration_preview()
     lifecycle = _Lifecycle()
     service = _service_with_preview(preview, lifecycle=lifecycle)
@@ -227,7 +284,31 @@ async def test_adapter_result_requires_duplicate_submit_lock_before_registration
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+    )
+
+    assert result.status == RuntimeExecutionOrderLifecycleAdapterResultStatus.BLOCKED
+    assert "first_real_submit_local_registration_gate_required" in result.blockers
+    assert result.order_objects_constructed is False
+    assert result.local_order_registration_executed is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+    assert lifecycle.calls == []
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_requires_duplicate_submit_lock_before_registration():
+    preview = _registration_preview()
+    lifecycle = _Lifecycle()
+    service = _service_with_preview(preview, lifecycle=lifecycle)
+    gate = _ready_gate(preview)
+
+    result = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
         duplicate_submit_lock_acquired=False,
+        local_registration_gate=gate,
     )
 
     assert (
@@ -245,12 +326,14 @@ async def test_adapter_result_registers_created_local_orders_when_explicitly_ena
     preview = _registration_preview()
     lifecycle = _Lifecycle()
     service = _service_with_preview(preview, lifecycle=lifecycle)
+    gate = _ready_gate(preview)
 
     result = await service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
         duplicate_submit_lock_acquired=True,
+        local_registration_gate=gate,
     )
 
     assert (
@@ -264,6 +347,7 @@ async def test_adapter_result_registers_created_local_orders_when_explicitly_ena
     assert result.order_lifecycle_called is True
     assert result.exchange_called is False
     assert result.execution_intent_status_changed is False
+    assert result.metadata["local_registration_gate_id"] == gate.gate_id
     assert result.entry_order_ids == ["runtime-order-draft-auth-1-entry"]
     assert result.protection_order_ids == ["runtime-order-draft-auth-1-sl"]
     assert [call["order"].id for call in lifecycle.calls] == result.local_order_ids
@@ -364,16 +448,19 @@ async def test_adapter_result_persistent_lock_replays_without_second_registratio
         lifecycle=lifecycle,
         adapter_result_repo=adapter_result_repo,
     )
+    gate = _ready_gate(preview)
 
     first = await service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
+        local_registration_gate=gate,
     )
     second = await service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
+        local_registration_gate=gate,
     )
 
     assert (
@@ -397,16 +484,19 @@ async def test_adapter_result_records_protection_registration_failure_and_replay
         lifecycle=lifecycle,
         adapter_result_repo=adapter_result_repo,
     )
+    gate = _ready_gate(preview)
 
     first = await service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
+        local_registration_gate=gate,
     )
     second = await service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
+        local_registration_gate=gate,
     )
 
     assert (
@@ -438,12 +528,14 @@ async def test_adapter_result_does_not_acquire_persistent_lock_without_lifecycle
         lifecycle=None,
         adapter_result_repo=adapter_result_repo,
     )
+    gate = _ready_gate(preview)
 
     with pytest.raises(RuntimeError, match="order_lifecycle_service_unavailable"):
         await service.order_lifecycle_adapter_result_for_authorization(
             "auth-1",
             order_lifecycle_adapter_enabled=True,
             local_order_registration_enabled=True,
+            local_registration_gate=gate,
         )
 
     assert adapter_result_repo.acquire_calls == 0

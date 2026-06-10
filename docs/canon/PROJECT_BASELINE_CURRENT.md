@@ -329,8 +329,9 @@ Key facts:
   runtime-native protection plan preview / runtime-native protection plan audit
   record / runtime OrderLifecycle handoff draft audit record / non-executing
   OrderLifecycle adapter preview gate / typed local order registration draft
-  preview / default-disabled OrderLifecycle adapter result skeleton / submit
-  adapter readiness preview / runtime submit rehearsal aggregate** now exist in
+  preview / first-real-submit local-registration gate / default-disabled
+  OrderLifecycle adapter result skeleton / submit adapter readiness preview /
+  runtime submit rehearsal aggregate** now exist in
   tracked code as bounded bridge layers. Deployment state must be verified from
   the current release manifest and postdeploy reports, not inferred from this
   canon paragraph.
@@ -377,6 +378,12 @@ Key facts:
   `order_objects_constructed=false`, `local_order_registration_executed=false`,
   `order_created=false`, `order_lifecycle_called=false`, and
   `exchange_called=false`.
+  RuntimeExecutionLocalRegistrationGate can require current-head deployment,
+  Owner real-submit authorization, Owner live-runtime enablement authorization,
+  runtime live-execution state, adapter/local-registration enablement, and an
+  explicit local-registration action authorization before any local
+  `Order(status=CREATED)` registration. It is not real-submit authority and
+  cannot call exchange or change ExecutionIntent status.
   RuntimeExecutionAttemptReservationPreview computes attempts/budget before and
   after from StrategyRuntimeInstance boundary while keeping
   `reservation_recorded=false`, `runtime_budget_mutated=false`, and
@@ -407,9 +414,9 @@ Key facts:
   `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` now exercises
   that chain with in-memory repositories and reports a first-real-submit packet:
   the technical non-executing rehearsal can pass, but first real submit remains
-  blocked while the current HEAD is not deployed, Owner real-submit
-  authorization is absent, runtime remains shadow / execution-disabled, and the
-  controlled submit adapter is not implemented.
+	  blocked while the current HEAD is not deployed, Owner real-submit
+	  authorization is absent, runtime remains shadow / execution-disabled, and the
+	  OrderLifecycle/local-registration runtime enablement gates remain closed.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

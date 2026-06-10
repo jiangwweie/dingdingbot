@@ -151,9 +151,12 @@ def build_runtime_execution_order_lifecycle_adapter_result(
     local_order_registration_enabled: bool = False,
     duplicate_submit_lock_acquired: bool = False,
     registered_orders: list[Order] | None = None,
+    local_registration_gate_id: str | None = None,
+    additional_blockers: list[str] | None = None,
+    additional_warnings: list[str] | None = None,
 ) -> RuntimeExecutionOrderLifecycleAdapterResult:
-    blockers = list(registration_preview.blockers)
-    warnings = list(registration_preview.warnings)
+    blockers = list(registration_preview.blockers) + list(additional_blockers or [])
+    warnings = list(registration_preview.warnings) + list(additional_warnings or [])
     registered_orders = list(registered_orders or [])
 
     if (
@@ -192,7 +195,7 @@ def build_runtime_execution_order_lifecycle_adapter_result(
                 RuntimeExecutionOrderLifecycleAdapterResultStatus
                 .LOCAL_ORDER_REGISTRATION_DISABLED
             )
-        elif "persistent_duplicate_submit_lock_required" in blockers:
+        elif blockers == ["persistent_duplicate_submit_lock_required"]:
             status = (
                 RuntimeExecutionOrderLifecycleAdapterResultStatus
                 .DUPLICATE_SUBMIT_LOCK_REQUIRED
@@ -242,6 +245,7 @@ def build_runtime_execution_order_lifecycle_adapter_result(
         metadata={
             "scope": "runtime_execution_order_lifecycle_adapter_result",
             "local_created_order_registration_only": True,
+            "local_registration_gate_id": local_registration_gate_id,
             "requires_persistent_duplicate_submit_lock": True,
             "does_not_submit_exchange_order": True,
             "does_not_call_exchange": True,
@@ -261,6 +265,7 @@ def build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
     failed_order: Order | None,
     failure_reason: str,
     failure_message: str | None = None,
+    local_registration_gate_id: str | None = None,
 ) -> RuntimeExecutionOrderLifecycleAdapterResult:
     blockers = list(registration_preview.blockers)
     blockers.append("local_order_registration_failed")
@@ -321,6 +326,7 @@ def build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
         metadata={
             "scope": "runtime_execution_order_lifecycle_adapter_result",
             "local_created_order_registration_only": True,
+            "local_registration_gate_id": local_registration_gate_id,
             "registration_failure_recorded": True,
             "failure_reason": failure_reason,
             "failure_message": failure_message,
@@ -347,6 +353,7 @@ def build_runtime_execution_order_lifecycle_adapter_lock_result(
     *,
     registration_preview: RuntimeExecutionOrderRegistrationDraftPreview,
     now_ms: int,
+    local_registration_gate_id: str | None = None,
 ) -> RuntimeExecutionOrderLifecycleAdapterResult:
     if (
         registration_preview.status
@@ -389,6 +396,7 @@ def build_runtime_execution_order_lifecycle_adapter_lock_result(
         metadata={
             "scope": "runtime_execution_order_lifecycle_adapter_result",
             "persistent_duplicate_submit_lock": True,
+            "local_registration_gate_id": local_registration_gate_id,
             "local_created_order_registration_pending": True,
             "does_not_submit_exchange_order": True,
             "does_not_call_exchange": True,

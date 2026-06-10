@@ -44,6 +44,7 @@ ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "order_object_construction_boundary_implemented": True,
     "local_order_registration_write_path_implemented": True,
     "order_lifecycle_adapter_invocation_implemented": True,
+    "first_real_submit_local_registration_gate_implemented": True,
     "persistent_duplicate_submit_lock_implemented": True,
     "local_registration_result_status_implemented": True,
     "protection_order_failure_recovery_implemented": True,
@@ -248,6 +249,7 @@ def build_order_lifecycle_adapter_enablement_packet(
                 "adapter_implementation_capabilities": dict(
                     ADAPTER_IMPLEMENTATION_CAPABILITIES
                 ),
+                "local_registration_requires_first_real_submit_gate": True,
             },
             "implementation_work_items": implementation_work_items,
             "runtime_enablement_blockers": runtime_enablement_blockers,
@@ -422,6 +424,13 @@ def _implementation_work_items(
         is not True
     ):
         items.append("persistent_duplicate_submit_lock_not_implemented")
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "first_real_submit_local_registration_gate_implemented"
+        ]
+        is not True
+    ):
+        items.append("first_real_submit_local_registration_gate_not_implemented")
     if (
         ADAPTER_IMPLEMENTATION_CAPABILITIES[
             "local_registration_result_status_implemented"

@@ -58,6 +58,12 @@ from src.domain.runtime_execution_order_lifecycle_adapter import (
 from src.domain.runtime_execution_order_registration_draft import (
     RuntimeExecutionOrderRegistrationDraftPreview,
 )
+from src.domain.runtime_execution_local_registration_gate import (
+    RuntimeExecutionLocalRegistrationGate,
+)
+from src.domain.runtime_execution_order_lifecycle_adapter_result import (
+    RuntimeExecutionOrderLifecycleAdapterResult,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -1148,6 +1154,90 @@ async def runtime_execution_order_registration_draft_preview_for_authorization(
     try:
         return await service.order_registration_draft_preview_for_authorization(
             authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-local-registration-gates/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionLocalRegistrationGate,
+)
+async def runtime_execution_local_registration_gate_for_authorization(
+    authorization_id: str,
+    current_head_deployed: bool = False,
+    owner_real_submit_authorized: bool = False,
+    owner_live_runtime_enablement_authorized: bool = False,
+    runtime_live_execution_enabled: bool = False,
+    order_lifecycle_adapter_enabled: bool = False,
+    local_order_registration_enabled: bool = False,
+    local_registration_action_authorized: bool = False,
+) -> RuntimeExecutionLocalRegistrationGate:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.local_registration_gate_for_authorization(
+            authorization_id,
+            current_head_deployed=current_head_deployed,
+            owner_real_submit_authorized=owner_real_submit_authorized,
+            owner_live_runtime_enablement_authorized=(
+                owner_live_runtime_enablement_authorized
+            ),
+            runtime_live_execution_enabled=runtime_live_execution_enabled,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
+            local_order_registration_enabled=local_order_registration_enabled,
+            local_registration_action_authorized=(
+                local_registration_action_authorized
+            ),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-order-lifecycle-adapter-results/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionOrderLifecycleAdapterResult,
+)
+async def runtime_execution_order_lifecycle_adapter_result_for_authorization(
+    authorization_id: str,
+    current_head_deployed: bool = False,
+    owner_real_submit_authorized: bool = False,
+    owner_live_runtime_enablement_authorized: bool = False,
+    runtime_live_execution_enabled: bool = False,
+    order_lifecycle_adapter_enabled: bool = False,
+    local_order_registration_enabled: bool = False,
+    local_registration_action_authorized: bool = False,
+) -> RuntimeExecutionOrderLifecycleAdapterResult:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        gate = await service.local_registration_gate_for_authorization(
+            authorization_id,
+            current_head_deployed=current_head_deployed,
+            owner_real_submit_authorized=owner_real_submit_authorized,
+            owner_live_runtime_enablement_authorized=(
+                owner_live_runtime_enablement_authorized
+            ),
+            runtime_live_execution_enabled=runtime_live_execution_enabled,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
+            local_order_registration_enabled=local_order_registration_enabled,
+            local_registration_action_authorized=(
+                local_registration_action_authorized
+            ),
+        )
+        return await service.order_lifecycle_adapter_result_for_authorization(
+            authorization_id,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
+            local_order_registration_enabled=local_order_registration_enabled,
+            local_registration_gate=gate,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

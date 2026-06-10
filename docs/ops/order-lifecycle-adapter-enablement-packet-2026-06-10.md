@@ -5,7 +5,9 @@ Date: 2026-06-10
 Status: accepted as a non-executing readiness packet. Follow-up implementation
 slices added a default-disabled OrderLifecycle adapter result skeleton,
 schema-readiness for local `CREATED` order registration, and a PG-backed
-persistent duplicate-submit lock/result table.
+persistent duplicate-submit lock/result table. The latest slice adds a
+default-disabled first-real-submit local-registration gate before any local
+`OrderLifecycleService.register_created_order` call.
 
 ## Purpose
 
@@ -64,7 +66,6 @@ runtime_not_live_execution_enabled
 order_lifecycle_adapter_disabled
 local_order_registration_runtime_enablement_disabled
 order_lifecycle_adapter_runtime_enablement_disabled
-protection_order_failure_recovery_not_implemented
 owner_real_submit_authorization_missing
 owner_live_runtime_enablement_authorization_missing
 ```
@@ -76,7 +77,9 @@ still keeps:
 ready_for_runtime_adapter_enablement = false
 ```
 
-because the implementation work items remain unresolved.
+because the runtime enablement gates remain unresolved. The adapter
+implementation capability list now records that the first-real-submit
+local-registration gate exists.
 
 ## Adapter Result Skeleton
 
@@ -86,8 +89,9 @@ adapter skeleton:
 - default call returns `order_lifecycle_adapter_disabled`;
 - no `Order` objects are constructed by default;
 - no local orders are registered by default;
-- explicit adapter enablement, local-registration enablement, and PG-backed
-  duplicate-submit lock acquisition are required before registration;
+- explicit adapter enablement, local-registration enablement, a READY
+  first-real-submit local-registration gate, and PG-backed duplicate-submit
+  lock acquisition are required before registration;
 - when explicitly enabled in application tests, it constructs local
   `Order(status=CREATED)` objects from typed registration drafts and calls
   `OrderLifecycleService.register_created_order`;
@@ -127,8 +131,9 @@ The packet does not:
 - change ExecutionIntent status;
 - construct Order objects by default;
 - register local orders by default;
-- acquire the duplicate-submit lock unless the adapter and local registration
-  gates are both explicitly enabled;
+- acquire the duplicate-submit lock unless the adapter/local-registration flags
+  are explicitly enabled and the first-real-submit local-registration gate is
+  READY;
 - call OwnerBoundedExecution;
 - call OrderLifecycle by default;
 - call exchange;
@@ -142,20 +147,12 @@ Command:
 /opt/homebrew/bin/pytest -q \
   tests/unit/test_runtime_order_lifecycle_adapter_result.py \
   tests/unit/test_order_lifecycle_adapter_enablement_packet.py \
-  tests/unit/test_runtime_first_real_submit_owner_packet.py \
   tests/unit/test_runtime_submit_rehearsal_pre_live_packet.py \
-  tests/unit/test_script_risk_classifier.py
+  tests/unit/test_runtime_first_real_submit_owner_packet.py
 ```
 
 Result:
 
 ```text
-33 passed
-```
-
-Additional focused verification for the adapter skeleton, migration gap, and
-Tokyo deploy/postdeploy planning guards:
-
-```text
-51 passed
+24 passed
 ```

@@ -61,6 +61,11 @@ from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     build_runtime_execution_order_lifecycle_adapter_result,
     build_runtime_execution_orders_for_registration,
 )
+from src.domain.runtime_execution_local_registration_gate import (
+    RuntimeExecutionLocalRegistrationGate,
+    RuntimeExecutionLocalRegistrationGateStatus,
+    build_runtime_execution_local_registration_gate,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -677,6 +682,37 @@ class RuntimeExecutionIntentAdapterService:
             now_ms=_now_ms(),
         )
 
+    async def local_registration_gate_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        current_head_deployed: bool = False,
+        owner_real_submit_authorized: bool = False,
+        owner_live_runtime_enablement_authorized: bool = False,
+        runtime_live_execution_enabled: bool = False,
+        order_lifecycle_adapter_enabled: bool = False,
+        local_order_registration_enabled: bool = False,
+        local_registration_action_authorized: bool = False,
+    ) -> RuntimeExecutionLocalRegistrationGate:
+        registration_preview = await self.order_registration_draft_preview_for_authorization(
+            authorization_id
+        )
+        return build_runtime_execution_local_registration_gate(
+            registration_preview=registration_preview,
+            current_head_deployed=current_head_deployed,
+            owner_real_submit_authorized=owner_real_submit_authorized,
+            owner_live_runtime_enablement_authorized=(
+                owner_live_runtime_enablement_authorized
+            ),
+            runtime_live_execution_enabled=runtime_live_execution_enabled,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
+            local_order_registration_enabled=local_order_registration_enabled,
+            local_registration_action_authorized=(
+                local_registration_action_authorized
+            ),
+            now_ms=_now_ms(),
+        )
+
     async def order_lifecycle_adapter_result_for_authorization(
         self,
         authorization_id: str,
@@ -684,13 +720,47 @@ class RuntimeExecutionIntentAdapterService:
         order_lifecycle_adapter_enabled: bool = False,
         local_order_registration_enabled: bool = False,
         duplicate_submit_lock_acquired: bool = False,
+        local_registration_gate: RuntimeExecutionLocalRegistrationGate | None = None,
     ) -> RuntimeExecutionOrderLifecycleAdapterResult:
         registration_preview = await self.order_registration_draft_preview_for_authorization(
             authorization_id
         )
+        gate_blockers: list[str] = []
+        gate_warnings: list[str] = []
+        local_registration_gate_id: str | None = None
+        if order_lifecycle_adapter_enabled or local_order_registration_enabled:
+            if local_registration_gate is None:
+                gate_blockers.append("first_real_submit_local_registration_gate_required")
+            else:
+                local_registration_gate_id = local_registration_gate.gate_id
+                if (
+                    local_registration_gate.registration_preview_id
+                    != registration_preview.registration_preview_id
+                ):
+                    gate_blockers.append("local_registration_gate_preview_mismatch")
+                if (
+                    local_registration_gate.status
+                    != RuntimeExecutionLocalRegistrationGateStatus
+                    .READY_FOR_LOCAL_CREATED_ORDER_REGISTRATION
+                ):
+                    gate_blockers.append("local_registration_gate_not_ready")
+                    gate_blockers.extend(local_registration_gate.blockers)
+                gate_warnings.extend(local_registration_gate.warnings)
+                if (
+                    local_registration_gate.order_lifecycle_adapter_enabled
+                    != order_lifecycle_adapter_enabled
+                ):
+                    gate_blockers.append("local_registration_gate_adapter_flag_mismatch")
+                if (
+                    local_registration_gate.local_order_registration_enabled
+                    != local_order_registration_enabled
+                ):
+                    gate_blockers.append("local_registration_gate_registration_flag_mismatch")
+
         should_register = (
             order_lifecycle_adapter_enabled
             and local_order_registration_enabled
+            and not gate_blockers
             and not registration_preview.blockers
         )
         if should_register and self._order_lifecycle_service is None:
@@ -701,6 +771,7 @@ class RuntimeExecutionIntentAdapterService:
         ):
             lock_result = build_runtime_execution_order_lifecycle_adapter_lock_result(
                 registration_preview=registration_preview,
+                local_registration_gate_id=local_registration_gate_id,
                 now_ms=_now_ms(),
             )
             acquired, existing = (
@@ -718,6 +789,9 @@ class RuntimeExecutionIntentAdapterService:
                 order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
                 local_order_registration_enabled=local_order_registration_enabled,
                 duplicate_submit_lock_acquired=duplicate_submit_lock_acquired,
+                local_registration_gate_id=local_registration_gate_id,
+                additional_blockers=gate_blockers,
+                additional_warnings=gate_warnings,
                 now_ms=_now_ms(),
             )
 
@@ -760,6 +834,7 @@ class RuntimeExecutionIntentAdapterService:
                         failed_order=order,
                         failure_reason=type(exc).__name__,
                         failure_message=str(exc),
+                        local_registration_gate_id=local_registration_gate_id,
                         now_ms=_now_ms(),
                     )
                 )
@@ -777,6 +852,8 @@ class RuntimeExecutionIntentAdapterService:
             local_order_registration_enabled=local_order_registration_enabled,
             duplicate_submit_lock_acquired=duplicate_submit_lock_acquired,
             registered_orders=registered_orders,
+            local_registration_gate_id=local_registration_gate_id,
+            additional_warnings=gate_warnings,
             now_ms=_now_ms(),
         )
         if self._order_lifecycle_adapter_result_repository is not None:

@@ -88,6 +88,18 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
         ]["local_registration_result_status_implemented"]
         is True
     )
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
+            "adapter_implementation_capabilities"
+        ]["first_real_submit_local_registration_gate_implemented"]
+        is True
+    )
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
+            "local_registration_requires_first_real_submit_gate"
+        ]
+        is True
+    )
     assert "order_lifecycle_adapter_invocation_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
@@ -101,6 +113,9 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "local_registration_result_status_not_implemented" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "first_real_submit_local_registration_gate_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "protection_order_failure_recovery_not_implemented" not in (
