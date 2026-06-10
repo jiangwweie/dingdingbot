@@ -173,6 +173,270 @@ def build_brf_short_candidate_semantics(
     )
 
 
+def build_btpc_short_candidate_semantics(
+    *,
+    strategy_family_version_id: str,
+    timeframe: str,
+    evidence: dict[str, Any],
+) -> StrategyCandidateSemantics:
+    structure = dict(evidence.get("price_action_structure") or {})
+    latest_close = _decimal(structure.get("latest_close"))
+    stop_reference = _decimal(structure.get("pullback_high_reference"))
+    return StrategyCandidateSemantics(
+        strategy_family_id="BTPC-001",
+        strategy_family_version_id=strategy_family_version_id,
+        archetype=StrategyArchetype.BEAR_TREND_PULLBACK_CONTINUATION,
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        feature_snapshots=[
+            StrategyFeatureSnapshot(
+                feature_set_id="btpc-bear-trend-pullback-continuation-v0",
+                timeframe=timeframe,
+                source="reference_price_action_evaluators",
+                features={
+                    "market_state": evidence.get("market_state"),
+                    "htf_context": evidence.get("htf_context"),
+                    "price_action_structure": structure,
+                },
+            )
+        ],
+        entry=EntrySetupProposal(
+            kind=EntrySetupKind.TREND_PULLBACK_LOSS,
+            side="short",
+            trigger="btpc_bear_trend_pullback_loss_confirmed",
+            entry_price_reference=latest_close,
+            trigger_candle_open_time_ms=_optional_int(evidence.get("latest_1h_open_time_ms")),
+            valid_timeframe=timeframe,
+            evidence={
+                "pullback_high_reference": structure.get("pullback_high_reference"),
+                "latest_close": structure.get("latest_close"),
+                "previous_low": structure.get("previous_low"),
+            },
+        ),
+        protection=ProtectionProposal(
+            reference_kind=ProtectionReferenceKind.STRUCTURE_EXTREME,
+            stop_price_reference=stop_reference,
+            invalidation_condition="close_above_pullback_high",
+            buffer_description="hard stop anchored above bear-trend pullback high",
+            evidence={"pullback_high_reference": structure.get("pullback_high_reference")},
+        ),
+        exit=_right_tail_exit(
+            invalidation_condition="close_above_pullback_high",
+            runner_note="downside runner preserves bear-trend continuation payoff after TP1",
+        ),
+        quality=_quality_score(
+            structure=Decimal("0.78") if structure.get("bear_trend_pullback_continuation") else Decimal("0.35"),
+            context=Decimal("0.78") if evidence.get("market_state") == "TREND_DOWN" else Decimal("0.45"),
+            protection=Decimal("0.72") if stop_reference is not None else Decimal("0.20"),
+            labels={
+                "structure_clarity": "pullback high and continuation loss are explicit",
+                "context_alignment": "higher-timeframe context supports bear-trend continuation",
+                "protection_clarity": "pullback high can anchor a mandatory hard stop",
+            },
+            warnings=["short_side_conservative_profile_required"],
+        ),
+    )
+
+
+def build_lsr_candidate_semantics(
+    *,
+    strategy_family_version_id: str,
+    timeframe: str,
+    side: str,
+    evidence: dict[str, Any],
+) -> StrategyCandidateSemantics:
+    structure = dict(evidence.get("price_action_structure") or {})
+    latest_close = _decimal(structure.get("latest_close"))
+    sweep_extreme = _decimal(structure.get("sweep_extreme_reference"))
+    range_target = _decimal(structure.get("range_mid_reference"))
+    return StrategyCandidateSemantics(
+        strategy_family_id="LSR-001",
+        strategy_family_version_id=strategy_family_version_id,
+        archetype=StrategyArchetype.LIQUIDITY_SWEEP_REVERSAL,
+        payoff_profile=StrategyPayoffProfile.MEAN_REVERSION,
+        feature_snapshots=[
+            StrategyFeatureSnapshot(
+                feature_set_id="lsr-liquidity-sweep-reversal-v0",
+                timeframe=timeframe,
+                source="reference_price_action_evaluators",
+                features={
+                    "market_state": evidence.get("market_state"),
+                    "range_structure": evidence.get("range_structure"),
+                    "price_action_structure": structure,
+                },
+            )
+        ],
+        entry=EntrySetupProposal(
+            kind=EntrySetupKind.LIQUIDITY_SWEEP_RECLAIM,
+            side=side,  # type: ignore[arg-type]
+            trigger=f"lsr_{side}_sweep_reclaim_confirmed",
+            entry_price_reference=latest_close,
+            trigger_candle_open_time_ms=_optional_int(evidence.get("latest_1h_open_time_ms")),
+            valid_timeframe=timeframe,
+            evidence={
+                "sweep_extreme_reference": structure.get("sweep_extreme_reference"),
+                "range_mid_reference": structure.get("range_mid_reference"),
+                "sweep_direction": structure.get("sweep_direction"),
+            },
+        ),
+        protection=ProtectionProposal(
+            reference_kind=ProtectionReferenceKind.RANGE_BOUNDARY_BUFFER,
+            stop_price_reference=sweep_extreme,
+            invalidation_condition="close_beyond_sweep_extreme",
+            buffer_description="hard stop beyond liquidity sweep extreme",
+            evidence={"sweep_extreme_reference": structure.get("sweep_extreme_reference")},
+        ),
+        exit=_mean_reversion_exit(
+            price_reference=range_target,
+            invalidation_condition="close_beyond_sweep_extreme",
+            note="liquidity sweep reversal exits at fixed RR or range-mid target; no mandatory runner",
+        ),
+        quality=_quality_score(
+            structure=Decimal("0.78") if structure.get("liquidity_sweep_reversal") else Decimal("0.35"),
+            context=Decimal("0.68"),
+            protection=Decimal("0.72") if sweep_extreme is not None else Decimal("0.20"),
+            labels={
+                "structure_clarity": "sweep, reclaim, and range midpoint are explicit",
+                "context_alignment": "mean-reversion setup does not require trend continuation",
+                "protection_clarity": "sweep extreme can anchor a bounded hard stop",
+            },
+        ),
+    )
+
+
+def build_rbr_candidate_semantics(
+    *,
+    strategy_family_version_id: str,
+    timeframe: str,
+    side: str,
+    evidence: dict[str, Any],
+) -> StrategyCandidateSemantics:
+    structure = dict(evidence.get("price_action_structure") or {})
+    boundary_stop = _decimal(structure.get("boundary_stop_reference"))
+    target = _decimal(structure.get("opposite_range_target_reference"))
+    latest_close = _decimal(structure.get("latest_close"))
+    return StrategyCandidateSemantics(
+        strategy_family_id="RBR-001",
+        strategy_family_version_id=strategy_family_version_id,
+        archetype=StrategyArchetype.RANGE_BOUNDARY_REVERSION,
+        payoff_profile=StrategyPayoffProfile.MEAN_REVERSION,
+        feature_snapshots=[
+            StrategyFeatureSnapshot(
+                feature_set_id="rbr-range-boundary-reversion-v0",
+                timeframe=timeframe,
+                source="reference_price_action_evaluators",
+                features={
+                    "market_state": evidence.get("market_state"),
+                    "range_structure": evidence.get("range_structure"),
+                    "volatility_state": evidence.get("volatility_state"),
+                    "price_action_structure": structure,
+                },
+            )
+        ],
+        entry=EntrySetupProposal(
+            kind=EntrySetupKind.RANGE_BOUNDARY_REJECTION,
+            side=side,  # type: ignore[arg-type]
+            trigger=f"rbr_{side}_range_boundary_rejection",
+            entry_price_reference=latest_close,
+            trigger_candle_open_time_ms=_optional_int(evidence.get("latest_1h_open_time_ms")),
+            valid_timeframe=timeframe,
+            evidence={
+                "range_boundary": structure.get("range_boundary"),
+                "boundary_stop_reference": structure.get("boundary_stop_reference"),
+                "opposite_range_target_reference": structure.get("opposite_range_target_reference"),
+            },
+        ),
+        protection=ProtectionProposal(
+            reference_kind=ProtectionReferenceKind.RANGE_BOUNDARY_BUFFER,
+            stop_price_reference=boundary_stop,
+            invalidation_condition="close_outside_range_boundary",
+            buffer_description="hard stop outside rejected range boundary",
+            evidence={"boundary_stop_reference": structure.get("boundary_stop_reference")},
+        ),
+        exit=_mean_reversion_exit(
+            price_reference=target,
+            invalidation_condition="close_outside_range_boundary",
+            note="range-boundary reversion exits at opposite range or fixed RR target",
+        ),
+        quality=_quality_score(
+            structure=Decimal("0.76") if structure.get("range_boundary_reversion") else Decimal("0.35"),
+            context=Decimal("0.78") if evidence.get("market_state") in {"RANGE", "CHOP"} else Decimal("0.45"),
+            protection=Decimal("0.72") if boundary_stop is not None else Decimal("0.20"),
+            labels={
+                "structure_clarity": "range boundary rejection and target boundary are explicit",
+                "context_alignment": "range/chop context supports mean reversion",
+                "protection_clarity": "range boundary can anchor a bounded hard stop",
+            },
+        ),
+    )
+
+
+def build_vcb_candidate_semantics(
+    *,
+    strategy_family_version_id: str,
+    timeframe: str,
+    side: str,
+    evidence: dict[str, Any],
+) -> StrategyCandidateSemantics:
+    structure = dict(evidence.get("price_action_structure") or {})
+    latest_close = _decimal(structure.get("latest_close"))
+    stop_reference = _decimal(structure.get("compression_opposite_boundary_reference"))
+    return StrategyCandidateSemantics(
+        strategy_family_id="VCB-001",
+        strategy_family_version_id=strategy_family_version_id,
+        archetype=StrategyArchetype.VOLATILITY_COMPRESSION_BREAKOUT,
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        feature_snapshots=[
+            StrategyFeatureSnapshot(
+                feature_set_id="vcb-volatility-compression-breakout-v0",
+                timeframe=timeframe,
+                source="reference_price_action_evaluators",
+                features={
+                    "market_state": evidence.get("market_state"),
+                    "volatility_state": evidence.get("volatility_state"),
+                    "price_action_structure": structure,
+                },
+            )
+        ],
+        entry=EntrySetupProposal(
+            kind=EntrySetupKind.COMPRESSION_BREAKOUT,
+            side=side,  # type: ignore[arg-type]
+            trigger=f"vcb_{side}_compression_breakout",
+            entry_price_reference=latest_close,
+            trigger_candle_open_time_ms=_optional_int(evidence.get("latest_1h_open_time_ms")),
+            valid_timeframe=timeframe,
+            evidence={
+                "breakout_boundary_reference": structure.get("breakout_boundary_reference"),
+                "compression_range_pct": structure.get("compression_range_pct"),
+            },
+        ),
+        protection=ProtectionProposal(
+            reference_kind=ProtectionReferenceKind.COMPRESSION_BOUNDARY_BUFFER,
+            stop_price_reference=stop_reference,
+            invalidation_condition="close_back_inside_compression_range",
+            buffer_description="hard stop beyond opposite compression boundary",
+            evidence={
+                "compression_opposite_boundary_reference": structure.get(
+                    "compression_opposite_boundary_reference"
+                )
+            },
+        ),
+        exit=_right_tail_exit(
+            invalidation_condition="close_back_inside_compression_range",
+            runner_note="breakout runner preserves rare volatility expansion payoff after TP1",
+        ),
+        quality=_quality_score(
+            structure=Decimal("0.78") if structure.get("volatility_compression_breakout") else Decimal("0.35"),
+            context=Decimal("0.70") if evidence.get("volatility_state", {}).get("compression_confirmed") else Decimal("0.45"),
+            protection=Decimal("0.70") if stop_reference is not None else Decimal("0.20"),
+            labels={
+                "structure_clarity": "compression boundary and breakout close are explicit",
+                "context_alignment": "volatility compression supports breakout payoff",
+                "protection_clarity": "opposite compression boundary can anchor hard stop",
+            },
+        ),
+    )
+
+
 def _right_tail_exit(
     *,
     invalidation_condition: str,
@@ -199,6 +463,42 @@ def _right_tail_exit(
         time_stop_bars=12,
         invalidation_conditions=[invalidation_condition],
         notes=[runner_note],
+    )
+
+
+def _mean_reversion_exit(
+    *,
+    price_reference: Decimal | None,
+    invalidation_condition: str,
+    note: str,
+) -> ExitProposal:
+    return ExitProposal(
+        plan_kind=ExitPlanKind.FIXED_RR_OR_RANGE_TARGETS,
+        payoff_profile=StrategyPayoffProfile.MEAN_REVERSION,
+        take_profit_targets=[
+            TakeProfitTargetProposal(
+                target_id="tp1",
+                target_kind="rr",
+                rr=Decimal("1"),
+                position_fraction=Decimal("0.5"),
+                notes=["first fixed-RR realization for bounded mean-reversion attempt"],
+            ),
+            TakeProfitTargetProposal(
+                target_id="range_target",
+                target_kind="range_reference",
+                price_reference=price_reference,
+                position_fraction=Decimal("0.5"),
+                notes=["mean-reversion target; no mandatory right-tail runner"],
+            ),
+        ],
+        runner=RunnerProposal(
+            enabled=False,
+            trail_kind="none",
+            preserve_right_tail=False,
+        ),
+        time_stop_bars=6,
+        invalidation_conditions=[invalidation_condition],
+        notes=[note],
     )
 
 

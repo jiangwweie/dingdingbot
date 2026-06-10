@@ -236,6 +236,22 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
         strategy_family_id="BRF-001",
         strategy_family_version_id="BRF-001-v0",
     )
+    btpc = catalog.get_binding(
+        strategy_family_id="BTPC-001",
+        strategy_family_version_id="BTPC-001-v0",
+    )
+    lsr = catalog.get_binding(
+        strategy_family_id="LSR-001",
+        strategy_family_version_id="LSR-001-v0",
+    )
+    rbr = catalog.get_binding(
+        strategy_family_id="RBR-001",
+        strategy_family_version_id="RBR-001-v0",
+    )
+    vcb = catalog.get_binding(
+        strategy_family_id="VCB-001",
+        strategy_family_version_id="VCB-001-v0",
+    )
     rmr = catalog.get_binding(
         strategy_family_id="RMR-001",
         strategy_family_version_id="RMR-001-v0",
@@ -263,6 +279,26 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert brf.owner_confirm_each_entry_required is False
     assert brf.metadata["short_side_conservative_profile_required"] is True
     assert "per-entry Owner confirmation" in brf.metadata["runtime_confirmation_note"]
+
+    assert btpc.allows_shadow_order_candidate is True
+    assert btpc.supported_sides == ["short"]
+    assert btpc.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
+    assert btpc.metadata["short_side_conservative_profile_required"] is True
+
+    assert lsr.allows_shadow_order_candidate is True
+    assert lsr.supported_sides == ["long", "short"]
+    assert lsr.payoff_profile == StrategyPayoffProfile.MEAN_REVERSION
+    assert lsr.exit_policy.runner_required is False
+
+    assert rbr.allows_shadow_order_candidate is True
+    assert rbr.supported_sides == ["long", "short"]
+    assert rbr.payoff_profile == StrategyPayoffProfile.MEAN_REVERSION
+    assert rbr.metadata["rmr_context_is_downgrade_not_hard_filter"] is True
+
+    assert vcb.allows_shadow_order_candidate is True
+    assert vcb.supported_sides == ["long", "short"]
+    assert vcb.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
+    assert vcb.exit_policy.runner_required is True
 
     assert rmr.candidate_mode == StrategyCandidateMode.REGIME_CLASSIFIER_ONLY
     assert rmr.allows_shadow_order_candidate is False
