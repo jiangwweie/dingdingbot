@@ -117,7 +117,7 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
         "release_identity_from_manifest_without_git_status"
     ]
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
-    assert len(report["facts"]["http_checks"]) == 12
+    assert len(report["facts"]["http_checks"]) == 17
     auth_checks = [
         item
         for item in report["facts"]["http_checks"]
@@ -138,6 +138,20 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert scheduled_post["method"] == "POST"
     assert scheduled_post["expected_status"] == 401
     assert scheduled_post["http_status"] == 401
+    runtime_write_checks = [
+        item
+        for item in report["facts"]["http_checks"]
+        if item["name"]
+        in {
+            "runtime_execution_recorded_intent_write_requires_auth",
+            "runtime_execution_attempt_mutation_write_requires_auth",
+            "runtime_execution_controlled_submit_write_requires_auth",
+        }
+    ]
+    assert len(runtime_write_checks) == 3
+    assert all(item["method"] == "POST" for item in runtime_write_checks)
+    assert all(item["expected_status"] == 401 for item in runtime_write_checks)
+    assert all(item["http_status"] == 401 for item in runtime_write_checks)
     assert all(value is False for value in report["safety_invariants"].values())
 
 

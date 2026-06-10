@@ -324,6 +324,56 @@ def _http_checks(
             "expect_json": True,
         },
         {
+            "name": "runtime_execution_submit_rehearsal_requires_auth",
+            "method": "GET",
+            "path": (
+                "/api/trading-console/runtime-execution-submit-rehearsals"
+                "/authorizations/postdeploy-probe-authorization"
+            ),
+            "expected_status": 401,
+            "expect_json": True,
+        },
+        {
+            "name": "runtime_execution_order_registration_draft_requires_auth",
+            "method": "GET",
+            "path": (
+                "/api/trading-console/runtime-execution-order-registration-draft-previews"
+                "/authorizations/postdeploy-probe-authorization"
+            ),
+            "expected_status": 401,
+            "expect_json": True,
+        },
+        {
+            "name": "runtime_execution_recorded_intent_write_requires_auth",
+            "method": "POST",
+            "path": (
+                "/api/trading-console/runtime-execution-intents"
+                "/drafts/postdeploy-probe-draft"
+            ),
+            "expected_status": 401,
+            "expect_json": True,
+        },
+        {
+            "name": "runtime_execution_attempt_mutation_write_requires_auth",
+            "method": "POST",
+            "path": (
+                "/api/trading-console/runtime-execution-attempt-mutations"
+                "/reservations/postdeploy-probe-reservation"
+            ),
+            "expected_status": 401,
+            "expect_json": True,
+        },
+        {
+            "name": "runtime_execution_controlled_submit_write_requires_auth",
+            "method": "POST",
+            "path": (
+                "/api/trading-console/runtime-execution-controlled-submit"
+                "/authorizations/postdeploy-probe-authorization?submit_enabled=true"
+            ),
+            "expected_status": 401,
+            "expect_json": True,
+        },
+        {
             "name": "trading_console_generic_post_blocked",
             "method": "POST",
             "path": "/api/trading-console/operations-cockpit",
