@@ -1,6 +1,6 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-06-09
+Last updated: 2026-06-10
 Current phase: BRC strategy runtime governance convergence
 
 ## Current Document Authority
@@ -56,6 +56,7 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 
 - `docs/canon/PROJECT_BASELINE_CURRENT.md`
 - `docs/canon/BRC_TARGET_SEMANTICS.md`
+- `docs/canon/STRATEGY_RUNTIME_GUIDE.md`
 - `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
 - `docs/canon/TECH_DEBT_BASELINE.md`
 - `docs/canon/DOCUMENT_GOVERNANCE.md`

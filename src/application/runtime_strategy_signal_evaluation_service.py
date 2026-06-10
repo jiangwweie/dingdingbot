@@ -18,6 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.domain.brf_price_action_evaluator import BRF001PriceActionEvaluator
 from src.domain.cpm_historical_evaluator import CPMRO001HistoricalEvaluator
+from src.domain.reference_price_action_evaluators import (
+    BTPC001PriceActionEvaluator,
+    LSR001PriceActionEvaluator,
+    RBR001PriceActionEvaluator,
+    VCB001PriceActionEvaluator,
+)
 from src.domain.strategy_family_signal import (
     SignalSide,
     SignalType,
@@ -237,6 +243,10 @@ def _default_evaluators() -> dict[tuple[str, str], RuntimeStrategySignalEvaluato
     return {
         ("CPM-RO-001", "CPM-RO-001-v0"): CPMRO001HistoricalEvaluator(),
         ("BRF-001", "BRF-001-v0"): BRF001PriceActionEvaluator(),
+        ("BTPC-001", "BTPC-001-v0"): BTPC001PriceActionEvaluator(),
+        ("LSR-001", "LSR-001-v0"): LSR001PriceActionEvaluator(),
+        ("RBR-001", "RBR-001-v0"): RBR001PriceActionEvaluator(),
+        ("VCB-001", "VCB-001-v0"): VCB001PriceActionEvaluator(),
     }
 
 

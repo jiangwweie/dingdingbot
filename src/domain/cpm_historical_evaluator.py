@@ -13,6 +13,9 @@ from decimal import Decimal
 from hashlib import sha1
 from typing import Any
 
+from src.domain.strategy_candidate_semantics_builders import (
+    build_cpm_long_candidate_semantics,
+)
 from src.domain.strategy_family_signal import (
     ExpectedRiskShape,
     SignalDataQuality,
@@ -182,6 +185,7 @@ class CPMRO001HistoricalEvaluator:
             "lookback_low": str(lookback_low),
             "sma20_1h": str(sma20_1h),
             "sma20_4h": str(sma20_4h),
+            "latest_1h_open_time_ms": latest_1h.open_time_ms,
             "latest_1h_close": str(latest_1h.close),
             "previous_1h_high": str(previous_1h.high),
             "previous_1h_low": str(previous_1h.low),
@@ -243,6 +247,15 @@ class CPMRO001HistoricalEvaluator:
         human_summary: str,
         evidence: dict[str, Any],
     ) -> StrategyFamilySignalOutput:
+        semantic_evidence = dict(evidence)
+        if side == SignalSide.LONG:
+            semantic_evidence["candidate_semantics"] = (
+                build_cpm_long_candidate_semantics(
+                    strategy_family_version_id=signal_input.strategy_family_version_id,
+                    timeframe=signal_input.primary_timeframe,
+                    evidence=evidence,
+                ).model_dump(mode="json")
+            )
         return self._output(
             signal_input,
             signal_type=SignalType.WOULD_ENTER,
@@ -251,7 +264,7 @@ class CPMRO001HistoricalEvaluator:
             reason_codes=reason_codes,
             human_summary=human_summary,
             data_quality=signal_input.input_quality,
-            evidence_payload=evidence,
+            evidence_payload=semantic_evidence,
             review_required=True,
         )
 

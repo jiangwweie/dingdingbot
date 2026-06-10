@@ -13,6 +13,9 @@ from decimal import Decimal
 from hashlib import sha1
 from typing import Any
 
+from src.domain.strategy_candidate_semantics_builders import (
+    build_brf_short_candidate_semantics,
+)
 from src.domain.strategy_family_signal import (
     ExpectedRiskShape,
     SignalDataQuality,
@@ -161,6 +164,7 @@ class BRF001PriceActionEvaluator:
             "market_state": market_state,
             "htf_context": htf_context,
             "entry_pattern": "bear_rally_failure" if rejection_confirmed else "none",
+            "latest_1h_open_time_ms": latest.open_time_ms,
             "rally_extension_confirmed": rally_extension_confirmed,
             "rejection_confirmed": rejection_confirmed,
             "price_action_structure": {
@@ -240,6 +244,14 @@ class BRF001PriceActionEvaluator:
         human_summary: str,
         evidence: dict[str, Any],
     ) -> StrategyFamilySignalOutput:
+        semantic_evidence = dict(evidence)
+        semantic_evidence["candidate_semantics"] = (
+            build_brf_short_candidate_semantics(
+                strategy_family_version_id=signal_input.strategy_family_version_id,
+                timeframe=signal_input.primary_timeframe,
+                evidence=evidence,
+            ).model_dump(mode="json")
+        )
         return self._output(
             signal_input,
             signal_type=SignalType.WOULD_ENTER,
@@ -248,7 +260,7 @@ class BRF001PriceActionEvaluator:
             reason_codes=reason_codes,
             human_summary=human_summary,
             data_quality=signal_input.input_quality,
-            evidence_payload=evidence,
+            evidence_payload=semantic_evidence,
             review_required=True,
         )
 

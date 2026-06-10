@@ -31,6 +31,13 @@ from src.domain.historical_signal_evaluation import (
     compute_historical_signal_summary,
     signal_output_record_from_output,
 )
+from src.domain.strategy_candidate_semantics import (
+    EntrySetupKind,
+    ExitPlanKind,
+    StrategyArchetype,
+    StrategyCandidateSemantics,
+    StrategyPayoffProfile,
+)
 from src.domain.strategy_family_registry import initial_strategy_family_registry_seed
 from src.domain.strategy_family_signal import SignalSide, SignalType
 from src.infrastructure.pg_historical_ohlcv_catalog_repository import PgHistoricalOhlcvCatalogRepository
@@ -334,6 +341,18 @@ async def test_cpm_evaluator_would_enter_long_and_short(repos):
         "cpm_short_bounce_depth_normal",
         "cpm_short_loss_confirmed",
     }.issubset(set(short_output.reason_codes))
+    candidate_semantics = StrategyCandidateSemantics.model_validate(
+        long_output.evidence_payload["candidate_semantics"]
+    )
+    assert candidate_semantics.archetype == StrategyArchetype.LONG_PULLBACK_CONTINUATION
+    assert candidate_semantics.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
+    assert candidate_semantics.entry.kind == EntrySetupKind.PULLBACK_RECLAIM
+    assert candidate_semantics.entry.side == "long"
+    assert candidate_semantics.protection.stop_price_reference == Decimal("99.8")
+    assert candidate_semantics.exit.plan_kind == ExitPlanKind.PARTIAL_TP_PLUS_RUNNER
+    assert candidate_semantics.exit.runner is not None
+    assert candidate_semantics.exit.runner.preserve_right_tail is True
+    assert "candidate_semantics" not in short_output.evidence_payload
     assert long_output.not_order is True
     assert long_output.not_execution_intent is True
     assert not _contains_forbidden_key(long_output.model_dump(mode="json"))

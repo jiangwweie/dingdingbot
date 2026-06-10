@@ -5,6 +5,7 @@ authority: owner-semantic-audit + code-verification
 last_verified: 2026-06-09
 source_of_truth:
   - docs/canon/PROJECT_BASELINE_CURRENT.md
+  - docs/canon/STRATEGY_RUNTIME_GUIDE.md
   - owner semantic audit 2026-06-09
   - tracked code verification
 ---
@@ -123,6 +124,12 @@ OwnerBoundedExecutionService is a valuable one-shot execution asset:
 
 ## 5. Strategy Semantics
 
+`docs/canon/STRATEGY_RUNTIME_GUIDE.md` is the durable guide for strategy
+implementation, entry/protection/exit binding, payoff-specific exits, strategy
+fact modeling, attempt/budget defaults, leverage boundaries, and near-term
+candidate strategy coverage. This section summarizes the BRC target chain; the
+guide governs implementation details when future tasks add or wire strategies.
+
 - **EntryPolicy / ExitPolicy** should belong to strategy semantics, not be
   ad-hoc per-trade decisions.
 - **ProtectionPolicy** (TP/SL) is minimum safety protection, not the whole
@@ -186,6 +193,14 @@ Initial strategy-semantics reference candidates:
   mandatory hard stop, strict `max_active_positions`, and confirmed
   runtime-bounded automatic attempts. BRF should not require Owner confirmation
   for every entry once the runtime/profile boundaries are confirmed.
+- `BTPC-001` / `LSR-001` / `RBR-001` / `VCB-001`: near-term candidate
+  strategy semantics for bear-trend pullback continuation, liquidity-sweep
+  reversal, range-boundary reversion, and volatility-compression breakout.
+  They are not proven-alpha production strategies. They must preserve
+  payoff-specific exits: trend/right-tail strategies use hard stop + TP1 +
+  runner + trailing/invalidation/time-stop semantics, while range/mean-reversion
+  strategies use hard stop + fixed RR or range targets + stricter time-stop
+  semantics.
 - `RMR-001`: range/chop regime classifier first, not the first trading
   strategy. RMR may downgrade CPM/BRF to observe-only or raise review
   requirements, but stale or missing RMR output must not act as execution
@@ -223,6 +238,14 @@ Current local B0 implementation slice:
   distinguish reviewed short-side squeeze risk from missing facts. It is not an
   execution source and carries no sizing, leverage, venue, route, order, or
   execution instruction fields.
+- `src/domain/reference_price_action_evaluators.py` evaluates explicit
+  closed-candle OHLCV evidence for `BTPC-001`, `LSR-001`, `RBR-001`, and
+  `VCB-001`. These are reference implementations for short-side continuation,
+  liquidity-sweep reversal, range-boundary reversion, and volatility
+  compression breakout. Their outputs may carry typed `candidate_semantics`
+  snapshots but remain observe-only strategy-family signals: no sizing,
+  leverage, venue, route, order, candidate creation, intent creation, or
+  exchange calls.
 - `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
   SignalEvaluation against those semantics and can create only a shadow
   OrderCandidate through SignalEvaluationShadowService. It can also consume a

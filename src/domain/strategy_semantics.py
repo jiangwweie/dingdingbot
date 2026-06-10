@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.strategy_candidate_semantics import StrategyPayoffProfile
 from src.domain.strategy_contract_v2 import (
     EntryPolicy,
     EntryPolicyKind,
@@ -176,6 +177,7 @@ class StrategyImplementationBinding(StrategySemanticsModel):
     review_metrics: list[str] = Field(default_factory=list)
     proven_alpha: bool = False
     reference_implementation: bool = True
+    payoff_profile: StrategyPayoffProfile = StrategyPayoffProfile.RIGHT_TAIL
     runtime_confirmation_mode: StrategyRuntimeConfirmationMode = (
         StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
     )
@@ -246,6 +248,7 @@ class StrategyImplementationBinding(StrategySemanticsModel):
             "implementation_kind": self.implementation_kind.value,
             "candidate_mode": self.candidate_mode.value,
             "runtime_confirmation_mode": self.runtime_confirmation_mode.value,
+            "payoff_profile": self.payoff_profile.value,
             "proven_alpha": self.proven_alpha,
             "reference_implementation": self.reference_implementation,
             "owner_confirm_each_entry_required": self.owner_confirm_each_entry_required,
@@ -347,6 +350,10 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 strategy_family_version_id="CPM-001-v0",
             ),
             _brf_binding(),
+            _btpc_binding(),
+            _lsr_binding(),
+            _rbr_binding(),
+            _vcb_binding(),
             _rmr_binding(),
             _fco_binding(),
         ]
@@ -394,6 +401,7 @@ def _cpm_binding(
         ),
         exit_policy=_right_tail_exit_policy("partial_tp_plus_runner"),
         review_metrics=_right_tail_review_metrics(),
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
         runtime_confirmation_mode=(
             StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
         ),
@@ -459,6 +467,7 @@ def _brf_binding() -> StrategyImplementationBinding:
         exit_policy=_right_tail_exit_policy("partial_tp_plus_downside_runner"),
         review_metrics=_right_tail_review_metrics()
         + ["short_squeeze_excursion", "rally_failure_follow_through"],
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
         runtime_confirmation_mode=(
             StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
         ),
@@ -472,6 +481,206 @@ def _brf_binding() -> StrategyImplementationBinding:
                 "Owner confirms short-side runtime boundaries once; BRF entries "
                 "do not require per-entry Owner confirmation after promotion."
             ),
+        },
+    )
+
+
+def _btpc_binding() -> StrategyImplementationBinding:
+    return StrategyImplementationBinding(
+        strategy_family_id="BTPC-001",
+        strategy_family_version_id="BTPC-001-v0",
+        canonical_family_id="BTPC-001",
+        implementation_id="btpc-price-action-reference-v0",
+        implementation_kind=StrategyImplementationKind.PRICE_ACTION,
+        candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
+        source_ref="src/domain/reference_price_action_evaluators.py",
+        supported_sides=["short"],
+        required_facts=_price_action_required_facts(),
+        optional_facts=[
+            _fact(
+                "funding_rate",
+                required=False,
+                description="Optional short-side funding caveat for review.",
+                missing_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+                stale_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+            ),
+        ],
+        entry_policy=EntryPolicy(
+            kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
+            trigger="bear_trend_pullback_loss_confirmed",
+            parameters={"reference_family": "BTPC-001", "side": "short"},
+        ),
+        protection_policy=ProtectionPolicy(
+            stop_policy=StopPolicy(
+                kind=StopPolicyKind.STRUCTURE_REFERENCE,
+                required=True,
+                reference={"structure": "pullback_high_or_atr_reference"},
+                risk_notes="short-side pullback continuation requires hard stop above pullback high",
+            ),
+            max_loss_reference="runtime.max_loss_budget_per_attempt",
+            notes=[
+                "BTPC is a short-side right-tail reference candidate.",
+                "Use conservative short-side runtime profile until live review upgrades it.",
+            ],
+        ),
+        exit_policy=_right_tail_exit_policy("partial_tp_plus_downside_runner"),
+        review_metrics=_right_tail_review_metrics()
+        + ["short_squeeze_excursion", "pullback_continuation_follow_through"],
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
+        metadata={
+            "semantic_admission_only": True,
+            "not_proven_alpha": True,
+            "reference_role": "short_bear_trend_pullback_continuation",
+            "short_side_conservative_profile_required": True,
+        },
+    )
+
+
+def _lsr_binding() -> StrategyImplementationBinding:
+    return StrategyImplementationBinding(
+        strategy_family_id="LSR-001",
+        strategy_family_version_id="LSR-001-v0",
+        canonical_family_id="LSR-001",
+        implementation_id="lsr-price-action-reference-v0",
+        implementation_kind=StrategyImplementationKind.PRICE_ACTION,
+        candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
+        source_ref="src/domain/reference_price_action_evaluators.py",
+        supported_sides=["long", "short"],
+        required_facts=[
+            *_price_action_required_facts(),
+            _fact("range_structure", description="Range/sweep structure for mean reversion."),
+        ],
+        optional_facts=[
+            _fact(
+                "volatility_state",
+                required=False,
+                description="Optional volatility caveat for sweep reversals.",
+                missing_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+                stale_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+            ),
+        ],
+        entry_policy=EntryPolicy(
+            kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
+            trigger="liquidity_sweep_reclaim_confirmed",
+            parameters={"reference_family": "LSR-001", "side": "long_or_short"},
+        ),
+        protection_policy=ProtectionPolicy(
+            stop_policy=StopPolicy(
+                kind=StopPolicyKind.STRUCTURE_REFERENCE,
+                required=True,
+                reference={"structure": "sweep_extreme_with_buffer"},
+                risk_notes="mean-reversion setup invalidates beyond sweep extreme",
+            ),
+            max_loss_reference="runtime.max_loss_budget_per_attempt",
+            notes=["LSR is a bounded mean-reversion candidate, not a right-tail trend runner by default."],
+        ),
+        exit_policy=_mean_reversion_exit_policy("fixed_rr_or_range_mid_target"),
+        review_metrics=_mean_reversion_review_metrics(),
+        payoff_profile=StrategyPayoffProfile.MEAN_REVERSION,
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
+        metadata={
+            "semantic_admission_only": True,
+            "not_proven_alpha": True,
+            "reference_role": "liquidity_sweep_reversal",
+        },
+    )
+
+
+def _rbr_binding() -> StrategyImplementationBinding:
+    return StrategyImplementationBinding(
+        strategy_family_id="RBR-001",
+        strategy_family_version_id="RBR-001-v0",
+        canonical_family_id="RBR-001",
+        implementation_id="rbr-price-action-reference-v0",
+        implementation_kind=StrategyImplementationKind.PRICE_ACTION,
+        candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
+        source_ref="src/domain/reference_price_action_evaluators.py",
+        supported_sides=["long", "short"],
+        required_facts=[
+            *_price_action_required_facts(),
+            _fact("range_structure", description="Range boundary evidence."),
+            _fact("volatility_state", description="Bounded volatility / chop evidence."),
+        ],
+        entry_policy=EntryPolicy(
+            kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
+            trigger="range_boundary_rejection_confirmed",
+            parameters={"reference_family": "RBR-001", "side": "long_or_short"},
+        ),
+        protection_policy=ProtectionPolicy(
+            stop_policy=StopPolicy(
+                kind=StopPolicyKind.STRUCTURE_REFERENCE,
+                required=True,
+                reference={"structure": "range_boundary_with_buffer"},
+                risk_notes="range reversion invalidates outside rejected boundary",
+            ),
+            max_loss_reference="runtime.max_loss_budget_per_attempt",
+            notes=["RBR uses fixed RR/range exits; do not force a trend runner by default."],
+        ),
+        exit_policy=_mean_reversion_exit_policy("fixed_rr_or_opposite_range_target"),
+        review_metrics=_mean_reversion_review_metrics()
+        + ["range_boundary_quality", "time_in_range_after_entry"],
+        payoff_profile=StrategyPayoffProfile.MEAN_REVERSION,
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
+        metadata={
+            "semantic_admission_only": True,
+            "not_proven_alpha": True,
+            "reference_role": "range_boundary_reversion",
+            "rmr_context_is_downgrade_not_hard_filter": True,
+        },
+    )
+
+
+def _vcb_binding() -> StrategyImplementationBinding:
+    return StrategyImplementationBinding(
+        strategy_family_id="VCB-001",
+        strategy_family_version_id="VCB-001-v0",
+        canonical_family_id="VCB-001",
+        implementation_id="vcb-price-action-reference-v0",
+        implementation_kind=StrategyImplementationKind.PRICE_ACTION,
+        candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
+        source_ref="src/domain/reference_price_action_evaluators.py",
+        supported_sides=["long", "short"],
+        required_facts=[
+            *_price_action_required_facts(),
+            _fact("volatility_state", description="Compression / expansion state."),
+        ],
+        entry_policy=EntryPolicy(
+            kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
+            trigger="volatility_compression_breakout_confirmed",
+            parameters={"reference_family": "VCB-001", "side": "long_or_short"},
+        ),
+        protection_policy=ProtectionPolicy(
+            stop_policy=StopPolicy(
+                kind=StopPolicyKind.STRUCTURE_REFERENCE,
+                required=True,
+                reference={"structure": "opposite_compression_boundary"},
+                risk_notes="failed breakout invalidates back inside compression range",
+            ),
+            max_loss_reference="runtime.max_loss_budget_per_attempt",
+            notes=["VCB is a right-tail breakout candidate but must keep hard stop concrete."],
+        ),
+        exit_policy=_right_tail_exit_policy("partial_tp_plus_breakout_runner"),
+        review_metrics=_right_tail_review_metrics()
+        + ["false_breakout_rate", "volatility_expansion_follow_through"],
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
+        metadata={
+            "semantic_admission_only": True,
+            "not_proven_alpha": True,
+            "reference_role": "volatility_compression_breakout",
         },
     )
 
@@ -515,6 +724,7 @@ def _rmr_binding() -> StrategyImplementationBinding:
             runner_required=False,
         ),
         review_metrics=["classifier_confidence", "market_state_accuracy", "downgrade_effect"],
+        payoff_profile=StrategyPayoffProfile.REGIME_CONTEXT,
         runtime_confirmation_mode=StrategyRuntimeConfirmationMode.OBSERVE_ONLY,
         owner_confirm_each_entry_required=False,
         metadata={
@@ -562,6 +772,7 @@ def _fco_binding() -> StrategyImplementationBinding:
             runner_required=False,
         ),
         review_metrics=["data_coverage", "freshness", "missing_fact_rate"],
+        payoff_profile=StrategyPayoffProfile.DATA_BACKLOG,
         runtime_confirmation_mode=StrategyRuntimeConfirmationMode.DATA_BACKLOG_ONLY,
         owner_confirm_each_entry_required=False,
         metadata={
@@ -623,6 +834,27 @@ def _right_tail_exit_policy(note: str) -> ExitPolicy:
     )
 
 
+def _mean_reversion_exit_policy(note: str) -> ExitPolicy:
+    return ExitPolicy(
+        take_profit_policy=TakeProfitPolicy(
+            kind=TakeProfitPolicyKind.MULTI_TP_RR,
+            levels=[
+                TakeProfitLevel(rr=Decimal("1"), position_ratio=Decimal("0.5")),
+                TakeProfitLevel(rr=Decimal("2"), position_ratio=Decimal("0.5")),
+            ],
+        ),
+        lifecycle_exit_policy=LifecycleExitPolicy(
+            kind=LifecycleExitPolicyKind.TIME_STOP,
+            parameters={"runner": False, "note": note},
+        ),
+        runner_required=False,
+        right_tail_notes=[
+            "mean-reversion candidates use fixed RR or range targets by default",
+            "do not force right-tail runner semantics onto range trades",
+        ],
+    )
+
+
 def _right_tail_review_metrics() -> list[str]:
     return [
         "MFE",
@@ -635,6 +867,20 @@ def _right_tail_review_metrics() -> list[str]:
         "runner_capped_too_early",
         "stop_effectiveness",
         "attempt_continuation_quality",
+    ]
+
+
+def _mean_reversion_review_metrics() -> list[str]:
+    return [
+        "MFE",
+        "MAE",
+        "R_multiple",
+        "range_target_hit",
+        "time_to_range_target",
+        "small_loss_count",
+        "stop_effectiveness",
+        "time_stop_effectiveness",
+        "attempt_quality",
     ]
 
 

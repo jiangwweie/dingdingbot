@@ -9,6 +9,7 @@ source_of_truth:
   - docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md
   - docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md
   - docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md
+  - docs/canon/STRATEGY_RUNTIME_GUIDE.md
   - tracked code verification
   - owner semantic audit 2026-06-09
 ---
@@ -39,6 +40,13 @@ experiments, and right-tail opportunity capture. It should not optimize for
 stable yield, low-volatility compounding, automatic asset management, or
 automatic profit withdrawal.
 
+Strategy implementation and runtime wiring must follow
+`docs/canon/STRATEGY_RUNTIME_GUIDE.md`. In particular, the target is bounded
+free trading inside an Owner-approved StrategyRuntimeInstance, not repeated
+per-entry manual approval forever. The Owner-supplied isolated subaccount
+capital is already risk-scoped experimental capital; system risk control should
+prevent loss of control, not suppress every losing trade.
+
 Strategy admission must be layered:
 
 - Semantic Admission: a strategy can be represented, audited, constrained, and
@@ -51,13 +59,17 @@ Strategy admission must be layered:
   FinalGate, Owner authorization, protection readiness, account facts, and
   deployment readiness checks.
 
-Current first strategy-semantics reference candidates are CPM / BRF / RMR /
-FCO:
+Current strategy-semantics guideposts are:
 
 - CPM is a long-only pullback-continuation price-action reference
   implementation candidate, not a proven-alpha production strategy.
 - BRF is a short-side bear-rally-failure price-action reference implementation
   candidate, not a proven-alpha production strategy.
+- BTPC / LSR / RBR / VCB are near-term candidate strategy semantics for
+  short-side continuation, liquidity-sweep reversal, range-boundary reversion,
+  and volatility-compression breakout coverage. They must enter through typed
+  StrategyImplementation / RequiredFacts / EntryPolicy / ProtectionPolicy /
+  ExitPolicy semantics, not hard-coded execution logic.
 - RMR is initially a range/chop regime classifier, not the first trading
   strategy. It now has a pure closed-candle classifier implementation for
   regime evidence only.
@@ -130,6 +142,16 @@ Key facts:
   required-fact checks to pass when the evidence is present. It remains
   observe-only and cannot create sizing, leverage, venue, route, order, or
   execution instructions.
+- **Reference Price Action Evaluators** now exist locally for `BTPC-001`,
+  `LSR-001`, `RBR-001`, and `VCB-001`. They are closed-candle OHLCV reference
+  implementations for bear-trend pullback continuation, liquidity-sweep
+  reversal, range-boundary reversion, and volatility-compression breakout.
+  Each can emit non-executing `StrategyFamilySignalOutput` evidence with a
+  typed `candidate_semantics` snapshot for entry, protection, exit, payoff
+  profile, and quality. Trend/right-tail strategies use TP1 + runner semantics;
+  range/mean-reversion strategies use fixed RR/range-target semantics. They do
+  not prove alpha, size orders, choose leverage, create candidates by
+  themselves, create intents, or call exchange.
 - **StrategyRuntimeFactOverlayService** now exists as a local non-executing
   read-only fact overlay before B0 strategy signal planning. When explicitly
   injected, it replaces caller-provided account/position/market allow facts
