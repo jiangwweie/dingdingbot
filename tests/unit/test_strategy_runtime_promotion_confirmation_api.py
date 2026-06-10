@@ -7,6 +7,12 @@ from fastapi.testclient import TestClient
 from src.domain.experimental_runtime_profile_proposal import (
     build_experimental_runtime_profile_proposal,
 )
+from src.domain.strategy_runtime import (
+    StrategyRuntimeBoundary,
+    StrategyRuntimeInstance,
+    StrategyRuntimeInstanceStatus,
+    StrategyRuntimePolicySnapshot,
+)
 from src.interfaces.operator_auth import create_password_hash
 
 
@@ -46,6 +52,12 @@ class _FakePromotionConfirmationRepo:
         self.records.append(record)
         return record
 
+    async def get(self, confirmation_id):
+        for record in self.records:
+            if record.confirmation_id == confirmation_id:
+                return record
+        return None
+
     async def list(
         self,
         *,
@@ -73,6 +85,60 @@ class _FakePromotionConfirmationRepo:
             and (scope is None or record.scope == scope)
         ]
         return list(reversed(records))[:limit]
+
+
+class _FakeRuntimeDraftService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def create_draft_from_profile_confirmation(
+        self,
+        trial_binding_id,
+        *,
+        confirmation,
+        carrier_id=None,
+        expires_at_ms=None,
+        metadata=None,
+    ):
+        self.calls.append(
+            {
+                "trial_binding_id": trial_binding_id,
+                "confirmation_id": confirmation.confirmation_id,
+                "carrier_id": carrier_id,
+                "expires_at_ms": expires_at_ms,
+                "metadata": metadata or {},
+            }
+        )
+        proposal = confirmation.runtime_profile_proposal_snapshot
+        return StrategyRuntimeInstance(
+            runtime_instance_id="strategy-runtime-api-profile-1",
+            trial_binding_id=trial_binding_id,
+            admission_decision_id="decision-api-profile-1",
+            strategy_family_id=confirmation.strategy_family_id,
+            strategy_family_version_id=confirmation.strategy_family_version_id,
+            owner_risk_acceptance_id="risk-api-profile-1",
+            carrier_id=carrier_id,
+            symbol=proposal.symbol,
+            side=proposal.side,
+            status=StrategyRuntimeInstanceStatus.DRAFT,
+            boundary=StrategyRuntimeBoundary.model_validate(
+                proposal.boundary.model_dump(mode="python")
+            ),
+            policy_snapshot=StrategyRuntimePolicySnapshot(
+                source="runtime_profile_promotion_confirmation"
+            ),
+            execution_enabled=False,
+            shadow_mode=True,
+            created_at_ms=NOW_MS,
+            updated_at_ms=NOW_MS,
+            expires_at_ms=expires_at_ms,
+            metadata={
+                "confirmation_id": confirmation.confirmation_id,
+                "creates_execution_intent": False,
+                "order_created": False,
+                "exchange_called": False,
+            },
+        )
 
 
 def _semantic_confirmed() -> dict:
@@ -217,6 +283,76 @@ def test_promotion_confirmation_api_records_profile_proposal_snapshot(monkeypatc
     assert payload["confirmation"]["runtime_mutation_created"] is False
     assert payload["no_action_guarantee"]["creates_order"] is False
     assert repo.records[0].runtime_profile_proposal_snapshot is not None
+
+
+def test_promotion_confirmation_api_creates_shadow_runtime_draft(monkeypatch):
+    _configure_auth(monkeypatch)
+    repo = _FakePromotionConfirmationRepo()
+    runtime_service = _FakeRuntimeDraftService()
+    from src.interfaces import api_brc_console
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_runtime_promotion_confirmation_repository",
+        lambda: repo,
+    )
+    from src.interfaces import api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        runtime_service,
+        raising=False,
+    )
+    from src.interfaces.api import app
+
+    confirmation = api_brc_console.StrategyRuntimePromotionGateConfirmationRecord(
+        confirmation_id="promotion-confirmation-api-runtime-draft-1",
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        semantic_confirmations=_semantic_confirmed(),
+        runtime_confirmations=_runtime_confirmed(),
+        runtime_profile_proposal_snapshot=build_experimental_runtime_profile_proposal(
+            strategy_family_id="CPM-RO-001",
+            strategy_family_version_id="CPM-RO-001-v0",
+            symbol="BNB/USDT:USDT",
+            side="long",
+        ),
+        reason="Owner/Codex confirms CPM runtime profile proposal.",
+        created_at_ms=NOW_MS,
+    )
+    repo.records.append(confirmation)
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/strategy-runtime-promotion-confirmations/"
+            "promotion-confirmation-api-runtime-draft-1/runtime-drafts",
+            json={
+                "trial_binding_id": "binding-cpm-api-profile-1",
+                "carrier_id": "carrier-cpm-api-profile-1",
+                "expires_at_ms": NOW_MS + 60000,
+                "metadata": {"source": "api-unit-test"},
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["confirmation_id"] == (
+        "promotion-confirmation-api-runtime-draft-1"
+    )
+    assert payload["runtime"]["runtime_instance_id"] == "strategy-runtime-api-profile-1"
+    assert payload["runtime"]["execution_enabled"] is False
+    assert payload["runtime"]["shadow_mode"] is True
+    assert payload["runtime"]["boundary"]["total_budget"] == "9.00"
+    assert payload["runtime"]["metadata"]["creates_execution_intent"] is False
+    assert payload["runtime"]["metadata"]["order_created"] is False
+    assert payload["runtime"]["metadata"]["exchange_called"] is False
+    assert payload["no_action_guarantee"]["creates_execution_intent"] is False
+    assert payload["no_action_guarantee"]["creates_order"] is False
+    assert runtime_service.calls[0]["trial_binding_id"] == "binding-cpm-api-profile-1"
+    assert runtime_service.calls[0]["metadata"]["created_by"] == "owner"
+    assert runtime_service.calls[0]["metadata"]["non_executing_record"] is True
 
 
 def test_promotion_confirmation_api_rejects_execution_metadata(monkeypatch):

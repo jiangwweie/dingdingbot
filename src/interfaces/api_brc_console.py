@@ -124,6 +124,7 @@ from src.application.brc_admission_service import (
     BrcAdmissionService,
     OwnerRiskAcceptanceInput,
 )
+from src.application.strategy_runtime_service import StrategyRuntimeError
 from src.domain.brc_admission import (
     AdmissionDecision,
     AdmissionEvidencePacket,
@@ -405,6 +406,30 @@ class StrategyRuntimePromotionConfirmationListResponse(BaseModel):
             "mutates_runtime": False,
             "creates_withdrawal_instruction": False,
             "creates_transfer_instruction": False,
+        }
+    )
+
+
+class StrategyRuntimeDraftFromProfileConfirmationCreateRequest(BaseModel):
+    trial_binding_id: str = Field(min_length=1, max_length=128)
+    carrier_id: Optional[str] = Field(default=None, max_length=128)
+    expires_at_ms: Optional[int] = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyRuntimeDraftFromProfileConfirmationResponse(BaseModel):
+    runtime: dict[str, Any]
+    confirmation_id: str
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "not_execution_authority": True,
+            "creates_execution_intent": False,
+            "creates_order": False,
+            "calls_exchange": False,
+            "calls_owner_bounded_execution": False,
+            "calls_order_lifecycle": False,
+            "execution_enabled": False,
+            "shadow_mode": True,
         }
     )
 
@@ -6967,6 +6992,63 @@ async def list_strategy_runtime_promotion_confirmations(
         ) from exc
     return StrategyRuntimePromotionConfirmationListResponse(
         confirmations=[record.model_dump(mode="json") for record in records]
+    )
+
+
+@router.post(
+    "/strategy-runtime-promotion-confirmations/{confirmation_id}/runtime-drafts",
+    response_model=StrategyRuntimeDraftFromProfileConfirmationResponse,
+)
+async def create_strategy_runtime_draft_from_profile_confirmation(
+    confirmation_id: str,
+    body: StrategyRuntimeDraftFromProfileConfirmationCreateRequest,
+    session: OperatorSessionDependency,
+) -> StrategyRuntimeDraftFromProfileConfirmationResponse:
+    try:
+        repo = _strategy_runtime_promotion_confirmation_repository()
+        await repo.initialize()
+        confirmation = await repo.get(confirmation_id)
+    except (ValueError, SQLAlchemyError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Strategy runtime promotion confirmation repository unavailable; "
+                "persistent PG facts are required."
+            ),
+        ) from exc
+    if confirmation is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"strategy runtime promotion confirmation not found: {confirmation_id}",
+        )
+    try:
+        runtime_service = await _operation_strategy_runtime_service()
+        runtime = await runtime_service.create_draft_from_profile_confirmation(
+            body.trial_binding_id,
+            confirmation=confirmation,
+            carrier_id=body.carrier_id,
+            expires_at_ms=body.expires_at_ms,
+            metadata={
+                **body.metadata,
+                "created_by": session.username,
+                "api_path": (
+                    "official_api_brc_strategy_runtime_confirmation_runtime_draft"
+                ),
+                "non_executing_record": True,
+            },
+        )
+    except StrategyRuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, SQLAlchemyError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Strategy runtime repository unavailable; persistent PG facts are required."
+            ),
+        ) from exc
+    return StrategyRuntimeDraftFromProfileConfirmationResponse(
+        runtime=runtime.model_dump(mode="json"),
+        confirmation_id=confirmation.confirmation_id,
     )
 
 

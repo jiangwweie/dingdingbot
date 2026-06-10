@@ -104,6 +104,11 @@ Key facts:
   migration constraints. The application service can create a shadow runtime
   draft from a TrialBinding plus a fully confirmed runtime profile proposal
   snapshot, copying the proposal boundary while keeping execution disabled.
+  The BRC Console exposes a narrow operator-auth API for this draft creation
+  path under
+  `/api/brc/strategy-runtime-promotion-confirmations/{confirmation_id}/runtime-drafts`;
+  it does not create candidates, intents, orders, OrderLifecycle calls, or
+  exchange calls.
 - **SignalEvaluation / OrderCandidate** now exist as local working-tree shadow
   records with PG persistence and Trading Console inspection endpoints. They do
   not create submit-ready ExecutionIntent records, orders, FinalGate execution

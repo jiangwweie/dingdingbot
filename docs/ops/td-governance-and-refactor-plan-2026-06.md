@@ -759,7 +759,9 @@ Current local B0 implementation slice:
   `StrategyRuntimeInstance` draft only when TrialBinding, StrategyFamilyVersion,
   confirmation facts, and proposal snapshot align. The created runtime remains
   `execution_enabled=false`, `shadow_mode=true`, and cannot create candidates,
-  intents, orders, OrderLifecycle calls, or exchange calls by itself.
+  intents, orders, OrderLifecycle calls, or exchange calls by itself. The BRC
+  Console now exposes a narrow operator-auth API for this exact path:
+  `/api/brc/strategy-runtime-promotion-confirmations/{confirmation_id}/runtime-drafts`.
 - `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
   withdrawal, manual profit extraction, capital injection, and capital-base
   reset review facts. These facts can explain account-equity movement and
@@ -1437,8 +1439,9 @@ Current local Sprint 7 slice:
   submit, or call exchange.
 - A fully confirmed proposal snapshot can now feed shadow runtime draft
   materialization through `StrategyRuntimeInstanceService`, but only as a
-  non-executing draft boundary. This reduces profile drift before scheduler /
-  shadow planning without granting live runtime execution.
+  non-executing draft boundary through a narrow BRC Console API. This reduces
+  profile drift before scheduler / shadow planning without granting live runtime
+  execution.
 
 Required properties:
 
