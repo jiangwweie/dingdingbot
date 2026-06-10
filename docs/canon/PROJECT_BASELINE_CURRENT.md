@@ -142,6 +142,16 @@ Key facts:
   required-fact checks to pass when the evidence is present. It remains
   observe-only and cannot create sizing, leverage, venue, route, order, or
   execution instructions.
+- **Reference Price Action Evaluators** now exist locally for `BTPC-001`,
+  `LSR-001`, `RBR-001`, and `VCB-001`. They are closed-candle OHLCV reference
+  implementations for bear-trend pullback continuation, liquidity-sweep
+  reversal, range-boundary reversion, and volatility-compression breakout.
+  Each can emit non-executing `StrategyFamilySignalOutput` evidence with a
+  typed `candidate_semantics` snapshot for entry, protection, exit, payoff
+  profile, and quality. Trend/right-tail strategies use TP1 + runner semantics;
+  range/mean-reversion strategies use fixed RR/range-target semantics. They do
+  not prove alpha, size orders, choose leverage, create candidates by
+  themselves, create intents, or call exchange.
 - **StrategyRuntimeFactOverlayService** now exists as a local non-executing
   read-only fact overlay before B0 strategy signal planning. When explicitly
   injected, it replaces caller-provided account/position/market allow facts

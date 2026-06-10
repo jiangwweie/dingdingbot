@@ -238,6 +238,14 @@ Current local B0 implementation slice:
   distinguish reviewed short-side squeeze risk from missing facts. It is not an
   execution source and carries no sizing, leverage, venue, route, order, or
   execution instruction fields.
+- `src/domain/reference_price_action_evaluators.py` evaluates explicit
+  closed-candle OHLCV evidence for `BTPC-001`, `LSR-001`, `RBR-001`, and
+  `VCB-001`. These are reference implementations for short-side continuation,
+  liquidity-sweep reversal, range-boundary reversion, and volatility
+  compression breakout. Their outputs may carry typed `candidate_semantics`
+  snapshots but remain observe-only strategy-family signals: no sizing,
+  leverage, venue, route, order, candidate creation, intent creation, or
+  exchange calls.
 - `src/application/strategy_semantics_shadow_binding_service.py` fact-checks a
   SignalEvaluation against those semantics and can create only a shadow
   OrderCandidate through SignalEvaluationShadowService. It can also consume a
