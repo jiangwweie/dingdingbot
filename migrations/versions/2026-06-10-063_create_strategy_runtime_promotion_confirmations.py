@@ -110,47 +110,47 @@ def upgrade() -> None:
         sa.Column("updated_at_ms", sa.BIGINT(), nullable=False),
         sa.CheckConstraint(
             "scope IN ('controlled_runtime_execution', 'first_real_submit_gate_review')",
-            name="ck_strategy_runtime_promotion_confirmations_scope",
+            name="ck_srpc_scope",
         ),
         sa.CheckConstraint(
             "records_promotion_gate_confirmation = true",
-            name="ck_strategy_runtime_promotion_confirmations_records_confirmation",
+            name="ck_srpc_records_confirmation",
         ),
         sa.CheckConstraint(
             "not_execution_authority = true",
-            name="ck_strategy_runtime_promotion_confirmations_not_authority",
+            name="ck_srpc_not_authority",
         ),
         sa.CheckConstraint(
             "execution_intent_created = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_intent",
+            name="ck_srpc_no_intent",
         ),
         sa.CheckConstraint(
             "order_created = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_order",
+            name="ck_srpc_no_order",
         ),
         sa.CheckConstraint(
             "exchange_called = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_exchange",
+            name="ck_srpc_no_exchange",
         ),
         sa.CheckConstraint(
             "owner_bounded_execution_called = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_one_shot",
+            name="ck_srpc_no_one_shot",
         ),
         sa.CheckConstraint(
             "order_lifecycle_called = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_lifecycle",
+            name="ck_srpc_no_lifecycle",
         ),
         sa.CheckConstraint(
             "runtime_mutation_created = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_runtime_mutation",
+            name="ck_srpc_no_runtime_mutation",
         ),
         sa.CheckConstraint(
             "withdrawal_instruction_created = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_withdrawal",
+            name="ck_srpc_no_withdrawal",
         ),
         sa.CheckConstraint(
             "transfer_instruction_created = false",
-            name="ck_strategy_runtime_promotion_confirmations_no_transfer",
+            name="ck_srpc_no_transfer",
         ),
     )
     op.create_index(
