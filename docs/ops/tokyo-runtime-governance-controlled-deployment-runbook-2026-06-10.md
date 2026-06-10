@@ -15,10 +15,10 @@ Target branch:
 
 Current local deployment candidate must be taken from
 `scripts/prepare_tokyo_runtime_governance_release.py --json` immediately before
-packaging or deployment. Last locally verified candidate after adding this
-runbook and its regression coverage:
+packaging or deployment. Last locally verified code-bearing candidate after
+adding the read-only Tokyo probe and its regression coverage:
 
-- `1e0dd98e test(ops): cover tokyo release readiness prep`
+- `4f939207 chore(ops): add tokyo readonly deployment probe`
 
 Current Tokyo baseline from the read-only fact check:
 
@@ -28,6 +28,26 @@ Current Tokyo baseline from the read-only fact check:
 - latest deployed migration file: `044_create_live_lifecycle_reviews`
 - local latest migration file: `064_add_runtime_profile_proposal_snapshot`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
+
+Last local release-prep dry-run for code-bearing candidate `4f939207` reported:
+
+- `ready_for_packaging=true`
+- deployed head is an ancestor of local `HEAD`
+- `commits_ahead_of_deployed=97`
+- local migration count `64`
+- latest local migration
+  `2026-06-10-064_add_runtime_profile_proposal_snapshot.py`
+- no tracked secret-candidate files
+- only warning:
+  `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
+
+Last Tokyo read-only probe for the same stage reported:
+
+- `ready_for_controlled_deploy_preflight=true`
+- no blockers or warnings
+- current deployed HEAD `415d398509872cb25bf969319e29732764f9615b`
+- current deployed migration count `44`
+- backend health `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 ## Non-Negotiable Invariants
 
@@ -82,9 +102,15 @@ This creates a local archive and manifest under
 Read-only checks before any remote mutation:
 
 ```bash
+./scripts/probe_tokyo_runtime_governance_readonly.py --json
+```
+
+If the script is unavailable, use the equivalent raw read-only checks:
+
+```bash
 ssh tokyo 'cd ~/brc-deploy/app/current && git rev-parse HEAD && git status --short --branch'
 ssh tokyo 'curl -fsS http://127.0.0.1:18080/api/health'
-ssh tokyo 'ps -eo pid,ppid,user,comm,args | egrep "(python -m src.main|postgres|docker)" | grep -v egrep'
+ssh tokyo 'ps -eo pid,ppid,user,comm,args | egrep "(python -m src.main|postgres|docker)" | grep -v -E "(grep|egrep)"'
 ```
 
 Expected:
