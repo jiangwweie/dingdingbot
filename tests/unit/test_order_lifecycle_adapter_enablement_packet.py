@@ -103,6 +103,9 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert "local_registration_result_status_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
+    assert "protection_order_failure_recovery_not_implemented" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
     assert "owner_real_submit_authorization_missing" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
@@ -151,7 +154,7 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "local_registration_result_status_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
-    assert "protection_order_failure_recovery_not_implemented" in (
+    assert "protection_order_failure_recovery_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
 

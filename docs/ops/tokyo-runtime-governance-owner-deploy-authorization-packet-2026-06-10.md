@@ -49,8 +49,8 @@ Latest expected release-preparation facts for the current stage:
 status=ready_for_local_packaging
 ready_for_packaging=true
 tracked_dirty=false
-migration_count=68
-latest_migration=2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py
+migration_count=69
+latest_migration=2026-06-10-069_allow_adapter_registration_failure_results.py
 deployed_head_is_ancestor=true
 commits_ahead_of_deployed=<computed from manifest>
 ```

@@ -112,6 +112,12 @@ future local registration path. The table is still constrained to forbid
 exchange submit/call, OwnerBoundedExecution calls, ExecutionIntent status
 mutation, and withdrawal/transfer creation.
 
+Migration `069_allow_adapter_registration_failure_results` lets the adapter
+result table persist fail-closed local registration failures, including the
+case where an entry local order has been registered but a protection local order
+registration fails. This records partial local state for review and duplicate
+replay; it still does not submit exchange orders or mutate `ExecutionIntent`.
+
 ## Safety Boundary
 
 The packet does not:

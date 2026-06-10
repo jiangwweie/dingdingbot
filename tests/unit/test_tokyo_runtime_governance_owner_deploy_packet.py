@@ -39,7 +39,7 @@ def _release_report() -> dict:
         },
         "migrations": {
             "count": 68,
-            "latest": "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py",
+            "latest": "2026-06-10-069_allow_adapter_registration_failure_results.py",
         },
         "release_checks": {
             "ready_for_packaging": True,

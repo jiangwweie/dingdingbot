@@ -38,7 +38,7 @@ DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION = (
     "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
 )
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
+    "2026-06-10-069_allow_adapter_registration_failure_results.py"
 )
 DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
@@ -289,8 +289,8 @@ def _plan_phases(
                 "scripts/prepare_tokyo_runtime_governance_release.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
-                "--base-revision 064 --head-revision 068 "
-                "--expected-revision-count 4",
+                "--base-revision 064 --head-revision 069 "
+                "--expected-revision-count 5",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
@@ -420,7 +420,7 @@ def _plan_phases(
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
                     f"--expected-current-head {q(head)} "
-                    "--expected-migration-count 68 "
+                    "--expected-migration-count 69 "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 (

@@ -2450,7 +2450,8 @@ class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
         CheckConstraint(
             "status IN ('blocked', 'order_lifecycle_adapter_disabled', "
             "'local_order_registration_disabled', 'duplicate_submit_lock_required', "
-            "'local_registration_lock_acquired', 'registered_created_local_orders')",
+            "'local_registration_lock_acquired', 'local_order_registration_failed', "
+            "'registered_created_local_orders')",
             name="ck_rt_ol_adapter_result_status",
         ),
         CheckConstraint(
@@ -2486,11 +2487,13 @@ class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
             name="ck_rt_ol_adapter_result_registered_lifecycle",
         ),
         CheckConstraint(
-            "status = 'registered_created_local_orders' OR local_order_registration_executed = false",
+            "status IN ('registered_created_local_orders', 'local_order_registration_failed') "
+            "OR local_order_registration_executed = false",
             name="ck_rt_ol_adapter_result_nonreg_no_exec",
         ),
         CheckConstraint(
-            "status = 'registered_created_local_orders' OR order_lifecycle_called = false",
+            "status IN ('registered_created_local_orders', 'local_order_registration_failed') "
+            "OR order_lifecycle_called = false",
             name="ck_rt_ol_adapter_result_nonreg_no_lifecycle",
         ),
         Index(

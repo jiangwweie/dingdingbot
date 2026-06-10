@@ -34,6 +34,7 @@ class RuntimeExecutionOrderLifecycleAdapterResultStatus(str, Enum):
     LOCAL_ORDER_REGISTRATION_DISABLED = "local_order_registration_disabled"
     DUPLICATE_SUBMIT_LOCK_REQUIRED = "duplicate_submit_lock_required"
     LOCAL_REGISTRATION_LOCK_ACQUIRED = "local_registration_lock_acquired"
+    LOCAL_ORDER_REGISTRATION_FAILED = "local_order_registration_failed"
     REGISTERED_CREATED_LOCAL_ORDERS = "registered_created_local_orders"
 
 
@@ -96,10 +97,15 @@ class RuntimeExecutionOrderLifecycleAdapterResult(
             raise ValueError("runtime adapter must not create withdrawal or transfer")
         if self.execution_intent_status_changed:
             raise ValueError("status transition is a later explicit gate")
-        if (
+        success_status = (
             self.status
             == RuntimeExecutionOrderLifecycleAdapterResultStatus.REGISTERED_CREATED_LOCAL_ORDERS
-        ):
+        )
+        failure_status = (
+            self.status
+            == RuntimeExecutionOrderLifecycleAdapterResultStatus.LOCAL_ORDER_REGISTRATION_FAILED
+        )
+        if success_status:
             if self.blockers:
                 raise ValueError("registered adapter result cannot have blockers")
             if not self.order_objects_constructed:
@@ -110,6 +116,17 @@ class RuntimeExecutionOrderLifecycleAdapterResult(
                 raise ValueError("registered adapter result must call OrderLifecycle")
             if self.registered_order_count != len(self.local_order_ids):
                 raise ValueError("registered_order_count mismatch")
+        elif failure_status:
+            if not self.blockers:
+                raise ValueError("failed adapter result must have blockers")
+            if not self.order_objects_constructed:
+                raise ValueError("failed adapter result must construct orders")
+            if not self.local_order_registration_executed:
+                raise ValueError("failed adapter result must attempt local registration")
+            if not self.order_lifecycle_called:
+                raise ValueError("failed adapter result must call OrderLifecycle")
+            if self.registered_order_count != len(self.local_order_ids):
+                raise ValueError("failed registered_order_count mismatch")
         else:
             if self.order_lifecycle_called or self.local_order_registration_executed:
                 raise ValueError("non-registered adapter result cannot call lifecycle")
@@ -226,6 +243,97 @@ def build_runtime_execution_order_lifecycle_adapter_result(
             "scope": "runtime_execution_order_lifecycle_adapter_result",
             "local_created_order_registration_only": True,
             "requires_persistent_duplicate_submit_lock": True,
+            "does_not_submit_exchange_order": True,
+            "does_not_call_exchange": True,
+            "does_not_call_owner_bounded_execution": True,
+            "does_not_change_execution_intent_status": True,
+            "does_not_create_withdrawal_or_transfer": True,
+        },
+    )
+
+
+def build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
+    *,
+    registration_preview: RuntimeExecutionOrderRegistrationDraftPreview,
+    now_ms: int,
+    attempted_orders: list[Order],
+    registered_orders: list[Order],
+    failed_order: Order | None,
+    failure_reason: str,
+    failure_message: str | None = None,
+) -> RuntimeExecutionOrderLifecycleAdapterResult:
+    blockers = list(registration_preview.blockers)
+    blockers.append("local_order_registration_failed")
+    warnings = list(registration_preview.warnings)
+
+    failed_order_role = failed_order.order_role.value if failed_order else None
+    if failed_order_role == "ENTRY":
+        blockers.append("entry_order_registration_failed")
+    elif failed_order is not None:
+        blockers.append("protection_order_registration_failed")
+
+    local_order_ids = [order.id for order in registered_orders]
+    entry_ids = [order.id for order in registered_orders if order.order_role.value == "ENTRY"]
+    protection_ids = [
+        order.id for order in registered_orders if order.order_role.value != "ENTRY"
+    ]
+    attempted_order_ids = [order.id for order in attempted_orders]
+    expected_protection_ids = [
+        order.id for order in attempted_orders if order.order_role.value != "ENTRY"
+    ]
+    if entry_ids and not protection_ids and expected_protection_ids:
+        warnings.append("entry_order_registered_without_registered_protection_order")
+
+    return RuntimeExecutionOrderLifecycleAdapterResult(
+        adapter_result_id=(
+            "runtime-order-lifecycle-adapter-result-"
+            f"{registration_preview.authorization_id}"
+        ),
+        registration_preview_id=registration_preview.registration_preview_id,
+        adapter_preview_id=registration_preview.adapter_preview_id,
+        handoff_draft_id=registration_preview.handoff_draft_id,
+        preflight_id=registration_preview.preflight_id,
+        authorization_id=registration_preview.authorization_id,
+        execution_intent_id=registration_preview.execution_intent_id,
+        runtime_instance_id=registration_preview.runtime_instance_id,
+        source_type=registration_preview.source_type,
+        source_id=registration_preview.source_id,
+        semantic_ids=registration_preview.semantic_ids,
+        status=(
+            RuntimeExecutionOrderLifecycleAdapterResultStatus
+            .LOCAL_ORDER_REGISTRATION_FAILED
+        ),
+        symbol=registration_preview.symbol,
+        side=registration_preview.side,
+        local_order_ids=local_order_ids,
+        entry_order_ids=entry_ids,
+        protection_order_ids=protection_ids,
+        registered_order_count=len(registered_orders),
+        blockers=_dedupe(blockers),
+        warnings=_dedupe(warnings),
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        order_objects_constructed=bool(attempted_orders),
+        local_order_registration_executed=True,
+        order_lifecycle_called=True,
+        created_at_ms=now_ms,
+        metadata={
+            "scope": "runtime_execution_order_lifecycle_adapter_result",
+            "local_created_order_registration_only": True,
+            "registration_failure_recorded": True,
+            "failure_reason": failure_reason,
+            "failure_message": failure_message,
+            "failed_local_order_id": failed_order.id if failed_order else None,
+            "failed_order_role": failed_order_role,
+            "failed_order_type": (
+                failed_order.order_type.value if failed_order else None
+            ),
+            "attempted_local_order_ids": attempted_order_ids,
+            "registered_before_failure_local_order_ids": local_order_ids,
+            "expected_protection_local_order_ids": expected_protection_ids,
+            "recovery_status": "fail_closed_adapter_result_recorded",
+            "requires_manual_review_before_retry": True,
             "does_not_submit_exchange_order": True,
             "does_not_call_exchange": True,
             "does_not_call_owner_bounded_execution": True,

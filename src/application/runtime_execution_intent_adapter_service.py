@@ -57,6 +57,7 @@ from src.domain.runtime_execution_order_registration_draft import (
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
     build_runtime_execution_order_lifecycle_adapter_lock_result,
+    build_runtime_execution_order_lifecycle_adapter_registration_failure_result,
     build_runtime_execution_order_lifecycle_adapter_result,
     build_runtime_execution_orders_for_registration,
 )
@@ -725,20 +726,49 @@ class RuntimeExecutionIntentAdapterService:
             registration_preview=registration_preview
         )
         for order in orders:
-            registered = await self._order_lifecycle_service.register_created_order(
-                order,
-                metadata={
-                    "scope": "runtime_order_lifecycle_adapter_local_registration",
-                    "runtime_instance_id": registration_preview.runtime_instance_id,
-                    "execution_intent_id": registration_preview.execution_intent_id,
-                    "authorization_id": registration_preview.authorization_id,
-                    "source_type": registration_preview.source_type,
-                    "source_id": registration_preview.source_id,
-                    "exchange_order_submitted": False,
-                    "exchange_called": False,
-                    "execution_intent_status_changed": False,
-                },
-            )
+            try:
+                registered = (
+                    await self._order_lifecycle_service.register_created_order(
+                        order,
+                        metadata={
+                            "scope": (
+                                "runtime_order_lifecycle_adapter_local_registration"
+                            ),
+                            "runtime_instance_id": (
+                                registration_preview.runtime_instance_id
+                            ),
+                            "execution_intent_id": (
+                                registration_preview.execution_intent_id
+                            ),
+                            "authorization_id": (
+                                registration_preview.authorization_id
+                            ),
+                            "source_type": registration_preview.source_type,
+                            "source_id": registration_preview.source_id,
+                            "exchange_order_submitted": False,
+                            "exchange_called": False,
+                            "execution_intent_status_changed": False,
+                        },
+                    )
+                )
+            except Exception as exc:
+                result = (
+                    build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
+                        registration_preview=registration_preview,
+                        attempted_orders=orders,
+                        registered_orders=registered_orders,
+                        failed_order=order,
+                        failure_reason=type(exc).__name__,
+                        failure_message=str(exc),
+                        now_ms=_now_ms(),
+                    )
+                )
+                if self._order_lifecycle_adapter_result_repository is not None:
+                    result = await (
+                        self._order_lifecycle_adapter_result_repository
+                        .complete_registration(result)
+                    )
+                return result
             registered_orders.append(registered)
 
         result = build_runtime_execution_order_lifecycle_adapter_result(

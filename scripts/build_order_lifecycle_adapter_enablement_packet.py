@@ -46,7 +46,7 @@ ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "order_lifecycle_adapter_invocation_implemented": True,
     "persistent_duplicate_submit_lock_implemented": True,
     "local_registration_result_status_implemented": True,
-    "protection_order_failure_recovery_implemented": False,
+    "protection_order_failure_recovery_implemented": True,
 }
 
 

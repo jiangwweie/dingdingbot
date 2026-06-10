@@ -20,6 +20,7 @@ from src.domain.models import Direction, OrderRole, OrderStatus, OrderType
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResultStatus,
     build_runtime_execution_order_lifecycle_adapter_lock_result,
+    build_runtime_execution_order_lifecycle_adapter_registration_failure_result,
     build_runtime_execution_order_lifecycle_adapter_result,
     build_runtime_execution_orders_for_registration,
 )
@@ -45,11 +46,14 @@ class _DraftRepo:
 
 
 class _Lifecycle:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_on_role: OrderRole | None = None) -> None:
         self.calls = []
+        self.fail_on_role = fail_on_role
 
     async def register_created_order(self, order, *, metadata=None):
         self.calls.append({"order": order, "metadata": metadata or {}})
+        if order.order_role == self.fail_on_role:
+            raise RuntimeError(f"register_failed_for_{order.order_role.value.lower()}")
         return order
 
 
@@ -309,6 +313,47 @@ def test_runtime_source_native_execution_intent_remains_recorded_after_local_reg
     assert result.exchange_order_submitted is False
 
 
+def test_adapter_registration_failure_result_records_partial_local_state():
+    preview = _registration_preview()
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+
+    result = build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
+        registration_preview=preview,
+        attempted_orders=orders,
+        registered_orders=[orders[0]],
+        failed_order=orders[1],
+        failure_reason="RuntimeError",
+        failure_message="register_failed_for_sl",
+        now_ms=NOW_MS,
+    )
+
+    assert (
+        result.status
+        == RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .LOCAL_ORDER_REGISTRATION_FAILED
+    )
+    assert result.local_order_ids == ["runtime-order-draft-auth-1-entry"]
+    assert result.entry_order_ids == ["runtime-order-draft-auth-1-entry"]
+    assert result.protection_order_ids == []
+    assert result.registered_order_count == 1
+    assert "local_order_registration_failed" in result.blockers
+    assert "protection_order_registration_failed" in result.blockers
+    assert (
+        "entry_order_registered_without_registered_protection_order"
+        in result.warnings
+    )
+    assert result.order_objects_constructed is True
+    assert result.local_order_registration_executed is True
+    assert result.order_lifecycle_called is True
+    assert result.exchange_called is False
+    assert result.exchange_order_submitted is False
+    assert result.execution_intent_status_changed is False
+    assert result.metadata["failed_local_order_id"] == "runtime-order-draft-auth-1-sl"
+    assert result.metadata["requires_manual_review_before_retry"] is True
+
+
 @pytest.mark.asyncio
 async def test_adapter_result_persistent_lock_replays_without_second_registration():
     preview = _registration_preview()
@@ -340,6 +385,48 @@ async def test_adapter_result_persistent_lock_replays_without_second_registratio
     assert adapter_result_repo.acquire_calls == 2
     assert adapter_result_repo.complete_calls == 1
     assert [call["order"].id for call in lifecycle.calls] == first.local_order_ids
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_records_protection_registration_failure_and_replays():
+    preview = _registration_preview()
+    lifecycle = _Lifecycle(fail_on_role=OrderRole.SL)
+    adapter_result_repo = _AdapterResultRepo()
+    service = _service_with_preview(
+        preview,
+        lifecycle=lifecycle,
+        adapter_result_repo=adapter_result_repo,
+    )
+
+    first = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+    )
+    second = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+    )
+
+    assert (
+        first.status
+        == RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .LOCAL_ORDER_REGISTRATION_FAILED
+    )
+    assert second == first
+    assert adapter_result_repo.acquire_calls == 2
+    assert adapter_result_repo.complete_calls == 1
+    assert [call["order"].id for call in lifecycle.calls] == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert first.local_order_ids == ["runtime-order-draft-auth-1-entry"]
+    assert first.protection_order_ids == []
+    assert "protection_order_registration_failed" in first.blockers
+    assert first.exchange_called is False
+    assert first.exchange_order_submitted is False
+    assert first.execution_intent_status_changed is False
 
 
 @pytest.mark.asyncio
@@ -551,3 +638,131 @@ async def test_adapter_result_migration_creates_unique_authorization_lock_table(
     assert "order_lifecycle_called" in columns
     assert "exchange_called" in columns
     assert "uq_rt_ol_adapter_result_authorization" in unique_constraints
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_migration_069_allows_local_registration_failure_rows():
+    migrations_dir = Path(__file__).resolve().parents[2] / "migrations/versions"
+    migration_068_path = (
+        migrations_dir
+        / "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
+    )
+    migration_069_path = (
+        migrations_dir
+        / "2026-06-10-069_allow_adapter_registration_failure_results.py"
+    )
+
+    spec_068 = importlib.util.spec_from_file_location(
+        "runtime_order_lifecycle_adapter_result_migration_068",
+        migration_068_path,
+    )
+    spec_069 = importlib.util.spec_from_file_location(
+        "runtime_order_lifecycle_adapter_result_migration_069",
+        migration_069_path,
+    )
+    assert spec_068 is not None and spec_068.loader is not None
+    assert spec_069 is not None and spec_069.loader is not None
+    migration_068 = importlib.util.module_from_spec(spec_068)
+    migration_069 = importlib.util.module_from_spec(spec_069)
+    spec_068.loader.exec_module(migration_068)
+    spec_069.loader.exec_module(migration_069)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        def upgrade(sync_conn):
+            old_op_068 = migration_068.op
+            old_op_069 = migration_069.op
+            migration_068.op = Operations(MigrationContext.configure(sync_conn))
+            migration_069.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration_068.upgrade()
+                migration_069.upgrade()
+                sync_conn.exec_driver_sql(
+                    """
+                    INSERT INTO runtime_execution_order_lifecycle_adapter_results (
+                        adapter_result_id,
+                        registration_preview_id,
+                        adapter_preview_id,
+                        handoff_draft_id,
+                        preflight_id,
+                        authorization_id,
+                        execution_intent_id,
+                        runtime_instance_id,
+                        source_type,
+                        source_id,
+                        status,
+                        symbol,
+                        side,
+                        local_order_ids,
+                        entry_order_ids,
+                        protection_order_ids,
+                        registered_order_count,
+                        blockers,
+                        warnings,
+                        order_lifecycle_adapter_enabled,
+                        local_order_registration_enabled,
+                        duplicate_submit_lock_acquired,
+                        order_objects_constructed,
+                        local_order_registration_executed,
+                        execution_intent_status_changed,
+                        exchange_order_submitted,
+                        exchange_called,
+                        owner_bounded_execution_called,
+                        order_lifecycle_called,
+                        withdrawal_or_transfer_created,
+                        created_at_ms,
+                        metadata
+                    ) VALUES (
+                        'adapter-result-failure-1',
+                        'registration-preview-1',
+                        'adapter-preview-1',
+                        'handoff-1',
+                        'preflight-1',
+                        'auth-1',
+                        'intent-1',
+                        'runtime-1',
+                        'brc_runtime_order_candidate',
+                        'candidate-1',
+                        'local_order_registration_failed',
+                        'BNB/USDT:USDT',
+                        'long',
+                        '["runtime-order-draft-auth-1-entry"]',
+                        '["runtime-order-draft-auth-1-entry"]',
+                        '[]',
+                        1,
+                        '["local_order_registration_failed", "protection_order_registration_failed"]',
+                        '["entry_order_registered_without_registered_protection_order"]',
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1,
+                        0,
+                        1781090000000,
+                        '{"recovery_status": "fail_closed_adapter_result_recorded"}'
+                    )
+                    """
+                )
+                row = sync_conn.exec_driver_sql(
+                    "SELECT status, registered_order_count "
+                    "FROM runtime_execution_order_lifecycle_adapter_results"
+                ).one()
+                return row
+            finally:
+                migration_068.op = old_op_068
+                migration_069.op = old_op_069
+
+        row = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert row[0] == "local_order_registration_failed"
+    assert row[1] == 1

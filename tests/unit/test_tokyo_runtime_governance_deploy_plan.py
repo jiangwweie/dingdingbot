@@ -56,7 +56,7 @@ def test_deploy_plan_requires_artifact_and_manifest():
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
+            "2026-06-10-069_allow_adapter_registration_failure_results.py"
         ),
     )
 
@@ -107,7 +107,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
+            "2026-06-10-069_allow_adapter_registration_failure_results.py"
         ),
     )
 
@@ -158,9 +158,9 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "HEALTH_URL=http://127.0.0.1:18080/api/health" in all_commands
     assert "for attempt in $(seq 1 30)" in all_commands
     assert 'curl -fsS "$HEALTH_URL"' in all_commands
-    assert "--base-revision 064 --head-revision 068" in all_commands
-    assert "--expected-revision-count 4" in all_commands
-    assert "--expected-migration-count 68" in all_commands
+    assert "--base-revision 064 --head-revision 069" in all_commands
+    assert "--expected-revision-count 5" in all_commands
+    assert "--expected-migration-count 69" in all_commands
     assert "verify_strategy_observation_shadow_planning_rehearsal.py --json" in all_commands
     assert "verify_runtime_submit_rehearsal_pre_live_packet.py --json" in all_commands
     assert "--skip-current-head-deployed-check" in all_commands
@@ -203,7 +203,7 @@ def test_deploy_plan_blocks_manifest_head_mismatch(tmp_path: Path):
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py"
+            "2026-06-10-069_allow_adapter_registration_failure_results.py"
         ),
     )
 
