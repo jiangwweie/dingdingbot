@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.strategy_candidate_semantics import StrategyPayoffProfile
 from src.domain.strategy_contract_v2 import (
     EntryPolicy,
     EntryPolicyKind,
@@ -176,6 +177,7 @@ class StrategyImplementationBinding(StrategySemanticsModel):
     review_metrics: list[str] = Field(default_factory=list)
     proven_alpha: bool = False
     reference_implementation: bool = True
+    payoff_profile: StrategyPayoffProfile = StrategyPayoffProfile.RIGHT_TAIL
     runtime_confirmation_mode: StrategyRuntimeConfirmationMode = (
         StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
     )
@@ -246,6 +248,7 @@ class StrategyImplementationBinding(StrategySemanticsModel):
             "implementation_kind": self.implementation_kind.value,
             "candidate_mode": self.candidate_mode.value,
             "runtime_confirmation_mode": self.runtime_confirmation_mode.value,
+            "payoff_profile": self.payoff_profile.value,
             "proven_alpha": self.proven_alpha,
             "reference_implementation": self.reference_implementation,
             "owner_confirm_each_entry_required": self.owner_confirm_each_entry_required,
@@ -394,6 +397,7 @@ def _cpm_binding(
         ),
         exit_policy=_right_tail_exit_policy("partial_tp_plus_runner"),
         review_metrics=_right_tail_review_metrics(),
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
         runtime_confirmation_mode=(
             StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
         ),
@@ -459,6 +463,7 @@ def _brf_binding() -> StrategyImplementationBinding:
         exit_policy=_right_tail_exit_policy("partial_tp_plus_downside_runner"),
         review_metrics=_right_tail_review_metrics()
         + ["short_squeeze_excursion", "rally_failure_follow_through"],
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
         runtime_confirmation_mode=(
             StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
         ),
@@ -515,6 +520,7 @@ def _rmr_binding() -> StrategyImplementationBinding:
             runner_required=False,
         ),
         review_metrics=["classifier_confidence", "market_state_accuracy", "downgrade_effect"],
+        payoff_profile=StrategyPayoffProfile.REGIME_CONTEXT,
         runtime_confirmation_mode=StrategyRuntimeConfirmationMode.OBSERVE_ONLY,
         owner_confirm_each_entry_required=False,
         metadata={
@@ -562,6 +568,7 @@ def _fco_binding() -> StrategyImplementationBinding:
             runner_required=False,
         ),
         review_metrics=["data_coverage", "freshness", "missing_fact_rate"],
+        payoff_profile=StrategyPayoffProfile.DATA_BACKLOG,
         runtime_confirmation_mode=StrategyRuntimeConfirmationMode.DATA_BACKLOG_ONLY,
         owner_confirm_each_entry_required=False,
         metadata={

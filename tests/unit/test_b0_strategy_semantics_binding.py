@@ -18,6 +18,7 @@ from src.domain.signal_evaluation import (
     SignalEvaluationDecision,
     SignalEvaluationStatus,
 )
+from src.domain.strategy_candidate_semantics import StrategyPayoffProfile
 from src.domain.strategy_semantics import (
     FactAvailabilityStatus,
     MarketState,
@@ -249,10 +250,12 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert cpm.reference_implementation is True
     assert cpm.allows_shadow_order_candidate is True
     assert cpm.supported_sides == ["long"]
+    assert cpm.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
 
     assert brf.allows_shadow_order_candidate is True
     assert brf.supported_sides == ["short"]
     assert brf.protection_policy.mandatory is True
+    assert brf.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
     assert (
         brf.runtime_confirmation_mode
         == StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
@@ -263,11 +266,13 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
 
     assert rmr.candidate_mode == StrategyCandidateMode.REGIME_CLASSIFIER_ONLY
     assert rmr.allows_shadow_order_candidate is False
+    assert rmr.payoff_profile == StrategyPayoffProfile.REGIME_CONTEXT
     assert rmr.runtime_confirmation_mode == StrategyRuntimeConfirmationMode.OBSERVE_ONLY
     assert rmr.metadata["must_not_hard_filter_before_review"] is True
 
     assert fco.candidate_mode == StrategyCandidateMode.DATA_BACKLOG_ONLY
     assert fco.allows_shadow_order_candidate is False
+    assert fco.payoff_profile == StrategyPayoffProfile.DATA_BACKLOG
     assert (
         fco.runtime_confirmation_mode
         == StrategyRuntimeConfirmationMode.DATA_BACKLOG_ONLY
