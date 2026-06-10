@@ -368,6 +368,7 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
     protection_creation_failure_policy_confirmed: bool = False,
+    protection_creation_failure_policy_id: str | None = None,
     duplicate_submit_policy_confirmed: bool = False,
     deployment_readiness_confirmed: bool = False,
     explicit_owner_real_submit_authorization: bool = False,
@@ -424,6 +425,7 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
         protection_creation_failure_policy_confirmed=(
             protection_creation_failure_policy_confirmed
         ),
+        protection_creation_failure_policy_id=protection_creation_failure_policy_id,
         duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
         deployment_readiness_confirmed=deployment_readiness_confirmed,
         explicit_owner_real_submit_authorization=(
@@ -586,6 +588,7 @@ async def runtime_strategy_promotion_gate_preview(
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
     protection_creation_failure_policy_confirmed: bool = False,
+    protection_creation_failure_policy_id: str | None = None,
     duplicate_submit_policy_confirmed: bool = False,
     deployment_readiness_confirmed: bool = False,
     explicit_owner_real_submit_authorization: bool = False,
@@ -646,6 +649,9 @@ async def runtime_strategy_promotion_gate_preview(
                 ),
                 protection_creation_failure_policy_confirmed=(
                     protection_creation_failure_policy_confirmed
+                ),
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
                 ),
                 duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
                 deployment_readiness_confirmed=deployment_readiness_confirmed,

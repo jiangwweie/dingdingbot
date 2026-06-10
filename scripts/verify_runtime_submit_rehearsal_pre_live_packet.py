@@ -17,6 +17,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -53,6 +54,10 @@ from src.domain.runtime_execution_order_registration_draft import (
 )
 from src.domain.runtime_execution_protection_plan import (
     RuntimeExecutionProtectionPlanStatus,
+)
+from src.domain.runtime_execution_protection_failure_policy import (
+    RuntimeExecutionProtectionFailurePolicyStatus,
+    build_runtime_execution_protection_failure_policy,
 )
 from src.domain.runtime_execution_intent_adapter import (
     RuntimeExecutionSubmitReadinessStatus,
@@ -286,6 +291,10 @@ async def build_pre_live_packet(
         authorization.authorization_id
     )
     protection_plan = await adapter_service.record_protection_plan_for_intent(intent.id)
+    protection_failure_policy = build_runtime_execution_protection_failure_policy(
+        protection_plan=protection_plan,
+        now_ms=_now_ms(),
+    )
     attempt_reservation = await adapter_service.record_attempt_reservation_for_authorization(
         authorization.authorization_id
     )
@@ -315,6 +324,7 @@ async def build_pre_live_packet(
         + list(submit_readiness.blockers)
         + list(rehearsal.blockers)
         + list(protection_plan.blockers)
+        + list(protection_failure_policy.blockers)
         + list(attempt_reservation.blockers)
         + list(attempt_mutation.blockers)
         + list(order_lifecycle_handoff.blockers)
@@ -351,11 +361,20 @@ async def build_pre_live_packet(
         order_lifecycle_adapter_preview=order_lifecycle_adapter_preview,
         order_registration_draft_preview=order_registration_draft_preview,
     )
+    protection_failure_policy_passed = (
+        protection_failure_policy.status
+        == RuntimeExecutionProtectionFailurePolicyStatus
+        .READY_FOR_FIRST_REAL_SUBMIT_CONFIRMATION
+        and protection_failure_policy.exchange_called is False
+        and protection_failure_policy.order_created is False
+        and protection_failure_policy.order_lifecycle_called is False
+    )
     forbidden_execution_flags = _forbidden_execution_flags(
         intent=intent,
         authorization=authorization,
         rehearsal=rehearsal,
         protection_plan=protection_plan,
+        protection_failure_policy=protection_failure_policy,
         order_lifecycle_handoff=order_lifecycle_handoff,
         order_lifecycle_adapter_preview=order_lifecycle_adapter_preview,
         order_registration_draft_preview=order_registration_draft_preview,
@@ -365,6 +384,8 @@ async def build_pre_live_packet(
         runtime=runtime,
         current_head_deployed=current_head_deployed,
         owner_real_submit_authorized=owner_real_submit_authorized,
+        protection_failure_policy_id=protection_failure_policy.policy_id,
+        protection_failure_policy_passed=protection_failure_policy_passed,
     )
     live_enablement_preview = build_strategy_runtime_live_enablement_preview(
         runtime=runtime,
@@ -386,6 +407,7 @@ async def build_pre_live_packet(
     checks = {
         "technical_rehearsal_passed": technical_rehearsal_passed,
         "registration_draft_chain_passed": registration_draft_chain_passed,
+        "protection_failure_policy_passed": protection_failure_policy_passed,
         "current_head_deployed": current_head_deployed,
         "owner_real_submit_authorization_present": owner_real_submit_authorized,
         "owner_live_runtime_enablement_authorization_present": (
@@ -396,6 +418,9 @@ async def build_pre_live_packet(
         ),
         "ready_for_first_real_submit": False,
         "technical_blockers": technical_blockers,
+        "protection_failure_policy_blockers": list(
+            protection_failure_policy.blockers
+        ),
         "operational_blockers": operational_blockers,
         "implementation_blockers": implementation_blockers,
         "live_enablement_blockers": live_enablement_preview.blockers,
@@ -404,6 +429,7 @@ async def build_pre_live_packet(
     checks["ready_for_first_real_submit"] = (
         checks["technical_rehearsal_passed"]
         and checks["registration_draft_chain_passed"]
+        and checks["protection_failure_policy_passed"]
         and checks["ready_for_live_runtime_enablement_mutation_design"]
         and not technical_blockers
         and not operational_blockers
@@ -457,6 +483,9 @@ async def build_pre_live_packet(
             ),
             "submit_rehearsal_status": _enum_value(rehearsal.status),
             "protection_plan_status": _enum_value(protection_plan.status),
+            "protection_failure_policy_status": _enum_value(
+                protection_failure_policy.status
+            ),
             "attempt_mutation_status": _enum_value(attempt_mutation.status),
             "order_lifecycle_handoff_status": _enum_value(
                 order_lifecycle_handoff.status
@@ -480,6 +509,9 @@ async def build_pre_live_packet(
             "in_memory_runtime_mutation_only": True,
             "runtime_events": list(runtime_service.events),
             "protection_plan": protection_plan.model_dump(mode="json"),
+            "protection_failure_policy": (
+                protection_failure_policy.model_dump(mode="json")
+            ),
             "attempt_reservation": attempt_reservation.model_dump(mode="json"),
             "attempt_mutation": attempt_mutation.model_dump(mode="json"),
             "order_lifecycle_handoff": order_lifecycle_handoff.model_dump(mode="json"),
@@ -501,9 +533,21 @@ async def build_pre_live_packet(
             "attempt_consumed": rehearsal.attempt_consumed,
             "execution_intent_status_changed": rehearsal.execution_intent_status_changed,
             "order_created": rehearsal.order_created,
+            "protection_failure_policy_order_created": (
+                protection_failure_policy.order_created
+            ),
             "owner_bounded_execution_called": rehearsal.owner_bounded_execution_called,
+            "protection_failure_policy_owner_bounded_execution_called": (
+                protection_failure_policy.owner_bounded_execution_called
+            ),
             "order_lifecycle_called": rehearsal.order_lifecycle_called,
+            "protection_failure_policy_order_lifecycle_called": (
+                protection_failure_policy.order_lifecycle_called
+            ),
             "exchange_called": rehearsal.exchange_called,
+            "protection_failure_policy_exchange_called": (
+                protection_failure_policy.exchange_called
+            ),
             "withdrawal_or_transfer_created": False,
         },
         "notes": [
@@ -674,6 +718,8 @@ def _promotion_gate_result(
     runtime: StrategyRuntimeInstance,
     current_head_deployed: bool,
     owner_real_submit_authorized: bool,
+    protection_failure_policy_id: str,
+    protection_failure_policy_passed: bool,
 ):
     binding = initial_strategy_semantics_catalog().get_binding(
         strategy_family_id=runtime.strategy_family_id,
@@ -712,7 +758,10 @@ def _promotion_gate_result(
             ),
             first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
                 budget_release_or_consume_rule_confirmed=True,
-                protection_creation_failure_policy_confirmed=True,
+                protection_creation_failure_policy_confirmed=(
+                    protection_failure_policy_passed
+                ),
+                protection_creation_failure_policy_id=protection_failure_policy_id,
                 duplicate_submit_policy_confirmed=True,
                 deployment_readiness_confirmed=current_head_deployed,
                 explicit_owner_real_submit_authorization=owner_real_submit_authorized,
@@ -727,6 +776,7 @@ def _forbidden_execution_flags(
     authorization: RuntimeExecutionSubmitAuthorization,
     rehearsal: Any,
     protection_plan: Any,
+    protection_failure_policy: Any,
     order_lifecycle_handoff: Any,
     order_lifecycle_adapter_preview: Any,
     order_registration_draft_preview: Any,
@@ -763,6 +813,18 @@ def _forbidden_execution_flags(
         ),
         "protection_plan_order_lifecycle_called": (
             protection_plan.order_lifecycle_called
+        ),
+        "protection_failure_policy_order_created": (
+            protection_failure_policy.order_created
+        ),
+        "protection_failure_policy_exchange_called": (
+            protection_failure_policy.exchange_called
+        ),
+        "protection_failure_policy_owner_bounded_execution_called": (
+            protection_failure_policy.owner_bounded_execution_called
+        ),
+        "protection_failure_policy_order_lifecycle_called": (
+            protection_failure_policy.order_lifecycle_called
         ),
         "order_lifecycle_handoff_execution_intent_status_changed": (
             order_lifecycle_handoff.execution_intent_status_changed
@@ -862,6 +924,10 @@ def _dedupe(items: list[str]) -> list[str]:
             seen.add(item)
             result.append(item)
     return result
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def _enum_value(value: Any) -> str:

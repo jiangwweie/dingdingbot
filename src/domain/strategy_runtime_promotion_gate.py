@@ -76,6 +76,10 @@ class RuntimeExecutionConfirmationFacts(StrategyRuntimePromotionGateModel):
 class FirstRealSubmitConfirmationFacts(StrategyRuntimePromotionGateModel):
     budget_release_or_consume_rule_confirmed: bool = False
     protection_creation_failure_policy_confirmed: bool = False
+    protection_creation_failure_policy_id: Optional[str] = Field(
+        default=None,
+        max_length=300,
+    )
     duplicate_submit_policy_confirmed: bool = False
     deployment_readiness_confirmed: bool = False
     explicit_owner_real_submit_authorization: bool = False
@@ -344,6 +348,9 @@ def _check_first_real_submit_confirmations(
         "protection_creation_failure_policy_confirmed": (
             facts.protection_creation_failure_policy_confirmed
         ),
+        "protection_creation_failure_policy_id": (
+            _present(facts.protection_creation_failure_policy_id)
+        ),
         "duplicate_submit_policy_confirmed": facts.duplicate_submit_policy_confirmed,
         "deployment_readiness_confirmed": facts.deployment_readiness_confirmed,
         "explicit_owner_real_submit_authorization": (
@@ -364,6 +371,10 @@ def _append_missing(
             continue
         blockers.append(f"{prefix}_{key}_missing")
         missing_owner_decisions.append(key)
+
+
+def _present(value: str | None) -> bool:
+    return bool(str(value or "").strip())
 
 
 def _binding_requires_short_side_conservative_profile(

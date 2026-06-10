@@ -78,6 +78,7 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     )
     assert packet["readiness_summary"]["technical_rehearsal_ready"] is True
     assert packet["readiness_summary"]["registration_draft_chain_ready"] is True
+    assert packet["readiness_summary"]["protection_failure_policy_ready"] is True
     assert packet["readiness_summary"]["entry_registration_draft_ready"] is True
     assert packet["readiness_summary"]["hard_stop_registration_draft_ready"] is True
     assert packet["checks"]["ready_for_non_executing_implementation_task"] is True
@@ -108,6 +109,12 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     )
     assert (
         packet["adapter_enablement_gate"]["current_state"][
+            "adapter_implementation_capabilities"
+        ]["exchange_stage_protection_failure_policy_gate_implemented"]
+        is True
+    )
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
             "local_registration_requires_first_real_submit_gate"
         ]
         is True
@@ -118,6 +125,15 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
         ]
         is True
     )
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
+            "protection_failure_policy_status"
+        ]
+        == "ready_for_first_real_submit_confirmation"
+    )
+    assert packet["registration_draft_evidence"][
+        "protection_failure_policy_id"
+    ].startswith("runtime-protection-failure-policy-")
     assert "order_lifecycle_adapter_invocation_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
@@ -143,6 +159,9 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "protection_order_failure_recovery_not_implemented" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "exchange_stage_protection_failure_policy_gate_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "owner_real_submit_authorization_missing" in (
@@ -230,6 +249,38 @@ async def test_adapter_enablement_packet_blocks_when_hard_stop_draft_is_missing(
     )
     assert packet["checks"]["ready_for_non_executing_implementation_task"] is False
     assert "hard_stop_registration_draft_missing" in packet["checks"]["blockers"]
+
+
+@pytest.mark.asyncio
+async def test_adapter_enablement_packet_blocks_when_protection_failure_policy_missing():
+    module = _load_module()
+    pre_live = _load_pre_live_module()
+    pre_live_packet = await pre_live.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        runner=_runner(pre_live),
+    )
+    mutated = copy.deepcopy(pre_live_packet)
+    mutated["checks"]["protection_failure_policy_passed"] = False
+    mutated["checks"]["protection_failure_policy_blockers"] = [
+        "require_reduce_only_recovery_mode_missing"
+    ]
+    mutated["registration_draft_chain"].pop("protection_failure_policy", None)
+
+    packet = module.build_order_lifecycle_adapter_enablement_packet(
+        pre_live_packet=mutated
+    )
+
+    assert (
+        packet["status"]
+        == "blocked_before_order_lifecycle_adapter_implementation_task"
+    )
+    assert packet["checks"]["ready_for_non_executing_implementation_task"] is False
+    assert "protection_failure_policy_not_ready" in packet["checks"]["blockers"]
+    assert "require_reduce_only_recovery_mode_missing" in (
+        packet["checks"]["blockers"]
+    )
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,16 @@ This document defines the runtime safety boundaries for the BRC project.
   than caller-supplied allow booleans, and it still must keep
   `local_order_registration_executed=false`, `execution_intent_status_changed=false`,
   and `exchange_called=false`.
+  `RuntimeExecutionProtectionFailurePolicy` defines the first-real-submit
+  exchange-stage failure response if an entry fill exists but exchange
+  protection creation is not verified. It must fail closed by treating the
+  position as unprotected, blocking new runtime entries, requiring Owner
+  recovery review, requiring reduce-only recovery mode and reconciliation
+  before retry, and consuming/holding attempt-budget accounting until the
+  incident is resolved. The policy is evidence for promotion review only: it
+  must not create recovery orders, call OrderLifecycle, call exchange, mark the
+  position protected, change ExecutionIntent status, or create
+  withdrawal/transfer instructions.
   `RuntimeExecutionOrderLifecycleAdapterResult` now exists as the next
   default-disabled adapter skeleton. By default it returns
   `order_lifecycle_adapter_disabled` and does not construct or register orders.
@@ -230,7 +240,8 @@ confirmed:
   Owner-confirm-each-entry, after the runtime/profile boundaries are confirmed;
 - when an attempt is consumed;
 - when budget reservation is released or confirmed consumed;
-- how protection order creation failure is handled;
+- how protection order creation failure is handled, with a concrete
+  `RuntimeExecutionProtectionFailurePolicy` ID;
 - how duplicate submit is blocked and audited;
 - active position / account fact source and stale-fact behavior;
 - deployment readiness, including whether the path is still local-only or tokyo

@@ -8,7 +8,9 @@ schema-readiness for local `CREATED` order registration, and a PG-backed
 persistent duplicate-submit lock/result table. The latest slice adds a
 default-disabled first-real-submit local-registration gate and evidence-based
 local-registration enablement decision before any local
-`OrderLifecycleService.register_created_order` call.
+`OrderLifecycleService.register_created_order` call, plus a non-executing
+protection-failure policy gate for the exchange-stage case where an entry fill
+exists but protection order creation is not verified.
 
 ## Purpose
 
@@ -55,6 +57,7 @@ Observed readiness:
 technical_rehearsal_ready = true
 submit_boundary_ready = true
 registration_draft_chain_ready = true
+protection_failure_policy_ready = true
 entry_registration_draft_ready = true
 hard_stop_registration_draft_ready = true
 ready_for_runtime_adapter_enablement = false
@@ -82,6 +85,12 @@ because the runtime enablement gates remain unresolved. The adapter
 implementation capability list now records that the first-real-submit
 local-registration gate and local-registration enablement decision exist.
 
+The packet also consumes the pre-live
+`RuntimeExecutionProtectionFailurePolicy` status. If that policy is missing or
+blocked, the adapter enablement packet is blocked before the non-executing
+implementation task and before runtime adapter enablement. Owner authorization
+flags cannot bypass this policy gate.
+
 ## Adapter Result Skeleton
 
 `RuntimeExecutionOrderLifecycleAdapterResult` now exists as a default-disabled
@@ -98,6 +107,11 @@ adapter skeleton:
   enablement evidence, local-registration enablement evidence, and
   local-registration action authorization IDs before the adapter result can
   proceed;
+- first-real-submit promotion also requires a concrete
+  `RuntimeExecutionProtectionFailurePolicy` ID for the
+  entry-filled/protection-creation-failed incident path. That policy is
+  fail-closed review evidence only; it does not close, flatten, create
+  recovery orders, call OrderLifecycle, or call exchange;
 - when explicitly enabled in application tests, it constructs local
   `Order(status=CREATED)` objects from typed registration drafts and calls
   `OrderLifecycleService.register_created_order`;
@@ -149,6 +163,7 @@ The packet does not:
 - acquire the duplicate-submit lock unless the adapter/local-registration flags
   are explicitly enabled and the first-real-submit local-registration
   enablement decision / gate is READY;
+- treat a missing/blocked protection-failure policy as ready;
 - call OwnerBoundedExecution;
 - call OrderLifecycle by default;
 - call exchange;
@@ -160,6 +175,7 @@ Command:
 
 ```bash
 /opt/homebrew/bin/pytest -q \
+  tests/unit/test_runtime_execution_protection_failure_policy.py \
   tests/unit/test_runtime_order_lifecycle_adapter_result.py \
   tests/unit/test_order_lifecycle_adapter_enablement_packet.py \
   tests/unit/test_runtime_submit_rehearsal_pre_live_packet.py \
@@ -169,7 +185,7 @@ Command:
 Result:
 
 ```text
-34 passed
+39 passed
 ```
 
 Additional API / execution-plan surface check:

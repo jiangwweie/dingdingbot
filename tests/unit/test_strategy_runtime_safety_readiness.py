@@ -119,6 +119,7 @@ def test_safety_readiness_allows_owner_codex_confirmation_when_boundary_complete
     assert "trusted_fact_sources_required" in result.warnings
     assert "trusted_account_facts_required" in result.warnings
     assert "stale_fact_behavior_required" in result.warnings
+    assert "protection_failure_policy_required" in result.warnings
     assert set(result.required_owner_confirmations) == {
         "attempt_consumption_rule_confirmed",
         "budget_reservation_rule_confirmed",
@@ -128,6 +129,7 @@ def test_safety_readiness_allows_owner_codex_confirmation_when_boundary_complete
         "max_leverage_boundary_confirmed",
         "max_loss_budget_confirmed",
         "max_notional_boundary_confirmed",
+        "protection_creation_failure_policy_confirmed",
         "protection_readiness_source_confirmed",
         "stale_fact_behavior_confirmed",
         "symbol_side_boundary_confirmed",

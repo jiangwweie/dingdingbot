@@ -40,6 +40,9 @@ READY_SUBMIT_ADAPTER_STATUS = "inputs_ready_dry_run_adapter_only"
 READY_HANDOFF_STATUS = "ready_for_order_lifecycle_adapter"
 READY_ADAPTER_PREVIEW_STATUS = "inputs_ready_registration_not_enabled"
 READY_REGISTRATION_DRAFT_STATUS = "inputs_ready_registration_draft_only"
+READY_PROTECTION_FAILURE_POLICY_STATUS = (
+    "ready_for_first_real_submit_confirmation"
+)
 ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "order_object_construction_boundary_implemented": True,
     "local_order_registration_write_path_implemented": True,
@@ -50,6 +53,7 @@ ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "persistent_duplicate_submit_lock_implemented": True,
     "local_registration_result_status_implemented": True,
     "protection_order_failure_recovery_implemented": True,
+    "exchange_stage_protection_failure_policy_gate_implemented": True,
 }
 
 
@@ -95,6 +99,9 @@ def build_order_lifecycle_adapter_enablement_packet(
     registration_preview = _as_dict(
         registration_chain.get("order_registration_draft_preview")
     )
+    protection_failure_policy = _as_dict(
+        registration_chain.get("protection_failure_policy")
+    )
     live_enablement_preview = _as_dict(
         pre_live_packet.get("live_enablement_preview")
     )
@@ -104,12 +111,24 @@ def build_order_lifecycle_adapter_enablement_packet(
     implementation_blockers = list(checks.get("implementation_blockers") or [])
     operational_blockers = list(checks.get("operational_blockers") or [])
     live_enablement_blockers = list(checks.get("live_enablement_blockers") or [])
+    protection_failure_policy_blockers = list(
+        checks.get("protection_failure_policy_blockers") or []
+    )
 
     draft_readiness = _draft_readiness(registration_preview=registration_preview)
     technical_ready = (
         checks.get("technical_rehearsal_passed") is True
         and not technical_blockers
         and not forbidden_execution_flags
+    )
+    protection_failure_policy_ready = (
+        checks.get("protection_failure_policy_passed") is True
+        and protection_failure_policy.get("status")
+        == READY_PROTECTION_FAILURE_POLICY_STATUS
+        and not protection_failure_policy.get("blockers")
+        and protection_failure_policy.get("order_created") is False
+        and protection_failure_policy.get("order_lifecycle_called") is False
+        and protection_failure_policy.get("exchange_called") is False
     )
     registration_chain_ready = (
         checks.get("registration_draft_chain_passed") is True
@@ -129,9 +148,12 @@ def build_order_lifecycle_adapter_enablement_packet(
 
     blockers = _dedupe(
         technical_blockers
+        + protection_failure_policy_blockers
         + forbidden_execution_flags
         + list(draft_readiness["blockers"])
     )
+    if not protection_failure_policy_ready:
+        blockers.append("protection_failure_policy_not_ready")
     if not technical_ready:
         blockers.append("technical_rehearsal_not_ready")
     if not submit_boundary_ready:
@@ -142,6 +164,7 @@ def build_order_lifecycle_adapter_enablement_packet(
 
     ready_for_non_executing_implementation_task = (
         technical_ready
+        and protection_failure_policy_ready
         and submit_boundary_ready
         and registration_chain_ready
         and draft_readiness["entry_registration_draft_ready"]
@@ -205,6 +228,7 @@ def build_order_lifecycle_adapter_enablement_packet(
             "technical_rehearsal_ready": technical_ready,
             "submit_boundary_ready": submit_boundary_ready,
             "registration_draft_chain_ready": registration_chain_ready,
+            "protection_failure_policy_ready": protection_failure_policy_ready,
             "entry_registration_draft_ready": draft_readiness[
                 "entry_registration_draft_ready"
             ],
@@ -248,6 +272,9 @@ def build_order_lifecycle_adapter_enablement_packet(
                 "order_objects_constructed": registration_preview.get(
                     "order_objects_constructed"
                 ),
+                "protection_failure_policy_status": protection_failure_policy.get(
+                    "status"
+                ),
                 "adapter_implementation_capabilities": dict(
                     ADAPTER_IMPLEMENTATION_CAPABILITIES
                 ),
@@ -274,6 +301,9 @@ def build_order_lifecycle_adapter_enablement_packet(
             "source_type": registration_preview.get("source_type"),
             "source_id": registration_preview.get("source_id"),
             "semantic_ids": registration_preview.get("semantic_ids", {}),
+            "protection_failure_policy_id": protection_failure_policy.get(
+                "policy_id"
+            ),
         },
         "pipeline": {
             "submit_rehearsal_status": pipeline.get("submit_rehearsal_status"),
@@ -288,6 +318,9 @@ def build_order_lifecycle_adapter_enablement_packet(
             ),
             "order_registration_draft_preview_status": pipeline.get(
                 "order_registration_draft_preview_status"
+            ),
+            "protection_failure_policy_status": pipeline.get(
+                "protection_failure_policy_status"
             ),
             "next_required_gate": pipeline.get("next_required_gate"),
         },
@@ -464,6 +497,13 @@ def _implementation_work_items(
         is not True
     ):
         items.append("protection_order_failure_recovery_not_implemented")
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "exchange_stage_protection_failure_policy_gate_implemented"
+        ]
+        is not True
+    ):
+        items.append("exchange_stage_protection_failure_policy_gate_not_implemented")
     if adapter_preview.get("order_lifecycle_adapter_implemented") is not True:
         items.append("order_lifecycle_adapter_runtime_enablement_disabled")
     if registration_preview.get("local_order_registration_enabled") is not True:

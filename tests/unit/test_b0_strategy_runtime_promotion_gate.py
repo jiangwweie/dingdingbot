@@ -63,6 +63,7 @@ def _first_real_submit_confirmed() -> FirstRealSubmitConfirmationFacts:
     return FirstRealSubmitConfirmationFacts(
         budget_release_or_consume_rule_confirmed=True,
         protection_creation_failure_policy_confirmed=True,
+        protection_creation_failure_policy_id="runtime-protection-failure-policy-test",
         duplicate_submit_policy_confirmed=True,
         deployment_readiness_confirmed=True,
         explicit_owner_real_submit_authorization=True,
@@ -178,6 +179,29 @@ def test_first_real_submit_scope_requires_extra_submit_confirmations():
         result.blockers
     )
     assert "first_real_submit_explicit_owner_real_submit_authorization_missing" in (
+        result.blockers
+    )
+
+
+def test_first_real_submit_scope_requires_protection_failure_policy_evidence_id():
+    result = evaluate_strategy_runtime_promotion_gate(
+        StrategyRuntimePromotionGateInput(
+            binding=_catalog_binding("CPM-RO-001", "CPM-RO-001-v0"),
+            scope=StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW,
+            semantic_confirmations=_semantic_confirmed(),
+            runtime_confirmations=_runtime_confirmed(),
+            first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
+                budget_release_or_consume_rule_confirmed=True,
+                protection_creation_failure_policy_confirmed=True,
+                duplicate_submit_policy_confirmed=True,
+                deployment_readiness_confirmed=True,
+                explicit_owner_real_submit_authorization=True,
+            ),
+        )
+    )
+
+    assert result.status == StrategyRuntimePromotionGateStatus.BLOCKED
+    assert "first_real_submit_protection_creation_failure_policy_id_missing" in (
         result.blockers
     )
 

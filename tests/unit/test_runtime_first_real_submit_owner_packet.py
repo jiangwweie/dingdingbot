@@ -71,6 +71,7 @@ async def test_owner_packet_blocks_when_deploy_and_owner_auth_are_missing():
 
     assert packet["status"] == "blocked_before_owner_first_real_submit_decision"
     assert packet["readiness_summary"]["technical_ready"] is True
+    assert packet["readiness_summary"]["protection_failure_policy_ready"] is True
     assert packet["readiness_summary"]["deployment_ready"] is False
     assert packet["readiness_summary"]["implementation_ready"] is False
     assert packet["checks"]["packet_ready_for_owner_decision"] is False
@@ -104,6 +105,7 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
 
     assert packet["status"] == "blocked_before_owner_first_real_submit_decision"
     assert packet["readiness_summary"]["technical_ready"] is True
+    assert packet["readiness_summary"]["protection_failure_policy_ready"] is True
     assert packet["readiness_summary"]["deployment_ready"] is True
     assert packet["readiness_summary"]["implementation_ready"] is False
     assert packet["remaining_gates"]["owner_decision_items"] == []
@@ -147,6 +149,32 @@ def test_owner_packet_can_be_ready_for_owner_decision_when_only_owner_is_missing
     assert packet["checks"]["blockers"] == []
 
 
+def test_owner_packet_blocks_missing_protection_failure_policy_even_with_owner_flags():
+    module = _load_module()
+    pre_live_packet = _minimal_pre_live_packet(
+        operational_blockers=[],
+        live_enablement_blockers=[],
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+    )
+    pre_live_packet["checks"]["protection_failure_policy_passed"] = False
+    pre_live_packet["checks"]["protection_failure_policy_blockers"] = [
+        "require_reduce_only_recovery_mode_missing"
+    ]
+
+    packet = module.build_first_real_submit_owner_packet(
+        pre_live_packet=pre_live_packet
+    )
+
+    assert packet["status"] == "blocked_before_owner_first_real_submit_decision"
+    assert packet["checks"]["packet_ready_for_owner_decision"] is False
+    assert "protection_failure_policy_not_ready" in packet["checks"]["blockers"]
+    assert "require_reduce_only_recovery_mode_missing" in (
+        packet["checks"]["blockers"]
+    )
+    assert packet["remaining_gates"]["owner_decision_items"] == []
+
+
 def _minimal_pre_live_packet(
     *,
     operational_blockers: list[str],
@@ -180,9 +208,11 @@ def _minimal_pre_live_packet(
         "checks": {
             "technical_rehearsal_passed": True,
             "registration_draft_chain_passed": True,
+            "protection_failure_policy_passed": True,
             "current_head_deployed": True,
             "ready_for_first_real_submit": False,
             "technical_blockers": [],
+            "protection_failure_policy_blockers": [],
             "operational_blockers": operational_blockers,
             "implementation_blockers": [],
             "live_enablement_blockers": live_enablement_blockers,

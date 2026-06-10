@@ -113,6 +113,9 @@ def _promotion_result(
                 FirstRealSubmitConfirmationFacts(
                     budget_release_or_consume_rule_confirmed=True,
                     protection_creation_failure_policy_confirmed=True,
+                    protection_creation_failure_policy_id=(
+                        "runtime-protection-failure-policy-test"
+                    ),
                     duplicate_submit_policy_confirmed=True,
                     deployment_readiness_confirmed=True,
                     explicit_owner_real_submit_authorization=True,

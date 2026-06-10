@@ -86,6 +86,9 @@ def build_first_real_submit_owner_packet(
     )
 
     technical_blockers = list(checks.get("technical_blockers") or [])
+    protection_failure_policy_blockers = list(
+        checks.get("protection_failure_policy_blockers") or []
+    )
     operational_blockers = list(checks.get("operational_blockers") or [])
     implementation_blockers = list(checks.get("implementation_blockers") or [])
     live_enablement_blockers = list(checks.get("live_enablement_blockers") or [])
@@ -110,7 +113,9 @@ def build_first_real_submit_owner_packet(
     technical_ready = (
         checks.get("technical_rehearsal_passed") is True
         and checks.get("registration_draft_chain_passed") is True
+        and checks.get("protection_failure_policy_passed") is True
         and not technical_blockers
+        and not protection_failure_policy_blockers
         and not forbidden_execution_flags
     )
     implementation_ready = not implementation_blockers
@@ -125,11 +130,14 @@ def build_first_real_submit_owner_packet(
 
     blockers = _dedupe(
         technical_blockers
+        + protection_failure_policy_blockers
         + deployment_blockers
         + non_owner_operational_blockers
         + implementation_blockers
         + forbidden_execution_flags
     )
+    if checks.get("protection_failure_policy_passed") is not True:
+        blockers.append("protection_failure_policy_not_ready")
     if not ready_for_owner_decision:
         blockers.append("first_real_submit_prerequisites_not_ready")
         blockers = _dedupe(blockers)
@@ -161,6 +169,9 @@ def build_first_real_submit_owner_packet(
         },
         "readiness_summary": {
             "technical_ready": technical_ready,
+            "protection_failure_policy_ready": (
+                checks.get("protection_failure_policy_passed") is True
+            ),
             "deployment_ready": deployment_ready,
             "implementation_ready": implementation_ready,
             "ready_for_owner_decision": ready_for_owner_decision,
@@ -184,6 +195,7 @@ def build_first_real_submit_owner_packet(
         },
         "remaining_gates": {
             "technical_blockers": technical_blockers,
+            "protection_failure_policy_blockers": protection_failure_policy_blockers,
             "deployment_blockers": deployment_blockers,
             "owner_decision_items": owner_decision_items,
             "non_owner_operational_blockers": non_owner_operational_blockers,

@@ -327,10 +327,11 @@ Key facts:
   adapter boundary / non-mutating attempt reservation preview /
   runtime attempt reservation audit record / runtime attempt mutation record /
   runtime-native protection plan preview / runtime-native protection plan audit
-  record / runtime OrderLifecycle handoff draft audit record / non-executing
-  OrderLifecycle adapter preview gate / typed local order registration draft
-  preview / first-real-submit local-registration gate / evidence-based local
-  registration enablement decision / default-disabled OrderLifecycle adapter
+  record / runtime protection-failure policy gate / runtime OrderLifecycle
+  handoff draft audit record / non-executing OrderLifecycle adapter preview
+  gate / typed local order registration draft preview / first-real-submit
+  local-registration gate / evidence-based local registration enablement
+  decision / default-disabled OrderLifecycle adapter
   result skeleton / ExecutionIntent local-order linkage
   gate / submit adapter readiness preview / runtime submit rehearsal aggregate**
   now exist in

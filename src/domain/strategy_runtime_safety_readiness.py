@@ -210,6 +210,19 @@ def evaluate_strategy_runtime_safety_readiness(
         facts={"requires_protection": boundary.requires_protection},
     )
     add(
+        "protection_failure_policy_required",
+        RuntimeSafetyRequirementStatus.WARN,
+        confirmation_key="protection_creation_failure_policy_confirmed",
+        message=(
+            "First real submit needs a fail-closed policy for entry-filled but "
+            "protection-order creation failed incidents."
+        ),
+        facts={
+            "incident_kind": "entry_filled_protection_creation_failed",
+            "required_behavior": "fail_closed_unprotected_position_recovery",
+        },
+    )
+    add(
         "review_required",
         RuntimeSafetyRequirementStatus.PASS
         if boundary.requires_review

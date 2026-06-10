@@ -412,6 +412,7 @@ async def test_trading_console_first_real_submit_scope_can_reach_gate_review_onl
         trusted_account_fact_source_confirmed=True,
         budget_release_or_consume_rule_confirmed=True,
         protection_creation_failure_policy_confirmed=True,
+        protection_creation_failure_policy_id="runtime-protection-failure-policy-test",
         duplicate_submit_policy_confirmed=True,
         deployment_readiness_confirmed=True,
         explicit_owner_real_submit_authorization=True,
