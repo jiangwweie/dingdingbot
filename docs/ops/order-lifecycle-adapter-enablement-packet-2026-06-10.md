@@ -6,7 +6,8 @@ Status: accepted as a non-executing readiness packet. Follow-up implementation
 slices added a default-disabled OrderLifecycle adapter result skeleton,
 schema-readiness for local `CREATED` order registration, and a PG-backed
 persistent duplicate-submit lock/result table. The latest slice adds a
-default-disabled first-real-submit local-registration gate before any local
+default-disabled first-real-submit local-registration gate and evidence-based
+local-registration enablement decision before any local
 `OrderLifecycleService.register_created_order` call.
 
 ## Purpose
@@ -79,7 +80,7 @@ ready_for_runtime_adapter_enablement = false
 
 because the runtime enablement gates remain unresolved. The adapter
 implementation capability list now records that the first-real-submit
-local-registration gate exists.
+local-registration gate and local-registration enablement decision exist.
 
 ## Adapter Result Skeleton
 
@@ -90,8 +91,13 @@ adapter skeleton:
 - no `Order` objects are constructed by default;
 - no local orders are registered by default;
 - explicit adapter enablement, local-registration enablement, a READY
-  first-real-submit local-registration gate, and PG-backed duplicate-submit
-  lock acquisition are required before registration;
+  first-real-submit local-registration enablement decision / gate, and
+  PG-backed duplicate-submit lock acquisition are required before registration;
+- the enablement decision freezes deployment evidence, Owner real-submit
+  authorization, Owner live-runtime enablement authorization, adapter
+  enablement evidence, local-registration enablement evidence, and
+  local-registration action authorization IDs before the adapter result can
+  proceed;
 - when explicitly enabled in application tests, it constructs local
   `Order(status=CREATED)` objects from typed registration drafts and calls
   `OrderLifecycleService.register_created_order`;
@@ -141,8 +147,8 @@ The packet does not:
 - construct Order objects by default;
 - register local orders by default;
 - acquire the duplicate-submit lock unless the adapter/local-registration flags
-  are explicitly enabled and the first-real-submit local-registration gate is
-  READY;
+  are explicitly enabled and the first-real-submit local-registration
+  enablement decision / gate is READY;
 - call OwnerBoundedExecution;
 - call OrderLifecycle by default;
 - call exchange;
@@ -163,5 +169,20 @@ Command:
 Result:
 
 ```text
-29 passed
+34 passed
+```
+
+Additional API / execution-plan surface check:
+
+```bash
+/opt/homebrew/bin/pytest -q \
+  tests/unit/test_brc_console_api_surface.py \
+  tests/unit/test_td5_runtime_execution_plan.py \
+  -k "execution_intent or controlled_submit or api"
+```
+
+Result:
+
+```text
+71 passed, 50 deselected
 ```

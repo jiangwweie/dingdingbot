@@ -329,8 +329,9 @@ Key facts:
   runtime-native protection plan preview / runtime-native protection plan audit
   record / runtime OrderLifecycle handoff draft audit record / non-executing
   OrderLifecycle adapter preview gate / typed local order registration draft
-  preview / first-real-submit local-registration gate / default-disabled
-  OrderLifecycle adapter result skeleton / ExecutionIntent local-order linkage
+  preview / first-real-submit local-registration gate / evidence-based local
+  registration enablement decision / default-disabled OrderLifecycle adapter
+  result skeleton / ExecutionIntent local-order linkage
   gate / submit adapter readiness preview / runtime submit rehearsal aggregate**
   now exist in
   tracked code as bounded bridge layers. Deployment state must be verified from

@@ -74,12 +74,22 @@ This document defines the runtime safety boundaries for the BRC project.
   draft facts, but it must keep `order_objects_constructed=false`,
   `local_order_registration_executed=false`, `order_created=false`,
   `order_lifecycle_called=false`, and `exchange_called=false`.
+  `RuntimeExecutionLocalRegistrationEnablementDecision` freezes the evidence
+  IDs required before the local-registration action is even eligible for a
+  later adapter call: deployment evidence, Owner real-submit authorization,
+  Owner live-runtime enablement authorization, adapter enablement evidence,
+  local-registration enablement evidence, and local-registration action
+  authorization. It derives Owner authorization facts from evidence IDs rather
+  than caller-supplied allow booleans, and it still must keep
+  `local_order_registration_executed=false`, `execution_intent_status_changed=false`,
+  and `exchange_called=false`.
   `RuntimeExecutionOrderLifecycleAdapterResult` now exists as the next
   default-disabled adapter skeleton. By default it returns
   `order_lifecycle_adapter_disabled` and does not construct or register orders.
   Only when an application caller explicitly provides adapter enablement, local
-  registration enablement, a READY first-real-submit local-registration gate,
-  and acquires the PG-backed duplicate-submit lock may it construct local
+  registration enablement, a READY first-real-submit local-registration
+  enablement decision / gate, and acquires the PG-backed duplicate-submit lock
+  may it construct local
   `Order(status=CREATED)` objects from typed registration drafts and call
   `OrderLifecycleService.register_created_order`. A repeated call for the same
   authorization must replay the stored adapter result instead of registering
@@ -134,7 +144,7 @@ This document defines the runtime safety boundaries for the BRC project.
 | TrialBinding + confirmed RuntimeProfileProposal -> StrategyRuntimeInstance draft | Shadow runtime boundary materialization | Active in local working tree; creates only a shadow runtime draft with execution_enabled=false / shadow_mode=true; no candidate, intent, order, OrderLifecycle call, or exchange call |
 | StrategyRuntimeInstance shadow lifecycle API | Shadow status control | Active in local working tree; can activate/pause/revoke shadow runtime status only; execution_enabled remains false, shadow_mode remains true, and no candidate/intent/order/exchange path is invoked |
 | StrategyRuntimeInstance -> SignalEvaluation -> OrderCandidate -> Runtime FinalGate preview | Runtime governance shadow / dry-run inspection | Active in local working tree; non-executable; not deployed; includes max-loss-first budget checks plus conjunctive max leverage / max margin / stop-vs-liquidation buffer checks when those runtime/candidate facts are present or required |
-| RuntimeExecutionPlan -> RuntimeExecutionIntentDraft -> RuntimeExecutionIntent adapter preview -> ExecutionIntent(recorded) -> SubmitReadiness preview -> SubmitAuthorization(recorded) -> ControlledSubmitPlan preview -> SubmitPreflight preview -> ControlledSubmitResult(default-disabled) -> AttemptReservationPreview -> AttemptReservation(recorded pending mutation) -> AttemptMutation(applied/blocked) -> ProtectionPlanPreview -> ProtectionPlan(recorded) -> OrderLifecycleHandoffDraft(recorded) -> OrderLifecycleAdapterPreview -> SubmitAdapterPreview -> SubmitRehearsal aggregate | Non-submitting bridge toward future execution | Active in local working tree; not deployed; records audit intent, Owner submit authorization, controlled-submit preview, submit-time FinalGate preflight, disabled/blocked/not-implemented adapter result, non-mutating attempt/budget readiness, pending reservation audit fact, controlled runtime attempt/budget mutation fact, runtime-native protection readiness/record, runtime OrderLifecycle handoff draft, non-executing local order registration gate, non-executing adapter readiness, and non-mutating rehearsal aggregation only; result consumes submit-time preflight before any adapter boundary status |
+| RuntimeExecutionPlan -> RuntimeExecutionIntentDraft -> RuntimeExecutionIntent adapter preview -> ExecutionIntent(recorded) -> SubmitReadiness preview -> SubmitAuthorization(recorded) -> ControlledSubmitPlan preview -> SubmitPreflight preview -> ControlledSubmitResult(default-disabled) -> AttemptReservationPreview -> AttemptReservation(recorded pending mutation) -> AttemptMutation(applied/blocked) -> ProtectionPlanPreview -> ProtectionPlan(recorded) -> OrderLifecycleHandoffDraft(recorded) -> OrderLifecycleAdapterPreview -> SubmitAdapterPreview -> SubmitRehearsal aggregate | Non-submitting bridge toward future execution | Active in local working tree; not deployed; records audit intent, Owner submit authorization, controlled-submit preview, submit-time FinalGate preflight, disabled/blocked/not-implemented adapter result, non-mutating attempt/budget readiness, pending reservation audit fact, controlled runtime attempt/budget mutation fact, runtime-native protection readiness/record, runtime OrderLifecycle handoff draft, non-executing local order registration gate, evidence-based local registration enablement decision, non-executing adapter readiness, and non-mutating rehearsal aggregation only; result consumes submit-time preflight before any adapter boundary status |
 | Dev/test controlled paths | Testnet rehearsal and controlled testing | Active for scoped verification; no real funds |
 | Scripts direct exchange paths | Research / admin scripts | Not integrated; untracked |
 | Readmodel / preview paths | CandidateAction, BudgetedAutonomy, policy evaluation | Read-only; not executable |
