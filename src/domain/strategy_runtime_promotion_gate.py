@@ -101,6 +101,7 @@ class StrategyRuntimePromotionGateResult(StrategyRuntimePromotionGateModel):
     missing_owner_decisions: list[str] = Field(default_factory=list)
     binding_candidate_mode: StrategyCandidateMode
     implementation_kind: StrategyImplementationKind
+    runtime_confirmation_mode: str = Field(min_length=1, max_length=128)
     proven_alpha: bool
     not_execution_authority: Literal[True] = True
     execution_intent_created: Literal[False] = False
@@ -236,6 +237,7 @@ def evaluate_strategy_runtime_promotion_gate(
         missing_owner_decisions=sorted(set(missing_owner_decisions)),
         binding_candidate_mode=binding.candidate_mode,
         implementation_kind=binding.implementation_kind,
+        runtime_confirmation_mode=binding.runtime_confirmation_mode.value,
         proven_alpha=binding.proven_alpha,
     )
 

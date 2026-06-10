@@ -183,8 +183,9 @@ Initial strategy-semantics reference candidates:
 - `BRF-001`: short-side bear-rally-failure price-action reference
   implementation candidate; not a proven-alpha production strategy. BRF uses a
   more conservative profile than CPM: lower leverage, smaller notional,
-  mandatory hard stop, strict `max_active_positions`, and
-  Owner-confirm-each-entry until explicitly upgraded.
+  mandatory hard stop, strict `max_active_positions`, and confirmed
+  runtime-bounded automatic attempts. BRF should not require Owner confirmation
+  for every entry once the runtime/profile boundaries are confirmed.
 - `RMR-001`: range/chop regime classifier first, not the first trading
   strategy. RMR may downgrade CPM/BRF to observe-only or raise review
   requirements, but stale or missing RMR output must not act as execution
@@ -242,8 +243,11 @@ Current local B0 implementation slice:
   promotion gate for the remaining Owner/Codex decisions. It blocks promotion
   beyond shadow/preview if strategy semantics, runtime profile, fact sources,
   attempt/budget rules, BRF short-side conservative profile, or first-real-submit
-  confirmations are missing. Lack of proven alpha is a warning limiting
-  economic/autonomy admission, not a semantic blocker.
+  confirmations are missing. Its result also carries the strategy
+  `runtime_confirmation_mode`, so downstream agents can distinguish
+  runtime-bounded automatic attempts from legacy owner-confirm-each-entry
+  operation. Lack of proven alpha is a warning limiting economic/autonomy
+  admission, not a semantic blocker.
 - `src/application/strategy_runtime_promotion_gate_service.py` exposes that
   gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
   for unknown bindings and remains non-executing.

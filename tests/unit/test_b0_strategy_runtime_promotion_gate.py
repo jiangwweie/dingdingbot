@@ -87,6 +87,7 @@ def test_cpm_blocks_until_owner_semantic_and_runtime_confirmations_exist():
     assert "runtime_protection_readiness_source_confirmed_missing" in result.blockers
     assert "runtime_stale_fact_behavior_confirmed_missing" in result.blockers
     assert "runtime_trusted_active_position_source_confirmed_missing" in result.blockers
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
     assert result.not_execution_authority is True
     assert result.execution_intent_created is False
     assert result.order_created is False
@@ -107,6 +108,7 @@ def test_cpm_can_be_ready_for_controlled_runtime_design_without_proven_alpha():
         == StrategyRuntimePromotionGateStatus.READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN
     )
     assert result.blockers == []
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
     assert "strategy_not_proven_alpha_limits_economic_and_autonomy_admission" in (
         result.warnings
     )
@@ -123,9 +125,27 @@ def test_brf_requires_short_side_conservative_profile_confirmation():
     )
 
     assert result.status == StrategyRuntimePromotionGateStatus.BLOCKED
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
     assert "runtime_short_side_conservative_profile_confirmed_missing" in (
         result.blockers
     )
+
+
+def test_brf_can_reach_runtime_design_after_short_profile_confirmation_without_per_entry_owner_mode():
+    result = evaluate_strategy_runtime_promotion_gate(
+        StrategyRuntimePromotionGateInput(
+            binding=_catalog_binding("BRF-001", "BRF-001-v0"),
+            semantic_confirmations=_semantic_confirmed(),
+            runtime_confirmations=_runtime_confirmed(short_profile=True),
+        )
+    )
+
+    assert (
+        result.status
+        == StrategyRuntimePromotionGateStatus.READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN
+    )
+    assert result.blockers == []
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
 
 
 def test_rmr_regime_classifier_cannot_promote_as_runtime_trade_strategy():
@@ -140,6 +160,7 @@ def test_rmr_regime_classifier_cannot_promote_as_runtime_trade_strategy():
     assert result.status == StrategyRuntimePromotionGateStatus.BLOCKED
     assert "strategy_binding_not_trade_candidate" in result.blockers
     assert "regime_classifier_not_runtime_trade_strategy" in result.blockers
+    assert result.runtime_confirmation_mode == "observe_only"
 
 
 def test_first_real_submit_scope_requires_extra_submit_confirmations():

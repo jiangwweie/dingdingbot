@@ -1031,8 +1031,8 @@ BRF short-side boundary:
 
 - BRF requires a more conservative execution profile than long-only CPM:
   lower leverage, smaller notional, mandatory hard stop, strict
-  `max_active_positions`, and Owner-confirm-each-entry until explicitly
-  upgraded.
+  `max_active_positions`, and confirmed runtime-bounded automatic attempts
+  rather than per-entry Owner confirmation after promotion.
 - BRF must not submit without concrete protection readiness. Short-side squeeze
   risk must be part of the strategy evidence and review semantics.
 
@@ -1054,8 +1054,9 @@ Owner confirmation required:
 - protection policy;
 - attempt consumption rule;
 - budget reservation rule;
-- whether runtime attempts are Owner-confirm-each-entry or budget-bounded
-  automatic attempts for the first controlled execution profile.
+- runtime attempts should use budget/runtime-bounded automatic attempts for the
+  first controlled execution profile after profile confirmation, not
+  Owner-confirm-each-entry.
 
 Additional confirmation required before the first real submit:
 

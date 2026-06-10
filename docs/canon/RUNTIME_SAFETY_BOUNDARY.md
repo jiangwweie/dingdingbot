@@ -176,8 +176,9 @@ confirmed:
 - budget reservation basis: prefer concrete max-loss evidence for
   `budget_reserved`, and use notional only as a conservative fallback when
   loss-budget evidence is missing;
-- whether the profile is Owner-confirm-each-entry or budget-bounded automatic
-  attempts;
+- the runtime confirmation mode. The target mode for the isolated experimental
+  subaccount is budget/runtime-bounded automatic attempts, not
+  Owner-confirm-each-entry, after the runtime/profile boundaries are confirmed;
 - when an attempt is consumed;
 - when budget reservation is released or confirmed consumed;
 - how protection order creation failure is handled;
@@ -188,7 +189,8 @@ confirmed:
 
 BRF / short-side runtime profiles must be more conservative than long-only CPM
 profiles until explicitly upgraded: lower leverage, smaller notional, mandatory
-hard stop, stricter max active positions, and Owner-confirm-each-entry.
+hard stop, stricter max active positions, and confirmed runtime-bounded
+automatic attempts rather than per-entry Owner confirmation.
 
 ---
 

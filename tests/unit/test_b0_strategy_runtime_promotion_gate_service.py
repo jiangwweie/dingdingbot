@@ -102,6 +102,7 @@ def test_promotion_gate_service_previews_cpm_by_strategy_version():
         result.status
         == StrategyRuntimePromotionGateStatus.READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN
     )
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
     assert result.not_execution_authority is True
     assert result.execution_intent_created is False
     assert result.order_created is False
@@ -117,6 +118,7 @@ def test_promotion_gate_service_keeps_brf_blocked_without_short_profile():
     )
 
     assert result.status == StrategyRuntimePromotionGateStatus.BLOCKED
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
     assert "runtime_short_side_conservative_profile_confirmed_missing" in (
         result.blockers
     )
@@ -201,6 +203,7 @@ async def test_trading_console_promotion_gate_preview_returns_ready_when_confirm
         == StrategyRuntimePromotionGateStatus.READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN
     )
     assert result.blockers == []
+    assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
     assert result.not_execution_authority is True
 
 

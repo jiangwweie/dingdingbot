@@ -48,6 +48,13 @@ class StrategyCandidateMode(str, Enum):
     DATA_BACKLOG_ONLY = "data_backlog_only"
 
 
+class StrategyRuntimeConfirmationMode(str, Enum):
+    RUNTIME_BOUNDED_AUTO_ATTEMPTS = "runtime_bounded_auto_attempts"
+    OWNER_CONFIRM_EACH_ENTRY = "owner_confirm_each_entry"
+    OBSERVE_ONLY = "observe_only"
+    DATA_BACKLOG_ONLY = "data_backlog_only"
+
+
 class FactAvailabilityStatus(str, Enum):
     AVAILABLE = "available"
     MISSING = "missing"
@@ -169,7 +176,10 @@ class StrategyImplementationBinding(StrategySemanticsModel):
     review_metrics: list[str] = Field(default_factory=list)
     proven_alpha: bool = False
     reference_implementation: bool = True
-    owner_confirm_each_entry_required: bool = True
+    runtime_confirmation_mode: StrategyRuntimeConfirmationMode = (
+        StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+    )
+    owner_confirm_each_entry_required: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -186,6 +196,22 @@ class StrategyImplementationBinding(StrategySemanticsModel):
             and self.candidate_mode != StrategyCandidateMode.DATA_BACKLOG_ONLY
         ):
             raise ValueError("data backlog must use DATA_BACKLOG_ONLY")
+        if (
+            self.candidate_mode != StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED
+            and self.runtime_confirmation_mode
+            == StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ):
+            raise ValueError(
+                "non-candidate strategy bindings cannot use runtime-bounded auto attempts"
+            )
+        if (
+            self.runtime_confirmation_mode
+            == StrategyRuntimeConfirmationMode.OWNER_CONFIRM_EACH_ENTRY
+            and not self.owner_confirm_each_entry_required
+        ):
+            raise ValueError(
+                "OWNER_CONFIRM_EACH_ENTRY mode requires owner_confirm_each_entry_required"
+            )
         return self
 
     @property
@@ -219,6 +245,7 @@ class StrategyImplementationBinding(StrategySemanticsModel):
             "implementation_id": self.implementation_id,
             "implementation_kind": self.implementation_kind.value,
             "candidate_mode": self.candidate_mode.value,
+            "runtime_confirmation_mode": self.runtime_confirmation_mode.value,
             "proven_alpha": self.proven_alpha,
             "reference_implementation": self.reference_implementation,
             "owner_confirm_each_entry_required": self.owner_confirm_each_entry_required,
@@ -367,10 +394,18 @@ def _cpm_binding(
         ),
         exit_policy=_right_tail_exit_policy("partial_tp_plus_runner"),
         review_metrics=_right_tail_review_metrics(),
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
         metadata={
             "semantic_admission_only": True,
             "not_proven_alpha": True,
             "reference_role": "long_pullback_continuation",
+            "runtime_confirmation_note": (
+                "Owner confirms bounded runtime/profile; entries may be attempted "
+                "automatically within runtime boundaries."
+            ),
         },
     )
 
@@ -418,17 +453,25 @@ def _brf_binding() -> StrategyImplementationBinding:
             max_loss_reference="runtime.max_loss_budget_per_attempt",
             notes=[
                 "BRF starts lower leverage and smaller notional than CPM.",
-                "Owner-confirm-each-entry is required until explicitly upgraded.",
+                "BRF may auto-attempt only inside a confirmed conservative runtime profile.",
             ],
         ),
         exit_policy=_right_tail_exit_policy("partial_tp_plus_downside_runner"),
         review_metrics=_right_tail_review_metrics()
         + ["short_squeeze_excursion", "rally_failure_follow_through"],
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
         metadata={
             "semantic_admission_only": True,
             "not_proven_alpha": True,
             "reference_role": "short_bear_rally_failure",
             "short_side_conservative_profile_required": True,
+            "runtime_confirmation_note": (
+                "Owner confirms short-side runtime boundaries once; BRF entries "
+                "do not require per-entry Owner confirmation after promotion."
+            ),
         },
     )
 
@@ -472,6 +515,8 @@ def _rmr_binding() -> StrategyImplementationBinding:
             runner_required=False,
         ),
         review_metrics=["classifier_confidence", "market_state_accuracy", "downgrade_effect"],
+        runtime_confirmation_mode=StrategyRuntimeConfirmationMode.OBSERVE_ONLY,
+        owner_confirm_each_entry_required=False,
         metadata={
             "semantic_admission_only": True,
             "not_trade_strategy": True,
@@ -517,6 +562,8 @@ def _fco_binding() -> StrategyImplementationBinding:
             runner_required=False,
         ),
         review_metrics=["data_coverage", "freshness", "missing_fact_rate"],
+        runtime_confirmation_mode=StrategyRuntimeConfirmationMode.DATA_BACKLOG_ONLY,
+        owner_confirm_each_entry_required=False,
         metadata={
             "semantic_admission_only": True,
             "data_dependency_backlog": True,

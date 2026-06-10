@@ -25,6 +25,7 @@ from src.domain.strategy_semantics import (
     StrategyEvaluationContext,
     StrategyFactCheckStatus,
     StrategyFactSnapshot,
+    StrategyRuntimeConfirmationMode,
     initial_strategy_semantics_catalog,
 )
 from src.domain.strategy_family_signal import (
@@ -252,15 +253,25 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert brf.allows_shadow_order_candidate is True
     assert brf.supported_sides == ["short"]
     assert brf.protection_policy.mandatory is True
-    assert brf.owner_confirm_each_entry_required is True
+    assert (
+        brf.runtime_confirmation_mode
+        == StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+    )
+    assert brf.owner_confirm_each_entry_required is False
     assert brf.metadata["short_side_conservative_profile_required"] is True
+    assert "per-entry Owner confirmation" in brf.metadata["runtime_confirmation_note"]
 
     assert rmr.candidate_mode == StrategyCandidateMode.REGIME_CLASSIFIER_ONLY
     assert rmr.allows_shadow_order_candidate is False
+    assert rmr.runtime_confirmation_mode == StrategyRuntimeConfirmationMode.OBSERVE_ONLY
     assert rmr.metadata["must_not_hard_filter_before_review"] is True
 
     assert fco.candidate_mode == StrategyCandidateMode.DATA_BACKLOG_ONLY
     assert fco.allows_shadow_order_candidate is False
+    assert (
+        fco.runtime_confirmation_mode
+        == StrategyRuntimeConfirmationMode.DATA_BACKLOG_ONLY
+    )
     assert fco.metadata["data_dependency_backlog"] is True
 
 
@@ -317,6 +328,10 @@ def test_brf_semantics_can_create_non_executing_shadow_order_candidate():
     assert candidate.protection_preview.stop_price_reference == Decimal("1725")
     assert candidate.metadata["adapter_scope"] == "b0_shadow_only"
     assert candidate.metadata["strategy_semantics"]["canonical_family_id"] == "BRF-001"
+    assert (
+        candidate.metadata["strategy_semantics"]["runtime_confirmation_mode"]
+        == "runtime_bounded_auto_attempts"
+    )
     assert candidate.metadata["strategy_semantics"]["proven_alpha"] is False
     assert "MFE" in candidate.metadata["right_tail_review_metrics"]
     assert "runner_capped_too_early" in candidate.metadata["right_tail_review_metrics"]
