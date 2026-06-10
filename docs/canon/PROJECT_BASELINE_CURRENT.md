@@ -386,6 +386,12 @@ Key facts:
   OwnerBoundedExecution, call OrderLifecycle, or call exchange. These layers do
   not call OwnerBoundedExecution, call OrderLifecycle, place orders, or call the
   exchange.
+  `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` now exercises
+  that chain with in-memory repositories and reports a first-real-submit packet:
+  the technical non-executing rehearsal can pass, but first real submit remains
+  blocked while the current HEAD is not deployed, Owner real-submit
+  authorization is absent, runtime remains shadow / execution-disabled, and the
+  controlled submit adapter is not implemented.
 - **StrategyFamily / Admission** exists as metadata, admission classification,
   and evidence chain. It does not bind to executable strategy code.
 - **CandidateAction / BudgetedAutonomy** are readmodel / preview / policy

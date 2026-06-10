@@ -76,7 +76,7 @@ The current local code and docs preserve this direction:
 | Trusted facts | `StrategyRuntimeFactOverlayService` can replace caller-supplied account/position/market allow facts and block missing trusted sources | local non-executing ready |
 | Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; scheduled observations preserve signal input snapshots and can call the shadow planner only after `allow_shadow_candidate_creation=true` plus a unique ACTIVE shadow runtime resolved from `StrategyRuntimeInstanceService`; the local CLI defaults to observation-only and requires explicit `--shadow-plan` / `--allow-shadow-candidate-creation` flags; Trading Console exposes an operator-auth manual scheduled run POST for this non-executing wiring; a local in-memory rehearsal verifier proves one CPM shadow candidate can be created with all execution/order/exchange flags false | local non-executing ready |
 | Runtime safety | Promotion and readiness gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, and deployment confirmations | local non-executing ready |
-| Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist | local non-submitting bridge only |
+| Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist; local pre-live packet verifier reaches the non-executing submit adapter boundary while preserving first-real-submit blockers | local non-submitting bridge only |
 | Console productization | Trading Console exposes runtime governance, strategy observation/planning, promotion/readiness, right-tail review, capital-base/withdrawal-adjusted review, and theme toggle surfaces | local UI/API verified previously |
 | Deployment | Tokyo backend and Trading Console static frontend are deployed; postdeploy verifier passed with authenticated endpoints expected to require login | deployed non-executing runtime governance |
 
@@ -213,6 +213,34 @@ order_created=false
 order_lifecycle_called=false
 owner_bounded_execution_called=false
 withdrawal_or_transfer_created=false
+```
+
+Local runtime submit rehearsal pre-live packet:
+
+```bash
+/opt/homebrew/bin/python3 \
+  scripts/verify_runtime_submit_rehearsal_pre_live_packet.py \
+  --json
+```
+
+Observed result:
+
+```text
+status=blocked_before_first_real_submit
+technical_rehearsal_passed=true
+ready_for_first_real_submit=false
+technical_blockers=[]
+operational_blockers=[
+  current_head_not_deployed_to_tokyo,
+  owner_real_submit_authorization_missing
+]
+implementation_blockers=[
+  runtime_not_live_execution_enabled,
+  controlled_submit_adapter_not_implemented
+]
+forbidden_execution_flags=[]
+submit_rehearsal_status=ready_for_non_executing_submit_adapter_boundary
+submit_adapter_preview_status=inputs_ready_adapter_not_implemented
 ```
 
 Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
