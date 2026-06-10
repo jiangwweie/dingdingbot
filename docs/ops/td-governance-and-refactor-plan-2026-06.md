@@ -754,6 +754,12 @@ Current local B0 implementation slice:
   protection-readiness, attempt, budget, active-position/account facts, and
   stale-fact behavior. It is not a runtime record, live-profile change,
   ExecutionIntent, order, or exchange authority.
+- `StrategyRuntimeInstanceService.create_draft_from_profile_confirmation()` can
+  materialize a confirmed proposal boundary into a shadow
+  `StrategyRuntimeInstance` draft only when TrialBinding, StrategyFamilyVersion,
+  confirmation facts, and proposal snapshot align. The created runtime remains
+  `execution_enabled=false`, `shadow_mode=true`, and cannot create candidates,
+  intents, orders, OrderLifecycle calls, or exchange calls by itself.
 - `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
   withdrawal, manual profit extraction, capital injection, and capital-base
   reset review facts. These facts can explain account-equity movement and
@@ -1429,6 +1435,10 @@ Current local Sprint 7 slice:
   mean-reversion boundary proposals, but the result remains only Owner/Codex
   review input and does not create a runtime, change live config, authorize
   submit, or call exchange.
+- A fully confirmed proposal snapshot can now feed shadow runtime draft
+  materialization through `StrategyRuntimeInstanceService`, but only as a
+  non-executing draft boundary. This reduces profile drift before scheduler /
+  shadow planning without granting live runtime execution.
 
 Required properties:
 

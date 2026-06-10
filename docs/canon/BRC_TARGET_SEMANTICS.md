@@ -82,7 +82,7 @@ StrategyFamily
 | AdmissionDecision | partially implemented | Admission gate metadata operations (Phase 1-17) complete | Formal admission pass/fail with evidence |
 | OwnerRiskAcceptance | partially implemented | OwnerRiskAcknowledgement exists for single-use authorization | Owner acceptance of strategy runtime risk |
 | TrialBinding | metadata only | Audit binding record; not a running strategy instance | Binding between admitted strategy and runtime instance |
-| StrategyRuntimeInstance | shadow implemented | Shadow governance model, PG table, repository, lifecycle events, and readmodel/API inspection exist; execution is disabled and shadow_mode is enforced | Running bounded strategy instance that generates evaluations |
+| StrategyRuntimeInstance | shadow implemented | Shadow governance model, PG table, repository, lifecycle events, and readmodel/API inspection exist; execution is disabled and shadow_mode is enforced; a fully confirmed profile proposal snapshot can create a shadow draft boundary from TrialBinding without enabling execution | Running bounded strategy instance that generates evaluations |
 | SignalEvaluation | shadow implemented | Shadow model, PG table, repository, service, and inspection API exist; no executable trigger | Per-instance signal evaluation within risk boundaries |
 | OrderCandidate | shadow implemented | Shadow candidate model and PG table exist; candidate_executable=false and not_execution_intent=true are enforced | Executable order candidate from signal evaluation |
 | FinalGate | implemented + runtime preview | FinalGate exists as hard one-shot execution gate; runtime-aware preview/dry-run exists for OrderCandidate inspection only | Pre-execution safety validation |
@@ -289,8 +289,14 @@ Current local B0 implementation slice:
 - `StrategyRuntimePromotionGateConfirmationRecord` can carry a structured
   `runtime_profile_proposal_snapshot` for the Owner/Codex-confirmed proposal
   evidence. The domain rejects blocked or mismatched proposal snapshots. This is
-  audit evidence only; it does not turn the proposal into runtime creation,
-  submit authorization, or exchange authority.
+  audit evidence only; by itself it does not turn the proposal into runtime
+  creation, submit authorization, or exchange authority.
+- `StrategyRuntimeInstanceService.create_draft_from_profile_confirmation()` can
+  create a shadow runtime draft only when TrialBinding, StrategyFamilyVersion,
+  confirmation facts, and proposal snapshot all align. It copies the confirmed
+  proposal boundary into `StrategyRuntimeInstance.boundary` while preserving
+  `execution_enabled=false`, `shadow_mode=true`, and no order/exchange
+  authority.
 - `src/application/strategy_runtime_promotion_gate_service.py` exposes that
   gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
   for unknown bindings and remains non-executing.

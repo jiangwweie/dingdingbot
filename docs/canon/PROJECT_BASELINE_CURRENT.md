@@ -101,7 +101,9 @@ Key facts:
 - **StrategyRuntimeInstance** now exists as a local working-tree shadow governance
   record with PG persistence and lifecycle events. It is not executable:
   `execution_enabled=false` and `shadow_mode=true` are enforced by domain and
-  migration constraints.
+  migration constraints. The application service can create a shadow runtime
+  draft from a TrialBinding plus a fully confirmed runtime profile proposal
+  snapshot, copying the proposal boundary while keeping execution disabled.
 - **SignalEvaluation / OrderCandidate** now exist as local working-tree shadow
   records with PG persistence and Trading Console inspection endpoints. They do
   not create submit-ready ExecutionIntent records, orders, FinalGate execution
@@ -206,7 +208,9 @@ Key facts:
   mean-reversion envelopes. The Trading Console exposes it as
   `GET /api/trading-console/strategy-runtime-profile-proposals`. It is not a
   runtime record, not Owner/Codex confirmation, not live-profile enablement, not
-  an ExecutionIntent, and not order/exchange authority.
+  an ExecutionIntent, and not order/exchange authority. Only a separate
+  promotion confirmation record plus TrialBinding can feed a shadow runtime
+  draft, and that draft remains non-executable.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signals into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->

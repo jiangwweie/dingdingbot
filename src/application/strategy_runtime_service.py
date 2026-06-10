@@ -19,6 +19,10 @@ from src.domain.runtime_execution_attempt_mutation import (
     RuntimeExecutionAttemptMutation,
     RuntimeExecutionAttemptMutationStatus,
 )
+from src.domain.strategy_runtime_promotion_gate import (
+    StrategyRuntimePromotionGateConfirmationRecord,
+    StrategyRuntimePromotionGateStatus,
+)
 
 
 def _now_ms() -> int:
@@ -160,6 +164,123 @@ class StrategyRuntimeInstanceService:
             saved,
             previous_status=None,
             reason="runtime draft created from admission trial binding",
+        )
+        return saved
+
+    async def create_draft_from_profile_confirmation(
+        self,
+        trial_binding_id: str,
+        *,
+        confirmation: StrategyRuntimePromotionGateConfirmationRecord,
+        carrier_id: Optional[str] = None,
+        expires_at_ms: Optional[int] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> StrategyRuntimeInstance:
+        existing = await self._runtime_repo.find_by_trial_binding_id(trial_binding_id)
+        if existing is not None:
+            raise StrategyRuntimeError(
+                f"strategy runtime already exists for trial binding: {trial_binding_id}"
+            )
+        if confirmation.runtime_instance_id is not None:
+            existing_by_id = await self._runtime_repo.get(confirmation.runtime_instance_id)
+            if existing_by_id is not None:
+                raise StrategyRuntimeError(
+                    "strategy runtime already exists for confirmation runtime id: "
+                    f"{confirmation.runtime_instance_id}"
+                )
+        _require_profile_confirmation_ready(confirmation)
+        proposal = confirmation.runtime_profile_proposal_snapshot
+        if proposal is None:
+            raise StrategyRuntimeError("runtime profile proposal snapshot is required")
+
+        binding = await self._admission_repo.get_admission_trial_binding(trial_binding_id)
+        if binding is None:
+            raise StrategyRuntimeError(f"admission trial binding not found: {trial_binding_id}")
+        version = await self._admission_repo.get_strategy_family_version(
+            binding.strategy_family_version_id
+        )
+        if version is None:
+            raise StrategyRuntimeError(
+                f"strategy family version not found: {binding.strategy_family_version_id}"
+            )
+        if binding.strategy_family_version_id != confirmation.strategy_family_version_id:
+            raise StrategyRuntimeError("confirmation strategy version does not match binding")
+        if version.strategy_family_id != confirmation.strategy_family_id:
+            raise StrategyRuntimeError("confirmation strategy family does not match version")
+        if proposal.strategy_family_id != version.strategy_family_id:
+            raise StrategyRuntimeError("profile proposal strategy family does not match version")
+        if proposal.strategy_family_version_id != binding.strategy_family_version_id:
+            raise StrategyRuntimeError(
+                "profile proposal strategy version does not match binding"
+            )
+
+        now_ms = _now_ms()
+        boundary = proposal.boundary.model_copy(deep=True)
+        policy_snapshot = StrategyRuntimePolicySnapshot(
+            risk_policy_snapshot={
+                "source": "runtime_profile_promotion_confirmation",
+                "confirmation_id": confirmation.confirmation_id,
+                "proposal_id": proposal.proposal_id,
+                "profile_kind": proposal.profile_kind.value,
+                "capital_base": str(proposal.capital_base),
+                "total_loss_budget": str(proposal.total_loss_budget),
+                "max_loss_per_attempt": str(proposal.max_loss_per_attempt),
+                "max_notional_per_attempt": str(proposal.max_notional_per_attempt),
+                "max_leverage": str(proposal.max_leverage),
+                "max_margin_per_attempt": str(proposal.max_margin_per_attempt),
+            },
+            playbook_id=binding.playbook_id,
+            playbook_snapshot=dict(binding.playbook_catalog_snapshot_json),
+            admission_execution_mode=binding.execution_mode.value,
+            source="runtime_profile_promotion_confirmation",
+        )
+        runtime = StrategyRuntimeInstance(
+            runtime_instance_id=confirmation.runtime_instance_id or _id("strategy-runtime"),
+            trial_binding_id=binding.binding_id,
+            admission_decision_id=binding.admission_decision_id,
+            strategy_family_id=version.strategy_family_id,
+            strategy_family_version_id=binding.strategy_family_version_id,
+            owner_risk_acceptance_id=binding.owner_risk_acceptance_id,
+            carrier_id=carrier_id or binding.runtime_carrier_id,
+            symbol=proposal.symbol,
+            side=proposal.side,
+            status=StrategyRuntimeInstanceStatus.DRAFT,
+            boundary=boundary,
+            policy_snapshot=policy_snapshot,
+            execution_enabled=False,
+            shadow_mode=True,
+            created_at_ms=now_ms,
+            updated_at_ms=now_ms,
+            expires_at_ms=expires_at_ms,
+            metadata={
+                "source": "runtime_profile_promotion_confirmation",
+                "confirmation_id": confirmation.confirmation_id,
+                "proposal_id": proposal.proposal_id,
+                "proposal_profile_kind": proposal.profile_kind.value,
+                "runtime_confirmation_mode": proposal.runtime_confirmation_mode.value,
+                "loss_inside_budget_is_accepted": True,
+                "runaway_behavior_is_forbidden": True,
+                "creates_execution_intent": False,
+                "order_created": False,
+                "exchange_called": False,
+                **(metadata or {}),
+            },
+        )
+        saved = await self._runtime_repo.create(runtime)
+        await self._record_event(
+            saved,
+            previous_status=None,
+            reason="runtime draft created from confirmed profile proposal",
+            event_type="created_from_profile_confirmation",
+            metadata={
+                "confirmation_id": confirmation.confirmation_id,
+                "proposal_id": proposal.proposal_id,
+                "execution_enabled": saved.execution_enabled,
+                "shadow_mode": saved.shadow_mode,
+                "creates_execution_intent": False,
+                "order_created": False,
+                "exchange_called": False,
+            },
         )
         return saved
 
@@ -309,3 +430,80 @@ def _first_nonempty(items: list[str]) -> Optional[str]:
         if value:
             return value
     return None
+
+
+def _require_profile_confirmation_ready(
+    confirmation: StrategyRuntimePromotionGateConfirmationRecord,
+) -> None:
+    if (
+        confirmation.promotion_gate_result_snapshot is not None
+        and confirmation.promotion_gate_result_snapshot.status
+        == StrategyRuntimePromotionGateStatus.BLOCKED
+    ):
+        raise StrategyRuntimeError("blocked promotion confirmation cannot create runtime")
+    semantic = confirmation.semantic_confirmations
+    semantic_checks = {
+        "strategy_family_confirmed": semantic.strategy_family_confirmed,
+        "implementation_source_confirmed": semantic.implementation_source_confirmed,
+        "required_facts_confirmed": semantic.required_facts_confirmed,
+        "entry_policy_confirmed": semantic.entry_policy_confirmed,
+        "exit_policy_confirmed": semantic.exit_policy_confirmed,
+        "protection_policy_confirmed": semantic.protection_policy_confirmed,
+        "eligible_for_runtime_execution_confirmed": (
+            semantic.eligible_for_runtime_execution_confirmed
+        ),
+        "right_tail_review_metrics_confirmed": (
+            semantic.right_tail_review_metrics_confirmed
+        ),
+    }
+    runtime = confirmation.runtime_confirmations
+    runtime_checks = {
+        "runtime_profile_confirmed": runtime.runtime_profile_confirmed,
+        "owner_confirmation_mode_confirmed": (
+            runtime.owner_confirmation_mode_confirmed
+        ),
+        "symbol_side_boundary_confirmed": runtime.symbol_side_boundary_confirmed,
+        "max_loss_budget_confirmed": runtime.max_loss_budget_confirmed,
+        "max_notional_boundary_confirmed": runtime.max_notional_boundary_confirmed,
+        "max_active_positions_boundary_confirmed": (
+            runtime.max_active_positions_boundary_confirmed
+        ),
+        "max_leverage_boundary_confirmed": runtime.max_leverage_boundary_confirmed,
+        "margin_usage_boundary_confirmed": runtime.margin_usage_boundary_confirmed,
+        "liquidation_buffer_boundary_confirmed": (
+            runtime.liquidation_buffer_boundary_confirmed
+        ),
+        "protection_readiness_source_confirmed": (
+            runtime.protection_readiness_source_confirmed
+        ),
+        "stale_fact_behavior_confirmed": runtime.stale_fact_behavior_confirmed,
+        "attempt_consumption_rule_confirmed": (
+            runtime.attempt_consumption_rule_confirmed
+        ),
+        "budget_reservation_rule_confirmed": (
+            runtime.budget_reservation_rule_confirmed
+        ),
+        "trusted_active_position_source_confirmed": (
+            runtime.trusted_active_position_source_confirmed
+        ),
+        "trusted_account_fact_source_confirmed": (
+            runtime.trusted_account_fact_source_confirmed
+        ),
+    }
+    missing = [
+        key
+        for key, confirmed in {**semantic_checks, **runtime_checks}.items()
+        if not confirmed
+    ]
+    if missing:
+        raise StrategyRuntimeError(
+            "profile confirmation missing required confirmations: "
+            + ", ".join(sorted(missing))
+        )
+    proposal = confirmation.runtime_profile_proposal_snapshot
+    if proposal is None:
+        raise StrategyRuntimeError("runtime profile proposal snapshot is required")
+    if proposal.side == "short" and not runtime.short_side_conservative_profile_confirmed:
+        raise StrategyRuntimeError(
+            "short-side runtime profile confirmation is required"
+        )

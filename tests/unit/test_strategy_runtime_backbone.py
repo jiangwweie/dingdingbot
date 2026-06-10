@@ -24,12 +24,20 @@ from src.domain.brc_admission import (
     TrialEnv,
     TrialStage,
 )
+from src.domain.experimental_runtime_profile_proposal import (
+    build_experimental_runtime_profile_proposal,
+)
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
     StrategyRuntimeEvent,
     StrategyRuntimeInstance,
     StrategyRuntimeInstanceStatus,
     StrategyRuntimePolicySnapshot,
+)
+from src.domain.strategy_runtime_promotion_gate import (
+    RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateConfirmationRecord,
+    StrategySemanticsConfirmationFacts,
 )
 from src.infrastructure.pg_models import (
     PGStrategyRuntimeEventORM,
@@ -168,6 +176,77 @@ class _FakeAdmissionRepo:
         return None
 
 
+class _ProfileAdmissionRepo:
+    async def get_admission_trial_binding(self, binding_id: str):
+        if binding_id != "binding-cpm-profile":
+            return None
+        return AdmissionTrialBinding(
+            binding_id="binding-cpm-profile",
+            admission_decision_id="decision-cpm-profile",
+            owner_risk_acceptance_id="risk-cpm-profile",
+            trial_constraint_snapshot_id="constraint-cpm-profile",
+            strategy_family_version_id="CPM-RO-001-v0",
+            playbook_id="PB-CPM",
+            playbook_catalog_snapshot_json={"id": "PB-CPM"},
+            trial_env=TrialEnv.TESTNET,
+            trial_stage=TrialStage.FUNDED_VALIDATION,
+            execution_mode=AdmissionExecutionMode.AUTO_WITHIN_BUDGET,
+            binding_status=AdmissionTrialBindingStatus.BINDING_RESERVED,
+            campaign_id=None,
+            runtime_carrier_id=None,
+            created_by_operation_id="operation-cpm-profile",
+            created_by_preflight_id="preflight-cpm-profile",
+            created_at_ms=NOW_MS,
+            updated_at_ms=NOW_MS,
+        )
+
+    async def get_strategy_family_version(self, strategy_family_version_id: str):
+        if strategy_family_version_id != "CPM-RO-001-v0":
+            return None
+        return StrategyFamilyVersion(
+            strategy_family_version_id="CPM-RO-001-v0",
+            strategy_family_id="CPM-RO-001",
+            version=1,
+            hypothesis="CPM 30U profile confirmation test",
+            supported_symbols=["BNB/USDT:USDT"],
+            supported_timeframes=["1h", "4h"],
+            created_at_ms=NOW_MS,
+        )
+
+
+def _semantic_confirmed() -> StrategySemanticsConfirmationFacts:
+    return StrategySemanticsConfirmationFacts(
+        strategy_family_confirmed=True,
+        implementation_source_confirmed=True,
+        required_facts_confirmed=True,
+        entry_policy_confirmed=True,
+        exit_policy_confirmed=True,
+        protection_policy_confirmed=True,
+        eligible_for_runtime_execution_confirmed=True,
+        right_tail_review_metrics_confirmed=True,
+    )
+
+
+def _runtime_confirmed() -> RuntimeExecutionConfirmationFacts:
+    return RuntimeExecutionConfirmationFacts(
+        runtime_profile_confirmed=True,
+        owner_confirmation_mode_confirmed=True,
+        symbol_side_boundary_confirmed=True,
+        max_loss_budget_confirmed=True,
+        max_notional_boundary_confirmed=True,
+        max_active_positions_boundary_confirmed=True,
+        max_leverage_boundary_confirmed=True,
+        margin_usage_boundary_confirmed=True,
+        liquidation_buffer_boundary_confirmed=True,
+        protection_readiness_source_confirmed=True,
+        stale_fact_behavior_confirmed=True,
+        attempt_consumption_rule_confirmed=True,
+        budget_reservation_rule_confirmed=True,
+        trusted_active_position_source_confirmed=True,
+        trusted_account_fact_source_confirmed=True,
+    )
+
+
 def test_strategy_runtime_creation_and_boundary_calculations():
     runtime = _runtime()
 
@@ -286,6 +365,83 @@ async def test_service_creates_draft_from_trial_binding_without_mutating_binding
     assert runtime.shadow_mode is True
     assert runtime_repo.events[-1].event_type == "created"
     assert _binding().binding_status == AdmissionTrialBindingStatus.BINDING_RESERVED
+
+
+@pytest.mark.asyncio
+async def test_service_creates_shadow_runtime_from_confirmed_profile_proposal():
+    runtime_repo = _FakeRuntimeRepo()
+    service = StrategyRuntimeInstanceService(
+        runtime_repository=runtime_repo,
+        admission_repository=_ProfileAdmissionRepo(),
+    )
+    confirmation = StrategyRuntimePromotionGateConfirmationRecord(
+        confirmation_id="promotion-confirmation-runtime-profile-1",
+        runtime_instance_id="strategy-runtime-profile-1",
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        semantic_confirmations=_semantic_confirmed(),
+        runtime_confirmations=_runtime_confirmed(),
+        runtime_profile_proposal_snapshot=build_experimental_runtime_profile_proposal(
+            strategy_family_id="CPM-RO-001",
+            strategy_family_version_id="CPM-RO-001-v0",
+            symbol="BNB/USDT:USDT",
+            side="long",
+        ),
+        reason="Owner/Codex confirms CPM 30U profile proposal.",
+        created_at_ms=NOW_MS,
+    )
+
+    runtime = await service.create_draft_from_profile_confirmation(
+        "binding-cpm-profile",
+        confirmation=confirmation,
+    )
+
+    assert runtime.runtime_instance_id == "strategy-runtime-profile-1"
+    assert runtime.status == StrategyRuntimeInstanceStatus.DRAFT
+    assert runtime.strategy_family_id == "CPM-RO-001"
+    assert runtime.symbol == "BNB/USDT:USDT"
+    assert runtime.side == "long"
+    assert runtime.boundary.max_attempts == 3
+    assert runtime.boundary.total_budget == Decimal("9.00")
+    assert runtime.boundary.max_notional_per_attempt == Decimal("10.00")
+    assert runtime.boundary.max_leverage == Decimal("1")
+    assert runtime.boundary.max_margin_per_attempt == Decimal("10.00")
+    assert runtime.boundary.min_liquidation_stop_buffer == Decimal("25")
+    assert runtime.execution_enabled is False
+    assert runtime.shadow_mode is True
+    assert runtime.metadata["confirmation_id"] == (
+        "promotion-confirmation-runtime-profile-1"
+    )
+    assert runtime.metadata["creates_execution_intent"] is False
+    assert runtime.metadata["order_created"] is False
+    assert runtime.metadata["exchange_called"] is False
+    assert runtime_repo.events[-1].event_type == "created_from_profile_confirmation"
+    assert runtime_repo.events[-1].metadata["creates_execution_intent"] is False
+    assert runtime_repo.events[-1].metadata["order_created"] is False
+    assert runtime_repo.events[-1].metadata["exchange_called"] is False
+
+
+@pytest.mark.asyncio
+async def test_service_blocks_profile_confirmation_without_snapshot():
+    service = StrategyRuntimeInstanceService(
+        runtime_repository=_FakeRuntimeRepo(),
+        admission_repository=_ProfileAdmissionRepo(),
+    )
+    confirmation = StrategyRuntimePromotionGateConfirmationRecord(
+        confirmation_id="promotion-confirmation-no-profile",
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        semantic_confirmations=_semantic_confirmed(),
+        runtime_confirmations=_runtime_confirmed(),
+        reason="Missing profile proposal should block runtime draft creation.",
+        created_at_ms=NOW_MS,
+    )
+
+    with pytest.raises(StrategyRuntimeError, match="proposal snapshot is required"):
+        await service.create_draft_from_profile_confirmation(
+            "binding-cpm-profile",
+            confirmation=confirmation,
+        )
 
 
 @pytest.mark.asyncio
