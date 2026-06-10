@@ -271,6 +271,24 @@ def _http_checks(
             "expect_json": True,
         },
         {
+            "name": "trading_console_strategy_runtime_promotion_gate",
+            "method": "GET",
+            "path": (
+                "/api/trading-console/strategy-runtime-promotion-gate"
+                "?strategy_family_id=CPM-RO-001"
+                "&strategy_family_version_id=CPM-RO-001-v0"
+            ),
+            "expected_status": 200,
+            "expect_json": True,
+        },
+        {
+            "name": "trading_console_owner_capital_review",
+            "method": "GET",
+            "path": "/api/trading-console/owner-capital-review?include_exchange=false&limit=1",
+            "expected_status": 200,
+            "expect_json": True,
+        },
+        {
             "name": "trading_console_right_tail_review",
             "method": "GET",
             "path": "/api/trading-console/right-tail-review?include_exchange=false&limit=1",

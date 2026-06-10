@@ -110,7 +110,7 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
         "release_identity_from_manifest_without_git_status"
     ]
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
-    assert len(report["facts"]["http_checks"]) == 9
+    assert len(report["facts"]["http_checks"]) == 11
     assert all(value is False for value in report["safety_invariants"].values())
 
 
