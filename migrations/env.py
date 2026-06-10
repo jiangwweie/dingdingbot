@@ -4,6 +4,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool, text
 from alembic import context
 import asyncio
+import os
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 # 导入 Base 以获取 metadata
@@ -15,6 +16,10 @@ from src.infrastructure.database import Base
 
 # Alembic Config
 config = context.config
+
+runtime_database_url = os.getenv("PG_DATABASE_URL") or os.getenv("DATABASE_URL")
+if runtime_database_url:
+    config.set_main_option("sqlalchemy.url", runtime_database_url)
 
 # 日志配置
 if config.config_file_name is not None:
