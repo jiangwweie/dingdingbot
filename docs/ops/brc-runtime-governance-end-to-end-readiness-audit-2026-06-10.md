@@ -75,8 +75,8 @@ The current local code and docs preserve this direction:
 | CPM/BRF planning | CPM long uses pullback-low or ATR stop; BRF short uses rally-high or ATR stop; both include TP1 1R partial and runner/trailing metadata | local non-executing ready |
 | Trusted facts | `StrategyRuntimeFactOverlayService` can replace caller-supplied account/position/market allow facts and block missing trusted sources | local non-executing ready |
 | Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; scheduled observations preserve signal input snapshots and can call the shadow planner only after `allow_shadow_candidate_creation=true` plus a unique ACTIVE shadow runtime resolved from `StrategyRuntimeInstanceService`; the local CLI defaults to observation-only and requires explicit `--shadow-plan` / `--allow-shadow-candidate-creation` flags; Trading Console exposes an operator-auth manual scheduled run POST for this non-executing wiring; a local in-memory rehearsal verifier proves one CPM shadow candidate can be created with all execution/order/exchange flags false | local non-executing ready |
-| Runtime safety | Promotion and readiness gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, and deployment confirmations | local non-executing ready |
-| Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist; local pre-live packet verifier reaches the non-executing submit adapter boundary while preserving first-real-submit blockers | local non-submitting bridge only |
+| Runtime safety | Promotion, readiness, and live-enablement preview gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, deployment, Owner live-runtime enablement, and Owner real-submit confirmations | local non-executing ready |
+| Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist; local pre-live packet verifier reaches the non-executing submit adapter boundary and now embeds StrategyRuntimeLiveEnablementPreview blockers | local non-submitting bridge only |
 | Console productization | Trading Console exposes runtime governance, strategy observation/planning, promotion/readiness, right-tail review, capital-base/withdrawal-adjusted review, and theme toggle surfaces | local UI/API verified previously |
 | Deployment | Tokyo backend and Trading Console static frontend are deployed; postdeploy verifier passed with authenticated endpoints expected to require login | deployed non-executing runtime governance |
 
@@ -229,6 +229,7 @@ Observed result:
 status=blocked_before_first_real_submit
 technical_rehearsal_passed=true
 ready_for_first_real_submit=false
+ready_for_live_runtime_enablement_mutation_design=false
 technical_blockers=[]
 operational_blockers=[
   current_head_not_deployed_to_tokyo,
@@ -238,6 +239,11 @@ implementation_blockers=[
   runtime_not_live_execution_enabled,
   controlled_submit_adapter_not_implemented
 ]
+live_enablement_blockers include:
+  current_head_not_deployed_to_tokyo,
+  owner_live_runtime_enablement_authorization_missing,
+  owner_real_submit_authorization_missing,
+  controlled_submit_adapter_not_implemented
 forbidden_execution_flags=[]
 submit_rehearsal_status=ready_for_non_executing_submit_adapter_boundary
 submit_adapter_preview_status=inputs_ready_adapter_not_implemented
@@ -247,7 +253,10 @@ Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
 deployment plan requires local packaging readiness, a `064 -> 064` migration
 gap audit with zero expected revisions, the local scheduled-observation
 shadow-planning rehearsal, and the local runtime submit pre-live packet
-technical rehearsal before any Owner-authorized remote mutation phase.
+technical rehearsal before any Owner-authorized remote mutation phase. The
+pre-live packet may pass its technical rehearsal while still reporting live
+enablement blockers; those blockers are intentional and must not be treated as
+deployment blockers unless the task is to perform live-runtime enablement.
 
 ## 6. Focused Test Evidence
 

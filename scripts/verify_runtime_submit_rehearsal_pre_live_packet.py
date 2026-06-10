@@ -67,6 +67,22 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstance,
     StrategyRuntimeInstanceStatus,
 )
+from src.domain.strategy_runtime_live_enablement import (
+    StrategyRuntimeLiveEnablementPreviewStatus,
+    build_strategy_runtime_live_enablement_preview,
+)
+from src.domain.strategy_runtime_promotion_gate import (
+    FirstRealSubmitConfirmationFacts,
+    RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateInput,
+    StrategyRuntimePromotionScope,
+    StrategySemanticsConfirmationFacts,
+    evaluate_strategy_runtime_promotion_gate,
+)
+from src.domain.strategy_runtime_safety_readiness import (
+    evaluate_strategy_runtime_safety_readiness,
+)
+from src.domain.strategy_semantics import initial_strategy_semantics_catalog
 
 
 DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
@@ -75,6 +91,7 @@ DEFAULT_SIDE = "long"
 DEFAULT_RUNTIME_ID = "pre-live-rehearsal-runtime-bnb-long"
 DEFAULT_ORDER_CANDIDATE_ID = "pre-live-rehearsal-candidate-bnb-long"
 OWNER_AUTHORIZATION_FLAG = "--owner-real-submit-authorized"
+OWNER_LIVE_RUNTIME_ENABLEMENT_FLAG = "--owner-live-runtime-enable-authorized"
 
 
 @dataclass(frozen=True)
@@ -159,6 +176,7 @@ async def build_pre_live_packet(
     *,
     deployed_head: str | None,
     owner_real_submit_authorized: bool,
+    owner_live_runtime_enablement_authorized: bool = False,
     require_current_head_deployed: bool = True,
     active_positions: int = 0,
     runner: Any | None = None,
@@ -234,29 +252,62 @@ async def build_pre_live_packet(
     if not rehearsal.submit_adapter_preview.submit_adapter_implemented:
         implementation_blockers.append("controlled_submit_adapter_not_implemented")
 
-    checks = {
-        "technical_rehearsal_passed": _technical_rehearsal_passed(
-            plan=plan,
-            draft=draft,
-            intent=intent,
-            submit_readiness=submit_readiness,
-            authorization=authorization,
-            rehearsal=rehearsal,
+    technical_rehearsal_passed = _technical_rehearsal_passed(
+        plan=plan,
+        draft=draft,
+        intent=intent,
+        submit_readiness=submit_readiness,
+        authorization=authorization,
+        rehearsal=rehearsal,
+    )
+    forbidden_execution_flags = _forbidden_execution_flags(
+        intent=intent,
+        authorization=authorization,
+        rehearsal=rehearsal,
+    )
+    safety_readiness = evaluate_strategy_runtime_safety_readiness(runtime)
+    promotion_gate_result = _promotion_gate_result(
+        runtime=runtime,
+        current_head_deployed=current_head_deployed,
+        owner_real_submit_authorized=owner_real_submit_authorized,
+    )
+    live_enablement_preview = build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=safety_readiness,
+        promotion_gate_result=promotion_gate_result,
+        current_head_deployed=current_head_deployed,
+        owner_live_runtime_enablement_authorized=owner_live_runtime_enablement_authorized,
+        owner_real_submit_authorization_present=owner_real_submit_authorized,
+        submit_technical_rehearsal_passed=technical_rehearsal_passed,
+        submit_adapter_implemented=(
+            rehearsal.submit_adapter_preview.submit_adapter_implemented
         ),
+        forbidden_execution_flags=forbidden_execution_flags,
+    )
+    ready_for_live_runtime_enablement = (
+        live_enablement_preview.status
+        == StrategyRuntimeLiveEnablementPreviewStatus.READY_FOR_LIVE_RUNTIME_ENABLEMENT_MUTATION_DESIGN
+    )
+    checks = {
+        "technical_rehearsal_passed": technical_rehearsal_passed,
         "current_head_deployed": current_head_deployed,
         "owner_real_submit_authorization_present": owner_real_submit_authorized,
+        "owner_live_runtime_enablement_authorization_present": (
+            owner_live_runtime_enablement_authorized
+        ),
+        "ready_for_live_runtime_enablement_mutation_design": (
+            ready_for_live_runtime_enablement
+        ),
         "ready_for_first_real_submit": False,
         "technical_blockers": technical_blockers,
         "operational_blockers": operational_blockers,
         "implementation_blockers": implementation_blockers,
-        "forbidden_execution_flags": _forbidden_execution_flags(
-            intent=intent,
-            authorization=authorization,
-            rehearsal=rehearsal,
-        ),
+        "live_enablement_blockers": live_enablement_preview.blockers,
+        "forbidden_execution_flags": forbidden_execution_flags,
     }
     checks["ready_for_first_real_submit"] = (
         checks["technical_rehearsal_passed"]
+        and checks["ready_for_live_runtime_enablement_mutation_design"]
         and not technical_blockers
         and not operational_blockers
         and not implementation_blockers
@@ -282,7 +333,11 @@ async def build_pre_live_packet(
         },
         "owner_gate": {
             "owner_real_submit_authorized": owner_real_submit_authorized,
+            "owner_live_runtime_enablement_authorized": (
+                owner_live_runtime_enablement_authorized
+            ),
             "authorization_flag": OWNER_AUTHORIZATION_FLAG,
+            "live_runtime_enablement_flag": OWNER_LIVE_RUNTIME_ENABLEMENT_FLAG,
         },
         "pipeline": {
             "plan_status": _enum_value(plan.status),
@@ -308,6 +363,9 @@ async def build_pre_live_packet(
             "next_required_gate": rehearsal.next_required_gate,
         },
         "checks": checks,
+        "safety_readiness": safety_readiness.model_dump(mode="json"),
+        "promotion_gate": promotion_gate_result.model_dump(mode="json"),
+        "live_enablement_preview": live_enablement_preview.model_dump(mode="json"),
         "rehearsal": rehearsal.model_dump(mode="json"),
         "safety_invariants": {
             "database_connected": False,
@@ -458,6 +516,58 @@ def _technical_rehearsal_passed(
     )
 
 
+def _promotion_gate_result(
+    *,
+    runtime: StrategyRuntimeInstance,
+    current_head_deployed: bool,
+    owner_real_submit_authorized: bool,
+):
+    binding = initial_strategy_semantics_catalog().get_binding(
+        strategy_family_id=runtime.strategy_family_id,
+        strategy_family_version_id=runtime.strategy_family_version_id,
+    )
+    return evaluate_strategy_runtime_promotion_gate(
+        StrategyRuntimePromotionGateInput(
+            binding=binding,
+            scope=StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW,
+            semantic_confirmations=StrategySemanticsConfirmationFacts(
+                strategy_family_confirmed=True,
+                implementation_source_confirmed=True,
+                required_facts_confirmed=True,
+                entry_policy_confirmed=True,
+                exit_policy_confirmed=True,
+                protection_policy_confirmed=True,
+                eligible_for_runtime_execution_confirmed=True,
+                right_tail_review_metrics_confirmed=True,
+            ),
+            runtime_confirmations=RuntimeExecutionConfirmationFacts(
+                runtime_profile_confirmed=True,
+                owner_confirmation_mode_confirmed=True,
+                symbol_side_boundary_confirmed=True,
+                max_loss_budget_confirmed=True,
+                max_notional_boundary_confirmed=True,
+                max_active_positions_boundary_confirmed=True,
+                max_leverage_boundary_confirmed=True,
+                margin_usage_boundary_confirmed=True,
+                liquidation_buffer_boundary_confirmed=True,
+                protection_readiness_source_confirmed=True,
+                stale_fact_behavior_confirmed=True,
+                attempt_consumption_rule_confirmed=True,
+                budget_reservation_rule_confirmed=True,
+                trusted_active_position_source_confirmed=True,
+                trusted_account_fact_source_confirmed=True,
+            ),
+            first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
+                budget_release_or_consume_rule_confirmed=True,
+                protection_creation_failure_policy_confirmed=True,
+                duplicate_submit_policy_confirmed=True,
+                deployment_readiness_confirmed=current_head_deployed,
+                explicit_owner_real_submit_authorization=owner_real_submit_authorized,
+            ),
+        )
+    )
+
+
 def _forbidden_execution_flags(
     *,
     intent: ExecutionIntent,
@@ -573,6 +683,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        OWNER_LIVE_RUNTIME_ENABLEMENT_FLAG,
+        action="store_true",
+        help=(
+            "Mark the Owner live-runtime enablement gate as present for readiness "
+            "accounting only. This script still does not mutate the runtime."
+        ),
+    )
+    parser.add_argument(
         "--active-positions",
         type=int,
         default=0,
@@ -591,6 +709,14 @@ def _print_human(report: dict[str, Any]) -> None:
         "owner_real_submit_authorization_present="
         + str(checks["owner_real_submit_authorization_present"]).lower()
     )
+    print(
+        "owner_live_runtime_enablement_authorization_present="
+        + str(checks["owner_live_runtime_enablement_authorization_present"]).lower()
+    )
+    print(
+        "ready_for_live_runtime_enablement_mutation_design="
+        + str(checks["ready_for_live_runtime_enablement_mutation_design"]).lower()
+    )
     print(f"ready_for_first_real_submit={str(checks['ready_for_first_real_submit']).lower()}")
     print(f"submit_rehearsal_status={pipeline['submit_rehearsal_status']}")
     print(f"submit_adapter_preview_status={pipeline['submit_adapter_preview_status']}")
@@ -603,6 +729,11 @@ def _print_human(report: dict[str, Any]) -> None:
             "implementation_blockers="
             + ",".join(checks["implementation_blockers"])
         )
+    if checks["live_enablement_blockers"]:
+        print(
+            "live_enablement_blockers="
+            + ",".join(checks["live_enablement_blockers"])
+        )
     if checks["forbidden_execution_flags"]:
         print("forbidden_execution_flags=" + ",".join(checks["forbidden_execution_flags"]))
 
@@ -612,6 +743,9 @@ async def _amain(argv: list[str] | None = None) -> int:
     report = await build_pre_live_packet(
         deployed_head=args.deployed_head,
         owner_real_submit_authorized=args.owner_real_submit_authorized,
+        owner_live_runtime_enablement_authorized=(
+            args.owner_live_runtime_enable_authorized
+        ),
         require_current_head_deployed=not args.skip_current_head_deployed_check,
         active_positions=args.active_positions,
     )

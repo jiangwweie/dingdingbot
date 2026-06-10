@@ -392,6 +392,16 @@ Key facts:
   blocked while the current HEAD is not deployed, Owner real-submit
   authorization is absent, runtime remains shadow / execution-disabled, and the
   controlled submit adapter is not implemented.
+- **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
+  pre-live gate. It combines concrete runtime safety readiness, first-real-submit
+  promotion gate status, current-head deployment status, Owner live-runtime
+  enablement authorization, Owner real-submit authorization, submit rehearsal
+  status, submit-adapter implementation status, and forbidden execution flags
+  into explicit blockers. A ready result means only
+  `ready_for_live_runtime_enablement_mutation_design`; it does not mutate
+  `StrategyRuntimeInstance`, enable `execution_enabled`, create
+  ExecutionIntent/order records, call OwnerBoundedExecution, call OrderLifecycle,
+  call exchange, or authorize real-funds submit.
 - **StrategyFamily / Admission** exists as metadata, admission classification,
   and evidence chain. It does not bind to executable strategy code.
 - **CandidateAction / BudgetedAutonomy** are readmodel / preview / policy

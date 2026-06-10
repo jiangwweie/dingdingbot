@@ -53,6 +53,7 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     assert report["status"] == "blocked_before_first_real_submit"
     assert report["checks"]["technical_rehearsal_passed"] is True
     assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is False
     assert report["checks"]["technical_blockers"] == []
     assert report["checks"]["operational_blockers"] == [
         "current_head_not_deployed_to_tokyo",
@@ -62,6 +63,20 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
         "runtime_not_live_execution_enabled",
         "controlled_submit_adapter_not_implemented",
     ]
+    assert "current_head_not_deployed_to_tokyo" in (
+        report["checks"]["live_enablement_blockers"]
+    )
+    assert "owner_live_runtime_enablement_authorization_missing" in (
+        report["checks"]["live_enablement_blockers"]
+    )
+    assert "controlled_submit_adapter_not_implemented" in (
+        report["checks"]["live_enablement_blockers"]
+    )
+    assert report["live_enablement_preview"]["status"] == "blocked"
+    assert report["live_enablement_preview"]["not_execution_authority"] is True
+    assert report["live_enablement_preview"]["runtime_state_mutated"] is False
+    assert report["live_enablement_preview"]["order_created"] is False
+    assert report["live_enablement_preview"]["exchange_called"] is False
     assert report["checks"]["forbidden_execution_flags"] == []
     assert all(value is False for value in report["safety_invariants"].values())
     assert report["pipeline"]["submit_rehearsal_status"] == (
@@ -79,6 +94,7 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     report = await module.build_pre_live_packet(
         deployed_head=LOCAL_HEAD,
         owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
         runner=_runner(module),
     )
 
@@ -86,11 +102,16 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     assert report["checks"]["technical_rehearsal_passed"] is True
     assert report["checks"]["current_head_deployed"] is True
     assert report["checks"]["owner_real_submit_authorization_present"] is True
+    assert report["checks"]["owner_live_runtime_enablement_authorization_present"] is True
     assert report["checks"]["operational_blockers"] == []
     assert report["checks"]["implementation_blockers"] == [
         "runtime_not_live_execution_enabled",
         "controlled_submit_adapter_not_implemented",
     ]
+    assert report["checks"]["live_enablement_blockers"] == [
+        "controlled_submit_adapter_not_implemented"
+    ]
+    assert report["promotion_gate"]["status"] == "ready_for_first_real_submit_gate_review"
     assert report["checks"]["ready_for_first_real_submit"] is False
     assert report["rehearsal"]["order_created"] is False
     assert report["rehearsal"]["order_lifecycle_called"] is False
