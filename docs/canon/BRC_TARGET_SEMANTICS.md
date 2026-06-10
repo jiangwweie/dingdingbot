@@ -286,11 +286,21 @@ Current local B0 implementation slice:
   does not call the runtime planner, create SignalEvaluation or OrderCandidate
   records, create ExecutionIntent records, create orders, call OrderLifecycle,
   or call exchange.
+- `src/application/runtime_strategy_signal_scheduler_planning_service.py`
+  provides the explicit non-executing handoff after scheduler readiness. It
+  calls the shadow runtime planner only when readiness is
+  `READY_FOR_NON_EXECUTING_PLANNER` and the caller explicitly sets
+  `allow_shadow_candidate_creation=true`; otherwise it performs no planner
+  call. This can create only shadow SignalEvaluation / OrderCandidate records
+  through the B0 planner. It is not a public strategy-signal write endpoint, not
+  an ExecutionIntent adapter, not an OrderLifecycle adapter, and not execution
+  authority.
 - This is not proven-alpha approval, not execution authority, and not a real
   OrderLifecycle adapter. Scheduler-level fact-source readiness is now visible,
-  but automatic runtime planner invocation, BRF runtime-profile confirmation,
-  deployment-backed FCO funding/OI/crowding coverage, and runtime promotion
-  remain Owner/Codex-gated before promotion beyond shadow binding.
+  and explicit non-executing planner handoff now exists, but deployment-backed
+  triggering, BRF runtime-profile confirmation, deployment-backed FCO
+  funding/OI/crowding coverage, and runtime promotion remain Owner/Codex-gated
+  before promotion beyond shadow binding.
 
 ProtectionPolicy and ExitPolicy must stay separate:
 

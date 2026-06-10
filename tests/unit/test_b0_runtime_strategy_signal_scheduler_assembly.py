@@ -2,10 +2,22 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from src.application.runtime_strategy_signal_evaluation_service import (
+    RuntimeStrategySignalEvaluationResult,
+    RuntimeStrategySignalEvaluationStatus,
+)
+from src.application.runtime_strategy_signal_planning_service import (
+    RuntimeStrategySignalCandidatePlanningResult,
+    RuntimeStrategySignalCandidatePlanningStatus,
+)
 from src.application.runtime_strategy_signal_scheduler_assembly import (
     RuntimeStrategySignalSchedulerAssemblyService,
     RuntimeStrategySignalSchedulerFactSources,
     RuntimeStrategySignalSchedulerReadinessStatus,
+)
+from src.application.runtime_strategy_signal_scheduler_planning_service import (
+    RuntimeStrategySignalSchedulerPlanningService,
+    RuntimeStrategySignalSchedulerPlanningStatus,
 )
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
@@ -141,6 +153,66 @@ def _ready_sources(*, market: bool = False) -> RuntimeStrategySignalSchedulerFac
     )
 
 
+class _FakeShadowPlanner:
+    def __init__(
+        self,
+        *,
+        status: RuntimeStrategySignalCandidatePlanningStatus = (
+            RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+        ),
+        blockers: list[str] | None = None,
+    ) -> None:
+        self.status = status
+        self.blockers = blockers or []
+        self.calls: list[dict] = []
+
+    async def plan_shadow_candidate_from_signal_input(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        runtime: StrategyRuntimeInstance,
+        context_builder=None,
+        context_id: str | None = None,
+        expires_at_ms: int | None = None,
+        metadata: dict | None = None,
+    ) -> RuntimeStrategySignalCandidatePlanningResult:
+        self.calls.append(
+            {
+                "evaluation_id": signal_input.evaluation_id,
+                "runtime_instance_id": runtime.runtime_instance_id,
+                "context_id": context_id,
+                "expires_at_ms": expires_at_ms,
+                "metadata": metadata or {},
+            }
+        )
+        created = (
+            self.status
+            == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+        )
+        return RuntimeStrategySignalCandidatePlanningResult(
+            planning_id=f"fake-plan-{signal_input.evaluation_id}",
+            runtime_instance_id=runtime.runtime_instance_id,
+            strategy_family_id=signal_input.strategy_family_id,
+            strategy_family_version_id=signal_input.strategy_family_version_id,
+            symbol=signal_input.symbol,
+            status=self.status,
+            evaluation_result=RuntimeStrategySignalEvaluationResult(
+                evaluation_id=signal_input.evaluation_id,
+                strategy_family_id=signal_input.strategy_family_id,
+                strategy_family_version_id=signal_input.strategy_family_version_id,
+                symbol=signal_input.symbol,
+                status=(
+                    RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+                ),
+                can_call_semantic_binding=True,
+            ),
+            blockers=list(self.blockers),
+            warnings=[],
+            signal_evaluation_created=created,
+            order_candidate_created=created,
+        )
+
+
 def test_scheduler_assembly_blocks_without_runtime_or_trusted_sources():
     readiness = RuntimeStrategySignalSchedulerAssemblyService().preview(
         _signal_input(),
@@ -181,6 +253,122 @@ def test_scheduler_assembly_can_reach_non_executing_planner_ready_state():
     assert readiness.order_lifecycle_called is False
     assert readiness.exchange_called is False
     assert readiness.not_execution_authority is True
+
+
+async def test_scheduler_planning_requires_explicit_enablement_before_planner_call():
+    planner = _FakeShadowPlanner()
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+        fact_sources=_ready_sources(),
+    ).plan_if_ready(
+        _signal_input(),
+        _output(),
+        runtime=_runtime(),
+        candidate_id="CPM-RO-001",
+    )
+
+    assert (
+        result.status
+        == RuntimeStrategySignalSchedulerPlanningStatus.EXPLICIT_ENABLE_REQUIRED
+    )
+    assert result.readiness.scheduler_can_call_runtime_planner is True
+    assert result.blockers == ["shadow_candidate_creation_not_explicitly_enabled"]
+    assert result.planner_call_performed is False
+    assert result.signal_evaluation_created is False
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+    assert planner.calls == []
+
+
+async def test_scheduler_planning_calls_shadow_planner_only_when_ready_and_enabled():
+    planner = _FakeShadowPlanner()
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+        fact_sources=_ready_sources(),
+    ).plan_if_ready(
+        _signal_input(),
+        _output(),
+        runtime=_runtime(),
+        candidate_id="CPM-RO-001",
+        allow_shadow_candidate_creation=True,
+        context_id="context-scheduler-handoff",
+        metadata={"unit_test": True},
+    )
+
+    assert (
+        result.status
+        == RuntimeStrategySignalSchedulerPlanningStatus.SHADOW_CANDIDATE_CREATED
+    )
+    assert result.readiness.scheduler_can_call_runtime_planner is True
+    assert result.planner_call_performed is True
+    assert result.signal_evaluation_created is True
+    assert result.order_candidate_created is True
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+    assert planner.calls == [
+        {
+            "evaluation_id": "eval-scheduler-CPM-RO-001",
+            "runtime_instance_id": "runtime-scheduler-CPM-RO-001",
+            "context_id": "context-scheduler-handoff",
+            "expires_at_ms": None,
+            "metadata": {
+                "scheduler_candidate_id": "CPM-RO-001",
+                "scheduler_planning_handoff": True,
+                "unit_test": True,
+            },
+        }
+    ]
+
+
+async def test_scheduler_planning_does_not_call_planner_when_readiness_blocked():
+    planner = _FakeShadowPlanner()
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+    ).plan_if_ready(
+        _signal_input(),
+        _output(),
+        runtime=_runtime(),
+        candidate_id="CPM-RO-001",
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert result.status == RuntimeStrategySignalSchedulerPlanningStatus.BLOCKED
+    assert "trusted_runtime_fact_overlay_not_configured" in result.blockers
+    assert result.planner_call_performed is False
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.exchange_called is False
+    assert planner.calls == []
+
+
+async def test_scheduler_planning_propagates_shadow_planner_block_without_execution():
+    planner = _FakeShadowPlanner(
+        status=RuntimeStrategySignalCandidatePlanningStatus.BLOCKED,
+        blockers=["trusted_account_facts_source_unavailable"],
+    )
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+        fact_sources=_ready_sources(),
+    ).plan_if_ready(
+        _signal_input(),
+        _output(),
+        runtime=_runtime(),
+        candidate_id="CPM-RO-001",
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert result.status == RuntimeStrategySignalSchedulerPlanningStatus.PLANNER_BLOCKED
+    assert result.blockers == ["trusted_account_facts_source_unavailable"]
+    assert result.planner_call_performed is True
+    assert result.signal_evaluation_created is False
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
 
 
 def test_scheduler_assembly_requires_market_source_for_fco_required_facts():

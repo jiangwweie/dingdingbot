@@ -141,8 +141,9 @@ Key facts:
   funding, open-interest, and global long/short account-ratio crowding facts,
   and Trading Console can opt into that source via
   `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`. Scheduler-level readiness
-  now exists for automatic evaluation binding, but scheduler/runtime automatic
-  planner invocation and deployment enablement are not yet productized.
+  and an explicit non-executing scheduler-to-planner handoff now exist for
+  automatic evaluation binding, but deployment enablement and public write/API
+  triggering are not yet productized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, runtime safety boundary,
@@ -170,13 +171,20 @@ Key facts:
   runtime state, create candidates, create intents, create orders, or call
   exchange.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
-  bridge from strategy signal pairs into the runtime planning path. It can run:
+  bridge from strategy signals into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->
   StrategyEvaluationContext -> shadow OrderCandidate -> RuntimeExecutionPlan /
   RuntimeExecutionIntentDraft`, while preserving `not_order=true`,
   `not_execution_intent=true`, `execution_intent_created=false`,
-  `order_created=false`, and `exchange_called=false`. If a trusted runtime fact
-  overlay is injected, it applies that overlay before semantic binding. It now
+  `order_created=false`, and `exchange_called=false`. It can also evaluate a
+  raw `StrategyFamilySignalInput` through `RuntimeStrategySignalEvaluationService`
+  before creating a shadow candidate, but only when the evaluator returns
+  `READY_FOR_SEMANTIC_BINDING`. In that path it generates a non-executing
+  planning proposal with entry price, structure/ATR stop reference, runtime
+  notional/leverage/loss preview, TP1 1R partial, and runner/trailing metadata
+  for CPM long and BRF short. If a trusted runtime fact overlay is injected, it
+  applies that overlay before semantic binding and blocks candidate planning
+  when trusted account/position/runtime boundary facts are missing. It now
   reads StrategySemantics RequiredFacts and automatically requires trusted
   market facts for required funding, open-interest, or crowding facts; if no
   overlay is available for such a strategy, planning fails closed. It does not
@@ -196,6 +204,15 @@ Key facts:
   This layer does not call RuntimeStrategySignalPlanningService, create
   SignalEvaluation records, create OrderCandidate records, create
   ExecutionIntent records, create orders, call OrderLifecycle, or call exchange.
+- **RuntimeStrategySignalSchedulerPlanningService** now exists as an explicit
+  non-executing scheduler handoff layer. It preserves the scheduler assembly as
+  readiness-only, then calls the shadow runtime strategy planner only when
+  readiness is `READY_FOR_NON_EXECUTING_PLANNER` and the caller explicitly sets
+  `allow_shadow_candidate_creation=true`. Without that explicit enablement it
+  returns `explicit_enable_required` and performs no planner call. It can create
+  only the same shadow SignalEvaluation / OrderCandidate records as the B0
+  planner; it does not create ExecutionIntent records, create orders, call
+  OrderLifecycle, call exchange, or provide execution authority.
 - **RightTailReview** now exists as pure review logic plus Trading Console
   read-only presentation. It calculates MFE, MAE, R multiple, tail-win size,
   small-loss count, winner hold time, runner giveback / early cap, stop
