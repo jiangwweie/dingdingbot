@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -13,13 +14,27 @@ from src.application.runtime_final_gate_preview_service import (
     RuntimeFinalGatePreviewService,
 )
 from src.application.runtime_strategy_signal_planning_service import (
+    RuntimeStrategySignalCandidatePlanningStatus,
     RuntimeStrategySignalPlanningError,
     RuntimeStrategySignalPlanningService,
 )
+from src.application.runtime_strategy_signal_evaluation_service import (
+    RuntimeStrategySignalEvaluationService,
+)
 from src.application.signal_evaluation_shadow_service import SignalEvaluationShadowService
+from src.application.strategy_runtime_fact_overlay_service import (
+    StrategyRuntimeFactOverlayService,
+)
 from src.application.strategy_semantics_shadow_binding_service import (
     StrategySemanticsBindingError,
     StrategySemanticsShadowBindingService,
+)
+from src.application.trial_readiness_account_facts import (
+    AccountFactsFreshnessStatus,
+    AccountFactsReconciliationStatus,
+    AccountFactsSourceType,
+    StaticTrialReadinessAccountFactsSource,
+    TrialReadinessAccountFacts,
 )
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraftStatus
 from src.domain.signal_evaluation import (
@@ -176,6 +191,237 @@ def _runtime() -> StrategyRuntimeInstance:
     )
 
 
+def _runtime_for_strategy(
+    *,
+    family_id: str,
+    version_id: str,
+    side: str,
+) -> StrategyRuntimeInstance:
+    return StrategyRuntimeInstance(
+        runtime_instance_id=f"runtime-{family_id.lower()}-{side}",
+        trial_binding_id=f"trial-{family_id.lower()}-{side}",
+        admission_decision_id=f"admission-{family_id.lower()}-{side}",
+        strategy_family_id=family_id,
+        strategy_family_version_id=version_id,
+        symbol="ETH/USDT:USDT",
+        side=side,
+        status=StrategyRuntimeInstanceStatus.ACTIVE,
+        boundary=StrategyRuntimeBoundary(
+            max_attempts=3,
+            attempts_used=0,
+            budget_reserved=Decimal("0"),
+            max_active_positions=1,
+            max_notional_per_attempt=Decimal("10"),
+            total_budget=Decimal("9"),
+            allowed_symbols=["ETH/USDT:USDT"],
+            allowed_sides=[side],
+            max_leverage=Decimal("1"),
+            max_margin_per_attempt=Decimal("10"),
+            min_liquidation_stop_buffer=Decimal("25"),
+            requires_protection=True,
+        ),
+        execution_enabled=False,
+        shadow_mode=True,
+        created_at_ms=NOW_MS,
+        updated_at_ms=NOW_MS,
+    )
+
+
+def _candle(index: int, open_: str, high: str, low: str, close: str) -> dict[str, Any]:
+    return {
+        "open_time_ms": NOW_MS - (40 - index) * 3_600_000,
+        "open": open_,
+        "high": high,
+        "low": low,
+        "close": close,
+        "volume": "100",
+    }
+
+
+def _cpm_reclaim_1h() -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index in range(18):
+        close = Decimal("100") + Decimal(index) * Decimal("0.15")
+        candles.append(
+            _candle(
+                index,
+                str(close - Decimal("0.1")),
+                str(close + Decimal("0.4")),
+                str(close - Decimal("0.4")),
+                str(close),
+            )
+        )
+    candles.append(_candle(18, "101.6", "102.4", "100.9", "101.8"))
+    candles.append(_candle(19, "101.9", "103.0", "101.0", "102.2"))
+    candles.append(_candle(20, "102.4", "105.0", "102.0", "104.2"))
+    return candles
+
+
+def _cpm_uptrend_4h() -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index in range(21):
+        close = Decimal("100") + Decimal(index) * Decimal("0.5")
+        candles.append(
+            _candle(
+                index,
+                str(close - Decimal("0.2")),
+                str(close + Decimal("0.5")),
+                str(close - Decimal("0.5")),
+                str(close),
+            )
+        )
+    return candles
+
+
+def _brf_1h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "101", "102", "99", "100"),
+        _candle(1, "100", "103", "99", "102"),
+        _candle(2, "102", "105", "101", "104"),
+        _candle(3, "104", "106", "103", "105"),
+        _candle(4, "105", "108", "104", "107"),
+        _candle(5, "107", "109", "106", "108"),
+        _candle(6, "108", "110", "107", "109"),
+        _candle(7, "109", "111", "108", "110"),
+        _candle(8, "110", "112", "109", "111"),
+        _candle(9, "111", "113", "110", "112"),
+        _candle(10, "112", "113", "109", "111"),
+        _candle(11, "111", "114", "105", "106"),
+    ]
+
+
+def _brf_down_context_4h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "122", "123", "119", "120"),
+        _candle(1, "120", "121", "117", "118"),
+        _candle(2, "118", "119", "115", "116"),
+        _candle(3, "116", "117", "113", "114"),
+    ]
+
+
+def _runtime_signal_input(
+    *,
+    family_id: str,
+    version_id: str,
+    one_hour: list[dict[str, Any]],
+    four_hour: list[dict[str, Any]],
+    last_price: Decimal,
+    atr: Decimal,
+    side: str,
+) -> StrategyFamilySignalInput:
+    return StrategyFamilySignalInput(
+        evaluation_id=f"eval-runtime-signal-{family_id}-{side}",
+        strategy_family_id=family_id,
+        strategy_family_version_id=version_id,
+        symbol="ETH/USDT:USDT",
+        timestamp_ms=NOW_MS,
+        primary_timeframe="1h",
+        context_timeframes=["4h"],
+        market_snapshot=MarketSnapshot(
+            symbol="ETH/USDT:USDT",
+            timestamp_ms=NOW_MS,
+            source="unit_market_read_only",
+            freshness="fresh",
+            last_price=last_price,
+            mark_price=last_price,
+            funding_rate=Decimal("0.0001"),
+            volatility=Decimal("0.15"),
+            atr=atr,
+            timeframe="1h",
+            candle_context={
+                "windows": {"1h": one_hour, "4h": four_hour},
+                "closed_bar": True,
+            },
+        ),
+        account_facts_snapshot=AccountFactsSnapshot(
+            source="unit_account_placeholder",
+            truth_level="placeholder",
+            timestamp_ms=NOW_MS,
+            freshness="fresh",
+            account_status="not_checked",
+            available_balance=Decimal("30"),
+            positions=[],
+            open_orders=[],
+            position_count=99,
+            open_order_count=0,
+            unknown_unmanaged_counts={"orders": 0, "positions": 99},
+            reconciliation_status={"status": "not_checked"},
+            read_only_provider="unit_placeholder",
+            limitations=["caller supplied facts must be replaced by trusted overlay"],
+        ),
+        position_open_order_summary={"active_positions_count": 99, "position_count": 99},
+        reconciliation_status={"status": "not_checked"},
+        runtime_safety_snapshot={"runtime_state": "shadow", "live_ready": False},
+        trial_constraints_snapshot={
+            "max_attempts": 3,
+            "max_loss_budget": "9",
+            "max_notional_per_attempt": "10",
+            "max_active_positions": 1,
+            "max_leverage": "1",
+            "allowed_symbols": ["ETH/USDT:USDT"],
+            "side": side,
+        },
+        source="unit_test",
+        freshness="fresh",
+    )
+
+
+def _ready_account_source() -> StaticTrialReadinessAccountFactsSource:
+    return StaticTrialReadinessAccountFactsSource(
+        TrialReadinessAccountFacts(
+            account_id="unit-account",
+            account_type="unit",
+            source_id="unit_cached_account_facts",
+            source_type=AccountFactsSourceType.PG_ACCOUNT_FACTS,
+            account_equity=Decimal("30"),
+            available_margin=Decimal("29"),
+            timestamp_ms=NOW_MS,
+            freshness_status=AccountFactsFreshnessStatus.FRESH,
+            reconciliation_status=AccountFactsReconciliationStatus.CLEAN,
+            read_only_guarantee=True,
+            external_call_performed=False,
+            external_call_type="none",
+        )
+    )
+
+
+class _TrustedPositionSource:
+    def __init__(self, positions: list | None = None) -> None:
+        self.positions = positions or []
+
+    async def list_active(self, *, symbol: str | None = None, limit: int = 100):
+        assert symbol == "ETH/USDT:USDT"
+        assert limit == 100
+        return list(self.positions)
+
+
+class _FakeCPMShortEvaluator:
+    def evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+    ) -> StrategyFamilySignalOutput:
+        return StrategyFamilySignalOutput(
+            signal_id=f"fake-short-{signal_input.evaluation_id}",
+            evaluation_id=signal_input.evaluation_id,
+            strategy_family_id=signal_input.strategy_family_id,
+            strategy_family_version_id=signal_input.strategy_family_version_id,
+            symbol=signal_input.symbol,
+            timestamp_ms=signal_input.timestamp_ms,
+            timeframe=signal_input.primary_timeframe,
+            signal_type=SignalType.WOULD_ENTER,
+            side=SignalSide.SHORT,
+            confidence=Decimal("0.6"),
+            reason_codes=["unit_fake_cpm_short"],
+            human_summary="Fake CPM short output for semantic gate coverage.",
+            required_execution_mode="observe_only",
+            evidence_payload={
+                "latest_1h_close": "104.2",
+                "lookback_low": "100.9",
+                "price_action_structure": {"pullback_reclaim": True},
+            },
+        )
+
+
 class _ShadowAndCandidateStore:
     def __init__(self) -> None:
         self.evaluation: SignalEvaluation | None = None
@@ -287,6 +533,49 @@ def _service(
     )
 
 
+def _candidate_planning_service(
+    *,
+    runtime: StrategyRuntimeInstance,
+    store: _ShadowAndCandidateStore | None = None,
+    overlay: StrategyRuntimeFactOverlayService | None = None,
+    signal_evaluation_service: RuntimeStrategySignalEvaluationService | None = None,
+) -> tuple[RuntimeStrategySignalPlanningService, _ShadowAndCandidateStore]:
+    store = store or _ShadowAndCandidateStore()
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == runtime.runtime_instance_id
+            return runtime
+
+    class _PositionSource:
+        async def list_active(self, *, symbol: str | None = None, limit: int = 100):
+            assert symbol == runtime.symbol
+            assert limit == 100
+            return []
+
+    final_gate = RuntimeFinalGatePreviewService(
+        runtime_service=_RuntimeService(),
+        signal_evaluation_service=store,
+        active_position_source=_PositionSource(),
+    )
+    planning = RuntimeExecutionPlanningService(
+        runtime_service=_RuntimeService(),
+        signal_evaluation_service=store,
+        final_gate_preview_service=final_gate,
+    )
+    return (
+        RuntimeStrategySignalPlanningService(
+            semantics_binding_service=StrategySemanticsShadowBindingService(
+                shadow_service=store,
+            ),
+            runtime_execution_planning_service=planning,
+            runtime_fact_overlay_service=overlay,
+            signal_evaluation_service=signal_evaluation_service,
+        ),
+        store,
+    )
+
+
 async def _repo_engine(*tables):
     engine = create_async_engine(
         "sqlite+aiosqlite://",
@@ -328,6 +617,245 @@ async def test_strategy_signal_pair_can_reach_runtime_intent_draft_without_execu
     assert draft.execution_intent_created is False
     assert draft.order_created is False
     assert draft.exchange_called is False
+
+
+async def test_runtime_signal_input_cpm_long_creates_shadow_candidate_with_proposal():
+    runtime = _runtime_for_strategy(
+        family_id="CPM-RO-001",
+        version_id="CPM-RO-001-v0",
+        side="long",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+    )
+    service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_reclaim_1h(),
+            four_hour=_cpm_uptrend_4h(),
+            last_price=Decimal("104.2"),
+            atr=Decimal("3"),
+            side="long",
+        ),
+        runtime=runtime,
+        context_id="context-cpm-shadow-planning-v1",
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+    assert result.evaluation_result.can_call_semantic_binding is True
+    assert result.signal_evaluation_created is True
+    assert result.order_candidate_created is True
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+    assert store.evaluation is not None
+    assert store.candidate is not None
+    assert result.candidate is store.candidate
+    assert result.candidate.side == "long"
+    assert result.proposal is not None
+    assert result.proposal.entry_price_reference == Decimal("104.2")
+    assert result.proposal.stop_source == "cpm_pullback_low"
+    assert result.proposal.stop_price_reference == Decimal("99.6")
+    assert result.proposal.intended_notional == Decimal("10")
+    assert result.proposal.leverage == Decimal("1")
+    assert result.proposal.margin_required == Decimal("10.00000000")
+    assert result.proposal.max_loss_reference > Decimal("0")
+    assert result.candidate.entry_price_reference == Decimal("104.2")
+    assert result.candidate.risk_preview.intended_notional == Decimal("10")
+    assert result.candidate.protection_preview.stop_price_reference == Decimal("99.6")
+    assert result.candidate.protection_preview.take_profit_references[0]["rr"] == "1"
+    assert (
+        result.candidate.protection_preview.take_profit_references[1][
+            "right_tail_capture"
+        ]
+        is True
+    )
+    assert result.candidate.metadata["runtime_strategy_signal_candidate_planning"] is True
+    assert result.candidate.metadata["planning_proposal"]["metadata"]["not_proven_alpha"] is True
+    assert result.candidate.not_order is True
+    assert result.candidate.not_execution_intent is True
+
+
+async def test_runtime_signal_input_brf_short_creates_shadow_candidate_with_rally_stop():
+    runtime = _runtime_for_strategy(
+        family_id="BRF-001",
+        version_id="BRF-001-v0",
+        side="short",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+    )
+    service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="BRF-001",
+            version_id="BRF-001-v0",
+            one_hour=_brf_1h(),
+            four_hour=_brf_down_context_4h(),
+            last_price=Decimal("106"),
+            atr=Decimal("4"),
+            side="short",
+        ),
+        runtime=runtime,
+        context_id="context-brf-shadow-planning-v1",
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+    assert result.evaluation_result.output is not None
+    assert result.evaluation_result.output.side == SignalSide.SHORT
+    assert store.evaluation is not None
+    assert store.candidate is not None
+    assert result.candidate is store.candidate
+    assert result.candidate.side == "short"
+    assert result.proposal is not None
+    assert result.proposal.entry_price_reference == Decimal("106")
+    assert result.proposal.stop_source == "brf_rally_high"
+    assert result.proposal.stop_price_reference == Decimal("114")
+    assert result.proposal.take_profit_references[0]["price_reference"] == "98.00000000"
+    assert (
+        result.proposal.take_profit_references[1]["policy"]
+        == "trailing_atr_or_structure_invalidation"
+    )
+    assert result.candidate.protection_preview.stop_price_reference == Decimal("114")
+    assert result.candidate.risk_preview.leverage == Decimal("1")
+    assert result.candidate.execution_enabled is False
+    assert result.candidate.candidate_executable is False
+    assert result.execution_intent_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+
+
+async def test_runtime_signal_input_cpm_short_mismatch_blocks_before_candidate():
+    runtime = _runtime_for_strategy(
+        family_id="CPM-RO-001",
+        version_id="CPM-RO-001-v0",
+        side="long",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+    )
+    evaluator_gate = RuntimeStrategySignalEvaluationService(
+        evaluators={
+            ("CPM-RO-001", "CPM-RO-001-v0"): _FakeCPMShortEvaluator(),
+        }
+    )
+    service, store = _candidate_planning_service(
+        runtime=runtime,
+        overlay=overlay,
+        signal_evaluation_service=evaluator_gate,
+    )
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_reclaim_1h(),
+            four_hour=_cpm_uptrend_4h(),
+            last_price=Decimal("104.2"),
+            atr=Decimal("3"),
+            side="long",
+        ),
+        runtime=runtime,
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.BLOCKED
+    assert "strategy_output_side_not_supported_by_semantics" in result.blockers
+    assert result.candidate is None
+    assert result.proposal is None
+    assert store.evaluation is None
+    assert store.candidate is None
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+
+
+async def test_runtime_signal_input_rmr_and_fco_do_not_trade():
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+    )
+
+    for family_id, version_id, expected_status in [
+        (
+            "RMR-001",
+            "RMR-001-v0",
+            RuntimeStrategySignalCandidatePlanningStatus.OBSERVE_ONLY,
+        ),
+        (
+            "FCO-001",
+            "FCO-001-v0",
+            RuntimeStrategySignalCandidatePlanningStatus.BLOCKED,
+        ),
+    ]:
+        runtime = _runtime_for_strategy(
+            family_id=family_id,
+            version_id=version_id,
+            side="long",
+        )
+        service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+        result = await service.plan_shadow_candidate_from_signal_input(
+            _runtime_signal_input(
+                family_id=family_id,
+                version_id=version_id,
+                one_hour=_cpm_reclaim_1h(),
+                four_hour=_cpm_uptrend_4h(),
+                last_price=Decimal("104.2"),
+                atr=Decimal("3"),
+                side="long",
+            ),
+            runtime=runtime,
+        )
+
+        assert result.status == expected_status
+        assert result.candidate is None
+        assert result.proposal is None
+        assert store.evaluation is None
+        assert store.candidate is None
+        assert result.order_candidate_created is False
+        assert result.execution_intent_created is False
+        assert result.exchange_called is False
+
+
+async def test_runtime_signal_input_blocks_missing_trusted_account_facts_before_candidate():
+    runtime = _runtime_for_strategy(
+        family_id="CPM-RO-001",
+        version_id="CPM-RO-001-v0",
+        side="long",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=None,
+    )
+    service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_reclaim_1h(),
+            four_hour=_cpm_uptrend_4h(),
+            last_price=Decimal("104.2"),
+            atr=Decimal("3"),
+            side="long",
+        ),
+        runtime=runtime,
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.BLOCKED
+    assert "trusted_account_facts_source_unavailable" in result.blockers
+    assert result.candidate is None
+    assert result.proposal is None
+    assert store.evaluation is None
+    assert store.candidate is None
+    assert result.order_candidate_created is False
+    assert result.exchange_called is False
 
 
 async def test_strategy_signal_pair_blocks_when_local_active_position_source_is_missing():
