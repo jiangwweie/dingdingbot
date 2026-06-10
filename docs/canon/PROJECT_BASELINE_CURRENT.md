@@ -328,10 +328,12 @@ Key facts:
   runtime attempt reservation audit record / runtime attempt mutation record /
   runtime-native protection plan preview / runtime-native protection plan audit
   record / runtime OrderLifecycle handoff draft audit record / non-executing
-  OrderLifecycle adapter preview gate / submit adapter readiness preview /
-  runtime submit rehearsal aggregate** now
-  exist in the local working tree as non-submitting bridge layers. They are not
-  deployed to tokyo.
+  OrderLifecycle adapter preview gate / typed local order registration draft
+  preview / default-disabled OrderLifecycle adapter result skeleton / submit
+  adapter readiness preview / runtime submit rehearsal aggregate** now exist in
+  tracked code as bounded bridge layers. Deployment state must be verified from
+  the current release manifest and postdeploy reports, not inferred from this
+  canon paragraph.
   RuntimeExecutionIntentDraft has its own audit table. The adapter can record
   `ExecutionIntent(status=recorded, source_type=brc_runtime_order_candidate)`
   without projecting OrderCandidate into legacy `SignalResult`. Drafts and

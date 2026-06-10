@@ -40,6 +40,14 @@ READY_SUBMIT_ADAPTER_STATUS = "inputs_ready_dry_run_adapter_only"
 READY_HANDOFF_STATUS = "ready_for_order_lifecycle_adapter"
 READY_ADAPTER_PREVIEW_STATUS = "inputs_ready_registration_not_enabled"
 READY_REGISTRATION_DRAFT_STATUS = "inputs_ready_registration_draft_only"
+ADAPTER_IMPLEMENTATION_CAPABILITIES = {
+    "order_object_construction_boundary_implemented": True,
+    "local_order_registration_write_path_implemented": True,
+    "order_lifecycle_adapter_invocation_implemented": True,
+    "persistent_duplicate_submit_lock_implemented": False,
+    "execution_intent_status_transition_after_registration_implemented": False,
+    "protection_order_failure_recovery_implemented": False,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,6 +245,9 @@ def build_order_lifecycle_adapter_enablement_packet(
                 "order_objects_constructed": registration_preview.get(
                     "order_objects_constructed"
                 ),
+                "adapter_implementation_capabilities": dict(
+                    ADAPTER_IMPLEMENTATION_CAPABILITIES
+                ),
             },
             "implementation_work_items": implementation_work_items,
             "runtime_enablement_blockers": runtime_enablement_blockers,
@@ -383,19 +394,54 @@ def _implementation_work_items(
     registration_preview: dict[str, Any],
 ) -> list[str]:
     items: list[str] = []
-    if adapter_preview.get("order_lifecycle_adapter_implemented") is not True:
-        items.append("order_lifecycle_adapter_invocation_not_implemented")
-    if registration_preview.get("local_order_registration_enabled") is not True:
-        items.append("local_order_registration_write_path_not_enabled")
-    if registration_preview.get("order_objects_constructed") is not True:
-        items.append("order_object_construction_boundary_not_enabled")
-    items.extend(
-        [
-            "persistent_duplicate_submit_lock_not_implemented",
-            "execution_intent_status_transition_after_registration_not_implemented",
-            "protection_order_failure_recovery_not_implemented",
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "order_lifecycle_adapter_invocation_implemented"
         ]
-    )
+        is not True
+    ):
+        items.append("order_lifecycle_adapter_invocation_not_implemented")
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "local_order_registration_write_path_implemented"
+        ]
+        is not True
+    ):
+        items.append("local_order_registration_write_path_not_enabled")
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "order_object_construction_boundary_implemented"
+        ]
+        is not True
+    ):
+        items.append("order_object_construction_boundary_not_enabled")
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "persistent_duplicate_submit_lock_implemented"
+        ]
+        is not True
+    ):
+        items.append("persistent_duplicate_submit_lock_not_implemented")
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "execution_intent_status_transition_after_registration_implemented"
+        ]
+        is not True
+    ):
+        items.append(
+            "execution_intent_status_transition_after_registration_not_implemented"
+        )
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "protection_order_failure_recovery_implemented"
+        ]
+        is not True
+    ):
+        items.append("protection_order_failure_recovery_not_implemented")
+    if adapter_preview.get("order_lifecycle_adapter_implemented") is not True:
+        items.append("order_lifecycle_adapter_runtime_enablement_disabled")
+    if registration_preview.get("local_order_registration_enabled") is not True:
+        items.append("local_order_registration_runtime_enablement_disabled")
     return _dedupe(items)
 
 

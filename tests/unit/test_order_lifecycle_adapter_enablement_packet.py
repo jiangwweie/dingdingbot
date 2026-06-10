@@ -15,7 +15,7 @@ SCRIPT_PATH = (
 PRE_LIVE_SCRIPT_PATH = (
     REPO_ROOT / "scripts" / "verify_runtime_submit_rehearsal_pre_live_packet.py"
 )
-LOCAL_HEAD = "1bedecd5bd00d1def1b77ca51d8f51c4aa021c1a"
+LOCAL_HEAD = "6a39509565471aa56be7945f8b04ce8d5e18460a"
 
 
 def _load_module():
@@ -51,7 +51,7 @@ def _runner(pre_live_module):
         if command == ("git", "rev-parse", "HEAD"):
             return pre_live_module.CommandResult(LOCAL_HEAD, 0)
         if command == ("git", "rev-parse", "--short=8", "HEAD"):
-            return pre_live_module.CommandResult("1bedecd5", 0)
+            return pre_live_module.CommandResult("6a395095", 0)
         raise AssertionError(f"unexpected command: {command}")
 
     return run
@@ -82,13 +82,16 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert packet["readiness_summary"]["hard_stop_registration_draft_ready"] is True
     assert packet["checks"]["ready_for_non_executing_implementation_task"] is True
     assert packet["checks"]["ready_for_runtime_adapter_enablement"] is False
-    assert "order_lifecycle_adapter_invocation_not_implemented" in (
+    assert "order_lifecycle_adapter_invocation_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
-    assert "local_order_registration_write_path_not_enabled" in (
+    assert "local_order_registration_write_path_not_enabled" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "persistent_duplicate_submit_lock_not_implemented" in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "execution_intent_status_transition_after_registration_not_implemented" in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "owner_real_submit_authorization_missing" in (
@@ -127,7 +130,10 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "order_lifecycle_adapter_disabled" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
-    assert "order_lifecycle_adapter_invocation_not_implemented" in (
+    assert "order_lifecycle_adapter_invocation_not_implemented" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "persistent_duplicate_submit_lock_not_implemented" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
 

@@ -82,31 +82,36 @@ def test_current_gap_evidence_names_revision_053_and_062_review_items():
     assert all(item["operation"] == "execute" for item in data_touching)
 
 
-def test_incremental_live_enablement_and_dry_run_submit_gap_is_reviewable_from_064_to_066():
+def test_incremental_live_enablement_and_order_created_status_gap_is_reviewable_from_064_to_067():
     module = _load_module()
 
     report = module.build_migration_gap_report(
         repo_root=REPO_ROOT,
         base_revision="064",
-        head_revision="066",
-        expected_revision_count=2,
+        head_revision="067",
+        expected_revision_count=3,
     )
 
     checks = report["checks"]
     assert report["status"] == "ready_for_controlled_migration_preflight"
     assert checks["ready_for_controlled_migration_preflight"] is True
     assert checks["blockers"] == []
-    assert checks["chain_length"] == 2
+    assert checks["chain_length"] == 3
     assert checks["first_revision"] == "065"
-    assert checks["last_revision"] == "066"
+    assert checks["last_revision"] == "067"
     assert "non_additive_schema_ops_present" in checks["warnings"]
     assert [item["filename"] for item in report["chain"]] == [
         "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py",
         "2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py",
+        "2026-06-10-067_allow_created_order_status.py",
     ]
     non_additive = report["review_evidence"]["non_additive_schema_ops"]
     assert {item["operation"] for item in non_additive} == {"drop_constraint"}
-    assert {"strategy_runtime_instances", "runtime_execution_controlled_submit_results"} <= {
+    assert {
+        "strategy_runtime_instances",
+        "runtime_execution_controlled_submit_results",
+        "orders",
+    } <= {
         item["table"] for item in non_additive
     }
     assert all(value is False for value in report["safety_invariants"].values())

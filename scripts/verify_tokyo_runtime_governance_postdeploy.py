@@ -23,9 +23,9 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 66
+DEFAULT_EXPECTED_MIGRATION_COUNT = 67
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py"
+    "2026-06-10-067_allow_created_order_status.py"
 )
 
 

@@ -54,6 +54,11 @@ from src.domain.runtime_execution_order_registration_draft import (
     RuntimeExecutionOrderRegistrationDraftPreview,
     build_runtime_execution_order_registration_draft_preview,
 )
+from src.domain.runtime_execution_order_lifecycle_adapter_result import (
+    RuntimeExecutionOrderLifecycleAdapterResult,
+    build_runtime_execution_order_lifecycle_adapter_result,
+    build_runtime_execution_orders_for_registration,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -64,6 +69,7 @@ from src.domain.runtime_execution_attempt_mutation import (
     RuntimeExecutionAttemptMutation,
     build_runtime_execution_attempt_mutation,
 )
+from src.domain.models import Order
 from src.domain.strategy_runtime import StrategyRuntimeInstance
 
 
@@ -184,6 +190,16 @@ class RuntimeExecutionRuntimeServicePort(Protocol):
         ...
 
 
+class RuntimeExecutionOrderLifecycleServicePort(Protocol):
+    async def register_created_order(
+        self,
+        order: Order,
+        *,
+        metadata: dict | None = None,
+    ) -> Order:
+        ...
+
+
 class RuntimeExecutionIntentAdapterService:
     """Build non-executing previews for future ExecutionIntent creation."""
 
@@ -210,6 +226,9 @@ class RuntimeExecutionIntentAdapterService:
         order_lifecycle_handoff_repository: (
             RuntimeExecutionOrderLifecycleHandoffRepositoryPort | None
         ) = None,
+        order_lifecycle_service: (
+            RuntimeExecutionOrderLifecycleServicePort | None
+        ) = None,
         final_gate_preview_service: RuntimeFinalGatePreviewPort | None = None,
         runtime_service: RuntimeExecutionRuntimeServicePort | None = None,
     ) -> None:
@@ -221,6 +240,7 @@ class RuntimeExecutionIntentAdapterService:
         self._attempt_mutation_repository = attempt_mutation_repository
         self._protection_plan_repository = protection_plan_repository
         self._order_lifecycle_handoff_repository = order_lifecycle_handoff_repository
+        self._order_lifecycle_service = order_lifecycle_service
         self._final_gate_preview_service = final_gate_preview_service
         self._runtime_service = runtime_service
 
@@ -632,6 +652,64 @@ class RuntimeExecutionIntentAdapterService:
         )
         return build_runtime_execution_order_registration_draft_preview(
             adapter_preview=adapter_preview,
+            now_ms=_now_ms(),
+        )
+
+    async def order_lifecycle_adapter_result_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        order_lifecycle_adapter_enabled: bool = False,
+        local_order_registration_enabled: bool = False,
+        duplicate_submit_lock_acquired: bool = False,
+    ) -> RuntimeExecutionOrderLifecycleAdapterResult:
+        registration_preview = await self.order_registration_draft_preview_for_authorization(
+            authorization_id
+        )
+        should_register = (
+            order_lifecycle_adapter_enabled
+            and local_order_registration_enabled
+            and duplicate_submit_lock_acquired
+            and not registration_preview.blockers
+        )
+        if not should_register:
+            return build_runtime_execution_order_lifecycle_adapter_result(
+                registration_preview=registration_preview,
+                order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
+                local_order_registration_enabled=local_order_registration_enabled,
+                duplicate_submit_lock_acquired=duplicate_submit_lock_acquired,
+                now_ms=_now_ms(),
+            )
+        if self._order_lifecycle_service is None:
+            raise RuntimeError("order_lifecycle_service_unavailable")
+
+        registered_orders: list[Order] = []
+        orders = build_runtime_execution_orders_for_registration(
+            registration_preview=registration_preview
+        )
+        for order in orders:
+            registered = await self._order_lifecycle_service.register_created_order(
+                order,
+                metadata={
+                    "scope": "runtime_order_lifecycle_adapter_local_registration",
+                    "runtime_instance_id": registration_preview.runtime_instance_id,
+                    "execution_intent_id": registration_preview.execution_intent_id,
+                    "authorization_id": registration_preview.authorization_id,
+                    "source_type": registration_preview.source_type,
+                    "source_id": registration_preview.source_id,
+                    "exchange_order_submitted": False,
+                    "exchange_called": False,
+                    "execution_intent_status_changed": False,
+                },
+            )
+            registered_orders.append(registered)
+
+        return build_runtime_execution_order_lifecycle_adapter_result(
+            registration_preview=registration_preview,
+            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
+            local_order_registration_enabled=local_order_registration_enabled,
+            duplicate_submit_lock_acquired=duplicate_submit_lock_acquired,
+            registered_orders=registered_orders,
             now_ms=_now_ms(),
         )
 

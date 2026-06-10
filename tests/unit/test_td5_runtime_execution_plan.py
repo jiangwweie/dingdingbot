@@ -950,6 +950,79 @@ def test_runtime_execution_controlled_submit_result_order_lifecycle_disabled_mig
     assert "order_lifecycle_adapter_enabled" in columns
 
 
+def test_orders_status_migration_allows_created_local_order_status():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-10-067_allow_created_order_status.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "td5_orders_allow_created_status",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    async def _run() -> list[str]:
+        async with engine.begin() as conn:
+            def upgrade(sync_conn):
+                old_op = migration.op
+                operations = Operations(MigrationContext.configure(sync_conn))
+                migration.op = operations
+                try:
+                    sync_conn.exec_driver_sql(
+                        """
+                        CREATE TABLE orders (
+                            id TEXT NOT NULL PRIMARY KEY,
+                            status TEXT NOT NULL DEFAULT 'PENDING',
+                            CONSTRAINT check_orders_status CHECK (
+                                status IN (
+                                    'PENDING',
+                                    'OPEN',
+                                    'PARTIALLY_FILLED',
+                                    'FILLED',
+                                    'CANCELED',
+                                    'REJECTED',
+                                    'EXPIRED'
+                                )
+                            )
+                        )
+                        """
+                    )
+                    migration.upgrade()
+                    sync_conn.exec_driver_sql(
+                        """
+                        INSERT INTO orders (id, status)
+                        VALUES
+                            ('created-local-order', 'CREATED'),
+                            ('submitted-order', 'SUBMITTED'),
+                            ('pending-order', 'PENDING')
+                        """
+                    )
+                    rows = sync_conn.exec_driver_sql(
+                        "SELECT status FROM orders ORDER BY id"
+                    ).fetchall()
+                    statuses = [str(row[0]) for row in rows]
+                    sync_conn.exec_driver_sql("UPDATE orders SET status = 'PENDING'")
+                    migration.downgrade()
+                    return statuses
+                finally:
+                    migration.op = old_op
+
+            return await conn.run_sync(upgrade)
+
+    statuses = asyncio.run(_run())
+    asyncio.run(engine.dispose())
+
+    assert statuses == ["CREATED", "PENDING", "SUBMITTED"]
+
+
 def test_runtime_execution_intent_draft_candidate_snapshot_migration():
     base_migration_path = (
         Path(__file__).resolve().parents[2]

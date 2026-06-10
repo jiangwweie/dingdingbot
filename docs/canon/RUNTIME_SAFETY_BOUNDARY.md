@@ -73,7 +73,16 @@ This document defines the runtime safety boundaries for the BRC project.
   order registration draft preview may validate entry/protection registration
   draft facts, but it must keep `order_objects_constructed=false`,
   `local_order_registration_executed=false`, `order_created=false`,
-  `order_lifecycle_called=false`, and `exchange_called=false`. The submit adapter
+  `order_lifecycle_called=false`, and `exchange_called=false`.
+  `RuntimeExecutionOrderLifecycleAdapterResult` now exists as the next
+  default-disabled adapter skeleton. By default it returns
+  `order_lifecycle_adapter_disabled` and does not construct or register orders.
+  Only when an application caller explicitly provides adapter enablement, local
+  registration enablement, and duplicate-submit lock evidence may it construct
+  local `Order(status=CREATED)` objects from typed registration drafts and call
+  `OrderLifecycleService.register_created_order`. Even then it must not submit
+  exchange orders, call exchange, call OwnerBoundedExecution, change
+  ExecutionIntent status, or create withdrawal/transfer instructions. The submit adapter
   rehearsal may summarize readiness and blockers across these gates, but it
   must not record reservations, apply attempt mutations, record protection
   plans, record OrderLifecycle handoff drafts, or call order/exchange services.

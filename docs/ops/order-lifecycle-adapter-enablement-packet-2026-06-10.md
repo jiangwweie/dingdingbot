@@ -2,7 +2,9 @@
 
 Date: 2026-06-10
 
-Status: accepted as a non-executing readiness packet.
+Status: accepted as a non-executing readiness packet. Follow-up implementation
+slice added a default-disabled OrderLifecycle adapter result skeleton and a
+schema-readiness migration for local `CREATED` order registration.
 
 ## Purpose
 
@@ -34,7 +36,7 @@ Command:
 ```bash
 /opt/homebrew/bin/python3 scripts/build_order_lifecycle_adapter_enablement_packet.py \
   --json \
-  --deployed-head 1bedecd5bd00d1def1b77ca51d8f51c4aa021c1a
+  --deployed-head 6a39509565471aa56be7945f8b04ce8d5e18460a
 ```
 
 Observed status:
@@ -59,8 +61,6 @@ Remaining runtime enablement blockers include:
 ```text
 runtime_not_live_execution_enabled
 order_lifecycle_adapter_disabled
-local_order_registration_write_path_not_enabled
-order_lifecycle_adapter_invocation_not_implemented
 persistent_duplicate_submit_lock_not_implemented
 execution_intent_status_transition_after_registration_not_implemented
 protection_order_failure_recovery_not_implemented
@@ -77,6 +77,28 @@ ready_for_runtime_adapter_enablement = false
 
 because the implementation work items remain unresolved.
 
+## Adapter Result Skeleton
+
+`RuntimeExecutionOrderLifecycleAdapterResult` now exists as a default-disabled
+adapter skeleton:
+
+- default call returns `order_lifecycle_adapter_disabled`;
+- no `Order` objects are constructed by default;
+- no local orders are registered by default;
+- explicit adapter enablement, local-registration enablement, and duplicate
+  submit lock evidence are required before registration;
+- when explicitly enabled in application tests, it constructs local
+  `Order(status=CREATED)` objects from typed registration drafts and calls
+  `OrderLifecycleService.register_created_order`;
+- it still does not submit exchange orders, call exchange, change
+  ExecutionIntent status, or create withdrawal/transfer instructions.
+
+Migration `067_allow_created_order_status` aligns the historical `orders`
+table status check with the current domain/ORM status model so future local
+registration of `Order(status=CREATED)` does not fail at the PG constraint
+layer. This migration is schema readiness only; it does not enable runtime
+adapter registration, submit, exchange access, or live trading.
+
 ## Safety Boundary
 
 The packet does not:
@@ -84,10 +106,10 @@ The packet does not:
 - write PG;
 - mutate a runtime;
 - change ExecutionIntent status;
-- construct Order objects;
-- register local orders;
+- construct Order objects by default;
+- register local orders by default;
 - call OwnerBoundedExecution;
-- call OrderLifecycle;
+- call OrderLifecycle by default;
 - call exchange;
 - create withdrawal or transfer instructions.
 
@@ -97,6 +119,7 @@ Command:
 
 ```bash
 /opt/homebrew/bin/pytest -q \
+  tests/unit/test_runtime_order_lifecycle_adapter_result.py \
   tests/unit/test_order_lifecycle_adapter_enablement_packet.py \
   tests/unit/test_runtime_first_real_submit_owner_packet.py \
   tests/unit/test_runtime_submit_rehearsal_pre_live_packet.py \
@@ -106,5 +129,12 @@ Command:
 Result:
 
 ```text
-25 passed
+29 passed
+```
+
+Additional focused verification for the adapter skeleton, migration gap, and
+Tokyo deploy/postdeploy planning guards:
+
+```text
+55 passed
 ```
