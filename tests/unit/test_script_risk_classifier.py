@@ -105,18 +105,42 @@ def test_tokyo_deploy_plan_is_planning_only_not_mutating() -> None:
         REPO_ROOT / "scripts/plan_tokyo_runtime_governance_deploy.py"
     )
 
-    assert result.level == ScriptRiskLevel.REVIEW_REQUIRED
+    assert result.level == ScriptRiskLevel.MUTATION_RESTRICTED
     assert result.default_allowed is False
     assert result.owner_confirmation_required is True
     assert result.live_action_possible is False
     assert result.exchange_write_possible is False
-    assert result.database_write_possible is False
+    assert result.database_write_possible is True
     assert result.runtime_control_possible is False
     assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
+    assert ScriptRiskCategory.DATABASE_WRITE in result.categories
     assert ScriptRiskCategory.LIVE_SCOPE in result.categories
     assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
+    assert ScriptRiskCategory.REMOTE_DEPLOYMENT in result.categories
     assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
+
+
+def test_remote_deployment_markers_are_mutation_restricted() -> None:
+    result = classify_script_text(
+        path="scripts/deploy_example.py",
+        text=(
+            '"""Dry-run by default; explicit Owner confirmation required."""\n'
+            "commands = ['scp artifact tokyo:/tmp/a', "
+            "'sudo -n systemctl stop svc', "
+            "'pg_dump $DATABASE_URL -Fc -f backup.pgdump', "
+            "'python -m alembic upgrade head', "
+            "'ln -sfn release current']\n"
+        ),
+    )
+
+    assert result.level == ScriptRiskLevel.MUTATION_RESTRICTED
+    assert result.default_allowed is False
+    assert result.owner_confirmation_required is True
+    assert result.database_write_possible is True
+    assert ScriptRiskCategory.REMOTE_DEPLOYMENT in result.categories
+    assert ScriptRiskCategory.DATABASE_WRITE in result.categories
+    assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
 
 
 def test_tokyo_postdeploy_verifier_is_readonly_review_required_not_write() -> None:
@@ -134,6 +158,24 @@ def test_tokyo_postdeploy_verifier_is_readonly_review_required_not_write() -> No
     assert ScriptRiskCategory.LIVE_SCOPE in result.categories
     assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
+
+
+def test_tokyo_deploy_executor_is_mutation_restricted_without_exchange_write() -> None:
+    result = classify_script_path(
+        REPO_ROOT / "scripts/execute_tokyo_runtime_governance_deploy.py"
+    )
+
+    assert result.level == ScriptRiskLevel.MUTATION_RESTRICTED
+    assert result.default_allowed is False
+    assert result.owner_confirmation_required is True
+    assert result.live_action_possible is False
+    assert result.exchange_write_possible is False
+    assert result.database_write_possible is True
+    assert result.runtime_control_possible is False
+    assert ScriptRiskCategory.DATABASE_WRITE in result.categories
+    assert ScriptRiskCategory.REMOTE_DEPLOYMENT in result.categories
+    assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
+    assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
 
 
 def test_testnet_daily_gate_reset_is_database_mutation_restricted() -> None:

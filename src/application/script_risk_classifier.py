@@ -17,6 +17,7 @@ class ScriptRiskCategory(str, Enum):
     EXCHANGE_READ = "exchange_read"
     EXCHANGE_WRITE = "exchange_write"
     DATABASE_WRITE = "database_write"
+    REMOTE_DEPLOYMENT = "remote_deployment"
     RUNTIME_CONTROL = "runtime_control"
     LIVE_SCOPE = "live_scope"
     TESTNET_SCOPE = "testnet_scope"
@@ -107,10 +108,21 @@ _PATTERNS: tuple[_RiskPattern, ...] = (
             r"\bINSERT\s+INTO\b|\bUPDATE\s+[A-Za-z0-9_\\.]+\s+SET\b|\bDELETE\s+FROM\b|"
             r"\bUPSERT\b|\bON CONFLICT\b|"
             r"\b(?:session|connection)\.commit\(|\breset_trade_count\b|"
-            r"\bset_state\(|\bRuntimeProfileRepository\b|APPLY=true",
+            r"\bset_state\(|\bRuntimeProfileRepository\b|APPLY=true|"
+            r"\balembic\s+upgrade\b",
             re.IGNORECASE,
         ),
         "The script can mutate database or persisted runtime/config state.",
+    ),
+    _RiskPattern(
+        ScriptRiskCategory.REMOTE_DEPLOYMENT,
+        "remote_deployment_marker",
+        re.compile(
+            r"\bscp\b|\bpg_dump\b|\btar\s+-xzf\b|\bln\s+-sfn\b|"
+            r"\bsystemctl\s+(?:stop|start|restart|reload)\b",
+            re.IGNORECASE,
+        ),
+        "The script can transfer release artifacts, change remote symlinks, backup PG, or control deployed services.",
     ),
     _RiskPattern(
         ScriptRiskCategory.RUNTIME_CONTROL,
@@ -255,7 +267,11 @@ def _risk_level(*, path: str, categories: tuple[ScriptRiskCategory, ...]) -> Scr
         return ScriptRiskLevel.LIVE_ACTION_RESTRICTED
     if ScriptRiskCategory.EXCHANGE_WRITE in categories:
         return ScriptRiskLevel.EXCHANGE_WRITE_RESTRICTED
-    if ScriptRiskCategory.RUNTIME_CONTROL in categories or ScriptRiskCategory.DATABASE_WRITE in categories:
+    if (
+        ScriptRiskCategory.RUNTIME_CONTROL in categories
+        or ScriptRiskCategory.DATABASE_WRITE in categories
+        or ScriptRiskCategory.REMOTE_DEPLOYMENT in categories
+    ):
         return ScriptRiskLevel.MUTATION_RESTRICTED
     if (
         ScriptRiskCategory.EXCHANGE_READ in categories
@@ -295,4 +311,6 @@ def _containment_notes(
         notes.append("Testnet write scope is still a controlled execution rehearsal and must not imply live permission.")
     if ScriptRiskCategory.LIVE_SCOPE in categories and ScriptRiskCategory.EXCHANGE_WRITE not in categories:
         notes.append("Live-scope read/preflight scripts still require credential-safe review before use.")
+    if ScriptRiskCategory.REMOTE_DEPLOYMENT in categories:
+        notes.append("Remote deployment, migration, backup, symlink, or service-control commands require an explicit bounded deployment approval.")
     return tuple(notes)

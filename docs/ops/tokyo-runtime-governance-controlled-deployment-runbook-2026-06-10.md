@@ -141,6 +141,24 @@ show `ready_for_owner_authorized_remote_deploy=true` and print the explicit
 remote mutation confirmation phrase before any upload, backup, migration,
 symlink switch, or restart.
 
+Once Owner explicitly approves the remote mutation stage, the same plan can be
+executed through the apply-gated executor:
+
+```bash
+/opt/homebrew/bin/python3 scripts/execute_tokyo_runtime_governance_deploy.py \
+  --json \
+  --archive-path <local-release-archive.tar.gz> \
+  --manifest-path <release-readiness-manifest.json> \
+  --release-name <remote-release-name> \
+  --apply \
+  --confirmation-phrase OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
+```
+
+Without `--apply` and the exact confirmation phrase, this executor remains a
+dry-run and must not mutate Tokyo. With `--apply`, it is a remote deployment,
+backup, migration, symlink, and service-control action; do not run it as a
+background convenience command.
+
 ## Remote Preflight
 
 Read-only checks before any remote mutation:
