@@ -264,6 +264,7 @@ export default function CarrierShelf() {
             live_readonly_observation: {
               candidates: observationCandidates,
               current_signals: observationSignals,
+              runtime_signal_planning_summary: observation.runtime_signal_planning_summary,
               non_permissions: observation.non_permissions,
             },
             scope_review: admission.scope_review,
@@ -337,12 +338,19 @@ function ReadOnlyObservationPanel({
   const unsafe = observation.live_ready === true
     || observation.live_observation_active === true
     || Object.values(observation.non_permissions || {}).some((value) => value !== true);
+  const planningSummary = observation.runtime_signal_planning_summary || {};
+  const plannerUnexpectedlyCalled = planningSummary.planner_call_performed === true
+    || planningSummary.signal_evaluation_created === true
+    || planningSummary.order_candidate_created === true
+    || planningSummary.execution_intent_created === true
+    || planningSummary.order_created === true
+    || planningSummary.exchange_called === true;
 
   return (
     <ConsolePanel
       title="只读观察链"
       caption="CPM / BRF 等策略语义可以进入证据和复盘，但不是执行权限"
-      action={<StatusChip tone={unsafe ? 'blocked' : candidates.length > 0 ? 'normal' : 'unavailable'}>{loading ? '读取中' : unsafe ? '需核查' : '非执行'}</StatusChip>}
+      action={<StatusChip tone={unsafe || plannerUnexpectedlyCalled ? 'blocked' : candidates.length > 0 ? 'normal' : 'unavailable'}>{loading ? '读取中' : unsafe || plannerUnexpectedlyCalled ? '需核查' : '非执行'}</StatusChip>}
     >
       {loading ? (
         <div className="px-4 py-6 text-sm text-slate-500">正在读取策略观察链...</div>
@@ -363,28 +371,37 @@ function ReadOnlyObservationPanel({
         <>
           <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
             <GateCell label="观察候选" value={String(candidates.length)} tone="normal" />
+            <GateCell label="规划预检" value={planningSummaryLabel(planningSummary)} tone={planningSummaryTone(planningSummary)} />
+            <GateCell label="Shadow 创建" value={plannerUnexpectedlyCalled ? '异常' : '未创建'} tone={plannerUnexpectedlyCalled ? 'blocked' : 'unavailable'} />
+            <GateCell label="执行权限" value={unsafe ? '需核查' : '未授予'} tone={unsafe ? 'blocked' : 'unavailable'} />
+          </div>
+          <div className="grid grid-cols-1 gap-px border-t border-slate-800 bg-slate-800/80 md:grid-cols-4">
             <GateCell label="当前信号" value={String(signals.length)} tone={signals.length > 0 ? 'attention' : 'unavailable'} />
             <GateCell label="Live ready" value={observation.live_ready ? '异常' : '否'} tone={observation.live_ready ? 'blocked' : 'normal'} />
-            <GateCell label="执行权限" value={unsafe ? '需核查' : '未授予'} tone={unsafe ? 'blocked' : 'unavailable'} />
+            <GateCell label="Planner 调用" value={planningSummary.planner_call_performed ? '异常' : '未调用'} tone={planningSummary.planner_call_performed ? 'blocked' : 'unavailable'} />
+            <GateCell label="Intent / Order" value={planningSummary.execution_intent_created || planningSummary.order_created ? '异常' : '未创建'} tone={planningSummary.execution_intent_created || planningSummary.order_created ? 'blocked' : 'unavailable'} />
           </div>
           <div className="divide-y divide-slate-800/90 border-t border-slate-800">
             {candidates.map((candidate) => {
               const signal = signals.find((item) => item.candidate_id === candidate.candidate_id);
+              const readiness = candidate.runtime_signal_planning_readiness || {};
               return (
                 <div key={candidate.candidate_id || `${candidate.strategy_group_id}-${candidate.symbol}`}>
                   <EntityRow
                     title={displayValue(candidate.candidate_id, '观察候选')}
-                    subtitle={`${displayValue(candidate.strategy_group_id, '策略族')} · ${displayValue(candidate.strategy_family_version_id, '版本待定')}`}
+                    subtitle={`${displayValue(candidate.strategy_group_id, '策略族')} · ${observationRoleLabel(candidate.observation_role)}`}
                     tone={observationCandidateTone(candidate, signal)}
                     cells={[
                       { label: '标的', value: displayValue(candidate.symbol, '暂无') },
                       { label: '方向', value: sideLabel(candidate.side) },
-                      { label: '角色', value: observationRoleLabel(candidate.observation_role) },
                       { label: '信号', value: signalTypeLabel(signal?.signal_type) },
+                      { label: '规划', value: planningStatusLabel(readiness.status) },
                     ]}
                     action={<StatusChip tone={observationCandidateTone(candidate, signal)}>{signal?.no_execution_permission === false ? '需核查' : '非执行'}</StatusChip>}
                   />
                   <div className="border-t border-slate-800/70 bg-slate-950/30 px-4 py-3 text-xs leading-5 text-slate-500">
+                    {planningLine(readiness)}
+                    <span className="mx-2 text-slate-700">/</span>
                     {signal?.human_summary || observationBlockerSummary(candidate)}
                   </div>
                 </div>
@@ -685,6 +702,63 @@ function signalTypeLabel(value?: string): string {
     invalid: '输入无效',
   };
   return map[String(value || '')] || displayValue(value, '暂无');
+}
+
+function planningStatusLabel(value?: unknown): string {
+  const map: Record<string, string> = {
+    observe_only: '观察',
+    blocked: '阻断',
+    ready_for_non_executing_planner: '可进非执行规划',
+  };
+  return map[String(value || '')] || displayValue(value, '暂无');
+}
+
+function planningSummaryLabel(summary: Record<string, any>): string {
+  const statusCounts = summary.status_counts || {};
+  const ready = Number(statusCounts.ready_for_non_executing_planner || 0);
+  const blocked = Number(statusCounts.blocked || 0);
+  const observeOnly = Number(statusCounts.observe_only || 0);
+  if (ready > 0) return `${ready} 可规划`;
+  if (blocked > 0) return `${blocked} 阻断`;
+  if (observeOnly > 0) return `${observeOnly} 观察`;
+  return '暂无';
+}
+
+function planningSummaryTone(summary: Record<string, any>): ConsoleTone {
+  if (
+    summary.planner_call_performed === true
+    || summary.signal_evaluation_created === true
+    || summary.order_candidate_created === true
+    || summary.execution_intent_created === true
+    || summary.order_created === true
+    || summary.exchange_called === true
+  ) return 'blocked';
+  const statusCounts = summary.status_counts || {};
+  if (Number(statusCounts.ready_for_non_executing_planner || 0) > 0) return 'attention';
+  if (Number(statusCounts.blocked || 0) > 0) return 'attention';
+  if (Number(statusCounts.observe_only || 0) > 0) return 'unavailable';
+  return 'unavailable';
+}
+
+function planningLine(readiness: Record<string, any>): string {
+  const created = [
+    readiness.signal_evaluation_created === true ? 'SignalEvaluation' : null,
+    readiness.order_candidate_created === true ? 'OrderCandidate' : null,
+    readiness.execution_intent_created === true ? 'ExecutionIntent' : null,
+    readiness.order_created === true ? 'Order' : null,
+  ].filter(Boolean);
+  if (created.length > 0) {
+    return `规划预检异常：已创建 ${created.join(' / ')}`;
+  }
+  const blockers = asArray<string>(readiness.blockers);
+  const warnings = asArray<string>(readiness.warnings);
+  if (blockers.length > 0) {
+    return `规划预检：${planningStatusLabel(readiness.status)}，阻断 ${blockers.slice(0, 2).join(' / ')}`;
+  }
+  if (warnings.length > 0) {
+    return `规划预检：${planningStatusLabel(readiness.status)}，关注 ${warnings.slice(0, 2).join(' / ')}`;
+  }
+  return `规划预检：${planningStatusLabel(readiness.status)}，未创建 SignalEvaluation / OrderCandidate`;
 }
 
 function observationBlockerSummary(candidate: ObservationCandidateView): string {

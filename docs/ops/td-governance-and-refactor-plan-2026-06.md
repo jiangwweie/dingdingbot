@@ -1278,6 +1278,12 @@ Current local Sprint 6 slice:
   CPM / BRF observation candidates visible in the Owner surface while preserving
   `live_ready=false`, no runtime start, no ExecutionIntent, no order, and no
   exchange write semantics.
+- The Strategy Library observation panel also displays scheduler-level runtime
+  signal planning readiness. It shows whether the observation is observe-only,
+  blocked, or ready only for the non-executing planner, and it keeps
+  `planner_call_performed=false`, `signal_evaluation_created=false`,
+  `order_candidate_created=false`, `execution_intent_created=false`, and
+  `order_created=false` visible before any future shadow promotion.
 - Dark and light theme switching is implemented with shared theme state,
   `data-theme`, and local persistence. It is a Sprint 6 product capability, not
   a one-off page skin.
@@ -1311,6 +1317,9 @@ Playwright local browser validation:
 - /strategy displays the read-only strategy observation chain, including BRF
   short-side observation candidates, and the proxy allows only GET for that
   exact observation API.
+- /strategy displays scheduler-level observation-to-shadow planning readiness
+  without calling the planner or creating SignalEvaluation / OrderCandidate
+  rows.
 ```
 
 ### Sprint 7: Runtime / Config / Safety Boundary Consolidation
