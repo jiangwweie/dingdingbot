@@ -142,8 +142,10 @@ Key facts:
   and Trading Console can opt into that source via
   `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true`. Scheduler-level readiness
   and an explicit non-executing scheduler-to-planner handoff now exist for
-  automatic evaluation binding, but deployment enablement and public write/API
-  triggering are not yet productized.
+  automatic evaluation binding. Trading Console now exposes an operator-auth
+  explicit non-executing shadow-plan POST for server-side strategy signal
+  evaluation and optional shadow candidate creation, but deployment automation
+  and scheduler-backed ingestion are not yet productized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, runtime safety boundary,
@@ -192,7 +194,8 @@ Key facts:
   FinalGate must use configured local active-position facts or block when
   unavailable. Trading Console now has an internal non-endpoint service factory
   that wires this planner with PG active-position facts and cached account facts;
-  it does not expose a new strategy-signal write endpoint.
+  the only public Trading Console trigger added for this path is the
+  operator-auth non-executing shadow-plan POST described below.
 - **RuntimeStrategySignalSchedulerAssemblyService** now exists as a pure
   non-executing scheduler-level readiness layer. It evaluates whether a
   `StrategyFamilySignalInput` + `StrategyFamilySignalOutput` pair has strategy
@@ -211,8 +214,12 @@ Key facts:
   `allow_shadow_candidate_creation=true`. Without that explicit enablement it
   returns `explicit_enable_required` and performs no planner call. It can create
   only the same shadow SignalEvaluation / OrderCandidate records as the B0
-  planner; it does not create ExecutionIntent records, create orders, call
-  OrderLifecycle, call exchange, or provide execution authority.
+  planner. Trading Console exposes this as
+  `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans`;
+  the endpoint runs server-side evaluation first, uses configured runtime /
+  account / active-position fact sources, and remains non-executing. It does
+  not create ExecutionIntent records, create orders, call OrderLifecycle, call
+  exchange, or provide execution authority.
 - **RightTailReview** now exists as pure review logic plus Trading Console
   read-only presentation. It calculates MFE, MAE, R multiple, tail-win size,
   small-loss count, winner hold time, runner giveback / early cap, stop

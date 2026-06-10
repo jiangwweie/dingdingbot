@@ -15,6 +15,11 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.runtime_strategy_signal_evaluation_service import (
+    RuntimeStrategySignalEvaluationResult,
+    RuntimeStrategySignalEvaluationService,
+    RuntimeStrategySignalEvaluationStatus,
+)
 from src.application.runtime_strategy_signal_planning_service import (
     RuntimeStrategySignalCandidatePlanningResult,
     RuntimeStrategySignalCandidatePlanningStatus,
@@ -72,6 +77,7 @@ class RuntimeStrategySignalSchedulerPlanningResult(BaseModel):
     strategy_family_version_id: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     status: RuntimeStrategySignalSchedulerPlanningStatus
+    evaluation_result: RuntimeStrategySignalEvaluationResult | None = None
     readiness: RuntimeStrategySignalSchedulerReadiness
     candidate_planning_result: RuntimeStrategySignalCandidatePlanningResult | None = None
     blockers: list[str] = Field(default_factory=list)
@@ -98,10 +104,77 @@ class RuntimeStrategySignalSchedulerPlanningService:
         planner: RuntimeStrategySignalShadowPlanner,
         semantics_catalog: StrategySemanticsCatalog | None = None,
         fact_sources: RuntimeStrategySignalSchedulerFactSources | None = None,
+        signal_evaluation_service: RuntimeStrategySignalEvaluationService | None = None,
     ) -> None:
         self._planner = planner
         self._semantics_catalog = semantics_catalog or initial_strategy_semantics_catalog()
         self._fact_sources = fact_sources or RuntimeStrategySignalSchedulerFactSources()
+        self._signal_evaluation_service = signal_evaluation_service or (
+            RuntimeStrategySignalEvaluationService(catalog=self._semantics_catalog)
+        )
+
+    async def plan_signal_input_if_ready(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        runtime: StrategyRuntimeInstance,
+        candidate_id: str | None = None,
+        allow_shadow_candidate_creation: bool = False,
+        fact_sources: RuntimeStrategySignalSchedulerFactSources | None = None,
+        context_builder: StrategyEvaluationContextBuilder | None = None,
+        context_id: str | None = None,
+        expires_at_ms: int | None = None,
+        metadata: dict | None = None,
+    ) -> RuntimeStrategySignalSchedulerPlanningResult:
+        evaluation = self._signal_evaluation_service.evaluate(signal_input)
+        if (
+            evaluation.status
+            != RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+            or evaluation.output is None
+        ):
+            readiness = _readiness_from_evaluation(
+                signal_input,
+                evaluation,
+                runtime=runtime,
+                fact_sources=fact_sources or self._fact_sources,
+                candidate_id=candidate_id,
+            )
+            return self._result(
+                signal_input,
+                runtime=runtime,
+                evaluation_result=evaluation,
+                readiness=readiness,
+                status=(
+                    RuntimeStrategySignalSchedulerPlanningStatus.OBSERVE_ONLY
+                    if evaluation.status
+                    == RuntimeStrategySignalEvaluationStatus.OBSERVE_ONLY
+                    else RuntimeStrategySignalSchedulerPlanningStatus.BLOCKED
+                ),
+                blockers=evaluation.blockers,
+                warnings=evaluation.warnings,
+                metadata={
+                    "planner_call_suppressed_reason": "evaluation_gate_not_ready",
+                    "server_side_evaluation_performed": True,
+                    **(metadata or {}),
+                },
+            )
+
+        return await self.plan_if_ready(
+            signal_input,
+            evaluation.output,
+            runtime=runtime,
+            candidate_id=candidate_id,
+            allow_shadow_candidate_creation=allow_shadow_candidate_creation,
+            fact_sources=fact_sources,
+            context_builder=context_builder,
+            context_id=context_id,
+            expires_at_ms=expires_at_ms,
+            metadata={
+                "server_side_evaluation_performed": True,
+                **(metadata or {}),
+            },
+            evaluation_result=evaluation,
+        )
 
     async def plan_if_ready(
         self,
@@ -116,6 +189,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
         context_id: str | None = None,
         expires_at_ms: int | None = None,
         metadata: dict | None = None,
+        evaluation_result: RuntimeStrategySignalEvaluationResult | None = None,
     ) -> RuntimeStrategySignalSchedulerPlanningResult:
         readiness = RuntimeStrategySignalSchedulerAssemblyService(
             semantics_catalog=self._semantics_catalog,
@@ -130,6 +204,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
             return self._result(
                 signal_input,
                 runtime=runtime,
+                evaluation_result=evaluation_result,
                 readiness=readiness,
                 status=RuntimeStrategySignalSchedulerPlanningStatus.OBSERVE_ONLY,
                 blockers=readiness.blockers,
@@ -145,6 +220,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
             return self._result(
                 signal_input,
                 runtime=runtime,
+                evaluation_result=evaluation_result,
                 readiness=readiness,
                 status=RuntimeStrategySignalSchedulerPlanningStatus.BLOCKED,
                 blockers=readiness.blockers,
@@ -157,6 +233,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
             return self._result(
                 signal_input,
                 runtime=runtime,
+                evaluation_result=evaluation_result,
                 readiness=readiness,
                 status=RuntimeStrategySignalSchedulerPlanningStatus.EXPLICIT_ENABLE_REQUIRED,
                 blockers=["shadow_candidate_creation_not_explicitly_enabled"],
@@ -189,6 +266,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
         return self._result(
             signal_input,
             runtime=runtime,
+            evaluation_result=evaluation_result,
             readiness=readiness,
             status=status,
             candidate_planning_result=planning,
@@ -208,6 +286,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
         signal_input: StrategyFamilySignalInput,
         *,
         runtime: StrategyRuntimeInstance,
+        evaluation_result: RuntimeStrategySignalEvaluationResult | None = None,
         readiness: RuntimeStrategySignalSchedulerReadiness,
         status: RuntimeStrategySignalSchedulerPlanningStatus,
         candidate_planning_result: RuntimeStrategySignalCandidatePlanningResult | None = None,
@@ -225,6 +304,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
             strategy_family_version_id=signal_input.strategy_family_version_id,
             symbol=signal_input.symbol,
             status=status,
+            evaluation_result=evaluation_result,
             readiness=readiness,
             candidate_planning_result=candidate_planning_result,
             blockers=sorted(dict.fromkeys(blockers or [])),
@@ -242,3 +322,49 @@ class RuntimeStrategySignalSchedulerPlanningService:
                 **(metadata or {}),
             },
         )
+
+
+def _readiness_from_evaluation(
+    signal_input: StrategyFamilySignalInput,
+    evaluation: RuntimeStrategySignalEvaluationResult,
+    *,
+    runtime: StrategyRuntimeInstance,
+    fact_sources: RuntimeStrategySignalSchedulerFactSources,
+    candidate_id: str | None,
+) -> RuntimeStrategySignalSchedulerReadiness:
+    output = evaluation.output
+    status = (
+        RuntimeStrategySignalSchedulerReadinessStatus.OBSERVE_ONLY
+        if evaluation.status == RuntimeStrategySignalEvaluationStatus.OBSERVE_ONLY
+        else RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED
+    )
+    return RuntimeStrategySignalSchedulerReadiness(
+        candidate_id=candidate_id,
+        evaluation_id=signal_input.evaluation_id,
+        signal_id=output.signal_id if output is not None else signal_input.evaluation_id,
+        strategy_family_id=signal_input.strategy_family_id,
+        strategy_family_version_id=signal_input.strategy_family_version_id,
+        symbol=signal_input.symbol,
+        side=output.side.value if output is not None else "none",
+        signal_type=output.signal_type.value if output is not None else "no_output",
+        status=status,
+        blockers=list(evaluation.blockers),
+        warnings=list(evaluation.warnings),
+        semantics_binding_found=evaluation.semantics_binding_found,
+        strategy_candidate_mode=evaluation.strategy_candidate_mode,
+        runtime_instance_id=runtime.runtime_instance_id,
+        runtime_bound=True,
+        fact_sources=fact_sources,
+        scheduler_can_call_runtime_planner=False,
+        metadata={
+            "source": "runtime_strategy_signal_scheduler_planning_service",
+            "server_side_evaluation_gate": True,
+            "planner_call_suppressed_reason": "evaluation_gate_not_ready",
+            "does_not_call_runtime_planner": True,
+            "does_not_create_signal_evaluation": True,
+            "does_not_create_order_candidate": True,
+            "does_not_create_execution_intent": True,
+            "does_not_call_order_lifecycle": True,
+            "does_not_call_exchange": True,
+        },
+    )

@@ -16,6 +16,7 @@ from src.application.runtime_strategy_signal_scheduler_assembly import (
     RuntimeStrategySignalSchedulerReadinessStatus,
 )
 from src.application.runtime_strategy_signal_scheduler_planning_service import (
+    RuntimeStrategySignalSchedulerPlanningResult,
     RuntimeStrategySignalSchedulerPlanningService,
     RuntimeStrategySignalSchedulerPlanningStatus,
 )
@@ -213,6 +214,19 @@ class _FakeShadowPlanner:
         )
 
 
+class _FakeSignalEvaluationService:
+    def __init__(self, result: RuntimeStrategySignalEvaluationResult) -> None:
+        self.result = result
+        self.calls: list[str] = []
+
+    def evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+    ) -> RuntimeStrategySignalEvaluationResult:
+        self.calls.append(signal_input.evaluation_id)
+        return self.result
+
+
 def test_scheduler_assembly_blocks_without_runtime_or_trusted_sources():
     readiness = RuntimeStrategySignalSchedulerAssemblyService().preview(
         _signal_input(),
@@ -345,6 +359,46 @@ async def test_scheduler_planning_does_not_call_planner_when_readiness_blocked()
     assert planner.calls == []
 
 
+async def test_scheduler_planning_blocks_before_planner_when_server_evaluation_not_ready():
+    planner = _FakeShadowPlanner()
+    evaluator = _FakeSignalEvaluationService(
+        RuntimeStrategySignalEvaluationResult(
+            evaluation_id="eval-scheduler-CPM-RO-001",
+            strategy_family_id="CPM-RO-001",
+            strategy_family_version_id="CPM-RO-001-v0",
+            symbol="ETH/USDT:USDT",
+            status=RuntimeStrategySignalEvaluationStatus.BLOCKED,
+            blockers=["strategy_semantics_binding_missing"],
+            can_call_semantic_binding=False,
+        )
+    )
+
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+        fact_sources=_ready_sources(),
+        signal_evaluation_service=evaluator,
+    ).plan_signal_input_if_ready(
+        _signal_input(),
+        runtime=_runtime(),
+        candidate_id="CPM-RO-001",
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert evaluator.calls == ["eval-scheduler-CPM-RO-001"]
+    assert result.status == RuntimeStrategySignalSchedulerPlanningStatus.BLOCKED
+    assert result.evaluation_result is not None
+    assert result.evaluation_result.status == RuntimeStrategySignalEvaluationStatus.BLOCKED
+    assert result.readiness.scheduler_can_call_runtime_planner is False
+    assert "strategy_semantics_binding_missing" in result.blockers
+    assert result.planner_call_performed is False
+    assert result.signal_evaluation_created is False
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+    assert planner.calls == []
+
+
 async def test_scheduler_planning_propagates_shadow_planner_block_without_execution():
     planner = _FakeShadowPlanner(
         status=RuntimeStrategySignalCandidatePlanningStatus.BLOCKED,
@@ -407,3 +461,98 @@ def test_scheduler_assembly_keeps_no_action_as_observe_only():
     assert readiness.scheduler_can_call_runtime_planner is False
     assert readiness.order_candidate_created is False
     assert readiness.execution_intent_created is False
+
+
+async def test_trading_console_shadow_plan_endpoint_delegates_non_executing_service(
+    monkeypatch,
+):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    runtime = _runtime()
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == runtime.runtime_instance_id
+            return runtime
+
+    class _PlanningService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def plan_signal_input_if_ready(
+            self,
+            signal_input: StrategyFamilySignalInput,
+            **kwargs,
+        ) -> RuntimeStrategySignalSchedulerPlanningResult:
+            self.calls.append(
+                {
+                    "evaluation_id": signal_input.evaluation_id,
+                    "runtime_instance_id": kwargs["runtime"].runtime_instance_id,
+                    "candidate_id": kwargs["candidate_id"],
+                    "allow_shadow_candidate_creation": (
+                        kwargs["allow_shadow_candidate_creation"]
+                    ),
+                    "context_id": kwargs["context_id"],
+                    "expires_at_ms": kwargs["expires_at_ms"],
+                    "metadata": kwargs["metadata"],
+                }
+            )
+            return await RuntimeStrategySignalSchedulerPlanningService(
+                planner=_FakeShadowPlanner(),
+                fact_sources=_ready_sources(),
+            ).plan_if_ready(
+                signal_input,
+                _output(),
+                **kwargs,
+            )
+
+    planning_service = _PlanningService()
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        _RuntimeService(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_strategy_signal_scheduler_planning_service",
+        planning_service,
+        raising=False,
+    )
+
+    result = await api_trading_console.runtime_strategy_signal_shadow_plan_for_signal_input(
+        runtime.runtime_instance_id,
+        api_trading_console.RuntimeStrategySignalShadowPlanningRequest(
+            signal_input=_signal_input(),
+            allow_shadow_candidate_creation=True,
+            candidate_id="CPM-RO-001",
+            context_id="context-api-shadow-plan",
+            expires_at_ms=NOW_MS + 60_000,
+            metadata={"unit_test": True},
+        ),
+    )
+
+    assert (
+        result.status
+        == RuntimeStrategySignalSchedulerPlanningStatus.SHADOW_CANDIDATE_CREATED
+    )
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+    assert planning_service.calls == [
+        {
+            "evaluation_id": "eval-scheduler-CPM-RO-001",
+            "runtime_instance_id": runtime.runtime_instance_id,
+            "candidate_id": "CPM-RO-001",
+            "allow_shadow_candidate_creation": True,
+            "context_id": "context-api-shadow-plan",
+            "expires_at_ms": NOW_MS + 60_000,
+            "metadata": {
+                "trading_console_api": True,
+                "runtime_instance_id": runtime.runtime_instance_id,
+                "unit_test": True,
+            },
+        }
+    ]

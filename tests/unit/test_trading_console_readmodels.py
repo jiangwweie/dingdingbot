@@ -548,6 +548,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
     from src.interfaces.api_trading_console import router
 
     allowed_post_paths = {
+        "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
         "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
         "/api/trading-console/runtime-execution-intents/drafts/{runtime_execution_intent_draft_id}",
         "/api/trading-console/runtime-execution-protection-plans/intents/{execution_intent_id}",

@@ -57,6 +57,10 @@ from src.domain.runtime_execution_attempt_mutation import (
 )
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, RuntimeExecutionPlan
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
+from src.application.runtime_strategy_signal_scheduler_planning_service import (
+    RuntimeStrategySignalSchedulerPlanningResult,
+)
+from src.domain.strategy_family_signal import StrategyFamilySignalInput
 from src.domain.strategy_runtime_promotion_gate import (
     FirstRealSubmitConfirmationFacts,
     RuntimeExecutionConfirmationFacts,
@@ -186,6 +190,15 @@ class StrategyRuntimeInspectionView(BaseModel):
     expires_at_ms: int | None = None
     revoked_at_ms: int | None = None
     closed_at_ms: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
+    signal_input: StrategyFamilySignalInput
+    allow_shadow_candidate_creation: bool = False
+    candidate_id: str | None = None
+    context_id: str | None = None
+    expires_at_ms: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -403,6 +416,47 @@ async def runtime_strategy_safety_readiness_preview(
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
+    response_model=RuntimeStrategySignalSchedulerPlanningResult,
+)
+async def runtime_strategy_signal_shadow_plan_for_signal_input(
+    runtime_instance_id: str,
+    request: RuntimeStrategySignalShadowPlanningRequest,
+) -> RuntimeStrategySignalSchedulerPlanningResult:
+    runtime_service = await _strategy_runtime_service()
+    try:
+        runtime = await runtime_service.get_runtime(runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    service = await _runtime_strategy_signal_scheduler_planning_service()
+    try:
+        return await service.plan_signal_input_if_ready(
+            request.signal_input,
+            runtime=runtime,
+            candidate_id=request.candidate_id,
+            allow_shadow_candidate_creation=request.allow_shadow_candidate_creation,
+            context_id=request.context_id,
+            expires_at_ms=request.expires_at_ms,
+            metadata={
+                "trading_console_api": True,
+                "runtime_instance_id": runtime_instance_id,
+                **request.metadata,
+            },
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
 
@@ -1669,6 +1723,51 @@ async def _runtime_strategy_signal_planning_service() -> Any:
         ),
     )
     setattr(api_module, "_runtime_strategy_signal_planning_service", service)
+    return service
+
+
+async def _runtime_strategy_signal_scheduler_planning_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(
+        api_module,
+        "_runtime_strategy_signal_scheduler_planning_service",
+        None,
+    )
+    if injected is not None:
+        return injected
+    from src.application.runtime_strategy_signal_scheduler_assembly import (
+        RuntimeStrategySignalSchedulerFactSources,
+    )
+    from src.application.runtime_strategy_signal_scheduler_planning_service import (
+        RuntimeStrategySignalSchedulerPlanningService,
+    )
+
+    position_source = getattr(api_module, "_position_repo", None)
+    if position_source is None:
+        position_source = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        )
+    market_fact_source = _trading_console_public_market_fact_source()
+    service = RuntimeStrategySignalSchedulerPlanningService(
+        planner=await _runtime_strategy_signal_planning_service(),
+        fact_sources=RuntimeStrategySignalSchedulerFactSources(
+            trusted_runtime_fact_overlay_configured=True,
+            trusted_active_position_source_available=position_source is not None,
+            trusted_account_facts_source_available=True,
+            trusted_market_fact_source_available=market_fact_source is not None,
+            source_scope="trading_console_internal_non_endpoint_sources",
+            metadata={
+                "pg_position_source_configured": position_source is not None,
+                "cached_account_facts_source_configured": True,
+                "public_market_fact_source_configured": market_fact_source is not None,
+                "non_executing": True,
+            },
+        ),
+    )
+    setattr(api_module, "_runtime_strategy_signal_scheduler_planning_service", service)
     return service
 
 

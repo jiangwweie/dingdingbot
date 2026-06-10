@@ -275,8 +275,10 @@ Current local B0 implementation slice:
   and cached account facts. It can also opt into
   `BinanceUsdmDerivativeMarketFactSource` via
   `TRADING_CONSOLE_PUBLIC_MARKET_FACTS_ENABLED=true` for public/read-only
-  funding, open-interest, and crowding facts. This is an application assembly
-  point only; no public strategy-signal write endpoint is exposed by this slice.
+  funding, open-interest, and crowding facts. Trading Console also exposes an
+  operator-auth non-executing shadow-plan POST that runs server-side evaluation
+  before delegating to this planner; this is a shadow SignalEvaluation /
+  OrderCandidate trigger only, not execution authority.
 - `src/application/runtime_strategy_signal_scheduler_assembly.py` provides the
   scheduler-level readiness gate before automatic runtime signal binding. It
   previews whether a strategy signal pair has B0 semantics, a matching shadow
@@ -292,9 +294,11 @@ Current local B0 implementation slice:
   `READY_FOR_NON_EXECUTING_PLANNER` and the caller explicitly sets
   `allow_shadow_candidate_creation=true`; otherwise it performs no planner
   call. This can create only shadow SignalEvaluation / OrderCandidate records
-  through the B0 planner. It is not a public strategy-signal write endpoint, not
-  an ExecutionIntent adapter, not an OrderLifecycle adapter, and not execution
-  authority.
+  through the B0 planner. The Trading Console endpoint
+  `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans`
+  is the explicit operator-auth trigger for this non-executing handoff. It is
+  not an ExecutionIntent adapter, not an OrderLifecycle adapter, and not
+  execution authority.
 - This is not proven-alpha approval, not execution authority, and not a real
   OrderLifecycle adapter. Scheduler-level fact-source readiness is now visible,
   and explicit non-executing planner handoff now exists, but deployment-backed
