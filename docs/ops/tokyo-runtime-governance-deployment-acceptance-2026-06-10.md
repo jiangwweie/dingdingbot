@@ -1,6 +1,6 @@
 # Tokyo Runtime Governance Deployment Acceptance - 2026-06-10
 
-Status: ACCEPTED_WITH_AUTHENTICATED_CONSOLE_CHECK_PENDING
+Status: ACCEPTED_WITH_AUTHENTICATED_CONSOLE_CHECK_LIMITED
 
 This record captures the deployed Tokyo state after the runtime-governance
 backend deployment and the follow-up Trading Console static frontend refresh.
@@ -48,9 +48,9 @@ Not deployed / not authorized:
 - Health response:
   `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`
 
-Note: local release branch HEAD is currently `531491b5`, which only fixes the
-post-deploy verifier expectation for authenticated endpoints. The actual
-deployed backend release remains `ae9b209e`.
+Note: local release branch HEAD is currently `bf874cde`, which only records
+deployment acceptance on top of post-deploy verifier fixes. The actual deployed
+backend release remains `ae9b209e`.
 
 ## Database
 
@@ -121,22 +121,48 @@ The only browser console error observed during anonymous smoke was the expected
 `401 Unauthorized` for `/api/auth/session`, which causes the login page to be
 shown.
 
-## Authenticated Console Check Pending
+## Authenticated Console Check
 
-The following checks require Owner login / TOTP handoff and were not completed
-by Codex in this pass:
+Owner logged in via Chrome and Codex completed a read-only authenticated console
+check.
 
-- Login succeeds with Operator account.
-- Dashboard / Runtime / Strategy / Review / Capital pages render authenticated
-  read-model data.
-- Runtime strategy pages show promotion gate / safety readiness without false
-  live-ready claims.
-- Strategy observation and shadow planning surfaces render without frontend-only
-  fake-ready states.
-- Dark/light mode remains usable after login.
-- Authenticated API reads return `200` for expected `GET /api/trading-console/*`
-  endpoints.
-- Non-allowed generic POST remains blocked.
+Observed authenticated UI state:
+
+- Public page opened as `Trading Console`, not `/login`.
+- Header showed `登录：jiangwei`.
+- Dashboard rendered read-model state including:
+  - `Recovery Required`
+  - `环境：实盘受控`
+  - `数据状态：部分同步`
+  - `Runtime 1`
+  - `Attention 4`
+  - `Intervention 25`
+  - `Recent Trades 8`
+  - `Budget degraded: missing account facts`
+  - `存在无法归属的保护单`
+- The control surface stated that it does not provide buy/sell buttons.
+- Governance action copy continued to state that pause/revoke preflights do not
+  close positions, cancel TP/SL, submit orders, transfer funds, or withdraw.
+- Dark/light mode worked after login:
+  - initial state showed `白天 / 切换`
+  - toggled state showed `暗黑 / 切换`
+  - HTML root entered `dark`
+  - the validation tab was restored to light mode afterwards
+
+Authenticated API limitation:
+
+- Chrome direct navigation to `/api/*` URLs was blocked by the local Chrome
+  client with `ERR_BLOCKED_BY_CLIENT`.
+- Browser page-scope `fetch` / `XMLHttpRequest` was not available in the Chrome
+  automation runtime.
+- Therefore this pass treats authenticated read-model rendering as the
+  authenticated frontend/backend integration evidence.
+- Hard authenticated API evidence should be collected in a follow-up using a
+  server-side read-only verifier or a temporary read-only validation token.
+
+This authenticated check did not create records and did not invoke trading,
+exchange order placement, `OrderLifecycle`, executable `ExecutionIntent`
+submission, transfer, or withdrawal behavior.
 
 ## Deployment Method Note
 
