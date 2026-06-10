@@ -15,6 +15,7 @@ from src.application.runtime_execution_intent_adapter_service import (
     RuntimeExecutionIntentAdapterService,
 )
 from src.domain.brc_audit_ids import BrcSemanticIds
+from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.domain.models import Direction, OrderRole, OrderStatus, OrderType
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResultStatus,
@@ -265,6 +266,47 @@ async def test_adapter_result_registers_created_local_orders_when_explicitly_ena
     assert all(
         call["metadata"]["exchange_called"] is False for call in lifecycle.calls
     )
+
+
+def test_runtime_source_native_execution_intent_remains_recorded_after_local_registration_result():
+    preview = _registration_preview()
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+    result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=preview,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        registered_orders=orders,
+        now_ms=NOW_MS,
+    )
+    intent = ExecutionIntent(
+        id=preview.execution_intent_id,
+        symbol=preview.symbol,
+        status=ExecutionIntentStatus.RECORDED,
+        source_type=preview.source_type,
+        source_id=preview.source_id,
+        source_payload={"submit_authorized": False},
+        runtime_execution_intent_draft_id="draft-1",
+        runtime_instance_id=preview.runtime_instance_id,
+        trial_binding_id=preview.semantic_ids.trial_binding_id,
+        strategy_family_id=preview.semantic_ids.strategy_family_id,
+        strategy_family_version_id=preview.semantic_ids.strategy_family_version_id,
+        signal_evaluation_id=preview.semantic_ids.signal_evaluation_id,
+        order_candidate_id=preview.semantic_ids.order_candidate_id,
+    )
+
+    assert result.status == (
+        RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .REGISTERED_CREATED_LOCAL_ORDERS
+    )
+    assert result.execution_intent_status_changed is False
+    assert intent.status == ExecutionIntentStatus.RECORDED
+    assert intent.order_id is None
+    assert intent.exchange_order_id is None
+    assert result.exchange_called is False
+    assert result.exchange_order_submitted is False
 
 
 @pytest.mark.asyncio

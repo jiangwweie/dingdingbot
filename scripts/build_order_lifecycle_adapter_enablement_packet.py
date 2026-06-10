@@ -45,7 +45,7 @@ ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "local_order_registration_write_path_implemented": True,
     "order_lifecycle_adapter_invocation_implemented": True,
     "persistent_duplicate_submit_lock_implemented": True,
-    "execution_intent_status_transition_after_registration_implemented": False,
+    "local_registration_result_status_implemented": True,
     "protection_order_failure_recovery_implemented": False,
 }
 
@@ -424,13 +424,11 @@ def _implementation_work_items(
         items.append("persistent_duplicate_submit_lock_not_implemented")
     if (
         ADAPTER_IMPLEMENTATION_CAPABILITIES[
-            "execution_intent_status_transition_after_registration_implemented"
+            "local_registration_result_status_implemented"
         ]
         is not True
     ):
-        items.append(
-            "execution_intent_status_transition_after_registration_not_implemented"
-        )
+        items.append("local_registration_result_status_not_implemented")
     if (
         ADAPTER_IMPLEMENTATION_CAPABILITIES[
             "protection_order_failure_recovery_implemented"

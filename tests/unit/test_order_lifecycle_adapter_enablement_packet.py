@@ -82,6 +82,12 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert packet["readiness_summary"]["hard_stop_registration_draft_ready"] is True
     assert packet["checks"]["ready_for_non_executing_implementation_task"] is True
     assert packet["checks"]["ready_for_runtime_adapter_enablement"] is False
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
+            "adapter_implementation_capabilities"
+        ]["local_registration_result_status_implemented"]
+        is True
+    )
     assert "order_lifecycle_adapter_invocation_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
@@ -91,7 +97,10 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert "persistent_duplicate_submit_lock_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
-    assert "execution_intent_status_transition_after_registration_not_implemented" in (
+    assert "execution_intent_status_transition_after_registration_not_implemented" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "local_registration_result_status_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "owner_real_submit_authorization_missing" in (
@@ -136,7 +145,13 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "persistent_duplicate_submit_lock_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
-    assert "execution_intent_status_transition_after_registration_not_implemented" in (
+    assert "execution_intent_status_transition_after_registration_not_implemented" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "local_registration_result_status_not_implemented" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "protection_order_failure_recovery_not_implemented" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
 

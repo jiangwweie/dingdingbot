@@ -62,7 +62,6 @@ Remaining runtime enablement blockers include:
 ```text
 runtime_not_live_execution_enabled
 order_lifecycle_adapter_disabled
-execution_intent_status_transition_after_registration_not_implemented
 local_order_registration_runtime_enablement_disabled
 order_lifecycle_adapter_runtime_enablement_disabled
 protection_order_failure_recovery_not_implemented
@@ -94,6 +93,9 @@ adapter skeleton:
   `OrderLifecycleService.register_created_order`;
 - duplicate calls for the same authorization replay the stored adapter result
   instead of registering local orders again;
+- the post-registration audit state is the adapter result status
+  `registered_created_local_orders`; the source-native `ExecutionIntent`
+  remains `recorded` at this stage;
 - it still does not submit exchange orders, call exchange, change
   ExecutionIntent status, or create withdrawal/transfer instructions.
 
