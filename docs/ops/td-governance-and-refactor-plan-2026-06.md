@@ -1306,6 +1306,12 @@ Current local Sprint 6 slice:
   `/api/brc/strategy-runtime-promotion-confirmations` record/list API through
   the Trading Console proxy, displays no-action flags, and does not generalize
   the console proxy into arbitrary BRC write access.
+- The Trading Console frontend proxy now also forwards only the exact BRC
+  confirmation/runtime governance POSTs needed by the Owner surface:
+  promotion-confirmation record/create, confirmed-profile shadow runtime draft
+  creation, and shadow runtime lifecycle status updates. These proxy exceptions
+  remain non-executing and do not generalize into broad `/api/brc/*` write
+  access.
 - The Strategy Library page now surfaces the read-only strategy observation
   chain from the narrow
   `/api/brc/strategy-groups/live-readonly-observation/v1` GET proxy. This makes

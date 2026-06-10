@@ -7,6 +7,10 @@ const READ_MODEL_API_BASE = process.env.TRADING_CONSOLE_API_BASE || 'http://127.
 const OPERATOR_SESSION = process.env.TRADING_CONSOLE_OPERATOR_SESSION || '';
 const STRATEGY_SIGNAL_SHADOW_PLAN_PATH =
   /^\/api\/trading-console\/strategy-runtimes\/[^/]+\/strategy-signal-shadow-plans$/;
+const BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH =
+  /^\/api\/brc\/strategy-runtime-promotion-confirmations\/[^/]+\/runtime-drafts$/;
+const BRC_SHADOW_RUNTIME_LIFECYCLE_PATH =
+  /^\/api\/brc\/strategy-runtimes\/[^/]+\/lifecycle$/;
 
 function targetUrl(originalUrl: string): string {
   return new URL(originalUrl, READ_MODEL_API_BASE).toString();
@@ -129,6 +133,28 @@ async function startServer() {
       res.status(405).json({
         error: 'trading_console_promotion_confirmation_proxy_method_not_allowed',
         message: 'Trading Console forwards only promotion confirmation record/list requests.',
+      });
+      return;
+    }
+    await proxyJsonRequest(req, res);
+  });
+
+  app.all('/api/brc/strategy-runtime-promotion-confirmations/*/runtime-drafts', async (req, res) => {
+    if (req.method !== 'POST' || !BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH.test(req.path)) {
+      res.status(405).json({
+        error: 'trading_console_runtime_draft_proxy_method_not_allowed',
+        message: 'Trading Console forwards only confirmed-profile shadow runtime draft creation requests.',
+      });
+      return;
+    }
+    await proxyJsonRequest(req, res);
+  });
+
+  app.all('/api/brc/strategy-runtimes/*/lifecycle', async (req, res) => {
+    if (req.method !== 'POST' || !BRC_SHADOW_RUNTIME_LIFECYCLE_PATH.test(req.path)) {
+      res.status(405).json({
+        error: 'trading_console_shadow_runtime_lifecycle_proxy_method_not_allowed',
+        message: 'Trading Console forwards only shadow runtime lifecycle status requests.',
       });
       return;
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -569,6 +570,22 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
             assert route.path in allowed_post_paths
         else:
             assert route.methods == {"GET"}
+
+
+def test_trading_console_frontend_proxy_keeps_brc_posts_narrow():
+    server_source = Path("trading-console/server.ts").read_text()
+
+    assert "BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH" in server_source
+    assert "BRC_SHADOW_RUNTIME_LIFECYCLE_PATH" in server_source
+    assert "/api/brc/strategy-runtime-promotion-confirmations/*/runtime-drafts" in (
+        server_source
+    )
+    assert "/api/brc/strategy-runtimes/*/lifecycle" in server_source
+    assert "trading_console_runtime_draft_proxy_method_not_allowed" in server_source
+    assert "trading_console_shadow_runtime_lifecycle_proxy_method_not_allowed" in (
+        server_source
+    )
+    assert "forwards only shadow runtime lifecycle status requests" in server_source
 
 
 def test_trading_console_action_apis_are_absent(monkeypatch):
