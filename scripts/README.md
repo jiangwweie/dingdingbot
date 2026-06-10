@@ -60,3 +60,12 @@ authorization for the exact action.
   restart services, create execution records, create orders, call
   OrderLifecycle, or call exchange APIs. Because it references live-scope
   readiness facts such as `live_ready`, classify and review it before running.
+
+- `audit_tokyo_runtime_governance_migration_gap.py`: local static migration-gap
+  audit for the Tokyo runtime-governance deployment stage. It parses local
+  Alembic migration files between deployed revision `044` and local revision
+  `064`, summarizes upgrade operations, and highlights review items such as
+  data-touching updates, non-additive schema operations, and not-null columns
+  added to existing tables. It does not connect to a database, SSH, deploy, run
+  migrations, restart services, read secrets, create execution records, create
+  orders, call OrderLifecycle, or call exchange APIs.

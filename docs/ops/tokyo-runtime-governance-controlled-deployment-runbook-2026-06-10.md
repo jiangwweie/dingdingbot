@@ -41,6 +41,24 @@ Last local release-prep dry-run for code-bearing candidate `4f939207` reported:
 - only warning:
   `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
 
+Last local migration-gap audit for `044 -> 064` reported:
+
+- `ready_for_controlled_migration_preflight=true`
+- chain length `20`, first revision `045`, last revision `064`
+- no `data_destructive_upgrade_ops`
+- warnings:
+  - `non_additive_schema_ops_present`
+  - `data_touching_upgrade_ops_present`
+  - `not_null_columns_added_to_existing_table`
+- review items:
+  - revision `050` updates the `execution_intents` status constraint and makes
+    legacy signal fields nullable for source-native intents;
+  - revision `053` adds `preflight_id`, `preflight_status`, and
+    `final_gate_verdict` as not-null fields to
+    `runtime_execution_controlled_submit_results`;
+  - revision `062` backfills / aligns the existing `positions` table for the
+    runtime read model.
+
 Last Tokyo read-only probe for the same stage reported:
 
 - `ready_for_controlled_deploy_preflight=true`
@@ -135,6 +153,27 @@ Before applying migrations:
 
 The migration jump includes runtime governance tables and audit records. Treat
 it as a controlled deployment stage, not as a casual restart.
+
+Local static audit command:
+
+```bash
+/opt/homebrew/bin/python3 scripts/audit_tokyo_runtime_governance_migration_gap.py --json
+```
+
+The output must show:
+
+- `ready_for_controlled_migration_preflight=true`;
+- chain length `20` for `045` through `064`;
+- no `data_destructive_upgrade_ops`.
+
+The output is allowed to warn about non-additive / data-touching review items,
+but those warnings require concrete deployment handling:
+
+- backend writes must be stopped or quiesced while migrations run;
+- a remote PG backup must be captured first;
+- revision `053` must not encounter existing rows in
+  `runtime_execution_controlled_submit_results` without compatible values;
+- revision `062` must be followed by a positions read-model smoke check.
 
 ## Release Procedure Shape
 
