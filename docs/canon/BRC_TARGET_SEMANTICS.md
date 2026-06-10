@@ -2,7 +2,7 @@
 title: BRC_TARGET_SEMANTICS
 status: CURRENT_CANON
 authority: owner-semantic-audit + code-verification
-last_verified: 2026-06-09
+last_verified: 2026-06-10
 source_of_truth:
   - docs/canon/PROJECT_BASELINE_CURRENT.md
   - docs/canon/STRATEGY_RUNTIME_GUIDE.md
@@ -161,6 +161,12 @@ guide governs implementation details when future tasks add or wire strategies.
   is concrete and submit-ready. A strategy must never use leverage to enlarge
   allowed loss, bypass protection, self-authorize execution, or expand runtime
   budget.
+- Runtime profile proposals may translate Owner risk-capital intent into
+  reviewable boundary defaults, but a proposal is not a
+  StrategyRuntimeInstance, not Owner/Codex confirmation, not live-profile
+  enablement, and not execution authority. The current 30U proposal path is a
+  non-executing input to later confirmation and runtime creation/promotion
+  decisions.
 
 Before controlled runtime execution, BRC must pass a Strategy Semantics /
 Entry-Exit Policy Binding gate:
@@ -272,6 +278,14 @@ Current local B0 implementation slice:
   runtime-bounded automatic attempts from legacy owner-confirm-each-entry
   operation. Lack of proven alpha is a warning limiting economic/autonomy
   admission, not a semantic blocker.
+- `src/domain/experimental_runtime_profile_proposal.py` provides a pure
+  non-executing profile proposal for the isolated 30U experimental capital
+  shape. It can propose CPM/right-tail-long, BRF/conservative-short, and
+  mean-reversion runtime boundaries with max attempts, loss budget, notional,
+  leverage, margin, liquidation-buffer, protection, review, and fact-source
+  confirmation keys. The Trading Console preview endpoint returns those
+  proposal facts only; it does not create a runtime, confirm a profile, create
+  an ExecutionIntent, create orders, or call exchange.
 - `src/application/strategy_runtime_promotion_gate_service.py` exposes that
   gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
   for unknown bindings and remains non-executing.

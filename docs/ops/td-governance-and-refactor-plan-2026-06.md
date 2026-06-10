@@ -741,6 +741,15 @@ Current local B0 implementation slice:
   they do not create ExecutionIntent rows, orders, runtime mutations,
   withdrawals, transfers, OrderLifecycle calls, OwnerBoundedExecution calls, or
   exchange calls.
+- `src/domain/experimental_runtime_profile_proposal.py` provides a pure
+  non-executing 30U small-capital runtime profile proposal. It proposes
+  reviewable `StrategyRuntimeBoundary` values for CPM/right-tail-long,
+  BRF/conservative-short, and mean-reversion shapes, plus explicit
+  Owner/Codex confirmation keys for runtime profile, symbol/side, max-loss,
+  notional, active positions, leverage, margin, liquidation buffer,
+  protection-readiness, attempt, budget, active-position/account facts, and
+  stale-fact behavior. It is not a runtime record, live-profile change,
+  ExecutionIntent, order, or exchange authority.
 - `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
   withdrawal, manual profit extraction, capital injection, and capital-base
   reset review facts. These facts can explain account-equity movement and
@@ -1410,6 +1419,12 @@ Current local Sprint 7 slice:
   prevents record-intent preflight/confirm from relying on user-supplied
   active-position/runtime facts while still avoiding any guessed "current
   runtime" selection.
+- `ExperimentalRuntimeProfileProposal` now provides the first non-executing
+  profile-template proposal for the isolated 30U experimental capital shape.
+  The Trading Console GET preview can show CPM long, BRF short, and
+  mean-reversion boundary proposals, but the result remains only Owner/Codex
+  review input and does not create a runtime, change live config, authorize
+  submit, or call exchange.
 
 Required properties:
 

@@ -17,6 +17,10 @@ from src.application.readmodels.trading_console import (
     TradingConsoleReadModelService,
 )
 from src.domain.execution_intent import ExecutionIntent
+from src.domain.experimental_runtime_profile_proposal import (
+    ExperimentalRuntimeProfileProposal,
+    build_experimental_runtime_profile_proposal,
+)
 from src.domain.runtime_execution_controlled_submit import (
     RuntimeExecutionControlledSubmitPlan,
     RuntimeExecutionControlledSubmitPreflight,
@@ -421,6 +425,26 @@ async def runtime_strategy_safety_readiness_preview(
         if "not found" in message:
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/strategy-runtime-profile-proposals",
+    response_model=ExperimentalRuntimeProfileProposal,
+)
+async def experimental_runtime_profile_proposal_preview(
+    strategy_family_id: str = Query(..., min_length=1, max_length=128),
+    strategy_family_version_id: str = Query(..., min_length=1, max_length=128),
+    symbol: str = Query(default="BNB/USDT:USDT", min_length=1, max_length=128),
+    side: str = Query(default="long", min_length=1, max_length=32),
+    capital_base: Decimal = Query(default=Decimal("30"), gt=Decimal("0")),
+) -> ExperimentalRuntimeProfileProposal:
+    return build_experimental_runtime_profile_proposal(
+        strategy_family_id=strategy_family_id,
+        strategy_family_version_id=strategy_family_version_id,
+        symbol=symbol,
+        side=side,
+        capital_base=capital_base,
+    )
 
 
 @router.post(

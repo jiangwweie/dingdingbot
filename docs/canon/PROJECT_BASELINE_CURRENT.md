@@ -196,6 +196,14 @@ Key facts:
   Owner/Codex confirmation. It does not confirm those facts by itself, mutate
   runtime state, create candidates, create intents, create orders, or call
   exchange.
+- **ExperimentalRuntimeProfileProposal** now exists as a pure non-executing
+  small-capital runtime profile proposal. It translates the Owner's 30U
+  experimental-risk-capital intent into reviewable `StrategyRuntimeBoundary`
+  values for eligible strategy semantics, including conservative BRF/short and
+  mean-reversion envelopes. The Trading Console exposes it as
+  `GET /api/trading-console/strategy-runtime-profile-proposals`. It is not a
+  runtime record, not Owner/Codex confirmation, not live-profile enablement, not
+  an ExecutionIntent, and not order/exchange authority.
 - **RuntimeStrategySignalPlanningService** now exists as a local non-executing
   bridge from strategy signals into the runtime planning path. It can run:
   `StrategyFamilySignalInput + StrategyFamilySignalOutput ->
@@ -394,6 +402,9 @@ BRC should become strategy runtime governance:
 - Do not treat StrategyFamilyVersion as executable strategy code.
 - Do not treat shadow StrategyRuntimeInstance, SignalEvaluation, or
   OrderCandidate records as execution authority.
+- Do not treat an ExperimentalRuntimeProfileProposal as a confirmed
+  StrategyRuntimeInstance, live runtime profile, Owner/Codex confirmation,
+  ExecutionIntent, or order authority.
 - Do not treat CPM / BRF reference implementation admission as proven-alpha or
   production-strategy approval.
 - Do not let RMR become a broad hard execution filter before its confidence,

@@ -2,7 +2,7 @@
 title: RUNTIME_SAFETY_BOUNDARY
 status: CURRENT_CANON
 authority: owner-instruction + code-verification + ADR-0009 + ADR-0012
-last_verified: 2026-06-09
+last_verified: 2026-06-10
 source_of_truth:
   - docs/adr/0009-non-real-live-execution-authorization-boundary.md
   - docs/adr/0012-bounded-risk-campaign-system.md
@@ -82,6 +82,10 @@ This document defines the runtime safety boundaries for the BRC project.
 - Budgeted small losses can be acceptable under Owner-approved experimental
   risk capital. System failure is budget breach, runaway behavior, missing
   auditability, boundary expansion, or unauthorized exchange write.
+- Experimental runtime profile proposals can suggest small-capital boundaries
+  for Owner/Codex review, but they are not confirmed runtime profiles, not
+  StrategyRuntimeInstance records, not live-profile changes, not submit
+  authorization, and not exchange/order authority.
 - Risk control targets loss of control, not every losing trade. Runtime safety
   must bound max single-attempt loss, max attempts, max active positions,
   notional, leverage, duplicate submits, stale account facts, missing
@@ -138,6 +142,7 @@ The following are prohibited unless Owner explicitly authorizes a specific task:
 | StrategyFamilyVersion | metadata | Strategy specification document; not bound to executable code |
 | AdmissionDecision | metadata | Classification and evidence; not an execution gate |
 | StrategyRuntimeInstance | shadow governance | Runtime identity and boundaries; execution_enabled=false / shadow_mode=true in current code |
+| ExperimentalRuntimeProfileProposal | preview / proposal | Reviewable 30U small-capital boundary proposal only; not a confirmed runtime profile, runtime record, ExecutionIntent, order, or exchange authority |
 | SignalEvaluation | shadow governance | Per-runtime signal evaluation record; not an order and not an execution intent |
 | OrderCandidate | shadow governance | Pre-authorization candidate; candidate_executable=false and not_execution_intent=true |
 | RuntimeFinalGatePreview | dry-run inspection | Runtime-aware checks only; no mutation, no order, no exchange call |
