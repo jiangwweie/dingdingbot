@@ -36,6 +36,7 @@ DEFAULT_EXPECTED_DEPLOYED_HEAD = "415d398509872cb25bf969319e29732764f9615b"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
 )
+DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
 
 
@@ -332,7 +333,20 @@ def _plan_phases(
                         'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
                         'test -n "$DB_URL" || '
                         "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
-                        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}"
+                        "if command -v pg_dump >/dev/null 2>&1; then "
+                        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
+                        "else "
+                        f"DB_USER=$({q(venv_python)} -c "
+                        "'import os; from urllib.parse import urlparse; "
+                        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
+                        f"DB_NAME=$({q(venv_python)} -c "
+                        "'import os; from urllib.parse import urlparse; "
+                        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
+                        'test -n "$DB_USER"; test -n "$DB_NAME"; '
+                        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
+                        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
+                        f"> {q(backup_path)}; "
+                        "fi"
                     ),
                 ),
                 _ssh(

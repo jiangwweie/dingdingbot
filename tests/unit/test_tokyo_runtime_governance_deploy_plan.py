@@ -140,6 +140,7 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "pg_dump" in all_commands
     assert "PG_DATABASE_URL" in all_commands
     assert 'pg_dump "$DB_URL"' in all_commands
+    assert "docker exec brc_prelive_pg_20260601" in all_commands
     assert "alembic upgrade head" in all_commands
     assert "ln -sfn" in all_commands
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
