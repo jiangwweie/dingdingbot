@@ -115,7 +115,7 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
         "release_identity_from_manifest_without_git_status"
     ]
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
-    assert len(report["facts"]["http_checks"]) == 11
+    assert len(report["facts"]["http_checks"]) == 12
     auth_checks = [
         item
         for item in report["facts"]["http_checks"]
@@ -128,6 +128,14 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert auth_checks
     assert all(item["expected_status"] == 401 for item in auth_checks)
     assert all(item["http_status"] == 401 for item in auth_checks)
+    scheduled_post = next(
+        item
+        for item in report["facts"]["http_checks"]
+        if item["name"] == "trading_console_scheduled_observation_run_requires_auth"
+    )
+    assert scheduled_post["method"] == "POST"
+    assert scheduled_post["expected_status"] == 401
+    assert scheduled_post["http_status"] == 401
     assert all(value is False for value in report["safety_invariants"].values())
 
 

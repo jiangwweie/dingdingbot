@@ -317,6 +317,13 @@ def _http_checks(
             "expect_json": True,
         },
         {
+            "name": "trading_console_scheduled_observation_run_requires_auth",
+            "method": "POST",
+            "path": "/api/trading-console/strategy-observations/scheduled-runs",
+            "expected_status": 401,
+            "expect_json": True,
+        },
+        {
             "name": "trading_console_generic_post_blocked",
             "method": "POST",
             "path": "/api/trading-console/operations-cockpit",

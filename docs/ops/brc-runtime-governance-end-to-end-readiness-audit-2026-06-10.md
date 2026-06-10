@@ -70,7 +70,7 @@ The current local code and docs preserve this direction:
 | Strategy signal planning | `RuntimeStrategySignalPlanningService` evaluates raw `StrategyFamilySignalInput` through `RuntimeStrategySignalEvaluationService` and creates only shadow `SignalEvaluation` / `OrderCandidate` when `READY_FOR_SEMANTIC_BINDING` | local non-executing ready |
 | CPM/BRF planning | CPM long uses pullback-low or ATR stop; BRF short uses rally-high or ATR stop; both include TP1 1R partial and runner/trailing metadata | local non-executing ready |
 | Trusted facts | `StrategyRuntimeFactOverlayService` can replace caller-supplied account/position/market allow facts and block missing trusted sources | local non-executing ready |
-| Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; scheduled observations preserve signal input snapshots and can call the shadow planner only after `allow_shadow_candidate_creation=true` plus a unique ACTIVE shadow runtime resolved from `StrategyRuntimeInstanceService`; the local CLI defaults to observation-only and requires explicit `--shadow-plan` / `--allow-shadow-candidate-creation` flags; Trading Console exposes an operator-auth manual scheduled run POST for this non-executing wiring | local non-executing ready |
+| Scheduler handoff | Scheduler readiness and explicit non-executing handoff exist; scheduled observations preserve signal input snapshots and can call the shadow planner only after `allow_shadow_candidate_creation=true` plus a unique ACTIVE shadow runtime resolved from `StrategyRuntimeInstanceService`; the local CLI defaults to observation-only and requires explicit `--shadow-plan` / `--allow-shadow-candidate-creation` flags; Trading Console exposes an operator-auth manual scheduled run POST for this non-executing wiring; a local in-memory rehearsal verifier proves one CPM shadow candidate can be created with all execution/order/exchange flags false | local non-executing ready |
 | Runtime safety | Promotion and readiness gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, and deployment confirmations | local non-executing ready |
 | Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist | local non-submitting bridge only |
 | Console productization | Trading Console exposes runtime governance, strategy observation/planning, promotion/readiness, right-tail review, capital-base/withdrawal-adjusted review, and theme toggle surfaces | local UI/API verified previously |
@@ -184,6 +184,31 @@ health.runtime_bound=true
 health.live_ready=false
 ```
 
+Local scheduled-observation shadow-planning rehearsal:
+
+```bash
+/opt/homebrew/bin/python3 \
+  scripts/verify_strategy_observation_shadow_planning_rehearsal.py \
+  --json
+```
+
+Observed result:
+
+```text
+status=rehearsal_passed
+shadow_candidate_created_count=1
+signal_evaluation_records=1
+order_candidate_records=1
+forbidden_execution_flags=[]
+database_connected=false
+exchange_called=false
+execution_intent_created=false
+order_created=false
+order_lifecycle_called=false
+owner_bounded_execution_called=false
+withdrawal_or_transfer_created=false
+```
+
 ## 6. Focused Test Evidence
 
 Deployment safety and script-risk tests:
@@ -226,6 +251,7 @@ Scheduler / API / trusted-overlay tests:
 
 ```bash
 /opt/homebrew/bin/pytest -q \
+  tests/unit/test_strategy_observation_shadow_planning_rehearsal.py \
   tests/unit/test_strategy_group_observation_script.py \
   tests/unit/test_strategy_group_live_readonly_observation.py \
   tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py \
@@ -236,7 +262,7 @@ Scheduler / API / trusted-overlay tests:
 Observed result:
 
 ```text
-88 passed
+89 passed
 ```
 
 Runtime bridge / FinalGate / promotion readiness tests:

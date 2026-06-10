@@ -193,7 +193,11 @@ Key facts:
   readiness. Trading Console also exposes an operator-auth manual
   `POST /api/trading-console/strategy-observations/scheduled-runs` endpoint for
   the same non-executing scheduled observation path; it is not an autonomous
-  scheduler and not submit authority.
+  scheduler and not submit authority. A local in-memory verifier,
+  `scripts/verify_strategy_observation_shadow_planning_rehearsal.py`, exercises
+  the real scheduled-observation resolver/planner path with static read-only
+  facts and proves CPM can create one shadow candidate while execution intent,
+  order, OrderLifecycle, exchange, and withdrawal/transfer flags remain false.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, runtime safety boundary,
