@@ -40,3 +40,14 @@ authorization for the exact action.
   It defaults to `active=True`, so seeding does not accidentally allow new
   entries. Use `--inactive` only for non-live/testnet smoke after explicit Owner
   approval and with the startup trading guard/manual arm process still in place.
+
+## Tokyo Runtime Governance Release Preparation
+
+- `prepare_tokyo_runtime_governance_release.py`: local read-only / dry-run
+  release readiness manifest for the Tokyo runtime-governance deployment stage.
+  It inspects local git, migration, deployed-head ancestry, untracked files, and
+  tracked secret-candidate path names. It does not SSH, deploy, run migrations,
+  restart services, read secrets, create execution records, create orders, call
+  OrderLifecycle, or call exchange APIs. Use `--write-artifacts` only when a
+  local `git archive` and manifest are needed for a controlled deployment
+  package.
