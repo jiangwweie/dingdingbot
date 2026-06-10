@@ -52,6 +52,7 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
 
     assert report["status"] == "blocked_before_first_real_submit"
     assert report["checks"]["technical_rehearsal_passed"] is True
+    assert report["checks"]["registration_draft_chain_passed"] is True
     assert report["checks"]["ready_for_first_real_submit"] is False
     assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is False
     assert report["checks"]["technical_blockers"] == []
@@ -82,6 +83,32 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     assert report["pipeline"]["submit_adapter_preview_status"] == (
         "inputs_ready_dry_run_adapter_only"
     )
+    assert report["pipeline"]["order_lifecycle_handoff_status"] == (
+        "ready_for_order_lifecycle_adapter"
+    )
+    assert report["pipeline"]["order_lifecycle_adapter_preview_status"] == (
+        "inputs_ready_registration_not_enabled"
+    )
+    assert report["pipeline"]["order_registration_draft_preview_status"] == (
+        "inputs_ready_registration_draft_only"
+    )
+    assert report["registration_draft_chain"]["in_memory_runtime_mutation_only"] is True
+    assert report["registration_draft_chain"]["attempt_mutation"]["status"] == "applied"
+    assert report["registration_draft_chain"]["order_registration_draft_preview"][
+        "order_objects_constructed"
+    ] is False
+    assert report["registration_draft_chain"]["order_registration_draft_preview"][
+        "local_order_registration_executed"
+    ] is False
+    assert report["registration_draft_chain"]["order_registration_draft_preview"][
+        "order_created"
+    ] is False
+    assert report["registration_draft_chain"]["order_registration_draft_preview"][
+        "order_lifecycle_called"
+    ] is False
+    assert report["registration_draft_chain"]["order_registration_draft_preview"][
+        "exchange_called"
+    ] is False
 
 
 @pytest.mark.asyncio
@@ -97,6 +124,7 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
 
     assert report["status"] == "blocked_before_first_real_submit"
     assert report["checks"]["technical_rehearsal_passed"] is True
+    assert report["checks"]["registration_draft_chain_passed"] is True
     assert report["checks"]["current_head_deployed"] is True
     assert report["checks"]["owner_real_submit_authorization_present"] is True
     assert report["checks"]["owner_live_runtime_enablement_authorization_present"] is True
@@ -109,6 +137,9 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is True
     assert report["promotion_gate"]["status"] == "ready_for_first_real_submit_gate_review"
     assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["pipeline"]["order_registration_draft_preview_status"] == (
+        "inputs_ready_registration_draft_only"
+    )
     assert report["rehearsal"]["order_created"] is False
     assert report["rehearsal"]["order_lifecycle_called"] is False
     assert report["rehearsal"]["exchange_called"] is False

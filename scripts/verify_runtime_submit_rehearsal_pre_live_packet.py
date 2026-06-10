@@ -39,6 +39,21 @@ from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
 from src.domain.runtime_execution_controlled_submit import (
     RuntimeExecutionControlledSubmitPreflightStatus,
 )
+from src.domain.runtime_execution_attempt_mutation import (
+    RuntimeExecutionAttemptMutationStatus,
+)
+from src.domain.runtime_execution_order_lifecycle_adapter import (
+    RuntimeExecutionOrderLifecycleAdapterPreviewStatus,
+)
+from src.domain.runtime_execution_order_lifecycle_handoff import (
+    RuntimeExecutionOrderLifecycleHandoffStatus,
+)
+from src.domain.runtime_execution_order_registration_draft import (
+    RuntimeExecutionOrderRegistrationDraftPreviewStatus,
+)
+from src.domain.runtime_execution_protection_plan import (
+    RuntimeExecutionProtectionPlanStatus,
+)
 from src.domain.runtime_execution_intent_adapter import (
     RuntimeExecutionSubmitReadinessStatus,
 )
@@ -103,11 +118,29 @@ class CommandResult:
 class _RuntimeService:
     def __init__(self, runtime: StrategyRuntimeInstance) -> None:
         self.runtime = runtime
+        self.events: list[dict[str, Any]] = []
 
     async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
         if runtime_instance_id != self.runtime.runtime_instance_id:
             raise ValueError("runtime_not_found")
         return self.runtime
+
+    async def apply_runtime_attempt_mutation(
+        self,
+        *,
+        previous_runtime: StrategyRuntimeInstance,
+        updated_runtime: StrategyRuntimeInstance,
+        mutation: Any,
+    ) -> None:
+        if previous_runtime.runtime_instance_id != self.runtime.runtime_instance_id:
+            raise ValueError("runtime_mutation_runtime_mismatch")
+        self.runtime = updated_runtime
+        self.events.append(
+            {
+                "event": "in_memory_attempt_mutation_applied",
+                "mutation_id": mutation.mutation_id,
+            }
+        )
 
 
 class _CandidateService:
@@ -172,6 +205,19 @@ class _SubmitAuthorizationRepository:
         return authorization
 
 
+class _InMemoryRepository:
+    def __init__(self, id_attr: str) -> None:
+        self.id_attr = id_attr
+        self.records: dict[str, Any] = {}
+
+    async def get(self, item_id: str) -> Any | None:
+        return self.records.get(item_id)
+
+    async def create(self, item: Any) -> Any:
+        self.records[getattr(item, self.id_attr)] = item
+        return item
+
+
 async def build_pre_live_packet(
     *,
     deployed_head: str | None,
@@ -198,6 +244,10 @@ async def build_pre_live_packet(
     draft_repository = _DraftRepository()
     intent_repository = _IntentRepository()
     authorization_repository = _SubmitAuthorizationRepository()
+    attempt_reservation_repository = _InMemoryRepository("reservation_id")
+    attempt_mutation_repository = _InMemoryRepository("mutation_id")
+    protection_plan_repository = _InMemoryRepository("protection_plan_id")
+    order_lifecycle_handoff_repository = _InMemoryRepository("handoff_draft_id")
     planning_service = RuntimeExecutionPlanningService(
         runtime_service=runtime_service,
         signal_evaluation_service=candidate_service,
@@ -208,6 +258,10 @@ async def build_pre_live_packet(
         draft_repository=draft_repository,
         intent_repository=intent_repository,
         submit_authorization_repository=authorization_repository,
+        attempt_reservation_repository=attempt_reservation_repository,
+        attempt_mutation_repository=attempt_mutation_repository,
+        protection_plan_repository=protection_plan_repository,
+        order_lifecycle_handoff_repository=order_lifecycle_handoff_repository,
         final_gate_preview_service=final_gate,
         runtime_service=runtime_service,
     )
@@ -231,6 +285,28 @@ async def build_pre_live_packet(
     rehearsal = await adapter_service.submit_rehearsal_for_authorization(
         authorization.authorization_id
     )
+    protection_plan = await adapter_service.record_protection_plan_for_intent(intent.id)
+    attempt_reservation = await adapter_service.record_attempt_reservation_for_authorization(
+        authorization.authorization_id
+    )
+    attempt_mutation = await adapter_service.apply_attempt_mutation_for_reservation(
+        attempt_reservation.reservation_id
+    )
+    order_lifecycle_handoff = (
+        await adapter_service.record_order_lifecycle_handoff_draft_for_authorization(
+            authorization.authorization_id
+        )
+    )
+    order_lifecycle_adapter_preview = (
+        await adapter_service.order_lifecycle_adapter_preview_for_authorization(
+            authorization.authorization_id
+        )
+    )
+    order_registration_draft_preview = (
+        await adapter_service.order_registration_draft_preview_for_authorization(
+            authorization.authorization_id
+        )
+    )
 
     technical_blockers = _dedupe(
         list(plan.final_gate_preview.blockers)
@@ -238,6 +314,12 @@ async def build_pre_live_packet(
         + list(intent_preview.blockers)
         + list(submit_readiness.blockers)
         + list(rehearsal.blockers)
+        + list(protection_plan.blockers)
+        + list(attempt_reservation.blockers)
+        + list(attempt_mutation.blockers)
+        + list(order_lifecycle_handoff.blockers)
+        + list(order_lifecycle_adapter_preview.blockers)
+        + list(order_registration_draft_preview.blockers)
     )
     operational_blockers: list[str] = []
     deployed_head = deployed_head or ""
@@ -262,10 +344,21 @@ async def build_pre_live_packet(
         authorization=authorization,
         rehearsal=rehearsal,
     )
+    registration_draft_chain_passed = _registration_draft_chain_passed(
+        protection_plan=protection_plan,
+        attempt_mutation=attempt_mutation,
+        order_lifecycle_handoff=order_lifecycle_handoff,
+        order_lifecycle_adapter_preview=order_lifecycle_adapter_preview,
+        order_registration_draft_preview=order_registration_draft_preview,
+    )
     forbidden_execution_flags = _forbidden_execution_flags(
         intent=intent,
         authorization=authorization,
         rehearsal=rehearsal,
+        protection_plan=protection_plan,
+        order_lifecycle_handoff=order_lifecycle_handoff,
+        order_lifecycle_adapter_preview=order_lifecycle_adapter_preview,
+        order_registration_draft_preview=order_registration_draft_preview,
     )
     safety_readiness = evaluate_strategy_runtime_safety_readiness(runtime)
     promotion_gate_result = _promotion_gate_result(
@@ -292,6 +385,7 @@ async def build_pre_live_packet(
     )
     checks = {
         "technical_rehearsal_passed": technical_rehearsal_passed,
+        "registration_draft_chain_passed": registration_draft_chain_passed,
         "current_head_deployed": current_head_deployed,
         "owner_real_submit_authorization_present": owner_real_submit_authorized,
         "owner_live_runtime_enablement_authorization_present": (
@@ -309,6 +403,7 @@ async def build_pre_live_packet(
     }
     checks["ready_for_first_real_submit"] = (
         checks["technical_rehearsal_passed"]
+        and checks["registration_draft_chain_passed"]
         and checks["ready_for_live_runtime_enablement_mutation_design"]
         and not technical_blockers
         and not operational_blockers
@@ -361,6 +456,17 @@ async def build_pre_live_packet(
                 rehearsal.submit_adapter_preview.status
             ),
             "submit_rehearsal_status": _enum_value(rehearsal.status),
+            "protection_plan_status": _enum_value(protection_plan.status),
+            "attempt_mutation_status": _enum_value(attempt_mutation.status),
+            "order_lifecycle_handoff_status": _enum_value(
+                order_lifecycle_handoff.status
+            ),
+            "order_lifecycle_adapter_preview_status": _enum_value(
+                order_lifecycle_adapter_preview.status
+            ),
+            "order_registration_draft_preview_status": _enum_value(
+                order_registration_draft_preview.status
+            ),
             "safe_stop_stage": rehearsal.safe_stop_stage,
             "next_required_gate": rehearsal.next_required_gate,
         },
@@ -369,12 +475,28 @@ async def build_pre_live_packet(
         "promotion_gate": promotion_gate_result.model_dump(mode="json"),
         "live_enablement_preview": live_enablement_preview.model_dump(mode="json"),
         "rehearsal": rehearsal.model_dump(mode="json"),
+        "registration_draft_chain": {
+            "scope": "runtime_order_registration_draft_pre_live_evidence",
+            "in_memory_runtime_mutation_only": True,
+            "runtime_events": list(runtime_service.events),
+            "protection_plan": protection_plan.model_dump(mode="json"),
+            "attempt_reservation": attempt_reservation.model_dump(mode="json"),
+            "attempt_mutation": attempt_mutation.model_dump(mode="json"),
+            "order_lifecycle_handoff": order_lifecycle_handoff.model_dump(mode="json"),
+            "order_lifecycle_adapter_preview": (
+                order_lifecycle_adapter_preview.model_dump(mode="json")
+            ),
+            "order_registration_draft_preview": (
+                order_registration_draft_preview.model_dump(mode="json")
+            ),
+        },
         "safety_invariants": {
             "database_connected": False,
             "remote_files_modified": False,
             "services_restarted": False,
             "migrations_run": False,
             "runtime_started": False,
+            "persistent_runtime_budget_mutated": False,
             "runtime_budget_mutated": rehearsal.runtime_budget_mutated,
             "attempt_consumed": rehearsal.attempt_consumed,
             "execution_intent_status_changed": rehearsal.execution_intent_status_changed,
@@ -518,6 +640,35 @@ def _technical_rehearsal_passed(
     )
 
 
+def _registration_draft_chain_passed(
+    *,
+    protection_plan: Any,
+    attempt_mutation: Any,
+    order_lifecycle_handoff: Any,
+    order_lifecycle_adapter_preview: Any,
+    order_registration_draft_preview: Any,
+) -> bool:
+    return (
+        protection_plan.status
+        == RuntimeExecutionProtectionPlanStatus.READY_FOR_SUBMIT_ADAPTER
+        and attempt_mutation.status == RuntimeExecutionAttemptMutationStatus.APPLIED
+        and order_lifecycle_handoff.status
+        == RuntimeExecutionOrderLifecycleHandoffStatus.READY_FOR_ORDER_LIFECYCLE_ADAPTER
+        and order_lifecycle_adapter_preview.status
+        == RuntimeExecutionOrderLifecycleAdapterPreviewStatus.INPUTS_READY_REGISTRATION_NOT_ENABLED
+        and order_registration_draft_preview.status
+        == (
+            RuntimeExecutionOrderRegistrationDraftPreviewStatus
+            .INPUTS_READY_REGISTRATION_DRAFT_ONLY
+        )
+        and order_registration_draft_preview.order_objects_constructed is False
+        and order_registration_draft_preview.local_order_registration_executed is False
+        and order_registration_draft_preview.order_created is False
+        and order_registration_draft_preview.order_lifecycle_called is False
+        and order_registration_draft_preview.exchange_called is False
+    )
+
+
 def _promotion_gate_result(
     *,
     runtime: StrategyRuntimeInstance,
@@ -575,6 +726,10 @@ def _forbidden_execution_flags(
     intent: ExecutionIntent,
     authorization: RuntimeExecutionSubmitAuthorization,
     rehearsal: Any,
+    protection_plan: Any,
+    order_lifecycle_handoff: Any,
+    order_lifecycle_adapter_preview: Any,
+    order_registration_draft_preview: Any,
 ) -> list[str]:
     flags: list[str] = []
     if intent.status != ExecutionIntentStatus.RECORDED:
@@ -601,6 +756,63 @@ def _forbidden_execution_flags(
             rehearsal.owner_bounded_execution_called
         ),
         "rehearsal_order_lifecycle_called": rehearsal.order_lifecycle_called,
+        "protection_plan_order_created": protection_plan.order_created,
+        "protection_plan_exchange_called": protection_plan.exchange_called,
+        "protection_plan_owner_bounded_execution_called": (
+            protection_plan.owner_bounded_execution_called
+        ),
+        "protection_plan_order_lifecycle_called": (
+            protection_plan.order_lifecycle_called
+        ),
+        "order_lifecycle_handoff_execution_intent_status_changed": (
+            order_lifecycle_handoff.execution_intent_status_changed
+        ),
+        "order_lifecycle_handoff_order_created": order_lifecycle_handoff.order_created,
+        "order_lifecycle_handoff_exchange_called": (
+            order_lifecycle_handoff.exchange_called
+        ),
+        "order_lifecycle_handoff_owner_bounded_execution_called": (
+            order_lifecycle_handoff.owner_bounded_execution_called
+        ),
+        "order_lifecycle_handoff_order_lifecycle_called": (
+            order_lifecycle_handoff.order_lifecycle_called
+        ),
+        "order_lifecycle_adapter_execution_intent_status_changed": (
+            order_lifecycle_adapter_preview.execution_intent_status_changed
+        ),
+        "order_lifecycle_adapter_order_created": (
+            order_lifecycle_adapter_preview.order_created
+        ),
+        "order_lifecycle_adapter_exchange_called": (
+            order_lifecycle_adapter_preview.exchange_called
+        ),
+        "order_lifecycle_adapter_owner_bounded_execution_called": (
+            order_lifecycle_adapter_preview.owner_bounded_execution_called
+        ),
+        "order_lifecycle_adapter_order_lifecycle_called": (
+            order_lifecycle_adapter_preview.order_lifecycle_called
+        ),
+        "order_registration_draft_order_objects_constructed": (
+            order_registration_draft_preview.order_objects_constructed
+        ),
+        "order_registration_draft_local_order_registration_executed": (
+            order_registration_draft_preview.local_order_registration_executed
+        ),
+        "order_registration_draft_execution_intent_status_changed": (
+            order_registration_draft_preview.execution_intent_status_changed
+        ),
+        "order_registration_draft_order_created": (
+            order_registration_draft_preview.order_created
+        ),
+        "order_registration_draft_exchange_called": (
+            order_registration_draft_preview.exchange_called
+        ),
+        "order_registration_draft_owner_bounded_execution_called": (
+            order_registration_draft_preview.owner_bounded_execution_called
+        ),
+        "order_registration_draft_order_lifecycle_called": (
+            order_registration_draft_preview.order_lifecycle_called
+        ),
     }
     flags.extend(key for key, value in checks.items() if value)
     return flags

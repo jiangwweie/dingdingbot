@@ -279,6 +279,7 @@ def _plan_phases(
                 "ready_for_controlled_migration_preflight is not true",
                 "scheduled-observation shadow-planning rehearsal does not pass",
                 "runtime submit pre-live technical rehearsal does not pass",
+                "runtime submit pre-live registration draft chain does not pass",
                 "runtime submit pre-live packet contains forbidden execution flags",
             ],
         },

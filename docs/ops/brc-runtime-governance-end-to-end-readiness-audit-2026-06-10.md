@@ -229,6 +229,7 @@ Observed result:
 ```text
 status=blocked_before_first_real_submit
 technical_rehearsal_passed=true
+registration_draft_chain_passed=true
 ready_for_first_real_submit=false
 ready_for_live_runtime_enablement_mutation_design=false
 technical_blockers=[]
@@ -247,13 +248,17 @@ live_enablement_blockers include:
 forbidden_execution_flags=[]
 submit_rehearsal_status=ready_for_non_executing_submit_adapter_boundary
 submit_adapter_preview_status=inputs_ready_dry_run_adapter_only
+order_lifecycle_handoff_status=ready_for_order_lifecycle_adapter
+order_lifecycle_adapter_preview_status=inputs_ready_registration_not_enabled
+order_registration_draft_preview_status=inputs_ready_registration_draft_only
 ```
 
 Current deployment-prep Phase 0 is aligned to this Tokyo baseline: the
 deployment plan requires local packaging readiness, a `064 -> 066` migration
 gap audit with two expected revisions, the local scheduled-observation
 shadow-planning rehearsal, and the local runtime submit pre-live packet
-technical rehearsal before any Owner-authorized remote mutation phase. The
+technical rehearsal plus non-registration order draft chain before any
+Owner-authorized remote mutation phase. The
 pre-live packet may pass its technical rehearsal while still reporting live
 enablement blockers; those blockers are intentional and must not be treated as
 deployment blockers unless the task is to perform live-runtime enablement.

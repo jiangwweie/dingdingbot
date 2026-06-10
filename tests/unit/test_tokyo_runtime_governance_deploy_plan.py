@@ -126,6 +126,10 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert phases["2_owner_authorized_upload_and_extract"]["remote_mutation"] is True
     assert phases["3_quiesce_backup_and_migrate"]["remote_mutation"] is True
     assert phases["4_switch_start_and_smoke"]["remote_mutation"] is True
+    assert (
+        "runtime submit pre-live registration draft chain does not pass"
+        in phases["0_local_preflight"]["stop_if"]
+    )
     assert all(
         phase.get("requires_confirmation_phrase")
         == "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
