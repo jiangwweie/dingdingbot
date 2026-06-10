@@ -129,7 +129,79 @@ tree does not contain `.git`. During remote deployment, copy the generated
 Post-deployment probes must use git identity when `.git` is present and release
 manifest identity when the release was built from an archive.
 
-Before any remote mutation, generate the owner-gated command plan:
+For follow-up deployments, prefer the git-based path. The local target commit
+must first be pushed to the selected remote branch, and that commit must be the
+remote branch HEAD. This avoids uploading a full local archive on every stage
+while preserving the same backup, migration, restart, and postdeploy gates.
+
+Generate the owner-gated git command plan:
+
+```bash
+/opt/homebrew/bin/python3 scripts/plan_tokyo_runtime_governance_git_deploy.py \
+  --json \
+  --repo-url <git-repository-url> \
+  --git-ref <remote-branch-name> \
+  --target-commit <commit-to-deploy> \
+  --release-name <remote-release-name> \
+  --previous-release <current-remote-release-path> \
+  --expected-deployed-head <current-remote-head> \
+  --expected-remote-migration-count <current-remote-migration-count> \
+  --expected-remote-latest-migration <current-remote-latest-migration>
+```
+
+The plan is not authorization and must not be treated as execution. It should
+show `ready_for_owner_authorized_remote_deploy=true`, contain no `scp`
+command, and print the explicit remote mutation confirmation phrase before any
+remote git fetch/export, backup, migration, symlink switch, or restart.
+
+Then build the consolidated git Owner decision packet:
+
+```bash
+/opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py \
+  --json \
+  --repo-url <git-repository-url> \
+  --git-ref <remote-branch-name> \
+  --target-commit <commit-to-deploy> \
+  --release-name <remote-release-name> \
+  --previous-release <current-remote-release-path> \
+  --expected-deployed-head <current-remote-head> \
+  --expected-remote-migration-count <current-remote-migration-count> \
+  --expected-remote-latest-migration <current-remote-latest-migration> \
+  > <owner-git-deploy-decision-packet.json>
+```
+
+This packet aggregates release readiness, git deploy plan, executor dry-run,
+Tokyo read-only probe, and the pre-live runtime submit packet. It must report
+`ready_for_owner_git_deploy_decision=true` before applying the deployment. That
+status does not authorize live runtime enablement, real submit, OrderLifecycle
+adapter enablement, or exchange order placement.
+
+Once Owner explicitly approves the remote mutation stage, execute the same
+git-based plan:
+
+```bash
+/opt/homebrew/bin/python3 scripts/execute_tokyo_runtime_governance_git_deploy.py \
+  --json \
+  --repo-url <git-repository-url> \
+  --git-ref <remote-branch-name> \
+  --target-commit <commit-to-deploy> \
+  --release-name <remote-release-name> \
+  --previous-release <current-remote-release-path> \
+  --expected-deployed-head <current-remote-head> \
+  --expected-remote-migration-count <current-remote-migration-count> \
+  --expected-remote-latest-migration <current-remote-latest-migration> \
+  --owner-deploy-packet-path <owner-git-deploy-decision-packet.json> \
+  --apply \
+  --confirmation-phrase OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
+```
+
+Without `--apply`, the exact confirmation phrase, and a ready git owner deploy
+decision packet for the same repo / ref / HEAD, this executor remains blocked
+or dry-run and must not mutate Tokyo.
+
+The archive path remains available as a fallback when Tokyo cannot fetch the
+repository. For fallback archive deployment, generate the owner-gated command
+plan:
 
 ```bash
 /opt/homebrew/bin/python3 scripts/plan_tokyo_runtime_governance_deploy.py \
@@ -139,10 +211,10 @@ Before any remote mutation, generate the owner-gated command plan:
   --release-name <remote-release-name>
 ```
 
-The plan is not authorization and must not be treated as execution. It should
-show `ready_for_owner_authorized_remote_deploy=true` and print the explicit
-remote mutation confirmation phrase before any upload, backup, migration,
-symlink switch, or restart.
+The archive plan is not authorization and must not be treated as execution. It
+should show `ready_for_owner_authorized_remote_deploy=true` and print the
+explicit remote mutation confirmation phrase before any upload, backup,
+migration, symlink switch, or restart.
 
 Then build the consolidated Owner decision packet:
 
@@ -155,8 +227,8 @@ Then build the consolidated Owner decision packet:
   > <owner-deploy-decision-packet.json>
 ```
 
-This packet aggregates release readiness, deploy plan, executor dry-run, Tokyo
-read-only probe, and the pre-live runtime submit packet. It must report
+This packet aggregates release readiness, archive deploy plan, executor dry-run,
+Tokyo read-only probe, and the pre-live runtime submit packet. It must report
 `ready_for_owner_deploy_decision=true` before asking the Owner to approve the
 deploy apply step. That status does not authorize live runtime enablement,
 real submit, OrderLifecycle adapter enablement, or exchange order placement.
@@ -175,8 +247,8 @@ executed through the apply-gated executor:
   --confirmation-phrase OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
 ```
 
-Without `--apply`, the exact confirmation phrase, and a ready owner deploy
-decision packet for the same archive / manifest / HEAD, this executor remains
+Without `--apply`, the exact confirmation phrase, and a ready archive owner
+deploy decision packet for the same archive / manifest / HEAD, this executor remains
 blocked or dry-run and must not mutate Tokyo. With all three, it is a remote
 deployment, backup, migration, symlink, and service-control action; do not run
 it as a background convenience command.
@@ -293,12 +365,12 @@ BRC_LLM_ENABLED=false
 Restart should be a deliberate backend restart with immediate health checks.
 Do not rely on a dirty release tree or an unknown long-running process.
 
-For the `064 -> 069` jump, the planned order is:
+For the default git-based deployment path, the planned order is:
 
 1. Run local and remote read-only preflights.
-2. Upload archive and manifest.
-3. Extract archive into a new release directory and copy the manifest to
-   `.brc-release-manifest.json`.
+2. Fetch the pushed branch head on Tokyo.
+3. Export the target commit from the remote git checkout into a new clean
+   release directory and write `.brc-release-manifest.json`.
 4. Stop `brc-owner-console-backend.service` with non-interactive sudo to quiesce
    backend writes.
 5. Create the PG backup.
@@ -307,6 +379,9 @@ For the `064 -> 069` jump, the planned order is:
 7. Repoint `app/current`.
 8. Start the backend service.
 9. Run health, post-deploy readonly probe, and console/API smokes.
+
+For archive fallback, replace steps 2-3 with upload of the local archive and
+manifest, then extraction into the clean release directory.
 
 ## Post-Deployment Smoke
 

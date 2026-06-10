@@ -15,31 +15,41 @@ deployment. This tracked packet intentionally does not pin a local candidate
 commit or archive path, because editing the packet would itself create a newer
 HEAD.
 
-Before applying deployment, regenerate `prepare -> plan -> executor dry-run`
-for the then-current HEAD and use those outputs as the candidate facts.
+Before applying deployment, regenerate `prepare -> git deploy plan -> git
+executor dry-run` for the then-current HEAD and use those outputs as the
+candidate facts. The target commit must first be pushed and must match the
+selected remote branch HEAD.
 
 Preferred machine-generated packet:
 
 ```bash
-/opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_owner_deploy_packet.py \
+/opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py \
   --json \
-  --archive-path <local-release-archive.tar.gz> \
-  --manifest-path <release-readiness-manifest.json> \
+  --repo-url <git-repository-url> \
+  --git-ref <remote-branch-name> \
+  --target-commit <commit-to-deploy> \
   --release-name <remote-release-name> \
-  > <owner-deploy-decision-packet.json>
+  --previous-release <current-remote-release-path> \
+  --expected-deployed-head <current-remote-head> \
+  --expected-remote-migration-count <current-remote-migration-count> \
+  --expected-remote-latest-migration <current-remote-latest-migration> \
+  > <owner-git-deploy-decision-packet.json>
 ```
 
 The packet must report:
 
 ```text
-status=ready_for_owner_deploy_decision
-ready_for_owner_deploy_decision=true
+status=ready_for_owner_git_deploy_decision
+ready_for_owner_git_deploy_decision=true
 ```
 
 This status means only that the Owner may decide whether to authorize the
 Tokyo deploy apply step. It is not first-real-submit authorization.
 The deploy executor must receive that same packet through
 `--owner-deploy-packet-path` before `--apply` can proceed.
+
+Archive-based `build_tokyo_runtime_governance_owner_deploy_packet.py` remains
+available only as fallback when Tokyo cannot fetch the git repository.
 
 ## 2. Verified Dry-Run Facts
 
@@ -95,11 +105,11 @@ owner-gated plan phases:
 
 1. Local release and migration-gap preflight.
 2. Remote read-only preflight.
-3. Upload archive and manifest to Tokyo.
-4. Extract into a new release directory.
+3. Fetch the pushed branch head on Tokyo.
+4. Export the target commit into a new release directory and write the manifest.
 5. Stop the backend service to quiesce writes.
 6. Create a PG backup with `pg_dump`.
-7. Run remote compile and Alembic `upgrade head` from migration `064` to `066`.
+7. Run remote compile and Alembic `upgrade head`.
 8. Switch `app/current` symlink to the new release.
 9. Restart the backend service.
 10. Run health, read-only deployment probe, and postdeploy verifier, including
