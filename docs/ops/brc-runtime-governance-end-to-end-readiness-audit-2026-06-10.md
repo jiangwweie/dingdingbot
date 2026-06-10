@@ -361,9 +361,10 @@ The following are not complete and must not be silently inferred:
    handling, duplicate-submit blocking, account/active-position facts,
    stale-fact behavior, deployment readiness, and explicit Owner real-submit
    authorization.
-6. Controlled runtime submit adapter, real OrderLifecycle adapter, and exchange
-   order submit remain intentionally unimplemented / disabled for runtime
-   governance.
+6. Controlled runtime submit adapter, real OrderLifecycle adapter, local order
+   registration, and exchange order submit remain intentionally unimplemented /
+   disabled for runtime governance. Local code may type-check registration draft
+   facts as a non-registration preview only.
 7. No automatic withdrawal or transfer design is allowed.
 
 ## 8. Owner Authorization Boundary

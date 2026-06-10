@@ -369,6 +369,12 @@ Key facts:
   keeping `local_order_registration_enabled=false`,
   `order_lifecycle_adapter_implemented=false`, `order_created=false`,
   `order_lifecycle_called=false`, and `exchange_called=false`.
+  RuntimeExecutionOrderRegistrationDraftPreview can additionally type-check the
+  local entry/protection registration draft facts as
+  `inputs_ready_registration_draft_only` while keeping
+  `order_objects_constructed=false`, `local_order_registration_executed=false`,
+  `order_created=false`, `order_lifecycle_called=false`, and
+  `exchange_called=false`.
   RuntimeExecutionAttemptReservationPreview computes attempts/budget before and
   after from StrategyRuntimeInstance boundary while keeping
   `reservation_recorded=false`, `runtime_budget_mutated=false`, and

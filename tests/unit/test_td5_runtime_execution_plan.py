@@ -53,6 +53,9 @@ from src.domain.runtime_execution_order_lifecycle_adapter import (
     RuntimeExecutionOrderLifecycleAdapterPreview,
     RuntimeExecutionOrderLifecycleAdapterPreviewStatus,
 )
+from src.domain.runtime_execution_order_registration_draft import (
+    RuntimeExecutionOrderRegistrationDraftPreviewStatus,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservationStatus,
     RuntimeExecutionAttemptReservationPreviewStatus,
@@ -79,6 +82,7 @@ from src.interfaces.api_trading_console import (
     record_runtime_execution_attempt_reservation_for_authorization,
     apply_runtime_execution_attempt_mutation_for_reservation,
     runtime_execution_order_lifecycle_adapter_preview_for_authorization,
+    runtime_execution_order_registration_draft_preview_for_authorization,
     record_runtime_execution_order_lifecycle_handoff_draft_for_authorization,
     record_runtime_execution_protection_plan_for_intent,
     record_runtime_execution_submit_authorization_for_intent,
@@ -3076,6 +3080,59 @@ async def test_runtime_execution_order_lifecycle_adapter_preview_inputs_ready_bu
     assert preview.order_lifecycle_called is False
 
 
+async def test_runtime_execution_order_registration_draft_preview_materializes_typed_drafts_without_registration():
+    candidate = _candidate(
+        protection_preview=OrderCandidateProtectionPreview(
+            requires_protection=True,
+            stop_reference="explicit_stop_price",
+            stop_price_reference=Decimal("594"),
+            take_profit_references=[
+                {"id": "TP1", "price": "660", "position_ratio": "1"}
+            ],
+        )
+    )
+    service, authorization, handoff, _handoff_repo = await _order_lifecycle_handoff_setup(
+        candidate=candidate
+    )
+
+    preview = await service.order_registration_draft_preview_for_authorization(
+        authorization.authorization_id
+    )
+
+    assert handoff.status == RuntimeExecutionOrderLifecycleHandoffStatus.READY_FOR_ORDER_LIFECYCLE_ADAPTER
+    assert preview.status == (
+        RuntimeExecutionOrderRegistrationDraftPreviewStatus
+        .INPUTS_READY_REGISTRATION_DRAFT_ONLY
+    )
+    assert preview.blockers == []
+    assert preview.registration_draft_count == 3
+    assert preview.entry_registration_draft_count == 1
+    assert preview.protection_registration_draft_count == 2
+    entry = preview.local_order_registration_drafts[0]
+    stop = preview.local_order_registration_drafts[1]
+    tp1 = preview.local_order_registration_drafts[2]
+    assert entry.order_role.value == "ENTRY"
+    assert entry.reduce_only is False
+    assert entry.parent_local_order_draft_id is None
+    assert entry.persisted is False
+    assert entry.not_order is True
+    assert stop.order_role.value == "SL"
+    assert stop.reduce_only is True
+    assert stop.trigger_price == Decimal("594")
+    assert stop.parent_local_order_draft_id == entry.local_order_draft_id
+    assert tp1.order_role.value == "TP1"
+    assert tp1.price == Decimal("660")
+    assert preview.local_order_registration_enabled is False
+    assert preview.order_lifecycle_adapter_implemented is False
+    assert preview.order_objects_constructed is False
+    assert preview.local_order_registration_executed is False
+    assert preview.execution_intent_status_changed is False
+    assert preview.order_created is False
+    assert preview.exchange_called is False
+    assert preview.owner_bounded_execution_called is False
+    assert preview.order_lifecycle_called is False
+
+
 async def test_runtime_execution_order_lifecycle_adapter_preview_rejects_execution_artifacts():
     candidate = _candidate(
         protection_preview=OrderCandidateProtectionPreview(
@@ -4087,6 +4144,50 @@ async def test_trading_console_runtime_execution_order_lifecycle_adapter_preview
     )
     assert preview.local_order_registration_enabled is False
     assert preview.order_lifecycle_adapter_implemented is False
+    assert preview.order_created is False
+    assert preview.exchange_called is False
+    assert preview.owner_bounded_execution_called is False
+    assert preview.order_lifecycle_called is False
+
+
+async def test_trading_console_runtime_execution_order_registration_draft_preview_is_non_executing(
+    monkeypatch,
+):
+    candidate = _candidate(
+        protection_preview=OrderCandidateProtectionPreview(
+            requires_protection=True,
+            stop_reference="explicit_stop_price",
+            stop_price_reference=Decimal("594"),
+            take_profit_references=[
+                {"id": "TP1", "price": "660", "position_ratio": "1"}
+            ],
+        )
+    )
+    service, authorization, _handoff, _handoff_repo = await _order_lifecycle_handoff_setup(
+        candidate=candidate
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_execution_intent_adapter_service",
+        service,
+        raising=False,
+    )
+
+    preview = await runtime_execution_order_registration_draft_preview_for_authorization(
+        authorization.authorization_id
+    )
+
+    assert preview.status == (
+        RuntimeExecutionOrderRegistrationDraftPreviewStatus
+        .INPUTS_READY_REGISTRATION_DRAFT_ONLY
+    )
+    assert preview.registration_draft_count == 3
+    assert preview.entry_registration_draft_count == 1
+    assert preview.protection_registration_draft_count == 2
+    assert preview.local_order_registration_enabled is False
+    assert preview.order_lifecycle_adapter_implemented is False
+    assert preview.order_objects_constructed is False
+    assert preview.local_order_registration_executed is False
     assert preview.order_created is False
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False

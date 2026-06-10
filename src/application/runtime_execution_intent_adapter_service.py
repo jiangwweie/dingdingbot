@@ -50,6 +50,10 @@ from src.domain.runtime_execution_order_lifecycle_adapter import (
     RuntimeExecutionOrderLifecycleAdapterPreview,
     build_runtime_execution_order_lifecycle_adapter_preview,
 )
+from src.domain.runtime_execution_order_registration_draft import (
+    RuntimeExecutionOrderRegistrationDraftPreview,
+    build_runtime_execution_order_registration_draft_preview,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -616,6 +620,18 @@ class RuntimeExecutionIntentAdapterService:
             raise ValueError("RuntimeExecutionOrderLifecycleHandoffDraft not found")
         return build_runtime_execution_order_lifecycle_adapter_preview(
             handoff=handoff,
+            now_ms=_now_ms(),
+        )
+
+    async def order_registration_draft_preview_for_authorization(
+        self,
+        authorization_id: str,
+    ) -> RuntimeExecutionOrderRegistrationDraftPreview:
+        adapter_preview = await self.order_lifecycle_adapter_preview_for_authorization(
+            authorization_id
+        )
+        return build_runtime_execution_order_registration_draft_preview(
+            adapter_preview=adapter_preview,
             now_ms=_now_ms(),
         )
 

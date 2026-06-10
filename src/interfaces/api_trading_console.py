@@ -55,6 +55,9 @@ from src.domain.runtime_execution_order_lifecycle_handoff import (
 from src.domain.runtime_execution_order_lifecycle_adapter import (
     RuntimeExecutionOrderLifecycleAdapterPreview,
 )
+from src.domain.runtime_execution_order_registration_draft import (
+    RuntimeExecutionOrderRegistrationDraftPreview,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -1123,6 +1126,27 @@ async def runtime_execution_order_lifecycle_adapter_preview_for_authorization(
     service = await _runtime_execution_intent_adapter_service()
     try:
         return await service.order_lifecycle_adapter_preview_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-order-registration-draft-previews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionOrderRegistrationDraftPreview,
+)
+async def runtime_execution_order_registration_draft_preview_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionOrderRegistrationDraftPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.order_registration_draft_preview_for_authorization(
             authorization_id
         )
     except RuntimeError as exc:

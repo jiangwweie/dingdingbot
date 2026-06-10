@@ -36,6 +36,7 @@ This document defines the runtime safety boundaries for the BRC project.
   RuntimeExecutionProtectionPlan /
   RuntimeExecutionOrderLifecycleHandoffDraft /
   RuntimeExecutionOrderLifecycleAdapterPreview /
+  RuntimeExecutionOrderRegistrationDraftPreview /
   RuntimeExecutionSubmitAdapterPreview /
   RuntimeExecutionSubmitRehearsal are non-submitting bridge layers. They
   may record draft/intent/submit authorization/controlled-submit result/pending
@@ -67,6 +68,10 @@ This document defines the runtime safety boundaries for the BRC project.
   `order_lifecycle_called=false`, and `exchange_called=false`. The
   OrderLifecycle adapter preview may verify those facts, but it must keep
   `local_order_registration_enabled=false`,
+  `local_order_registration_executed=false`, `order_created=false`,
+  `order_lifecycle_called=false`, and `exchange_called=false`. The typed local
+  order registration draft preview may validate entry/protection registration
+  draft facts, but it must keep `order_objects_constructed=false`,
   `local_order_registration_executed=false`, `order_created=false`,
   `order_lifecycle_called=false`, and `exchange_called=false`. The submit adapter
   rehearsal may summarize readiness and blockers across these gates, but it

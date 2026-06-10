@@ -1223,6 +1223,16 @@ Current execution pre-integration status already present locally:
   `local_order_registration_executed=false`, `order_created=false`,
   `exchange_called=false`, `owner_bounded_execution_called=false`, and
   `order_lifecycle_called=false`.
+- `RuntimeExecutionOrderRegistrationDraftPreview` exists as a typed,
+  non-registration local order draft preview. It consumes the non-executing
+  OrderLifecycle adapter preview, validates entry/protection registration draft
+  facts as typed local draft models, and can return
+  `inputs_ready_registration_draft_only` while keeping
+  `order_objects_constructed=false`,
+  `local_order_registration_enabled=false`,
+  `local_order_registration_executed=false`, `order_created=false`,
+  `exchange_called=false`, `owner_bounded_execution_called=false`, and
+  `order_lifecycle_called=false`.
 - `RuntimeExecutionAttemptReservationPreview` exists as a non-mutating
   attempts/budget reservation preview. It computes attempts and budget
   before/after from `StrategyRuntimeInstance.boundary`, can reach
