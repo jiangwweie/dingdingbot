@@ -77,6 +77,12 @@ def build_tokyo_probe_report(
     root = _remote_path(deploy_root)
     current_path = f"{root}/app/current"
     quoted_current_path = _quote_remote_path(current_path)
+    release_identity = _remote_release_identity(
+        host,
+        quoted_current_path=quoted_current_path,
+        connect_timeout_seconds=connect_timeout_seconds,
+        runner=command_runner,
+    )
     facts = {
         "host": _ssh_text(
             host,
@@ -96,18 +102,10 @@ def build_tokyo_probe_report(
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
-        "current_head": _ssh_text(
-            host,
-            f"cd {quoted_current_path} && git rev-parse HEAD",
-            connect_timeout_seconds=connect_timeout_seconds,
-            runner=command_runner,
-        ),
-        "current_status": _ssh_text(
-            host,
-            f"cd {quoted_current_path} && git status --short --branch",
-            connect_timeout_seconds=connect_timeout_seconds,
-            runner=command_runner,
-        ),
+        "release_identity_source": release_identity["source"],
+        "release_manifest": release_identity["manifest"],
+        "current_head": release_identity["head"],
+        "current_status": release_identity["status"],
         "migration_count": _ssh_text(
             host,
             (
@@ -201,13 +199,20 @@ def evaluate_probe_checks(
         blockers.append("remote_current_head_mismatch")
 
     current_status = str(facts.get("current_status") or "")
+    release_identity_source = str(facts.get("release_identity_source") or "")
     dirty_lines = [
         line
         for line in current_status.splitlines()
-        if line and not line.startswith("## ")
+        if (
+            line
+            and not line.startswith("## ")
+            and line != "release_manifest_without_git_status"
+        )
     ]
     if dirty_lines:
         blockers.append("remote_current_release_worktree_dirty")
+    if release_identity_source == "release_manifest":
+        warnings.append("remote_release_identity_from_manifest_without_git_status")
 
     migration_count = _int_or_none(facts.get("migration_count"))
     if migration_count is None:
@@ -339,6 +344,69 @@ def _remote_health(
     }
 
 
+def _remote_release_identity(
+    host: str,
+    *,
+    quoted_current_path: str,
+    connect_timeout_seconds: int,
+    runner: Runner,
+) -> dict[str, Any]:
+    head_result = _ssh_result(
+        host,
+        f"cd {quoted_current_path} && git rev-parse HEAD",
+        connect_timeout_seconds=connect_timeout_seconds,
+        runner=runner,
+    )
+    if head_result.returncode == 0 and head_result.stdout.strip():
+        status = _ssh_text(
+            host,
+            f"cd {quoted_current_path} && git status --short --branch",
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=runner,
+        )
+        return {
+            "source": "git",
+            "head": head_result.stdout.strip(),
+            "status": status,
+            "manifest": None,
+        }
+
+    manifest_result = _ssh_result(
+        host,
+        f"cd {quoted_current_path} && cat .brc-release-manifest.json",
+        connect_timeout_seconds=connect_timeout_seconds,
+        runner=runner,
+    )
+    if manifest_result.returncode != 0 or not manifest_result.stdout.strip():
+        raise TokyoProbeError(
+            "remote release identity unavailable: git rev-parse failed and "
+            ".brc-release-manifest.json was not readable"
+        )
+    try:
+        manifest = json.loads(manifest_result.stdout)
+    except json.JSONDecodeError as exc:
+        raise TokyoProbeError("remote release manifest is not valid JSON") from exc
+    head = (
+        manifest.get("local_git", {}).get("head")
+        if isinstance(manifest.get("local_git"), dict)
+        else None
+    )
+    if not head:
+        raise TokyoProbeError("remote release manifest missing local_git.head")
+    return {
+        "source": "release_manifest",
+        "head": str(head).strip(),
+        "status": "release_manifest_without_git_status",
+        "manifest": {
+            "scope": manifest.get("scope"),
+            "generated_at_utc": manifest.get("generated_at_utc"),
+            "short_head": manifest.get("local_git", {}).get("short_head")
+            if isinstance(manifest.get("local_git"), dict)
+            else None,
+        },
+    }
+
+
 def _ssh_text(
     host: str,
     remote_command: str,
@@ -367,6 +435,26 @@ def _ssh_text(
     if not stdout and not allow_empty:
         raise TokyoProbeError(f"remote command returned empty output: {remote_command}")
     return stdout
+
+
+def _ssh_result(
+    host: str,
+    remote_command: str,
+    *,
+    connect_timeout_seconds: int,
+    runner: Runner,
+) -> CommandResult:
+    return runner(
+        (
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            f"ConnectTimeout={connect_timeout_seconds}",
+            host,
+            f"set -eu; {remote_command}",
+        )
+    )
 
 
 def _run(command: tuple[str, ...]) -> CommandResult:
@@ -399,6 +487,7 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(f"host={facts['host']}")
     print(f"user={facts['user']}")
     print(f"current_realpath={facts['current_realpath']}")
+    print(f"release_identity_source={facts['release_identity_source']}")
     print(f"current_head={facts['current_head']}")
     print(f"migration_count={facts['migration_count']}")
     print(f"latest_migration={facts['latest_migration']}")

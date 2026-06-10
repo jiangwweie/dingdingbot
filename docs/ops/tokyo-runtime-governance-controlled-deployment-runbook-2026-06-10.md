@@ -115,6 +115,32 @@ If a local release artifact is needed:
 This creates a local archive and manifest under
 `output/tokyo-runtime-governance-release/`. It still does not deploy.
 
+The release archive is produced with `git archive`, so the extracted release
+tree does not contain `.git`. During remote deployment, copy the generated
+`release-readiness-manifest.json` into the release root as:
+
+```text
+.brc-release-manifest.json
+```
+
+Post-deployment probes must use git identity when `.git` is present and release
+manifest identity when the release was built from an archive.
+
+Before any remote mutation, generate the owner-gated command plan:
+
+```bash
+/opt/homebrew/bin/python3 scripts/plan_tokyo_runtime_governance_deploy.py \
+  --json \
+  --archive-path <local-release-archive.tar.gz> \
+  --manifest-path <release-readiness-manifest.json> \
+  --release-name <remote-release-name>
+```
+
+The plan is not authorization and must not be treated as execution. It should
+show `ready_for_owner_authorized_remote_deploy=true` and print the explicit
+remote mutation confirmation phrase before any upload, backup, migration,
+symlink switch, or restart.
+
 ## Remote Preflight
 
 Read-only checks before any remote mutation:
@@ -202,6 +228,21 @@ BRC_LLM_ENABLED=false
 
 Restart should be a deliberate backend restart with immediate health checks.
 Do not rely on a dirty release tree or an unknown long-running process.
+
+For the `044 -> 064` jump, the planned order is:
+
+1. Run local and remote read-only preflights.
+2. Upload archive and manifest.
+3. Extract archive into a new release directory and copy the manifest to
+   `.brc-release-manifest.json`.
+4. Stop `brc-owner-console-backend.service` with non-interactive sudo to quiesce
+   backend writes.
+5. Create the PG backup.
+6. Run `compileall`, `alembic heads`, and `alembic upgrade head` from the new
+   release tree with `live-readonly.env`.
+7. Repoint `app/current`.
+8. Start the backend service.
+9. Run health, post-deploy readonly probe, and console/API smokes.
 
 ## Post-Deployment Smoke
 

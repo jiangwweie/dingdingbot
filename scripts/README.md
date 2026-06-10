@@ -69,3 +69,11 @@ authorization for the exact action.
   added to existing tables. It does not connect to a database, SSH, deploy, run
   migrations, restart services, read secrets, create execution records, create
   orders, call OrderLifecycle, or call exchange APIs.
+
+- `plan_tokyo_runtime_governance_deploy.py`: local dry-run deployment plan
+  generator. It reads a local release archive path and readiness manifest, then
+  prints the owner-gated remote command sequence for upload, quiesce, backup,
+  migration, symlink switch, restart, and smoke checks. It does not execute SSH,
+  scp, database, migration, restart, order, OrderLifecycle, or exchange actions.
+  Remote mutation remains gated by the explicit confirmation phrase printed in
+  the plan.

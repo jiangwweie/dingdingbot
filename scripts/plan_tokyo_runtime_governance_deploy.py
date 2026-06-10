@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+"""Plan a controlled Tokyo runtime-governance deployment.
+
+Default behavior is dry-run planning only. The script reads local artifact and
+manifest metadata, then prints a command plan. It does not SSH, scp, deploy,
+write remote files, connect to a database, run migrations, restart services,
+read secrets, create execution records, create orders, call OrderLifecycle, or
+call exchange APIs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shlex
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+DEFAULT_HOST = "tokyo"
+DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
+DEFAULT_SERVICE_NAME = "brc-owner-console-backend.service"
+DEFAULT_ENV_PATH = "/home/ubuntu/brc-deploy/env/live-readonly.env"
+DEFAULT_VENV_PYTHON = (
+    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+)
+DEFAULT_API_BASE = "http://127.0.0.1:18080"
+DEFAULT_PREVIOUS_RELEASE = (
+    "/home/ubuntu/brc-deploy/releases/brc-jit-lifecycle-audit-415d3985-20260608"
+)
+DEFAULT_EXPECTED_DEPLOYED_HEAD = "415d398509872cb25bf969319e29732764f9615b"
+DEFAULT_EXPECTED_LATEST_MIGRATION = (
+    "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+)
+CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+
+
+class DeployPlanError(RuntimeError):
+    """Raised when deployment planning cannot proceed."""
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    stdout: str
+    returncode: int
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    repo_root = _repo_root()
+    report = build_deploy_plan(
+        repo_root=repo_root,
+        archive_path=Path(args.archive_path) if args.archive_path else None,
+        manifest_path=Path(args.manifest_path) if args.manifest_path else None,
+        release_name=args.release_name,
+        host=args.host,
+        deploy_root=args.deploy_root,
+        service_name=args.service_name,
+        env_path=args.env_path,
+        venv_python=args.venv_python,
+        api_base=args.api_base,
+        previous_release=args.previous_release,
+        expected_deployed_head=args.expected_deployed_head,
+        expected_latest_migration=args.expected_latest_migration,
+    )
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        _print_human_report(report)
+    return 0 if report["checks"]["ready_for_owner_authorized_remote_deploy"] else 2
+
+
+def build_deploy_plan(
+    *,
+    repo_root: Path,
+    archive_path: Path | None,
+    manifest_path: Path | None,
+    release_name: str | None,
+    host: str,
+    deploy_root: str,
+    service_name: str,
+    env_path: str,
+    venv_python: str,
+    api_base: str,
+    previous_release: str,
+    expected_deployed_head: str,
+    expected_latest_migration: str,
+) -> dict[str, Any]:
+    """Build a non-executing deployment command plan."""
+
+    head = _git(repo_root, "rev-parse", "HEAD").stdout
+    short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD").stdout
+    tracked_dirty = _tracked_dirty(repo_root)
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if tracked_dirty:
+        blockers.append("tracked_worktree_dirty")
+
+    manifest: dict[str, Any] | None = None
+    if archive_path is None:
+        blockers.append("archive_path_required")
+    elif not archive_path.exists():
+        blockers.append("archive_path_missing")
+    if manifest_path is None:
+        blockers.append("manifest_path_required")
+    elif not manifest_path.exists():
+        blockers.append("manifest_path_missing")
+    else:
+        manifest = _load_manifest(manifest_path)
+        manifest_head = _manifest_head(manifest)
+        if manifest_head and manifest_head != head:
+            blockers.append("manifest_head_mismatch_current_head")
+        if not manifest_head:
+            blockers.append("manifest_head_missing")
+
+    final_release_name = release_name or _default_release_name(short_head)
+    if not final_release_name.startswith("brc-runtime-governance-"):
+        warnings.append("release_name_not_standard_runtime_governance_prefix")
+
+    deploy_root = deploy_root.rstrip("/")
+    incoming_dir = f"{deploy_root}/incoming"
+    releases_dir = f"{deploy_root}/releases"
+    reports_dir = f"{deploy_root}/reports/{final_release_name}"
+    backups_dir = f"{deploy_root}/backups"
+    app_current = f"{deploy_root}/app/current"
+    remote_release_path = f"{releases_dir}/{final_release_name}"
+    remote_tmp_release_path = f"{remote_release_path}.tmp"
+    remote_archive_path = (
+        f"{incoming_dir}/{archive_path.name}" if archive_path is not None else None
+    )
+    remote_manifest_path = (
+        f"{incoming_dir}/{manifest_path.name}" if manifest_path is not None else None
+    )
+    backup_path = f"{backups_dir}/{final_release_name}.pgdump"
+
+    plan_phases = _plan_phases(
+        host=host,
+        repo_root=repo_root,
+        archive_path=archive_path,
+        manifest_path=manifest_path,
+        deploy_root=deploy_root,
+        incoming_dir=incoming_dir,
+        reports_dir=reports_dir,
+        backups_dir=backups_dir,
+        app_current=app_current,
+        remote_release_path=remote_release_path,
+        remote_tmp_release_path=remote_tmp_release_path,
+        remote_archive_path=remote_archive_path,
+        remote_manifest_path=remote_manifest_path,
+        backup_path=backup_path,
+        service_name=service_name,
+        env_path=env_path,
+        venv_python=venv_python,
+        api_base=api_base,
+        previous_release=previous_release,
+        expected_deployed_head=expected_deployed_head,
+        head=head,
+        expected_latest_migration=expected_latest_migration,
+    )
+
+    return {
+        "status": (
+            "ready_for_owner_authorized_remote_deploy_plan"
+            if not blockers
+            else "blocked"
+        ),
+        "scope": "tokyo_runtime_governance_controlled_deploy_plan",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "repo_root": str(repo_root),
+        "inputs": {
+            "host": host,
+            "deploy_root": deploy_root,
+            "archive_path": str(archive_path) if archive_path else None,
+            "manifest_path": str(manifest_path) if manifest_path else None,
+            "release_name": final_release_name,
+            "service_name": service_name,
+            "env_path": env_path,
+            "venv_python": venv_python,
+            "api_base": api_base,
+            "previous_release": previous_release,
+            "expected_deployed_head": expected_deployed_head,
+            "expected_latest_migration": expected_latest_migration,
+        },
+        "release": {
+            "head": head,
+            "short_head": short_head,
+            "manifest_head": _manifest_head(manifest) if manifest else None,
+            "release_name": final_release_name,
+            "remote_release_path": remote_release_path,
+            "remote_tmp_release_path": remote_tmp_release_path,
+            "remote_archive_path": remote_archive_path,
+            "remote_manifest_path": remote_manifest_path,
+            "remote_release_manifest_path": (
+                f"{remote_release_path}/.brc-release-manifest.json"
+            ),
+            "backup_path": backup_path,
+        },
+        "checks": {
+            "ready_for_owner_authorized_remote_deploy": not blockers,
+            "blockers": blockers,
+            "warnings": warnings,
+            "remote_mutation_requires_confirmation_phrase": CONFIRMATION_PHRASE,
+        },
+        "plan_phases": plan_phases,
+        "safety_invariants": {
+            "planning_run_only": True,
+            "ssh_called": False,
+            "scp_called": False,
+            "remote_files_modified": False,
+            "database_connected": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+            "secrets_read": False,
+        },
+    }
+
+
+def _plan_phases(
+    *,
+    host: str,
+    repo_root: Path,
+    archive_path: Path | None,
+    manifest_path: Path | None,
+    deploy_root: str,
+    incoming_dir: str,
+    reports_dir: str,
+    backups_dir: str,
+    app_current: str,
+    remote_release_path: str,
+    remote_tmp_release_path: str,
+    remote_archive_path: str | None,
+    remote_manifest_path: str | None,
+    backup_path: str,
+    service_name: str,
+    env_path: str,
+    venv_python: str,
+    api_base: str,
+    previous_release: str,
+    expected_deployed_head: str,
+    head: str,
+    expected_latest_migration: str,
+) -> list[dict[str, Any]]:
+    q = shlex.quote
+    local_python = "/opt/homebrew/bin/python3"
+    archive = str(archive_path) if archive_path else "<archive_path_required>"
+    manifest = str(manifest_path) if manifest_path else "<manifest_path_required>"
+    remote_archive = remote_archive_path or f"{incoming_dir}/<archive>"
+    remote_manifest = remote_manifest_path or f"{incoming_dir}/<manifest>"
+    release_manifest = f"{remote_release_path}/.brc-release-manifest.json"
+
+    return [
+        {
+            "phase": "0_local_preflight",
+            "remote_mutation": False,
+            "commands": [
+                f"cd {q(str(repo_root))} && {local_python} "
+                "scripts/prepare_tokyo_runtime_governance_release.py --json",
+                f"cd {q(str(repo_root))} && {local_python} "
+                "scripts/audit_tokyo_runtime_governance_migration_gap.py --json",
+            ],
+            "stop_if": [
+                "ready_for_packaging is not true",
+                "ready_for_controlled_migration_preflight is not true",
+            ],
+        },
+        {
+            "phase": "1_remote_preflight_readonly",
+            "remote_mutation": False,
+            "commands": [
+                f"cd {q(str(repo_root))} && {local_python} "
+                "scripts/probe_tokyo_runtime_governance_readonly.py --json",
+            ],
+            "stop_if": [
+                "ready_for_controlled_deploy_preflight is not true",
+                "remote current head differs from expected baseline",
+                "health live_ready is true",
+            ],
+        },
+        {
+            "phase": "2_owner_authorized_upload_and_extract",
+            "remote_mutation": True,
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [
+                _ssh(host, f"set -eu; mkdir -p {q(incoming_dir)} {q(reports_dir)} {q(backups_dir)}"),
+                f"scp {q(archive)} {q(host + ':' + remote_archive)}",
+                f"scp {q(manifest)} {q(host + ':' + remote_manifest)}",
+                _ssh(
+                    host,
+                    (
+                        f"set -eu; test ! -e {q(remote_release_path)}; "
+                        f"rm -rf {q(remote_tmp_release_path)}; "
+                        f"mkdir -p {q(remote_tmp_release_path)}; "
+                        f"tar -xzf {q(remote_archive)} -C {q(remote_tmp_release_path)} "
+                        "--strip-components=1; "
+                        f"cp {q(remote_manifest)} {q(remote_tmp_release_path)}/.brc-release-manifest.json; "
+                        f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}"
+                    ),
+                ),
+                _ssh(
+                    host,
+                    (
+                        f"set -eu; test $(readlink -f {q(app_current)}) = "
+                        f"{q(previous_release)}"
+                    ),
+                ),
+            ],
+            "stop_if": [
+                "release path already exists",
+                "archive extraction fails",
+                "app/current no longer points to the expected previous release",
+            ],
+        },
+        {
+            "phase": "3_quiesce_backup_and_migrate",
+            "remote_mutation": True,
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [
+                _ssh(host, f"sudo -n systemctl stop {q(service_name)}"),
+                _ssh(
+                    host,
+                    (
+                        "set -eu; umask 077; set -a; "
+                        f". {q(env_path)}; set +a; "
+                        f"pg_dump \"$DATABASE_URL\" -Fc -f {q(backup_path)}"
+                    ),
+                ),
+                _ssh(
+                    host,
+                    (
+                        f"set -eu; cd {q(remote_release_path)}; set -a; "
+                        f". {q(env_path)}; set +a; "
+                        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
+                        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
+                        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
+                    ),
+                ),
+            ],
+            "stop_if": [
+                "service cannot be stopped with non-interactive sudo",
+                "database backup is not created",
+                "alembic upgrade fails",
+            ],
+            "rollback_hint": (
+                "If migration fails after service stop, do not blindly downgrade. "
+                "Restart the previous release only after inspecting migration state."
+            ),
+        },
+        {
+            "phase": "4_switch_start_and_smoke",
+            "remote_mutation": True,
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [
+                _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),
+                _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
+                _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
+                _ssh(host, f"curl -fsS {q(api_base.rstrip('/') + '/api/health')}"),
+                (
+                    f"cd {q(str(repo_root))} && {local_python} "
+                    "scripts/probe_tokyo_runtime_governance_readonly.py --json "
+                    f"--expected-current-head {q(head)} "
+                    "--expected-migration-count 64 "
+                    f"--expected-latest-migration {q(expected_latest_migration)}"
+                ),
+                _ssh(
+                    host,
+                    (
+                        f"test -f {q(release_manifest)} && "
+                        f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
+                    ),
+                ),
+            ],
+            "stop_if": [
+                "service is not active",
+                "health is not ok",
+                "health live_ready is true",
+                "post-deploy readonly probe fails",
+            ],
+        },
+    ]
+
+
+def _ssh(host: str, remote_command: str) -> str:
+    return f"ssh {shlex.quote(host)} {shlex.quote(remote_command)}"
+
+
+def _load_manifest(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise DeployPlanError(f"cannot read manifest: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise DeployPlanError(f"manifest is not valid JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise DeployPlanError("manifest JSON root must be an object")
+    return payload
+
+
+def _manifest_head(manifest: dict[str, Any] | None) -> str | None:
+    if not manifest:
+        return None
+    local_git = manifest.get("local_git")
+    if not isinstance(local_git, dict):
+        return None
+    head = local_git.get("head")
+    return str(head).strip() if head else None
+
+
+def _default_release_name(short_head: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"brc-runtime-governance-{short_head}-{stamp}"
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build a non-executing Tokyo runtime-governance deploy plan."
+    )
+    parser.add_argument("--json", action="store_true", help="Print JSON output.")
+    parser.add_argument("--archive-path", help="Local git-archive release artifact.")
+    parser.add_argument("--manifest-path", help="Local release-readiness manifest.")
+    parser.add_argument("--release-name", help="Remote release directory name.")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="SSH host alias.")
+    parser.add_argument("--deploy-root", default=DEFAULT_DEPLOY_ROOT)
+    parser.add_argument("--service-name", default=DEFAULT_SERVICE_NAME)
+    parser.add_argument("--env-path", default=DEFAULT_ENV_PATH)
+    parser.add_argument("--venv-python", default=DEFAULT_VENV_PYTHON)
+    parser.add_argument("--api-base", default=DEFAULT_API_BASE)
+    parser.add_argument("--previous-release", default=DEFAULT_PREVIOUS_RELEASE)
+    parser.add_argument(
+        "--expected-deployed-head",
+        default=DEFAULT_EXPECTED_DEPLOYED_HEAD,
+    )
+    parser.add_argument(
+        "--expected-latest-migration",
+        default=DEFAULT_EXPECTED_LATEST_MIGRATION,
+    )
+    return parser.parse_args(argv)
+
+
+def _repo_root() -> Path:
+    result = _run(("git", "rev-parse", "--show-toplevel"), cwd=Path.cwd())
+    if result.returncode != 0 or not result.stdout:
+        raise DeployPlanError("not inside a git repository")
+    return Path(result.stdout.strip())
+
+
+def _git(repo_root: Path, *args: str) -> CommandResult:
+    result = _run(("git", *args), cwd=repo_root)
+    if result.returncode != 0:
+        raise DeployPlanError(f"git {' '.join(args)} failed")
+    return result
+
+
+def _tracked_dirty(repo_root: Path) -> bool:
+    status = _git(repo_root, "status", "--porcelain").stdout
+    for line in status.splitlines():
+        if line and not line.startswith("?? "):
+            return True
+    return False
+
+
+def _run(command: tuple[str, ...], *, cwd: Path) -> CommandResult:
+    completed = subprocess.run(
+        command,
+        cwd=str(cwd),
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout = completed.stdout.strip()
+    if completed.returncode != 0 and completed.stderr.strip():
+        stdout = completed.stderr.strip()
+    return CommandResult(stdout=stdout, returncode=completed.returncode)
+
+
+def _print_human_report(report: dict[str, Any]) -> None:
+    checks = report["checks"]
+    release = report["release"]
+    print(f"status={report['status']}")
+    print(f"release_name={release['release_name']}")
+    print(f"remote_release_path={release['remote_release_path']}")
+    print(
+        "ready_for_owner_authorized_remote_deploy="
+        + str(checks["ready_for_owner_authorized_remote_deploy"]).lower()
+    )
+    if checks["blockers"]:
+        print("blockers=" + ",".join(checks["blockers"]))
+    if checks["warnings"]:
+        print("warnings=" + ",".join(checks["warnings"]))
+    print(
+        "remote_mutation_requires_confirmation_phrase="
+        + checks["remote_mutation_requires_confirmation_phrase"]
+    )
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except DeployPlanError as exc:
+        print(f"deploy_plan_error={exc}", file=sys.stderr)
+        raise SystemExit(2)

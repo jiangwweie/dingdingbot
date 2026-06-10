@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -198,3 +199,81 @@ def test_tokyo_probe_builds_report_with_fake_runner_and_home_expanding_paths():
         for command in remote_commands
     )
     assert not any("'$HOME/" in command for command in remote_commands)
+
+
+def test_tokyo_probe_accepts_git_archive_release_manifest_identity():
+    module = _load_module()
+    manifest = {
+        "scope": "tokyo_runtime_governance_release_preparation",
+        "generated_at_utc": "2026-06-10T04:57:41Z",
+        "local_git": {
+            "head": "a6f0a49f3d001e9294f49495281703aaa218adab",
+            "short_head": "a6f0a49f",
+        },
+    }
+
+    def runner(command):
+        remote = command[-1]
+        if remote == "set -eu; hostname":
+            return module.CommandResult("VM-0-11-ubuntu\n", "", 0)
+        if remote == "set -eu; whoami":
+            return module.CommandResult("ubuntu\n", "", 0)
+        if "readlink -f" in remote:
+            return module.CommandResult(
+                "/home/ubuntu/brc-deploy/releases/"
+                "brc-runtime-governance-a6f0a49f-20260610T045741Z\n",
+                "",
+                0,
+            )
+        if "git rev-parse HEAD" in remote:
+            return module.CommandResult("", "fatal: not a git repository\n", 128)
+        if "cat .brc-release-manifest.json" in remote:
+            return module.CommandResult(json.dumps(manifest), "", 0)
+        if "wc -l" in remote:
+            return module.CommandResult("64\n", "", 0)
+        if "tail -1" in remote:
+            return module.CommandResult(
+                "2026-06-10-064_add_runtime_profile_proposal_snapshot.py\n",
+                "",
+                0,
+            )
+        if "curl -fsS" in remote:
+            return module.CommandResult(
+                '{"status":"ok","runtime_bound":true,"live_ready":false}'
+                "\nHTTP_STATUS:200\n",
+                "",
+                0,
+            )
+        if "ps -eo" in remote:
+            return module.CommandResult(
+                "2518668 1 ubuntu python /venv/bin/python -m src.main\n"
+                "19125 19104 70 postgres postgres\n",
+                "",
+                0,
+            )
+        raise AssertionError(f"unexpected command: {remote}")
+
+    report = module.build_tokyo_probe_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head="a6f0a49f3d001e9294f49495281703aaa218adab",
+        expected_migration_count=64,
+        expected_latest_migration=(
+            "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+        ),
+        connect_timeout_seconds=8,
+        runner=runner,
+    )
+
+    assert report["status"] == "ready_for_controlled_deploy_preflight"
+    assert report["facts"]["release_identity_source"] == "release_manifest"
+    assert report["facts"]["current_head"] == (
+        "a6f0a49f3d001e9294f49495281703aaa218adab"
+    )
+    assert report["facts"]["current_status"] == "release_manifest_without_git_status"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["dirty_status_lines"] == []
+    assert report["checks"]["warnings"] == [
+        "remote_release_identity_from_manifest_without_git_status"
+    ]
