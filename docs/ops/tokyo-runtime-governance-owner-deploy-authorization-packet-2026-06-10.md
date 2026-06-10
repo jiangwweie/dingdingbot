@@ -9,31 +9,34 @@ authorization.
 
 ## 1. Candidate Verified Before This Packet
 
-Verified deployment candidate:
+Current verified deployment candidate must be read from the generated
+`release-readiness-manifest.json` immediately before deployment. The latest
+local verification before this document update was:
 
-- branch: `codex/sprint6-console-runtime-integration`
-- candidate commit: `daa13fb4af14d6a419888e531bda60b566673579`
+- branch: `release/tokyo-runtime-governance-20260610`
+- candidate commit:
+  `7621bc8267e7c13028496c7f15d87b8447a12526`
 - candidate archive:
-  `output/tokyo-runtime-governance-release/brc-runtime-governance-daa13fb4-20260610T053122Z/brc-runtime-governance-daa13fb4-20260610T053122Z.tar.gz`
+  `output/tokyo-runtime-governance-release/brc-runtime-governance-7621bc82-20260610T092441Z/brc-runtime-governance-7621bc82-20260610T092441Z.tar.gz`
 - candidate manifest:
-  `output/tokyo-runtime-governance-release/brc-runtime-governance-daa13fb4-20260610T053122Z/release-readiness-manifest.json`
+  `output/tokyo-runtime-governance-release/brc-runtime-governance-7621bc82-20260610T092441Z/release-readiness-manifest.json`
 
-This document is an authorization packet created after that candidate was
-verified. If the Owner wants this packet included in the deployed release
-artifact, regenerate `prepare -> plan -> executor dry-run` for the then-current
+If any tracked file changes after this packet, regenerate
+`prepare -> plan -> executor dry-run` and use the manifest for the then-current
 HEAD before applying deployment.
 
 ## 2. Verified Dry-Run Facts
 
-Release preparation for `daa13fb4` reported:
+Release preparation for `7621bc82` reported:
 
 ```text
 status=ready_for_local_packaging
 ready_for_packaging=true
 tracked_dirty=false
-migration_count=64
-latest_migration=2026-06-10-064_add_runtime_profile_proposal_snapshot.py
+migration_count=66
+latest_migration=2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py
 deployed_head_is_ancestor=true
+commits_ahead_of_deployed=18
 ```
 
 Deployment plan reported:
@@ -50,7 +53,7 @@ Executor dry-run reported:
 
 ```text
 status=dry_run_ready
-commands_planned=18
+commands_planned=20
 commands_executed=0
 blockers=[]
 ```
@@ -60,10 +63,10 @@ Tokyo read-only probe reported:
 ```text
 status=ready_for_controlled_deploy_preflight
 blockers=[]
-warnings=[]
-current_head=415d398509872cb25bf969319e29732764f9615b
-migration_count=44
-latest_migration=2026-06-08-044_create_live_lifecycle_reviews.py
+warnings=[remote_release_identity_from_manifest_without_git_status]
+current_head=ae9b209e33cd287273491f2e93dfdff3b6a814fd
+migration_count=64
+latest_migration=2026-06-10-064_add_runtime_profile_proposal_snapshot.py
 health.status=ok
 health.runtime_bound=true
 health.live_ready=false
@@ -80,10 +83,12 @@ owner-gated plan phases:
 4. Extract into a new release directory.
 5. Stop the backend service to quiesce writes.
 6. Create a PG backup with `pg_dump`.
-7. Run remote compile and Alembic `upgrade head` from migration `044` to `064`.
+7. Run remote compile and Alembic `upgrade head` from migration `064` to `066`.
 8. Switch `app/current` symlink to the new release.
 9. Restart the backend service.
-10. Run health, read-only deployment probe, and postdeploy verifier.
+10. Run health, read-only deployment probe, and postdeploy verifier, including
+    auth-gated runtime submit / registration draft / controlled-submit API
+    smoke checks.
 
 ## 4. What Deploy Apply Must Not Do
 
@@ -126,4 +131,3 @@ Even if deployment succeeds:
 - system failure remains runaway behavior, boundary breach, unauditable orders,
   duplicate submits, missing trusted facts, missing protection, or unauthorized
   exchange writes.
-

@@ -11,21 +11,23 @@ orders.
 
 Target branch:
 
-- `codex/sprint6-console-runtime-integration`
+- `release/tokyo-runtime-governance-20260610`
 
 Current local deployment candidate must be taken from
 `scripts/prepare_tokyo_runtime_governance_release.py --json` immediately before
-packaging or deployment. Last locally verified code-bearing candidate after
-adding the read-only Tokyo probe and its regression coverage:
+packaging or deployment. Last locally verified candidate before this document
+update:
 
-- `4f939207 chore(ops): add tokyo readonly deployment probe`
+- `7621bc82 test(ops): expand runtime postdeploy smoke gates`
 
 Current Tokyo baseline from the read-only fact check:
 
 - deployed app symlink: `/home/ubuntu/brc-deploy/app/current`
-- deployed release: `brc-jit-lifecycle-audit-415d3985-20260608`
-- deployed HEAD: `415d398509872cb25bf969319e29732764f9615b`
-- latest deployed migration file: `044_create_live_lifecycle_reviews`
+- deployed release:
+  `brc-runtime-governance-ae9b209e-20260610T061250Z`
+- deployed HEAD: `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
+- latest deployed migration file:
+  `064_add_runtime_profile_proposal_snapshot`
 - local latest migration file:
   `066_add_order_lifecycle_adapter_disabled_submit_status`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
@@ -57,9 +59,10 @@ Last local migration-gap audit for `064 -> 066` reported:
 Last Tokyo read-only probe for the same stage reported:
 
 - `ready_for_controlled_deploy_preflight=true`
-- no blockers or warnings
-- current deployed HEAD `415d398509872cb25bf969319e29732764f9615b`
-- current deployed migration count `44`
+- no blockers
+- warning: `remote_release_identity_from_manifest_without_git_status`
+- current deployed HEAD `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
+- current deployed migration count `64`
 - backend health `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 ## Non-Negotiable Invariants
@@ -89,9 +92,9 @@ The output must show:
 
 - `ready_for_packaging=true`;
 - deployed head is an ancestor of local `HEAD`;
-- migration count is at least `64`;
+- migration count is at least `66`;
 - latest migration is
-  `2026-06-10-064_add_runtime_profile_proposal_snapshot.py`;
+  `2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py`;
 - no tracked secret-candidate files;
 - no tracked worktree changes.
 
@@ -185,7 +188,7 @@ Before applying migrations:
 1. Create a database backup using the existing remote backup path, or an
    equivalent PG-native backup command.
 2. Record the backup filename in a deployment evidence note.
-3. Inspect the migration path from deployed `064` to local `065`.
+3. Inspect the migration path from deployed `064` to local `066`.
 4. Run migration planning in a staging/dry-run context when available.
 5. Apply migrations only after the release artifact and rollback target are
    known.
@@ -202,7 +205,7 @@ Local static audit command:
 The output must show:
 
 - `ready_for_controlled_migration_preflight=true`;
-- chain length `1` for `065`;
+- chain length `2` for `065 -> 066`;
 - no `data_destructive_upgrade_ops`.
 
 The output is allowed to warn about non-additive / data-touching review items,
@@ -210,9 +213,10 @@ but those warnings require concrete deployment handling:
 
 - backend writes must be stopped or quiesced while migrations run;
 - a remote PG backup must be captured first;
-- revision `053` must not encounter existing rows in
-  `runtime_execution_controlled_submit_results` without compatible values;
-- revision `062` must be followed by a positions read-model smoke check.
+- revision `065` relaxes runtime shadow-only constraints only after explicit
+  live-runtime enablement authorization is proven;
+- revision `066` adds the OrderLifecycle-adapter disabled submit status and
+  must not be interpreted as enabling the real adapter.
 
 ## Release Procedure Shape
 
@@ -276,8 +280,10 @@ Preferred post-deployment read-only verifier:
 ```
 
 This verifier checks release identity, migration-file state, health invariants,
-key runtime-governance read endpoints, and that generic Trading Console POSTs
-remain blocked. It uses `include_exchange=false` for Trading Console checks.
+key runtime-governance read endpoints, auth gates for runtime submit /
+registration draft / controlled-submit endpoints, and that generic Trading
+Console POSTs remain blocked. It uses `include_exchange=false` for Trading
+Console checks.
 
 Minimum console checks:
 
