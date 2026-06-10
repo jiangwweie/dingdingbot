@@ -246,6 +246,33 @@ def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
     assert report["command_results"][-1]["stderr_tail"] == "boom"
 
 
+def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: Path):
+    module = _load_module()
+    plan = _ready_plan(tmp_path)
+
+    def runner(command: str):
+        if "HEALTH_URL=" in command:
+            return module.ShellResult(command, "", "connection refused", 7)
+        return module.ShellResult(command, "ok", "", 0)
+
+    report = module.execute_deploy_plan(
+        plan,
+        apply=True,
+        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        owner_deploy_packet=_owner_packet_for_plan(plan),
+        runner=runner,
+    )
+
+    assert report["status"] == "failed"
+    assert report["checks"]["blockers"] == ["command_failed:4_switch_start_and_smoke"]
+    assert report["effects"]["remote_files_modified"] is True
+    assert report["effects"]["database_backup_created"] is True
+    assert report["effects"]["migrations_run"] is True
+    assert report["effects"]["services_restarted"] is True
+    assert report["effects"]["order_created"] is False
+    assert report["effects"]["exchange_called"] is False
+
+
 def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)

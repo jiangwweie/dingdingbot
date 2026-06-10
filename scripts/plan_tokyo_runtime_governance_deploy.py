@@ -256,6 +256,15 @@ def _plan_phases(
     remote_archive = remote_archive_path or f"{incoming_dir}/<archive>"
     remote_manifest = remote_manifest_path or f"{incoming_dir}/<manifest>"
     release_manifest = f"{remote_release_path}/.brc-release-manifest.json"
+    health_url = api_base.rstrip("/") + "/api/health"
+    health_wait_command = (
+        f"set -eu; HEALTH_URL={q(health_url)}; "
+        "for attempt in $(seq 1 30); do "
+        'curl -fsS "$HEALTH_URL" 2>/dev/null && exit 0; '
+        "sleep 1; "
+        "done; "
+        'curl -fsS "$HEALTH_URL"'
+    )
 
     return [
         {
@@ -389,7 +398,7 @@ def _plan_phases(
                 _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),
                 _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
                 _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
-                _ssh(host, f"curl -fsS {q(api_base.rstrip('/') + '/api/health')}"),
+                _ssh(host, health_wait_command),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "

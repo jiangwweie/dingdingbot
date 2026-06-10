@@ -175,6 +175,11 @@ blocked or dry-run and must not mutate Tokyo. With all three, it is a remote
 deployment, backup, migration, symlink, and service-control action; do not run
 it as a background convenience command.
 
+The executor's backend health smoke must wait for bounded readiness after
+`systemctl start`, not only check `systemctl is-active`. A release can be active
+before the HTTP listener is ready. The planned health smoke waits up to 30
+seconds for `/api/health` before failing.
+
 ## Remote Preflight
 
 Read-only checks before any remote mutation:

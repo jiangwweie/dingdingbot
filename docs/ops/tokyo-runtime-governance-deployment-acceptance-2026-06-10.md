@@ -1,16 +1,55 @@
 # Tokyo Runtime Governance Deployment Acceptance - 2026-06-10
 
-Status: ACCEPTED_WITH_AUTHENTICATED_CONSOLE_CHECK_LIMITED
+Status: ACCEPTED_WITH_RUNTIME_GOVERNANCE_BACKEND_REFRESH_AND_AUTHENTICATED_CONSOLE_CHECK_LIMITED
 
 This record captures the deployed Tokyo state after the runtime-governance
-backend deployment and the follow-up Trading Console static frontend refresh.
+backend deployment, follow-up Trading Console static frontend refresh, and the
+later runtime-governance backend refresh to the current release candidate.
+
+## Current Backend Refresh - afbdcb38
+
+Accepted backend refresh:
+
+- Deployed release path:
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-afbdcb38-20260610T094802Z`
+- Current symlink:
+  `/home/ubuntu/brc-deploy/app/current -> /home/ubuntu/brc-deploy/releases/brc-runtime-governance-afbdcb38-20260610T094802Z`
+- Deployed backend SHA:
+  `afbdcb38387cfbea5a5da366a588f04b96cdb691`
+- Backend listener:
+  `127.0.0.1:18080`
+- Backend health:
+  `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`
+- Migration count:
+  `66`
+- Latest migration:
+  `2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py`
+- Postdeploy verifier:
+  `postdeploy_acceptance_passed`
+- Postdeploy acceptance packet:
+  `postdeploy_acceptance_ready`
+- First real submit:
+  still blocked by the pre-live submit packet
+- Warning:
+  `release_identity_from_manifest_without_git_status`
+
+The first apply report stopped at the immediate `/api/health` curl in
+`4_switch_start_and_smoke` because the backend was not accepting connections
+yet. Follow-up read-only checks showed the service active and healthy, and the
+formal postdeploy verifier plus postdeploy acceptance packet passed. The deploy
+plan has been updated to use a bounded health readiness wait so future applies
+do not fail on this startup race.
+
+This refresh did not create execution records, did not submit an executable
+`ExecutionIntent`, did not call `OrderLifecycle`, did not place exchange orders,
+and did not authorize live runtime trading.
 
 ## Scope
 
 Deployed:
 
-- Runtime governance backend release.
-- Alembic migrations from 044 to 064.
+- Runtime governance backend release up to `afbdcb38`.
+- Alembic migrations from 044 to 066.
 - Trading Console static frontend build.
 - Post-deploy read-only verification.
 
@@ -31,7 +70,12 @@ Not deployed / not authorized:
 - Nginx API proxy: `/api/* -> http://127.0.0.1:18080`
 - No public `5174` listener was observed.
 
-## Backend Release
+## Earlier Backend Release - ae9b209e
+
+The following backend release details capture the earlier accepted deployment
+slice. They are superseded for backend identity by the current `afbdcb38`
+backend refresh above, but remain useful evidence for the frontend/authenticated
+console acceptance that happened at that stage.
 
 - Deployed release path:
   `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ae9b209e-20260610T061250Z`
@@ -48,11 +92,11 @@ Not deployed / not authorized:
 - Health response:
   `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`
 
-Note: local release branch HEAD is currently `bf874cde`, which only records
-deployment acceptance on top of post-deploy verifier fixes. The actual deployed
-backend release remains `ae9b209e`.
+Note: at that earlier acceptance point, local release branch HEAD was
+`bf874cde`, which only recorded deployment acceptance on top of post-deploy
+verifier fixes. The deployed backend release for that slice was `ae9b209e`.
 
-## Database
+## Earlier Database State - 064
 
 - Alembic version after deploy: `064`
 - Latest migration file:

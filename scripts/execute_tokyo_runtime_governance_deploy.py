@@ -260,17 +260,52 @@ def _execution_report(
         },
         "planned_commands": commands if not apply else [],
         "command_results": command_results,
-        "effects": {
-            "remote_files_modified": bool(apply and status == "applied"),
-            "database_backup_created": bool(apply and status == "applied"),
-            "migrations_run": bool(apply and status == "applied"),
-            "services_restarted": bool(apply and status == "applied"),
-            "execution_intent_created": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "exchange_called": False,
-            "secrets_read_by_codex": False,
-        },
+        "effects": _effects_from_command_results(
+            apply=apply,
+            command_results=command_results,
+        ),
+    }
+
+
+def _effects_from_command_results(
+    *,
+    apply: bool,
+    command_results: list[dict[str, Any]],
+) -> dict[str, bool]:
+    successful_commands = [
+        str(result.get("command") or "")
+        for result in command_results
+        if result.get("returncode") == 0
+    ]
+    successful_phases = {
+        str(result.get("phase") or "")
+        for result in command_results
+        if result.get("returncode") == 0
+    }
+    return {
+        "remote_files_modified": bool(
+            apply
+            and (
+                "2_owner_authorized_upload_and_extract" in successful_phases
+                or any("ln -sfn" in command for command in successful_commands)
+            )
+        ),
+        "database_backup_created": bool(
+            apply and any("pg_dump" in command for command in successful_commands)
+        ),
+        "migrations_run": bool(
+            apply
+            and any("alembic upgrade head" in command for command in successful_commands)
+        ),
+        "services_restarted": bool(
+            apply
+            and any("systemctl start" in command for command in successful_commands)
+        ),
+        "execution_intent_created": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "exchange_called": False,
+        "secrets_read_by_codex": False,
     }
 
 
