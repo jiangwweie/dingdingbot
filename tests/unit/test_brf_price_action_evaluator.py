@@ -251,6 +251,16 @@ async def test_brf_evaluator_supplies_short_squeeze_fact_for_shadow_candidate():
     assert output.required_execution_mode == "observe_only"
     assert output.evidence_payload["price_action_structure"]["bear_rally_failure"] is True
     assert output.evidence_payload["short_squeeze_risk"]["status"] == "reviewed"
+    assert (
+        output.evidence_payload["short_squeeze_risk"]["runtime_confirmation_mode"]
+        == "runtime_bounded_auto_attempts"
+    )
+    assert (
+        output.evidence_payload["short_squeeze_risk"][
+            "owner_confirm_each_entry_required"
+        ]
+        is False
+    )
     assert output.not_order is True
     assert output.not_execution_intent is True
     assert not _contains_forbidden_key(output.model_dump(mode="json"))
