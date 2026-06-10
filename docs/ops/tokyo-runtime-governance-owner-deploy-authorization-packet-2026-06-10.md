@@ -10,24 +10,17 @@ authorization.
 ## 1. Candidate Verified Before This Packet
 
 Current verified deployment candidate must be read from the generated
-`release-readiness-manifest.json` immediately before deployment. The latest
-local verification before this document update was:
+`release-readiness-manifest.json` and the deploy plan immediately before
+deployment. This tracked packet intentionally does not pin a local candidate
+commit or archive path, because editing the packet would itself create a newer
+HEAD.
 
-- branch: `release/tokyo-runtime-governance-20260610`
-- candidate commit:
-  `7621bc8267e7c13028496c7f15d87b8447a12526`
-- candidate archive:
-  `output/tokyo-runtime-governance-release/brc-runtime-governance-7621bc82-20260610T092441Z/brc-runtime-governance-7621bc82-20260610T092441Z.tar.gz`
-- candidate manifest:
-  `output/tokyo-runtime-governance-release/brc-runtime-governance-7621bc82-20260610T092441Z/release-readiness-manifest.json`
-
-If any tracked file changes after this packet, regenerate
-`prepare -> plan -> executor dry-run` and use the manifest for the then-current
-HEAD before applying deployment.
+Before applying deployment, regenerate `prepare -> plan -> executor dry-run`
+for the then-current HEAD and use those outputs as the candidate facts.
 
 ## 2. Verified Dry-Run Facts
 
-Release preparation for `7621bc82` reported:
+Latest expected release-preparation facts for the current stage:
 
 ```text
 status=ready_for_local_packaging
@@ -36,7 +29,7 @@ tracked_dirty=false
 migration_count=66
 latest_migration=2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py
 deployed_head_is_ancestor=true
-commits_ahead_of_deployed=18
+commits_ahead_of_deployed=<computed from manifest>
 ```
 
 Deployment plan reported:

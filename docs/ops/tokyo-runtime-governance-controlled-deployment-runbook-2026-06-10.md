@@ -15,10 +15,9 @@ Target branch:
 
 Current local deployment candidate must be taken from
 `scripts/prepare_tokyo_runtime_governance_release.py --json` immediately before
-packaging or deployment. Last locally verified candidate before this document
-update:
-
-- `7621bc82 test(ops): expand runtime postdeploy smoke gates`
+packaging or deployment. This runbook intentionally does not pin a local
+candidate commit, because every runbook edit creates a newer HEAD. The
+generated manifest and deploy plan are the deployment candidate facts.
 
 Current Tokyo baseline from the read-only fact check:
 
