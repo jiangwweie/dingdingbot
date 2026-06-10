@@ -25,7 +25,8 @@ Preferred machine-generated packet:
   --json \
   --archive-path <local-release-archive.tar.gz> \
   --manifest-path <release-readiness-manifest.json> \
-  --release-name <remote-release-name>
+  --release-name <remote-release-name> \
+  > <owner-deploy-decision-packet.json>
 ```
 
 The packet must report:
@@ -37,6 +38,8 @@ ready_for_owner_deploy_decision=true
 
 This status means only that the Owner may decide whether to authorize the
 Tokyo deploy apply step. It is not first-real-submit authorization.
+The deploy executor must receive that same packet through
+`--owner-deploy-packet-path` before `--apply` can proceed.
 
 ## 2. Verified Dry-Run Facts
 

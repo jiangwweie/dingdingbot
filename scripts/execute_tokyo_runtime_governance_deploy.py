@@ -59,6 +59,11 @@ ShellRunner = Callable[[str], ShellResult]
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = _repo_root()
+    owner_deploy_packet = (
+        _load_owner_deploy_packet(Path(args.owner_deploy_packet_path))
+        if args.owner_deploy_packet_path
+        else None
+    )
     plan = build_deploy_plan(
         repo_root=repo_root,
         archive_path=Path(args.archive_path) if args.archive_path else None,
@@ -78,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         plan,
         apply=args.apply,
         confirmation_phrase=args.confirmation_phrase,
+        owner_deploy_packet=owner_deploy_packet,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -91,6 +97,7 @@ def execute_deploy_plan(
     *,
     apply: bool,
     confirmation_phrase: str | None,
+    owner_deploy_packet: dict[str, Any] | None = None,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
     """Execute or dry-run a generated deploy plan."""
@@ -123,6 +130,16 @@ def execute_deploy_plan(
             status="blocked",
             apply=True,
             blockers=["owner_confirmation_phrase_missing_or_mismatch"],
+            command_results=[],
+        )
+
+    packet_blockers = _owner_deploy_packet_blockers(plan, owner_deploy_packet)
+    if packet_blockers:
+        return _execution_report(
+            plan=plan,
+            status="blocked",
+            apply=True,
+            blockers=packet_blockers,
             command_results=[],
         )
 
@@ -166,6 +183,52 @@ def execute_deploy_plan(
         blockers=[],
         command_results=command_results,
     )
+
+
+def _owner_deploy_packet_blockers(
+    plan: dict[str, Any],
+    packet: dict[str, Any] | None,
+) -> list[str]:
+    if packet is None:
+        return ["owner_deploy_decision_packet_required"]
+
+    blockers: list[str] = []
+    checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
+    owner_gate = (
+        packet.get("owner_gate") if isinstance(packet.get("owner_gate"), dict) else {}
+    )
+    candidate = (
+        packet.get("candidate") if isinstance(packet.get("candidate"), dict) else {}
+    )
+    safety_invariants = (
+        packet.get("safety_invariants")
+        if isinstance(packet.get("safety_invariants"), dict)
+        else {}
+    )
+    plan_release = plan.get("release") if isinstance(plan.get("release"), dict) else {}
+    plan_inputs = plan.get("inputs") if isinstance(plan.get("inputs"), dict) else {}
+
+    if packet.get("status") != "ready_for_owner_deploy_decision":
+        blockers.append("owner_deploy_decision_packet_not_ready")
+    if checks.get("ready_for_owner_deploy_decision") is not True:
+        blockers.append("owner_deploy_decision_check_not_ready")
+    if checks.get("blockers"):
+        blockers.append("owner_deploy_packet_has_blockers")
+    if checks.get("first_real_submit_still_blocked") is not True:
+        blockers.append("owner_deploy_packet_first_real_submit_not_blocked")
+    if checks.get("forbidden_effects"):
+        blockers.append("owner_deploy_packet_contains_forbidden_effects")
+    if owner_gate.get("deploy_confirmation_phrase") != CONFIRMATION_PHRASE:
+        blockers.append("owner_deploy_packet_confirmation_phrase_mismatch")
+    if candidate.get("head") != plan_release.get("head"):
+        blockers.append("owner_deploy_packet_head_mismatch")
+    if candidate.get("archive_path") != plan_inputs.get("archive_path"):
+        blockers.append("owner_deploy_packet_archive_path_mismatch")
+    if candidate.get("manifest_path") != plan_inputs.get("manifest_path"):
+        blockers.append("owner_deploy_packet_manifest_path_mismatch")
+    if safety_invariants.get("deploy_apply_requested") is True:
+        blockers.append("owner_deploy_packet_was_built_from_apply")
+    return blockers
 
 
 def _execution_report(
@@ -247,6 +310,18 @@ def _repo_root() -> Path:
     return Path(completed.stdout.strip())
 
 
+def _load_owner_deploy_packet(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text())
+    except OSError as exc:
+        raise DeployExecutionError(f"owner deploy decision packet unreadable: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise DeployExecutionError(f"owner deploy decision packet is not JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise DeployExecutionError("owner deploy decision packet must be a JSON object")
+    return payload
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Dry-run or apply an owner-gated Tokyo runtime-governance deploy plan."
@@ -273,6 +348,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--confirmation-phrase",
         default=None,
         help=f"Required with --apply: {CONFIRMATION_PHRASE}",
+    )
+    parser.add_argument(
+        "--owner-deploy-packet-path",
+        default=None,
+        help=(
+            "Required with --apply: JSON output from "
+            "build_tokyo_runtime_governance_owner_deploy_packet.py for the same "
+            "archive, manifest, and HEAD."
+        ),
     )
     return parser.parse_args(argv)
 

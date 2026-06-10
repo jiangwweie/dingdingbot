@@ -145,7 +145,8 @@ Then build the consolidated Owner decision packet:
   --json \
   --archive-path <local-release-archive.tar.gz> \
   --manifest-path <release-readiness-manifest.json> \
-  --release-name <remote-release-name>
+  --release-name <remote-release-name> \
+  > <owner-deploy-decision-packet.json>
 ```
 
 This packet aggregates release readiness, deploy plan, executor dry-run, Tokyo
@@ -163,14 +164,16 @@ executed through the apply-gated executor:
   --archive-path <local-release-archive.tar.gz> \
   --manifest-path <release-readiness-manifest.json> \
   --release-name <remote-release-name> \
+  --owner-deploy-packet-path <owner-deploy-decision-packet.json> \
   --apply \
   --confirmation-phrase OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
 ```
 
-Without `--apply` and the exact confirmation phrase, this executor remains a
-dry-run and must not mutate Tokyo. With `--apply`, it is a remote deployment,
-backup, migration, symlink, and service-control action; do not run it as a
-background convenience command.
+Without `--apply`, the exact confirmation phrase, and a ready owner deploy
+decision packet for the same archive / manifest / HEAD, this executor remains
+blocked or dry-run and must not mutate Tokyo. With all three, it is a remote
+deployment, backup, migration, symlink, and service-control action; do not run
+it as a background convenience command.
 
 ## Remote Preflight
 
