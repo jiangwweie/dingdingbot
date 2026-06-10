@@ -6,16 +6,16 @@ This record captures the deployed Tokyo state after the runtime-governance
 backend deployment, follow-up Trading Console static frontend refresh, and the
 later runtime-governance backend refresh to the current release candidate.
 
-## Current Backend Refresh - afbdcb38
+## Current Backend Refresh - 1734b8cc
 
 Accepted backend refresh:
 
 - Deployed release path:
-  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-afbdcb38-20260610T094802Z`
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-1734b8cc-20260610T100025Z`
 - Current symlink:
-  `/home/ubuntu/brc-deploy/app/current -> /home/ubuntu/brc-deploy/releases/brc-runtime-governance-afbdcb38-20260610T094802Z`
+  `/home/ubuntu/brc-deploy/app/current -> /home/ubuntu/brc-deploy/releases/brc-runtime-governance-1734b8cc-20260610T100025Z`
 - Deployed backend SHA:
-  `afbdcb38387cfbea5a5da366a588f04b96cdb691`
+  `1734b8cc3baaf41f00a3ce8c8c0453a11a1b17c1`
 - Backend listener:
   `127.0.0.1:18080`
 - Backend health:
@@ -33,12 +33,12 @@ Accepted backend refresh:
 - Warning:
   `release_identity_from_manifest_without_git_status`
 
-The first apply report stopped at the immediate `/api/health` curl in
+An intermediate `afbdcb38` apply stopped at the immediate `/api/health` curl in
 `4_switch_start_and_smoke` because the backend was not accepting connections
 yet. Follow-up read-only checks showed the service active and healthy, and the
 formal postdeploy verifier plus postdeploy acceptance packet passed. The deploy
-plan has been updated to use a bounded health readiness wait so future applies
-do not fail on this startup race.
+plan was updated to use a bounded health readiness wait, then `1734b8cc` was
+deployed successfully with all 20 apply commands completed.
 
 This refresh did not create execution records, did not submit an executable
 `ExecutionIntent`, did not call `OrderLifecycle`, did not place exchange orders,
@@ -48,7 +48,7 @@ and did not authorize live runtime trading.
 
 Deployed:
 
-- Runtime governance backend release up to `afbdcb38`.
+- Runtime governance backend release up to `1734b8cc`.
 - Alembic migrations from 044 to 066.
 - Trading Console static frontend build.
 - Post-deploy read-only verification.
@@ -73,7 +73,7 @@ Not deployed / not authorized:
 ## Earlier Backend Release - ae9b209e
 
 The following backend release details capture the earlier accepted deployment
-slice. They are superseded for backend identity by the current `afbdcb38`
+slice. They are superseded for backend identity by the current `1734b8cc`
 backend refresh above, but remain useful evidence for the frontend/authenticated
 console acceptance that happened at that stage.
 
