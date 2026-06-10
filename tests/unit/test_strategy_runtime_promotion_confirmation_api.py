@@ -90,6 +90,7 @@ class _FakePromotionConfirmationRepo:
 class _FakeRuntimeDraftService:
     def __init__(self) -> None:
         self.calls = []
+        self.lifecycle_calls = []
 
     async def create_draft_from_profile_confirmation(
         self,
@@ -134,6 +135,65 @@ class _FakeRuntimeDraftService:
             expires_at_ms=expires_at_ms,
             metadata={
                 "confirmation_id": confirmation.confirmation_id,
+                "creates_execution_intent": False,
+                "order_created": False,
+                "exchange_called": False,
+            },
+        )
+
+    async def activate_runtime(self, runtime_instance_id, *, actor="owner"):
+        self.lifecycle_calls.append(
+            {"action": "activate_shadow", "runtime_instance_id": runtime_instance_id, "actor": actor}
+        )
+        return self._runtime(runtime_instance_id, StrategyRuntimeInstanceStatus.ACTIVE)
+
+    async def pause_runtime(self, runtime_instance_id, *, actor="owner"):
+        self.lifecycle_calls.append(
+            {"action": "pause_shadow", "runtime_instance_id": runtime_instance_id, "actor": actor}
+        )
+        return self._runtime(runtime_instance_id, StrategyRuntimeInstanceStatus.PAUSED)
+
+    async def revoke_runtime(self, runtime_instance_id, *, actor="owner"):
+        self.lifecycle_calls.append(
+            {"action": "revoke_shadow", "runtime_instance_id": runtime_instance_id, "actor": actor}
+        )
+        return self._runtime(runtime_instance_id, StrategyRuntimeInstanceStatus.REVOKED)
+
+    def _runtime(self, runtime_instance_id, status):
+        return StrategyRuntimeInstance(
+            runtime_instance_id=runtime_instance_id,
+            trial_binding_id="binding-api-profile-1",
+            admission_decision_id="decision-api-profile-1",
+            strategy_family_id="CPM-RO-001",
+            strategy_family_version_id="CPM-RO-001-v0",
+            owner_risk_acceptance_id="risk-api-profile-1",
+            carrier_id="carrier-api-profile-1",
+            symbol="BNB/USDT:USDT",
+            side="long",
+            status=status,
+            boundary=StrategyRuntimeBoundary(
+                max_attempts=3,
+                max_active_positions=1,
+                max_notional_per_attempt="10.00",
+                total_budget="9.00",
+                allowed_symbols=["BNB/USDT:USDT"],
+                allowed_sides=["long"],
+                max_leverage="1",
+                max_margin_per_attempt="10.00",
+                min_liquidation_stop_buffer="25",
+                requires_protection=True,
+                requires_review=True,
+            ),
+            policy_snapshot=StrategyRuntimePolicySnapshot(
+                source="runtime_profile_promotion_confirmation"
+            ),
+            execution_enabled=False,
+            shadow_mode=True,
+            created_at_ms=NOW_MS,
+            updated_at_ms=NOW_MS,
+            metadata={
+                "creates_signal_evaluation": False,
+                "creates_order_candidate": False,
                 "creates_execution_intent": False,
                 "order_created": False,
                 "exchange_called": False,
@@ -353,6 +413,52 @@ def test_promotion_confirmation_api_creates_shadow_runtime_draft(monkeypatch):
     assert runtime_service.calls[0]["trial_binding_id"] == "binding-cpm-api-profile-1"
     assert runtime_service.calls[0]["metadata"]["created_by"] == "owner"
     assert runtime_service.calls[0]["metadata"]["non_executing_record"] is True
+
+
+def test_strategy_runtime_lifecycle_api_keeps_shadow_no_action(monkeypatch):
+    _configure_auth(monkeypatch)
+    runtime_service = _FakeRuntimeDraftService()
+    from src.interfaces import api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        runtime_service,
+        raising=False,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/brc/strategy-runtimes/strategy-runtime-api-profile-1/lifecycle",
+            json={"action": "activate_shadow"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"] == "activate_shadow"
+    assert payload["runtime"]["status"] == "active"
+    assert payload["runtime"]["execution_enabled"] is False
+    assert payload["runtime"]["shadow_mode"] is True
+    assert payload["runtime"]["metadata"]["creates_signal_evaluation"] is False
+    assert payload["runtime"]["metadata"]["creates_order_candidate"] is False
+    assert payload["runtime"]["metadata"]["creates_execution_intent"] is False
+    assert payload["runtime"]["metadata"]["order_created"] is False
+    assert payload["runtime"]["metadata"]["exchange_called"] is False
+    assert payload["no_action_guarantee"]["creates_signal_evaluation"] is False
+    assert payload["no_action_guarantee"]["creates_order_candidate"] is False
+    assert payload["no_action_guarantee"]["creates_execution_intent"] is False
+    assert payload["no_action_guarantee"]["creates_order"] is False
+    assert payload["no_action_guarantee"]["calls_exchange"] is False
+    assert payload["no_action_guarantee"]["mutates_shadow_runtime_status"] is True
+    assert runtime_service.lifecycle_calls == [
+        {
+            "action": "activate_shadow",
+            "runtime_instance_id": "strategy-runtime-api-profile-1",
+            "actor": "owner",
+        }
+    ]
 
 
 def test_promotion_confirmation_api_rejects_execution_metadata(monkeypatch):

@@ -108,7 +108,9 @@ Key facts:
   path under
   `/api/brc/strategy-runtime-promotion-confirmations/{confirmation_id}/runtime-drafts`;
   it does not create candidates, intents, orders, OrderLifecycle calls, or
-  exchange calls.
+  exchange calls. The BRC Console also exposes a narrow shadow lifecycle API
+  for `activate_shadow`, `pause_shadow`, and `revoke_shadow`; it mutates only
+  runtime status and preserves `execution_enabled=false` / `shadow_mode=true`.
 - **SignalEvaluation / OrderCandidate** now exist as local working-tree shadow
   records with PG persistence and Trading Console inspection endpoints. They do
   not create submit-ready ExecutionIntent records, orders, FinalGate execution

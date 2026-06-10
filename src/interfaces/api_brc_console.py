@@ -434,6 +434,30 @@ class StrategyRuntimeDraftFromProfileConfirmationResponse(BaseModel):
     )
 
 
+class StrategyRuntimeLifecycleActionRequest(BaseModel):
+    action: Literal["activate_shadow", "pause_shadow", "revoke_shadow"]
+
+
+class StrategyRuntimeLifecycleActionResponse(BaseModel):
+    runtime: dict[str, Any]
+    action: str
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "not_execution_authority": True,
+            "creates_signal_evaluation": False,
+            "creates_order_candidate": False,
+            "creates_execution_intent": False,
+            "creates_order": False,
+            "calls_exchange": False,
+            "calls_owner_bounded_execution": False,
+            "calls_order_lifecycle": False,
+            "execution_enabled": False,
+            "shadow_mode": True,
+            "mutates_shadow_runtime_status": True,
+        }
+    )
+
+
 dev_testnet_router = APIRouter(
     prefix="/api/dev/testnet/brc",
     tags=["BRC Controlled Testnet"],
@@ -7049,6 +7073,50 @@ async def create_strategy_runtime_draft_from_profile_confirmation(
     return StrategyRuntimeDraftFromProfileConfirmationResponse(
         runtime=runtime.model_dump(mode="json"),
         confirmation_id=confirmation.confirmation_id,
+    )
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/lifecycle",
+    response_model=StrategyRuntimeLifecycleActionResponse,
+)
+async def update_strategy_runtime_shadow_lifecycle(
+    runtime_instance_id: str,
+    body: StrategyRuntimeLifecycleActionRequest,
+    session: OperatorSessionDependency,
+) -> StrategyRuntimeLifecycleActionResponse:
+    try:
+        runtime_service = await _operation_strategy_runtime_service()
+        if body.action == "activate_shadow":
+            runtime = await runtime_service.activate_runtime(
+                runtime_instance_id,
+                actor=session.username,
+            )
+        elif body.action == "pause_shadow":
+            runtime = await runtime_service.pause_runtime(
+                runtime_instance_id,
+                actor=session.username,
+            )
+        else:
+            runtime = await runtime_service.revoke_runtime(
+                runtime_instance_id,
+                actor=session.username,
+            )
+    except StrategyRuntimeError as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    except (ValueError, SQLAlchemyError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Strategy runtime repository unavailable; persistent PG facts are required."
+            ),
+        ) from exc
+    return StrategyRuntimeLifecycleActionResponse(
+        runtime=runtime.model_dump(mode="json"),
+        action=body.action,
     )
 
 

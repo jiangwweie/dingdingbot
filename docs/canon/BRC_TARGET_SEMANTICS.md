@@ -299,7 +299,9 @@ Current local B0 implementation slice:
   authority. The BRC Console exposes this as a narrow operator-auth runtime
   draft API from a promotion confirmation ID plus TrialBinding ID; the endpoint
   returns no-action guarantees and does not create candidates, intents, orders,
-  OrderLifecycle calls, or exchange calls.
+  OrderLifecycle calls, or exchange calls. The companion shadow lifecycle API
+  can activate, pause, or revoke that runtime for shadow planning while keeping
+  execution disabled.
 - `src/application/strategy_runtime_promotion_gate_service.py` exposes that
   gate by `StrategyFamilyVersion` from the semantics catalog. It fails closed
   for unknown bindings and remains non-executing.

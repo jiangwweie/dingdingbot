@@ -762,6 +762,11 @@ Current local B0 implementation slice:
   intents, orders, OrderLifecycle calls, or exchange calls by itself. The BRC
   Console now exposes a narrow operator-auth API for this exact path:
   `/api/brc/strategy-runtime-promotion-confirmations/{confirmation_id}/runtime-drafts`.
+- The BRC Console exposes a narrow shadow runtime lifecycle API for
+  `activate_shadow`, `pause_shadow`, and `revoke_shadow`. It mutates only
+  shadow runtime status, keeps `execution_enabled=false` / `shadow_mode=true`,
+  and does not create candidates, intents, orders, OrderLifecycle calls, or
+  exchange calls.
 - `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
   withdrawal, manual profit extraction, capital injection, and capital-base
   reset review facts. These facts can explain account-equity movement and
