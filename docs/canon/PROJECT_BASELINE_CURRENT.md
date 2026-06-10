@@ -177,8 +177,12 @@ Key facts:
   and an explicit non-executing scheduler-to-planner handoff now exist for
   automatic evaluation binding. Trading Console now exposes an operator-auth
   explicit non-executing shadow-plan POST for server-side strategy signal
-  evaluation and optional shadow candidate creation, but deployment automation
-  and scheduler-backed ingestion are not yet productized.
+  evaluation and optional shadow candidate creation. The scheduled read-only
+  observation runner can now preserve the full signal input snapshot and, when
+  explicitly injected with a runtime resolver plus scheduler-planning service,
+  hand the just-observed signal to the non-executing shadow planner. Tokyo
+  autonomous scheduling / triggering remains disabled unless separately wired
+  and authorized.
 - **StrategyRuntimePromotionGate** now exists as a pure non-executing domain
   gate for promotion beyond B0 shadow/preview work. It turns missing
   Owner/Codex strategy, runtime, fact-source, runtime safety boundary,

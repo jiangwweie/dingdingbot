@@ -128,6 +128,7 @@ class StrategyGroupObservationRecord(BaseModel):
     human_summary: str
     evidence_payload: dict[str, Any] = Field(default_factory=dict)
     signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    signal_input_snapshot: dict[str, Any] = Field(default_factory=dict)
     invalidation_conditions: list[dict[str, Any]] = Field(default_factory=list)
     review_windows: list[str] = Field(default_factory=list)
     review_status_by_window: dict[str, str] = Field(default_factory=dict)
@@ -653,6 +654,7 @@ def _evaluate_observation_candidate(
             output,
             getattr(market_source, "source_id", "unknown"),
             getattr(market_source, "source_type", None),
+            signal_input=signal_input,
             runtime_signal_planning_readiness=runtime_signal_planning_readiness,
         )
         preview = _signal_preview(output)
@@ -719,6 +721,7 @@ def _observation_record_from_output(
     output: StrategyFamilySignalOutput,
     market_source_id: str,
     source_type: str | None = None,
+    signal_input: StrategyFamilySignalInput | None = None,
     runtime_signal_planning_readiness: dict[str, Any] | None = None,
 ) -> StrategyGroupObservationRecord:
     review_status = {
@@ -750,6 +753,9 @@ def _observation_record_from_output(
         human_summary=output.human_summary,
         evidence_payload=output.evidence_payload,
         signal_snapshot=output.signal_snapshot,
+        signal_input_snapshot=(
+            signal_input.model_dump(mode="json") if signal_input is not None else {}
+        ),
         invalidation_conditions=list(output.invalidation_conditions),
         review_windows=list(spec.review_windows),
         review_status_by_window=review_status,

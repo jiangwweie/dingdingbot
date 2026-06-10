@@ -8,16 +8,22 @@ paths.
 
 from __future__ import annotations
 
-from typing import Literal
+from inspect import isawaitable
+from typing import Any, Callable, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
+from src.application.runtime_strategy_signal_scheduler_planning_service import (
+    RuntimeStrategySignalSchedulerPlanningResult,
+)
 from src.application.strategy_group_live_readonly_observation import (
     StrategyGroupLiveReadOnlyObservationResponse,
     StrategyGroupObservationRecord,
     StrategyGroupMarketBarSource,
     build_strategy_group_live_readonly_observation_v1,
 )
+from src.domain.strategy_family_signal import StrategyFamilySignalInput
+from src.domain.strategy_runtime import StrategyRuntimeInstance
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.local_sqlite_observation_market_source import LocalSqliteObservationMarketSource
 from src.infrastructure.pg_strategy_group_observation_repository import PgStrategyGroupObservationRepository
@@ -25,6 +31,42 @@ from src.infrastructure.pg_strategy_group_observation_repository import PgStrate
 
 ObservationSourceName = Literal["live_market", "local_sqlite_fallback"]
 ObservationWriteAction = Literal["inserted", "skipped_duplicate", "failed"]
+ShadowPlanningAction = Literal[
+    "not_requested",
+    "runtime_resolver_missing",
+    "signal_input_snapshot_missing",
+    "runtime_not_resolved",
+    "blocked",
+    "observe_only",
+    "explicit_enable_required",
+    "planner_blocked",
+    "shadow_candidate_created",
+    "failed",
+]
+
+
+class RuntimeSignalShadowPlanningService(Protocol):
+    async def plan_signal_input_if_ready(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        runtime: StrategyRuntimeInstance,
+        candidate_id: str | None = None,
+        allow_shadow_candidate_creation: bool = False,
+        context_id: str | None = None,
+        expires_at_ms: int | None = None,
+        metadata: dict | None = None,
+    ) -> RuntimeStrategySignalSchedulerPlanningResult:
+        ...
+
+
+class ObservationRuntimeResolver(Protocol):
+    async def resolve_runtime_for_signal(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        observation: StrategyGroupObservationRecord,
+    ) -> StrategyRuntimeInstance | None:
+        ...
 
 
 class ScheduledObservationCandidateResult(BaseModel):
@@ -43,6 +85,18 @@ class ScheduledObservationCandidateResult(BaseModel):
     action: ObservationWriteAction
     reason: str | None = None
     runtime_signal_planning_readiness: dict = Field(default_factory=dict)
+    shadow_planning_action: ShadowPlanningAction = "not_requested"
+    shadow_planning_result: dict[str, Any] = Field(default_factory=dict)
+    shadow_planning_blockers: list[str] = Field(default_factory=list)
+    shadow_planning_warnings: list[str] = Field(default_factory=list)
+    runtime_instance_id: str | None = None
+    planner_call_performed: bool = False
+    signal_evaluation_created: bool = False
+    order_candidate_created: bool = False
+    execution_intent_created: bool = False
+    order_created: bool = False
+    order_lifecycle_called: bool = False
+    exchange_called: bool = False
     not_order: bool = True
     not_execution_intent: bool = True
     no_execution_permission: bool = True
@@ -78,8 +132,21 @@ async def run_scheduled_readonly_observation_once(
     source_name: ObservationSourceName = "live_market",
     market_source: StrategyGroupMarketBarSource | None = None,
     repository: PgStrategyGroupObservationRepository | None = None,
+    runtime_resolver: ObservationRuntimeResolver
+    | Callable[
+        [StrategyFamilySignalInput, StrategyGroupObservationRecord],
+        StrategyRuntimeInstance | None,
+    ]
+    | None = None,
+    runtime_signal_planning_service: RuntimeSignalShadowPlanningService | None = None,
+    allow_shadow_candidate_creation: bool = False,
 ) -> ScheduledReadonlyObservationRunResult:
-    """Run one scheduled/cron-ready observation cycle with PG idempotency."""
+    """Run one scheduled/cron-ready observation cycle with PG idempotency.
+
+    When a runtime resolver and scheduler-planning service are injected, this
+    can also hand the just-observed signal to the non-executing shadow planner.
+    Without explicit injection it remains observation-only.
+    """
 
     source = market_source or build_observation_market_source(source_name)
     repo = repository or PgStrategyGroupObservationRepository()
@@ -89,7 +156,15 @@ async def run_scheduled_readonly_observation_once(
     candidate_results: list[ScheduledObservationCandidateResult] = []
 
     for record in preview.current_signals:
-        candidate_results.append(await _record_if_new(repo, record))
+        candidate_result = await _record_if_new(repo, record)
+        candidate_result = await _with_shadow_planning_result(
+            candidate_result,
+            record,
+            runtime_resolver=runtime_resolver,
+            runtime_signal_planning_service=runtime_signal_planning_service,
+            allow_shadow_candidate_creation=allow_shadow_candidate_creation,
+        )
+        candidate_results.append(candidate_result)
 
     inserted = sum(1 for result in candidate_results if result.action == "inserted")
     skipped = sum(1 for result in candidate_results if result.action == "skipped_duplicate")
@@ -175,3 +250,121 @@ def _candidate_result(
         no_order_permission=record.no_order_permission,
         no_runtime_start=record.no_runtime_start,
     )
+
+
+async def _with_shadow_planning_result(
+    result: ScheduledObservationCandidateResult,
+    record: StrategyGroupObservationRecord,
+    *,
+    runtime_resolver: ObservationRuntimeResolver
+    | Callable[
+        [StrategyFamilySignalInput, StrategyGroupObservationRecord],
+        StrategyRuntimeInstance | None,
+    ]
+    | None,
+    runtime_signal_planning_service: RuntimeSignalShadowPlanningService | None,
+    allow_shadow_candidate_creation: bool,
+) -> ScheduledObservationCandidateResult:
+    if runtime_signal_planning_service is None:
+        return result
+    if not record.signal_input_snapshot:
+        return result.model_copy(
+            update={
+                "shadow_planning_action": "signal_input_snapshot_missing",
+                "shadow_planning_blockers": ["signal_input_snapshot_missing"],
+            }
+        )
+    if runtime_resolver is None:
+        return result.model_copy(
+            update={
+                "shadow_planning_action": "runtime_resolver_missing",
+                "shadow_planning_blockers": ["runtime_resolver_missing"],
+            }
+        )
+
+    try:
+        signal_input = StrategyFamilySignalInput.model_validate(
+            record.signal_input_snapshot
+        )
+        runtime = await _resolve_runtime(runtime_resolver, signal_input, record)
+        if runtime is None:
+            return result.model_copy(
+                update={
+                    "shadow_planning_action": "runtime_not_resolved",
+                    "shadow_planning_blockers": ["runtime_not_resolved"],
+                }
+            )
+        planning = await runtime_signal_planning_service.plan_signal_input_if_ready(
+            signal_input,
+            runtime=runtime,
+            candidate_id=record.candidate_id,
+            allow_shadow_candidate_creation=allow_shadow_candidate_creation,
+            context_id=f"scheduled-observation:{record.record_id}",
+            metadata={
+                "scheduled_readonly_observation": True,
+                "observation_id": record.record_id,
+                "candidate_id": record.candidate_id,
+                "market_bar_timestamp_ms": record.market_bar_timestamp_ms,
+                "allow_shadow_candidate_creation": allow_shadow_candidate_creation,
+            },
+        )
+    except Exception as exc:
+        return result.model_copy(
+            update={
+                "shadow_planning_action": "failed",
+                "shadow_planning_blockers": [
+                    f"{type(exc).__name__}: {str(exc)[:240]}"
+                ],
+            }
+        )
+
+    action = _planning_action(planning)
+    return result.model_copy(
+        update={
+            "shadow_planning_action": action,
+            "shadow_planning_result": planning.model_dump(mode="json"),
+            "shadow_planning_blockers": list(planning.blockers),
+            "shadow_planning_warnings": list(planning.warnings),
+            "runtime_instance_id": planning.runtime_instance_id,
+            "planner_call_performed": planning.planner_call_performed,
+            "signal_evaluation_created": planning.signal_evaluation_created,
+            "order_candidate_created": planning.order_candidate_created,
+            "execution_intent_created": planning.execution_intent_created,
+            "order_created": planning.order_created,
+            "order_lifecycle_called": planning.order_lifecycle_called,
+            "exchange_called": planning.exchange_called,
+        }
+    )
+
+
+async def _resolve_runtime(
+    resolver: ObservationRuntimeResolver
+    | Callable[
+        [StrategyFamilySignalInput, StrategyGroupObservationRecord],
+        StrategyRuntimeInstance | None,
+    ],
+    signal_input: StrategyFamilySignalInput,
+    record: StrategyGroupObservationRecord,
+) -> StrategyRuntimeInstance | None:
+    if callable(resolver):
+        value = resolver(signal_input, record)
+    else:
+        value = resolver.resolve_runtime_for_signal(signal_input, record)
+    if isawaitable(value):
+        value = await value
+    return value
+
+
+def _planning_action(
+    planning: RuntimeStrategySignalSchedulerPlanningResult,
+) -> ShadowPlanningAction:
+    value = planning.status.value
+    if value in {
+        "blocked",
+        "observe_only",
+        "explicit_enable_required",
+        "planner_blocked",
+        "shadow_candidate_created",
+    }:
+        return value  # type: ignore[return-value]
+    return "failed"

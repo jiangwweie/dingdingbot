@@ -260,9 +260,9 @@ bridge preview, and readiness surfaces. They do not prove live trading behavior.
 
 The following are not complete and must not be silently inferred:
 
-1. Automated scheduler-backed strategy signal ingestion is not productized on
-   Tokyo. The explicit operator-auth shadow-plan POST exists; autonomous
-   ingestion/triggering does not.
+1. Scheduler-backed strategy signal handoff is now productized locally as an
+   injectable, non-executing scheduled-observation-to-shadow-planner bridge.
+   Tokyo autonomous scheduling / triggering is still not enabled.
 2. Hard authenticated API `200` evidence for each Trading Console endpoint is
    still limited by local Chrome client blocking direct `/api/*` navigation.
    Authenticated UI read-model rendering has been verified; a follow-up should

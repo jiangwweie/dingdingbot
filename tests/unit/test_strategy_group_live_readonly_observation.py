@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,14 @@ from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from src.application.runtime_strategy_signal_scheduler_assembly import (
+    RuntimeStrategySignalSchedulerReadiness,
+    RuntimeStrategySignalSchedulerReadinessStatus,
+)
+from src.application.runtime_strategy_signal_scheduler_planning_service import (
+    RuntimeStrategySignalSchedulerPlanningResult,
+    RuntimeStrategySignalSchedulerPlanningStatus,
+)
 from src.application.strategy_group_live_readonly_observation import (
     InMemoryStrategyGroupObservationSink,
     MI001MomentumImpulseReadOnlyEvaluator,
@@ -26,6 +35,11 @@ from src.application.strategy_group_forward_review import (
     calculate_forward_reviews_for_observation,
 )
 from src.domain.strategy_family_signal import SignalSide, SignalType
+from src.domain.strategy_runtime import (
+    StrategyRuntimeBoundary,
+    StrategyRuntimeInstance,
+    StrategyRuntimeInstanceStatus,
+)
 from src.infrastructure.binance_public_kline_market_source import BinancePublicKlineMarketSource
 from src.infrastructure.pg_models import PGBrcStrategyGroupForwardReviewORM, PGBrcStrategyGroupObservationORM
 from src.infrastructure.pg_strategy_group_forward_review_repository import PgStrategyGroupForwardReviewRepository
@@ -136,7 +150,7 @@ def test_live_readonly_observation_v1_exposes_mi_cpm_and_brf_without_execution_f
     assert payload.runner_mapping["strategy_specific_signal_evaluator_glue_wired"] is True
     assert payload.live_observation_active is False
     assert payload.live_ready is False
-    assert len(payload.current_signals) == 4
+    assert len(payload.current_signals) == 8
     brf = next(
         record
         for record in payload.current_signals
@@ -179,8 +193,8 @@ def test_run_once_records_observe_only_signal_history_without_runtime_effect():
         sink=sink,
     )
 
-    assert len(payload.current_signals) == 4
-    assert len(payload.signal_history) == 4
+    assert len(payload.current_signals) == 8
+    assert len(payload.signal_history) == 8
     assert payload.sink_summary["sink_status"] == "process_local_sink_recording_enabled"
     assert payload.sink_summary["writes_execution_or_order_tables"] is False
     assert all(record.not_order is True for record in payload.signal_history)
@@ -266,7 +280,7 @@ def test_live_market_source_records_observe_only_history_with_live_source_metada
         sink=InMemoryStrategyGroupObservationSink(),
     )
 
-    assert len(payload.current_signals) == 4
+    assert len(payload.current_signals) == 8
     assert payload.input_source_summary["source_type"] == "live_market_read_only"
     assert payload.input_source_summary["is_live_read_only"] is True
     assert payload.input_source_summary["fallback_used"] is False
@@ -296,7 +310,7 @@ async def test_pg_observation_repository_round_trip(observation_repo):
         ],
     )
 
-    assert len(recent) == 4
+    assert len(recent) == 8
     assert [record.candidate_id for record in current] == [
         "MI-001-SOL-LONG",
         "MI-001-BNB-LONG",
@@ -309,6 +323,11 @@ async def test_pg_observation_repository_round_trip(observation_repo):
     assert all(record.no_execution_permission is True for record in recent)
     assert all(record.no_order_permission is True for record in recent)
     assert all(record.no_runtime_start is True for record in recent)
+    assert all(record.signal_input_snapshot for record in recent)
+    assert all(
+        record.signal_input_snapshot["strategy_family_id"] == record.strategy_group_id
+        for record in recent
+    )
 
 
 @pytest.mark.asyncio
@@ -324,11 +343,11 @@ async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observ
         repository=observation_repo,
     )
 
-    assert first.inserted_count == 4
+    assert first.inserted_count == 8
     assert first.skipped_duplicate_count == 0
     assert first.failed_count == 0
     assert second.inserted_count == 0
-    assert second.skipped_duplicate_count == 4
+    assert second.skipped_duplicate_count == 8
     assert second.failed_count == 0
     assert all(item.existing_record_id for item in second.candidate_results)
     assert all(item.runtime_signal_planning_readiness for item in first.candidate_results)
@@ -338,11 +357,128 @@ async def test_scheduled_readonly_observation_is_idempotent_by_closed_bar(observ
     )
 
     recent = await observation_repo.list_recent(limit=10)
-    assert len(recent) == 4
+    assert len(recent) == 8
     assert all(record.not_order is True for record in recent)
     assert all(record.not_execution_intent is True for record in recent)
     assert all(record.no_order_permission is True for record in recent)
     assert all(record.runtime_signal_planning_readiness for record in recent)
+    assert all(record.signal_input_snapshot for record in recent)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_observation_can_handoff_to_non_executing_shadow_planner(
+    observation_repo,
+):
+    class _RuntimeResolver:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def resolve_runtime_for_signal(self, signal_input, observation):
+            self.calls.append(observation.record_id)
+            return _shadow_runtime_for_signal(signal_input)
+
+    class _PlanningService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def plan_signal_input_if_ready(self, signal_input, **kwargs):
+            runtime = kwargs["runtime"]
+            self.calls.append(
+                {
+                    "evaluation_id": signal_input.evaluation_id,
+                    "runtime_instance_id": runtime.runtime_instance_id,
+                    "candidate_id": kwargs["candidate_id"],
+                    "allow_shadow_candidate_creation": (
+                        kwargs["allow_shadow_candidate_creation"]
+                    ),
+                    "context_id": kwargs["context_id"],
+                    "metadata": kwargs["metadata"],
+                }
+            )
+            return RuntimeStrategySignalSchedulerPlanningResult(
+                planning_id=f"scheduled-plan-{signal_input.evaluation_id}",
+                runtime_instance_id=runtime.runtime_instance_id,
+                strategy_family_id=signal_input.strategy_family_id,
+                strategy_family_version_id=signal_input.strategy_family_version_id,
+                symbol=signal_input.symbol,
+                status=(
+                    RuntimeStrategySignalSchedulerPlanningStatus.SHADOW_CANDIDATE_CREATED
+                ),
+                readiness=RuntimeStrategySignalSchedulerReadiness(
+                    candidate_id=kwargs["candidate_id"],
+                    evaluation_id=signal_input.evaluation_id,
+                    signal_id=f"scheduled-signal-{signal_input.evaluation_id}",
+                    strategy_family_id=signal_input.strategy_family_id,
+                    strategy_family_version_id=signal_input.strategy_family_version_id,
+                    symbol=signal_input.symbol,
+                    side=runtime.side,
+                    signal_type="would_enter",
+                    status=(
+                        RuntimeStrategySignalSchedulerReadinessStatus.READY_FOR_NON_EXECUTING_PLANNER
+                    ),
+                    runtime_instance_id=runtime.runtime_instance_id,
+                    runtime_bound=True,
+                    scheduler_can_call_runtime_planner=True,
+                ),
+                planner_call_performed=True,
+                signal_evaluation_created=True,
+                order_candidate_created=True,
+            )
+
+    resolver = _RuntimeResolver()
+    planning_service = _PlanningService()
+
+    result = await run_scheduled_readonly_observation_once(
+        source_name="local_sqlite_fallback",
+        market_source=SampleStrategyGroupMarketBarSource(),
+        repository=observation_repo,
+        runtime_resolver=resolver,
+        runtime_signal_planning_service=planning_service,
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert result.inserted_count == 8
+    assert len(planning_service.calls) == 8
+    assert len(resolver.calls) == 8
+    assert all(
+        item.shadow_planning_action == "shadow_candidate_created"
+        for item in result.candidate_results
+    )
+    assert all(item.planner_call_performed is True for item in result.candidate_results)
+    assert all(item.signal_evaluation_created is True for item in result.candidate_results)
+    assert all(item.order_candidate_created is True for item in result.candidate_results)
+    assert all(item.execution_intent_created is False for item in result.candidate_results)
+    assert all(item.order_created is False for item in result.candidate_results)
+    assert all(item.order_lifecycle_called is False for item in result.candidate_results)
+    assert all(item.exchange_called is False for item in result.candidate_results)
+    assert all(item.not_order is True for item in result.candidate_results)
+    assert all(item.not_execution_intent is True for item in result.candidate_results)
+    assert planning_service.calls[0]["allow_shadow_candidate_creation"] is True
+    assert planning_service.calls[0]["metadata"]["scheduled_readonly_observation"] is True
+
+
+@pytest.mark.asyncio
+async def test_scheduled_observation_planner_requires_runtime_resolver(observation_repo):
+    class _PlanningService:
+        async def plan_signal_input_if_ready(self, signal_input, **kwargs):
+            raise AssertionError("planner must not be called without runtime resolver")
+
+    result = await run_scheduled_readonly_observation_once(
+        source_name="local_sqlite_fallback",
+        market_source=SampleStrategyGroupMarketBarSource(),
+        repository=observation_repo,
+        runtime_signal_planning_service=_PlanningService(),
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert result.inserted_count == 8
+    assert all(
+        item.shadow_planning_action == "runtime_resolver_missing"
+        for item in result.candidate_results
+    )
+    assert all(item.planner_call_performed is False for item in result.candidate_results)
+    assert all(item.order_candidate_created is False for item in result.candidate_results)
+    assert all(item.execution_intent_created is False for item in result.candidate_results)
 
 
 @pytest.mark.asyncio
@@ -605,6 +741,37 @@ def test_mi001_readonly_evaluator_returns_invalid_for_missing_context():
     assert "mi001_invalid_insufficient_candles" in output.reason_codes
     assert output.not_order is True
     assert output.not_execution_intent is True
+
+
+def _shadow_runtime_for_signal(signal_input):
+    return StrategyRuntimeInstance(
+        runtime_instance_id=f"runtime-{signal_input.strategy_family_id}-{signal_input.symbol}",
+        trial_binding_id=f"trial-{signal_input.strategy_family_id}",
+        admission_decision_id=f"admission-{signal_input.strategy_family_id}",
+        strategy_family_id=signal_input.strategy_family_id,
+        strategy_family_version_id=signal_input.strategy_family_version_id,
+        symbol=signal_input.symbol,
+        side=signal_input.trial_constraints_snapshot.get("side", "long"),
+        status=StrategyRuntimeInstanceStatus.ACTIVE,
+        boundary=StrategyRuntimeBoundary(
+            max_attempts=3,
+            attempts_used=0,
+            budget_reserved=Decimal("0"),
+            max_active_positions=1,
+            max_notional_per_attempt=Decimal("10"),
+            total_budget=Decimal("9"),
+            allowed_symbols=[signal_input.symbol],
+            allowed_sides=[signal_input.trial_constraints_snapshot.get("side", "long")],
+            max_leverage=Decimal("1"),
+            max_margin_per_attempt=Decimal("10"),
+            min_liquidation_stop_buffer=Decimal("25"),
+            requires_protection=True,
+        ),
+        execution_enabled=False,
+        shadow_mode=True,
+        created_at_ms=signal_input.timestamp_ms,
+        updated_at_ms=signal_input.timestamp_ms,
+    )
 
 
 def _candle(open_time_ms: int, open_: str, high: str, low: str, close: str):

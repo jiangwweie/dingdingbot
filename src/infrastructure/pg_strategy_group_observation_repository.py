@@ -127,6 +127,10 @@ class PgStrategyGroupObservationRepository:
             evidence_payload["_runtime_signal_planning_readiness"] = dict(
                 payload["runtime_signal_planning_readiness"]
             )
+        if payload.get("signal_input_snapshot"):
+            evidence_payload["_signal_input_snapshot"] = dict(
+                payload["signal_input_snapshot"]
+            )
         if payload.get("strategy_family_version_id"):
             evidence_payload["_strategy_family_version_id"] = payload[
                 "strategy_family_version_id"
@@ -163,6 +167,9 @@ class PgStrategyGroupObservationRepository:
         runtime_signal_planning_readiness = dict(
             evidence_payload.pop("_runtime_signal_planning_readiness", {}) or {}
         )
+        signal_input_snapshot = dict(
+            evidence_payload.pop("_signal_input_snapshot", {}) or {}
+        )
         strategy_family_version_id = evidence_payload.pop(
             "_strategy_family_version_id",
             None,
@@ -187,6 +194,7 @@ class PgStrategyGroupObservationRepository:
             human_summary=row.human_summary,
             evidence_payload=evidence_payload,
             signal_snapshot=dict(row.signal_snapshot_json or {}),
+            signal_input_snapshot=signal_input_snapshot,
             invalidation_conditions=list(row.invalidation_conditions_json or []),
             review_windows=list(row.review_windows_json or []),
             review_status_by_window=dict(row.review_status_json or {}),
