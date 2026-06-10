@@ -215,6 +215,23 @@ passed
 git diff --check
 passed
 
+B0 promotion-gate confirmation record validation:
+
+python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py \
+  tests/unit/test_strategy_runtime_promotion_confirmation_repository.py \
+  tests/unit/test_strategy_runtime_promotion_confirmation_api.py
+21 passed
+
+python3 -m compileall -q src/domain/strategy_runtime_promotion_gate.py \
+  src/application/strategy_runtime_promotion_gate_service.py \
+  src/infrastructure/pg_strategy_runtime_promotion_confirmation_repository.py \
+  src/interfaces/api_brc_console.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_strategy_runtime_promotion_confirmation_repository.py \
+  tests/unit/test_strategy_runtime_promotion_confirmation_api.py
+passed
+
 Sprint 7 runtime safety confirmation-gate validation:
 
 python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate.py \
@@ -707,6 +724,23 @@ Current local B0 implementation slice:
   by `StrategyFamilyVersion` from the semantics catalog, fails closed on unknown
   bindings, and remains non-executing. This is the intended reusable gate entry
   for future Console / Sprint 5 promotion checks.
+- `StrategyRuntimePromotionGateConfirmationRecord` now freezes the Owner/Codex
+  confirmation facts used by that gate. The record can carry the gate result
+  snapshot and explicitly remains `not_execution_authority=true`,
+  `execution_intent_created=false`, `order_created=false`,
+  `exchange_called=false`, `owner_bounded_execution_called=false`,
+  `order_lifecycle_called=false`, and `runtime_mutation_created=false`.
+- `migrations/versions/2026-06-10-063_create_strategy_runtime_promotion_confirmations.py`
+  and
+  `src/infrastructure/pg_strategy_runtime_promotion_confirmation_repository.py`
+  persist those confirmation records with database-level no-action constraints.
+- `src/interfaces/api_brc_console.py` exposes
+  `/api/brc/strategy-runtime-promotion-confirmations` record/list APIs so
+  promotion-gate confirmations no longer need to exist only as ad hoc preview
+  query facts. These APIs record the confirmation facts and gate snapshot only;
+  they do not create ExecutionIntent rows, orders, runtime mutations,
+  withdrawals, transfers, OrderLifecycle calls, OwnerBoundedExecution calls, or
+  exchange calls.
 - `src/domain/owner_capital_adjustment.py` defines Owner-recorded manual
   withdrawal, manual profit extraction, capital injection, and capital-base
   reset review facts. These facts can explain account-equity movement and

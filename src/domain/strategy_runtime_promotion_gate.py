@@ -9,9 +9,9 @@ orders, exchange payloads, or runtime mutations.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.domain.strategy_semantics import (
     StrategyCandidateMode,
@@ -106,6 +106,85 @@ class StrategyRuntimePromotionGateResult(StrategyRuntimePromotionGateModel):
     execution_intent_created: Literal[False] = False
     order_created: Literal[False] = False
     exchange_called: Literal[False] = False
+
+
+class StrategyRuntimePromotionGateConfirmationRecord(
+    StrategyRuntimePromotionGateModel
+):
+    """Auditable Owner/Codex confirmation facts for promotion-gate review.
+
+    This record freezes the facts used to evaluate a promotion gate. It is not
+    an ExecutionIntent, submit authorization, order, transfer, withdrawal, or
+    exchange request.
+    """
+
+    confirmation_id: str = Field(min_length=1, max_length=180)
+    runtime_instance_id: Optional[str] = Field(default=None, max_length=128)
+    strategy_family_id: str = Field(min_length=1, max_length=128)
+    strategy_family_version_id: str = Field(min_length=1, max_length=128)
+    scope: StrategyRuntimePromotionScope = (
+        StrategyRuntimePromotionScope.CONTROLLED_RUNTIME_EXECUTION
+    )
+    semantic_confirmations: StrategySemanticsConfirmationFacts = Field(
+        default_factory=StrategySemanticsConfirmationFacts
+    )
+    runtime_confirmations: RuntimeExecutionConfirmationFacts = Field(
+        default_factory=RuntimeExecutionConfirmationFacts
+    )
+    first_real_submit_confirmations: FirstRealSubmitConfirmationFacts = Field(
+        default_factory=FirstRealSubmitConfirmationFacts
+    )
+    promotion_gate_result_snapshot: Optional[StrategyRuntimePromotionGateResult] = None
+    recorded_by: str = Field(default="owner", min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=512)
+    evidence_refs: list[str] = Field(default_factory=list)
+    created_at_ms: int = Field(ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    records_promotion_gate_confirmation: Literal[True] = True
+    not_execution_authority: Literal[True] = True
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    exchange_called: Literal[False] = False
+    owner_bounded_execution_called: Literal[False] = False
+    order_lifecycle_called: Literal[False] = False
+    runtime_mutation_created: Literal[False] = False
+    withdrawal_instruction_created: Literal[False] = False
+    transfer_instruction_created: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _reject_execution_metadata(
+        self,
+    ) -> "StrategyRuntimePromotionGateConfirmationRecord":
+        forbidden = {
+            "client_order_id",
+            "exchange_order_id",
+            "exchange_payload",
+            "execution_intent_id",
+            "order_id",
+            "place_order",
+            "submit_order",
+            "transfer_payload",
+            "withdrawal_payload",
+        }
+        for key in _walk_keys({"metadata": self.metadata}):
+            if key.lower() in forbidden:
+                raise ValueError(
+                    "promotion confirmation contains forbidden execution field: "
+                    f"{key}"
+                )
+        return self
+
+    def to_gate_input(
+        self,
+        binding: StrategyImplementationBinding,
+    ) -> StrategyRuntimePromotionGateInput:
+        return StrategyRuntimePromotionGateInput(
+            binding=binding,
+            scope=self.scope,
+            semantic_confirmations=self.semantic_confirmations,
+            runtime_confirmations=self.runtime_confirmations,
+            first_real_submit_confirmations=self.first_real_submit_confirmations,
+        )
 
 
 def evaluate_strategy_runtime_promotion_gate(
@@ -279,3 +358,17 @@ def _binding_requires_short_side_conservative_profile(
     if "short" in supported_sides:
         return True
     return bool(binding.metadata.get("short_side_conservative_profile_required"))
+
+
+def _walk_keys(value: Any) -> list[str]:
+    keys: list[str] = []
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="python")
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            keys.append(str(key))
+            keys.extend(_walk_keys(nested))
+    elif isinstance(value, list):
+        for item in value:
+            keys.extend(_walk_keys(item))
+    return keys

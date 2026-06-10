@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.domain.strategy_runtime_promotion_gate import (
     FirstRealSubmitConfirmationFacts,
     RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateConfirmationRecord,
     StrategyRuntimePromotionGateInput,
     StrategyRuntimePromotionGateResult,
     StrategyRuntimePromotionScope,
@@ -73,4 +74,31 @@ class StrategyRuntimePromotionGateService:
                     or FirstRealSubmitConfirmationFacts()
                 ),
             )
+        )
+
+    def preview_from_confirmation(
+        self,
+        confirmation: StrategyRuntimePromotionGateConfirmationRecord,
+    ) -> StrategyRuntimePromotionGateResult:
+        return self.preview(
+            strategy_family_id=confirmation.strategy_family_id,
+            strategy_family_version_id=confirmation.strategy_family_version_id,
+            scope=confirmation.scope,
+            semantic_confirmations=confirmation.semantic_confirmations,
+            runtime_confirmations=confirmation.runtime_confirmations,
+            first_real_submit_confirmations=(
+                confirmation.first_real_submit_confirmations
+            ),
+        )
+
+    def with_result_snapshot(
+        self,
+        confirmation: StrategyRuntimePromotionGateConfirmationRecord,
+    ) -> StrategyRuntimePromotionGateConfirmationRecord:
+        return confirmation.model_copy(
+            update={
+                "promotion_gate_result_snapshot": self.preview_from_confirmation(
+                    confirmation
+                )
+            }
         )

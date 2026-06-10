@@ -44,6 +44,10 @@ from src.application.strategy_trial_architecture_governance import (
     StrategyTrialArchitectureGovernanceResponse,
     build_bnb_strategy_trial_architecture_governance,
 )
+from src.application.strategy_runtime_promotion_gate_service import (
+    StrategyRuntimePromotionGateService,
+    StrategyRuntimePromotionGateServiceError,
+)
 from src.application.strategy_trial_carrier_expansion import (
     SecondCarrierExpansionResponse,
     build_second_carrier_expansion_bootstrap,
@@ -142,6 +146,13 @@ from src.domain.owner_capital_baseline_snapshot import (
     OwnerCapitalBaselineSnapshot,
     OwnerCapitalBaselineSnapshotSource,
 )
+from src.domain.strategy_runtime_promotion_gate import (
+    FirstRealSubmitConfirmationFacts,
+    RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateConfirmationRecord,
+    StrategyRuntimePromotionScope,
+    StrategySemanticsConfirmationFacts,
+)
 from src.interfaces.operator_auth import OperatorSessionDependency, require_operator_session
 from src.interfaces import api_console_runtime as runtime
 from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
@@ -150,6 +161,9 @@ from src.infrastructure.pg_owner_capital_adjustment_repository import (
 )
 from src.infrastructure.pg_owner_capital_baseline_snapshot_repository import (
     PgOwnerCapitalBaselineSnapshotRepository,
+)
+from src.infrastructure.pg_strategy_runtime_promotion_confirmation_repository import (
+    PgStrategyRuntimePromotionConfirmationRepository,
 )
 
 
@@ -326,6 +340,64 @@ class OwnerCapitalBaselineSnapshotListResponse(BaseModel):
             "mutates_runtime_budget": False,
             "mutates_strategy_pnl": False,
             "creates_risk_event": False,
+        }
+    )
+
+
+class StrategyRuntimePromotionConfirmationCreateRequest(BaseModel):
+    confirmation_id: Optional[str] = Field(default=None, max_length=180)
+    runtime_instance_id: Optional[str] = Field(default=None, max_length=128)
+    strategy_family_id: str = Field(min_length=1, max_length=128)
+    strategy_family_version_id: str = Field(min_length=1, max_length=128)
+    scope: StrategyRuntimePromotionScope = (
+        StrategyRuntimePromotionScope.CONTROLLED_RUNTIME_EXECUTION
+    )
+    semantic_confirmations: StrategySemanticsConfirmationFacts = Field(
+        default_factory=StrategySemanticsConfirmationFacts
+    )
+    runtime_confirmations: RuntimeExecutionConfirmationFacts = Field(
+        default_factory=RuntimeExecutionConfirmationFacts
+    )
+    first_real_submit_confirmations: FirstRealSubmitConfirmationFacts = Field(
+        default_factory=FirstRealSubmitConfirmationFacts
+    )
+    reason: str = Field(min_length=1, max_length=512)
+    evidence_refs: list[str] = Field(default_factory=list)
+    created_at_ms: Optional[int] = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyRuntimePromotionConfirmationResponse(BaseModel):
+    confirmation: dict[str, Any]
+    promotion_gate_result: dict[str, Any]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "not_execution_authority": True,
+            "creates_execution_intent": False,
+            "creates_order": False,
+            "calls_exchange": False,
+            "calls_owner_bounded_execution": False,
+            "calls_order_lifecycle": False,
+            "mutates_runtime": False,
+            "creates_withdrawal_instruction": False,
+            "creates_transfer_instruction": False,
+        }
+    )
+
+
+class StrategyRuntimePromotionConfirmationListResponse(BaseModel):
+    confirmations: list[dict[str, Any]]
+    no_action_guarantee: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "not_execution_authority": True,
+            "creates_execution_intent": False,
+            "creates_order": False,
+            "calls_exchange": False,
+            "calls_owner_bounded_execution": False,
+            "calls_order_lifecycle": False,
+            "mutates_runtime": False,
+            "creates_withdrawal_instruction": False,
+            "creates_transfer_instruction": False,
         }
     )
 
@@ -6720,6 +6792,32 @@ def _owner_capital_baseline_snapshot_repository() -> PgOwnerCapitalBaselineSnaps
     return PgOwnerCapitalBaselineSnapshotRepository()
 
 
+def _strategy_runtime_promotion_confirmation_repository() -> (
+    PgStrategyRuntimePromotionConfirmationRepository
+):
+    injected = getattr(
+        _api_module(),
+        "_strategy_runtime_promotion_confirmation_repo",
+        None,
+    )
+    if injected is not None:
+        return injected
+    return PgStrategyRuntimePromotionConfirmationRepository()
+
+
+def _strategy_runtime_promotion_gate_service() -> StrategyRuntimePromotionGateService:
+    injected = getattr(
+        _api_module(),
+        "_strategy_runtime_promotion_gate_service",
+        None,
+    )
+    if injected is not None:
+        return injected
+    service = StrategyRuntimePromotionGateService()
+    setattr(_api_module(), "_strategy_runtime_promotion_gate_service", service)
+    return service
+
+
 def _default_live_lifecycle_review_id(authorization_id: str, status: str) -> str:
     safe_auth = re.sub(r"[^A-Za-z0-9_.:-]+", "-", authorization_id).strip("-")
     return f"live-review-{safe_auth}-{status}"
@@ -6737,6 +6835,110 @@ def _default_owner_capital_baseline_snapshot_id(
     occurred_at_ms: int,
 ) -> str:
     return f"owner-capital-baseline-{source.value}-{occurred_at_ms}"
+
+
+def _default_strategy_runtime_promotion_confirmation_id(
+    *,
+    strategy_family_id: str,
+    strategy_family_version_id: str,
+    scope: StrategyRuntimePromotionScope,
+    created_at_ms: int,
+    runtime_instance_id: Optional[str] = None,
+) -> str:
+    raw = "-".join(
+        part
+        for part in (
+            runtime_instance_id,
+            strategy_family_id,
+            strategy_family_version_id,
+            scope.value,
+            str(created_at_ms),
+        )
+        if part
+    )
+    safe = re.sub(r"[^A-Za-z0-9_.:-]+", "-", raw).strip("-")
+    return f"promotion-confirmation-{safe}"
+
+
+@router.post(
+    "/strategy-runtime-promotion-confirmations",
+    response_model=StrategyRuntimePromotionConfirmationResponse,
+)
+async def create_strategy_runtime_promotion_confirmation(
+    body: StrategyRuntimePromotionConfirmationCreateRequest,
+    session: OperatorSessionDependency,
+) -> StrategyRuntimePromotionConfirmationResponse:
+    created_at_ms = body.created_at_ms or int(time.time() * 1000)
+    try:
+        record = StrategyRuntimePromotionGateConfirmationRecord(
+            confirmation_id=body.confirmation_id
+            or _default_strategy_runtime_promotion_confirmation_id(
+                strategy_family_id=body.strategy_family_id,
+                strategy_family_version_id=body.strategy_family_version_id,
+                scope=body.scope,
+                created_at_ms=created_at_ms,
+                runtime_instance_id=body.runtime_instance_id,
+            ),
+            runtime_instance_id=body.runtime_instance_id,
+            strategy_family_id=body.strategy_family_id,
+            strategy_family_version_id=body.strategy_family_version_id,
+            scope=body.scope,
+            semantic_confirmations=body.semantic_confirmations,
+            runtime_confirmations=body.runtime_confirmations,
+            first_real_submit_confirmations=body.first_real_submit_confirmations,
+            recorded_by=session.username,
+            reason=body.reason,
+            evidence_refs=body.evidence_refs,
+            created_at_ms=created_at_ms,
+            metadata={
+                **body.metadata,
+                "ledger_write_path": (
+                    "official_api_brc_strategy_runtime_promotion_confirmations"
+                ),
+                "non_executing_record": True,
+                "bounded_small_risk_capital": True,
+                "prevents_runaway_not_budgeted_losses": True,
+            },
+        )
+        record = _strategy_runtime_promotion_gate_service().with_result_snapshot(record)
+    except StrategyRuntimePromotionGateServiceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    repo = _strategy_runtime_promotion_confirmation_repository()
+    await repo.initialize()
+    saved = await repo.append(record)
+    result = saved.promotion_gate_result_snapshot
+    return StrategyRuntimePromotionConfirmationResponse(
+        confirmation=saved.model_dump(mode="json"),
+        promotion_gate_result=result.model_dump(mode="json") if result else {},
+    )
+
+
+@router.get(
+    "/strategy-runtime-promotion-confirmations",
+    response_model=StrategyRuntimePromotionConfirmationListResponse,
+)
+async def list_strategy_runtime_promotion_confirmations(
+    runtime_instance_id: Optional[str] = Query(default=None, max_length=128),
+    strategy_family_id: Optional[str] = Query(default=None, max_length=128),
+    strategy_family_version_id: Optional[str] = Query(default=None, max_length=128),
+    scope: Optional[StrategyRuntimePromotionScope] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> StrategyRuntimePromotionConfirmationListResponse:
+    repo = _strategy_runtime_promotion_confirmation_repository()
+    await repo.initialize()
+    records = await repo.list(
+        runtime_instance_id=runtime_instance_id,
+        strategy_family_id=strategy_family_id,
+        strategy_family_version_id=strategy_family_version_id,
+        scope=scope,
+        limit=limit,
+    )
+    return StrategyRuntimePromotionConfirmationListResponse(
+        confirmations=[record.model_dump(mode="json") for record in records]
+    )
 
 
 @router.post(

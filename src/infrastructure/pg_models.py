@@ -1617,6 +1617,133 @@ class PGRuntimeExecutionSubmitAuthorizationORM(PGCoreBase):
     )
 
 
+class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
+    """Owner/Codex confirmation facts for strategy-runtime promotion gates.
+
+    Rows in this table are review facts only. They do not create intents,
+    orders, runtime mutations, transfers, withdrawals, or exchange requests.
+    """
+
+    __tablename__ = "strategy_runtime_promotion_confirmations"
+
+    confirmation_id: Mapped[str] = mapped_column(String(180), primary_key=True)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy_family_version_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False)
+    semantic_confirmations_json: Mapped[dict] = mapped_column(
+        "semantic_confirmations",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    runtime_confirmations_json: Mapped[dict] = mapped_column(
+        "runtime_confirmations",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    first_real_submit_confirmations_json: Mapped[dict] = mapped_column(
+        "first_real_submit_confirmations",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    promotion_gate_result_snapshot_json: Mapped[Optional[dict]] = mapped_column(
+        "promotion_gate_result_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_refs: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    records_promotion_gate_confirmation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    not_execution_authority: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    execution_intent_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    runtime_mutation_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    transfer_instruction_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('controlled_runtime_execution', 'first_real_submit_gate_review')",
+            name="ck_strategy_runtime_promotion_confirmations_scope",
+        ),
+        CheckConstraint(
+            "records_promotion_gate_confirmation = true",
+            name="ck_strategy_runtime_promotion_confirmations_records_confirmation",
+        ),
+        CheckConstraint(
+            "not_execution_authority = true",
+            name="ck_strategy_runtime_promotion_confirmations_not_authority",
+        ),
+        CheckConstraint(
+            "execution_intent_created = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_intent",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_order",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_one_shot",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_lifecycle",
+        ),
+        CheckConstraint(
+            "runtime_mutation_created = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_runtime_mutation",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_strategy_runtime_promotion_confirmations_no_transfer",
+        ),
+        Index(
+            "idx_strategy_runtime_promotion_confirmations_runtime_time",
+            "runtime_instance_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_strategy_runtime_promotion_confirmations_strategy_time",
+            "strategy_family_id",
+            "strategy_family_version_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_strategy_runtime_promotion_confirmations_scope_time",
+            "scope",
+            "created_at_ms",
+        ),
+    )
+
+
 class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
     """Audit record for the runtime controlled-submit adapter boundary.
 

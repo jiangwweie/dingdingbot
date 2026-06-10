@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from src.domain.strategy_runtime_promotion_gate import (
     FirstRealSubmitConfirmationFacts,
     RuntimeExecutionConfirmationFacts,
+    StrategyRuntimePromotionGateConfirmationRecord,
     StrategyRuntimePromotionGateInput,
     StrategyRuntimePromotionGateStatus,
     StrategyRuntimePromotionScope,
@@ -178,3 +181,50 @@ def test_first_real_submit_scope_can_reach_gate_review_but_not_execution_authori
     assert result.execution_intent_created is False
     assert result.order_created is False
     assert result.exchange_called is False
+
+
+def test_promotion_confirmation_record_replays_gate_facts_without_execution_authority():
+    confirmation = StrategyRuntimePromotionGateConfirmationRecord(
+        confirmation_id="promotion-confirmation-cpm-1",
+        runtime_instance_id="runtime-cpm-1",
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        semantic_confirmations=_semantic_confirmed(),
+        runtime_confirmations=_runtime_confirmed(),
+        reason="Owner accepts bounded 30U experimental capital semantics.",
+        created_at_ms=1781000000000,
+        metadata={"risk_capital_objective": "bounded_loss_right_tail_capture"},
+    )
+
+    result = evaluate_strategy_runtime_promotion_gate(
+        confirmation.to_gate_input(_catalog_binding("CPM-RO-001", "CPM-RO-001-v0"))
+    )
+
+    assert (
+        result.status
+        == StrategyRuntimePromotionGateStatus.READY_FOR_CONTROLLED_RUNTIME_EXECUTION_DESIGN
+    )
+    assert confirmation.records_promotion_gate_confirmation is True
+    assert confirmation.not_execution_authority is True
+    assert confirmation.execution_intent_created is False
+    assert confirmation.order_created is False
+    assert confirmation.exchange_called is False
+    assert confirmation.owner_bounded_execution_called is False
+    assert confirmation.order_lifecycle_called is False
+    assert confirmation.runtime_mutation_created is False
+    assert confirmation.withdrawal_instruction_created is False
+    assert confirmation.transfer_instruction_created is False
+
+
+def test_promotion_confirmation_record_rejects_execution_metadata():
+    with pytest.raises(ValueError, match="forbidden execution field"):
+        StrategyRuntimePromotionGateConfirmationRecord(
+            confirmation_id="promotion-confirmation-forbidden-1",
+            strategy_family_id="CPM-RO-001",
+            strategy_family_version_id="CPM-RO-001-v0",
+            semantic_confirmations=_semantic_confirmed(),
+            runtime_confirmations=_runtime_confirmed(),
+            reason="Should reject exchange payload metadata.",
+            created_at_ms=1781000000000,
+            metadata={"nested": {"exchange_order_id": "should-not-exist"}},
+        )
