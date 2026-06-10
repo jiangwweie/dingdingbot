@@ -18,6 +18,26 @@ HEAD.
 Before applying deployment, regenerate `prepare -> plan -> executor dry-run`
 for the then-current HEAD and use those outputs as the candidate facts.
 
+Preferred machine-generated packet:
+
+```bash
+/opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_owner_deploy_packet.py \
+  --json \
+  --archive-path <local-release-archive.tar.gz> \
+  --manifest-path <release-readiness-manifest.json> \
+  --release-name <remote-release-name>
+```
+
+The packet must report:
+
+```text
+status=ready_for_owner_deploy_decision
+ready_for_owner_deploy_decision=true
+```
+
+This status means only that the Owner may decide whether to authorize the
+Tokyo deploy apply step. It is not first-real-submit authorization.
+
 ## 2. Verified Dry-Run Facts
 
 Latest expected release-preparation facts for the current stage:

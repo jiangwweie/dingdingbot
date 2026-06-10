@@ -138,6 +138,22 @@ show `ready_for_owner_authorized_remote_deploy=true` and print the explicit
 remote mutation confirmation phrase before any upload, backup, migration,
 symlink switch, or restart.
 
+Then build the consolidated Owner decision packet:
+
+```bash
+/opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_owner_deploy_packet.py \
+  --json \
+  --archive-path <local-release-archive.tar.gz> \
+  --manifest-path <release-readiness-manifest.json> \
+  --release-name <remote-release-name>
+```
+
+This packet aggregates release readiness, deploy plan, executor dry-run, Tokyo
+read-only probe, and the pre-live runtime submit packet. It must report
+`ready_for_owner_deploy_decision=true` before asking the Owner to approve the
+deploy apply step. That status does not authorize live runtime enablement,
+real submit, OrderLifecycle adapter enablement, or exchange order placement.
+
 Once Owner explicitly approves the remote mutation stage, the same plan can be
 executed through the apply-gated executor:
 
