@@ -180,6 +180,21 @@ The executor's backend health smoke must wait for bounded readiness after
 before the HTTP listener is ready. The planned health smoke waits up to 30
 seconds for `/api/health` before failing.
 
+For a follow-up deployment after a newer runtime-governance release is already
+on Tokyo, pass the current remote baseline explicitly to the plan, owner packet,
+and apply executor:
+
+```text
+--previous-release <current remote release path>
+--expected-deployed-head <current remote deployed head>
+--expected-remote-migration-count <current remote migration count>
+--expected-remote-latest-migration <current remote latest migration filename>
+```
+
+The default values remain the original `ae9b209e` / migration `064` predeploy
+baseline and are not correct for continuous deploys after the first controlled
+runtime-governance refresh.
+
 ## Remote Preflight
 
 Read-only checks before any remote mutation:

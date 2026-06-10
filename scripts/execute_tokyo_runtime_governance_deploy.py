@@ -32,6 +32,8 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
     DEFAULT_ENV_PATH,
     DEFAULT_EXPECTED_DEPLOYED_HEAD,
     DEFAULT_EXPECTED_LATEST_MIGRATION,
+    DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION,
+    DEFAULT_EXPECTED_REMOTE_MIGRATION_COUNT,
     DEFAULT_HOST,
     DEFAULT_PREVIOUS_RELEASE,
     DEFAULT_SERVICE_NAME,
@@ -77,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         api_base=args.api_base,
         previous_release=args.previous_release,
         expected_deployed_head=args.expected_deployed_head,
+        expected_remote_migration_count=args.expected_remote_migration_count,
+        expected_remote_latest_migration=args.expected_remote_latest_migration,
         expected_latest_migration=args.expected_latest_migration,
     )
     report = execute_deploy_plan(
@@ -373,6 +377,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--previous-release", default=DEFAULT_PREVIOUS_RELEASE)
     parser.add_argument("--expected-deployed-head", default=DEFAULT_EXPECTED_DEPLOYED_HEAD)
+    parser.add_argument(
+        "--expected-remote-migration-count",
+        type=int,
+        default=DEFAULT_EXPECTED_REMOTE_MIGRATION_COUNT,
+    )
+    parser.add_argument(
+        "--expected-remote-latest-migration",
+        default=DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION,
+    )
     parser.add_argument("--expected-latest-migration", default=DEFAULT_EXPECTED_LATEST_MIGRATION)
     parser.add_argument(
         "--apply",

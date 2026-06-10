@@ -33,6 +33,10 @@ DEFAULT_PREVIOUS_RELEASE = (
     "/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ae9b209e-20260610T061250Z"
 )
 DEFAULT_EXPECTED_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
+DEFAULT_EXPECTED_REMOTE_MIGRATION_COUNT = 64
+DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION = (
+    "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+)
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-06-10-066_add_order_lifecycle_adapter_disabled_submit_status.py"
 )
@@ -66,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         api_base=args.api_base,
         previous_release=args.previous_release,
         expected_deployed_head=args.expected_deployed_head,
+        expected_remote_migration_count=args.expected_remote_migration_count,
+        expected_remote_latest_migration=args.expected_remote_latest_migration,
         expected_latest_migration=args.expected_latest_migration,
     )
     if args.json:
@@ -89,7 +95,9 @@ def build_deploy_plan(
     api_base: str,
     previous_release: str,
     expected_deployed_head: str,
-    expected_latest_migration: str,
+    expected_remote_migration_count: int = DEFAULT_EXPECTED_REMOTE_MIGRATION_COUNT,
+    expected_remote_latest_migration: str = DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION,
+    expected_latest_migration: str = DEFAULT_EXPECTED_LATEST_MIGRATION,
 ) -> dict[str, Any]:
     """Build a non-executing deployment command plan."""
 
@@ -159,6 +167,8 @@ def build_deploy_plan(
         api_base=api_base,
         previous_release=previous_release,
         expected_deployed_head=expected_deployed_head,
+        expected_remote_migration_count=expected_remote_migration_count,
+        expected_remote_latest_migration=expected_remote_latest_migration,
         head=head,
         expected_latest_migration=expected_latest_migration,
     )
@@ -184,6 +194,8 @@ def build_deploy_plan(
             "api_base": api_base,
             "previous_release": previous_release,
             "expected_deployed_head": expected_deployed_head,
+            "expected_remote_migration_count": expected_remote_migration_count,
+            "expected_remote_latest_migration": expected_remote_latest_migration,
             "expected_latest_migration": expected_latest_migration,
         },
         "release": {
@@ -246,6 +258,8 @@ def _plan_phases(
     api_base: str,
     previous_release: str,
     expected_deployed_head: str,
+    expected_remote_migration_count: int,
+    expected_remote_latest_migration: str,
     head: str,
     expected_latest_migration: str,
 ) -> list[dict[str, Any]]:
@@ -297,7 +311,10 @@ def _plan_phases(
             "remote_mutation": False,
             "commands": [
                 f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/probe_tokyo_runtime_governance_readonly.py --json",
+                "scripts/probe_tokyo_runtime_governance_readonly.py --json "
+                f"--expected-current-head {q(expected_deployed_head)} "
+                f"--expected-migration-count {expected_remote_migration_count} "
+                f"--expected-latest-migration {q(expected_remote_latest_migration)}",
             ],
             "stop_if": [
                 "ready_for_controlled_deploy_preflight is not true",
@@ -478,6 +495,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--expected-deployed-head",
         default=DEFAULT_EXPECTED_DEPLOYED_HEAD,
+    )
+    parser.add_argument(
+        "--expected-remote-migration-count",
+        type=int,
+        default=DEFAULT_EXPECTED_REMOTE_MIGRATION_COUNT,
+    )
+    parser.add_argument(
+        "--expected-remote-latest-migration",
+        default=DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION,
     )
     parser.add_argument(
         "--expected-latest-migration",

@@ -97,6 +97,8 @@ async def _build_owner_deploy_packet_from_args(
         api_base=args.api_base,
         previous_release=args.previous_release,
         expected_deployed_head=args.expected_deployed_head,
+        expected_remote_migration_count=args.expected_remote_migration_count,
+        expected_remote_latest_migration=args.expected_remote_latest_migration,
         expected_latest_migration=args.expected_deploy_latest_migration,
     )
     deploy_dry_run = execute_deploy_plan(

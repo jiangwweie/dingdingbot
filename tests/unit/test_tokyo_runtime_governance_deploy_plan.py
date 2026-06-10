@@ -149,6 +149,12 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "ln -sfn" in all_commands
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
     assert "systemctl start brc-owner-console-backend.service" in all_commands
+    assert "--expected-current-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
+    assert "--expected-migration-count 64" in all_commands
+    assert (
+        "--expected-latest-migration "
+        "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+    ) in all_commands
     assert "HEALTH_URL=http://127.0.0.1:18080/api/health" in all_commands
     assert "for attempt in $(seq 1 30)" in all_commands
     assert 'curl -fsS "$HEALTH_URL"' in all_commands
