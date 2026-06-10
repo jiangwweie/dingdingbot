@@ -115,6 +115,17 @@ async function startServer() {
     await proxyJsonRequest(req, res);
   });
 
+  app.all('/api/brc/strategy-runtime-promotion-confirmations', async (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.status(405).json({
+        error: 'trading_console_promotion_confirmation_proxy_method_not_allowed',
+        message: 'Trading Console forwards only promotion confirmation record/list requests.',
+      });
+      return;
+    }
+    await proxyJsonRequest(req, res);
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

@@ -91,6 +91,27 @@ type PromotionGateView = {
   exchange_called?: boolean;
 };
 
+type PromotionConfirmationView = {
+  confirmation_id: string;
+  runtime_instance_id?: string | null;
+  strategy_family_id?: string;
+  strategy_family_version_id?: string;
+  scope?: string;
+  recorded_by?: string;
+  reason?: string;
+  created_at_ms?: number;
+  promotion_gate_result_snapshot?: PromotionGateView | null;
+  not_execution_authority?: boolean;
+  execution_intent_created?: boolean;
+  order_created?: boolean;
+  exchange_called?: boolean;
+  owner_bounded_execution_called?: boolean;
+  order_lifecycle_called?: boolean;
+  runtime_mutation_created?: boolean;
+  withdrawal_instruction_created?: boolean;
+  transfer_instruction_created?: boolean;
+};
+
 type RuntimeSafetyTone = 'normal' | 'warning' | 'danger' | 'muted';
 
 export default function AuthorizationState() {
@@ -229,6 +250,7 @@ export default function AuthorizationState() {
           <AuthorizationBridgePanel envelope={authState.envelope} data={authData} error={authState.error} />
           <RuntimeSafetyReadinessPanel runtimes={runtimes} />
           <RuntimePromotionGatePanel runtimes={runtimes} />
+          <RuntimePromotionConfirmationLedger runtime={selectedRuntime} />
         </div>
 
         <InspectorPanel
@@ -541,6 +563,76 @@ function RuntimePromotionGateDetail({ runtimeId }: { runtimeId: string }) {
   );
 }
 
+function RuntimePromotionConfirmationLedger({ runtime }: { runtime: RuntimeView | null }) {
+  const runtimeId = runtime?.runtime_instance_id ? String(runtime.runtime_instance_id) : null;
+  const { records, loading, error } = usePromotionConfirmationLedger(runtimeId);
+
+  if (!runtimeId) {
+    return (
+      <ConsolePanel title="门禁确认账本" caption="Owner / Codex promotion-gate 确认事实">
+        <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-3">
+          <BoundaryCell label="运行实例" value="暂无实例" tone="blocked" />
+          <BoundaryCell label="账本记录" value="等待 Runtime" tone="attention" />
+          <BoundaryCell label="执行权限" value="未授予" tone="unavailable" />
+        </div>
+      </ConsolePanel>
+    );
+  }
+
+  const latest = records[0];
+  const unsafe = records.some((record) => promotionConfirmationUnsafe(record));
+
+  return (
+    <ConsolePanel
+      title="门禁确认账本"
+      caption="持久化的 promotion-gate 确认事实；不是 submit 授权"
+      action={<StatusChip tone={error || unsafe ? 'blocked' : records.length > 0 ? 'attention' : 'unavailable'}>{loading ? '读取中' : records.length > 0 ? `${records.length} 条` : '暂无记录'}</StatusChip>}
+    >
+      {loading ? (
+        <div className="px-4 py-6 text-sm text-slate-500">正在读取门禁确认账本...</div>
+      ) : error ? (
+        <div className="px-4 py-4">
+          <GuidanceLine tone="intervention" title="confirmation ledger 暂不可用" body={error} />
+        </div>
+      ) : records.length === 0 ? (
+        <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-3">
+          <BoundaryCell label="运行实例" value={runtimeId} tone="attention" />
+          <BoundaryCell label="账本记录" value="暂无记录" tone="unavailable" />
+          <BoundaryCell label="执行权限" value="未授予" tone="unavailable" />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+            <BoundaryCell label="最新记录" value={displayValue(latest.confirmation_id, '暂无')} tone="attention" />
+            <BoundaryCell label="门禁快照" value={promotionGateStatusLabel(latest.promotion_gate_result_snapshot?.status)} tone={latest.promotion_gate_result_snapshot?.status === 'blocked' ? 'blocked' : 'attention'} />
+            <BoundaryCell label="记录人" value={displayValue(latest.recorded_by, '暂无')} tone="unavailable" />
+            <BoundaryCell label="执行权限" value={latest.not_execution_authority ? '未授予' : '异常'} tone={latest.not_execution_authority ? 'unavailable' : 'blocked'} />
+          </div>
+
+          <div className="divide-y divide-slate-800/90 border-t border-slate-800">
+            {records.slice(0, 4).map((record) => (
+              <div key={record.confirmation_id}>
+                <EntityRow
+                  title={record.confirmation_id}
+                  subtitle={displayValue(record.reason, '暂无原因')}
+                  tone={promotionConfirmationUnsafe(record) ? 'blocked' : 'attention'}
+                  cells={[
+                    { label: 'Scope', value: displayValue(record.scope, '暂无') },
+                    { label: 'Gate', value: promotionGateStatusLabel(record.promotion_gate_result_snapshot?.status) },
+                    { label: '记录时间', value: formatTimestampMs(record.created_at_ms) },
+                    { label: 'No action', value: promotionConfirmationUnsafe(record) ? '需核查' : '保持' },
+                  ]}
+                  action={<StatusChip tone={promotionConfirmationUnsafe(record) ? 'blocked' : 'unavailable'}>{record.order_created || record.exchange_called ? '异常' : '非执行'}</StatusChip>}
+                />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </ConsolePanel>
+  );
+}
+
 function usePromotionGatePreview(path: string): {
   gate: PromotionGateView;
   loading: boolean;
@@ -592,6 +684,59 @@ function usePromotionGatePreview(path: string): {
   }, [path]);
 
   return { gate, loading, error };
+}
+
+function usePromotionConfirmationLedger(runtimeId: string | null): {
+  records: PromotionConfirmationView[];
+  loading: boolean;
+  error: string | null;
+} {
+  const [records, setRecords] = useState<PromotionConfirmationView[]>([]);
+  const [loading, setLoading] = useState(Boolean(runtimeId));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      if (!runtimeId) {
+        setRecords([]);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+      const path = `/api/brc/strategy-runtime-promotion-confirmations?runtime_instance_id=${encodeURIComponent(runtimeId)}&limit=5`;
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(path, {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (response.status === 401) {
+          window.dispatchEvent(new Event('trading-console:unauthorized'));
+        }
+        if (!response.ok) throw new Error(`GET ${path} returned HTTP ${response.status}`);
+        const payload = await response.json();
+        if (active) setRecords(asArray<PromotionConfirmationView>(payload?.confirmations));
+      } catch (err) {
+        console.error('Trading Console promotion confirmation API error', { runtimeId, error: err });
+        if (active) {
+          setRecords([]);
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [runtimeId]);
+
+  return { records, loading, error };
 }
 
 function RuntimeSafetyReadinessDetail({ runtimeId }: { runtimeId: string }) {
@@ -966,6 +1111,20 @@ function promotionGateDecisionLabel(code: string): string {
     explicit_owner_real_submit_authorization: 'Owner 明确授权首次真实 submit',
   };
   return map[code] || code;
+}
+
+function promotionConfirmationUnsafe(record: PromotionConfirmationView): boolean {
+  return (
+    record.not_execution_authority !== true
+    || record.execution_intent_created === true
+    || record.order_created === true
+    || record.exchange_called === true
+    || record.owner_bounded_execution_called === true
+    || record.order_lifecycle_called === true
+    || record.runtime_mutation_created === true
+    || record.withdrawal_instruction_created === true
+    || record.transfer_instruction_created === true
+  );
 }
 
 function promotionGateBlockerLabel(code: string): string {

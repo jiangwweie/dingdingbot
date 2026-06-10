@@ -192,3 +192,44 @@ def test_promotion_confirmation_api_rejects_execution_metadata(monkeypatch):
     assert response.status_code == 400
     assert "forbidden execution field" in response.json()["message"]
     assert repo.records == []
+
+
+def test_promotion_confirmation_api_returns_503_when_repository_unavailable(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api_brc_console
+
+    def unavailable_repo():
+        raise ValueError("PG_DATABASE_URL missing")
+
+    monkeypatch.setattr(
+        api_brc_console,
+        "_strategy_runtime_promotion_confirmation_repository",
+        unavailable_repo,
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        post_response = client.post(
+            "/api/brc/strategy-runtime-promotion-confirmations",
+            json={
+                "confirmation_id": "promotion-confirmation-api-unavailable",
+                "strategy_family_id": "CPM-RO-001",
+                "strategy_family_version_id": "CPM-RO-001-v0",
+                "semantic_confirmations": _semantic_confirmed(),
+                "runtime_confirmations": _runtime_confirmed(),
+                "reason": "Repository unavailable should fail closed.",
+                "created_at_ms": NOW_MS,
+            },
+        )
+        get_response = client.get(
+            "/api/brc/strategy-runtime-promotion-confirmations"
+            "?runtime_instance_id=runtime-cpm-api-1"
+        )
+
+    assert post_response.status_code == 503
+    assert get_response.status_code == 503
+    assert "repository unavailable" in post_response.json()["message"]
+    assert "repository unavailable" in get_response.json()["message"]

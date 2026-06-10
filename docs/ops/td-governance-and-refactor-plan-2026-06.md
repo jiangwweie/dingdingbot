@@ -1267,6 +1267,11 @@ Current local Sprint 6 slice:
   or generic promotion-gate preview path. It displays missing Owner/Codex
   decisions and preserves `not_execution_authority`, `order_created=false`, and
   `exchange_called=false`.
+- The Runtime governance page now includes a promotion-confirmation ledger
+  panel. It reads only the narrow
+  `/api/brc/strategy-runtime-promotion-confirmations` record/list API through
+  the Trading Console proxy, displays no-action flags, and does not generalize
+  the console proxy into arbitrary BRC write access.
 - Dark and light theme switching is implemented with shared theme state,
   `data-theme`, and local persistence. It is a Sprint 6 product capability, not
   a one-off page skin.
@@ -1286,10 +1291,17 @@ python3 -m pytest -q tests/unit/test_b0_strategy_runtime_promotion_gate_service.
 
 Playwright local browser validation:
 - /runtime displays the first-real-submit gate panel.
+- /runtime displays the promotion-confirmation ledger panel.
 - Generic promotion-gate preview returns status=blocked,
   scope=first_real_submit_gate_review, not_execution_authority=true,
   order_created=false, exchange_called=false.
 - /runtime dark-mode layout has no horizontal overflow.
+- /runtime light-mode layout preserves `data-theme=light`, localStorage
+  persistence, and no horizontal overflow.
+- The Trading Console proxy forwards only the exact
+  `/api/brc/strategy-runtime-promotion-confirmations` GET/POST surface. With
+  local PG unavailable, POST/GET return explicit 503 JSON instead of 500, so
+  the UI fails closed without implying Owner/Codex confirmation.
 ```
 
 ### Sprint 7: Runtime / Config / Safety Boundary Consolidation

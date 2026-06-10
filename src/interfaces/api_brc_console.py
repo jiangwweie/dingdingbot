@@ -10,6 +10,7 @@ from typing import Any, Literal, Mapping, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.application.brc_operation_layer import (
     BrcOperationService,
@@ -6906,9 +6907,18 @@ async def create_strategy_runtime_promotion_confirmation(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    repo = _strategy_runtime_promotion_confirmation_repository()
-    await repo.initialize()
-    saved = await repo.append(record)
+    try:
+        repo = _strategy_runtime_promotion_confirmation_repository()
+        await repo.initialize()
+        saved = await repo.append(record)
+    except (ValueError, SQLAlchemyError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Strategy runtime promotion confirmation repository unavailable; "
+                "persistent PG facts are required."
+            ),
+        ) from exc
     result = saved.promotion_gate_result_snapshot
     return StrategyRuntimePromotionConfirmationResponse(
         confirmation=saved.model_dump(mode="json"),
@@ -6927,15 +6937,24 @@ async def list_strategy_runtime_promotion_confirmations(
     scope: Optional[StrategyRuntimePromotionScope] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> StrategyRuntimePromotionConfirmationListResponse:
-    repo = _strategy_runtime_promotion_confirmation_repository()
-    await repo.initialize()
-    records = await repo.list(
-        runtime_instance_id=runtime_instance_id,
-        strategy_family_id=strategy_family_id,
-        strategy_family_version_id=strategy_family_version_id,
-        scope=scope,
-        limit=limit,
-    )
+    try:
+        repo = _strategy_runtime_promotion_confirmation_repository()
+        await repo.initialize()
+        records = await repo.list(
+            runtime_instance_id=runtime_instance_id,
+            strategy_family_id=strategy_family_id,
+            strategy_family_version_id=strategy_family_version_id,
+            scope=scope,
+            limit=limit,
+        )
+    except (ValueError, SQLAlchemyError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Strategy runtime promotion confirmation repository unavailable; "
+                "persistent PG facts are required."
+            ),
+        ) from exc
     return StrategyRuntimePromotionConfirmationListResponse(
         confirmations=[record.model_dump(mode="json") for record in records]
     )
