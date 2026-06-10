@@ -6,7 +6,7 @@ import asyncio
 import os
 import time
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -66,6 +66,12 @@ from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, Runti
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
 from src.application.runtime_strategy_signal_scheduler_planning_service import (
     RuntimeStrategySignalSchedulerPlanningResult,
+)
+from src.application.strategy_group_readonly_observation_scheduler import (
+    ObservationSourceName,
+    ScheduledReadonlyObservationRunResult,
+    StrategyRuntimeObservationResolver,
+    run_scheduled_readonly_observation_once,
 )
 from src.domain.strategy_family_signal import StrategyFamilySignalInput
 from src.domain.strategy_runtime_promotion_gate import (
@@ -207,6 +213,13 @@ class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScheduledReadonlyObservationRunRequest(BaseModel):
+    source_name: ObservationSourceName = "live_market"
+    shadow_plan: bool = False
+    allow_shadow_candidate_creation: bool = False
+    non_executing: Literal[True] = True
 
 
 class SignalEvaluationInspectionView(BaseModel):
@@ -486,6 +499,40 @@ async def runtime_strategy_signal_shadow_plan_for_signal_input(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-observations/scheduled-runs",
+    response_model=ScheduledReadonlyObservationRunResult,
+)
+async def run_scheduled_strategy_observation(
+    request: ScheduledReadonlyObservationRunRequest,
+) -> ScheduledReadonlyObservationRunResult:
+    if request.allow_shadow_candidate_creation and not request.shadow_plan:
+        raise HTTPException(
+            status_code=400,
+            detail="allow_shadow_candidate_creation requires shadow_plan=true",
+        )
+
+    kwargs: dict[str, Any] = {"source_name": request.source_name}
+    if request.shadow_plan:
+        kwargs.update(
+            {
+                "runtime_resolver": StrategyRuntimeObservationResolver(
+                    runtime_service=await _strategy_runtime_service(),
+                ),
+                "runtime_signal_planning_service": (
+                    await _runtime_strategy_signal_scheduler_planning_service()
+                ),
+                "allow_shadow_candidate_creation": request.allow_shadow_candidate_creation,
+            }
+        )
+    try:
+        return await run_scheduled_readonly_observation_once(**kwargs)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(

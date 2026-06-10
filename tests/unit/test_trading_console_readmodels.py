@@ -549,6 +549,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
     from src.interfaces.api_trading_console import router
 
     allowed_post_paths = {
+        "/api/trading-console/strategy-observations/scheduled-runs",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
         "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
         "/api/trading-console/runtime-execution-intents/drafts/{runtime_execution_intent_draft_id}",
@@ -570,6 +571,136 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
             assert route.path in allowed_post_paths
         else:
             assert route.methods == {"GET"}
+
+
+def test_trading_console_can_run_scheduled_observation_without_shadow_planning(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    import src.interfaces.api_trading_console as trading_api
+    from src.application.strategy_group_readonly_observation_scheduler import (
+        ScheduledReadonlyObservationRunResult,
+    )
+    from src.interfaces.api import app
+
+    captured: dict = {}
+
+    async def fake_run_scheduled_readonly_observation_once(**kwargs):
+        captured.update(kwargs)
+        return ScheduledReadonlyObservationRunResult(
+            source_requested="local_sqlite_fallback",
+            market_source="unit_test_market_source",
+            source_type="unit_test_source",
+            candidates_evaluated=0,
+            inserted_count=0,
+            skipped_duplicate_count=0,
+            failed_count=0,
+        )
+
+    monkeypatch.setattr(
+        trading_api,
+        "run_scheduled_readonly_observation_once",
+        fake_run_scheduled_readonly_observation_once,
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/trading-console/strategy-observations/scheduled-runs",
+            json={"source_name": "local_sqlite_fallback"},
+        )
+
+    assert response.status_code == 200
+    assert captured == {"source_name": "local_sqlite_fallback"}
+    payload = response.json()
+    assert payload["inserted_count"] == 0
+    assert payload["non_permissions"]["no_exchange_write"] is True
+
+
+def test_trading_console_scheduled_observation_can_inject_shadow_plan(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    import src.interfaces.api_trading_console as trading_api
+    from src.application.strategy_group_readonly_observation_scheduler import (
+        ScheduledReadonlyObservationRunResult,
+    )
+    from src.interfaces.api import app
+
+    captured: dict = {}
+
+    async def fake_runtime_service():
+        return object()
+
+    async def fake_scheduler_planning_service():
+        return "scheduler-planning-service"
+
+    async def fake_run_scheduled_readonly_observation_once(**kwargs):
+        captured.update(kwargs)
+        return ScheduledReadonlyObservationRunResult(
+            source_requested="local_sqlite_fallback",
+            market_source="unit_test_market_source",
+            source_type="unit_test_source",
+            candidates_evaluated=0,
+            inserted_count=0,
+            skipped_duplicate_count=0,
+            failed_count=0,
+        )
+
+    monkeypatch.setattr(trading_api, "_strategy_runtime_service", fake_runtime_service)
+    monkeypatch.setattr(
+        trading_api,
+        "_runtime_strategy_signal_scheduler_planning_service",
+        fake_scheduler_planning_service,
+    )
+    monkeypatch.setattr(
+        trading_api,
+        "run_scheduled_readonly_observation_once",
+        fake_run_scheduled_readonly_observation_once,
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/trading-console/strategy-observations/scheduled-runs",
+            json={
+                "source_name": "local_sqlite_fallback",
+                "shadow_plan": True,
+                "allow_shadow_candidate_creation": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["source_name"] == "local_sqlite_fallback"
+    assert captured["runtime_resolver"].__class__.__name__ == (
+        "StrategyRuntimeObservationResolver"
+    )
+    assert captured["runtime_signal_planning_service"] == "scheduler-planning-service"
+    assert captured["allow_shadow_candidate_creation"] is True
+    assert response.json()["non_permissions"]["no_exchange_write"] is True
+
+
+def test_trading_console_scheduled_observation_rejects_shadow_candidate_without_plan(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    import src.interfaces.api_trading_console as trading_api
+    from src.interfaces.api import app
+
+    async def fail_run(**kwargs):
+        raise AssertionError("scheduled runner must not be called for invalid flags")
+
+    monkeypatch.setattr(trading_api, "run_scheduled_readonly_observation_once", fail_run)
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.post(
+            "/api/trading-console/strategy-observations/scheduled-runs",
+            json={"allow_shadow_candidate_creation": True},
+        )
+
+    assert response.status_code == 400
+    assert "requires shadow_plan=true" in response.json()["message"]
 
 
 def test_trading_console_frontend_proxy_keeps_brc_posts_narrow():
