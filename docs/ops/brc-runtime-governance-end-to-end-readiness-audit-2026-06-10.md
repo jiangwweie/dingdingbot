@@ -1,37 +1,38 @@
 # BRC Runtime Governance End-to-End Readiness Audit - 2026-06-10
 
-Status: PRE_DEPLOYMENT_READINESS_AUDIT
+Status: POST_DEPLOYMENT_NON_EXECUTING_READINESS_AUDIT
 
-This audit summarizes the current local readiness for the BRC strategy runtime
-governance refactor. It is evidence for an Owner/Codex deployment decision, not
-deployment authorization, not live-submit authorization, and not order
-authority.
+This audit summarizes the current local and Tokyo deployed readiness for the BRC
+strategy runtime governance refactor. It is evidence for non-executing runtime
+governance readiness, not live-submit authorization and not order authority.
 
 ## 1. Scope
 
 Local worktree:
 
 - path: `/Users/jiangwei/Documents/final-sprint6-integration`
-- branch: `codex/sprint6-console-runtime-integration`
-- audited deployment candidate: `4ab1efd1580ceac337bac7e997a3496b632384a1`
+- branch: `release/tokyo-runtime-governance-20260610`
+- current local HEAD: `6533e066`
+- audited deployed backend candidate: `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
 - stage commits:
   - `cfd66143 chore(ops): add gated tokyo deploy executor`
-  - readiness audit commit: read from `git log` for the current branch
+  - `6533e066 docs(ops): add authenticated tokyo console evidence`
 
-This document is itself a docs-only evidence commit. If it becomes part of the
-deployment target, regenerate the release archive and dry-run plan for the
-current HEAD immediately before applying deployment.
+Current local HEAD is ahead of the deployed backend only by deploy-verifier and
+docs-only evidence commits. The actual deployed runtime code remains
+`ae9b209e`.
 
 Current remote Tokyo fact:
 
-- deployed HEAD: `415d398509872cb25bf969319e29732764f9615b`
-- deployed migration count: `44`
+- deployed backend HEAD: `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
+- deployed migration count: `64`
 - deployed latest migration:
-  `2026-06-08-044_create_live_lifecycle_reviews.py`
+  `2026-06-10-064_add_runtime_profile_proposal_snapshot.py`
 - health: `status=ok`, `runtime_bound=true`, `live_ready=false`
-- conclusion: Tokyo is healthy but still behind the local runtime-governance
-  branch. Do not describe local Sprint 5-7 / B0 capabilities as deployed until
-  the controlled deployment is applied and verified.
+- public URL: `http://43.133.176.150/`
+- public listener: nginx port `80`; backend listener: `127.0.0.1:18080`
+- conclusion: Tokyo now runs the non-executing runtime-governance deployment,
+  but this is still not live-submit authorization.
 
 ## 2. Objective Alignment
 
@@ -72,7 +73,7 @@ The current local code and docs preserve this direction:
 | Runtime safety | Promotion and readiness gates require loss, notional, leverage, margin, liquidation buffer, protection, stale-fact, account, active-position, attempt/budget, BRF short-profile, first-submit, and deployment confirmations | local non-executing ready |
 | Execution bridge | Runtime intent draft, source-native recorded intent audit, submit authorization, controlled-submit plan/preflight/result, attempt reservation/mutation audit, protection plan, OrderLifecycle handoff draft, adapter preview, submit rehearsal exist | local non-submitting bridge only |
 | Console productization | Trading Console exposes runtime governance, strategy observation/planning, promotion/readiness, right-tail review, capital-base/withdrawal-adjusted review, and theme toggle surfaces | local UI/API verified previously |
-| Deployment prep | Release prep, Tokyo read-only probe, migration-gap audit, deployment plan, postdeploy verifier, and apply-gated deploy executor exist | local dry-run ready |
+| Deployment | Tokyo backend and Trading Console static frontend are deployed; postdeploy verifier passed with authenticated endpoints expected to require login | deployed non-executing runtime governance |
 
 ## 4. Non-Execution Proof
 
@@ -105,7 +106,7 @@ exchange_called=false
 
 ## 5. Verified Commands
 
-Local packaging at `4ab1efd1`:
+Historical pre-deployment local packaging at `4ab1efd1`:
 
 ```bash
 /opt/homebrew/bin/python3 scripts/prepare_tokyo_runtime_governance_release.py \
@@ -124,7 +125,7 @@ latest_migration=2026-06-10-064_add_runtime_profile_proposal_snapshot.py
 deployed_head_is_ancestor=true
 ```
 
-Deployment plan:
+Historical pre-deployment plan:
 
 ```bash
 /opt/homebrew/bin/python3 scripts/plan_tokyo_runtime_governance_deploy.py \
@@ -144,7 +145,7 @@ warnings=[]
 remote_mutation_requires_confirmation_phrase=OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
 ```
 
-Executor dry-run:
+Historical pre-deployment executor dry-run:
 
 ```bash
 /opt/homebrew/bin/python3 scripts/execute_tokyo_runtime_governance_deploy.py \
@@ -220,48 +221,74 @@ Observed result:
 45 passed
 ```
 
-These tests prove the local non-executing planning surface, not deployed runtime
-behavior and not live trading behavior.
+Scheduler / API / trusted-overlay tests:
+
+```bash
+/opt/homebrew/bin/pytest -q \
+  tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py \
+  tests/unit/test_b0_strategy_runtime_fact_overlay.py \
+  tests/unit/test_trading_console_readmodels.py
+```
+
+Observed result:
+
+```text
+62 passed
+```
+
+Runtime bridge / FinalGate / promotion readiness tests:
+
+```bash
+/opt/homebrew/bin/pytest -q \
+  tests/unit/test_td4_runtime_final_gate_preview.py \
+  tests/unit/test_td5_runtime_execution_plan.py \
+  tests/unit/test_strategy_runtime_safety_readiness.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate.py \
+  tests/unit/test_b0_strategy_runtime_promotion_gate_service.py
+```
+
+Observed result:
+
+```text
+118 passed
+```
+
+These tests prove the local non-executing planning, scheduler handoff, runtime
+bridge preview, and readiness surfaces. They do not prove live trading behavior.
 
 ## 7. Remaining Hard Gates
 
 The following are not complete and must not be silently inferred:
 
-1. Tokyo controlled deployment has not been applied.
-2. Tokyo Alembic migration jump `044 -> 064` has not been run.
-3. Tokyo postdeploy verifier has not been run against deployed `4ab1efd1`.
-4. Strategy scheduler-backed ingestion is not productized on Tokyo.
-5. FCO remains blocked until deployment-backed funding/OI/crowding fact coverage
+1. Automated scheduler-backed strategy signal ingestion is not productized on
+   Tokyo. The explicit operator-auth shadow-plan POST exists; autonomous
+   ingestion/triggering does not.
+2. Hard authenticated API `200` evidence for each Trading Console endpoint is
+   still limited by local Chrome client blocking direct `/api/*` navigation.
+   Authenticated UI read-model rendering has been verified; a follow-up should
+   use a server-side read-only verifier or temporary read-only validation token
+   for endpoint-by-endpoint proof.
+3. FCO remains blocked until deployment-backed funding/OI/crowding fact coverage
    and Owner-confirmed semantics exist.
-6. Runtime profiles are proposals / confirmation evidence only until Owner/Codex
+4. Runtime profiles are proposals / confirmation evidence only until Owner/Codex
    confirms exact live profile values and materializes the allowed shadow
    runtime path.
-7. First real runtime submit still requires explicit confirmations for attempt
+5. First real runtime submit still requires explicit confirmations for attempt
    consumption, budget reservation/release/consume, protection failure
    handling, duplicate-submit blocking, account/active-position facts,
    stale-fact behavior, deployment readiness, and explicit Owner real-submit
    authorization.
-8. Controlled runtime submit adapter, real OrderLifecycle adapter, and exchange
+6. Controlled runtime submit adapter, real OrderLifecycle adapter, and exchange
    order submit remain intentionally unimplemented / disabled for runtime
    governance.
-9. No automatic withdrawal or transfer design is allowed.
+7. No automatic withdrawal or transfer design is allowed.
 
 ## 8. Owner Authorization Boundary
 
-Remote deployment apply requires a separate explicit Owner authorization. The
-confirmation phrase is:
+The 2026-06-10 Tokyo runtime-governance deployment was Owner-authorized and
+applied. Deployment remains separate from live-submit authorization.
 
-```text
-OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
-```
-
-Without that explicit deployment authorization, do not run:
-
-```bash
-/opt/homebrew/bin/python3 scripts/execute_tokyo_runtime_governance_deploy.py \
-  --apply \
-  --confirmation-phrase OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY
-```
-
-Even after deployment, real-funds order placement remains a separate gate.
-Deployment is not live-submit authorization.
+Real-funds order placement still requires a separate explicit Owner decision at
+the action-time trading gate. Do not treat deployment, shadow planning, runtime
+profile confirmation, promotion-gate preview, or readiness tests as permission
+to submit orders.
