@@ -28,24 +28,24 @@ Current Tokyo baseline from the read-only fact check:
 - latest deployed migration file:
   `064_add_runtime_profile_proposal_snapshot`
 - local latest migration file:
-  `069_allow_adapter_registration_failure_results`
+  `070_add_execution_intent_local_orders_registered_status`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 Local release-prep for the next code-bearing candidate should report:
 
 - `ready_for_packaging=true`
 - deployed head is an ancestor of local `HEAD`
-- local migration count `69`
+- local migration count `70`
 - latest local migration
-  `2026-06-10-069_allow_adapter_registration_failure_results.py`
+  `2026-06-10-070_add_execution_intent_local_orders_registered_status.py`
 - no tracked secret-candidate files
 - only warning:
   `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
 
-Last local migration-gap audit for `064 -> 069` reported:
+Last local migration-gap audit for `064 -> 070` reported:
 
 - `ready_for_controlled_migration_preflight=true`
-- chain length `5`, first revision `065`, last revision `069`
+- chain length `6`, first revision `065`, last revision `070`
 - no `data_destructive_upgrade_ops`
 - warnings:
   - `non_additive_schema_ops_present`
@@ -59,7 +59,9 @@ Last local migration-gap audit for `064 -> 069` reported:
   - revision `068` adds the runtime OrderLifecycle adapter-result table whose
     unique `authorization_id` is the persistent duplicate-submit lock;
   - revision `069` lets adapter-result rows record fail-closed local
-    registration failures for partial entry/protection registration review.
+    registration failures for partial entry/protection registration review;
+  - revision `070` adds the ExecutionIntent
+    `local_orders_registered` status for local-order linkage review.
 
 Last Tokyo read-only probe for the same stage reported:
 
@@ -97,9 +99,9 @@ The output must show:
 
 - `ready_for_packaging=true`;
 - deployed head is an ancestor of local `HEAD`;
-- migration count is at least `69`;
+- migration count is at least `70`;
 - latest migration is
-  `2026-06-10-069_allow_adapter_registration_failure_results.py`;
+  `2026-06-10-070_add_execution_intent_local_orders_registered_status.py`;
 - no tracked secret-candidate files;
 - no tracked worktree changes.
 
@@ -304,7 +306,7 @@ Before applying migrations:
 1. Create a database backup using the existing remote backup path, or an
    equivalent PG-native backup command.
 2. Record the backup filename in a deployment evidence note.
-3. Inspect the migration path from deployed `064` to local `069`.
+3. Inspect the migration path from deployed `064` to local `070`.
 4. Run migration planning in a staging/dry-run context when available.
 5. Apply migrations only after the release artifact and rollback target are
    known.
@@ -321,7 +323,7 @@ Local static audit command:
 The output must show:
 
 - `ready_for_controlled_migration_preflight=true`;
-- chain length `5` for `065 -> 069`;
+- chain length `6` for `065 -> 070`;
 - no `data_destructive_upgrade_ops`.
 
 The output is allowed to warn about non-additive / data-touching review items,
@@ -335,7 +337,9 @@ but those warnings require concrete deployment handling:
   must not be interpreted as enabling the real adapter;
 - revision `067` only permits local `Order(status=CREATED)` persistence;
 - revision `068` only adds the persistent adapter-result duplicate-submit lock;
-- revision `069` only allows fail-closed adapter registration failure results.
+- revision `069` only allows fail-closed adapter registration failure results;
+- revision `070` only adds the ExecutionIntent
+  `local_orders_registered` status for local-order linkage review.
 
 ## Release Procedure Shape
 

@@ -82,23 +82,23 @@ def test_current_gap_evidence_names_revision_053_and_062_review_items():
     assert all(item["operation"] == "execute" for item in data_touching)
 
 
-def test_incremental_live_enablement_and_order_lifecycle_adapter_gap_is_reviewable_from_064_to_069():
+def test_incremental_live_enablement_and_order_lifecycle_adapter_gap_is_reviewable_from_064_to_070():
     module = _load_module()
 
     report = module.build_migration_gap_report(
         repo_root=REPO_ROOT,
         base_revision="064",
-        head_revision="069",
-        expected_revision_count=5,
+        head_revision="070",
+        expected_revision_count=6,
     )
 
     checks = report["checks"]
     assert report["status"] == "ready_for_controlled_migration_preflight"
     assert checks["ready_for_controlled_migration_preflight"] is True
     assert checks["blockers"] == []
-    assert checks["chain_length"] == 5
+    assert checks["chain_length"] == 6
     assert checks["first_revision"] == "065"
-    assert checks["last_revision"] == "069"
+    assert checks["last_revision"] == "070"
     assert "non_additive_schema_ops_present" in checks["warnings"]
     assert [item["filename"] for item in report["chain"]] == [
         "2026-06-10-065_relax_strategy_runtime_live_enablement_constraints.py",
@@ -106,6 +106,7 @@ def test_incremental_live_enablement_and_order_lifecycle_adapter_gap_is_reviewab
         "2026-06-10-067_allow_created_order_status.py",
         "2026-06-10-068_create_runtime_order_lifecycle_adapter_results.py",
         "2026-06-10-069_allow_adapter_registration_failure_results.py",
+        "2026-06-10-070_add_execution_intent_local_orders_registered_status.py",
     ]
     non_additive = report["review_evidence"]["non_additive_schema_ops"]
     assert {item["operation"] for item in non_additive} == {"drop_constraint"}

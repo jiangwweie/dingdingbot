@@ -173,7 +173,7 @@ class PGExecutionIntentORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('recorded', 'pending', 'blocked', 'submitted', 'failed', "
+            "status IN ('recorded', 'local_orders_registered', 'pending', 'blocked', 'submitted', 'failed', "
             "'protecting', 'partially_protected', 'completed')",
             name="ck_execution_intents_status",
         ),

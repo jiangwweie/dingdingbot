@@ -98,8 +98,11 @@ adapter skeleton:
 - duplicate calls for the same authorization replay the stored adapter result
   instead of registering local orders again;
 - the post-registration audit state is the adapter result status
-  `registered_created_local_orders`; the source-native `ExecutionIntent`
-  remains `recorded` at this stage;
+  `registered_created_local_orders`; the adapter result itself keeps the
+  source-native `ExecutionIntent` `recorded` at this stage;
+- a separate `RuntimeExecutionIntentLocalOrderLinkage` gate may later move the
+  source-native `ExecutionIntent` to `local_orders_registered` and link only the
+  entry local `order_id`; this is not exchange submit authority;
 - it still does not submit exchange orders, call exchange, change
   ExecutionIntent status, or create withdrawal/transfer instructions.
 
@@ -121,6 +124,12 @@ result table persist fail-closed local registration failures, including the
 case where an entry local order has been registered but a protection local order
 registration fails. This records partial local state for review and duplicate
 replay; it still does not submit exchange orders or mutate `ExecutionIntent`.
+
+Migration `070_add_execution_intent_local_orders_registered_status` lets the
+`execution_intents` table represent the explicit intermediate
+`local_orders_registered` status. This is local-order linkage only; it does not
+permit `submitted` / `completed`, does not set `exchange_order_id`, and does not
+authorize exchange submit.
 
 ## Safety Boundary
 
@@ -154,5 +163,5 @@ Command:
 Result:
 
 ```text
-24 passed
+29 passed
 ```

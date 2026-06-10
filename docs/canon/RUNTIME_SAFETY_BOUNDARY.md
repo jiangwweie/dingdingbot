@@ -86,7 +86,12 @@ This document defines the runtime safety boundaries for the BRC project.
   local orders again. Even then it must not submit exchange orders, call
   exchange, call OwnerBoundedExecution, change ExecutionIntent status, or
   create withdrawal/transfer instructions. The local-registration gate is not
-  real-submit authority and does not authorize exchange placement. The submit adapter
+  real-submit authority and does not authorize exchange placement. A separate
+  RuntimeExecutionIntentLocalOrderLinkage gate may then mark the source-native
+  ExecutionIntent as `local_orders_registered` and link the entry local
+  `order_id` only after a successful adapter result and explicit linkage
+  enablement. That linkage must keep `exchange_order_id=null`, must not use
+  `submitted` / `completed`, and must not call exchange. The submit adapter
   rehearsal may summarize readiness and blockers across these gates, but it
   must not record reservations, apply attempt mutations, record protection
   plans, record OrderLifecycle handoff drafts, or call order/exchange services.

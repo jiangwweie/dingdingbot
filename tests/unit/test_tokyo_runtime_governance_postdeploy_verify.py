@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "verify_tokyo_runtime_governance_postdeploy.py"
 EXPECTED_HEAD = "0c350ca7d34db7d2db7c9ae2b99fa6c6e0ddcafe"
 LATEST_MIGRATION = (
-    "2026-06-10-069_allow_adapter_registration_failure_results.py"
+    "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
 )
 
 
@@ -60,7 +60,7 @@ def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
         if "cat .brc-release-manifest.json" in remote:
             return module.CommandResult(json.dumps(manifest), "", 0)
         if "wc -l" in remote:
-            return module.CommandResult("69\n", "", 0)
+            return module.CommandResult("70\n", "", 0)
         if "tail -1" in remote:
             return module.CommandResult(LATEST_MIGRATION + "\n", "", 0)
         if "/api/health" in remote:
@@ -104,7 +104,7 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
         deploy_root="~/brc-deploy",
         api_base="http://127.0.0.1:18080",
         expected_current_head=EXPECTED_HEAD,
-        expected_migration_count=69,
+        expected_migration_count=70,
         expected_latest_migration=LATEST_MIGRATION,
         connect_timeout_seconds=8,
         runner=_runner(),
@@ -163,7 +163,7 @@ def test_postdeploy_verifier_blocks_live_ready_true_and_unblocked_generic_post()
         deploy_root="~/brc-deploy",
         api_base="http://127.0.0.1:18080",
         expected_current_head=EXPECTED_HEAD,
-        expected_migration_count=69,
+        expected_migration_count=70,
         expected_latest_migration=LATEST_MIGRATION,
         connect_timeout_seconds=8,
         runner=_runner(live_ready=True, generic_post_status=200),

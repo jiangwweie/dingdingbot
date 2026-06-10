@@ -64,6 +64,9 @@ from src.domain.runtime_execution_local_registration_gate import (
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
 )
+from src.domain.runtime_execution_intent_local_order_linkage import (
+    RuntimeExecutionIntentLocalOrderLinkage,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -1238,6 +1241,31 @@ async def runtime_execution_order_lifecycle_adapter_result_for_authorization(
             order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
             local_order_registration_enabled=local_order_registration_enabled,
             local_registration_gate=gate,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-intent-local-order-linkages/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionIntentLocalOrderLinkage,
+)
+async def runtime_execution_intent_local_order_linkage_for_authorization(
+    authorization_id: str,
+    execution_intent_local_order_linkage_enabled: bool = False,
+) -> RuntimeExecutionIntentLocalOrderLinkage:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.intent_local_order_linkage_for_authorization(
+            authorization_id,
+            execution_intent_local_order_linkage_enabled=(
+                execution_intent_local_order_linkage_enabled
+            ),
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

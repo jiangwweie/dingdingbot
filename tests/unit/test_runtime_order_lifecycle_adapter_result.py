@@ -28,6 +28,13 @@ from src.domain.runtime_execution_local_registration_gate import (
     RuntimeExecutionLocalRegistrationGateStatus,
     build_runtime_execution_local_registration_gate,
 )
+from src.domain.runtime_execution_intent_adapter import (
+    RuntimeExecutionIntentSourceType,
+)
+from src.domain.runtime_execution_intent_local_order_linkage import (
+    RuntimeExecutionIntentLocalOrderLinkageStatus,
+    build_runtime_execution_intent_local_order_linkage,
+)
 from src.domain.runtime_execution_order_registration_draft import (
     RuntimeExecutionLocalOrderRegistrationDraft,
     RuntimeExecutionOrderRegistrationDraftPreview,
@@ -78,6 +85,26 @@ class _AdapterResultRepo:
         self.complete_calls += 1
         self.stored = result
         return result
+
+    async def get_by_authorization_id(self, authorization_id):
+        if self.stored and self.stored.authorization_id == authorization_id:
+            return self.stored
+        return None
+
+
+class _IntentRepo:
+    def __init__(self, intent: ExecutionIntent) -> None:
+        self.intent = intent
+        self.saved: list[ExecutionIntent] = []
+
+    async def get(self, intent_id: str):
+        if intent_id == self.intent.id:
+            return self.intent
+        return None
+
+    async def save(self, intent: ExecutionIntent) -> None:
+        self.intent = intent
+        self.saved.append(intent)
 
 
 def _registration_preview() -> RuntimeExecutionOrderRegistrationDraftPreview:
@@ -167,6 +194,30 @@ def _ready_gate(preview: RuntimeExecutionOrderRegistrationDraftPreview):
         local_order_registration_enabled=True,
         local_registration_action_authorized=True,
         now_ms=NOW_MS,
+    )
+
+
+def _runtime_intent(preview: RuntimeExecutionOrderRegistrationDraftPreview) -> ExecutionIntent:
+    return ExecutionIntent(
+        id=preview.execution_intent_id,
+        symbol=preview.symbol,
+        status=ExecutionIntentStatus.RECORDED,
+        source_type=RuntimeExecutionIntentSourceType.BRC_RUNTIME_ORDER_CANDIDATE.value,
+        source_id=preview.source_id,
+        source_payload={
+            "side": preview.side,
+            "candidate_order_type": "market",
+            "proposed_quantity": "0.016",
+            "intended_notional": "9.60",
+            "exchange_called": False,
+        },
+        runtime_execution_intent_draft_id="draft-1",
+        runtime_instance_id=preview.runtime_instance_id,
+        trial_binding_id=preview.semantic_ids.trial_binding_id,
+        strategy_family_id=preview.semantic_ids.strategy_family_id,
+        strategy_family_version_id=preview.semantic_ids.strategy_family_version_id,
+        signal_evaluation_id=preview.semantic_ids.signal_evaluation_id,
+        order_candidate_id=preview.semantic_ids.order_candidate_id,
     )
 
 
@@ -397,6 +448,122 @@ def test_runtime_source_native_execution_intent_remains_recorded_after_local_reg
     assert result.exchange_order_submitted is False
 
 
+def test_intent_local_order_linkage_is_disabled_by_default():
+    preview = _registration_preview()
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+    result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=preview,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        registered_orders=orders,
+        local_registration_gate_id="gate-1",
+        now_ms=NOW_MS,
+    )
+    intent = _runtime_intent(preview)
+
+    linkage = build_runtime_execution_intent_local_order_linkage(
+        intent=intent,
+        adapter_result=result,
+        execution_intent_local_order_linkage_enabled=False,
+        now_ms=NOW_MS + 1,
+    )
+
+    assert (
+        linkage.status
+        == RuntimeExecutionIntentLocalOrderLinkageStatus.LOCAL_ORDER_LINKAGE_DISABLED
+    )
+    assert "execution_intent_local_order_linkage_disabled" in linkage.blockers
+    assert linkage.execution_intent_status_changed is False
+    assert linkage.order_id_linked is False
+    assert linkage.linked_execution_intent_snapshot is None
+    assert intent.status == ExecutionIntentStatus.RECORDED
+    assert intent.order_id is None
+    assert linkage.exchange_called is False
+
+
+def test_intent_local_order_linkage_marks_local_orders_registered_without_exchange():
+    preview = _registration_preview()
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+    result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=preview,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        registered_orders=orders,
+        local_registration_gate_id="gate-1",
+        now_ms=NOW_MS,
+    )
+    intent = _runtime_intent(preview)
+
+    linkage = build_runtime_execution_intent_local_order_linkage(
+        intent=intent,
+        adapter_result=result,
+        execution_intent_local_order_linkage_enabled=True,
+        now_ms=NOW_MS + 1,
+    )
+
+    assert (
+        linkage.status
+        == RuntimeExecutionIntentLocalOrderLinkageStatus.LINKED_LOCAL_ORDERS
+    )
+    linked = linkage.linked_execution_intent_snapshot
+    assert linked is not None
+    assert linked.status == ExecutionIntentStatus.LOCAL_ORDERS_REGISTERED
+    assert linked.order_id == "runtime-order-draft-auth-1-entry"
+    assert linked.exchange_order_id is None
+    assert linked.source_payload["local_orders_registered"] is True
+    assert linked.source_payload["local_order_ids"] == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert linked.source_payload["protection_order_ids"] == [
+        "runtime-order-draft-auth-1-sl"
+    ]
+    assert linked.source_payload["exchange_called"] is False
+    assert linkage.execution_intent_status_changed is True
+    assert linkage.order_id_linked is True
+    assert linkage.exchange_order_submitted is False
+    assert linkage.exchange_called is False
+    assert linkage.not_exchange_submit_authority is True
+
+
+def test_intent_local_order_linkage_blocks_failed_local_registration_result():
+    preview = _registration_preview()
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+    result = build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
+        registration_preview=preview,
+        attempted_orders=orders,
+        registered_orders=[orders[0]],
+        failed_order=orders[1],
+        failure_reason="RuntimeError",
+        failure_message="register_failed_for_sl",
+        local_registration_gate_id="gate-1",
+        now_ms=NOW_MS,
+    )
+    intent = _runtime_intent(preview)
+
+    linkage = build_runtime_execution_intent_local_order_linkage(
+        intent=intent,
+        adapter_result=result,
+        execution_intent_local_order_linkage_enabled=True,
+        now_ms=NOW_MS + 1,
+    )
+
+    assert linkage.status == RuntimeExecutionIntentLocalOrderLinkageStatus.BLOCKED
+    assert "local_orders_not_registered" in linkage.blockers
+    assert "local_order_registration_failed" in linkage.blockers
+    assert linkage.linked_execution_intent_snapshot is None
+    assert linkage.execution_intent_status_changed is False
+    assert linkage.exchange_called is False
+
+
 def test_adapter_registration_failure_result_records_partial_local_state():
     preview = _registration_preview()
     orders = build_runtime_execution_orders_for_registration(
@@ -541,6 +708,45 @@ async def test_adapter_result_does_not_acquire_persistent_lock_without_lifecycle
     assert adapter_result_repo.acquire_calls == 0
     assert adapter_result_repo.complete_calls == 0
     assert adapter_result_repo.stored is None
+
+
+@pytest.mark.asyncio
+async def test_service_persists_local_order_linkage_after_registered_adapter_result():
+    preview = _registration_preview()
+    orders = build_runtime_execution_orders_for_registration(
+        registration_preview=preview
+    )
+    adapter_result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=preview,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        registered_orders=orders,
+        local_registration_gate_id="gate-1",
+        now_ms=NOW_MS,
+    )
+    adapter_result_repo = _AdapterResultRepo()
+    adapter_result_repo.stored = adapter_result
+    intent_repo = _IntentRepo(_runtime_intent(preview))
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        intent_repository=intent_repo,
+        order_lifecycle_adapter_result_repository=adapter_result_repo,
+    )
+
+    linkage = await service.intent_local_order_linkage_for_authorization(
+        "auth-1",
+        execution_intent_local_order_linkage_enabled=True,
+    )
+
+    assert (
+        linkage.status
+        == RuntimeExecutionIntentLocalOrderLinkageStatus.LINKED_LOCAL_ORDERS
+    )
+    assert len(intent_repo.saved) == 1
+    assert intent_repo.intent.status == ExecutionIntentStatus.LOCAL_ORDERS_REGISTERED
+    assert intent_repo.intent.order_id == "runtime-order-draft-auth-1-entry"
+    assert intent_repo.intent.exchange_order_id is None
 
 
 @pytest.mark.asyncio
@@ -858,3 +1064,77 @@ async def test_adapter_result_migration_069_allows_local_registration_failure_ro
 
     assert row[0] == "local_order_registration_failed"
     assert row[1] == 1
+
+
+@pytest.mark.asyncio
+async def test_execution_intent_migration_070_allows_local_orders_registered_status():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "execution_intent_local_orders_registered_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        def upgrade(sync_conn):
+            sync_conn.exec_driver_sql(
+                """
+                CREATE TABLE execution_intents (
+                    id VARCHAR(64) PRIMARY KEY,
+                    symbol VARCHAR(64) NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    order_id VARCHAR(64),
+                    exchange_order_id VARCHAR(128),
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL,
+                    CONSTRAINT ck_execution_intents_status CHECK (
+                        status IN ('recorded', 'pending', 'blocked', 'submitted',
+                        'failed', 'protecting', 'partially_protected', 'completed')
+                    )
+                )
+                """
+            )
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration.upgrade()
+                sync_conn.exec_driver_sql(
+                    """
+                    INSERT INTO execution_intents (
+                        id, symbol, status, order_id, exchange_order_id,
+                        created_at, updated_at
+                    ) VALUES (
+                        'intent-local-linked',
+                        'BNB/USDT:USDT',
+                        'local_orders_registered',
+                        'runtime-order-draft-auth-1-entry',
+                        NULL,
+                        1781090000000,
+                        1781090000001
+                    )
+                    """
+                )
+                row = sync_conn.exec_driver_sql(
+                    "SELECT status, order_id, exchange_order_id "
+                    "FROM execution_intents"
+                ).one()
+                return row
+            finally:
+                migration.op = old_op
+
+        row = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert row[0] == "local_orders_registered"
+    assert row[1] == "runtime-order-draft-auth-1-entry"
+    assert row[2] is None

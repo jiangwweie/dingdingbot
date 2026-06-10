@@ -42,7 +42,7 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
 
 DEFAULT_GIT_REF = "dev"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-10-069_allow_adapter_registration_failure_results.py"
+    "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
 )
 
 
@@ -316,8 +316,8 @@ def _plan_phases(
                 f"--deployed-head {q(expected_deployed_head)}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
-                "--base-revision 064 --head-revision 069 "
-                "--expected-revision-count 5",
+                "--base-revision 064 --head-revision 070 "
+                "--expected-revision-count 6",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
@@ -420,7 +420,7 @@ def _plan_phases(
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
                     f"--expected-current-head {q(target_commit)} "
-                    "--expected-migration-count 69 "
+                    "--expected-migration-count 70 "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 (

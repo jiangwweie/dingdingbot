@@ -330,8 +330,9 @@ Key facts:
   record / runtime OrderLifecycle handoff draft audit record / non-executing
   OrderLifecycle adapter preview gate / typed local order registration draft
   preview / first-real-submit local-registration gate / default-disabled
-  OrderLifecycle adapter result skeleton / submit adapter readiness preview /
-  runtime submit rehearsal aggregate** now exist in
+  OrderLifecycle adapter result skeleton / ExecutionIntent local-order linkage
+  gate / submit adapter readiness preview / runtime submit rehearsal aggregate**
+  now exist in
   tracked code as bounded bridge layers. Deployment state must be verified from
   the current release manifest and postdeploy reports, not inferred from this
   canon paragraph.
@@ -384,6 +385,10 @@ Key facts:
   explicit local-registration action authorization before any local
   `Order(status=CREATED)` registration. It is not real-submit authority and
   cannot call exchange or change ExecutionIntent status.
+  RuntimeExecutionIntentLocalOrderLinkage can separately mark a source-native
+  ExecutionIntent as `local_orders_registered` and link the entry local
+  `order_id` after a successful adapter result plus explicit linkage enablement.
+  It keeps `exchange_order_id=null` and is not exchange-submit authority.
   RuntimeExecutionAttemptReservationPreview computes attempts/budget before and
   after from StrategyRuntimeInstance boundary while keeping
   `reservation_recorded=false`, `runtime_budget_mutated=false`, and

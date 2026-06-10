@@ -85,7 +85,7 @@ def _ready_plan(tmp_path: Path) -> dict:
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-069_allow_adapter_registration_failure_results.py"
+            "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
         ),
     )
 

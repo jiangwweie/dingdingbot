@@ -66,6 +66,10 @@ from src.domain.runtime_execution_local_registration_gate import (
     RuntimeExecutionLocalRegistrationGateStatus,
     build_runtime_execution_local_registration_gate,
 )
+from src.domain.runtime_execution_intent_local_order_linkage import (
+    RuntimeExecutionIntentLocalOrderLinkage,
+    build_runtime_execution_intent_local_order_linkage,
+)
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
     RuntimeExecutionAttemptReservationPreview,
@@ -208,6 +212,12 @@ class RuntimeExecutionOrderLifecycleServicePort(Protocol):
 
 
 class RuntimeExecutionOrderLifecycleAdapterResultRepositoryPort(Protocol):
+    async def get_by_authorization_id(
+        self,
+        authorization_id: str,
+    ) -> RuntimeExecutionOrderLifecycleAdapterResult | None:
+        ...
+
     async def acquire_registration_lock(
         self,
         result: RuntimeExecutionOrderLifecycleAdapterResult,
@@ -862,6 +872,41 @@ class RuntimeExecutionIntentAdapterService:
                 .complete_registration(result)
             )
         return result
+
+    async def intent_local_order_linkage_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        execution_intent_local_order_linkage_enabled: bool = False,
+    ) -> RuntimeExecutionIntentLocalOrderLinkage:
+        if self._intent_repository is None:
+            raise RuntimeError("runtime_execution_intent_repository_unavailable")
+        if self._order_lifecycle_adapter_result_repository is None:
+            raise RuntimeError(
+                "runtime_execution_order_lifecycle_adapter_result_repository_unavailable"
+            )
+        adapter_result = await (
+            self._order_lifecycle_adapter_result_repository
+            .get_by_authorization_id(authorization_id)
+        )
+        if adapter_result is None:
+            raise ValueError("RuntimeExecutionOrderLifecycleAdapterResult not found")
+        intent = await self._intent_repository.get(adapter_result.execution_intent_id)
+        if intent is None:
+            raise ValueError("ExecutionIntent not found")
+        linkage = build_runtime_execution_intent_local_order_linkage(
+            intent=intent,
+            adapter_result=adapter_result,
+            execution_intent_local_order_linkage_enabled=(
+                execution_intent_local_order_linkage_enabled
+            ),
+            now_ms=_now_ms(),
+        )
+        if linkage.linked_execution_intent_snapshot is not None:
+            await self._intent_repository.save(
+                linkage.linked_execution_intent_snapshot
+            )
+        return linkage
 
 
 def _now_ms() -> int:
