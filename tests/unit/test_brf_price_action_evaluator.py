@@ -16,6 +16,13 @@ from src.domain.signal_evaluation import (
     SignalEvaluationDecision,
     SignalEvaluationStatus,
 )
+from src.domain.strategy_candidate_semantics import (
+    EntrySetupKind,
+    ExitPlanKind,
+    StrategyArchetype,
+    StrategyCandidateSemantics,
+    StrategyPayoffProfile,
+)
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
     FORBIDDEN_EXECUTION_FIELDS,
@@ -261,6 +268,19 @@ async def test_brf_evaluator_supplies_short_squeeze_fact_for_shadow_candidate():
         ]
         is False
     )
+    candidate_semantics = StrategyCandidateSemantics.model_validate(
+        output.evidence_payload["candidate_semantics"]
+    )
+    assert candidate_semantics.archetype == StrategyArchetype.BEAR_RALLY_FAILURE
+    assert candidate_semantics.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
+    assert candidate_semantics.entry.kind == EntrySetupKind.RALLY_FAILURE
+    assert candidate_semantics.entry.side == "short"
+    assert candidate_semantics.entry.entry_price_reference == Decimal("106")
+    assert candidate_semantics.protection.stop_price_reference == Decimal("114")
+    assert candidate_semantics.exit.plan_kind == ExitPlanKind.PARTIAL_TP_PLUS_RUNNER
+    assert candidate_semantics.exit.runner is not None
+    assert candidate_semantics.exit.runner.preserve_right_tail is True
+    assert "short_side_conservative_profile_required" in candidate_semantics.quality.warnings
     assert output.not_order is True
     assert output.not_execution_intent is True
     assert not _contains_forbidden_key(output.model_dump(mode="json"))
