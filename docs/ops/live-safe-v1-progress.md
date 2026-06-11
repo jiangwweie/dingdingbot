@@ -3837,3 +3837,51 @@ Use this file for session progress and handoff notes.
     call exchange, mutate attempts/budget, withdraw, or transfer;
   - executable first-real-submit, exchange order placement, OrderLifecycle
     submit, withdrawal, and transfer remain Owner-authorized-only.
+
+## 2026-06-12 (Wake-up Packet Tokyo Deploy + Remote Handoff Evidence)
+
+- Tokyo git deploy:
+  - deployed branch head `e70e318c` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-e70e318c-20260612Twakeup-packet`;
+  - `/home/ubuntu/brc-deploy/app/current` now points to that release;
+  - deploy execution status: `applied`;
+  - command count: `16/16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - exchange called: `false`;
+  - execution intent created: `false`;
+  - order created: `false`;
+  - OrderLifecycle called: `false`;
+  - secrets read by Codex: `false`.
+- Remote observation status at handoff-packet build time:
+  - source report directory:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-190ac471`;
+  - status: `waiting_for_signal`;
+  - latest iteration: `10`;
+  - iterations remaining: `67`;
+  - stop reason: `running`;
+  - prepared authorization ID: `null`;
+  - shadow candidate ID: `null`;
+  - forbidden effects: `[]`.
+- Remote packets generated from current deployed release:
+  - operator packet:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-190ac471/operator-packet-e70e318c.json`;
+  - wake-up packet:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-190ac471/wakeup-packet-e70e318c.json`.
+- Remote wake-up packet conclusion:
+  - status: `owner_sleep_safe_observation_running`;
+  - owner attention: `no_owner_action_needed_now`;
+  - next step: `continue_active_runtime_observation`;
+  - active runtime count: `2`;
+  - runtime ready signal count: `0`;
+  - strategy-group would-enter signal count: `0`;
+  - strategy-group no-action signal count: `8`;
+  - allowed while Owner is away: `continue_active_runtime_observation`;
+  - source forbidden effects: `[]`.
+- Safety:
+  - this deployment and packet generation did not create shadow candidates,
+    prepare authorization records, ExecutionIntents, orders, OrderLifecycle
+    submits, exchange writes, withdrawals, or transfers;
+  - first-real-submit remains blocked until a separate explicit Owner action
+    authorization and live submit evidence review.
