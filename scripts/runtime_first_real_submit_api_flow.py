@@ -251,6 +251,8 @@ class FirstRealSubmitApiFlow:
         intent_body = _body(intent)
         self.state.remember("execution_intent_id", intent_body.get("id"))
 
+        self._record_protection_plan()
+
         intent_id = self._required_id("execution_intent_id")
         if not intent_id:
             return
@@ -263,9 +265,56 @@ class FirstRealSubmitApiFlow:
         authorization_body = _body(authorization)
         self.state.remember("authorization_id", authorization_body.get("authorization_id"))
 
-        self._record_evidence_preparation()
+        self._record_evidence_preparation(collect_body_blockers=False)
 
-    def _record_evidence_preparation(self) -> None:
+    def _hydrate_authorization_context(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        plan = self._step(
+            "hydrate_controlled_submit_plan",
+            "GET",
+            (
+                "/api/trading-console/"
+                "runtime-execution-controlled-submit-plans/"
+                f"authorizations/{authorization_id}"
+            ),
+        )
+        body = _body(plan)
+        self.state.remember("execution_intent_id", body.get("execution_intent_id"))
+        self.state.remember(
+            "runtime_execution_intent_draft_id",
+            body.get("runtime_execution_intent_draft_id"),
+        )
+        semantic_ids = body.get("semantic_ids")
+        if isinstance(semantic_ids, dict):
+            self.state.merge_ids(
+                {
+                    "order_candidate_id": semantic_ids.get("order_candidate_id"),
+                    "runtime_instance_id": semantic_ids.get("runtime_instance_id"),
+                    "signal_evaluation_id": semantic_ids.get("signal_evaluation_id"),
+                }
+            )
+        self.state.remember("order_candidate_id", body.get("source_id"))
+
+    def _record_protection_plan(self) -> None:
+        intent_id = self._required_id("execution_intent_id")
+        if not intent_id:
+            return
+        protection_plan = self._step(
+            "record_protection_plan",
+            "POST",
+            (
+                "/api/trading-console/"
+                f"runtime-execution-protection-plans/intents/{intent_id}"
+            ),
+        )
+        self.state.remember(
+            "protection_plan_id",
+            _body(protection_plan).get("protection_plan_id"),
+        )
+
+    def _record_evidence_preparation(self, *, collect_body_blockers: bool = True) -> None:
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
             return
@@ -285,14 +334,32 @@ class FirstRealSubmitApiFlow:
                     self._config.real_adapter_boundary_implemented
                 ),
             },
+            collect_body_blockers=collect_body_blockers,
         )
         body = _body(preparation)
         self.state.merge_ids(body.get("available_evidence_ids"))
         self.state.merge_ids(body.get("prepared_evidence_ids"))
+        if self.state.ids.get("attempt_outcome_policy_id"):
+            reservation_id = f"runtime-attempt-reservation-{authorization_id}"
+            self.state.remember("reservation_id", reservation_id)
+            self.state.remember(
+                "attempt_mutation_id",
+                f"runtime-attempt-mutation-{reservation_id}",
+            )
 
     def _record_attempt_reservation_and_policy(self) -> None:
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
+            return
+        if self.state.ids.get("attempt_outcome_policy_id"):
+            self.state.add_warnings(
+                [
+                    (
+                        "existing_attempt_outcome_policy_reused_"
+                        "no_new_attempt_mutation"
+                    )
+                ]
+            )
             return
         reservation = self._step(
             "record_attempt_reservation",
@@ -328,7 +395,7 @@ class FirstRealSubmitApiFlow:
             query={"outcome_kind": self._config.outcome_kind},
         )
         self.state.remember("attempt_outcome_policy_id", _body(policy).get("policy_id"))
-        self._record_evidence_preparation()
+        self._record_evidence_preparation(collect_body_blockers=False)
 
     def _record_order_lifecycle_handoff(self) -> None:
         authorization_id = self._required_id("authorization_id")
@@ -350,6 +417,15 @@ class FirstRealSubmitApiFlow:
             return
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
+            return
+        self._hydrate_authorization_context()
+        if self.state.blockers:
+            return
+        self._record_protection_plan()
+        if self.state.blockers:
+            return
+        self._record_evidence_preparation(collect_body_blockers=False)
+        if any(blocker.endswith("_http_404") for blocker in self.state.blockers):
             return
         self._record_attempt_reservation_and_policy()
         self._record_order_lifecycle_handoff()
@@ -715,6 +791,7 @@ class FirstRealSubmitApiFlow:
         *,
         query: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
+        collect_body_blockers: bool = True,
     ) -> dict[str, Any]:
         result = self._client.request_json(method, path, query=query, body=body)
         body_value = _body(result)
@@ -732,8 +809,9 @@ class FirstRealSubmitApiFlow:
         self.state.steps.append(record)
         if result.get("http_status", 0) >= 300 or result.get("error"):
             self.state.add_blockers([f"{name}_http_{result.get('http_status')}"])
-        if isinstance(body_value, dict):
+        if isinstance(body_value, dict) and collect_body_blockers:
             self.state.add_blockers(body_value.get("blockers"))
+        if isinstance(body_value, dict):
             self.state.add_warnings(body_value.get("warnings"))
         return result
 

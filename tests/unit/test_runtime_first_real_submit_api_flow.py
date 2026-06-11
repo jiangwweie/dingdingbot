@@ -11,8 +11,9 @@ from scripts.runtime_first_real_submit_api_flow import (
 
 
 class _FakeClient:
-    def __init__(self) -> None:
+    def __init__(self, *, existing_attempt_policy: bool = False) -> None:
         self.calls: list[dict] = []
+        self.existing_attempt_policy = existing_attempt_policy
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -27,18 +28,54 @@ class _FakeClient:
             return {"http_status": 200, "body": {"draft_id": "draft-1", "status": "ready_for_intent_creation"}}
         if "runtime-execution-intents/drafts" in path:
             return {"http_status": 200, "body": {"id": "intent-1", "status": "recorded"}}
+        if "runtime-execution-controlled-submit-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "execution_intent_id": "intent-1",
+                    "runtime_execution_intent_draft_id": "draft-1",
+                    "source_id": "candidate-1",
+                    "semantic_ids": {
+                        "order_candidate_id": "candidate-1",
+                        "runtime_instance_id": "runtime-1",
+                        "signal_evaluation_id": "signal-1",
+                    },
+                    "status": "ready_for_controlled_submit_adapter",
+                },
+            }
+        if "runtime-execution-protection-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "protection_plan_id": "protection-plan-1",
+                    "status": "ready_for_submit_adapter",
+                    "order_created": False,
+                    "exchange_called": False,
+                },
+            }
         if "runtime-execution-submit-authorizations" in path:
             return {"http_status": 200, "body": {"authorization_id": "auth-1", "status": "approved_pending_controlled_submit"}}
         if "runtime-execution-first-real-submit-evidence-preparations" in path:
+            available = {
+                "trusted_submit_fact_snapshot_id": "facts-1",
+                "submit_idempotency_policy_id": "idem-1",
+                "protection_creation_failure_policy_id": "protect-fail-1",
+            }
+            if self.existing_attempt_policy:
+                available["attempt_outcome_policy_id"] = (
+                    "runtime-attempt-outcome-policy-"
+                    "runtime-attempt-reservation-auth-1-"
+                    "entry_filled_protection_creation_failed"
+                )
             return {
                 "http_status": 200,
                 "body": {
                     "status": "prepared_packet_blocked",
-                    "available_evidence_ids": {
-                        "trusted_submit_fact_snapshot_id": "facts-1",
-                        "submit_idempotency_policy_id": "idem-1",
-                        "protection_creation_failure_policy_id": "protect-fail-1",
-                    },
+                    "available_evidence_ids": available,
+                    "blockers": [
+                        "first_real_submit_packet_unavailable:"
+                        "runtimeexecutionorderlifecycleadapterresult_not_found"
+                    ],
                 },
             }
         if "runtime-execution-attempt-reservations" in path:
@@ -92,6 +129,18 @@ def test_prepare_from_order_candidate_stops_before_local_registration():
     assert report["blockers"] == []
     assert report["ids"]["authorization_id"] == "auth-1"
     paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-protection-plans" in path for path in paths)
+    protection_index = next(
+        index
+        for index, path in enumerate(paths)
+        if "runtime-execution-protection-plans" in path
+    )
+    authorization_index = next(
+        index
+        for index, path in enumerate(paths)
+        if "runtime-execution-submit-authorizations" in path
+    )
+    assert protection_index < authorization_index
     assert not any("attempt-mutations" in path for path in paths)
     assert not any("attempt-outcome-policies" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
@@ -115,8 +164,34 @@ def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
     assert report["ids"]["local_registration_enablement_decision_id"] == "local-enable-1"
     assert report["ids"]["exchange_submit_enablement_decision_id"] == "exchange-enable-1"
     paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-controlled-submit-plans" in path for path in paths)
+    assert any("runtime-execution-protection-plans" in path for path in paths)
     assert any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
+
+
+def test_arm_existing_authorization_reuses_existing_attempt_policy():
+    client = _FakeClient(existing_attempt_policy=True)
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            authorization_id="auth-1",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["reservation_id"] == "runtime-attempt-reservation-auth-1"
+    assert (
+        "existing_attempt_outcome_policy_reused_no_new_attempt_mutation"
+        in report["warnings"]
+    )
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-controlled-submit-plans" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
 
 
 def test_execute_requires_exact_env_confirmation(monkeypatch):

@@ -32,7 +32,7 @@ class PgRuntimeExecutionProtectionPlanRepository:
         plan: RuntimeExecutionProtectionPlan,
     ) -> RuntimeExecutionProtectionPlan:
         async with self._session_maker() as session:
-            session.add(self._to_orm(plan))
+            await session.merge(self._to_orm(plan))
             await session.commit()
         return plan
 
