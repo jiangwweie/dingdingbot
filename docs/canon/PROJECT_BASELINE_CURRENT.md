@@ -511,7 +511,11 @@ Key facts:
   `packet_ready_for_owner_decision=true` is not confused with
   `ready_for_first_real_submit=true`; local registration readiness, exchange
   pre-execution readiness, and true exchange-submit action readiness remain
-  separate facts. That packet also includes post-submit budget-settlement
+  separate facts. When deployment and non-owner prerequisites are ready but
+  Owner live-runtime / real-submit authorization is still missing, it can
+  surface `ready_for_owner_first_real_submit_decision` while still reporting
+  `ready_for_first_real_submit=false`. That packet also includes
+  post-submit budget-settlement
   persistence-path evidence when the repository/migration path is available;
   this is machine evidence for post-submit closure, not new exchange authority
   and not proof that a post-submit settlement already exists.

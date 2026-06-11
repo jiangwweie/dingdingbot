@@ -97,6 +97,44 @@ async def test_owner_packet_blocks_when_deploy_and_owner_auth_are_missing():
 
 
 @pytest.mark.asyncio
+async def test_owner_packet_reaches_owner_review_when_deployed_and_only_owner_authorization_is_missing():
+    module = _load_module()
+    pre_live = _load_pre_live_module()
+    pre_live_packet = await pre_live.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=False,
+        owner_live_runtime_enablement_authorized=False,
+        exercise_local_registration_pre_exchange=True,
+        exercise_exchange_submit_adapter_pre_execution=True,
+        runner=_runner(pre_live),
+    )
+
+    packet = module.build_first_real_submit_owner_packet(
+        pre_live_packet=pre_live_packet
+    )
+
+    assert packet["status"] == "ready_for_owner_first_real_submit_decision"
+    assert packet["checks"]["packet_ready_for_owner_decision"] is True
+    assert packet["checks"]["ready_for_first_real_submit"] is False
+    assert packet["checks"]["blockers"] == []
+    assert packet["remaining_gates"]["owner_decision_items"] == [
+        "Owner live-runtime enablement authorization",
+        "Owner real-submit authorization",
+    ]
+    assert packet["remaining_gates"]["non_owner_live_enablement_blockers"] == []
+    assert packet["first_real_submit_action_boundary"][
+        "ready_for_first_real_submit"
+    ] is False
+    assert "first_real_submit_action_not_ready" in (
+        packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
+    )
+    assert packet["first_real_submit_action_boundary"][
+        "does_not_authorize_live_action"
+    ] is True
+    assert packet["safety_invariants"]["exchange_called"] is False
+
+
+@pytest.mark.asyncio
 async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present():
     module = _load_module()
     pre_live = _load_pre_live_module()

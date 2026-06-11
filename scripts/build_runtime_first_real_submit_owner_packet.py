@@ -141,7 +141,8 @@ def build_first_real_submit_owner_packet(
         if blocker not in {OWNER_REAL_SUBMIT_AUTH_MISSING}
     ]
     non_owner_live_enablement_blockers = _non_owner_live_enablement_blockers(
-        live_enablement_blockers
+        live_enablement_blockers=live_enablement_blockers,
+        owner_gate=owner_gate,
     )
 
     technical_ready = (
@@ -434,19 +435,30 @@ def _owner_decision_items(
 
 
 def _non_owner_live_enablement_blockers(
+    *,
     live_enablement_blockers: list[str],
+    owner_gate: dict[str, Any],
 ) -> list[str]:
     owner_live_blockers = {
         OWNER_LIVE_RUNTIME_AUTH_MISSING,
         OWNER_REAL_SUBMIT_AUTH_MISSING,
     }
-    return _dedupe(
-        [
-            blocker
-            for blocker in live_enablement_blockers
-            if blocker not in owner_live_blockers
-        ]
-    )
+    if owner_gate.get("owner_real_submit_authorized") is not True:
+        owner_live_blockers.update(
+            {
+                "promotion_gate_first_real_submit_explicit_owner_real_submit_authorization_missing",
+                "promotion_gate_first_real_submit_owner_real_submit_authorization_id_missing",
+            }
+        )
+
+    non_owner = [
+        blocker
+        for blocker in live_enablement_blockers
+        if blocker not in owner_live_blockers
+    ]
+    if non_owner == ["promotion_gate_not_ready_for_first_real_submit"]:
+        return []
+    return _dedupe(non_owner)
 
 
 def _exchange_submit_action_blockers(
