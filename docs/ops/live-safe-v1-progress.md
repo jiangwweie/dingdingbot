@@ -2177,3 +2177,68 @@ Use this file for session progress and handoff notes.
   strategy / signal / order-candidate IDs, but `execution_intent_id` is still
   missing from this recovered local order chain, so the semantic review packet
   reports `runtime_semantic_trace_incomplete`.
+
+## 2026-06-11 (Runtime Closed Review Next-Attempt Gate)
+
+- Added and pushed `program/live-safe-v1` commit
+  `3ba4158f6559389eb53bf1f8d1fd893242c38d26`.
+- The change connects closed-trade review state to the Trading Console
+  post-action / next-attempt backend gate:
+  - `closed_from_pg_exit_order` with runtime live-lifecycle evidence is now
+    treated as `closed_trade_review_required`;
+  - only `brc_live_lifecycle_reviews.lifecycle_status=closed_reviewed` plus
+    `review_status=closed_reviewed` clears the next attempt to
+    `clear_for_preflight`;
+  - legacy historical closed one-shot orders without runtime live-lifecycle
+    review evidence remain uncoupled from the new runtime review gate.
+- Safety result:
+  - no order, ExecutionIntent, OrderLifecycle, exchange, withdrawal, transfer,
+    or runtime-budget mutation path was added;
+  - frontend state continues to be backend-owned and cannot infer submit
+    permission from a filled TP/SL alone.
+- Verification:
+  - `python3 -m pytest -q tests/unit/test_trading_console_readmodels.py`
+    passed with `48 passed`;
+  - `python3 -m pytest -q tests/unit/test_budgeted_autonomy.py tests/unit/test_runtime_closed_trade_lifecycle_review.py tests/unit/test_runtime_semantic_review_packet.py tests/unit/test_right_tail_review.py`
+    passed with `19 passed`;
+  - compile and `git diff --check` passed.
+- Deployment status: Tokyo is still deployed at
+  `d0bcce7c9dea5824a83cd3b3820f14896353dedb`
+  (`brc-runtime-governance-d0bcce7c-20260611T0920Z`) and health is still
+  `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+  This gate has not yet been deployed because the server is not in active
+  external use and per-stage deploys are not required.
+
+## 2026-06-11 (Strategy Signal -> Shadow Candidate Planning v1 Verified)
+
+- Current `program/live-safe-v1` code already contains the B0 strategy signal
+  planning bridge:
+  `RuntimeStrategySignalEvaluationService -> StrategyEvaluationContext ->
+  StrategySemanticsShadowBindingService -> shadow SignalEvaluation /
+  OrderCandidate`, with optional scheduler handoff and explicit shadow-plan
+  API/CLI entry points.
+- Verified behavior:
+  - CPM / BRF evaluator outputs must pass the B0 semantics gate before shadow
+    candidate creation;
+  - `READY_FOR_SEMANTIC_BINDING` is the only evaluator status that may create
+    shadow records;
+  - trusted runtime fact overlay can replace caller-supplied account and active
+    position facts; missing trusted facts block candidate planning;
+  - generated proposals include entry price, structure/ATR stop reference,
+    runtime notional/leverage/loss preview, TP1 1R partial, and runner/trailing
+    metadata for CPM long / BRF short style planning;
+  - RMR and FCO remain non-trading / backlog semantics and do not become
+    execution authority.
+- Verification:
+  - `python3 -m pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_strategy_signal_evaluation_service.py tests/unit/test_b0_strategy_runtime_fact_overlay.py tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py tests/unit/test_strategy_observation_shadow_planning_rehearsal.py`
+    passed with `39 passed`;
+  - `python3 scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json`
+    returned `status=rehearsal_passed`, created one shadow SignalEvaluation and
+    one shadow OrderCandidate, and reported no forbidden execution flags.
+- This stage did not create ExecutionIntent records, orders, OrderLifecycle
+  calls, exchange calls, withdrawal/transfer instructions, or runtime-budget
+  mutations.
+- Current next mainline gap: use the verified shadow planning path and reviewed
+  first live attempt state to decide the next controlled runtime attempt path,
+  including whether to deploy the latest gate code before the next Tokyo
+  rehearsal/live attempt.
