@@ -415,6 +415,95 @@ class StartupReconciliationTrustedSubmitFactReader:
         )
 
 
+class ReconciliationReadModelTrustedSubmitFactReader:
+    """Read symbol-level reconciliation status from the persisted read model."""
+
+    def __init__(
+        self,
+        read_model_repository: Any,
+        *,
+        max_age_ms: int = DEFAULT_LOCAL_FACT_MAX_AGE_MS,
+    ) -> None:
+        self._read_model_repository = read_model_repository
+        self._max_age_ms = max_age_ms
+
+    async def read_trusted_submit_fact_source(
+        self,
+        *,
+        key: str,
+        symbol: str,
+        now_ms: int,
+        **_kwargs: Any,
+    ) -> RuntimeExecutionTrustedSubmitFactSource:
+        get_recent_reports = getattr(
+            self._read_model_repository,
+            "get_recent_reports",
+            None,
+        )
+        if not callable(get_recent_reports):
+            return _missing_source(
+                key,
+                source_id="reconciliation_read_model_repository_unavailable",
+                source_type="reconciliation_read_model",
+                now_ms=now_ms,
+                metadata={"reason": "get_recent_reports_unavailable"},
+            )
+        try:
+            reports = await get_recent_reports(symbol=symbol, limit=1)
+        except Exception as exc:  # pragma: no cover - repository owned.
+            return _missing_source(
+                key,
+                source_id="reconciliation_read_model_read_failed",
+                source_type="reconciliation_read_model",
+                now_ms=now_ms,
+                metadata={"read_error": type(exc).__name__},
+            )
+        if not reports:
+            return _missing_source(
+                key,
+                source_id=f"reconciliation-readmodel:{symbol}:missing",
+                source_type="reconciliation_read_model",
+                now_ms=now_ms,
+                metadata={"reason": "reconciliation_read_model_report_not_found"},
+            )
+
+        report = reports[0]
+        checked_at_ms = _int_or_none(_get(report, "checked_at_ms"))
+        clean = _reconciliation_report_is_clean(report)
+        freshness = RuntimeExecutionTrustedFactFreshness.FRESH
+        if checked_at_ms is None:
+            freshness = RuntimeExecutionTrustedFactFreshness.MISSING
+        elif not clean:
+            freshness = RuntimeExecutionTrustedFactFreshness.STALE
+
+        return RuntimeExecutionTrustedSubmitFactSource(
+            key=key,
+            source_id=str(
+                _get(report, "report_id") or f"reconciliation-readmodel:{symbol}"
+            ),
+            source_type="reconciliation_read_model",
+            freshness=freshness,
+            observed_at_ms=checked_at_ms,
+            max_age_ms=(
+                self._max_age_ms
+                if freshness == RuntimeExecutionTrustedFactFreshness.FRESH
+                else None
+            ),
+            metadata={
+                "symbol": symbol,
+                "clean": clean,
+                "is_consistent": bool(_get(report, "is_consistent")),
+                "total_count": _int_or_none(_get(report, "total_count")),
+                "severe_count": _int_or_none(_get(report, "severe_count")),
+                "warning_count": _int_or_none(_get(report, "warning_count")),
+                "is_fetch_failure": bool(_get(report, "is_fetch_failure")),
+                "fetch_failure_reason": _get(report, "fetch_failure_reason"),
+                "runtime_instance_id": _get(report, "runtime_instance_id"),
+                "order_candidate_id": _get(report, "order_candidate_id"),
+            },
+        )
+
+
 def _fresh_source(
     key: str,
     *,
@@ -543,3 +632,12 @@ def _summary_is_clean(summary: Any) -> bool:
     if discrepancy_count is not None:
         return discrepancy_count == 0
     return False
+
+
+def _reconciliation_report_is_clean(report: Any) -> bool:
+    return (
+        bool(_get(report, "is_consistent"))
+        and not bool(_get(report, "is_fetch_failure"))
+        and int(_get(report, "severe_count") or 0) == 0
+        and int(_get(report, "warning_count") or 0) == 0
+    )

@@ -7,6 +7,7 @@ from src.application.runtime_execution_trusted_submit_fact_readers import (
     ConfiguredMarketRuleTrustedSubmitFactReader,
     LocalActivePositionTrustedSubmitFactReader,
     LocalOpenOrderTrustedSubmitFactReader,
+    ReconciliationReadModelTrustedSubmitFactReader,
     RuntimeProtectionPlanTrustedSubmitFactReader,
     StartupReconciliationTrustedSubmitFactReader,
     TrialReadinessAccountTrustedSubmitFactReader,
@@ -29,6 +30,7 @@ from src.domain.runtime_execution_trusted_submit_facts import (
     RuntimeExecutionTrustedSubmitFactsStatus,
     RuntimeExecutionTrustedSubmitFactSource,
 )
+from src.infrastructure.repository_ports import ReconciliationReadModelReport
 
 
 NOW_MS = 1781000000000
@@ -164,6 +166,42 @@ class _ProtectionPlanRepo:
             blockers=[],
             created_at_ms=NOW_MS - 50,
         )
+
+
+class _ReconciliationReadModelRepo:
+    def __init__(self, reports=None) -> None:
+        self.reports = list(reports or [])
+        self.calls = []
+
+    async def get_recent_reports(self, *, symbol, limit):
+        self.calls.append({"symbol": symbol, "limit": limit})
+        return self.reports[:limit]
+
+
+def _reconciliation_report(
+    *,
+    report_id: str = "reconciliation-report-1",
+    symbol: str = "BNB/USDT:USDT",
+    checked_at_ms: int | None = NOW_MS - 50,
+    is_consistent: bool = True,
+    severe_count: int = 0,
+    warning_count: int = 0,
+    is_fetch_failure: bool = False,
+):
+    return ReconciliationReadModelReport(
+        report_id=report_id,
+        symbol=symbol,
+        checked_at_ms=checked_at_ms,
+        is_consistent=is_consistent,
+        total_count=severe_count + warning_count,
+        severe_count=severe_count,
+        warning_count=warning_count,
+        is_fetch_failure=is_fetch_failure,
+        fetch_failure_reason="fetch failed" if is_fetch_failure else None,
+        runtime_instance_id="runtime-1",
+        order_candidate_id="candidate-1",
+        created_at=NOW_MS - 40,
+    )
 
 
 def _controlled_submit_plan():
@@ -366,6 +404,118 @@ async def test_trusted_submit_facts_assembler_uses_local_readonly_sources():
     )
     assert snapshot.exchange_called is False
     assert snapshot.order_lifecycle_called is False
+
+
+async def test_reconciliation_read_model_reader_marks_clean_report_fresh():
+    repo = _ReconciliationReadModelRepo([_reconciliation_report()])
+    reader = ReconciliationReadModelTrustedSubmitFactReader(repo)
+
+    source = await reader.read_trusted_submit_fact_source(
+        key="reconciliation",
+        execution_intent_id="intent-1",
+        runtime_instance_id="runtime-1",
+        order_candidate_id="candidate-1",
+        symbol="BNB/USDT:USDT",
+        side="long",
+        now_ms=NOW_MS,
+    )
+
+    assert repo.calls == [{"symbol": "BNB/USDT:USDT", "limit": 1}]
+    assert source.source_id == "reconciliation-report-1"
+    assert source.source_type == "reconciliation_read_model"
+    assert source.freshness == RuntimeExecutionTrustedFactFreshness.FRESH
+    assert source.observed_at_ms == NOW_MS - 50
+    assert source.metadata["clean"] is True
+    assert source.metadata["runtime_instance_id"] == "runtime-1"
+    assert source.exchange_called is False
+
+
+async def test_reconciliation_read_model_reader_blocks_missing_report():
+    reader = ReconciliationReadModelTrustedSubmitFactReader(
+        _ReconciliationReadModelRepo([]),
+    )
+
+    source = await reader.read_trusted_submit_fact_source(
+        key="reconciliation",
+        execution_intent_id="intent-1",
+        runtime_instance_id="runtime-1",
+        order_candidate_id="candidate-1",
+        symbol="BNB/USDT:USDT",
+        side="long",
+        now_ms=NOW_MS,
+    )
+
+    assert source.freshness == RuntimeExecutionTrustedFactFreshness.MISSING
+    assert source.source_id == "reconciliation-readmodel:BNB/USDT:USDT:missing"
+    assert source.metadata["reason"] == "reconciliation_read_model_report_not_found"
+    assert source.exchange_called is False
+
+
+async def test_reconciliation_read_model_reader_marks_unclean_report_stale():
+    reader = ReconciliationReadModelTrustedSubmitFactReader(
+        _ReconciliationReadModelRepo(
+            [_reconciliation_report(is_consistent=False, warning_count=1)],
+        ),
+    )
+
+    source = await reader.read_trusted_submit_fact_source(
+        key="reconciliation",
+        execution_intent_id="intent-1",
+        runtime_instance_id="runtime-1",
+        order_candidate_id="candidate-1",
+        symbol="BNB/USDT:USDT",
+        side="long",
+        now_ms=NOW_MS,
+    )
+
+    assert source.freshness == RuntimeExecutionTrustedFactFreshness.STALE
+    assert source.metadata["clean"] is False
+    assert source.metadata["warning_count"] == 1
+    assert source.exchange_called is False
+
+
+async def test_trusted_submit_facts_assembler_uses_reconciliation_read_model():
+    service = RuntimeExecutionTrustedSubmitFactsAssemblyService(
+        account_fact_reader=TrialReadinessAccountTrustedSubmitFactReader(
+            _AccountFactsSource(),
+        ),
+        active_position_reader=LocalActivePositionTrustedSubmitFactReader(
+            _PositionSource(),
+        ),
+        open_order_reader=LocalOpenOrderTrustedSubmitFactReader(_OrderSource()),
+        protection_state_reader=RuntimeProtectionPlanTrustedSubmitFactReader(
+            _ProtectionPlanRepo(),
+        ),
+        market_rule_reader=ConfiguredMarketRuleTrustedSubmitFactReader(
+            {
+                "BNB/USDT:USDT": {
+                    "source_id": "configured-market-rule-bnb",
+                    "source_type": "configured_market_rule_snapshot",
+                    "observed_at_ms": NOW_MS - 50,
+                    "min_qty": "0.001",
+                    "tick_size": "0.01",
+                    "quantity_precision": "0.001",
+                }
+            }
+        ),
+        reconciliation_reader=ReconciliationReadModelTrustedSubmitFactReader(
+            _ReconciliationReadModelRepo([_reconciliation_report()]),
+        ),
+    )
+
+    snapshot = await service.assemble_snapshot_for_controlled_submit_plan(
+        plan=_controlled_submit_plan(),
+        now_ms=NOW_MS,
+    )
+
+    assert snapshot.status == (
+        RuntimeExecutionTrustedSubmitFactsStatus
+        .READY_FOR_FIRST_REAL_SUBMIT_CONFIRMATION
+    )
+    assert snapshot.blockers == []
+    assert snapshot.reconciliation_source is not None
+    assert snapshot.reconciliation_source.source_type == "reconciliation_read_model"
+    assert snapshot.reconciliation_source.metadata["clean"] is True
 
 
 async def test_trusted_submit_facts_local_reader_missing_market_rule_blocks():

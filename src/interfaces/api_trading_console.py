@@ -3283,8 +3283,8 @@ def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
         ConfiguredMarketRuleTrustedSubmitFactReader,
         LocalActivePositionTrustedSubmitFactReader,
         LocalOpenOrderTrustedSubmitFactReader,
+        ReconciliationReadModelTrustedSubmitFactReader,
         RuntimeProtectionPlanTrustedSubmitFactReader,
-        StartupReconciliationTrustedSubmitFactReader,
         TrialReadinessAccountTrustedSubmitFactReader,
     )
     from src.application.runtime_execution_trusted_submit_facts_service import (
@@ -3295,6 +3295,9 @@ def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
     )
     from src.infrastructure.pg_runtime_execution_submit_prerequisite_repositories import (
         PgRuntimeExecutionTrustedSubmitFactsRepository,
+    )
+    from src.infrastructure.pg_reconciliation_read_model_repository import (
+        PgReconciliationReadModelRepository,
     )
     from src.interfaces import api as api_module
 
@@ -3332,8 +3335,8 @@ def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
         market_rule_reader=ConfiguredMarketRuleTrustedSubmitFactReader(
             market_rule_provider,
         ),
-        reconciliation_reader=StartupReconciliationTrustedSubmitFactReader(
-            lambda: getattr(api_module, "_startup_reconciliation_summary", None),
+        reconciliation_reader=ReconciliationReadModelTrustedSubmitFactReader(
+            PgReconciliationReadModelRepository(),
         ),
     )
 
