@@ -515,6 +515,12 @@ Key facts:
   persistence-path evidence when the repository/migration path is available;
   this is machine evidence for post-submit closure, not new exchange authority
   and not proof that a post-submit settlement already exists.
+  `scripts/build_runtime_first_real_submit_final_review_packet.py` now joins a
+  postdeploy acceptance packet with the Owner first-real-submit packet into one
+  read-only final review surface. It checks current-head consistency,
+  postdeploy acceptance, owner-packet/action readiness, and forbidden
+  side-effect flags; it does not deploy, run migrations, start runtimes,
+  register orders, call OrderLifecycle, call exchange, or authorize submit.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

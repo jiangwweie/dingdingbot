@@ -76,6 +76,11 @@ This document defines the runtime safety boundaries for the BRC project.
   post-submit settlement persistence path exists
   (`runtime-post-submit-budget-settlement-persistence-084`), but it must not
   require a prior settlement record before the first real submit.
+  The first-real-submit final review packet may aggregate postdeploy acceptance
+  evidence and Owner decision evidence for human review, but it is still
+  read-only evidence. It must not deploy, run migrations, start runtimes,
+  register local orders, call OrderLifecycle, call exchange, create
+  ExecutionIntent records, or authorize submit.
   The runtime protection plan preview/record is runtime-native and must not
   reuse one-shot OwnerBounded authorization semantics as hidden execution
   authority, create orders, or create exchange payloads. The submit adapter
@@ -192,6 +197,9 @@ This document defines the runtime safety boundaries for the BRC project.
   flag, gateway readiness, recovery state, idempotency policy,
   protection-failure policy, Owner authorization, deployment evidence, and
   scoped action authorization all validate.
+- A first-real-submit final review packet can say that deployment evidence and
+  Owner/action evidence are mutually consistent for review; it is not the
+  action point, not exchange enablement, and not real-submit authorization.
 - Documentation work must not run the project or call the exchange unless the
   active task explicitly includes bounded read-only verification.
 - Real live trading / real-funds order placement requires separate explicit
