@@ -6,6 +6,7 @@ from scripts.runtime_first_real_submit_api_flow import (
     APPROVAL_ENV,
     FirstRealSubmitApiFlow,
     FlowConfig,
+    _load_env_file,
     _approval_value,
 )
 
@@ -157,6 +158,14 @@ class _FakeClient:
         if "runtime-execution-first-real-submit-enablement-packets" in path:
             return {"http_status": 200, "body": {"status": "ready_for_owner_final_review"}}
         if "runtime-execution-first-real-submit-actions" in path:
+            if query and query.get("owner_confirmed_for_first_real_submit_action") is False:
+                return {
+                    "http_status": 200,
+                    "body": {
+                        "execution_result_id": "exec-disabled-1",
+                        "status": "exchange_submit_execution_disabled",
+                    },
+                }
             return {"http_status": 200, "body": {"execution_result_id": "exec-1", "status": "exchange_submit_orders_submitted"}}
         if "runtime-execution-submit-outcome-reviews" in path:
             return {"http_status": 200, "body": {"review_id": "review-1", "status": "ready_for_attempt_outcome_policy"}}
@@ -301,6 +310,34 @@ def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
     assert not any("first-real-submit-actions" in path for path in paths)
 
 
+def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit():
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            preview_disabled_first_real_submit_action=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["disabled_first_real_submit_execution_result_id"] == (
+        "exec-disabled-1"
+    )
+    action_calls = [
+        call
+        for call in client.calls
+        if "runtime-execution-first-real-submit-actions" in call["path"]
+    ]
+    assert len(action_calls) == 1
+    assert action_calls[0]["query"]["owner_confirmed_for_first_real_submit_action"] is False
+    assert report["ready_for_real_submit_action"] is False
+
+
 def test_arm_blocks_before_attempt_mutation_when_submit_facts_are_stale():
     client = _FakeClient(
         evidence_blockers=[
@@ -398,3 +435,22 @@ def test_execute_calls_real_submit_when_env_guard_matches(monkeypatch):
     assert os.environ[APPROVAL_ENV] == "auth-1:first-real-submit:real_gateway_action"
     paths = [call["path"] for call in client.calls]
     assert any("first-real-submit-actions" in path for path in paths)
+
+
+def test_env_loader_fills_operator_auth_from_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "BRC_OPERATOR_USERNAME='owner'",
+                "BRC_OPERATOR_SESSION_SECRET=\"secret-value\"",
+            ]
+        )
+    )
+    monkeypatch.setenv("BRC_OPERATOR_USERNAME", "")
+    monkeypatch.delenv("BRC_OPERATOR_SESSION_SECRET", raising=False)
+
+    _load_env_file(str(env_file))
+
+    assert os.environ["BRC_OPERATOR_USERNAME"] == "owner"
+    assert os.environ["BRC_OPERATOR_SESSION_SECRET"] == "secret-value"

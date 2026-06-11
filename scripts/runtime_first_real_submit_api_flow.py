@@ -54,6 +54,7 @@ class ApiClient(Protocol):
 class FlowConfig:
     api_base: str
     mode: str
+    env_file: str | None = None
     order_candidate_id: str | None = None
     authorization_id: str | None = None
     signal_input_path: str | None = None
@@ -74,6 +75,7 @@ class FlowConfig:
     enable_local_registration: bool = True
     arm_exchange_submit_adapter: bool = True
     record_gateway_readiness: bool = True
+    preview_disabled_first_real_submit_action: bool = False
     execute_real_submit: bool = False
     record_post_submit_accounting: bool = True
     adapter_result_store_implemented: bool = True
@@ -698,6 +700,44 @@ class FirstRealSubmitApiFlow:
             _body(exchange_adapter).get("adapter_result_id"),
         )
         self._preview_enablement_packet()
+        if self._config.preview_disabled_first_real_submit_action:
+            self._preview_disabled_first_real_submit_action()
+
+    def _preview_disabled_first_real_submit_action(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        result = self._step(
+            "preview_disabled_first_real_submit_action",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-actions/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(
+                    exchange=True,
+                    include_exchange_action=True,
+                ),
+                "owner_confirmed_for_first_real_submit_action": False,
+            },
+        )
+        body = _body(result)
+        self.state.remember(
+            "disabled_first_real_submit_execution_result_id",
+            body.get("execution_result_id"),
+        )
+        status = str(body.get("status") or "")
+        if status and status != "exchange_submit_execution_disabled":
+            self.state.add_blockers(
+                [
+                    (
+                        "disabled_first_real_submit_action_unexpected_status:"
+                        f"{status}"
+                    )
+                ]
+            )
 
     def _execute_first_real_submit(self) -> None:
         authorization_id = self._required_id("authorization_id")
@@ -1058,6 +1098,21 @@ def _query_values(query: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _load_env_file(path: str | None) -> None:
+    if not path:
+        return
+    env_path = Path(path).expanduser()
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and not os.environ.get(key):
+            os.environ[key] = value
+
+
 def _session_cookie() -> str:
     config = _load_auth_config()
     now = int(time.time())
@@ -1082,6 +1137,7 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         description="Run a guarded runtime first-real-submit API flow.",
     )
     parser.add_argument("--api-base", default=os.environ.get(API_BASE_ENV, DEFAULT_API_BASE))
+    parser.add_argument("--env-file", help="Optional env file for operator auth/API config.")
     parser.add_argument(
         "--mode",
         choices=["inspect", "prepare", "arm", "execute"],
@@ -1110,6 +1166,15 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     parser.add_argument("--skip-local-registration", action="store_true")
     parser.add_argument("--skip-exchange-arm", action="store_true")
     parser.add_argument("--skip-gateway-readiness", action="store_true")
+    parser.add_argument(
+        "--preview-disabled-first-real-submit-action",
+        action="store_true",
+        help=(
+            "After arm evidence is ready, call the official first-real-submit "
+            "action wrapper with owner_confirmed=false. This proves the action "
+            "surface is reachable while keeping exchange execution disabled."
+        ),
+    )
     parser.add_argument("--execute-real-submit", action="store_true")
     parser.add_argument("--skip-post-submit-accounting", action="store_true")
     parser.add_argument("--adapter-result-store-implemented", action="store_true", default=True)
@@ -1118,6 +1183,7 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     return FlowConfig(
         api_base=args.api_base,
         mode=args.mode,
+        env_file=args.env_file,
         order_candidate_id=args.order_candidate_id,
         authorization_id=args.authorization_id,
         signal_input_path=args.signal_input_path,
@@ -1138,6 +1204,9 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         enable_local_registration=not args.skip_local_registration,
         arm_exchange_submit_adapter=not args.skip_exchange_arm,
         record_gateway_readiness=not args.skip_gateway_readiness,
+        preview_disabled_first_real_submit_action=(
+            args.preview_disabled_first_real_submit_action
+        ),
         execute_real_submit=args.execute_real_submit,
         record_post_submit_accounting=not args.skip_post_submit_accounting,
         adapter_result_store_implemented=args.adapter_result_store_implemented,
@@ -1147,6 +1216,7 @@ def _parse_args(argv: list[str]) -> FlowConfig:
 
 def main(argv: list[str] | None = None) -> int:
     config = _parse_args(argv or sys.argv[1:])
+    _load_env_file(config.env_file)
     flow = FirstRealSubmitApiFlow(
         client=UrlLibApiClient(api_base=config.api_base),
         config=config,

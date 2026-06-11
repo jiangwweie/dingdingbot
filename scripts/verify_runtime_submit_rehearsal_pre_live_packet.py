@@ -359,6 +359,7 @@ class _InMemoryExchangeGateway:
         trigger_price: Decimal | None = None,
         reduce_only: bool = False,
         client_order_id: str | None = None,
+        position_side: str | None = None,
     ) -> OrderPlacementResult:
         self.calls.append(
             {
@@ -372,6 +373,7 @@ class _InMemoryExchangeGateway:
                 ),
                 "reduce_only": reduce_only,
                 "client_order_id": client_order_id,
+                "position_side": position_side,
             }
         )
         return OrderPlacementResult(

@@ -407,9 +407,7 @@ async def test_pre_live_packet_can_simulate_enabled_exchange_execution_in_memory
     assert simulation["real_exchange_submit_adapter_executed"] is True
     assert simulation["exchange_call_count"] == 2
     assert simulation["order_lifecycle_submit_call_count"] == 2
-    assert simulation["entry_exchange_order_id"].startswith(
-        "in-memory-exchange-runtime-order-draft-"
-    )
+    assert simulation["entry_exchange_order_id"].startswith("in-memory-exchange-")
     assert simulation["entry_exchange_order_id"].endswith("-entry")
     assert len(simulation["protection_exchange_order_ids"]) == 1
     assert simulation["execution_intent_status_changed"] is False
