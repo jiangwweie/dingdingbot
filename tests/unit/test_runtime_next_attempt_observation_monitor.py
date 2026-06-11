@@ -175,3 +175,44 @@ def test_monitor_cli_stdout_is_json_only(monkeypatch, capsys):
     assert json.loads(captured.out)["status"] == "waiting_for_signal"
     assert "inner noisy monitor" not in captured.out
     assert "inner noisy monitor" in captured.err
+
+
+def test_monitor_cli_can_write_output_json(monkeypatch, capsys, tmp_path):
+    output_path = tmp_path / "nested" / "monitor.json"
+
+    def fake_build_monitor_packet(args):
+        return {
+            "status": "ready_for_prepare",
+            "runtime_instance_id": args.runtime_instance_id,
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    monkeypatch.setattr(
+        runtime_next_attempt_observation_monitor,
+        "_build_monitor_packet",
+        fake_build_monitor_packet,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "runtime_next_attempt_observation_monitor.py",
+            "--runtime-instance-id",
+            "runtime-1",
+            "--output-json",
+            str(output_path),
+        ],
+    )
+
+    assert runtime_next_attempt_observation_monitor.main() == 0
+
+    captured = capsys.readouterr()
+    stdout_payload = json.loads(captured.out)
+    file_payload = json.loads(output_path.read_text())
+    assert stdout_payload["status"] == "ready_for_prepare"
+    assert file_payload == stdout_payload
+    assert file_payload["safety_invariants"]["exchange_write_called"] is False

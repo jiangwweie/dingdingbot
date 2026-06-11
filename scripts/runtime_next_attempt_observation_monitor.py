@@ -187,6 +187,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-cycles", type=int, default=1)
     parser.add_argument("--interval-seconds", type=float, default=0.0)
     parser.add_argument("--continue-on-blocked", action="store_true", default=False)
+    parser.add_argument(
+        "--output-json",
+        help="Optional path for the monitor packet. Stdout remains JSON.",
+    )
 
     monitor, base_argv = parser.parse_known_args(argv)
     base = observation_flow._parse_args(base_argv)
@@ -199,7 +203,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     with redirect_stdout(sys.stderr):
         payload = _build_monitor_packet(args)
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    output = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    if args.output_json:
+        output_path = Path(args.output_json).expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output + "\n", encoding="utf-8")
+    print(output)
     return 0 if payload["status"] in {
         "waiting_for_signal",
         "ready_for_prepare",
