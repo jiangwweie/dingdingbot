@@ -453,12 +453,16 @@ Key facts:
   requested. With `--exercise-exchange-submit-adapter-pre-execution`, the same
   verifier can assemble in-memory gateway readiness, scoped exchange-submit
   action authorization, exchange-submit enablement, and an exchange-submit
-  adapter-result duplicate-submit lock. That path intentionally stops at
-  `exchange_submit_adapter_not_implemented`: it does not call exchange, submit
-  an order, call OrderLifecycle submit, or change ExecutionIntent status. A
-  shadow / execution-disabled runtime is the expected source state before a
-  live-runtime enablement mutation, not itself proof of a missing
-  implementation.
+  adapter-result duplicate-submit lock. It also proves the true execution
+  result entrypoint remains disabled unless explicitly enabled, returning
+  `exchange_submit_execution_disabled` without gateway or OrderLifecycle submit
+  calls. That path intentionally stops at
+  `exchange_submit_adapter_not_implemented` /
+  `exchange_submit_execution_disabled`: it does not call exchange, submit an
+  order, call OrderLifecycle submit, execute the real exchange adapter, or
+  change ExecutionIntent status. A shadow / execution-disabled runtime is the
+  expected source state before a live-runtime enablement mutation, not itself
+  proof of a missing implementation.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

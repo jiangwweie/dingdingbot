@@ -1029,6 +1029,42 @@ async def build_pre_live_packet(
                 if exchange_submit_adapter_rehearsal["adapter_result"] is not None
                 else False
             ),
+            "exchange_submit_disabled_execution_exchange_called": (
+                exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ].exchange_called
+                if exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ] is not None
+                else False
+            ),
+            "exchange_submit_disabled_execution_order_lifecycle_submit_called": (
+                exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ].order_lifecycle_submit_called
+                if exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ] is not None
+                else False
+            ),
+            "exchange_submit_disabled_execution_exchange_order_submitted": (
+                exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ].exchange_order_submitted
+                if exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ] is not None
+                else False
+            ),
+            "exchange_submit_disabled_execution_real_adapter_executed": (
+                exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ].real_exchange_submit_adapter_executed
+                if exchange_submit_adapter_rehearsal[
+                    "disabled_execution_result"
+                ] is not None
+                else False
+            ),
             "protection_failure_policy_exchange_called": (
                 protection_failure_policy.exchange_called
             ),
@@ -1405,6 +1441,7 @@ async def _exercise_exchange_submit_adapter_pre_execution(
         "action_authorization": None,
         "enablement_decision": None,
         "adapter_result": None,
+        "disabled_execution_result": None,
     }
     if not enabled:
         return result
@@ -1525,13 +1562,26 @@ async def _exercise_exchange_submit_adapter_pre_execution(
         exchange_submit_adapter_enabled=True,
         exchange_submit_enablement_decision=enablement_decision,
     )
+    disabled_execution_result = (
+        await adapter_service.exchange_submit_execution_result_for_authorization(
+            authorization_id,
+            exchange_submit_execution_enabled=False,
+            exchange_submit_enablement_decision=enablement_decision,
+        )
+    )
     ready = (
         enablement_decision.status.value == "ready_for_exchange_submit_action"
         and adapter_result.status.value == "exchange_submit_adapter_not_implemented"
+        and disabled_execution_result.status.value
+        == "exchange_submit_execution_disabled"
         and adapter_result.duplicate_submit_lock_acquired is True
         and adapter_result.exchange_called is False
         and adapter_result.order_lifecycle_submit_called is False
         and adapter_result.exchange_order_submitted is False
+        and disabled_execution_result.exchange_called is False
+        and disabled_execution_result.order_lifecycle_submit_called is False
+        and disabled_execution_result.exchange_order_submitted is False
+        and disabled_execution_result.real_exchange_submit_adapter_executed is False
     )
     result.update(
         {
@@ -1544,6 +1594,7 @@ async def _exercise_exchange_submit_adapter_pre_execution(
                     + list(action_authorization.blockers)
                     + list(enablement_decision.blockers)
                     + list(adapter_result.blockers)
+                    + list(disabled_execution_result.blockers)
                 )
             ),
             "trusted_submit_fact_snapshot_id": trusted_submit_fact_snapshot_id,
@@ -1573,6 +1624,7 @@ async def _exercise_exchange_submit_adapter_pre_execution(
             "action_authorization": action_authorization,
             "enablement_decision": enablement_decision,
             "adapter_result": adapter_result,
+            "disabled_execution_result": disabled_execution_result,
         }
     )
     return result
@@ -1662,6 +1714,9 @@ def _exchange_submit_adapter_rehearsal_payload(
             rehearsal["enablement_decision"]
         ),
         "adapter_result": _dump_optional_model(rehearsal["adapter_result"]),
+        "disabled_execution_result": _dump_optional_model(
+            rehearsal["disabled_execution_result"]
+        ),
     }
 
 

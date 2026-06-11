@@ -282,6 +282,7 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
     enablement_decision = exchange_rehearsal["enablement_decision"]
     gateway_readiness = exchange_rehearsal["gateway_readiness"]
     adapter_result = exchange_rehearsal["adapter_result"]
+    disabled_execution_result = exchange_rehearsal["disabled_execution_result"]
     blockers = report["checks"]["exchange_submit_rehearsal_blockers"]
 
     assert report["status"] == "blocked_before_first_real_submit"
@@ -304,6 +305,15 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
     assert adapter_result["exchange_called"] is False
     assert adapter_result["order_lifecycle_submit_called"] is False
     assert adapter_result["exchange_order_submitted"] is False
+    assert disabled_execution_result["status"] == "exchange_submit_execution_disabled"
+    assert disabled_execution_result["exchange_submit_execution_enabled"] is False
+    assert disabled_execution_result["exchange_called"] is False
+    assert disabled_execution_result["order_lifecycle_submit_called"] is False
+    assert disabled_execution_result["exchange_order_submitted"] is False
+    assert (
+        disabled_execution_result["real_exchange_submit_adapter_executed"]
+        is False
+    )
     assert "exchange_submit_adapter_not_implemented" in blockers
     assert "exchange_submit_action_authorization_missing" not in blockers
     assert "runtime_exchange_gateway_readiness_missing" not in blockers
@@ -321,5 +331,29 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
     )
     assert (
         report["safety_invariants"]["exchange_submit_adapter_exchange_order_submitted"]
+        is False
+    )
+    assert (
+        report["safety_invariants"][
+            "exchange_submit_disabled_execution_exchange_called"
+        ]
+        is False
+    )
+    assert (
+        report["safety_invariants"][
+            "exchange_submit_disabled_execution_order_lifecycle_submit_called"
+        ]
+        is False
+    )
+    assert (
+        report["safety_invariants"][
+            "exchange_submit_disabled_execution_exchange_order_submitted"
+        ]
+        is False
+    )
+    assert (
+        report["safety_invariants"][
+            "exchange_submit_disabled_execution_real_adapter_executed"
+        ]
         is False
     )

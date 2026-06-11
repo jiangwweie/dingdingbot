@@ -145,9 +145,12 @@ This document defines the runtime safety boundaries for the BRC project.
   registration has succeeded. That rehearsal may assemble in-memory gateway
   readiness, scoped exchange-submit action authorization, exchange-submit
   enablement, and the adapter-result duplicate-submit lock, but it must still
-  return `exchange_submit_adapter_not_implemented` and keep
-  `exchange_called=false`, `order_lifecycle_submit_called=false`,
-  `exchange_order_submitted=false`, and
+  return `exchange_submit_adapter_not_implemented`. It may also call the true
+  execution-result entrypoint with
+  `exchange_submit_execution_enabled=false`, which must return
+  `exchange_submit_execution_disabled` and keep `exchange_called=false`,
+  `order_lifecycle_submit_called=false`, `exchange_order_submitted=false`,
+  `real_exchange_submit_adapter_executed=false`, and
   `execution_intent_status_changed=false`. The execution-result stage is the
   only stage that may call the exchange gateway /
   `OrderLifecycleService.submit_order`, and only when the explicit execution
