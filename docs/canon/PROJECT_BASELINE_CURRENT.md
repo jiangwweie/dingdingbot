@@ -308,10 +308,13 @@ Key facts:
   strategy-PnL mutations, or withdrawal instructions.
 - **RuntimeExecutionFirstRealSubmitOutcomeAccounting** now exists as a
   post-submit accounting packet. It records a submit outcome review and, when
-  local order facts are resolved enough, derives the attempt-outcome policy for
-  the existing reservation. If the entry remains open/no-fill or facts are
-  missing, it returns a blocked accounting packet instead of inventing budget
-  release/consume behavior. The packet does not call exchange, call
+  local order facts plus post-submit reconciliation read-model evidence are
+  resolved enough, derives the attempt-outcome policy for the existing
+  reservation. If the entry remains open/no-fill, order facts are missing,
+  reconciliation evidence is missing, or reconciliation has a severe mismatch,
+  it returns a blocked accounting packet instead of inventing budget
+  release/consume behavior. Warning-only reconciliation mismatches are carried
+  as warnings. The packet does not call exchange, call
   OrderLifecycle, release budget, mutate runtime state, create/cancel/close
   orders, or create withdrawal/transfer instructions.
 - **Position runtime semantic ID propagation** now exists as an additive local

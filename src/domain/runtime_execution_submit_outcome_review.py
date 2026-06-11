@@ -76,6 +76,22 @@ class RuntimeExecutionSubmitOutcomeReview(
     entry_filled_qty: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     protection_order_ids: list[str] = Field(default_factory=list)
     missing_order_ids: list[str] = Field(default_factory=list)
+    post_submit_reconciliation_required: bool = False
+    post_submit_reconciliation_evidence_id: Optional[str] = Field(
+        default=None,
+        max_length=260,
+    )
+    post_submit_reconciliation_status: Optional[str] = Field(
+        default=None,
+        max_length=64,
+    )
+    post_submit_reconciliation_checked_at_ms: Optional[int] = Field(
+        default=None,
+        ge=0,
+    )
+    post_submit_reconciliation_mismatch_count: int = Field(default=0, ge=0)
+    post_submit_reconciliation_severe_count: int = Field(default=0, ge=0)
+    post_submit_reconciliation_warning_count: int = Field(default=0, ge=0)
     submitted_to_exchange: bool
     any_fill: bool
     partial_fill: bool = False
@@ -146,6 +162,8 @@ def build_runtime_execution_submit_outcome_review(
     *,
     exchange_submit_execution_result: RuntimeExecutionExchangeSubmitExecutionResult,
     local_orders: list[Order] | None,
+    post_submit_reconciliation_report: Any | None = None,
+    post_submit_reconciliation_mismatches: list[Any] | None = None,
     now_ms: int,
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
@@ -158,6 +176,13 @@ def build_runtime_execution_submit_outcome_review(
     entry_order_id = result.entry_order_id or _submitted_entry_order_id(result)
     protection_order_ids = list(result.protection_order_ids)
     missing_order_ids: list[str] = []
+    reconciliation = _post_submit_reconciliation_evidence(
+        result=result,
+        report=post_submit_reconciliation_report,
+        mismatches=post_submit_reconciliation_mismatches or [],
+    )
+    blockers.extend(reconciliation["blockers"])
+    warnings.extend(reconciliation["warnings"])
 
     if result.status in {
         RuntimeExecutionExchangeSubmitExecutionStatus.BLOCKED,
@@ -179,6 +204,7 @@ def build_runtime_execution_submit_outcome_review(
             entry_order=None,
             protection_order_ids=protection_order_ids,
             missing_order_ids=missing_order_ids,
+            reconciliation=reconciliation,
             submitted_to_exchange=False,
             any_fill=False,
             no_fill=True,
@@ -208,6 +234,7 @@ def build_runtime_execution_submit_outcome_review(
             entry_order=order_by_id.get(entry_order_id or ""),
             protection_order_ids=protection_order_ids,
             missing_order_ids=missing_order_ids,
+            reconciliation=reconciliation,
             submitted_to_exchange=False,
             any_fill=False,
             no_fill=True,
@@ -240,6 +267,7 @@ def build_runtime_execution_submit_outcome_review(
             entry_order=entry_order,
             protection_order_ids=protection_order_ids,
             missing_order_ids=missing_order_ids,
+            reconciliation=reconciliation,
             submitted_to_exchange=result.exchange_order_submitted,
             any_fill=False,
             no_fill=False,
@@ -285,6 +313,7 @@ def build_runtime_execution_submit_outcome_review(
         entry_order=entry_order,
         protection_order_ids=protection_order_ids,
         missing_order_ids=missing_order_ids,
+        reconciliation=reconciliation,
         submitted_to_exchange=result.exchange_order_submitted,
         any_fill=any_fill,
         partial_fill=partial_fill,
@@ -403,6 +432,7 @@ def _review(
     entry_order: Order | None,
     protection_order_ids: list[str],
     missing_order_ids: list[str],
+    reconciliation: dict[str, Any],
     submitted_to_exchange: bool,
     any_fill: bool,
     blockers: list[str],
@@ -441,6 +471,13 @@ def _review(
         entry_filled_qty=entry_order.filled_qty if entry_order else None,
         protection_order_ids=protection_order_ids,
         missing_order_ids=_dedupe(missing_order_ids),
+        post_submit_reconciliation_required=bool(reconciliation["required"]),
+        post_submit_reconciliation_evidence_id=reconciliation["evidence_id"],
+        post_submit_reconciliation_status=reconciliation["status"],
+        post_submit_reconciliation_checked_at_ms=reconciliation["checked_at_ms"],
+        post_submit_reconciliation_mismatch_count=reconciliation["mismatch_count"],
+        post_submit_reconciliation_severe_count=reconciliation["severe_count"],
+        post_submit_reconciliation_warning_count=reconciliation["warning_count"],
         submitted_to_exchange=submitted_to_exchange,
         any_fill=any_fill,
         partial_fill=partial_fill,
@@ -456,6 +493,9 @@ def _review(
             "scope": "runtime_execution_submit_outcome_review",
             "read_only_order_fact_classification": True,
             "exchange_submit_execution_status": result.status.value,
+            "post_submit_reconciliation_required": bool(reconciliation["required"]),
+            "post_submit_reconciliation_evidence_id": reconciliation["evidence_id"],
+            "post_submit_reconciliation_status": reconciliation["status"],
             "does_not_release_budget": True,
             "does_not_mutate_runtime_state": True,
             "does_not_change_execution_intent_status": True,
@@ -490,10 +530,97 @@ def _requires_reconciliation(
     }
 
 
+def _post_submit_reconciliation_evidence(
+    *,
+    result: RuntimeExecutionExchangeSubmitExecutionResult,
+    report: Any | None,
+    mismatches: list[Any],
+) -> dict[str, Any]:
+    required = result.status in {
+        RuntimeExecutionExchangeSubmitExecutionStatus
+        .EXCHANGE_SUBMIT_ORDERS_SUBMITTED,
+        RuntimeExecutionExchangeSubmitExecutionStatus.PROTECTION_SUBMIT_FAILED,
+    } and result.exchange_order_submitted
+    evidence_id = _optional_str(getattr(report, "report_id", None))
+    checked_at_ms = _optional_int(getattr(report, "checked_at_ms", None))
+    is_fetch_failure = bool(getattr(report, "is_fetch_failure", False))
+    is_consistent = bool(getattr(report, "is_consistent", False))
+    severe_count = _optional_int(getattr(report, "severe_count", None))
+    warning_count = _optional_int(getattr(report, "warning_count", None))
+    mismatch_count = len(mismatches)
+    if severe_count is None:
+        severe_count = sum(
+            1
+            for mismatch in mismatches
+            if getattr(mismatch, "severity", None) in {"SEVERE", "CRITICAL"}
+        )
+    if warning_count is None:
+        warning_count = sum(
+            1
+            for mismatch in mismatches
+            if getattr(mismatch, "severity", None) == "WARNING"
+        )
+    status = None
+    blockers: list[str] = []
+    warnings: list[str] = []
+
+    if report is not None:
+        status = (
+            "fetch_failure"
+            if is_fetch_failure
+            else "clean"
+            if is_consistent
+            else "mismatch"
+        )
+        report_symbol = _optional_str(getattr(report, "symbol", None))
+        report_runtime_id = _optional_str(getattr(report, "runtime_instance_id", None))
+        if report_symbol and report_symbol != result.symbol:
+            blockers.append("post_submit_reconciliation_symbol_mismatch")
+        if report_runtime_id and report_runtime_id != result.runtime_instance_id:
+            blockers.append("post_submit_reconciliation_runtime_mismatch")
+
+    if required and not evidence_id:
+        blockers.append("post_submit_reconciliation_evidence_missing")
+    if is_fetch_failure:
+        blockers.append("post_submit_reconciliation_fetch_failure")
+    if required and severe_count > 0:
+        blockers.append("post_submit_reconciliation_severe_mismatch_present")
+    if required and report is not None and not is_consistent and severe_count == 0:
+        warnings.append("post_submit_reconciliation_warning_mismatch_present")
+
+    return {
+        "required": required,
+        "evidence_id": evidence_id,
+        "status": status,
+        "checked_at_ms": checked_at_ms,
+        "mismatch_count": mismatch_count,
+        "severe_count": severe_count,
+        "warning_count": warning_count,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 def _optional_status(order: Order | None) -> str | None:
     if order is None:
         return None
     return order.status.value
+
+
+def _optional_str(value: Any | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _dedupe(items: list[str]) -> list[str]:

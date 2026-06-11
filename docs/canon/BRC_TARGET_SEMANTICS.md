@@ -90,7 +90,7 @@ StrategyFamily
 | OrderLifecycle | implemented | Order lifecycle service handles order placement and tracking | Order lifecycle management with strategy semantic IDs |
 | Order / Position | implemented | Order and position management through exchange gateway | Live order and position tracking |
 | Reconciliation | implemented | Reconciliation service exists | PG / exchange consistency verification |
-| Review | partially implemented | Review Ledger design exists; limited production review data; first-real-submit outcome accounting can record submit outcome review and derive attempt-outcome policy when order facts are resolved; PG-persisted post-submit budget settlement can release no-fill/rejected reserved budget or record held/consumed reserved budget for filled outcomes without order/exchange side effects | Full review with strategy semantic traceability |
+| Review | partially implemented | Review Ledger design exists; limited production review data; first-real-submit outcome accounting can record submit outcome review and derive attempt-outcome policy when local order facts plus post-submit reconciliation evidence are resolved; missing reconciliation evidence or severe mismatch blocks accounting, while warning-only mismatch is recorded as warning; PG-persisted post-submit budget settlement can release no-fill/rejected reserved budget or record held/consumed reserved budget for filled outcomes without order/exchange side effects | Full review with strategy semantic traceability |
 
 Status legend:
 
@@ -388,7 +388,8 @@ Review
 Current Review Ledger does not yet carry the full strategy semantic chain
 automatically from order/exchange facts. First-real-submit outcome accounting
 can now record submit outcome review evidence and derive an attempt-outcome
-policy when local order facts are resolved, but broader lifecycle review
+policy when local order facts plus post-submit reconciliation evidence are
+resolved, but broader lifecycle review
 orchestration remains a known gap (see `docs/canon/TECH_DEBT_BASELINE.md`).
 
 Future Review should distinguish trading PnL from Owner manual withdrawal,

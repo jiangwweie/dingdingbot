@@ -193,6 +193,26 @@ class _PostSubmitBudgetSettlementRepo:
         )
 
 
+class _ReconciliationReadModelRepo:
+    def __init__(self, reports=None, mismatches=None) -> None:
+        self.reports = list(reports or [])
+        self.mismatches = {
+            report_id: list(items)
+            for report_id, items in dict(mismatches or {}).items()
+        }
+
+    async def get_recent_reports(self, symbol=None, limit=100):
+        reports = [
+            report
+            for report in self.reports
+            if symbol is None or report.symbol == symbol
+        ]
+        return reports[:limit]
+
+    async def get_mismatches(self, report_id):
+        return list(self.mismatches.get(report_id, []))
+
+
 class _RuntimeService:
     def __init__(self, runtime: StrategyRuntimeInstance) -> None:
         self.runtime = runtime
@@ -270,6 +290,7 @@ def test_submit_outcome_review_blocks_open_no_fill_until_resolved():
     review = build_runtime_execution_submit_outcome_review(
         exchange_submit_execution_result=result,
         local_orders=[entry, sl],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
         now_ms=NOW_MS,
     )
 
@@ -291,6 +312,7 @@ def test_submit_outcome_review_maps_no_fill_cancel_to_release_policy_kind():
     review = build_runtime_execution_submit_outcome_review(
         exchange_submit_execution_result=result,
         local_orders=[entry, sl],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
         now_ms=NOW_MS,
     )
 
@@ -344,6 +366,7 @@ def test_submit_outcome_review_maps_fill_states_to_attempt_outcome_kind(
     review = build_runtime_execution_submit_outcome_review(
         exchange_submit_execution_result=result,
         local_orders=[entry, sl],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
         now_ms=NOW_MS,
     )
 
@@ -381,6 +404,7 @@ def test_submit_outcome_review_maps_filled_entry_protection_failure():
     review = build_runtime_execution_submit_outcome_review(
         exchange_submit_execution_result=result,
         local_orders=[entry, sl],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
         now_ms=NOW_MS,
     )
 
@@ -410,6 +434,9 @@ async def test_submit_outcome_review_service_reads_existing_result_and_orders_on
         draft_repository=_DraftRepo(),
         exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
         order_lifecycle_service=lifecycle,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     review = await service.submit_outcome_review_for_authorization("auth-1")
@@ -438,6 +465,72 @@ async def test_submit_outcome_review_service_blocks_when_order_facts_missing():
     assert review.missing_order_ids == ["entry-1", "sl-1"]
 
 
+def test_submit_outcome_review_blocks_submitted_result_without_reconciliation():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
+
+    review = build_runtime_execution_submit_outcome_review(
+        exchange_submit_execution_result=result,
+        local_orders=[entry, sl],
+        now_ms=NOW_MS,
+    )
+
+    assert review.status == RuntimeExecutionSubmitOutcomeReviewStatus.BLOCKED
+    assert review.post_submit_reconciliation_required is True
+    assert "post_submit_reconciliation_evidence_missing" in review.blockers
+    assert review.attempt_outcome_policy_ready is False
+
+
+def test_submit_outcome_review_allows_warning_only_reconciliation():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
+
+    review = build_runtime_execution_submit_outcome_review(
+        exchange_submit_execution_result=result,
+        local_orders=[entry, sl],
+        post_submit_reconciliation_report=_warning_reconciliation_report(),
+        post_submit_reconciliation_mismatches=[
+            _reconciliation_mismatch("WARNING")
+        ],
+        now_ms=NOW_MS,
+    )
+
+    assert (
+        review.status
+        == RuntimeExecutionSubmitOutcomeReviewStatus
+        .CLASSIFIED_READY_FOR_ATTEMPT_OUTCOME_POLICY
+    )
+    assert review.post_submit_reconciliation_status == "mismatch"
+    assert review.post_submit_reconciliation_warning_count == 1
+    assert "post_submit_reconciliation_warning_mismatch_present" in (
+        review.warnings
+    )
+
+
+def test_submit_outcome_review_blocks_severe_reconciliation_mismatch():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
+
+    review = build_runtime_execution_submit_outcome_review(
+        exchange_submit_execution_result=result,
+        local_orders=[entry, sl],
+        post_submit_reconciliation_report=_severe_reconciliation_report(),
+        post_submit_reconciliation_mismatches=[
+            _reconciliation_mismatch("SEVERE")
+        ],
+        now_ms=NOW_MS,
+    )
+
+    assert review.status == RuntimeExecutionSubmitOutcomeReviewStatus.BLOCKED
+    assert review.post_submit_reconciliation_severe_count == 1
+    assert "post_submit_reconciliation_severe_mismatch_present" in (
+        review.blockers
+    )
+
+
 async def test_submit_outcome_review_service_records_pg_style_evidence_only():
     result = _submitted_result()
     entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1"))
@@ -448,6 +541,9 @@ async def test_submit_outcome_review_service_records_pg_style_evidence_only():
         exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
         order_lifecycle_service=_Lifecycle([entry, sl]),
         submit_outcome_review_repository=review_repo,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     review = await service.record_submit_outcome_review_for_authorization("auth-1")
@@ -473,6 +569,7 @@ async def test_attempt_outcome_policy_records_from_submit_outcome_review():
             _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1")),
             _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0")),
         ],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
         now_ms=NOW_MS,
     )
     reservation = _reservation()
@@ -555,6 +652,9 @@ async def test_first_real_submit_outcome_accounting_records_review_and_policy():
         attempt_reservation_repository=_AttemptReservationRepo(reservation),
         attempt_mutation_repository=_AttemptMutationRepo(mutation),
         attempt_outcome_policy_repository=policy_repo,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     accounting = await (
@@ -595,6 +695,9 @@ async def test_first_real_submit_outcome_accounting_blocks_unresolved_review():
         attempt_reservation_repository=_AttemptReservationRepo(reservation),
         attempt_mutation_repository=_AttemptMutationRepo(_mutation(reservation)),
         attempt_outcome_policy_repository=policy_repo,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     accounting = await (
@@ -634,6 +737,9 @@ async def test_post_submit_budget_settlement_releases_no_fill_reserved_budget():
         attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
         post_submit_budget_settlement_repository=settlement_repo,
         runtime_service=runtime_service,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     settlement = await service.settle_first_real_submit_budget_for_authorization(
@@ -678,6 +784,9 @@ async def test_post_submit_budget_settlement_records_full_fill_consumed_without_
         attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
         post_submit_budget_settlement_repository=settlement_repo,
         runtime_service=runtime_service,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     settlement = await service.settle_first_real_submit_budget_for_authorization(
@@ -726,6 +835,9 @@ async def test_post_submit_budget_settlement_blocks_runtime_budget_drift():
         attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
         post_submit_budget_settlement_repository=settlement_repo,
         runtime_service=runtime_service,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
     )
 
     settlement = await service.settle_first_real_submit_budget_for_authorization(
@@ -756,6 +868,7 @@ async def test_submit_outcome_review_repository_roundtrips_by_authorization():
                 _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1")),
                 _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0")),
             ],
+            post_submit_reconciliation_report=_clean_reconciliation_report(),
             now_ms=NOW_MS,
         )
 
@@ -1217,6 +1330,54 @@ def _submitted_order(
         average_exec_price=None,
         reduce_only=role != "ENTRY",
         order_lifecycle_submit_called=lifecycle_called,
+    )
+
+
+def _clean_reconciliation_report(report_id: str = "recon-clean-1"):
+    return SimpleNamespace(
+        report_id=report_id,
+        symbol="BNB/USDT:USDT",
+        checked_at_ms=NOW_MS,
+        is_consistent=True,
+        severe_count=0,
+        warning_count=0,
+        is_fetch_failure=False,
+        runtime_instance_id="runtime-1",
+    )
+
+
+def _warning_reconciliation_report(report_id: str = "recon-warning-1"):
+    return SimpleNamespace(
+        report_id=report_id,
+        symbol="BNB/USDT:USDT",
+        checked_at_ms=NOW_MS,
+        is_consistent=False,
+        severe_count=0,
+        warning_count=1,
+        is_fetch_failure=False,
+        runtime_instance_id="runtime-1",
+    )
+
+
+def _severe_reconciliation_report(report_id: str = "recon-severe-1"):
+    return SimpleNamespace(
+        report_id=report_id,
+        symbol="BNB/USDT:USDT",
+        checked_at_ms=NOW_MS,
+        is_consistent=False,
+        severe_count=1,
+        warning_count=0,
+        is_fetch_failure=False,
+        runtime_instance_id="runtime-1",
+    )
+
+
+def _reconciliation_mismatch(severity: str):
+    return SimpleNamespace(
+        report_id="recon-severe-1",
+        symbol="BNB/USDT:USDT",
+        severity=severity,
+        mismatch_type="local_order_missing_on_exchange",
     )
 
 

@@ -446,6 +446,21 @@ class RuntimeExecutionSubmitOutcomeReviewRepositoryPort(Protocol):
         ...
 
 
+class RuntimeExecutionReconciliationReadModelRepositoryPort(Protocol):
+    async def get_recent_reports(
+        self,
+        symbol: str | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        ...
+
+    async def get_mismatches(
+        self,
+        report_id: str,
+    ) -> list[Any]:
+        ...
+
+
 class RuntimeExecutionExchangeSubmitActionAuthorizationRepositoryPort(Protocol):
     async def create(
         self,
@@ -635,6 +650,9 @@ class RuntimeExecutionIntentAdapterService:
         submit_outcome_review_repository: (
             RuntimeExecutionSubmitOutcomeReviewRepositoryPort | None
         ) = None,
+        reconciliation_read_model_repository: (
+            RuntimeExecutionReconciliationReadModelRepositoryPort | None
+        ) = None,
         exchange_submit_recovery_resolution_repository: (
             RuntimeExecutionExchangeSubmitRecoveryResolutionRepositoryPort | None
         ) = None,
@@ -682,6 +700,9 @@ class RuntimeExecutionIntentAdapterService:
             exchange_submit_execution_result_repository
         )
         self._submit_outcome_review_repository = submit_outcome_review_repository
+        self._reconciliation_read_model_repository = (
+            reconciliation_read_model_repository
+        )
         self._exchange_submit_recovery_resolution_repository = (
             exchange_submit_recovery_resolution_repository
         )
@@ -2585,6 +2606,8 @@ class RuntimeExecutionIntentAdapterService:
 
         local_orders: list[Order] = []
         additional_blockers: list[str] = []
+        reconciliation_report = None
+        reconciliation_mismatches: list[Any] = []
         statuses_requiring_order_facts = {
             RuntimeExecutionExchangeSubmitExecutionStatus
             .EXCHANGE_SUBMIT_ORDERS_SUBMITTED,
@@ -2606,13 +2629,50 @@ class RuntimeExecutionIntentAdapterService:
                     order = await self._order_lifecycle_service.get_order(order_id)
                     if order is not None:
                         local_orders.append(order)
+            (
+                reconciliation_report,
+                reconciliation_mismatches,
+                reconciliation_blockers,
+            ) = await self._latest_post_submit_reconciliation_evidence(result)
+            additional_blockers.extend(reconciliation_blockers)
 
         return build_runtime_execution_submit_outcome_review(
             exchange_submit_execution_result=result,
             local_orders=local_orders,
+            post_submit_reconciliation_report=reconciliation_report,
+            post_submit_reconciliation_mismatches=reconciliation_mismatches,
             now_ms=_now_ms(),
             additional_blockers=additional_blockers,
         )
+
+    async def _latest_post_submit_reconciliation_evidence(
+        self,
+        result: RuntimeExecutionExchangeSubmitExecutionResult,
+    ) -> tuple[Any | None, list[Any], list[str]]:
+        repository = self._reconciliation_read_model_repository
+        if repository is None:
+            return None, [], []
+        try:
+            reports = await repository.get_recent_reports(
+                symbol=result.symbol,
+                limit=10,
+            )
+        except Exception as exc:
+            return None, [], [
+                f"post_submit_reconciliation_evidence_fetch_failed:{type(exc).__name__}"
+            ]
+        for report in reports:
+            if not _reconciliation_report_matches_submit_result(report, result):
+                continue
+            try:
+                mismatches = await repository.get_mismatches(report.report_id)
+            except Exception as exc:
+                return report, [], [
+                    "post_submit_reconciliation_mismatch_fetch_failed:"
+                    f"{type(exc).__name__}"
+                ]
+            return report, list(mismatches), []
+        return None, [], []
 
     async def record_submit_outcome_review_for_authorization(
         self,
@@ -3682,6 +3742,19 @@ def _submit_outcome_review_policy_blockers(
     if review.symbol != reservation.symbol:
         blockers.append("submit_outcome_review_symbol_mismatch")
     return _dedupe(blockers)
+
+
+def _reconciliation_report_matches_submit_result(
+    report: Any,
+    result: RuntimeExecutionExchangeSubmitExecutionResult,
+) -> bool:
+    report_symbol = getattr(report, "symbol", None)
+    if report_symbol is not None and str(report_symbol) != result.symbol:
+        return False
+    report_runtime_id = getattr(report, "runtime_instance_id", None)
+    if report_runtime_id and str(report_runtime_id) != result.runtime_instance_id:
+        return False
+    return True
 
 
 def _dedupe(items: list[str]) -> list[str]:

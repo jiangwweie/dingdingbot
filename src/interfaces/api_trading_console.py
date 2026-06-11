@@ -3196,6 +3196,9 @@ async def _runtime_execution_intent_adapter_service(
     from src.infrastructure.pg_runtime_execution_submit_outcome_review_repository import (
         PgRuntimeExecutionSubmitOutcomeReviewRepository,
     )
+    from src.infrastructure.pg_reconciliation_read_model_repository import (
+        PgReconciliationReadModelRepository,
+    )
     from src.infrastructure.pg_runtime_execution_exchange_submit_recovery_resolution_repository import (
         PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository,
     )
@@ -3255,6 +3258,7 @@ async def _runtime_execution_intent_adapter_service(
         submit_outcome_review_repository=(
             PgRuntimeExecutionSubmitOutcomeReviewRepository()
         ),
+        reconciliation_read_model_repository=PgReconciliationReadModelRepository(),
         exchange_submit_recovery_resolution_repository=(
             PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository()
         ),
