@@ -202,6 +202,41 @@ async def test_runtime_managed_controlled_close_projects_and_cancels_protection(
 
 
 @pytest.mark.asyncio
+async def test_controlled_close_records_custom_scope_metadata():
+    from src.application.position_projection_service import PositionProjectionService
+
+    position = _position()
+    position_repo = _PositionRepo(position)
+    lifecycle = _Lifecycle()
+    lifecycle.orders["entry"] = _order("entry", OrderRole.ENTRY, OrderStatus.FILLED, "ex-entry")
+    gateway = _Gateway()
+    capital = MagicMock()
+    capital.record_exit_projection = AsyncMock()
+
+    observed_metadata = {}
+    original_register = lifecycle.register_created_order
+
+    async def register_created_order(order, metadata=None):
+        observed_metadata.update(metadata or {})
+        return await original_register(order, metadata=metadata)
+
+    lifecycle.register_created_order = register_created_order
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital,
+        order_lifecycle=lifecycle,
+        gateway=gateway,
+        position_projection_service=PositionProjectionService(position_repo),
+    )
+
+    await orchestrator.execute_controlled_close(
+        position=position,
+        scope="runtime_owner_reduce_only_close",
+    )
+
+    assert observed_metadata["scope"] == "runtime_owner_reduce_only_close"
+
+
+@pytest.mark.asyncio
 async def test_controlled_close_terminalizes_protection_when_exchange_order_already_missing():
     from src.application.position_projection_service import PositionProjectionService
 

@@ -551,8 +551,9 @@ class ExecutionOrchestrator:
         position: Any,
         reason: str = "controlled_test_close",
         max_amount: Decimal = Decimal("0.01"),
+        scope: str = "testnet_runtime_managed_close",
     ) -> Dict[str, Any]:
-        """Execute one runtime-owned controlled reduce-only close for testnet smoke."""
+        """Execute one runtime-owned controlled reduce-only close."""
         if getattr(position, "is_closed", False):
             raise ValueError("controlled close requires an active local position")
         amount = Decimal(str(getattr(position, "current_qty", "0")))
@@ -599,7 +600,7 @@ class ExecutionOrchestrator:
                 "source": "ExecutionOrchestrator.execute_controlled_close",
                 "reason": reason,
                 "parent_order_id": entry_order.id,
-                "scope": "testnet_runtime_managed_close",
+                "scope": scope,
             },
         )
 
