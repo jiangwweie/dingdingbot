@@ -2977,3 +2977,57 @@ Use this file for session progress and handoff notes.
   - after close, this same post-close follow-up packet should progress from
     close authorization to closed-review command args and next-attempt gate
     verification.
+
+## 2026-06-11 (Post-close Operator Command Plan)
+
+- Added and deployed `program/live-safe-v1` commit
+  `cca3efdee0518dabb9df8c889a0eb92491b83099`
+  `feat(runtime): include post-close operator command plan`.
+- `scripts/build_runtime_post_close_followup_packet.py` now includes a
+  non-executing `operator_command_plan` in its JSON output.
+- The command plan carries:
+  - refresh follow-up command args;
+  - Owner reduce-only close dry-run command args;
+  - Owner reduce-only close execute command args;
+  - required Owner approval env/value;
+  - closed-review facts refresh command args;
+  - closed-review command args when the runtime is flat and review facts are
+    ready;
+  - the expected post-close sequence from refresh -> Owner authorization ->
+    close -> flat verification -> review -> next-attempt gate.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_post_close_followup_script.py tests/unit/test_runtime_post_close_followup.py tests/unit/test_runtime_closed_trade_review_facts.py tests/unit/test_runtime_owner_reduce_only_close_flow.py`
+    passed with `12 passed`;
+  - `python3 -m py_compile scripts/build_runtime_post_close_followup_packet.py tests/unit/test_runtime_post_close_followup_script.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed release is
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cca3efde-20260611Tcommandplan`;
+  - deployed head is
+    `cca3efdee0518dabb9df8c889a0eb92491b83099`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote post-close follow-up packet for
+  `strategy-runtime-95655873b76c`:
+  - status `waiting_for_owner_close_authorization`;
+  - closed-review facts status `waiting_for_close`;
+  - resolved entry order id `rtod-c4439560677fbd165a-entry`;
+  - Owner close approval value remains
+    `runtime-reduce-only-close:strategy-runtime-95655873b76c:AVAX/USDT:USDT:short:qty=1.0:owner-authorized`;
+  - operator execute args are present but not executed:
+    `scripts/runtime_owner_reduce_only_close_flow.py --runtime-instance-id strategy-runtime-95655873b76c --env-file /home/ubuntu/brc-deploy/env/live-readonly.env --execute-real-close`.
+- Safety proof:
+  - command plan reported `command_plan_only=true`;
+  - exchange write called `false`;
+  - review record created `false`;
+  - order created `false`;
+  - position closed `false`;
+  - runtime state mutated `false`;
+  - no withdrawal / transfer.
+- Remaining live action:
+  - real reduce-only close is still not executed;
+  - the next live step still requires exact Owner authorization before running
+    the execute command with the approval env value.
