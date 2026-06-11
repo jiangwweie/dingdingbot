@@ -6,6 +6,7 @@ import asyncio
 import os
 import time
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -287,6 +288,30 @@ class ScheduledReadonlyObservationRunRequest(BaseModel):
     source_name: ObservationSourceName = "live_market"
     shadow_plan: bool = False
     allow_shadow_candidate_creation: bool = False
+    non_executing: Literal[True] = True
+
+
+class RuntimeNextAttemptObservationCycleRequest(BaseModel):
+    source: Literal["live_market", "sample"] = "live_market"
+    include_exchange: bool = True
+    allow_prepare_records: bool = False
+    symbol: str | None = None
+    side: str | None = None
+    family: str | None = None
+    strategy_family_id: str | None = None
+    carrier_id: str | None = None
+    quantity: str | None = None
+    target_notional_usdt: str | None = None
+    max_notional: str | None = None
+    leverage: str | None = None
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    protection_mode: str | None = None
+    review_requirement: str | None = None
+    evaluation_id: str | None = None
+    playbook_id: str | None = None
+    one_hour_limit: int = Field(default=25, ge=5, le=200)
+    four_hour_limit: int = Field(default=12, ge=2, le=100)
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     non_executing: Literal[True] = True
 
 
@@ -698,6 +723,36 @@ async def run_scheduled_strategy_observation(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/next-attempt-observation-cycle",
+)
+async def runtime_next_attempt_observation_cycle(
+    runtime_instance_id: str,
+    request: RuntimeNextAttemptObservationCycleRequest,
+) -> dict[str, Any]:
+    if request.allow_prepare_records:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "next-attempt observation API is non-executing; use the "
+                "official runtime_next_attempt_prepare_api_flow after "
+                "ready_for_prepare"
+            ),
+        )
+    try:
+        return await _runtime_next_attempt_observation_cycle_payload(
+            runtime_instance_id=runtime_instance_id,
+            request=request,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
 
 
 @router.get(
@@ -3396,6 +3451,243 @@ def _runtime_post_close_operator_command_plan(
             "runtime_state_mutated": False,
             "withdrawal_or_transfer_created": False,
         },
+    }
+
+
+async def _runtime_next_attempt_observation_cycle_payload(
+    *,
+    runtime_instance_id: str,
+    request: RuntimeNextAttemptObservationCycleRequest,
+) -> dict[str, Any]:
+    from scripts import build_runtime_strategy_signal_input_packet as signal_builder
+    from src.application.runtime_strategy_signal_evaluation_service import (
+        RuntimeStrategySignalEvaluationService,
+        RuntimeStrategySignalEvaluationStatus,
+    )
+
+    runtime = await (await _strategy_runtime_service()).get_runtime(runtime_instance_id)
+    if request.symbol and request.symbol != runtime.symbol:
+        raise ValueError("signal symbol override must match runtime symbol")
+    owner_scope = _runtime_next_attempt_owner_scope(runtime, request)
+    owner_flow_response = await _service(
+        include_exchange=request.include_exchange,
+    ).owner_action_flow(
+        owner_scope=owner_scope,
+        include_exchange=request.include_exchange,
+    )
+    owner_flow_data = dict(owner_flow_response.data or {})
+    owner_action_flow = dict(owner_flow_data.get("owner_action_flow") or {})
+    post_action_state = dict(owner_flow_data.get("post_action_state") or {})
+    next_attempt_gate = dict(
+        owner_action_flow.get("next_attempt_gate")
+        or post_action_state.get("next_attempt_gate")
+        or {}
+    )
+    jit_audit = dict(owner_action_flow.get("just_in_time_lifecycle_audit") or {})
+    gate_clear = (
+        next_attempt_gate.get("status") == "clear_for_preflight"
+        and next_attempt_gate.get("next_attempt_allowed_by_lifecycle") is True
+        and jit_audit.get("can_execute_live") is not True
+    )
+    if not gate_clear:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "blocked_stage": "next_attempt_gate",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_packet": None,
+            "prepare_packet": None,
+            "blockers": list(next_attempt_gate.get("blockers") or ["next_attempt_gate_blocked"]),
+            "warnings": list(next_attempt_gate.get("warnings") or []),
+            "operator_command_plan": {
+                "next_step": next_attempt_gate.get("required_next_step")
+                or "resolve_next_attempt_gate_blocker",
+                "not_executed": True,
+                "creates_shadow_candidate": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+
+    source = signal_builder._market_source(
+        SimpleNamespace(
+            source=request.source,
+            timeout_seconds=request.timeout_seconds,
+        )
+    )
+    one_hour = source.latest_closed_candles(
+        symbol=runtime.symbol,
+        timeframe="1h",
+        limit=request.one_hour_limit,
+    )
+    four_hour = source.latest_closed_candles(
+        symbol=runtime.symbol,
+        timeframe="4h",
+        limit=request.four_hour_limit,
+    )
+    now_ms = int(time.time() * 1000)
+    signal_input = signal_builder._build_signal_input(
+        runtime=runtime,
+        one_hour=one_hour,
+        four_hour=four_hour,
+        source_id=getattr(source, "source_id", "unknown_read_only_market_source"),
+        source_type=getattr(source, "source_type", "read_only_market_source"),
+        evaluation_id=request.evaluation_id,
+        playbook_id=request.playbook_id,
+        now_ms=now_ms,
+    )
+    evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
+    signal_packet = {
+        "scope": "runtime_next_attempt_observation_cycle_signal_packet",
+        "status": (
+            "ready_for_shadow_candidate_prepare"
+            if evaluation.status
+            == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+            else evaluation.status.value
+        ),
+        "runtime_instance_id": runtime.runtime_instance_id,
+        "strategy_family_id": runtime.strategy_family_id,
+        "strategy_family_version_id": runtime.strategy_family_version_id,
+        "symbol": runtime.symbol,
+        "side": runtime.side,
+        "source": getattr(source, "source_id", "unknown_read_only_market_source"),
+        "source_type": getattr(source, "source_type", "read_only_market_source"),
+        "signal_input": signal_input.model_dump(mode="json"),
+        "evaluation_result": evaluation.model_dump(mode="json"),
+        "safety_invariants": {
+            "market_data_read_only": True,
+            "signal_evaluation_created": False,
+            "order_candidate_created": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_write_called": False,
+            "runtime_state_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+    ready = (
+        evaluation.status
+        == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    )
+    if not ready:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "waiting_for_signal",
+            "blocked_stage": "strategy_signal",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_packet": signal_packet,
+            "prepare_packet": None,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": list(evaluation.warnings),
+            "operator_command_plan": {
+                "next_step": "observe_only_or_wait_for_next_closed_bar",
+                "not_executed": True,
+                "creates_shadow_candidate": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+
+    return {
+        "scope": "runtime_next_attempt_observation_cycle_api",
+        "status": "ready_for_prepare",
+        "runtime_instance_id": runtime_instance_id,
+        "owner_action_scope": owner_scope,
+        "include_exchange": request.include_exchange,
+        "next_attempt_gate": next_attempt_gate,
+        "just_in_time_lifecycle_audit": jit_audit,
+        "signal_packet": signal_packet,
+        "prepare_packet": None,
+        "blockers": [],
+        "warnings": list(evaluation.warnings),
+        "operator_command_plan": {
+            "next_step": "run_official_runtime_next_attempt_prepare_api_flow",
+            "api_prepare_endpoint": (
+                f"/api/trading-console/strategy-runtimes/{runtime_instance_id}"
+                "/strategy-signal-shadow-plans"
+            ),
+            "cli_prepare_command_args": [
+                "scripts/runtime_next_attempt_prepare_api_flow.py",
+                "--runtime-instance-id",
+                runtime_instance_id,
+                "--signal-input-json",
+                "<write signal_packet.signal_input to a local json file first>",
+            ],
+            "signal_input_embedded": True,
+            "not_executed": True,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "live_submit_allowed": False,
+            "requires_official_final_gate": True,
+            "requires_explicit_owner_real_submit_authorization": True,
+        },
+        "safety_invariants": _runtime_next_attempt_observation_safety(),
+    }
+
+
+def _runtime_next_attempt_owner_scope(
+    runtime: StrategyRuntimeInstance,
+    request: RuntimeNextAttemptObservationCycleRequest,
+) -> dict[str, Any]:
+    boundary = runtime.boundary
+    return {
+        key: value
+        for key, value in {
+            "symbol": request.symbol or runtime.symbol,
+            "side": request.side or runtime.side,
+            "family": request.family,
+            "strategy_family_id": request.strategy_family_id
+            or runtime.strategy_family_id,
+            "carrier_id": request.carrier_id
+            or runtime.carrier_id
+            or runtime.strategy_family_version_id,
+            "quantity": request.quantity,
+            "target_notional_usdt": request.target_notional_usdt,
+            "max_notional": request.max_notional
+            or _decimal_string(boundary.max_notional_per_attempt),
+            "leverage": request.leverage or _decimal_string(boundary.max_leverage),
+            "max_attempts": request.max_attempts or boundary.max_attempts,
+            "protection_mode": request.protection_mode,
+            "review_requirement": request.review_requirement
+            or runtime.review_requirement.value,
+        }.items()
+        if value not in (None, "")
+    }
+
+
+def _runtime_next_attempt_observation_safety() -> dict[str, bool]:
+    return {
+        "api_non_executing": True,
+        "allow_prepare_records": False,
+        "local_registration_armed": False,
+        "exchange_submit_armed": False,
+        "execute_real_submit": False,
+        "exchange_write_called": False,
+        "signal_evaluation_created": False,
+        "order_candidate_created": False,
+        "execution_intent_created": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "attempt_counter_mutated": False,
+        "runtime_budget_mutated": False,
+        "position_opened": False,
+        "position_closed": False,
+        "withdrawal_or_transfer_created": False,
     }
 
 
