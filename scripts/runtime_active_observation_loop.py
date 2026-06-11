@@ -25,6 +25,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_active_observation_monitor as active_monitor  # noqa: E402
+from scripts.runtime_active_observation_status import build_status_packet  # noqa: E402
 
 
 WAITING_STATUS = "waiting_for_signal"
@@ -184,17 +185,14 @@ def _build_loop_packet(
             interim_stop_reason = stop_reason
             if not should_stop and iteration < max_iterations:
                 interim_stop_reason = "running"
-            _write_json(
-                Path(args.loop_output_json).expanduser(),
-                _loop_packet(
-                    args,
-                    root=root,
-                    summaries=summaries,
-                    packets=packets,
-                    final_status=final_status,
-                    stop_reason=interim_stop_reason,
-                    max_iterations=max_iterations,
-                ),
+            _write_loop_and_status_packets(
+                args,
+                root=root,
+                summaries=summaries,
+                packets=packets,
+                final_status=final_status,
+                stop_reason=interim_stop_reason,
+                max_iterations=max_iterations,
             )
 
         if should_stop:
@@ -211,6 +209,38 @@ def _build_loop_packet(
         stop_reason=stop_reason,
         max_iterations=max_iterations,
     )
+
+
+def _write_loop_and_status_packets(
+    args: argparse.Namespace,
+    *,
+    root: Path,
+    summaries: list[dict[str, Any]],
+    packets: list[dict[str, Any]],
+    final_status: str,
+    stop_reason: str,
+    max_iterations: int,
+) -> None:
+    _write_json(
+        Path(args.loop_output_json).expanduser(),
+        _loop_packet(
+            args,
+            root=root,
+            summaries=summaries,
+            packets=packets,
+            final_status=final_status,
+            stop_reason=stop_reason,
+            max_iterations=max_iterations,
+        ),
+    )
+    if getattr(args, "status_output_json", None):
+        status_packet = build_status_packet(
+            root,
+            stale_after_seconds=float(
+                getattr(args, "status_stale_after_seconds", 900.0) or 900.0
+            ),
+        )
+        _write_json(Path(args.status_output_json).expanduser(), status_packet)
 
 
 def _build_cycle_packet_with_timeout(
@@ -390,6 +420,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--loop-output-json",
         help="Optional path for the aggregate loop packet. Stdout remains JSON.",
     )
+    loop_parser.add_argument(
+        "--status-output-json",
+        help="Optional path for a refreshed read-only status packet.",
+    )
+    loop_parser.add_argument("--status-stale-after-seconds", type=float, default=900.0)
     loop_parser.add_argument("--include-packets", action="store_true", default=False)
     loop_args, monitor_argv = loop_parser.parse_known_args(argv)
     monitor_args = active_monitor._parse_args(monitor_argv)
@@ -398,6 +433,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         loop_interval_seconds=loop_args.loop_interval_seconds,
         cycle_timeout_seconds=loop_args.cycle_timeout_seconds,
         loop_output_json=loop_args.loop_output_json,
+        status_output_json=loop_args.status_output_json,
+        status_stale_after_seconds=loop_args.status_stale_after_seconds,
         include_packets=loop_args.include_packets,
         output_dir=monitor_args.output_dir,
         monitor_args=monitor_args,

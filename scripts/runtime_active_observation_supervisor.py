@@ -49,7 +49,11 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
-def _loop_command(args: argparse.Namespace, loop_packet_path: Path) -> list[str]:
+def _loop_command(
+    args: argparse.Namespace,
+    loop_packet_path: Path,
+    status_packet_path: Path,
+) -> list[str]:
     command = [
         sys.executable,
         str(ROOT_DIR / "scripts" / "runtime_active_observation_loop.py"),
@@ -67,6 +71,10 @@ def _loop_command(args: argparse.Namespace, loop_packet_path: Path) -> list[str]
         str(Path(args.output_dir).expanduser()),
         "--loop-output-json",
         str(loop_packet_path),
+        "--status-output-json",
+        str(status_packet_path),
+        "--status-stale-after-seconds",
+        str(args.status_stale_after_seconds),
         "--one-hour-limit",
         str(args.one_hour_limit),
         "--four-hour-limit",
@@ -175,7 +183,7 @@ def build_supervisor_packet(
     followup_stdout_path = output_dir / "followup-stdout.json"
 
     command_runner = runner or _run_subprocess
-    loop_command = _loop_command(args, loop_packet_path)
+    loop_command = _loop_command(args, loop_packet_path, status_packet_path)
     _write_json(
         supervisor_packet_path,
         _running_supervisor_packet(

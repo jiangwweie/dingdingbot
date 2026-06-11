@@ -91,6 +91,7 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
     assert packet["loop_status"] == "waiting_for_signal"
     assert packet["followup_status"] == "waiting_for_ready_final_gate_preflight"
     assert "--allow-prepare-records" in calls[0]
+    assert "--status-output-json" in calls[0]
     assert "--allow-arm-preview" in calls[1]
     assert "--allow-disabled-smoke" in calls[1]
     assert "--execute-real-submit" not in flat_commands
@@ -163,6 +164,7 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
     loop_command = running["command_results"]["loop"]["command"]
     assert "--cycle-timeout-seconds" in loop_command
     assert "123.0" in loop_command
+    assert "--status-output-json" in loop_command
 
     final_packet = json.loads(
         (tmp_path / "supervisor" / "supervisor-packet.json").read_text()

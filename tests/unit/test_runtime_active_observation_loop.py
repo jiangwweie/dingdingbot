@@ -14,6 +14,7 @@ def _args(
     cycle_timeout_seconds=0.0,
     include_packets=False,
     loop_output_json=None,
+    status_output_json=None,
 ):
     monitor_args = type(
         "MonitorArgs",
@@ -31,6 +32,8 @@ def _args(
             "loop_interval_seconds": interval,
             "cycle_timeout_seconds": cycle_timeout_seconds,
             "loop_output_json": loop_output_json,
+            "status_output_json": status_output_json,
+            "status_stale_after_seconds": 900.0,
             "include_packets": include_packets,
             "output_dir": str(tmp_path / "loop"),
             "monitor_args": monitor_args,
@@ -127,8 +130,10 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
 
 
 def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path):
-    output_path = tmp_path / "loop-packet.json"
+    output_path = tmp_path / "loop" / "loop-packet.json"
+    status_path = tmp_path / "loop" / "status-packet.json"
     snapshots = []
+    status_snapshots = []
 
     def builder(args):
         return _packet()
@@ -136,6 +141,7 @@ def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path)
     def sleeper(seconds):
         assert seconds == 10.0
         snapshots.append(json.loads(output_path.read_text()))
+        status_snapshots.append(json.loads(status_path.read_text()))
 
     packet = runtime_active_observation_loop._build_loop_packet(
         _args(
@@ -143,6 +149,7 @@ def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path)
             max_iterations=2,
             interval=10.0,
             loop_output_json=str(output_path),
+            status_output_json=str(status_path),
         ),
         packet_builder=builder,
         sleeper=sleeper,
@@ -153,11 +160,18 @@ def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path)
     assert snapshots[0]["status"] == "waiting_for_signal"
     assert snapshots[0]["stop_reason"] == "running"
     assert snapshots[0]["iterations_completed"] == 1
+    assert status_snapshots[0]["status"] == "waiting_for_signal"
+    assert status_snapshots[0]["loop_status"] == "waiting_for_signal"
+    assert status_snapshots[0]["iterations_completed"] == 1
+    assert status_snapshots[0]["safety_invariants"]["read_packets_only"] is True
 
     latest_file = json.loads(output_path.read_text())
+    latest_status_file = json.loads(status_path.read_text())
     assert latest_file["stop_reason"] == "max_iterations_exhausted"
     assert latest_file["iterations_completed"] == 2
     assert latest_file == packet
+    assert latest_status_file["iterations_completed"] == 2
+    assert latest_status_file["loop_status"] == "waiting_for_signal"
 
 
 def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path):
