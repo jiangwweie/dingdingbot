@@ -75,6 +75,12 @@ class RuntimeExecutionConfirmationFacts(StrategyRuntimePromotionGateModel):
 
 class FirstRealSubmitConfirmationFacts(StrategyRuntimePromotionGateModel):
     budget_release_or_consume_rule_confirmed: bool = False
+    post_submit_budget_settlement_persistence_confirmed: bool = False
+    post_submit_budget_settlement_persistence_evidence_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=260,
+    )
     attempt_outcome_policy_id: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -386,6 +392,9 @@ def _check_first_real_submit_confirmations(
         "budget_release_or_consume_rule_confirmed": (
             facts.budget_release_or_consume_rule_confirmed
         ),
+        "post_submit_budget_settlement_persistence_confirmed": (
+            facts.post_submit_budget_settlement_persistence_confirmed
+        ),
         "protection_creation_failure_policy_confirmed": (
             facts.protection_creation_failure_policy_confirmed
         ),
@@ -396,6 +405,14 @@ def _check_first_real_submit_confirmations(
         ),
     }
     _append_missing(required, "first_real_submit", blockers, missing_owner_decisions)
+    if not facts.post_submit_budget_settlement_persistence_evidence_id:
+        blockers.append(
+            "first_real_submit_post_submit_budget_settlement_persistence_"
+            "evidence_id_missing"
+        )
+        missing_owner_decisions.append(
+            "post_submit_budget_settlement_persistence_evidence_id"
+        )
     if not facts.attempt_outcome_policy_id:
         blockers.append("first_real_submit_attempt_outcome_policy_id_missing")
         missing_owner_decisions.append("attempt_outcome_policy_id")

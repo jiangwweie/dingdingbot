@@ -417,6 +417,7 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
     trusted_account_fact_source_confirmed: bool = False,
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
+    post_submit_budget_settlement_persistence_evidence_id: Optional[str] = None,
     attempt_outcome_policy_id: Optional[str] = None,
     protection_creation_failure_policy_confirmed: bool = False,
     protection_creation_failure_policy_id: Optional[str] = None,
@@ -479,6 +480,9 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
         ),
         budget_release_or_consume_rule_confirmed=(
             budget_release_or_consume_rule_confirmed
+        ),
+        post_submit_budget_settlement_persistence_evidence_id=(
+            post_submit_budget_settlement_persistence_evidence_id
         ),
         attempt_outcome_policy_id=attempt_outcome_policy_id,
         protection_creation_failure_policy_confirmed=(
@@ -659,6 +663,7 @@ async def runtime_strategy_promotion_gate_preview(
     trusted_account_fact_source_confirmed: bool = False,
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
+    post_submit_budget_settlement_persistence_evidence_id: Optional[str] = None,
     attempt_outcome_policy_id: Optional[str] = None,
     protection_creation_failure_policy_confirmed: bool = False,
     protection_creation_failure_policy_id: Optional[str] = None,
@@ -726,6 +731,12 @@ async def runtime_strategy_promotion_gate_preview(
             first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
                 budget_release_or_consume_rule_confirmed=(
                     budget_release_or_consume_rule_confirmed
+                ),
+                post_submit_budget_settlement_persistence_confirmed=bool(
+                    post_submit_budget_settlement_persistence_evidence_id
+                ),
+                post_submit_budget_settlement_persistence_evidence_id=(
+                    post_submit_budget_settlement_persistence_evidence_id
                 ),
                 attempt_outcome_policy_id=attempt_outcome_policy_id,
                 protection_creation_failure_policy_confirmed=(
@@ -1769,6 +1780,7 @@ async def runtime_execution_first_real_submit_enablement_packet_for_authorizatio
     trusted_account_fact_source_confirmed: bool = False,
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
+    post_submit_budget_settlement_persistence_evidence_id: Optional[str] = None,
     attempt_outcome_policy_id: Optional[str] = None,
     protection_creation_failure_policy_confirmed: bool = False,
     protection_creation_failure_policy_id: Optional[str] = None,
@@ -1827,6 +1839,9 @@ async def runtime_execution_first_real_submit_enablement_packet_for_authorizatio
             deployment_readiness_evidence_id=deployment_readiness_evidence_id,
             budget_release_or_consume_rule_confirmed=(
                 budget_release_or_consume_rule_confirmed
+            ),
+            post_submit_budget_settlement_persistence_evidence_id=(
+                post_submit_budget_settlement_persistence_evidence_id
             ),
             protection_creation_failure_policy_confirmed=(
                 protection_creation_failure_policy_confirmed

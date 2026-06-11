@@ -47,6 +47,7 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
         trusted_submit_fact_snapshot_id: str | None = None,
         submit_idempotency_policy_id: str | None = None,
         attempt_outcome_policy_id: str | None = None,
+        post_submit_budget_settlement_persistence_evidence_id: str | None = None,
         protection_creation_failure_policy_id: str | None = None,
         local_registration_enablement_decision_id: str | None = None,
         exchange_submit_enablement_decision_id: str | None = None,
@@ -80,6 +81,14 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
         effective_attempt_outcome_policy_id = _first_present(
             attempt_outcome_policy_id,
             resolved_evidence_ids.get("attempt_outcome_policy_id"),
+        )
+        effective_post_submit_budget_settlement_persistence_evidence_id = (
+            _first_present(
+                post_submit_budget_settlement_persistence_evidence_id,
+                resolved_evidence_ids.get(
+                    "post_submit_budget_settlement_persistence_evidence_id"
+                ),
+            )
         )
         effective_protection_creation_failure_policy_id = _first_present(
             protection_creation_failure_policy_id,
@@ -256,6 +265,12 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
         first_real_submit_confirmations = FirstRealSubmitConfirmationFacts(
             budget_release_or_consume_rule_confirmed=(
                 budget_release_or_consume_rule_confirmed
+            ),
+            post_submit_budget_settlement_persistence_confirmed=bool(
+                effective_post_submit_budget_settlement_persistence_evidence_id
+            ),
+            post_submit_budget_settlement_persistence_evidence_id=(
+                effective_post_submit_budget_settlement_persistence_evidence_id
             ),
             attempt_outcome_policy_id=effective_attempt_outcome_policy_id,
             protection_creation_failure_policy_confirmed=(

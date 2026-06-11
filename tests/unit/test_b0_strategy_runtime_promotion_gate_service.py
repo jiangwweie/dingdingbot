@@ -411,6 +411,9 @@ async def test_trading_console_first_real_submit_scope_can_reach_gate_review_onl
         trusted_active_position_source_confirmed=True,
         trusted_account_fact_source_confirmed=True,
         budget_release_or_consume_rule_confirmed=True,
+        post_submit_budget_settlement_persistence_evidence_id=(
+            "runtime-post-submit-budget-settlement-persistence-084"
+        ),
         attempt_outcome_policy_id="runtime-attempt-outcome-policy-test",
         trusted_submit_fact_snapshot_id="trusted-submit-facts-snapshot-test",
         submit_idempotency_policy_id="runtime-submit-idempotency-policy-test",

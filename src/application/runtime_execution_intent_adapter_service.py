@@ -180,6 +180,9 @@ from src.domain.strategy_runtime import StrategyRuntimeInstance
 _EXCHANGE_SUBMIT_PROTECTION_FAILED_RECOVERY_TYPE = (
     "exchange_submit_protection_fail"
 )
+_POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID = (
+    "runtime-post-submit-budget-settlement-persistence-084"
+)
 
 
 class RuntimeExecutionIntentDraftPort(Protocol):
@@ -927,6 +930,11 @@ class RuntimeExecutionIntentAdapterService:
             )
             if policy is not None:
                 resolved["attempt_outcome_policy_id"] = attempt_outcome_policy_id
+
+        if self._post_submit_budget_settlement_repository is not None:
+            resolved["post_submit_budget_settlement_persistence_evidence_id"] = (
+                _POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+            )
 
         if (
             execution_intent_id

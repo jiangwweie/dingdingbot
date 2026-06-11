@@ -137,6 +137,11 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationService:
                     attempt_outcome_policy_id=available_evidence_ids.get(
                         "attempt_outcome_policy_id"
                     ),
+                    post_submit_budget_settlement_persistence_evidence_id=(
+                        available_evidence_ids.get(
+                            "post_submit_budget_settlement_persistence_evidence_id"
+                        )
+                    ),
                     protection_creation_failure_policy_id=(
                         available_evidence_ids.get(
                             "protection_creation_failure_policy_id"

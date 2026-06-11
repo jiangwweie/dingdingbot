@@ -136,6 +136,9 @@ DEFAULT_RUNTIME_ID = "pre-live-rehearsal-runtime-bnb-long"
 DEFAULT_ORDER_CANDIDATE_ID = "pre-live-rehearsal-candidate-bnb-long"
 OWNER_AUTHORIZATION_FLAG = "--owner-real-submit-authorized"
 OWNER_LIVE_RUNTIME_ENABLEMENT_FLAG = "--owner-live-runtime-enable-authorized"
+POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID = (
+    "runtime-post-submit-budget-settlement-persistence-084"
+)
 
 
 @dataclass(frozen=True)
@@ -465,6 +468,7 @@ async def build_pre_live_packet(
         "submit_idempotency_policy_id"
     )
     attempt_outcome_policy_repository = _InMemoryRepository("policy_id")
+    post_submit_budget_settlement_repository = _InMemoryRepository("settlement_id")
     order_lifecycle_handoff_repository = _InMemoryRepository("handoff_draft_id")
     order_lifecycle_adapter_result_repository = (
         _OrderLifecycleAdapterResultRepository()
@@ -518,6 +522,9 @@ async def build_pre_live_packet(
         attempt_reservation_repository=attempt_reservation_repository,
         attempt_mutation_repository=attempt_mutation_repository,
         attempt_outcome_policy_repository=attempt_outcome_policy_repository,
+        post_submit_budget_settlement_repository=(
+            post_submit_budget_settlement_repository
+        ),
         protection_plan_repository=protection_plan_repository,
         protection_failure_policy_repository=protection_failure_policy_repository,
         order_lifecycle_handoff_repository=order_lifecycle_handoff_repository,
@@ -711,6 +718,11 @@ async def build_pre_live_packet(
             attempt_outcome_policy_id=local_registration_rehearsal[
                 "attempt_outcome_policy_id"
             ],
+            post_submit_budget_settlement_persistence_evidence_id=(
+                evidence_preparation.available_evidence_ids.get(
+                    "post_submit_budget_settlement_persistence_evidence_id"
+                )
+            ),
             protection_creation_failure_policy_id=local_registration_rehearsal[
                 "protection_creation_failure_policy_id"
             ],
@@ -855,6 +867,11 @@ async def build_pre_live_packet(
         protection_failure_policy_id=protection_failure_policy.policy_id,
         protection_failure_policy_passed=protection_failure_policy_passed,
         attempt_outcome_policy_id=rehearsal.attempt_outcome_policy_id,
+        post_submit_budget_settlement_persistence_evidence_id=(
+            evidence_preparation.available_evidence_ids.get(
+                "post_submit_budget_settlement_persistence_evidence_id"
+            )
+        ),
         trusted_submit_fact_snapshot_id=rehearsal.trusted_submit_fact_snapshot_id,
         submit_idempotency_policy_id=rehearsal.submit_idempotency_policy_id,
         local_registration_enablement_decision_id=(
@@ -1926,6 +1943,7 @@ def _promotion_gate_result(
     protection_failure_policy_id: str,
     protection_failure_policy_passed: bool,
     attempt_outcome_policy_id: str | None,
+    post_submit_budget_settlement_persistence_evidence_id: str | None,
     trusted_submit_fact_snapshot_id: str | None,
     submit_idempotency_policy_id: str | None,
     local_registration_enablement_decision_id: str | None,
@@ -1971,6 +1989,12 @@ def _promotion_gate_result(
             ),
             first_real_submit_confirmations=FirstRealSubmitConfirmationFacts(
                 budget_release_or_consume_rule_confirmed=True,
+                post_submit_budget_settlement_persistence_confirmed=bool(
+                    post_submit_budget_settlement_persistence_evidence_id
+                ),
+                post_submit_budget_settlement_persistence_evidence_id=(
+                    post_submit_budget_settlement_persistence_evidence_id
+                ),
                 protection_creation_failure_policy_confirmed=(
                     protection_failure_policy_passed
                 ),

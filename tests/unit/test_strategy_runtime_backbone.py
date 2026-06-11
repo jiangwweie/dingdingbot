@@ -796,6 +796,10 @@ def _promotion_gate(runtime: StrategyRuntimeInstance, *, confirmed: bool):
             first_real_submit_confirmations=(
                 FirstRealSubmitConfirmationFacts(
                     budget_release_or_consume_rule_confirmed=True,
+                    post_submit_budget_settlement_persistence_confirmed=True,
+                    post_submit_budget_settlement_persistence_evidence_id=(
+                        "runtime-post-submit-budget-settlement-persistence-084"
+                    ),
                     attempt_outcome_policy_id="runtime-attempt-outcome-policy-test",
                     trusted_submit_fact_snapshot_id=(
                         "trusted-submit-facts-snapshot-test"

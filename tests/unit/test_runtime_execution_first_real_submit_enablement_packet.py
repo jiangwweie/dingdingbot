@@ -67,6 +67,9 @@ from src.interfaces import api_trading_console as trading_console_api
 
 
 NOW_MS = 1781000000000
+POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID = (
+    "runtime-post-submit-budget-settlement-persistence-084"
+)
 
 
 def _semantic_ids() -> BrcSemanticIds:
@@ -344,6 +347,10 @@ def _runtime_confirmed() -> RuntimeExecutionConfirmationFacts:
 def _first_submit_confirmed(**overrides) -> FirstRealSubmitConfirmationFacts:
     fields = {
         "budget_release_or_consume_rule_confirmed": True,
+        "post_submit_budget_settlement_persistence_confirmed": True,
+        "post_submit_budget_settlement_persistence_evidence_id": (
+            POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+        ),
         "attempt_outcome_policy_id": "attempt-outcome-auth-1",
         "protection_creation_failure_policy_confirmed": True,
         "protection_creation_failure_policy_id": "protection-failure-auth-1",
@@ -652,6 +659,9 @@ async def test_first_real_submit_enablement_packet_service_defaults_evidence_ids
         exchange_submit_adapter_enablement_id="adapter-enable-auth-1",
         exchange_submit_action_authorization_id="exchange-action-auth-1",
         deployment_readiness_evidence_id="runtime-gateway-readiness-auth-1",
+        post_submit_budget_settlement_persistence_evidence_id=(
+            POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+        ),
         budget_release_or_consume_rule_confirmed=True,
         protection_creation_failure_policy_confirmed=True,
         duplicate_submit_policy_confirmed=True,
@@ -768,6 +778,9 @@ async def test_first_real_submit_enablement_packet_service_uses_decision_evidenc
     packet = await service.preview_for_authorization(
         "auth-1",
         budget_release_or_consume_rule_confirmed=True,
+        post_submit_budget_settlement_persistence_evidence_id=(
+            POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+        ),
         protection_creation_failure_policy_confirmed=True,
         duplicate_submit_policy_confirmed=True,
         deployment_readiness_confirmed=True,
@@ -829,6 +842,9 @@ async def test_first_real_submit_enablement_packet_service_resolves_recorded_evi
                 "trusted_submit_fact_snapshot_id": "trusted-submit-facts-auth-1",
                 "submit_idempotency_policy_id": "submit-idempotency-auth-1",
                 "attempt_outcome_policy_id": "attempt-outcome-auth-1",
+                "post_submit_budget_settlement_persistence_evidence_id": (
+                    POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+                ),
                 "protection_creation_failure_policy_id": "protection-failure-auth-1",
             }
 
@@ -893,6 +909,11 @@ async def test_first_real_submit_enablement_packet_service_resolves_recorded_evi
     assert packet.first_real_submit_confirmations.trusted_submit_fact_snapshot_id == (
         "trusted-submit-facts-auth-1"
     )
+    assert (
+        packet.first_real_submit_confirmations
+        .post_submit_budget_settlement_persistence_evidence_id
+        == POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+    )
     assert packet.order_created is False
     assert packet.exchange_called is False
 
@@ -934,6 +955,7 @@ async def test_runtime_adapter_resolves_only_existing_deterministic_evidence_ids
         trusted_submit_facts_repository=trusted_repo,
         submit_idempotency_repository=idempotency_repo,
         attempt_outcome_policy_repository=attempt_repo,
+        post_submit_budget_settlement_repository=object(),
         protection_failure_policy_repository=protection_repo,
     )
 
@@ -947,6 +969,9 @@ async def test_runtime_adapter_resolves_only_existing_deterministic_evidence_ids
         "attempt_outcome_policy_id": (
             "runtime-attempt-outcome-policy-runtime-attempt-reservation-auth-1-"
             "entry_filled_protection_creation_failed"
+        ),
+        "post_submit_budget_settlement_persistence_evidence_id": (
+            POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
         ),
         "protection_creation_failure_policy_id": (
             "runtime-protection-failure-policy-intent-1"
@@ -1008,7 +1033,11 @@ async def test_first_real_submit_evidence_preparation_records_machine_evidence_o
             authorization_id,
         ):
             calls.append({"method": "resolve", "authorization_id": authorization_id})
-            return {}
+            return {
+                "post_submit_budget_settlement_persistence_evidence_id": (
+                    POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+                )
+            }
 
         async def exchange_submit_enablement_decision_for_authorization(
             self,
@@ -1328,6 +1357,9 @@ async def test_trading_console_first_real_submit_packet_api(monkeypatch):
             trusted_active_position_source_confirmed=True,
             trusted_account_fact_source_confirmed=True,
             budget_release_or_consume_rule_confirmed=True,
+            post_submit_budget_settlement_persistence_evidence_id=(
+                POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+            ),
             attempt_outcome_policy_id="attempt-outcome-auth-1",
             protection_creation_failure_policy_confirmed=True,
             protection_creation_failure_policy_id="protection-failure-auth-1",
@@ -1397,7 +1429,11 @@ async def test_trading_console_first_real_submit_evidence_preparation_api(
             self,
             authorization_id,
         ):
-            return {}
+            return {
+                "post_submit_budget_settlement_persistence_evidence_id": (
+                    POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+                )
+            }
 
         async def exchange_submit_enablement_decision_for_authorization(
             self,

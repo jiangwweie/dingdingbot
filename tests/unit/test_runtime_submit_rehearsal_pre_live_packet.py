@@ -104,6 +104,12 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
         report["checks"]["machine_evidence_available_ids"]
     )
     assert (
+        report["checks"]["machine_evidence_available_ids"][
+            "post_submit_budget_settlement_persistence_evidence_id"
+        ]
+        == module.POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
+    )
+    assert (
         "local_registration_action_authorization_not_auto_created"
         in report["checks"]["machine_evidence_skipped"]
     )
@@ -194,6 +200,12 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     )
     assert "attempt_outcome_policy_id" in (
         report["checks"]["machine_evidence_available_ids"]
+    )
+    assert (
+        report["checks"]["machine_evidence_available_ids"][
+            "post_submit_budget_settlement_persistence_evidence_id"
+        ]
+        == module.POST_SUBMIT_BUDGET_SETTLEMENT_PERSISTENCE_EVIDENCE_ID
     )
     assert report["first_real_submit_packet"]["status"] == "blocked"
     assert report["pipeline"]["submit_rehearsal_status"] == "blocked"

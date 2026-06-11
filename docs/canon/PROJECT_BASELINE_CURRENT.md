@@ -430,7 +430,10 @@ Key facts:
   releasing it. The settlement is now a PG-persisted audit fact. It blocks
   runtime attempt/budget drift and never changes attempt counts,
   ExecutionIntent status, orders, OrderLifecycle, exchange, or
-  withdrawal/transfer state.
+  withdrawal/transfer state. First-real-submit readiness now also carries
+  machine evidence that this persistence path exists
+  (`runtime-post-submit-budget-settlement-persistence-084`), but it does not
+  require a settlement record before the first real submit.
   RuntimeExecutionSubmitAdapterPreview exposes missing OrderLifecycle/protection
   inputs without mutating runtime budget or creating orders.
   RuntimeExecutionSubmitRehearsal aggregates submit-readiness, controlled-submit
@@ -505,7 +508,10 @@ Key facts:
   `packet_ready_for_owner_decision=true` is not confused with
   `ready_for_first_real_submit=true`; local registration readiness, exchange
   pre-execution readiness, and true exchange-submit action readiness remain
-  separate facts.
+  separate facts. That packet also includes post-submit budget-settlement
+  persistence-path evidence when the repository/migration path is available;
+  this is machine evidence for post-submit closure, not new exchange authority
+  and not proof that a post-submit settlement already exists.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime
