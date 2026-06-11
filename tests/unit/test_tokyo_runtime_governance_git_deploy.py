@@ -77,9 +77,9 @@ def _ready_git_plan():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=69,
+        expected_remote_migration_count=81,
         expected_remote_latest_migration=(
-            "2026-06-10-069_allow_adapter_registration_failure_results.py"
+            "2026-06-11-081_create_llm_advisory_plane.py"
         ),
     )
 
@@ -126,9 +126,9 @@ def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
         api_base="http://127.0.0.1:18080",
         previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
         expected_deployed_head="baseline-head",
-        expected_remote_migration_count=69,
+        expected_remote_migration_count=81,
         expected_remote_latest_migration=(
-            "2026-06-10-069_allow_adapter_registration_failure_results.py"
+            "2026-06-11-081_create_llm_advisory_plane.py"
         ),
     )
 
@@ -138,18 +138,28 @@ def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
     assert report["safety_invariants"]["remote_files_modified"] is False
 
 
+def test_git_deploy_default_ref_is_live_safe_program_branch():
+    plan_module = _load_plan_module()
+    packet_module = _load_packet_module()
+    execute_module = _load_execute_module()
+
+    assert plan_module.DEFAULT_GIT_REF == "program/live-safe-v1"
+    assert packet_module.DEFAULT_GIT_REF == "program/live-safe-v1"
+    assert execute_module.DEFAULT_GIT_REF == "program/live-safe-v1"
+
+
 def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     report = _ready_git_plan()
 
     assert report["status"] == "ready_for_owner_authorized_remote_git_deploy_plan"
     assert report["checks"]["blockers"] == []
-    assert report["inputs"]["target_migration_count"] == 81
+    assert report["inputs"]["target_migration_count"] == 84
     assert report["inputs"]["local_latest_migration"] == (
-        "2026-06-11-081_create_llm_advisory_plane.py"
+        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
     )
-    assert report["inputs"]["remote_migration_revision"] == "069"
-    assert report["inputs"]["target_migration_revision"] == "081"
-    assert report["inputs"]["migration_gap_revision_count"] == 12
+    assert report["inputs"]["remote_migration_revision"] == "081"
+    assert report["inputs"]["target_migration_revision"] == "084"
+    assert report["inputs"]["migration_gap_revision_count"] == 3
     phases = {phase["phase"]: phase for phase in report["plan_phases"]}
     assert phases["2_owner_authorized_git_fetch_and_export"]["remote_mutation"] is True
     assert all(
@@ -170,9 +180,9 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert ".brc-release-manifest.json" in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
-    assert "--expected-min-migrations 81" in all_commands
-    assert "--base-revision 069 --head-revision 081 --expected-revision-count 12" in all_commands
-    assert "--expected-migration-count 81" in all_commands
+    assert "--expected-min-migrations 84" in all_commands
+    assert "--base-revision 081 --head-revision 084 --expected-revision-count 3" in all_commands
+    assert "--expected-migration-count 84" in all_commands
     assert "--expected-migration-count 70" not in all_commands
     assert "--base-revision 064 --head-revision 070" not in all_commands
 

@@ -11,7 +11,11 @@ orders.
 
 Target branch:
 
-- `release/tokyo-runtime-governance-20260610`
+- `program/live-safe-v1`
+
+`dev` remains an integration branch, but it is not the default deployment ref
+for the current Live-safe v1 runtime-governance stream. Use `dev` only after an
+explicit branch-management decision promotes the same target commit there.
 
 Current local deployment candidate must be taken from
 `scripts/prepare_tokyo_runtime_governance_release.py --json` immediately before
@@ -23,53 +27,44 @@ Current Tokyo baseline from the read-only fact check:
 
 - deployed app symlink: `/home/ubuntu/brc-deploy/app/current`
 - deployed release:
-  `brc-runtime-governance-ae9b209e-20260610T061250Z`
-- deployed HEAD: `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
+  `brc-runtime-governance-cbcff9f4-20260611T025626Z`
+- deployed HEAD: `cbcff9f45d4c26b56408d76ab6dd98ea86f5fdb0`
 - latest deployed migration file:
-  `064_add_runtime_profile_proposal_snapshot`
+  `081_create_llm_advisory_plane`
 - local latest migration file:
-  `070_add_execution_intent_local_orders_registered_status`
+  `084_create_runtime_post_submit_budget_settlements`
 - backend health: `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 Local release-prep for the next code-bearing candidate should report:
 
 - `ready_for_packaging=true`
 - deployed head is an ancestor of local `HEAD`
-- local migration count `70`
+- local migration count `84`
 - latest local migration
-  `2026-06-10-070_add_execution_intent_local_orders_registered_status.py`
+  `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`
 - no tracked secret-candidate files
 - only warning:
   `untracked_files_exist_and_are_not_in_git_archive` for `.playwright-cli/`
 
-Last local migration-gap audit for `064 -> 070` reported:
+Last local migration-gap audit for `081 -> 084` should report:
 
 - `ready_for_controlled_migration_preflight=true`
-- chain length `6`, first revision `065`, last revision `070`
+- chain length `3`, first revision `082`, last revision `084`
 - no `data_destructive_upgrade_ops`
 - warnings:
   - `non_additive_schema_ops_present`
 - review items:
-  - revision `065` relaxes `strategy_runtime_instances` check constraints so an
-    explicitly authorized runtime can leave shadow-only flags;
-  - revision `066` adds `order_lifecycle_adapter_enabled=false` and permits the
-    controlled-submit audit status `order_lifecycle_adapter_disabled`;
-  - revision `067` allows local `Order(status=CREATED)` registration through
-    the historical orders status check;
-  - revision `068` adds the runtime OrderLifecycle adapter-result table whose
-    unique `authorization_id` is the persistent duplicate-submit lock;
-  - revision `069` lets adapter-result rows record fail-closed local
-    registration failures for partial entry/protection registration review;
-  - revision `070` adds the ExecutionIntent
-    `local_orders_registered` status for local-order linkage review.
+  - revision `082` updates the exchange-submit adapter armed status contract;
+  - revision `083` records explicit exchange submit execution mode;
+  - revision `084` adds runtime post-submit budget settlement evidence.
 
 Last Tokyo read-only probe for the same stage reported:
 
 - `ready_for_controlled_deploy_preflight=true`
 - no blockers
 - warning: `remote_release_identity_from_manifest_without_git_status`
-- current deployed HEAD `ae9b209e33cd287273491f2e93dfdff3b6a814fd`
-- current deployed migration count `64`
+- current deployed HEAD `cbcff9f45d4c26b56408d76ab6dd98ea86f5fdb0`
+- current deployed migration count `81`
 - backend health `status=ok`, `runtime_bound=true`, `live_ready=false`
 
 ## Non-Negotiable Invariants
@@ -99,9 +94,9 @@ The output must show:
 
 - `ready_for_packaging=true`;
 - deployed head is an ancestor of local `HEAD`;
-- migration count is at least `70`;
+- migration count is at least `84`;
 - latest migration is
-  `2026-06-10-070_add_execution_intent_local_orders_registered_status.py`;
+  `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
 - no tracked secret-candidate files;
 - no tracked worktree changes.
 
@@ -142,7 +137,7 @@ Generate the owner-gated git command plan:
 /opt/homebrew/bin/python3 scripts/plan_tokyo_runtime_governance_git_deploy.py \
   --json \
   --repo-url <git-repository-url> \
-  --git-ref <remote-branch-name> \
+  --git-ref program/live-safe-v1 \
   --target-commit <commit-to-deploy> \
   --release-name <remote-release-name> \
   --previous-release <current-remote-release-path> \
@@ -162,7 +157,7 @@ Then build the consolidated git Owner decision packet:
 /opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py \
   --json \
   --repo-url <git-repository-url> \
-  --git-ref <remote-branch-name> \
+  --git-ref program/live-safe-v1 \
   --target-commit <commit-to-deploy> \
   --release-name <remote-release-name> \
   --previous-release <current-remote-release-path> \
@@ -271,9 +266,9 @@ and apply executor:
 --expected-remote-latest-migration <current remote latest migration filename>
 ```
 
-The default values remain the original `ae9b209e` / migration `064` predeploy
-baseline and are not correct for continuous deploys after the first controlled
-runtime-governance refresh.
+The default git deploy ref is `program/live-safe-v1`; remote baseline values
+still must be supplied from the latest postdeploy/read-only evidence for each
+continuous deployment.
 
 ## Remote Preflight
 
@@ -306,7 +301,7 @@ Before applying migrations:
 1. Create a database backup using the existing remote backup path, or an
    equivalent PG-native backup command.
 2. Record the backup filename in a deployment evidence note.
-3. Inspect the migration path from deployed `064` to local `070`.
+3. Inspect the migration path from deployed `081` to local `084`.
 4. Run migration planning in a staging/dry-run context when available.
 5. Apply migrations only after the release artifact and rollback target are
    known.
@@ -323,7 +318,7 @@ Local static audit command:
 The output must show:
 
 - `ready_for_controlled_migration_preflight=true`;
-- chain length `6` for `065 -> 070`;
+- chain length `3` for `082 -> 084`;
 - no `data_destructive_upgrade_ops`.
 
 The output is allowed to warn about non-additive / data-touching review items,
@@ -331,15 +326,9 @@ but those warnings require concrete deployment handling:
 
 - backend writes must be stopped or quiesced while migrations run;
 - a remote PG backup must be captured first;
-- revision `065` relaxes runtime shadow-only constraints only after explicit
-  live-runtime enablement authorization is proven;
-- revision `066` adds the OrderLifecycle-adapter disabled submit status and
-  must not be interpreted as enabling the real adapter;
-- revision `067` only permits local `Order(status=CREATED)` persistence;
-- revision `068` only adds the persistent adapter-result duplicate-submit lock;
-- revision `069` only allows fail-closed adapter registration failure results;
-- revision `070` only adds the ExecutionIntent
-  `local_orders_registered` status for local-order linkage review.
+- revision `082` only aligns the exchange-submit adapter armed status contract;
+- revision `083` only records explicit exchange submit execution mode;
+- revision `084` only records post-submit budget settlement evidence.
 
 ## Release Procedure Shape
 

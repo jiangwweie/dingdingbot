@@ -40,9 +40,9 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
 )
 
 
-DEFAULT_GIT_REF = "dev"
+DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-11-081_create_llm_advisory_plane.py"
+    "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
 )
 
 

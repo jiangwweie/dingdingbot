@@ -26,7 +26,7 @@ Preferred machine-generated packet:
 /opt/homebrew/bin/python3 scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py \
   --json \
   --repo-url <git-repository-url> \
-  --git-ref <remote-branch-name> \
+  --git-ref program/live-safe-v1 \
   --target-commit <commit-to-deploy> \
   --release-name <remote-release-name> \
   --previous-release <current-remote-release-path> \
@@ -35,6 +35,9 @@ Preferred machine-generated packet:
   --expected-remote-latest-migration <current-remote-latest-migration> \
   > <owner-git-deploy-decision-packet.json>
 ```
+
+The default git deploy ref is `program/live-safe-v1`. Use `dev` only after an
+explicit branch-management decision promotes the same target commit there.
 
 The packet must report:
 
@@ -59,8 +62,8 @@ Latest expected release-preparation facts for the current stage:
 status=ready_for_local_packaging
 ready_for_packaging=true
 tracked_dirty=false
-migration_count=70
-latest_migration=2026-06-10-070_add_execution_intent_local_orders_registered_status.py
+migration_count=84
+latest_migration=2026-06-11-084_create_runtime_post_submit_budget_settlements.py
 deployed_head_is_ancestor=true
 commits_ahead_of_deployed=<computed from manifest>
 ```
@@ -90,9 +93,9 @@ Tokyo read-only probe reported:
 status=ready_for_controlled_deploy_preflight
 blockers=[]
 warnings=[remote_release_identity_from_manifest_without_git_status]
-current_head=ae9b209e33cd287273491f2e93dfdff3b6a814fd
-migration_count=64
-latest_migration=2026-06-10-064_add_runtime_profile_proposal_snapshot.py
+current_head=cbcff9f45d4c26b56408d76ab6dd98ea86f5fdb0
+migration_count=81
+latest_migration=2026-06-11-081_create_llm_advisory_plane.py
 health.status=ok
 health.runtime_bound=true
 health.live_ready=false
