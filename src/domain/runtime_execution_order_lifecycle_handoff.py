@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import Enum
+import hashlib
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -323,7 +324,8 @@ def _order_model_drafts(
         or semantic_ids.order_candidate_id
         or f"runtime-signal-{authorization_id}"
     )
-    entry_draft_id = f"runtime-order-draft-{authorization_id}-entry"
+    draft_prefix = _order_draft_id_prefix(authorization_id)
+    entry_draft_id = f"{draft_prefix}-entry"
     drafts = [
         {
             "local_order_draft_id": entry_draft_id,
@@ -355,7 +357,7 @@ def _order_model_drafts(
     ]
     for index, protection_draft in enumerate(protection_order_drafts, start=1):
         role = str(protection_draft.get("order_role") or f"EXIT{index}").lower()
-        draft_id = f"runtime-order-draft-{authorization_id}-{role}"
+        draft_id = f"{draft_prefix}-{role}"
         drafts.append(
             {
                 "local_order_draft_id": draft_id,
@@ -384,6 +386,11 @@ def _order_model_drafts(
             }
         )
     return drafts
+
+
+def _order_draft_id_prefix(authorization_id: str) -> str:
+    digest = hashlib.sha256(authorization_id.encode("utf-8")).hexdigest()[:18]
+    return f"rtod-{digest}"
 
 
 def _dedupe(items: list[str]) -> list[str]:

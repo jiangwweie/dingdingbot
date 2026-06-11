@@ -2906,6 +2906,7 @@ async def test_runtime_execution_order_lifecycle_handoff_records_ready_adapter_i
     }
     assert len(handoff.order_model_drafts) == 3
     assert handoff.order_model_drafts[0]["local_order_draft_id"].endswith("-entry")
+    assert len(handoff.order_model_drafts[0]["local_order_draft_id"]) <= 64
     assert handoff.order_model_drafts[0]["signal_id"] == "evaluation-1"
     assert handoff.order_model_drafts[0]["status"] == "CREATED"
     assert handoff.order_model_drafts[0]["runtime_instance_id"] == "runtime-1"
@@ -2913,6 +2914,8 @@ async def test_runtime_execution_order_lifecycle_handoff_records_ready_adapter_i
     assert handoff.order_model_drafts[1]["parent_local_order_draft_id"] == (
         handoff.order_model_drafts[0]["local_order_draft_id"]
     )
+    assert len(handoff.order_model_drafts[1]["local_order_draft_id"]) <= 64
+    assert len(handoff.order_model_drafts[1]["parent_local_order_draft_id"]) <= 64
     assert handoff.order_model_drafts[1]["reduce_only"] is True
     assert handoff.order_model_drafts[1]["order_lifecycle_called"] is False
     assert handoff.order_model_drafts[1]["exchange_called"] is False
@@ -3043,9 +3046,12 @@ async def test_runtime_execution_order_lifecycle_handoff_repository_roundtrips_r
         assert loaded.order_model_drafts[0]["signal_id"] == "evaluation-1"
         assert loaded.order_model_drafts[0]["status"] == "CREATED"
         assert loaded.order_model_drafts[0]["persisted"] is False
+        assert len(loaded.order_model_drafts[0]["local_order_draft_id"]) <= 64
         assert loaded.order_model_drafts[1]["parent_local_order_draft_id"] == (
             loaded.order_model_drafts[0]["local_order_draft_id"]
         )
+        assert len(loaded.order_model_drafts[1]["local_order_draft_id"]) <= 64
+        assert len(loaded.order_model_drafts[1]["parent_local_order_draft_id"]) <= 64
         assert loaded.stop_price_reference == Decimal("594")
         assert loaded.order_lifecycle_adapter_implemented is False
         assert loaded.order_created is False
