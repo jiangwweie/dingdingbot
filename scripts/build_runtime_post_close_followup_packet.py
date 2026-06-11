@@ -88,6 +88,10 @@ def _operator_command_plan(
     approval_env = getattr(packet, "owner_close_approval_env", None)
     approval_value = getattr(packet, "owner_close_approval_value", None)
     close_execute_args = [*close_args, "--execute-real-close"] if approval_value else []
+    packet_status = getattr(packet, "status", "")
+    post_close_complete = (
+        str(getattr(packet_status, "value", packet_status)) == "post_close_complete"
+    )
     return {
         "scope": "runtime_post_close_operator_command_plan",
         "not_executed": True,
@@ -98,18 +102,24 @@ def _operator_command_plan(
         "owner_close_dry_run_command_args": close_args if approval_value else [],
         "owner_close_execute_command_args": close_execute_args,
         "closed_review_facts_refresh_command_args": review_facts_args,
-        "closed_review_command_args": list(
-            getattr(packet, "closed_review_command_args", []) or []
+        "closed_review_command_args": (
+            []
+            if post_close_complete
+            else list(getattr(packet, "closed_review_command_args", []) or [])
         ),
-        "post_close_required_sequence": [
-            "refresh_followup",
-            "owner_authorize_exact_reduce_only_close_value",
-            "run_owner_close_execute_command",
-            "refresh_followup_until_flat",
-            "run_closed_review_dry_run",
-            "run_closed_review_apply_if_ready",
-            "verify_next_attempt_gate",
-        ],
+        "post_close_required_sequence": (
+            list(getattr(packet, "required_steps", []) or [])
+            if post_close_complete
+            else [
+                "refresh_followup",
+                "owner_authorize_exact_reduce_only_close_value",
+                "run_owner_close_execute_command",
+                "refresh_followup_until_flat",
+                "run_closed_review_dry_run",
+                "run_closed_review_apply_if_ready",
+                "verify_next_attempt_gate",
+            ]
+        ),
         "safety_invariants": {
             "packet_only": True,
             "command_plan_only": True,
@@ -146,6 +156,9 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     from src.infrastructure.exchange_gateway import ExchangeGateway
     from src.infrastructure.pg_order_repository import PgOrderRepository
     from src.infrastructure.pg_position_repository import PgPositionRepository
+    from src.infrastructure.pg_live_lifecycle_review_repository import (
+        PgLiveLifecycleReviewRepository,
+    )
     from src.infrastructure.pg_strategy_runtime_repository import (
         PgStrategyRuntimeRepository,
     )
@@ -153,9 +166,11 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     runtime_repository = PgStrategyRuntimeRepository()
     position_repository = PgPositionRepository()
     order_repository = PgOrderRepository()
+    review_repository = PgLiveLifecycleReviewRepository()
     await runtime_repository.initialize()
     await position_repository.initialize()
     await order_repository.initialize()
+    await review_repository.initialize()
 
     gateway = None
     if not args.skip_exchange:
@@ -216,10 +231,23 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
                 exit_plan=exit_plan,
                 now_ms=int(time.time() * 1000),
             )
+        closed_review = None
+        if not monitor.active_position_present:
+            closed_review = await review_repository.get_latest(
+                authorization_id=f"runtime-review:{args.runtime_instance_id}",
+                symbol=monitor.symbol,
+            )
+        closed_review_recorded = _closed_reviewed(closed_review)
         packet = build_runtime_post_close_followup_packet(
             monitor=monitor,
             owner_close_packet=owner_close_packet,
             closed_review_facts_packet=closed_review_facts_packet,
+            closed_review_recorded=closed_review_recorded,
+            closed_review_id=(
+                getattr(closed_review, "review_id", None)
+                if closed_review_recorded
+                else None
+            ),
             now_ms=int(time.time() * 1000),
         )
         operator_command_plan = _operator_command_plan(
@@ -236,6 +264,9 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             if owner_close_packet is not None
             else None,
             "closed_review_facts_packet": _json_value(closed_review_facts_packet),
+            "closed_lifecycle_review": _json_value(closed_review)
+            if closed_review is not None
+            else None,
             "operator_command_plan": operator_command_plan,
             "safety_invariants": {
                 "packet_only": True,
@@ -255,6 +286,16 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
         if gateway is not None:
             await gateway.close()
         await close_all_connections()
+
+
+def _closed_reviewed(review: Any | None) -> bool:
+    if review is None:
+        return False
+    return (
+        str(getattr(review, "review_status", "") or "").lower() == "closed_reviewed"
+        and str(getattr(review, "lifecycle_status", "") or "").lower()
+        == "closed_reviewed"
+    )
 
 
 def main() -> int:

@@ -85,3 +85,28 @@ def test_post_close_followup_operator_command_plan_is_non_executing():
     assert plan["closed_review_command_args"][-1] == "exit-1"
     assert plan["safety_invariants"]["exchange_write_called"] is False
     assert plan["safety_invariants"]["review_record_created"] is False
+
+
+def test_post_close_followup_operator_plan_omits_review_command_when_complete():
+    packet = SimpleNamespace(
+        status=SimpleNamespace(value="post_close_complete"),
+        owner_close_approval_env=None,
+        owner_close_approval_value=None,
+        required_steps=["verify_next_attempt_gate"],
+        closed_review_command_args=[
+            "scripts/create_runtime_closed_trade_review.py",
+            "--runtime-instance-id",
+            "runtime-1",
+        ],
+    )
+
+    plan = build_runtime_post_close_followup_packet._operator_command_plan(
+        runtime_instance_id="runtime-1",
+        env_file="/tmp/runtime.env",
+        packet=packet,
+    )
+
+    assert plan["owner_close_dry_run_command_args"] == []
+    assert plan["owner_close_execute_command_args"] == []
+    assert plan["closed_review_command_args"] == []
+    assert plan["post_close_required_sequence"] == ["verify_next_attempt_gate"]
