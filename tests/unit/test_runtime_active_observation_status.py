@@ -26,6 +26,7 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
         root / "loop-packet.json",
         {
             "status": "waiting_for_signal",
+            "iterations_requested": 5,
             "iterations_completed": 2,
             "stop_reason": "running",
             "latest_summary": {
@@ -70,8 +71,15 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
     packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
 
     assert packet["status"] == "waiting_for_signal"
+    assert packet["iterations_requested"] == 5
     assert packet["iterations_completed"] == 2
+    assert packet["iterations_remaining"] == 3
     assert packet["latest_iteration"] == 2
+    assert packet["observation_running"] is True
+    assert packet["observation_window_complete"] is False
+    assert packet["operator_command_plan"]["observation_next_step"] == (
+        "continue_active_observation_loop"
+    )
     assert packet["active_runtime_count"] == 1
     assert packet["runtime_signal_summaries"][0]["strategy_family_id"] == "CPM-001"
     assert packet["runtime_signal_summaries"][0]["reason_codes"] == ["cpm_no_action"]
@@ -133,3 +141,46 @@ def test_status_marks_prepare_followup_as_attention(tmp_path):
     assert packet["operator_command_plan"]["followup_next_step"] == (
         "review_ready_signal_then_continue_prepare_record_path"
     )
+
+
+def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "loop-packet.json",
+        {
+            "status": "waiting_for_signal",
+            "iterations_requested": 3,
+            "iterations_completed": 3,
+            "stop_reason": "max_iterations_exhausted",
+            "latest_summary": {
+                "iteration": 3,
+                "active_runtime_count": 2,
+                "runtime_signal_summaries": [],
+            },
+            "operator_command_plan": {
+                "next_step": "continue_waiting_for_strategy_signal"
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "attempt_counter_mutated": False,
+                "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert packet["status"] == "observation_window_complete_no_signal"
+    assert packet["latest_status"] == "waiting_for_signal"
+    assert packet["iterations_requested"] == 3
+    assert packet["iterations_completed"] == 3
+    assert packet["iterations_remaining"] == 0
+    assert packet["observation_running"] is False
+    assert packet["observation_window_complete"] is True
+    assert packet["operator_command_plan"]["observation_next_step"] == (
+        "review_no_signal_window_or_start_new_observation"
+    )
+    assert packet["safety_invariants"]["places_order"] is False

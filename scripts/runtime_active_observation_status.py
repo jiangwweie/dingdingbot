@@ -182,6 +182,12 @@ def build_status_packet(
         "disabled_smoke_completed",
     }:
         status = "attention"
+    elif (
+        latest_status == "waiting_for_signal"
+        and isinstance(loop, dict)
+        and loop.get("stop_reason") == "max_iterations_exhausted"
+    ):
+        status = "observation_window_complete_no_signal"
     elif latest_status == "waiting_for_signal":
         status = "waiting_for_signal"
 
@@ -195,6 +201,20 @@ def build_status_packet(
         followup.get("operator_command_plan") if isinstance(followup, dict) else None
     )
 
+    iterations_requested = (
+        loop.get("iterations_requested") if isinstance(loop, dict) else None
+    )
+    iterations_completed = (
+        loop.get("iterations_completed") if isinstance(loop, dict) else None
+    )
+    iterations_remaining = None
+    if iterations_requested is not None and iterations_completed is not None:
+        iterations_remaining = max(
+            int(iterations_requested) - int(iterations_completed),
+            0,
+        )
+    stop_reason = loop.get("stop_reason") if isinstance(loop, dict) else None
+
     return {
         "scope": "runtime_active_observation_status",
         "status": status,
@@ -207,13 +227,17 @@ def build_status_packet(
         "supervisor_status": supervisor.get("status") if isinstance(supervisor, dict) else None,
         "loop_status": loop.get("status") if isinstance(loop, dict) else None,
         "followup_status": followup.get("status") if isinstance(followup, dict) else None,
-        "iterations_completed": loop.get("iterations_completed") if isinstance(loop, dict) else None,
+        "iterations_requested": iterations_requested,
+        "iterations_completed": iterations_completed,
+        "iterations_remaining": iterations_remaining,
         "latest_iteration": (
             latest_summary.get("iteration")
             if isinstance(latest_summary, dict)
             else None
         ),
-        "stop_reason": loop.get("stop_reason") if isinstance(loop, dict) else None,
+        "stop_reason": stop_reason,
+        "observation_running": stop_reason == "running",
+        "observation_window_complete": stop_reason == "max_iterations_exhausted",
         "active_runtime_count": (
             latest_summary.get("active_runtime_count")
             if isinstance(latest_summary, dict)
@@ -240,6 +264,10 @@ def build_status_packet(
             ).get("next_step"),
             "loop_next_step": (loop_operator_plan or {}).get("next_step"),
             "followup_next_step": (followup_operator_plan or {}).get("next_step"),
+            "observation_next_step": _observation_next_step(
+                status=status,
+                stop_reason=stop_reason,
+            ),
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -260,6 +288,20 @@ def build_status_packet(
             "forbidden_effects": forbidden_effects,
         },
     }
+
+
+def _observation_next_step(*, status: str, stop_reason: str | None) -> str:
+    if status == "observation_window_complete_no_signal":
+        return "review_no_signal_window_or_start_new_observation"
+    if stop_reason == "running":
+        return "continue_active_observation_loop"
+    if status == "attention":
+        return "review_non_executing_prepare_or_preview_packet"
+    if status.startswith("blocked"):
+        return "resolve_active_observation_status_blocker"
+    if status == "stale":
+        return "refresh_or_restart_active_observation_status"
+    return "review_active_observation_status"
 
 
 def main() -> int:
