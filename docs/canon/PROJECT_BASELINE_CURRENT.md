@@ -333,7 +333,10 @@ Key facts:
   local-registration gate / evidence-based local registration enablement
   decision / default-disabled OrderLifecycle adapter
   result skeleton / ExecutionIntent local-order linkage
-  gate / submit adapter readiness preview / runtime submit rehearsal aggregate**
+  gate / submit adapter readiness preview / runtime submit rehearsal aggregate /
+  exchange-submit packet preview / exchange-submit enablement decision /
+  exchange-submit action authorization / default-disabled exchange-submit
+  adapter and execution results**
   now exist in
   tracked code as bounded bridge layers. Deployment state must be verified from
   the current release manifest and postdeploy reports, not inferred from this
@@ -415,9 +418,22 @@ Key facts:
   and submit adapter preview into one operator-facing non-mutating rehearsal
   result. It does not record reservations, apply attempt mutations, record
   protection plans, record OrderLifecycle handoff drafts, create orders, call
-  OwnerBoundedExecution, call OrderLifecycle, or call exchange. These layers do
-  not call OwnerBoundedExecution, call OrderLifecycle, place orders, or call the
-  exchange.
+  OwnerBoundedExecution, call OrderLifecycle, or call exchange. These upstream
+  rehearsal layers do not call OwnerBoundedExecution, call OrderLifecycle, place
+  orders, or call the exchange.
+  RuntimeExecutionExchangeSubmitPacketPreview and
+  RuntimeExecutionExchangeSubmitEnablementDecision can prove local registered
+  orders are structurally ready for exchange submit without calling exchange or
+  OrderLifecycle submit. RuntimeExecutionExchangeSubmitActionAuthorization is
+  scoped first-real-submit / exchange-stage action evidence. Exchange-submit
+  adapter/result and execution paths are default-disabled; when explicitly
+  enabled, the application service revalidates persisted first-real-submit
+  prerequisite evidence at the action point before acquiring duplicate-submit
+  locks or calling the exchange gateway. The adapter-result stage must not call
+  exchange. The execution-result stage may call the exchange gateway only after
+  explicit execution enablement, gateway readiness, recovery/idempotency checks,
+  protection-failure policy, Owner/deployment evidence, and scoped action
+  authorization all validate.
   `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` now exercises
   that chain with in-memory repositories and reports a first-real-submit packet:
   the technical non-executing rehearsal can pass, but first real submit remains

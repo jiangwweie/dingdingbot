@@ -116,10 +116,28 @@ This document defines the runtime safety boundaries for the BRC project.
   rehearsal may summarize readiness and blockers across these gates, but it
   must not record reservations, apply attempt mutations, record protection
   plans, record OrderLifecycle handoff drafts, or call order/exchange services.
-  The submit adapter boundary can reach dry-run readiness, but real order
-  placement remains disabled until a separate OrderLifecycle adapter enablement
-  gate; it must not call OwnerBoundedExecution, call OrderLifecycle, submit
-  orders, or call exchange.
+  The submit adapter boundary can reach dry-run readiness, but it must not call
+  OwnerBoundedExecution, call OrderLifecycle, submit orders, or call exchange.
+  `RuntimeExecutionExchangeSubmitPacketPreview` and
+  `RuntimeExecutionExchangeSubmitEnablementDecision` may prove that a locally
+  registered runtime entry/protection set is structurally ready for exchange
+  submit, but they still do not call exchange, call OrderLifecycle submit,
+  change intent status, or create withdrawal/transfer instructions. A scoped
+  `RuntimeExecutionExchangeSubmitActionAuthorization` is first-real-submit /
+  exchange-stage action evidence, not hidden strategy self-authorization and
+  not a permanent product decision that every future runtime-bounded attempt
+  must require a new human confirmation. When exchange-submit adapter/result or
+  execution is explicitly enabled, the application service must re-read and
+  revalidate persisted first-real-submit prerequisite evidence at the action
+  point, including the scoped exchange-submit action authorization, before
+  acquiring duplicate-submit locks or calling the exchange gateway. Missing,
+  stale, mismatched, or expired evidence blocks the action at that point. The
+  adapter-result stage may acquire a duplicate-submit lock but must not call
+  the gateway. The execution-result stage is the only stage that may call the
+  exchange gateway / `OrderLifecycleService.submit_order`, and only when the
+  explicit execution flag, gateway readiness, recovery state, idempotency
+  policy, protection-failure policy, Owner authorization, deployment evidence,
+  and scoped action authorization all validate.
 - Documentation work must not run the project or call the exchange unless the
   active task explicitly includes bounded read-only verification.
 - Real live trading / real-funds order placement requires separate explicit
@@ -156,6 +174,7 @@ This document defines the runtime safety boundaries for the BRC project.
 | StrategyRuntimeInstance shadow lifecycle API | Shadow status control | Active in local working tree; can activate/pause/revoke shadow runtime status only; execution_enabled remains false, shadow_mode remains true, and no candidate/intent/order/exchange path is invoked |
 | StrategyRuntimeInstance -> SignalEvaluation -> OrderCandidate -> Runtime FinalGate preview | Runtime governance shadow / dry-run inspection | Active in local working tree; non-executable; not deployed; includes max-loss-first budget checks plus conjunctive max leverage / max margin / stop-vs-liquidation buffer checks when those runtime/candidate facts are present or required |
 | RuntimeExecutionPlan -> RuntimeExecutionIntentDraft -> RuntimeExecutionIntent adapter preview -> ExecutionIntent(recorded) -> SubmitReadiness preview -> SubmitAuthorization(recorded) -> ControlledSubmitPlan preview -> SubmitPreflight preview -> ControlledSubmitResult(default-disabled) -> AttemptReservationPreview -> AttemptReservation(recorded pending mutation) -> AttemptMutation(applied/blocked) -> ProtectionPlanPreview -> ProtectionPlan(recorded) -> OrderLifecycleHandoffDraft(recorded) -> OrderLifecycleAdapterPreview -> SubmitAdapterPreview -> SubmitRehearsal aggregate | Non-submitting bridge toward future execution | Active in local working tree; not deployed; records audit intent, Owner submit authorization, controlled-submit preview, submit-time FinalGate preflight, disabled/blocked/not-implemented adapter result, non-mutating attempt/budget readiness, pending reservation audit fact, controlled runtime attempt/budget mutation fact, runtime-native protection readiness/record, runtime OrderLifecycle handoff draft, non-executing local order registration gate, evidence-based local registration enablement decision, non-executing adapter readiness, and non-mutating rehearsal aggregation only; result consumes submit-time preflight before any adapter boundary status |
+| RuntimeExecutionExchangeSubmitPacketPreview -> RuntimeExecutionExchangeSubmitEnablementDecision -> RuntimeExecutionExchangeSubmitActionAuthorization -> RuntimeExecutionExchangeSubmitAdapterResult -> RuntimeExecutionExchangeSubmitExecutionResult | Default-disabled controlled exchange-submit stage | Active in local working tree; not deployed; packet/enablement/action authorization are audit/readiness evidence only; adapter-result revalidates persisted prerequisite evidence before acquiring a duplicate-submit lock and must not call exchange; execution-result revalidates the same evidence before any gateway call and remains blocked unless explicitly enabled with gateway readiness, recovery, idempotency, protection-failure, Owner, deployment, and scoped action evidence present |
 | Dev/test controlled paths | Testnet rehearsal and controlled testing | Active for scoped verification; no real funds |
 | Scripts direct exchange paths | Research / admin scripts | Not integrated; untracked |
 | Readmodel / preview paths | CandidateAction, BudgetedAutonomy, policy evaluation | Read-only; not executable |
