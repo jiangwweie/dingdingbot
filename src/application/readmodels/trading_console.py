@@ -3495,7 +3495,17 @@ def _post_action_review_ledger(
     live_lifecycle_reviews: list[dict[str, Any]],
 ) -> dict[str, Any]:
     entry_order = entry_orders[0] if entry_orders else None
-    latest_live_lifecycle_review = live_lifecycle_reviews[0] if live_lifecycle_reviews else None
+    closed_live_lifecycle_review = next(
+        (
+            item for item in live_lifecycle_reviews
+            if _live_lifecycle_review_is_closed_reviewed(item)
+        ),
+        None,
+    )
+    latest_live_lifecycle_review = (
+        closed_live_lifecycle_review
+        or (live_lifecycle_reviews[0] if live_lifecycle_reviews else None)
+    )
     exit_orders = [
         item for item in protection_orders
         if str(item.get("status") or "").upper() in {"FILLED", "CLOSED"}
@@ -3510,7 +3520,10 @@ def _post_action_review_ledger(
         and str(item.get("status") or "").upper() in {"CANCELED", "EXPIRED", "CLOSED"}
     ]
     entry_filled = str((entry_order or {}).get("status") or "").upper() in {"FILLED", "CLOSED"}
-    if exit_orders:
+    if exit_orders and closed_live_lifecycle_review:
+        lifecycle_status = "closed_reviewed"
+        tp_sl_status = "tp_or_sl_filled"
+    elif exit_orders:
         lifecycle_status = "closed_from_pg_exit_order"
         tp_sl_status = "tp_or_sl_filled"
     elif entry_filled and external_hygiene_orders and not open_protection_orders:
@@ -3543,25 +3556,18 @@ def _post_action_review_ledger(
             "protection_order_count": len(protection_orders),
             "open_protection_order_count": len(open_protection_orders),
         },
-        "strategy_outcome": (
-            "pending_closed_trade_review"
-            if lifecycle_status == "closed_from_pg_exit_order"
-            else "revise_after_external_flat_reconciliation"
-            if lifecycle_status == "closed_external_exchange_flat_unresolved"
-            else "pending_post_action_review"
+        "strategy_outcome": _post_action_strategy_outcome(
+            lifecycle_status=lifecycle_status,
+            live_lifecycle_review=latest_live_lifecycle_review,
         ),
         "review_decision": {
-            "status": (
-                "revise"
-                if lifecycle_status == "closed_external_exchange_flat_unresolved"
-                else "pending_open_recorded"
-                if latest_live_lifecycle_review and lifecycle_status == "protected_open_from_pg_orders"
-                else "pending_open_missing"
-                if lifecycle_status == "protected_open_from_pg_orders"
-                else "pending" if reviews else "not_recorded"
+            "status": _post_action_review_decision_status(
+                lifecycle_status=lifecycle_status,
+                reviews=reviews,
+                live_lifecycle_review=latest_live_lifecycle_review,
             ),
             "allowed_values": ["promote", "revise", "park"],
-            "requires_owner_review": True,
+            "requires_owner_review": lifecycle_status != "closed_reviewed",
             **(
                 {"source": "system_reconciliation_review"}
                 if lifecycle_status == "closed_external_exchange_flat_unresolved"
@@ -3573,8 +3579,21 @@ def _post_action_review_ledger(
                     "review_id": latest_live_lifecycle_review.get("review_id"),
                     "review_status": latest_live_lifecycle_review.get("review_status"),
                     "lifecycle_status": latest_live_lifecycle_review.get("lifecycle_status"),
+                    "review_decision": (
+                        (latest_live_lifecycle_review.get("metadata") or {}).get("review_decision")
+                        if isinstance(latest_live_lifecycle_review.get("metadata"), dict)
+                        else None
+                    ),
+                    "attempt_continuation_quality": (
+                        (latest_live_lifecycle_review.get("metadata") or {}).get(
+                            "attempt_continuation_quality"
+                        )
+                        if isinstance(latest_live_lifecycle_review.get("metadata"), dict)
+                        else None
+                    ),
                 }
-                if latest_live_lifecycle_review and lifecycle_status == "protected_open_from_pg_orders"
+                if latest_live_lifecycle_review
+                and lifecycle_status in {"protected_open_from_pg_orders", "closed_reviewed"}
                 else {}
             ),
         },
@@ -3585,7 +3604,48 @@ def _post_action_review_ledger(
             "slippage_not_available",
         ],
         "hard_blockers": [],
-    }
+}
+
+
+def _live_lifecycle_review_is_closed_reviewed(review: dict[str, Any]) -> bool:
+    return (
+        str(review.get("lifecycle_status") or "") == "closed_reviewed"
+        and str(review.get("review_status") or "") == "closed_reviewed"
+    )
+
+
+def _post_action_strategy_outcome(
+    *,
+    lifecycle_status: str,
+    live_lifecycle_review: dict[str, Any] | None,
+) -> str:
+    metadata = (
+        live_lifecycle_review.get("metadata")
+        if live_lifecycle_review and isinstance(live_lifecycle_review.get("metadata"), dict)
+        else {}
+    )
+    if lifecycle_status == "closed_reviewed":
+        return str(metadata.get("strategy_outcome") or "closed_reviewed")
+    if lifecycle_status == "closed_from_pg_exit_order":
+        return "pending_closed_trade_review"
+    if lifecycle_status == "closed_external_exchange_flat_unresolved":
+        return "revise_after_external_flat_reconciliation"
+    return "pending_post_action_review"
+
+
+def _post_action_review_decision_status(
+    *,
+    lifecycle_status: str,
+    reviews: list[dict[str, Any]],
+    live_lifecycle_review: dict[str, Any] | None,
+) -> str:
+    if lifecycle_status == "closed_reviewed":
+        return "closed_reviewed"
+    if lifecycle_status == "closed_external_exchange_flat_unresolved":
+        return "revise"
+    if lifecycle_status == "protected_open_from_pg_orders":
+        return "pending_open_recorded" if live_lifecycle_review else "pending_open_missing"
+    return "pending" if reviews else "not_recorded"
 
 
 def _post_action_next_attempt_gate(
@@ -3646,6 +3706,30 @@ def _post_action_next_attempt_gate(
                     "retry_condition": "PG/exchange position and order counts must be aligned and flat, or current lifecycle must be proven open-protected.",
                 }
             )
+    elif lifecycle_status == "closed_reviewed":
+        lifecycle_gate = "clear_for_next_preflight"
+        lifecycle_classification = "closed_reviewed"
+        retry_condition = "Create fresh Owner/Budget authorization and rerun official FinalGate for exactly one scoped attempt."
+        disabled_reason = None
+    elif (
+        lifecycle_status == "closed_from_pg_exit_order"
+        and review_ledger.get("live_lifecycle_review")
+    ):
+        lifecycle_gate = "closed_trade_review_required"
+        lifecycle_classification = "review_required"
+        retry_condition = "Record closed trade live lifecycle review before the next bounded-live attempt."
+        disabled_reason = "Closed trade review is required before another bounded-live attempt."
+        blockers.append(
+            {
+                "id": "NEXT-ATTEMPT-CLOSED-TRADE-REVIEW-REQUIRED",
+                "stage": "post_action_review",
+                "path": "Owner Action Flow next attempt gate",
+                "evidence": "PG exit order is filled but brc_live_lifecycle_reviews has not recorded closed_reviewed.",
+                "severity": "hard_blocker",
+                "bridge": "create_runtime_closed_trade_lifecycle_review",
+                "retry_condition": "Append a closed_reviewed live lifecycle review record from resolved order/position/reconciliation facts.",
+            }
+        )
     elif lifecycle_status in {
         "closed_from_pg_exit_order",
         "closed_external_exchange_flat_unresolved",
@@ -3655,7 +3739,7 @@ def _post_action_next_attempt_gate(
         lifecycle_classification = (
             "external_flat"
             if lifecycle_status == "closed_external_exchange_flat_unresolved"
-            else "closed_reviewed"
+            else "legacy_closed_no_runtime_review_required"
             if lifecycle_status == "closed_from_pg_exit_order"
             else "no_current_lifecycle"
         )
@@ -3706,6 +3790,8 @@ def _post_action_next_attempt_gate(
             if lifecycle_gate == "current_lifecycle_open_protected"
             else "official_recovery_required"
             if lifecycle_gate == "position_order_conflict_requires_recovery"
+            else "record_closed_trade_review"
+            if lifecycle_gate == "closed_trade_review_required"
             else "complete_review_ledger"
             if lifecycle_gate == "review_state_incomplete"
             else "owner_decision_and_final_gate"
@@ -4119,7 +4205,12 @@ def _owner_action_just_in_time_lifecycle_audit(
     gate = str(next_attempt_gate.get("gate") or "unknown")
     can_continue = (
         next_attempt_gate.get("next_attempt_allowed_by_lifecycle") is True
-        and classification in {"closed_reviewed", "no_current_lifecycle", "external_flat"}
+        and classification in {
+            "closed_reviewed",
+            "no_current_lifecycle",
+            "external_flat",
+            "legacy_closed_no_runtime_review_required",
+        }
     )
     if classification == "still_open_protected":
         decision = "block_next_attempt_current_lifecycle_open"
@@ -4127,6 +4218,9 @@ def _owner_action_just_in_time_lifecycle_audit(
     elif classification in {"tp_filled_position_closed", "sl_filled_position_closed", "external_flat"}:
         decision = "requires_reconciliation_before_continuing"
         next_action = "reconcile_close_cleanup_and_record_closed_reviewed"
+    elif classification == "review_required":
+        decision = "block_next_attempt_review_required"
+        next_action = "record_closed_trade_review"
     elif classification in {
         "exchange_flat_pg_open",
         "pg_flat_exchange_open",
@@ -4134,7 +4228,6 @@ def _owner_action_just_in_time_lifecycle_audit(
         "protection_orphaned",
         "inconsistent_requires_recovery",
         "unknown_fail_closed",
-        "review_required",
     }:
         decision = "block_next_attempt_recovery_required"
         next_action = "official_recovery_required"

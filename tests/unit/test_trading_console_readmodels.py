@@ -2819,6 +2819,7 @@ def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
         exchange=exchange,
         order_repo=_FakeOrderRepo(closed_orders),
         account_snapshot=_FakeAccountSnapshot(),
+        live_lifecycle_review_repo=_FakeLiveLifecycleReviewRepo([]),
     )
     from src.interfaces.api import app
 
@@ -2857,11 +2858,225 @@ def test_owner_action_flow_budget_ignores_historical_closed_orders(monkeypatch):
     assert flow["next_attempt_gate"]["next_attempt_allowed_by_lifecycle"] is True
     assert flow["next_attempt_gate"]["action_allowed"] is False
     jit_audit = flow["just_in_time_lifecycle_audit"]
-    assert jit_audit["classification"] in {"closed_reviewed", "no_current_lifecycle"}
+    assert jit_audit["classification"] in {
+        "legacy_closed_no_runtime_review_required",
+        "no_current_lifecycle",
+    }
     assert jit_audit["can_continue_to_authorization"] is True
     assert jit_audit["decision"] == "continue_to_owner_budget_final_gate"
     assert jit_audit["can_execute_live"] is False
     assert jit_audit["places_order"] is False
+
+
+def test_owner_action_flow_blocks_closed_runtime_until_live_review_recorded(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    closed_orders = [
+        _FakeOrder(
+            "entry-runtime",
+            "ENTRY",
+            "entry-exchange-runtime",
+            parent_order_id=None,
+            status="FILLED",
+            symbol="SOL/USDT:USDT",
+        ),
+        _FakeOrder(
+            "tp-runtime",
+            "TP1",
+            "tp-exchange-runtime",
+            status="CANCELED",
+            symbol="SOL/USDT:USDT",
+        ),
+        _FakeOrder(
+            "sl-runtime",
+            "SL",
+            "sl-exchange-runtime",
+            status="FILLED",
+            symbol="SOL/USDT:USDT",
+        ),
+    ]
+    live_reviews = [
+        SimpleNamespace(
+            review_id="live-review-runtime-pending-open",
+            authorization_id="runtime-review:runtime-1",
+            carrier_id="BTPC-001-live-runtime",
+            strategy_family_id="BTPC-001",
+            strategy_family_version_id="BTPC-001-v0",
+            runtime_instance_id="runtime-1",
+            order_candidate_id="candidate-1",
+            symbol="SOL/USDT:USDT",
+            side="short",
+            quantity="1",
+            lifecycle_status="protected_open",
+            review_status="pending_open",
+            metadata={"source": "unit-test"},
+            places_order=False,
+            mutates_exchange=False,
+            grants_trading_permission=False,
+            frontend_action_enabled=False,
+        )
+    ]
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        order_repo=_FakeOrderRepo(closed_orders),
+        position_repo=_FakePositionRepo(),
+        live_lifecycle_review_repo=_FakeLiveLifecycleReviewRepo(live_reviews),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "include_exchange": "true",
+                "market_regime": "trend",
+                "family": "Trend",
+                "strategy_family_id": "TF-001-live-readonly-v0",
+                "carrier_id": "TF-001-live-readonly-v0",
+                "symbol": "SOL/USDT:USDT",
+                "side": "short",
+                "quantity": "1",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    post_action = data["post_action_state"]
+    ledger = post_action["review_ledger"]
+    assert ledger["lifecycle_status"] == "closed_from_pg_exit_order"
+    assert ledger["strategy_outcome"] == "pending_closed_trade_review"
+    assert ledger["review_decision"]["status"] == "pending"
+    assert ledger["review_decision"].get("source") is None
+    gate = post_action["next_attempt_gate"]
+    assert gate["status"] == "blocked"
+    assert gate["gate"] == "closed_trade_review_required"
+    assert gate["next_attempt_allowed_by_lifecycle"] is False
+    assert gate["blockers"][0]["id"] == "NEXT-ATTEMPT-CLOSED-TRADE-REVIEW-REQUIRED"
+    flow = data["owner_action_flow"]
+    assert flow["next_attempt_gate"]["gate"] == "closed_trade_review_required"
+    assert flow["just_in_time_lifecycle_audit"]["decision"] == "block_next_attempt_review_required"
+    assert flow["just_in_time_lifecycle_audit"]["next_recommended_action"] == (
+        "record_closed_trade_review"
+    )
+    assert data["action_state"]["enabled"] is False
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_owner_action_flow_clears_next_attempt_after_closed_live_review(monkeypatch):
+    _configure_auth(monkeypatch)
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    closed_orders = [
+        _FakeOrder(
+            "entry-runtime",
+            "ENTRY",
+            "entry-exchange-runtime",
+            parent_order_id=None,
+            status="FILLED",
+            symbol="SOL/USDT:USDT",
+        ),
+        _FakeOrder(
+            "tp-runtime",
+            "TP1",
+            "tp-exchange-runtime",
+            status="CANCELED",
+            symbol="SOL/USDT:USDT",
+        ),
+        _FakeOrder(
+            "sl-runtime",
+            "SL",
+            "sl-exchange-runtime",
+            status="FILLED",
+            symbol="SOL/USDT:USDT",
+        ),
+    ]
+    live_reviews = [
+        SimpleNamespace(
+            review_id="live-review-runtime-closed-reviewed",
+            authorization_id="runtime-review:runtime-1",
+            carrier_id="BTPC-001-live-runtime",
+            strategy_family_id="BTPC-001",
+            strategy_family_version_id="BTPC-001-v0",
+            runtime_instance_id="runtime-1",
+            order_candidate_id="candidate-1",
+            symbol="SOL/USDT:USDT",
+            side="short",
+            quantity="1",
+            lifecycle_status="closed_reviewed",
+            review_status="closed_reviewed",
+            metadata={
+                "review_decision": "revise",
+                "strategy_outcome": "small_bounded_loss",
+                "attempt_continuation_quality": "continue_after_small_loss",
+            },
+            places_order=False,
+            mutates_exchange=False,
+            grants_trading_permission=False,
+            frontend_action_enabled=False,
+        )
+    ]
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        order_repo=_FakeOrderRepo(closed_orders),
+        position_repo=_FakePositionRepo(),
+        live_lifecycle_review_repo=_FakeLiveLifecycleReviewRepo(live_reviews),
+    )
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/owner-action-flow",
+            params={
+                "include_exchange": "true",
+                "market_regime": "trend",
+                "family": "Trend",
+                "strategy_family_id": "TF-001-live-readonly-v0",
+                "carrier_id": "TF-001-live-readonly-v0",
+                "symbol": "SOL/USDT:USDT",
+                "side": "short",
+                "quantity": "1",
+                "max_notional": "20",
+                "leverage": "1",
+                "max_attempts": "1",
+                "protection_mode": "single_tp_plus_sl",
+                "review_requirement": "post_action_review_required",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    post_action = data["post_action_state"]
+    ledger = post_action["review_ledger"]
+    assert ledger["lifecycle_status"] == "closed_reviewed"
+    assert ledger["strategy_outcome"] == "small_bounded_loss"
+    assert ledger["review_decision"]["status"] == "closed_reviewed"
+    assert ledger["review_decision"]["requires_owner_review"] is False
+    assert ledger["review_decision"]["source"] == "brc_live_lifecycle_reviews"
+    assert ledger["review_decision"]["review_id"] == "live-review-runtime-closed-reviewed"
+    assert ledger["review_decision"]["attempt_continuation_quality"] == (
+        "continue_after_small_loss"
+    )
+    gate = post_action["next_attempt_gate"]
+    assert gate["status"] == "clear_for_preflight"
+    assert gate["gate"] == "clear_for_next_preflight"
+    assert gate["lifecycle_classification"] == "closed_reviewed"
+    assert gate["next_attempt_allowed_by_lifecycle"] is True
+    flow = data["owner_action_flow"]
+    assert flow["just_in_time_lifecycle_audit"]["decision"] == (
+        "continue_to_owner_budget_final_gate"
+    )
+    assert data["action_state"]["enabled"] is False
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
 
 
 def test_owner_action_flow_v01_attempts_ignore_prior_day_completed_intent(monkeypatch):

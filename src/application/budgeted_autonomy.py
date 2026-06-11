@@ -574,6 +574,7 @@ def _ledger_closed_reviewed(ledger: dict[str, object]) -> bool:
     review = ledger.get("review_decision")
     review_status = review.get("status") if isinstance(review, dict) else None
     closed_lifecycles = {
+        "closed_reviewed",
         "closed_from_pg_exit_order",
         "closed_external_exchange_flat_unresolved",
     }
