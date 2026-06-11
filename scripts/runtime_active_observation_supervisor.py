@@ -12,10 +12,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from scripts.runtime_active_observation_status import build_status_packet
-
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from scripts.runtime_active_observation_status import build_status_packet  # noqa: E402
+
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 
 
