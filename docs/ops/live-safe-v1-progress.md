@@ -3031,3 +3031,47 @@ Use this file for session progress and handoff notes.
   - real reduce-only close is still not executed;
   - the next live step still requires exact Owner authorization before running
     the execute command with the approval env value.
+
+## 2026-06-11 (Trading Console Post-close Follow-up API)
+
+- Added and deployed `program/live-safe-v1` commit
+  `03229c7877d44003b2fb76263434ea22d80ed212`
+  `feat(console): expose runtime post-close follow-up`.
+- Added authenticated read-only Trading Console endpoint:
+  - `GET /api/trading-console/strategy-runtimes/{runtime_instance_id}/post-close-follow-up`.
+- The endpoint returns the same non-executing post-close payload shape used by
+  the operator script:
+  - monitor packet;
+  - Owner close packet;
+  - closed-review facts packet;
+  - operator command plan;
+  - no-write safety invariants.
+- The endpoint uses existing runtime monitor / exit plan services plus the
+  closed-review facts resolver. It does not place, cancel, amend, or submit
+  orders; it does not write a review record; it does not mutate runtime state.
+- Local verification:
+  - `pytest -q tests/unit/test_trading_console_readmodels.py -k "post_close_followup or live_position_monitor or active_position_exit_plan or requires_operator_session or router_keeps_read_models"`
+    passed with `5 passed`;
+  - `python3 -m py_compile src/interfaces/api_trading_console.py tests/unit/test_trading_console_readmodels.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed release is
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-03229c78-20260611Tpostcloseapi`;
+  - deployed head is
+    `03229c7877d44003b2fb76263434ea22d80ed212`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote API smoke:
+  - unauthenticated GET to the new endpoint returned `401 Operator login
+    required`, proving the endpoint is not exposed outside the Operator session;
+  - remote script path still returned
+    `waiting_for_owner_close_authorization`,
+    `closed_review_facts=waiting_for_close`, and
+    `command_plan_only=true`.
+- Remaining live action:
+  - real reduce-only close is still not executed;
+  - the Trading Console can now read the post-close plan, but actual close still
+    requires exact Owner authorization and the explicit execute flag.
