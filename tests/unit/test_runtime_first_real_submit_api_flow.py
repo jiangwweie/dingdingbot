@@ -4,11 +4,13 @@ import os
 
 from scripts.runtime_first_real_submit_api_flow import (
     APPROVAL_ENV,
+    EXCHANGE_ARM_APPROVAL_ENV,
     FirstRealSubmitApiFlow,
     FlowConfig,
     LOCAL_REGISTRATION_APPROVAL_ENV,
     _load_env_file,
     _approval_value,
+    _exchange_arm_approval_value,
     _local_registration_approval_value,
 )
 
@@ -348,6 +350,10 @@ def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_co
         LOCAL_REGISTRATION_APPROVAL_ENV,
         _local_registration_approval_value("auth-1"),
     )
+    monkeypatch.setenv(
+        EXCHANGE_ARM_APPROVAL_ENV,
+        _exchange_arm_approval_value("auth-1"),
+    )
     client = _FakeClient()
     flow = FirstRealSubmitApiFlow(
         client=client,
@@ -381,6 +387,34 @@ def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_co
         if "runtime-execution-order-lifecycle-handoff-drafts" in path
     )
     assert mutation_index < handoff_index
+
+
+def test_arm_blocks_exchange_arm_without_exchange_arm_confirmation(monkeypatch):
+    monkeypatch.setenv(
+        LOCAL_REGISTRATION_APPROVAL_ENV,
+        _local_registration_approval_value("auth-1"),
+    )
+    monkeypatch.delenv(EXCHANGE_ARM_APPROVAL_ENV, raising=False)
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert "owner_runtime_exchange_arm_env_confirmation_missing" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-action-authorizations" in path for path in paths)
+    assert not any("exchange-submit-adapter-results" in path for path in paths)
+    assert not any("first-real-submit-actions" in path for path in paths)
 
 
 def test_arm_blocks_attempt_consumption_without_local_registration_confirmation(
@@ -628,6 +662,10 @@ def test_arm_existing_authorization_reuses_existing_attempt_policy(monkeypatch):
     monkeypatch.setenv(
         LOCAL_REGISTRATION_APPROVAL_ENV,
         _local_registration_approval_value("auth-1"),
+    )
+    monkeypatch.setenv(
+        EXCHANGE_ARM_APPROVAL_ENV,
+        _exchange_arm_approval_value("auth-1"),
     )
     client = _FakeClient(existing_attempt_policy=True)
     flow = FirstRealSubmitApiFlow(

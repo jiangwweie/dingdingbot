@@ -35,6 +35,7 @@ from src.interfaces.operator_auth import (
 API_BASE_ENV = "RUNTIME_FIRST_REAL_SUBMIT_API_BASE"
 APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT"
 LOCAL_REGISTRATION_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP"
+EXCHANGE_ARM_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_EXCHANGE_ARM_PREP"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_OUTCOME_KIND = "entry_filled_protection_creation_failed"
 
@@ -667,6 +668,10 @@ class FirstRealSubmitApiFlow:
         )
         if not self._config.arm_exchange_submit_adapter:
             return
+        if self._config.mode == "arm":
+            self._require_exchange_arm_guard(authorization_id)
+            if self.state.blockers:
+                return
         if self._config.record_gateway_readiness:
             readiness = self._step(
                 "record_exchange_gateway_readiness",
@@ -1072,6 +1077,17 @@ class FirstRealSubmitApiFlow:
                 ]
             )
 
+    def _require_exchange_arm_guard(self, authorization_id: str) -> None:
+        expected = _exchange_arm_approval_value(authorization_id)
+        actual = os.environ.get(EXCHANGE_ARM_APPROVAL_ENV, "").strip()
+        if actual != expected:
+            self.state.add_blockers(
+                [
+                    "owner_runtime_exchange_arm_env_confirmation_missing",
+                    f"expected_{EXCHANGE_ARM_APPROVAL_ENV}={expected}",
+                ]
+            )
+
     def _report(self) -> dict[str, Any]:
         return {
             "script": "runtime_first_real_submit_api_flow",
@@ -1097,6 +1113,8 @@ class FirstRealSubmitApiFlow:
                 "local_registration_env_confirmation_name": (
                     LOCAL_REGISTRATION_APPROVAL_ENV
                 ),
+                "exchange_arm_requires_env_confirmation": True,
+                "exchange_arm_env_confirmation_name": EXCHANGE_ARM_APPROVAL_ENV,
                 "no_withdrawal_or_transfer": True,
             },
         }
@@ -1217,6 +1235,10 @@ def _approval_value(authorization_id: str) -> str:
 
 def _local_registration_approval_value(authorization_id: str) -> str:
     return f"{authorization_id}:attempt-local-registration:no-exchange-submit"
+
+
+def _exchange_arm_approval_value(authorization_id: str) -> str:
+    return f"{authorization_id}:exchange-arm:no-real-submit"
 
 
 def _parse_args(argv: list[str]) -> FlowConfig:
