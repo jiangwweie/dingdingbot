@@ -133,6 +133,12 @@ def _position() -> Position:
         entry_price=Decimal("2100"),
         current_qty=Decimal("0.01"),
         opened_at=1,
+        runtime_instance_id="runtime-controlled",
+        trial_binding_id="trial-controlled",
+        strategy_family_id="CPM",
+        strategy_family_version_id="CPM-v1",
+        signal_evaluation_id="signal-controlled",
+        order_candidate_id="candidate-controlled",
     )
 
 
@@ -153,6 +159,12 @@ def _order(order_id: str, role: OrderRole, status: OrderStatus, exchange_order_i
         updated_at=1,
         reduce_only=role != OrderRole.ENTRY,
         parent_order_id="entry" if role != OrderRole.ENTRY else None,
+        runtime_instance_id="runtime-controlled" if role == OrderRole.ENTRY else None,
+        trial_binding_id="trial-controlled" if role == OrderRole.ENTRY else None,
+        strategy_family_id="CPM" if role == OrderRole.ENTRY else None,
+        strategy_family_version_id="CPM-v1" if role == OrderRole.ENTRY else None,
+        signal_evaluation_id="signal-controlled" if role == OrderRole.ENTRY else None,
+        order_candidate_id="candidate-controlled" if role == OrderRole.ENTRY else None,
     )
 
 
@@ -183,6 +195,12 @@ async def test_runtime_managed_controlled_close_projects_and_cancels_protection(
     assert close_order.order_role == OrderRole.EXIT
     assert close_order.status == OrderStatus.FILLED
     assert close_order.reduce_only is True
+    assert close_order.runtime_instance_id == "runtime-controlled"
+    assert close_order.trial_binding_id == "trial-controlled"
+    assert close_order.strategy_family_id == "CPM"
+    assert close_order.strategy_family_version_id == "CPM-v1"
+    assert close_order.signal_evaluation_id == "signal-controlled"
+    assert close_order.order_candidate_id == "candidate-controlled"
     assert gateway.place_calls == [
         {
             "symbol": SYMBOL,

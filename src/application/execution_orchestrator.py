@@ -593,6 +593,18 @@ class ExecutionOrchestrator:
             reduce_only=True,
             parent_order_id=entry_order.id,
             exit_reason=reason,
+            runtime_instance_id=getattr(position, "runtime_instance_id", None)
+            or entry_order.runtime_instance_id,
+            trial_binding_id=getattr(position, "trial_binding_id", None)
+            or entry_order.trial_binding_id,
+            strategy_family_id=getattr(position, "strategy_family_id", None)
+            or entry_order.strategy_family_id,
+            strategy_family_version_id=getattr(position, "strategy_family_version_id", None)
+            or entry_order.strategy_family_version_id,
+            signal_evaluation_id=getattr(position, "signal_evaluation_id", None)
+            or entry_order.signal_evaluation_id,
+            order_candidate_id=getattr(position, "order_candidate_id", None)
+            or entry_order.order_candidate_id,
         )
         await self._order_lifecycle.register_created_order(
             close_order,
