@@ -2103,3 +2103,32 @@ Use this file for session progress and handoff notes.
 - This work did not persist to PG, create admission/campaign facts, start
   runtime, call an exchange, authorize live, or widen symbol/side/leverage
   authority.
+
+## 2026-06-11 (Runtime Close Projection Recovery / Tokyo Deploy)
+
+- Deployed `program/live-safe-v1` commit
+  `1f801c0e06808d94d9ade80576fe8a5453bd8507` to Tokyo via the git-based
+  runtime-governance deploy path:
+  `brc-runtime-governance-1f801c0e-20260611T0906Z`.
+- Tokyo health after deploy:
+  `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Applied local PG projection recovery for the already-observed AVAX runtime
+  close trade only. The recovery used exchange read-only trade facts for
+  trade `1386754188` and did not submit, cancel, amend, or close any exchange
+  order.
+- Recovered local order/position projection:
+  - runtime `strategy-runtime-95655873b76c`;
+  - SL order `rtod-a194d1ef363c12c3df-sl` marked `FILLED`;
+  - exit price `6.635`;
+  - local position `pos_signal-evaluation-adabffa08945` marked closed with
+    `current_qty=0` and `realized_pnl=-0.0400`.
+- Post-recovery reconciliation for `AVAX/USDT:USDT` reported
+  `is_consistent=true`, `severe_count=0`, `warning_count=0`, and
+  `mismatch_count=0`.
+- Runtime live-position monitor for `strategy-runtime-95655873b76c` now reports
+  `flat_review_required`, `active_position_present=false`,
+  `attempts_used=1`, `attempts_remaining=2`, and
+  `review_required_before_next_attempt=true`.
+- This stage did not authorize or create a new live entry. The next runtime
+  attempt should proceed only after the stopped-out first attempt is reviewed
+  and the runtime profile remains inside the Owner-approved budget.
