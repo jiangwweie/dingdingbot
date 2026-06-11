@@ -64,7 +64,9 @@ async def _build_postdeploy_acceptance_packet_from_args(
         connect_timeout_seconds=args.connect_timeout_seconds,
     )
     pre_live_packet = None
-    if not args.skip_pre_live_packet:
+    if args.pre_live_packet_path:
+        pre_live_packet = _load_json_object(Path(args.pre_live_packet_path))
+    elif not args.skip_pre_live_packet:
         pre_live_packet = await build_pre_live_packet(
             deployed_head=args.expected_current_head,
             owner_real_submit_authorized=False,
@@ -294,11 +296,26 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--connect-timeout-seconds", type=int, default=8)
     parser.add_argument("--active-positions", type=int, default=0)
     parser.add_argument(
+        "--pre-live-packet-path",
+        help=(
+            "Use an existing pre-live submit packet instead of building one "
+            "from the local checkout. Useful for git-archive deployments where "
+            "the release manifest is the deployed identity source."
+        ),
+    )
+    parser.add_argument(
         "--skip-pre-live-packet",
         action="store_true",
         help="Skip the pre-live submit packet. The packet will not be acceptance-ready.",
     )
     return parser.parse_args(argv)
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise PostDeployAcceptancePacketError(f"{path} did not contain a JSON object")
+    return payload
 
 
 def _print_human(packet: dict[str, Any]) -> None:

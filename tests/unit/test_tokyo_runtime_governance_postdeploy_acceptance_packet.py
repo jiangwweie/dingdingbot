@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -173,3 +174,38 @@ def test_postdeploy_acceptance_packet_requires_current_head_deployed_gate():
 
     assert packet["status"] == "blocked"
     assert "pre_live_current_head_deployed_gate_not_true" in packet["checks"]["blockers"]
+
+
+def test_postdeploy_acceptance_cli_can_use_existing_pre_live_packet(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    module = _load_module()
+    pre_live_path = tmp_path / "pre-live.json"
+    pre_live_path.write_text(json.dumps(_pre_live_packet()) + "\n")
+
+    def fake_postdeploy_report(**kwargs):
+        assert kwargs["expected_current_head"] == EXPECTED_HEAD
+        return _postdeploy_report()
+
+    monkeypatch.setattr(module, "build_postdeploy_report", fake_postdeploy_report)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_tokyo_runtime_governance_postdeploy_acceptance_packet.py",
+            "--json",
+            "--expected-current-head",
+            EXPECTED_HEAD,
+            "--pre-live-packet-path",
+            str(pre_live_path),
+        ],
+    )
+
+    assert module.main() == 0
+
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["status"] == "postdeploy_acceptance_ready"
+    assert packet["checks"]["postdeploy_acceptance_ready"] is True
+    assert packet["pre_live_submit_summary"]["current_head_deployed"] is True
