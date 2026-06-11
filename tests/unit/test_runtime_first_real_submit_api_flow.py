@@ -352,9 +352,20 @@ def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_co
     assert any("runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths)
     assert any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
+    mutation_index = next(
+        index
+        for index, path in enumerate(paths)
+        if "runtime-execution-attempt-mutations" in path
+    )
+    handoff_index = next(
+        index
+        for index, path in enumerate(paths)
+        if "runtime-execution-order-lifecycle-handoff-drafts" in path
+    )
+    assert mutation_index < handoff_index
 
 
-def test_arm_does_not_consume_attempt_when_handoff_blocks():
+def test_arm_consumes_attempt_before_handoff_when_explicitly_enabled():
     client = _FakeClient(handoff_blockers=["handoff_internal_fact_missing"])
     flow = FirstRealSubmitApiFlow(
         client=client,
@@ -370,13 +381,13 @@ def test_arm_does_not_consume_attempt_when_handoff_blocks():
 
     assert "handoff_internal_fact_missing" in report["blockers"]
     paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert any("runtime-execution-attempt-outcome-policies" in path for path in paths)
     assert any(
         "runtime-execution-order-lifecycle-handoff-drafts" in path
         for path in paths
     )
-    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
-    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert not any("runtime-execution-attempt-outcome-policies" in path for path in paths)
     assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
     assert not any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)

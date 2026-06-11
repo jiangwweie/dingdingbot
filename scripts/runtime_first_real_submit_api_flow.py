@@ -580,27 +580,12 @@ class FirstRealSubmitApiFlow:
                 )
                 return
 
-        self._record_order_lifecycle_handoff()
-        if self.state.blockers:
-            return
-
         if self._config.record_attempt_consumption:
             self._record_attempt_reservation_and_policy()
-        else:
-            if self.state.ids.get("attempt_outcome_policy_id"):
-                self.state.add_warnings(
-                    [
-                        (
-                            "existing_attempt_outcome_policy_reused_"
-                            "no_new_attempt_mutation"
-                        )
-                    ]
-                )
-            else:
-                self.state.add_blockers(
-                    ["attempt_consumption_required_after_order_lifecycle_handoff"]
-                )
+            if self.state.blockers:
                 return
+
+        self._record_order_lifecycle_handoff()
         if self.state.blockers:
             return
         self._derive_action_ids(authorization_id)
