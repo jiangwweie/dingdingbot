@@ -131,3 +131,76 @@ ready_for_final_gate_preflight=false
 This stage does not authorize or execute real submit. If a runtime becomes
 ready for prepare overnight, the loop may create shadow/prepare records and
 then stops for operator review. Real submit remains separately Owner-gated.
+
+## Python Loop Replacement
+
+Follow-up commit:
+
+```text
+451b68fdd5e76be146781ae9219e91186bc00609
+feat(ops): add bounded active observation loop
+```
+
+Additional local verification:
+
+```text
+python3 -m py_compile scripts/runtime_active_observation_loop.py scripts/runtime_active_observation_monitor.py
+pytest -q tests/unit/test_runtime_active_observation_loop.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_next_attempt_observation_monitor.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py tests/unit/test_runtime_next_attempt_observation_cycle.py tests/unit/test_runtime_next_attempt_observation_cycle_api.py tests/unit/test_runtime_next_attempt_prepare_api_flow.py
+```
+
+Result:
+
+```text
+33 passed
+```
+
+Tokyo was updated from:
+
+```text
+/home/ubuntu/brc-deploy/releases/brc-runtime-governance-6f7ea48b-20260612Tactive-monitor
+```
+
+to:
+
+```text
+/home/ubuntu/brc-deploy/releases/brc-runtime-governance-451b68fd-20260612Tactive-loop
+```
+
+Postdeploy status:
+
+```text
+postdeploy_acceptance_passed
+service=active
+health={"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}
+```
+
+The earlier ad-hoc shell loop was stopped:
+
+```text
+stopped_old_pid=3831711
+```
+
+The deployed Python loop smoke produced:
+
+```text
+status=waiting_for_signal
+active_runtime_count=2
+monitored_runtime_count=2
+prepare_records_created=false
+exchange_write_called=false
+order_created=false
+order_lifecycle_called=false
+attempt_counter_mutated=false
+runtime_budget_mutated=false
+withdrawal_or_transfer_created=false
+```
+
+The durable Python overnight loop is now running:
+
+```text
+report_root=/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-python
+pid=3836605
+interval_seconds=300
+max_iterations=96
+initial_status=waiting_for_signal
+```
