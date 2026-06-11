@@ -1081,7 +1081,7 @@ def _body(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _optional_detail(value: dict[str, Any]) -> str | None:
-    detail = value.get("detail")
+    detail = value.get("detail") or value.get("message")
     if detail is None:
         return None
     text = str(detail).strip()

@@ -182,7 +182,7 @@ class _FakeClient:
                 if self.disabled_action_http_status >= 300:
                     return {
                         "http_status": self.disabled_action_http_status,
-                        "body": {"detail": self.disabled_action_detail},
+                        "body": {"message": self.disabled_action_detail},
                         "error": True,
                     }
                 return {
