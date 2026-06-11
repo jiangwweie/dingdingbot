@@ -571,6 +571,10 @@ class FirstRealSubmitApiFlow:
                 self.state.add_warnings(
                     ["attempt_consumption_not_recorded_in_arm_preview"]
                 )
+                self.state.add_blockers(
+                    ["attempt_consumption_required_before_order_lifecycle_handoff"]
+                )
+                return
         self._record_order_lifecycle_handoff()
         if self.state.blockers:
             return

@@ -287,7 +287,7 @@ def test_prepare_blocks_before_draft_when_order_candidate_is_already_used():
     assert "authorization_id" not in report["ids"]
 
 
-def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
+def test_arm_preview_stops_before_attempt_consumption_by_default():
     client = _FakeClient()
     flow = FirstRealSubmitApiFlow(
         client=client,
@@ -300,17 +300,42 @@ def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
 
     report = flow.run()
 
-    assert report["blockers"] == []
-    assert report["ids"]["local_registration_enablement_decision_id"] == "local-enable-1"
-    assert report["ids"]["exchange_submit_enablement_decision_id"] == "exchange-enable-1"
+    assert "attempt_consumption_required_before_order_lifecycle_handoff" in report["blockers"]
     paths = [call["path"] for call in client.calls]
     assert any("runtime-execution-controlled-submit-plans" in path for path in paths)
     assert any("runtime-execution-protection-plans" in path for path in paths)
-    assert any("exchange-submit-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths)
+    assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
+    assert not any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("runtime-execution-attempt-reservations" in path for path in paths)
     assert not any("runtime-execution-attempt-mutations" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
     assert "attempt_consumption_not_recorded_in_arm_preview" in report["warnings"]
+
+
+def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_consumption():
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["local_registration_enablement_decision_id"] == "local-enable-1"
+    assert report["ids"]["exchange_submit_enablement_decision_id"] == "exchange-enable-1"
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert any("runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths)
+    assert any("exchange-submit-adapter-results" in path for path in paths)
+    assert not any("first-real-submit-actions" in path for path in paths)
 
 
 def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit():
@@ -327,17 +352,14 @@ def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit()
 
     report = flow.run()
 
-    assert report["blockers"] == []
-    assert report["ids"]["disabled_first_real_submit_execution_result_id"] == (
-        "exec-disabled-1"
-    )
+    assert "attempt_consumption_required_before_order_lifecycle_handoff" in report["blockers"]
+    assert "disabled_first_real_submit_execution_result_id" not in report["ids"]
     action_calls = [
         call
         for call in client.calls
         if "runtime-execution-first-real-submit-actions" in call["path"]
     ]
-    assert len(action_calls) == 1
-    assert action_calls[0]["query"]["owner_confirmed_for_first_real_submit_action"] is False
+    assert action_calls == []
     assert report["ready_for_real_submit_action"] is False
     assert not any(
         "runtime-execution-attempt-mutations" in call["path"]
