@@ -15,17 +15,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.application.reconciliation import ReconciliationService
-from src.application.runtime_live_position_monitor_service import (
-    RuntimeLivePositionMonitorService,
-)
-from src.infrastructure.connection_pool import close_all_connections
-from src.infrastructure.exchange_gateway import ExchangeGateway
-from src.infrastructure.pg_order_repository import PgOrderRepository
-from src.infrastructure.pg_position_repository import PgPositionRepository
-from src.infrastructure.pg_strategy_runtime_repository import PgStrategyRuntimeRepository
-
-
 def _parse_bool_env(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -59,6 +48,19 @@ def _json_value(value: Any) -> Any:
 
 async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
+
+    from src.application.reconciliation import ReconciliationService
+    from src.application.runtime_live_position_monitor_service import (
+        RuntimeLivePositionMonitorService,
+    )
+    from src.infrastructure.connection_pool import close_all_connections
+    from src.infrastructure.exchange_gateway import ExchangeGateway
+    from src.infrastructure.pg_order_repository import PgOrderRepository
+    from src.infrastructure.pg_position_repository import PgPositionRepository
+    from src.infrastructure.pg_strategy_runtime_repository import (
+        PgStrategyRuntimeRepository,
+    )
+
     runtime_repository = PgStrategyRuntimeRepository()
     position_repository = PgPositionRepository()
     order_repository = PgOrderRepository()
