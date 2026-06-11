@@ -2132,3 +2132,48 @@ Use this file for session progress and handoff notes.
 - This stage did not authorize or create a new live entry. The next runtime
   attempt should proceed only after the stopped-out first attempt is reviewed
   and the runtime profile remains inside the Owner-approved budget.
+
+## 2026-06-11 (Runtime Closed Trade Review / Tokyo Deploy)
+
+- Added and deployed `program/live-safe-v1` commit
+  `d0bcce7c9dea5824a83cd3b3820f14896353dedb` via the git-based Tokyo deploy
+  path:
+  `brc-runtime-governance-d0bcce7c-20260611T0920Z`.
+- Added `RuntimeClosedTradeLifecycleReviewService` plus
+  `scripts/create_runtime_closed_trade_review.py` to generate a
+  `brc_live_lifecycle_reviews` closed-review record from already-resolved
+  runtime order / position / reconciliation facts.
+- Local verification:
+  - `python3 -m pytest -q tests/unit/test_runtime_closed_trade_lifecycle_review.py tests/unit/test_runtime_semantic_review_packet.py tests/unit/test_right_tail_review.py`
+    passed with `11 passed`;
+  - `python3 -m pytest -q tests/unit/test_brc_live_lifecycle_review_endpoints.py tests/unit/test_runtime_live_position_monitor.py tests/unit/test_runtime_execution_submit_outcome_review.py`
+    passed with `34 passed`;
+  - compile and `git diff --check` passed.
+- Tokyo postdeploy acceptance passed and health remained:
+  `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Applied the closed-review writer for runtime
+  `strategy-runtime-95655873b76c`, entry
+  `rtod-a194d1ef363c12c3df-entry`, and SL
+  `rtod-a194d1ef363c12c3df-sl`.
+- Recorded review:
+  - review id
+    `live-review-runtime-review:strategy-runtime-95655873b76c-closed-reviewed-rtod-a194d1ef363c12c3df-sl`;
+  - lifecycle/review status `closed_reviewed`;
+  - strategy outcome `small_bounded_loss`;
+  - realized PnL `-0.0400`;
+  - max-loss budget basis `0.087764740000000000`;
+  - R multiple `-0.4558`;
+  - stop effectiveness `effective_bounded_loss`;
+  - attempt continuation quality `continue_after_small_loss`.
+- The writer is idempotent for the recorded review id. A follow-up dry-run
+  returned `already_recorded`.
+- Safety result:
+  - exchange facts were read-only;
+  - no exchange write, order create/cancel/amend, position close,
+    ExecutionIntent creation, runtime-budget mutation, withdrawal, or transfer
+    was performed;
+  - only the live lifecycle review ledger was written.
+- Known residual trace gap: the review record preserved runtime / trial /
+  strategy / signal / order-candidate IDs, but `execution_intent_id` is still
+  missing from this recovered local order chain, so the semantic review packet
+  reports `runtime_semantic_trace_incomplete`.
