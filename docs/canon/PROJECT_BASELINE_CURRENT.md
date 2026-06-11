@@ -424,6 +424,12 @@ Key facts:
   keeps `execution_intent_status_changed=false`,
   `order_created=false`, `exchange_called=false`,
   `owner_bounded_execution_called=false`, and `order_lifecycle_called=false`.
+  RuntimeExecutionPostSubmitBudgetSettlement can apply resolved first-real-submit
+  outcome accounting to runtime state: no-fill/rejected outcomes may release
+  reserved budget; filled outcomes record consumed/held budget without
+  releasing it. It blocks runtime attempt/budget drift and never changes
+  attempt counts, ExecutionIntent status, orders, OrderLifecycle, exchange, or
+  withdrawal/transfer state.
   RuntimeExecutionSubmitAdapterPreview exposes missing OrderLifecycle/protection
   inputs without mutating runtime budget or creating orders.
   RuntimeExecutionSubmitRehearsal aggregates submit-readiness, controlled-submit

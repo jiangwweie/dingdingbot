@@ -61,7 +61,13 @@ This document defines the runtime safety boundaries for the BRC project.
   may record a submit outcome review and derive an attempt-outcome policy from
   resolved local order facts. That packet is accounting evidence only: it must
   not release budget, mutate runtime state, create/cancel/close orders, call
-  OrderLifecycle, or call exchange.
+  OrderLifecycle, or call exchange. A later
+  `RuntimeExecutionPostSubmitBudgetSettlement` may apply that resolved
+  accounting to `StrategyRuntimeInstance` state by releasing reserved budget
+  only for no-fill/rejected outcomes, or by recording that reserved budget
+  remains held/consumed for filled outcomes. It must not change attempt counts,
+  change ExecutionIntent status, create/cancel/close orders, call
+  OrderLifecycle, call exchange, or create withdrawal/transfer instructions.
   The runtime protection plan preview/record is runtime-native and must not
   reuse one-shot OwnerBounded authorization semantics as hidden execution
   authority, create orders, or create exchange payloads. The submit adapter

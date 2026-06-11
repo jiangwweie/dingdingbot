@@ -38,10 +38,18 @@ from src.domain.runtime_execution_exchange_submit_execution_result import (
 from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
     RuntimeExecutionFirstRealSubmitOutcomeAccountingStatus,
 )
+from src.domain.runtime_execution_post_submit_budget_settlement import (
+    RuntimeExecutionPostSubmitBudgetSettlementStatus,
+)
 from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitObservedOutcome,
     RuntimeExecutionSubmitOutcomeReviewStatus,
     build_runtime_execution_submit_outcome_review,
+)
+from src.domain.strategy_runtime import (
+    StrategyRuntimeBoundary,
+    StrategyRuntimeInstance,
+    StrategyRuntimeInstanceStatus,
 )
 from src.infrastructure.pg_models import PGRuntimeExecutionSubmitOutcomeReviewORM
 from src.infrastructure.pg_runtime_execution_submit_outcome_review_repository import (
@@ -156,6 +164,37 @@ class _AttemptOutcomePolicyRepo:
             (policy for policy in self.created if policy.policy_id == policy_id),
             None,
         )
+
+
+class _RuntimeService:
+    def __init__(self, runtime: StrategyRuntimeInstance) -> None:
+        self.runtime = runtime
+        self.applied = []
+
+    async def get_runtime(self, runtime_instance_id: str):
+        if self.runtime.runtime_instance_id != runtime_instance_id:
+            raise ValueError("runtime not found")
+        return self.runtime
+
+    async def apply_runtime_attempt_mutation(self, **kwargs):
+        raise AssertionError("attempt mutation should not be applied by settlement")
+
+    async def apply_runtime_post_submit_budget_settlement(
+        self,
+        *,
+        previous_runtime,
+        updated_runtime,
+        settlement,
+    ):
+        self.applied.append(
+            {
+                "previous_runtime": previous_runtime,
+                "updated_runtime": updated_runtime,
+                "settlement": settlement,
+            }
+        )
+        self.runtime = updated_runtime
+        return updated_runtime
 
 
 def test_submit_outcome_review_maps_entry_submit_failure_without_order_facts():
@@ -550,6 +589,123 @@ async def test_first_real_submit_outcome_accounting_blocks_unresolved_review():
     assert accounting.exchange_called is False
 
 
+async def test_post_submit_budget_settlement_releases_no_fill_reserved_budget():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.CANCELED, Decimal("0"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.CANCELED, Decimal("0"))
+    reservation = _reservation()
+    mutation = _mutation(reservation)
+    runtime_service = _RuntimeService(_runtime())
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        order_lifecycle_service=_Lifecycle([entry, sl]),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo(),
+        attempt_reservation_repository=_AttemptReservationRepo(reservation),
+        attempt_mutation_repository=_AttemptMutationRepo(mutation),
+        attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        runtime_service=runtime_service,
+    )
+
+    settlement = await service.settle_first_real_submit_budget_for_authorization(
+        "auth-1",
+        reservation_id=reservation.reservation_id,
+    )
+
+    assert settlement.status == (
+        RuntimeExecutionPostSubmitBudgetSettlementStatus
+        .RELEASED_RESERVED_BUDGET
+    )
+    assert settlement.budget_release_amount == Decimal("6")
+    assert settlement.budget_reserved_before == Decimal("6")
+    assert settlement.budget_reserved_after == Decimal("0")
+    assert settlement.budget_remaining_after == Decimal("30")
+    assert settlement.runtime_budget_mutated is True
+    assert settlement.attempt_counter_mutated is False
+    assert settlement.budget_released is True
+    assert settlement.exchange_called is False
+    assert settlement.order_lifecycle_called is False
+    assert runtime_service.runtime.boundary.attempts_used == 1
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
+    assert len(runtime_service.applied) == 1
+
+
+async def test_post_submit_budget_settlement_records_full_fill_consumed_without_release():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
+    reservation = _reservation()
+    mutation = _mutation(reservation)
+    runtime_service = _RuntimeService(_runtime())
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        order_lifecycle_service=_Lifecycle([entry, sl]),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo(),
+        attempt_reservation_repository=_AttemptReservationRepo(reservation),
+        attempt_mutation_repository=_AttemptMutationRepo(mutation),
+        attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        runtime_service=runtime_service,
+    )
+
+    settlement = await service.settle_first_real_submit_budget_for_authorization(
+        "auth-1",
+        reservation_id=reservation.reservation_id,
+    )
+
+    assert settlement.status == (
+        RuntimeExecutionPostSubmitBudgetSettlementStatus
+        .RECORDED_RESERVED_BUDGET_CONSUMED
+    )
+    assert settlement.budget_release_amount == Decimal("0")
+    assert settlement.budget_reserved_before == Decimal("6")
+    assert settlement.budget_reserved_after == Decimal("6")
+    assert settlement.budget_remaining_after == Decimal("24")
+    assert settlement.budget_consumption_recorded is True
+    assert settlement.runtime_state_mutated is True
+    assert settlement.runtime_budget_mutated is False
+    assert settlement.budget_released is False
+    assert runtime_service.runtime.boundary.attempts_used == 1
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("6")
+    assert (
+        runtime_service.runtime.metadata["last_post_submit_budget_action"]
+        == "confirm_reserved_budget_consumed"
+    )
+
+
+async def test_post_submit_budget_settlement_blocks_runtime_budget_drift():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.CANCELED, Decimal("0"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.CANCELED, Decimal("0"))
+    reservation = _reservation()
+    mutation = _mutation(reservation)
+    runtime_service = _RuntimeService(
+        _runtime(boundary={"budget_reserved": Decimal("5")})
+    )
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        order_lifecycle_service=_Lifecycle([entry, sl]),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo(),
+        attempt_reservation_repository=_AttemptReservationRepo(reservation),
+        attempt_mutation_repository=_AttemptMutationRepo(mutation),
+        attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        runtime_service=runtime_service,
+    )
+
+    settlement = await service.settle_first_real_submit_budget_for_authorization(
+        "auth-1",
+        reservation_id=reservation.reservation_id,
+    )
+
+    assert settlement.status == RuntimeExecutionPostSubmitBudgetSettlementStatus.BLOCKED
+    assert "runtime_budget_reserved_drift" in settlement.blockers
+    assert settlement.runtime_state_mutated is False
+    assert settlement.budget_released is False
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("5")
+    assert runtime_service.applied == []
+
+
 async def test_submit_outcome_review_repository_roundtrips_by_authorization():
     engine, session_maker = await _repo_engine(
         PGRuntimeExecutionSubmitOutcomeReviewORM.__table__
@@ -771,6 +927,52 @@ async def test_trading_console_records_first_real_submit_accounting_without_gate
     assert accounting.exchange_called is False
     assert accounting.order_lifecycle_called is False
     assert accounting.runtime_state_mutated is False
+
+
+async def test_trading_console_settles_post_submit_budget_without_gateway(
+    monkeypatch,
+):
+    factory_calls = []
+
+    class FakeService:
+        async def settle_first_real_submit_budget_for_authorization(
+            self,
+            authorization_id,
+            *,
+            reservation_id,
+        ):
+            return SimpleNamespace(
+                authorization_id=authorization_id,
+                reservation_id=reservation_id,
+                exchange_called=False,
+                order_lifecycle_called=False,
+                runtime_state_mutated=True,
+            )
+
+    async def fake_factory(*, include_runtime_exchange_gateway=False):
+        factory_calls.append(include_runtime_exchange_gateway)
+        return FakeService()
+
+    monkeypatch.setattr(
+        trading_console_api,
+        "_runtime_execution_intent_adapter_service",
+        fake_factory,
+    )
+
+    settlement = await (
+        trading_console_api
+        .settle_runtime_execution_post_submit_budget_for_authorization(
+            "auth-1",
+            reservation_id="reservation-1",
+        )
+    )
+
+    assert factory_calls == [False]
+    assert settlement.authorization_id == "auth-1"
+    assert settlement.reservation_id == "reservation-1"
+    assert settlement.exchange_called is False
+    assert settlement.order_lifecycle_called is False
+    assert settlement.runtime_state_mutated is True
 
 
 def _submitted_result() -> RuntimeExecutionExchangeSubmitExecutionResult:
@@ -1012,6 +1214,43 @@ def _mutation(
             "budget_reservation_amount": "6",
         },
     )
+
+
+def _runtime(**overrides) -> StrategyRuntimeInstance:
+    boundary_overrides = dict(overrides.pop("boundary", {}))
+    boundary_values = {
+        "max_attempts": 3,
+        "attempts_used": 1,
+        "budget_reserved": Decimal("6"),
+        "max_active_positions": 1,
+        "max_notional_per_attempt": Decimal("300"),
+        "total_budget": Decimal("30"),
+        "allowed_symbols": ["BNB/USDT:USDT"],
+        "allowed_sides": ["long"],
+        "max_leverage": Decimal("1"),
+        "requires_protection": True,
+        "requires_review": True,
+    }
+    boundary_values.update(boundary_overrides)
+    boundary = StrategyRuntimeBoundary(**boundary_values)
+    values = {
+        "runtime_instance_id": "runtime-1",
+        "trial_binding_id": "binding-1",
+        "admission_decision_id": "admission-1",
+        "strategy_family_id": "CPM-001",
+        "strategy_family_version_id": "CPM-001-v0",
+        "symbol": "BNB/USDT:USDT",
+        "side": "long",
+        "status": StrategyRuntimeInstanceStatus.ACTIVE,
+        "boundary": boundary,
+        "execution_enabled": False,
+        "shadow_mode": True,
+        "created_at_ms": NOW_MS,
+        "updated_at_ms": NOW_MS,
+        "metadata": {},
+    }
+    values.update(overrides)
+    return StrategyRuntimeInstance(**values)
 
 
 async def _repo_engine(*tables):

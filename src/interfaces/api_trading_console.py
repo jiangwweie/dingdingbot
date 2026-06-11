@@ -97,6 +97,9 @@ from src.domain.runtime_execution_submit_outcome_review import (
 from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
     RuntimeExecutionFirstRealSubmitOutcomeAccounting,
 )
+from src.domain.runtime_execution_post_submit_budget_settlement import (
+    RuntimeExecutionPostSubmitBudgetSettlement,
+)
 from src.domain.runtime_execution_submit_rehearsal import (
     RuntimeExecutionSubmitRehearsal,
 )
@@ -2181,6 +2184,30 @@ async def record_runtime_execution_first_real_submit_outcome_accounting(
                 authorization_id,
                 reservation_id=reservation_id,
             )
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-post-submit-budget-settlements/"
+    "authorizations/{authorization_id}",
+    response_model=RuntimeExecutionPostSubmitBudgetSettlement,
+)
+async def settle_runtime_execution_post_submit_budget_for_authorization(
+    authorization_id: str,
+    reservation_id: str,
+) -> RuntimeExecutionPostSubmitBudgetSettlement:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.settle_first_real_submit_budget_for_authorization(
+            authorization_id,
+            reservation_id=reservation_id,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

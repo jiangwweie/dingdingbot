@@ -140,6 +140,10 @@ from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
     RuntimeExecutionFirstRealSubmitOutcomeAccounting,
     build_runtime_execution_first_real_submit_outcome_accounting,
 )
+from src.domain.runtime_execution_post_submit_budget_settlement import (
+    RuntimeExecutionPostSubmitBudgetSettlement,
+    build_runtime_execution_post_submit_budget_settlement,
+)
 from src.domain.runtime_execution_exchange_submit_recovery_resolution import (
     RuntimeExecutionExchangeSubmitRecoveryResolution,
     RuntimeExecutionExchangeSubmitRecoveryResolutionStatus,
@@ -539,6 +543,15 @@ class RuntimeExecutionRuntimeServicePort(Protocol):
         previous_runtime: StrategyRuntimeInstance,
         updated_runtime: StrategyRuntimeInstance,
         mutation: RuntimeExecutionAttemptMutation,
+    ) -> StrategyRuntimeInstance:
+        ...
+
+    async def apply_runtime_post_submit_budget_settlement(
+        self,
+        *,
+        previous_runtime: StrategyRuntimeInstance,
+        updated_runtime: StrategyRuntimeInstance,
+        settlement: RuntimeExecutionPostSubmitBudgetSettlement,
     ) -> StrategyRuntimeInstance:
         ...
 
@@ -2635,6 +2648,41 @@ class RuntimeExecutionIntentAdapterService:
             attempt_outcome_policy=policy,
             now_ms=_now_ms(),
         )
+
+    async def settle_first_real_submit_budget_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        reservation_id: str,
+    ) -> RuntimeExecutionPostSubmitBudgetSettlement:
+        if self._attempt_mutation_repository is None:
+            raise RuntimeError("runtime_execution_attempt_mutation_repository_unavailable")
+        if self._runtime_service is None:
+            raise RuntimeError("runtime_service_unavailable")
+        accounting = await (
+            self.record_first_real_submit_outcome_accounting_for_authorization(
+                authorization_id,
+                reservation_id=reservation_id,
+            )
+        )
+        mutation_id = f"runtime-attempt-mutation-{reservation_id}"
+        mutation = await self._attempt_mutation_repository.get(mutation_id)
+        runtime = await self._runtime_service.get_runtime(accounting.runtime_instance_id)
+        settlement, updated_runtime = (
+            build_runtime_execution_post_submit_budget_settlement(
+                accounting=accounting,
+                mutation=mutation,
+                runtime=runtime,
+                now_ms=_now_ms(),
+            )
+        )
+        if updated_runtime is not None:
+            await self._runtime_service.apply_runtime_post_submit_budget_settlement(
+                previous_runtime=runtime,
+                updated_runtime=updated_runtime,
+                settlement=settlement,
+            )
+        return settlement
 
     async def submit_rehearsal_for_authorization(
         self,

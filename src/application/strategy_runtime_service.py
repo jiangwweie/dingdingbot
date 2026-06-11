@@ -19,6 +19,10 @@ from src.domain.runtime_execution_attempt_mutation import (
     RuntimeExecutionAttemptMutation,
     RuntimeExecutionAttemptMutationStatus,
 )
+from src.domain.runtime_execution_post_submit_budget_settlement import (
+    RuntimeExecutionPostSubmitBudgetSettlement,
+    RuntimeExecutionPostSubmitBudgetSettlementStatus,
+)
 from src.domain.strategy_runtime_live_enablement import (
     StrategyRuntimeLiveEnablementMutation,
     StrategyRuntimeLiveEnablementMutationStatus,
@@ -377,6 +381,52 @@ class StrategyRuntimeInstanceService:
                 "attempt_consumed": mutation.attempt_consumed,
                 "order_created": mutation.order_created,
                 "exchange_called": mutation.exchange_called,
+            },
+        )
+        return saved
+
+    async def apply_runtime_post_submit_budget_settlement(
+        self,
+        *,
+        previous_runtime: StrategyRuntimeInstance,
+        updated_runtime: StrategyRuntimeInstance,
+        settlement: RuntimeExecutionPostSubmitBudgetSettlement,
+    ) -> StrategyRuntimeInstance:
+        if settlement.status == RuntimeExecutionPostSubmitBudgetSettlementStatus.BLOCKED:
+            raise StrategyRuntimeError("blocked budget settlement cannot update runtime")
+        if previous_runtime.runtime_instance_id != updated_runtime.runtime_instance_id:
+            raise StrategyRuntimeError("budget settlement previous/updated runtime mismatch")
+        if settlement.runtime_instance_id != updated_runtime.runtime_instance_id:
+            raise StrategyRuntimeError("budget settlement target mismatch")
+        if updated_runtime.execution_enabled or not updated_runtime.shadow_mode:
+            raise StrategyRuntimeError("budget settlement cannot enable execution")
+        if updated_runtime.boundary.attempts_used != previous_runtime.boundary.attempts_used:
+            raise StrategyRuntimeError("budget settlement cannot mutate attempt count")
+        saved = await self._runtime_repo.update_status(updated_runtime)
+        await self._record_event(
+            saved,
+            previous_status=previous_runtime.status,
+            actor="system",
+            reason="runtime post-submit budget settlement recorded",
+            event_type="runtime_post_submit_budget_settled",
+            metadata={
+                "settlement_id": settlement.settlement_id,
+                "accounting_id": settlement.accounting_id,
+                "reservation_id": settlement.reservation_id,
+                "authorization_id": settlement.authorization_id,
+                "budget_action": (
+                    settlement.budget_action.value
+                    if settlement.budget_action is not None
+                    else None
+                ),
+                "outcome_kind": settlement.outcome_kind,
+                "budget_reserved_before": str(settlement.budget_reserved_before),
+                "budget_reserved_after": str(settlement.budget_reserved_after),
+                "budget_release_amount": str(settlement.budget_release_amount),
+                "runtime_budget_mutated": settlement.runtime_budget_mutated,
+                "attempt_counter_mutated": settlement.attempt_counter_mutated,
+                "order_created": settlement.order_created,
+                "exchange_called": settlement.exchange_called,
             },
         )
         return saved
