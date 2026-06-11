@@ -496,6 +496,8 @@ class FirstRealSubmitApiFlow:
         )
         reservation_body = _body(reservation)
         self.state.remember("reservation_id", reservation_body.get("reservation_id"))
+        if self.state.blockers:
+            return
 
         reservation_id = self._required_id("reservation_id")
         if not reservation_id:
@@ -509,6 +511,8 @@ class FirstRealSubmitApiFlow:
             ),
         )
         self.state.remember("attempt_mutation_id", _body(mutation).get("mutation_id"))
+        if self.state.blockers:
+            return
 
         policy = self._step(
             "record_attempt_outcome_policy",
@@ -520,6 +524,8 @@ class FirstRealSubmitApiFlow:
             query={"outcome_kind": self._config.outcome_kind},
         )
         self.state.remember("attempt_outcome_policy_id", _body(policy).get("policy_id"))
+        if self.state.blockers:
+            return
         self._record_evidence_preparation(collect_body_blockers=False)
 
     def _record_order_lifecycle_handoff(self) -> None:
@@ -555,9 +561,7 @@ class FirstRealSubmitApiFlow:
             return
         if self.state.blockers:
             return
-        if self._config.record_attempt_consumption:
-            self._record_attempt_reservation_and_policy()
-        else:
+        if not self._config.record_attempt_consumption:
             if self.state.ids.get("attempt_outcome_policy_id"):
                 self.state.add_warnings(
                     [
@@ -575,7 +579,28 @@ class FirstRealSubmitApiFlow:
                     ["attempt_consumption_required_before_order_lifecycle_handoff"]
                 )
                 return
+
         self._record_order_lifecycle_handoff()
+        if self.state.blockers:
+            return
+
+        if self._config.record_attempt_consumption:
+            self._record_attempt_reservation_and_policy()
+        else:
+            if self.state.ids.get("attempt_outcome_policy_id"):
+                self.state.add_warnings(
+                    [
+                        (
+                            "existing_attempt_outcome_policy_reused_"
+                            "no_new_attempt_mutation"
+                        )
+                    ]
+                )
+            else:
+                self.state.add_blockers(
+                    ["attempt_consumption_required_after_order_lifecycle_handoff"]
+                )
+                return
         if self.state.blockers:
             return
         self._derive_action_ids(authorization_id)

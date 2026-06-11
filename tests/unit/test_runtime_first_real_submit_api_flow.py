@@ -21,6 +21,8 @@ class _FakeClient:
         candidate_reusable: bool | None = True,
         candidate_usage_status: str = "unused",
         evidence_blockers: list[str] | None = None,
+        handoff_http_status: int = 200,
+        handoff_blockers: list[str] | None = None,
     ) -> None:
         self.calls: list[dict] = []
         self.existing_attempt_policy = existing_attempt_policy
@@ -29,6 +31,8 @@ class _FakeClient:
         self.candidate_reusable = candidate_reusable
         self.candidate_usage_status = candidate_usage_status
         self.evidence_blockers = evidence_blockers or []
+        self.handoff_http_status = handoff_http_status
+        self.handoff_blockers = handoff_blockers or []
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -140,7 +144,19 @@ class _FakeClient:
         if "runtime-execution-attempt-outcome-policies" in path:
             return {"http_status": 200, "body": {"policy_id": "policy-1", "status": "ready_for_attempt_budget_outcome_accounting"}}
         if "runtime-execution-order-lifecycle-handoff-drafts" in path:
-            return {"http_status": 200, "body": {"handoff_draft_id": "handoff-1", "status": "ready_for_order_lifecycle_adapter"}}
+            return {
+                "http_status": self.handoff_http_status,
+                "body": {
+                    "handoff_draft_id": "handoff-1",
+                    "status": (
+                        "blocked"
+                        if self.handoff_blockers
+                        else "ready_for_order_lifecycle_adapter"
+                    ),
+                    "blockers": self.handoff_blockers,
+                },
+                "error": self.handoff_http_status >= 300,
+            }
         if "runtime-execution-local-registration-action-authorizations" in path:
             return {"http_status": 200, "body": {"action_authorization_id": "local-action-1", "status": "approved_for_local_registration_action"}}
         if "runtime-execution-local-registration-enablements" in path:
@@ -335,6 +351,34 @@ def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_co
     assert any("runtime-execution-attempt-mutations" in path for path in paths)
     assert any("runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths)
     assert any("exchange-submit-adapter-results" in path for path in paths)
+    assert not any("first-real-submit-actions" in path for path in paths)
+
+
+def test_arm_does_not_consume_attempt_when_handoff_blocks():
+    client = _FakeClient(handoff_blockers=["handoff_internal_fact_missing"])
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert "handoff_internal_fact_missing" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert any(
+        "runtime-execution-order-lifecycle-handoff-drafts" in path
+        for path in paths
+    )
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-attempt-outcome-policies" in path for path in paths)
+    assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
+    assert not any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
 
 
