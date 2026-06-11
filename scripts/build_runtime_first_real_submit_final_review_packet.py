@@ -62,6 +62,9 @@ def build_first_real_submit_final_review_packet(
     owner_deployment_gate = _as_dict(
         first_real_submit_owner_packet.get("deployment_gate")
     )
+    submit_authorization_id = _infer_submit_authorization_id(
+        first_real_submit_owner_packet
+    )
 
     target_head = _first_present(
         expected_current_head,
@@ -163,6 +166,11 @@ def build_first_real_submit_final_review_packet(
             ),
             "does_not_authorize_live_action": True,
         },
+        "first_real_submit_action_context": {
+            "submit_authorization_id": submit_authorization_id,
+            "requires_exact_owner_action_confirmation": True,
+            "does_not_authorize_live_action": True,
+        },
         "checks": {
             "ready_for_prerequisite_review": ready_for_prerequisite_review,
             "ready_for_owner_action_review": ready_for_owner_action_review,
@@ -236,6 +244,55 @@ def _forbidden_effects(
             if value is True:
                 forbidden.append(f"{source}.{name}")
     return _dedupe(forbidden)
+
+
+def _infer_submit_authorization_id(packet: dict[str, Any]) -> str | None:
+    """Infer the submit authorization id from persisted evidence identifiers."""
+
+    candidates = [
+        (
+            _as_dict(packet.get("local_registration_rehearsal")).get(
+                "action_authorization_id"
+            ),
+            "runtime-local-registration-action-authorization-",
+        ),
+        (
+            _as_dict(packet.get("local_registration_rehearsal")).get(
+                "enablement_decision_id"
+            ),
+            "runtime-local-registration-enablement-",
+        ),
+        (
+            _as_dict(packet.get("exchange_submit_rehearsal")).get(
+                "enablement_decision_id"
+            ),
+            "runtime-exchange-submit-enablement-",
+        ),
+        (
+            _as_dict(
+                _as_dict(packet.get("evidence_preparation")).get(
+                    "prepared_evidence_ids"
+                )
+            ).get("submit_idempotency_policy_id"),
+            "runtime-submit-idempotency-",
+        ),
+        (
+            _as_dict(
+                _as_dict(packet.get("evidence_preparation")).get(
+                    "available_evidence_ids"
+                )
+            ).get("submit_idempotency_policy_id"),
+            "runtime-submit-idempotency-",
+        ),
+    ]
+    for value, prefix in candidates:
+        text = _optional_str(value)
+        if not text or not text.startswith(prefix):
+            continue
+        inferred = text[len(prefix) :]
+        if inferred.startswith("runtime-submit-authorization-"):
+            return inferred
+    return None
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

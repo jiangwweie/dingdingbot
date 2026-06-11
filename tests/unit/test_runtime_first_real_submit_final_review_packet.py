@@ -43,6 +43,9 @@ def test_final_review_packet_can_reach_owner_action_review():
     assert packet["owner_gate"]["next_authorization_if_ready"] == (
         "explicit first-real-submit action authorization"
     )
+    assert packet["first_real_submit_action_context"][
+        "submit_authorization_id"
+    ] == "runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5"
     assert packet["safety_invariants"]["exchange_called"] is False
     assert packet["safety_invariants"]["remote_files_modified"] is False
 
@@ -163,6 +166,12 @@ def _owner_packet(head: str = HEAD, *, action_ready: bool = True):
             "remaining_action_blockers": action_blockers,
             "requires_separate_action_authorization": True,
             "does_not_authorize_live_action": True,
+        },
+        "local_registration_rehearsal": {
+            "action_authorization_id": (
+                "runtime-local-registration-action-authorization-"
+                "runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5"
+            ),
         },
         "safety_invariants": {
             "packet_build_only": True,
