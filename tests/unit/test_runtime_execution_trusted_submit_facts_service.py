@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from src.application.runtime_execution_trusted_submit_fact_readers import (
     ConfiguredMarketRuleTrustedSubmitFactReader,
+    ExchangeMarketRuleTrustedSubmitFactReader,
     LocalActivePositionTrustedSubmitFactReader,
     LocalOpenOrderTrustedSubmitFactReader,
     ReconciliationReadModelTrustedSubmitFactReader,
@@ -166,6 +167,22 @@ class _ProtectionPlanRepo:
             blockers=[],
             created_at_ms=NOW_MS - 50,
         )
+
+
+class _MarketInfoGateway:
+    def __init__(self, market_info=None) -> None:
+        self.market_info = market_info or {
+            "min_quantity": Decimal("0.1"),
+            "quantity_precision": 1,
+            "price_precision": 3,
+            "min_notional": Decimal("5"),
+            "step_size": Decimal("0.1"),
+        }
+        self.calls = []
+
+    async def get_market_info(self, symbol):
+        self.calls.append(symbol)
+        return self.market_info
 
 
 class _ReconciliationReadModelRepo:
@@ -404,6 +421,31 @@ async def test_trusted_submit_facts_assembler_uses_local_readonly_sources():
     )
     assert snapshot.exchange_called is False
     assert snapshot.order_lifecycle_called is False
+
+
+async def test_exchange_market_rule_reader_uses_readonly_gateway_metadata():
+    gateway = _MarketInfoGateway()
+    reader = ExchangeMarketRuleTrustedSubmitFactReader(gateway)
+
+    source = await reader.read_trusted_submit_fact_source(
+        key="market_rule",
+        execution_intent_id="intent-1",
+        runtime_instance_id="runtime-1",
+        order_candidate_id="candidate-1",
+        symbol="AVAX/USDT:USDT",
+        side="short",
+        now_ms=NOW_MS,
+    )
+
+    assert gateway.calls == ["AVAX/USDT:USDT"]
+    assert source.source_id == "exchange-market-rule:AVAX/USDT:USDT"
+    assert source.source_type == "exchange_market_rule_readonly"
+    assert source.freshness == RuntimeExecutionTrustedFactFreshness.FRESH
+    assert source.metadata["min_qty"] == "0.1"
+    assert source.metadata["min_notional"] == "5"
+    assert source.metadata["step_size"] == "0.1"
+    assert source.metadata["read_only_exchange_metadata"] is True
+    assert source.exchange_called is False
 
 
 async def test_reconciliation_read_model_reader_marks_clean_report_fresh():

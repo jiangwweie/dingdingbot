@@ -3281,6 +3281,7 @@ async def _runtime_execution_intent_adapter_service(
 def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
     from src.application.runtime_execution_trusted_submit_fact_readers import (
         ConfiguredMarketRuleTrustedSubmitFactReader,
+        ExchangeMarketRuleTrustedSubmitFactReader,
         LocalActivePositionTrustedSubmitFactReader,
         LocalOpenOrderTrustedSubmitFactReader,
         ReconciliationReadModelTrustedSubmitFactReader,
@@ -3319,6 +3320,13 @@ def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
         getattr(api_module, "_trading_console_market_rule_snapshot_provider", None)
         or getattr(api_module, "_trading_console_market_rules", None)
     )
+    market_rule_reader = (
+        ConfiguredMarketRuleTrustedSubmitFactReader(market_rule_provider)
+        if market_rule_provider is not None
+        else ExchangeMarketRuleTrustedSubmitFactReader(
+            getattr(api_module, "_exchange_gateway", None),
+        )
+    )
 
     return RuntimeExecutionTrustedSubmitFactsAssemblyService(
         repository=PgRuntimeExecutionTrustedSubmitFactsRepository(),
@@ -3332,9 +3340,7 @@ def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
         protection_state_reader=RuntimeProtectionPlanTrustedSubmitFactReader(
             PgRuntimeExecutionProtectionPlanRepository(),
         ),
-        market_rule_reader=ConfiguredMarketRuleTrustedSubmitFactReader(
-            market_rule_provider,
-        ),
+        market_rule_reader=market_rule_reader,
         reconciliation_reader=ReconciliationReadModelTrustedSubmitFactReader(
             PgReconciliationReadModelRepository(),
         ),

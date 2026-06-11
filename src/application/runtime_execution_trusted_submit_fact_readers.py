@@ -349,6 +349,77 @@ class ConfiguredMarketRuleTrustedSubmitFactReader:
         )
 
 
+class ExchangeMarketRuleTrustedSubmitFactReader:
+    """Read market-rule facts from an injected read-only exchange gateway."""
+
+    def __init__(
+        self,
+        exchange_gateway: Any,
+        *,
+        max_age_ms: int = DEFAULT_LOCAL_FACT_MAX_AGE_MS,
+    ) -> None:
+        self._exchange_gateway = exchange_gateway
+        self._max_age_ms = max_age_ms
+
+    async def read_trusted_submit_fact_source(
+        self,
+        *,
+        key: str,
+        symbol: str,
+        now_ms: int,
+        **_kwargs: Any,
+    ) -> RuntimeExecutionTrustedSubmitFactSource:
+        get_market_info = getattr(self._exchange_gateway, "get_market_info", None)
+        if not callable(get_market_info):
+            return _missing_source(
+                key,
+                source_id="exchange_market_rule_source_unavailable",
+                source_type="exchange_market_rule_readonly",
+                now_ms=now_ms,
+                metadata={"reason": "get_market_info_unavailable"},
+            )
+        try:
+            market_info = await get_market_info(symbol)
+        except Exception as exc:  # pragma: no cover - gateway owned.
+            return _missing_source(
+                key,
+                source_id=f"exchange-market-rule:{symbol}:read-failed",
+                source_type="exchange_market_rule_readonly",
+                now_ms=now_ms,
+                metadata={"read_error": type(exc).__name__},
+            )
+        if not market_info:
+            return _missing_source(
+                key,
+                source_id=f"exchange-market-rule:{symbol}:missing",
+                source_type="exchange_market_rule_readonly",
+                now_ms=now_ms,
+                metadata={"reason": "market_info_missing"},
+            )
+
+        return _fresh_source(
+            key,
+            source_id=f"exchange-market-rule:{symbol}",
+            source_type="exchange_market_rule_readonly",
+            now_ms=now_ms,
+            max_age_ms=self._max_age_ms,
+            metadata={
+                "symbol": symbol,
+                "min_qty": _string_or_none(_get(market_info, "min_quantity")),
+                "min_notional": _string_or_none(_get(market_info, "min_notional")),
+                "step_size": _string_or_none(_get(market_info, "step_size")),
+                "price_precision": _string_or_none(
+                    _get(market_info, "price_precision")
+                ),
+                "quantity_precision": _string_or_none(
+                    _get(market_info, "quantity_precision")
+                ),
+                "source": "exchange_gateway_get_market_info",
+                "read_only_exchange_metadata": True,
+            },
+        )
+
+
 class StartupReconciliationTrustedSubmitFactReader:
     """Read reconciliation status from an injected startup/read-model summary."""
 
@@ -605,6 +676,12 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _summary_status(summary: Any) -> str:
