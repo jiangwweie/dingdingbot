@@ -1,9 +1,9 @@
 """Runtime exchange-submit adapter result shell.
 
-This is the durable replay boundary immediately before a future
-ExchangeGateway.place_order adapter. It can acquire a persistent duplicate-submit
-lock and record that the exchange-submit adapter is still not implemented. It
-must not call OrderLifecycle.submit_order, ExchangeGateway, OwnerBoundedExecution,
+This is the durable replay boundary immediately before the execution-result
+stage. It can acquire a persistent duplicate-submit lock and freeze the
+action-scoped exchange-submit request previews. It must not call
+OrderLifecycle.submit_order, ExchangeGateway, OwnerBoundedExecution,
 withdrawals, or transfers.
 """
 
@@ -30,6 +30,7 @@ class RuntimeExecutionExchangeSubmitAdapterResultStatus(str, Enum):
     EXCHANGE_SUBMIT_ADAPTER_DISABLED = "exchange_submit_adapter_disabled"
     EXCHANGE_SUBMIT_LOCK_REQUIRED = "exchange_submit_lock_required"
     EXCHANGE_SUBMIT_LOCK_ACQUIRED = "exchange_submit_lock_acquired"
+    EXCHANGE_SUBMIT_ADAPTER_ARMED = "exchange_submit_adapter_armed"
     EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED = (
         "exchange_submit_adapter_not_implemented"
     )
@@ -105,7 +106,7 @@ class RuntimeExecutionExchangeSubmitAdapterResult(
                 "exchange submit adapter result cannot create withdrawal/transfer"
             )
         if self.exchange_submit_adapter_implemented:
-            raise ValueError("real exchange submit adapter is not implemented here")
+            raise ValueError("exchange submit adapter result cannot execute adapter")
         if (
             self.status
             == RuntimeExecutionExchangeSubmitAdapterResultStatus
@@ -116,20 +117,22 @@ class RuntimeExecutionExchangeSubmitAdapterResult(
         if (
             self.status
             == RuntimeExecutionExchangeSubmitAdapterResultStatus
-            .EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED
+            .EXCHANGE_SUBMIT_ADAPTER_ARMED
         ):
             if not self.duplicate_submit_lock_acquired:
-                raise ValueError("not-implemented result requires duplicate-submit lock")
+                raise ValueError("armed result requires duplicate-submit lock")
             if not self.exchange_submit_adapter_enabled:
-                raise ValueError("not-implemented result requires adapter enablement")
+                raise ValueError("armed result requires adapter enablement")
             if not self.order_lifecycle_submit_enabled:
-                raise ValueError("not-implemented result requires lifecycle submit enablement")
+                raise ValueError("armed result requires lifecycle submit enablement")
             if not self.exchange_submit_action_authorized:
-                raise ValueError("not-implemented result requires action authorization")
+                raise ValueError("armed result requires action authorization")
             if not self.exchange_submit_action_authorization_id:
                 raise ValueError(
-                    "not-implemented result requires action authorization id"
+                    "armed result requires action authorization id"
                 )
+            if self.blockers:
+                raise ValueError("armed result cannot have blockers")
         if self.submit_request_count != len(self.submit_request_previews):
             raise ValueError("submit_request_count mismatch")
         return self
@@ -161,8 +164,6 @@ def build_runtime_execution_exchange_submit_adapter_result(
         blockers.append("exchange_submit_adapter_disabled")
     if exchange_submit_adapter_enabled and not duplicate_submit_lock_acquired:
         blockers.append("persistent_duplicate_submit_lock_required")
-    if exchange_submit_adapter_enabled and duplicate_submit_lock_acquired and not blockers:
-        blockers.append("exchange_submit_adapter_not_implemented")
 
     status = RuntimeExecutionExchangeSubmitAdapterResultStatus.BLOCKED
     if blockers:
@@ -184,9 +185,8 @@ def build_runtime_execution_exchange_submit_adapter_result(
     else:
         status = (
             RuntimeExecutionExchangeSubmitAdapterResultStatus
-            .EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED
+            .EXCHANGE_SUBMIT_ADAPTER_ARMED
         )
-        blockers.append("exchange_submit_adapter_not_implemented")
 
     request_previews = _request_previews_from_decision(enablement_decision)
     return RuntimeExecutionExchangeSubmitAdapterResult(
@@ -244,10 +244,17 @@ def build_runtime_execution_exchange_submit_adapter_result(
             "scope": "runtime_execution_exchange_submit_adapter_result",
             "persistent_duplicate_submit_lock": duplicate_submit_lock_acquired,
             "exchange_submit_adapter_enabled": exchange_submit_adapter_enabled,
+            "exchange_submit_adapter_armed": (
+                status
+                == (
+                    RuntimeExecutionExchangeSubmitAdapterResultStatus
+                    .EXCHANGE_SUBMIT_ADAPTER_ARMED
+                )
+            ),
             "exchange_submit_action_authorization_id": (
                 enablement_decision.exchange_submit_action_authorization_id
             ),
-            "real_exchange_submit_adapter_implemented": False,
+            "real_exchange_submit_adapter_executed": False,
             "local_registration_adapter_result_id": gate.adapter_result_id,
             "enablement_decision_id": enablement_decision.decision_id,
             "does_not_call_order_lifecycle_submit": True,

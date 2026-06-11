@@ -113,6 +113,11 @@ def upgrade() -> None:
             server_default=sa.false(),
         ),
         sa.Column(
+            "exchange_submit_action_authorization_id",
+            sa.String(length=360),
+            nullable=True,
+        ),
+        sa.Column(
             "duplicate_submit_lock_acquired",
             sa.Boolean(),
             nullable=False,
@@ -169,6 +174,7 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "status IN ('blocked', 'exchange_submit_adapter_disabled', "
             "'exchange_submit_lock_required', 'exchange_submit_lock_acquired', "
+            "'exchange_submit_adapter_armed', "
             "'exchange_submit_adapter_not_implemented')",
             name="ck_rt_exchange_submit_result_status",
         ),

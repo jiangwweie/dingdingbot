@@ -159,11 +159,11 @@ async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
         pre_live_packet=pre_live_packet
     )
 
-    assert packet["status"] == "ready_for_owner_first_real_submit_decision"
+    assert packet["status"] == "ready_for_owner_controlled_first_real_submit_review"
     assert packet["checks"]["packet_ready_for_owner_decision"] is True
-    assert packet["checks"]["ready_for_first_real_submit"] is False
+    assert packet["checks"]["ready_for_first_real_submit"] is True
     assert packet["readiness_summary"]["owner_decision_scope"] == (
-        "owner_review_not_submit_authority"
+        "owner_controlled_first_real_submit_review"
     )
     assert (
         packet["readiness_summary"]["local_registration_pre_exchange_ready"]
@@ -185,7 +185,7 @@ async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
     )
     assert packet["exchange_submit_rehearsal"]["ready"] is True
     assert packet["exchange_submit_rehearsal"]["adapter_result_status"] == (
-        "exchange_submit_adapter_not_implemented"
+        "exchange_submit_adapter_armed"
     )
     assert packet["exchange_submit_rehearsal"][
         "disabled_execution_result_status"
@@ -211,19 +211,19 @@ async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
     ] is True
     assert packet["first_real_submit_action_boundary"][
         "ready_for_first_real_submit"
-    ] is False
+    ] is True
     assert packet["first_real_submit_action_boundary"][
         "owner_decision_is_submit_authority"
     ] is False
     assert packet["first_real_submit_action_boundary"][
         "requires_separate_action_authorization"
     ] is True
-    assert "exchange_submit_adapter_not_implemented" in (
+    assert "exchange_submit_adapter_not_implemented" not in (
         packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
     )
-    assert "first_real_submit_action_not_ready" in (
-        packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
-    )
+    assert packet["first_real_submit_action_boundary"][
+        "remaining_action_blockers"
+    ] == []
 
 
 @pytest.mark.asyncio

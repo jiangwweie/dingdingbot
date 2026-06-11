@@ -2933,6 +2933,7 @@ class PGRuntimeExecutionExchangeSubmitAdapterResultORM(PGCoreBase):
         CheckConstraint(
             "status IN ('blocked', 'exchange_submit_adapter_disabled', "
             "'exchange_submit_lock_required', 'exchange_submit_lock_acquired', "
+            "'exchange_submit_adapter_armed', "
             "'exchange_submit_adapter_not_implemented')",
             name="ck_rt_exchange_submit_result_status",
         ),

@@ -2030,7 +2030,7 @@ def test_exchange_submit_adapter_result_is_disabled_by_default():
     assert result.exchange_called is False
 
 
-def test_exchange_submit_adapter_result_records_not_implemented_after_lock():
+def test_exchange_submit_adapter_result_records_armed_after_lock():
     decision = _ready_exchange_submit_enablement_decision(_registration_preview())
 
     result = build_runtime_execution_exchange_submit_adapter_result(
@@ -2043,9 +2043,9 @@ def test_exchange_submit_adapter_result_records_not_implemented_after_lock():
     assert (
         result.status
         == RuntimeExecutionExchangeSubmitAdapterResultStatus
-        .EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED
+        .EXCHANGE_SUBMIT_ADAPTER_ARMED
     )
-    assert "exchange_submit_adapter_not_implemented" in result.blockers
+    assert result.blockers == []
     assert result.local_order_ids == [
         "runtime-order-draft-auth-1-entry",
         "runtime-order-draft-auth-1-sl",
@@ -2453,7 +2453,7 @@ async def test_service_blocks_exchange_submit_enablement_with_unsafe_trusted_sub
 
 
 @pytest.mark.asyncio
-async def test_service_exchange_submit_adapter_result_replays_not_implemented():
+async def test_service_exchange_submit_adapter_result_replays_armed_result():
     preview = _registration_preview()
     lifecycle = _Lifecycle()
     adapter_result_repo = _AdapterResultRepo()
@@ -2509,7 +2509,7 @@ async def test_service_exchange_submit_adapter_result_replays_not_implemented():
     assert (
         first.status
         == RuntimeExecutionExchangeSubmitAdapterResultStatus
-        .EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED
+        .EXCHANGE_SUBMIT_ADAPTER_ARMED
     )
     assert second == first
     assert exchange_result_repo.acquire_calls == 2
@@ -2617,9 +2617,9 @@ async def test_service_exchange_submit_adapter_result_recovers_acquired_lock():
     assert (
         recovered.status
         == RuntimeExecutionExchangeSubmitAdapterResultStatus
-        .EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED
+        .EXCHANGE_SUBMIT_ADAPTER_ARMED
     )
-    assert "exchange_submit_adapter_not_implemented" in recovered.blockers
+    assert recovered.blockers == []
     assert (
         "recovered_exchange_submit_lock_acquired_state"
         in recovered.warnings
@@ -3694,7 +3694,7 @@ async def test_pg_exchange_submit_repository_acquires_unique_authorization_lock(
     assert (
         loaded.status
         == RuntimeExecutionExchangeSubmitAdapterResultStatus
-        .EXCHANGE_SUBMIT_ADAPTER_NOT_IMPLEMENTED
+        .EXCHANGE_SUBMIT_ADAPTER_ARMED
     )
     assert loaded.local_order_ids == [
         "runtime-order-draft-auth-1-entry",
@@ -4495,6 +4495,7 @@ async def test_exchange_submit_adapter_result_migration_creates_lock_table():
                         order_lifecycle_submit_enabled,
                         exchange_submit_adapter_enabled,
                         exchange_submit_action_authorized,
+                        exchange_submit_action_authorization_id,
                         duplicate_submit_lock_acquired,
                         exchange_submit_adapter_implemented,
                         order_lifecycle_submit_called,
@@ -4517,7 +4518,7 @@ async def test_exchange_submit_adapter_result_migration_creates_lock_table():
                         'runtime-1',
                         'brc_runtime_order_candidate',
                         'candidate-1',
-                        'exchange_submit_adapter_not_implemented',
+                        'exchange_submit_adapter_armed',
                         'BNB/USDT:USDT',
                         '["runtime-order-draft-auth-1-entry"]',
                         'runtime-order-draft-auth-1-entry',
@@ -4526,11 +4527,12 @@ async def test_exchange_submit_adapter_result_migration_creates_lock_table():
                         0,
                         0,
                         0,
-                        '["exchange_submit_adapter_not_implemented"]',
+                        '[]',
                         '[]',
                         1,
                         1,
                         1,
+                        'exchange-submit-action-1',
                         1,
                         0,
                         0,
@@ -4565,10 +4567,99 @@ async def test_exchange_submit_adapter_result_migration_creates_lock_table():
     assert "order_lifecycle_submit_called" in columns
     assert "exchange_order_submitted" in columns
     assert "exchange_called" in columns
+    assert "exchange_submit_action_authorization_id" in columns
     assert "uq_rt_exchange_submit_result_authorization" in unique_constraints
-    assert row[0] == "exchange_submit_adapter_not_implemented"
+    assert row[0] == "exchange_submit_adapter_armed"
     assert row[1] == 0
     assert row[2] == 0
+
+
+@pytest.mark.asyncio
+async def test_exchange_submit_adapter_result_armed_status_migration_updates_legacy_table():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/"
+        / "2026-06-11-082_update_exchange_submit_adapter_armed_status.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "runtime_exchange_submit_adapter_armed_status_migration",
+        migration_path,
+    )
+    assert spec is not None
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    async with engine.begin() as conn:
+        def upgrade(sync_conn):
+            sync_conn.exec_driver_sql(
+                """
+                CREATE TABLE runtime_execution_exchange_submit_adapter_results (
+                    adapter_result_id VARCHAR(520) PRIMARY KEY,
+                    authorization_id VARCHAR(220) NOT NULL,
+                    status VARCHAR(72) NOT NULL,
+                    exchange_called BOOLEAN NOT NULL DEFAULT 0,
+                    CONSTRAINT ck_rt_exchange_submit_result_status
+                    CHECK (
+                        status IN (
+                            'blocked',
+                            'exchange_submit_adapter_disabled',
+                            'exchange_submit_lock_required',
+                            'exchange_submit_lock_acquired',
+                            'exchange_submit_adapter_not_implemented'
+                        )
+                    )
+                )
+                """
+            )
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration.upgrade()
+                inspector = inspect(sync_conn)
+                columns = {
+                    column["name"]
+                    for column in inspector.get_columns(
+                        "runtime_execution_exchange_submit_adapter_results"
+                    )
+                }
+                sync_conn.exec_driver_sql(
+                    """
+                    INSERT INTO runtime_execution_exchange_submit_adapter_results (
+                        adapter_result_id,
+                        authorization_id,
+                        status,
+                        exchange_submit_action_authorization_id,
+                        exchange_called
+                    ) VALUES (
+                        'exchange-submit-result-auth-1',
+                        'auth-1',
+                        'exchange_submit_adapter_armed',
+                        'exchange-submit-action-1',
+                        0
+                    )
+                    """
+                )
+                row = sync_conn.exec_driver_sql(
+                    "SELECT status, exchange_submit_action_authorization_id "
+                    "FROM runtime_execution_exchange_submit_adapter_results"
+                ).one()
+                return columns, row
+            finally:
+                migration.op = old_op
+
+        columns, row = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert "exchange_submit_action_authorization_id" in columns
+    assert row[0] == "exchange_submit_adapter_armed"
+    assert row[1] == "exchange-submit-action-1"
 
 
 @pytest.mark.asyncio

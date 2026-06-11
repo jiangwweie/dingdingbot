@@ -1710,7 +1710,7 @@ async def _exercise_exchange_submit_adapter_pre_execution(
     )
     ready = (
         enablement_decision.status.value == "ready_for_exchange_submit_action"
-        and adapter_result.status.value == "exchange_submit_adapter_not_implemented"
+        and adapter_result.status.value == "exchange_submit_adapter_armed"
         and disabled_execution_result.status.value
         == "exchange_submit_execution_disabled"
         and adapter_result.duplicate_submit_lock_acquired is True

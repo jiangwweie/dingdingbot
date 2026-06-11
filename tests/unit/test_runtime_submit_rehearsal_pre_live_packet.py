@@ -285,7 +285,7 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
     disabled_execution_result = exchange_rehearsal["disabled_execution_result"]
     blockers = report["checks"]["exchange_submit_rehearsal_blockers"]
 
-    assert report["status"] == "blocked_before_first_real_submit"
+    assert report["status"] == "ready_for_owner_controlled_first_real_submit_review"
     assert report["checks"]["local_registration_pre_exchange_exercised"] is True
     assert report["checks"]["local_registration_pre_exchange_ready"] is True
     assert (
@@ -294,13 +294,14 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
     )
     assert report["checks"]["exchange_submit_adapter_pre_execution_ready"] is True
     assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is True
-    assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["checks"]["ready_for_first_real_submit"] is True
     assert report["checks"]["live_enablement_blockers"] == []
     assert report["rehearsal"]["status"] == "ready_for_owner_live_action_review"
     assert action_authorization["status"] == "approved_for_exchange_submit_action"
     assert enablement_decision["status"] == "ready_for_exchange_submit_action"
     assert gateway_readiness["status"] == "ready_for_manual_gateway_binding"
-    assert adapter_result["status"] == "exchange_submit_adapter_not_implemented"
+    assert adapter_result["status"] == "exchange_submit_adapter_armed"
+    assert adapter_result["blockers"] == []
     assert adapter_result["duplicate_submit_lock_acquired"] is True
     assert adapter_result["exchange_called"] is False
     assert adapter_result["order_lifecycle_submit_called"] is False
@@ -314,7 +315,7 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
         disabled_execution_result["real_exchange_submit_adapter_executed"]
         is False
     )
-    assert "exchange_submit_adapter_not_implemented" in blockers
+    assert "exchange_submit_adapter_not_implemented" not in blockers
     assert "exchange_submit_action_authorization_missing" not in blockers
     assert "runtime_exchange_gateway_readiness_missing" not in blockers
     assert "runtime_exchange_gateway_readiness_repository_unavailable" not in blockers
@@ -375,7 +376,7 @@ async def test_pre_live_packet_can_simulate_enabled_exchange_execution_in_memory
     simulation = exchange_rehearsal["in_memory_execution_simulation"]
     blockers = report["checks"]["exchange_submit_rehearsal_blockers"]
 
-    assert report["status"] == "blocked_before_first_real_submit"
+    assert report["status"] == "ready_for_owner_controlled_first_real_submit_review"
     assert report["checks"]["exchange_submit_adapter_pre_execution_ready"] is True
     assert (
         report["checks"]["in_memory_exchange_execution_simulation_exercised"]
@@ -385,7 +386,7 @@ async def test_pre_live_packet_can_simulate_enabled_exchange_execution_in_memory
         report["checks"]["in_memory_exchange_execution_simulation_submitted"]
         is True
     )
-    assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["checks"]["ready_for_first_real_submit"] is True
     assert simulation["status"] == "exchange_submit_orders_submitted"
     assert simulation["exchange_submit_execution_enabled"] is True
     assert simulation["exchange_called"] is True
@@ -402,7 +403,7 @@ async def test_pre_live_packet_can_simulate_enabled_exchange_execution_in_memory
     assert simulation["execution_intent_status_changed"] is False
     assert simulation["owner_bounded_execution_called"] is False
     assert simulation["withdrawal_or_transfer_created"] is False
-    assert "exchange_submit_adapter_not_implemented" in blockers
+    assert "exchange_submit_adapter_not_implemented" not in blockers
     assert (
         report["safety_invariants"][
             "in_memory_exchange_execution_simulation_exchange_called"

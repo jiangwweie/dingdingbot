@@ -457,7 +457,7 @@ Key facts:
   result entrypoint remains disabled unless explicitly enabled, returning
   `exchange_submit_execution_disabled` without gateway or OrderLifecycle submit
   calls. That path intentionally stops at
-  `exchange_submit_adapter_not_implemented` /
+  `exchange_submit_adapter_armed` /
   `exchange_submit_execution_disabled`: it does not call exchange, submit an
   order, call OrderLifecycle submit, execute the real exchange adapter, or
   change ExecutionIntent status. A shadow / execution-disabled runtime is the

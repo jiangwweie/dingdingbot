@@ -325,7 +325,7 @@ async def test_adapter_enablement_packet_surfaces_exchange_simulation_evidence()
     )
     assert packet["exchange_submit_evidence"]["pre_execution_ready"] is True
     assert packet["exchange_submit_evidence"]["adapter_result_status"] == (
-        "exchange_submit_adapter_not_implemented"
+        "exchange_submit_adapter_armed"
     )
     assert packet["exchange_submit_evidence"][
         "disabled_execution_result_status"
