@@ -240,3 +240,91 @@ def test_supervisor_blocks_when_child_packets_report_forbidden_effect(tmp_path):
     assert packet["safety_invariants"]["forbidden_effects"] == [
         "followup.exchange_order_submitted"
     ]
+
+
+def test_supervisor_runs_followup_after_ready_preflight_without_submit(tmp_path):
+    calls = []
+
+    def runner(command, stdout_path):
+        calls.append(command)
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-packet.json",
+                {
+                    "status": "ready_for_final_gate_preflight",
+                    "latest_summary": {
+                        "status": "ready_for_final_gate_preflight",
+                        "prepared_authorization_id": "auth-ready-1",
+                    },
+                    "operator_command_plan": {
+                        "prepared_authorization_id": "auth-ready-1",
+                        "creates_execution_intent": False,
+                        "places_order": False,
+                        "calls_order_lifecycle": False,
+                    },
+                    "safety_invariants": {
+                        "exchange_write_called": False,
+                        "order_created": False,
+                        "order_lifecycle_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                    },
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-packet.json",
+                {
+                    "status": "disabled_smoke_completed",
+                    "source_loop_status": "ready_for_final_gate_preflight",
+                    "prepared_authorization_id": "auth-ready-1",
+                    "operator_command_plan": {
+                        "arm_preview_called": True,
+                        "disabled_smoke_called": True,
+                        "owner_confirmed_for_first_real_submit_action": False,
+                    },
+                    "safety_invariants": {
+                        "exchange_called": False,
+                        "exchange_order_submitted": False,
+                        "order_created": False,
+                        "order_lifecycle_submit_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                        "loop_forbidden_effects": [],
+                        "arm_preview_forbidden_effects": [],
+                        "disabled_smoke_forbidden_effects": [],
+                    },
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+        _args(tmp_path),
+        runner=runner,
+    )
+
+    flat_commands = " ".join(" ".join(command) for command in calls)
+    assert packet["status"] == "supervisor_completed"
+    assert packet["loop_status"] == "ready_for_final_gate_preflight"
+    assert packet["followup_status"] == "disabled_smoke_completed"
+    assert packet["safety_invariants"]["forbidden_effects"] == []
+    assert "--allow-arm-preview" in calls[1]
+    assert "--allow-disabled-smoke" in calls[1]
+    assert "--execute-real-submit" not in flat_commands
+    assert "--mode execute" not in flat_commands
+
+    status_packet = json.loads(
+        (tmp_path / "supervisor" / "status-packet.json").read_text()
+    )
+    assert status_packet["loop_status"] == "ready_for_final_gate_preflight"
+    assert status_packet["followup_status"] == "disabled_smoke_completed"
+    assert status_packet["prepared_authorization_id"] == "auth-ready-1"
+    assert status_packet["safety_invariants"]["places_order"] is False
+    assert status_packet["safety_invariants"]["calls_order_lifecycle"] is False
