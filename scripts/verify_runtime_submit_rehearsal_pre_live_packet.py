@@ -434,8 +434,7 @@ async def build_pre_live_packet(
     runner: Any | None = None,
 ) -> dict[str, Any]:
     repo_root = _repo_root(runner=runner)
-    local_head = _git(repo_root, "rev-parse", "HEAD", runner=runner).stdout
-    short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD", runner=runner).stdout
+    local_head, short_head = _local_git_identity(repo_root, runner=runner)
     runtime = _runtime()
     candidate = _candidate()
     exercise_local_registration_pre_exchange = (
@@ -2158,10 +2157,36 @@ def _forbidden_execution_flags(
 
 
 def _repo_root(*, runner: Any | None = None) -> Path:
-    result = _run(("git", "rev-parse", "--show-toplevel"), cwd=Path.cwd(), runner=runner)
+    cwd = Path.cwd()
+    result = _run(("git", "rev-parse", "--show-toplevel"), cwd=cwd, runner=runner)
     if result.returncode != 0 or not result.stdout:
+        if (cwd / ".brc-release-manifest.json").exists():
+            return cwd
         raise RuntimeError("not_inside_git_repository")
     return Path(result.stdout)
+
+
+def _local_git_identity(
+    repo_root: Path,
+    *,
+    runner: Any | None = None,
+) -> tuple[str, str]:
+    head = _run(("git", "rev-parse", "HEAD"), cwd=repo_root, runner=runner)
+    short = _run(("git", "rev-parse", "--short=8", "HEAD"), cwd=repo_root, runner=runner)
+    if head.returncode == 0 and head.stdout:
+        return head.stdout, short.stdout or head.stdout[:8]
+
+    manifest_path = repo_root / ".brc-release-manifest.json"
+    if manifest_path.exists():
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        local_git = data.get("local_git") if isinstance(data, dict) else None
+        if isinstance(local_git, dict):
+            manifest_head = str(local_git.get("head") or "")
+            manifest_short = str(local_git.get("short_head") or "")
+            if manifest_head:
+                return manifest_head, manifest_short or manifest_head[:8]
+
+    raise RuntimeError("local_git_identity_unavailable")
 
 
 def _git(repo_root: Path, *args: str, runner: Any | None = None) -> CommandResult:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -36,6 +37,13 @@ def _runner(module):
         if command == ("git", "rev-parse", "--short=8", "HEAD"):
             return module.CommandResult("e004ec39", 0)
         raise AssertionError(f"unexpected command: {command}")
+
+    return run
+
+
+def _not_git_runner(module):
+    def run(command, cwd):
+        return module.CommandResult("fatal: not a git repository", 1)
 
     return run
 
@@ -121,6 +129,38 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     assert report["pipeline"]["order_lifecycle_adapter_preview_status"] == (
         "inputs_ready_registration_not_enabled"
     )
+
+
+@pytest.mark.asyncio
+async def test_pre_live_packet_can_read_release_manifest_without_git(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_module()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".brc-release-manifest.json").write_text(
+        json.dumps(
+            {
+                "local_git": {
+                    "head": LOCAL_HEAD,
+                    "short_head": "e004ec39",
+                },
+                "scope": "tokyo_runtime_governance_git_release",
+            }
+        )
+        + "\n"
+    )
+
+    report = await module.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=False,
+        runner=_not_git_runner(module),
+    )
+
+    assert report["local_git"]["head"] == LOCAL_HEAD
+    assert report["local_git"]["short_head"] == "e004ec39"
+    assert report["deployment_gate"]["current_head_deployed"] is True
+    assert "not_inside_git_repository" not in report["checks"]["technical_blockers"]
     assert report["pipeline"]["order_registration_draft_preview_status"] == (
         "inputs_ready_registration_draft_only"
     )
