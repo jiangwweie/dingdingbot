@@ -86,6 +86,7 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         ),
         "blockers": list(packet.get("blockers") or []),
         "warnings": list(packet.get("warnings") or []),
+        "prepared_authorization_id": plan.get("prepared_authorization_id"),
     }
 
 
