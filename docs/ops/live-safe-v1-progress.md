@@ -2798,3 +2798,67 @@ Use this file for session progress and handoff notes.
   - if Owner explicitly authorizes the exact value above, the next step can run
     the same script with `--execute-real-close`, then verify projection,
     reconciliation, closed review, and next-attempt gate.
+
+## 2026-06-11 (Runtime Post-close Follow-up Packet)
+
+- Added and deployed `program/live-safe-v1` commits:
+  - `3f28b1f60c9a90b9894fb3e52c25d0bc83450efd`
+    `feat(runtime): add post-close follow-up packet`;
+  - `524c869ea36bb8c65712fe8075185da335c5700c`
+    `fix(runtime): keep post-close follow-up CLI JSON clean`.
+- Added a non-executing post-close follow-up packet:
+  - domain model `src/domain/runtime_post_close_followup.py`;
+  - CLI `scripts/build_runtime_post_close_followup_packet.py`;
+  - tests
+    `tests/unit/test_runtime_post_close_followup.py` and
+    `tests/unit/test_runtime_post_close_followup_script.py`.
+- The packet keeps the close aftermath explicit:
+  - active position still present -> wait for Owner reduce-only close
+    authorization or continue holding;
+  - after flat -> verify reconciliation, record closed trade review, then
+    verify next-attempt gate;
+  - flat with review gate clear -> post-close follow-up complete.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_post_close_followup.py tests/unit/test_runtime_post_close_followup_script.py tests/unit/test_runtime_reduce_only_close_authorization.py tests/unit/test_runtime_live_position_monitor.py`
+    passed with `13 passed`;
+  - `python3 -m py_compile src/domain/runtime_post_close_followup.py scripts/build_runtime_post_close_followup_packet.py tests/unit/test_runtime_post_close_followup.py tests/unit/test_runtime_post_close_followup_script.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance for final deployed head
+  `524c869ea36bb8c65712fe8075185da335c5700c`:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed release is
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-524c869e-20260611Tfollowup-json`;
+  - migration count remained `84`;
+  - latest migration remained
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote post-close follow-up packet for
+  `strategy-runtime-95655873b76c`:
+  - status `waiting_for_owner_close_authorization`;
+  - active position present `true`;
+  - symbol `AVAX/USDT:USDT`;
+  - owner close packet status `ready_for_owner_authorization`;
+  - blockers `[]`;
+  - warnings:
+    `missing_tp_protection_right_tail_exit_not_mounted`,
+    `reconciliation_warning_present`;
+  - required steps include exact Owner authorization, reduce-only close flow,
+    flat monitor verification, reconciliation severe-count verification,
+    closed trade review, and next-attempt gate verification;
+  - Owner approval value remains
+    `runtime-reduce-only-close:strategy-runtime-95655873b76c:AVAX/USDT:USDT:short:qty=1.0:owner-authorized`.
+- Safety proof:
+  - this stage did not execute a close;
+  - exchange write called `false`;
+  - order created / cancelled / amended `false`;
+  - position closed `false`;
+  - runtime state mutated `false`;
+  - no withdrawal / transfer.
+- Remaining live action:
+  - the real reduce-only close is still not executed;
+  - it still requires the exact Owner approval value above plus the explicit
+    `--execute-real-close` flag, followed by flat / reconciliation / review /
+    next-attempt verification.
