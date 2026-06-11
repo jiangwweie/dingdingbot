@@ -306,6 +306,14 @@ Key facts:
   Console `right_tail_review.closed_trade_review_packets`. It does not create
   orders, ExecutionIntent records, exchange calls, runtime-budget mutations,
   strategy-PnL mutations, or withdrawal instructions.
+- **RuntimeExecutionFirstRealSubmitOutcomeAccounting** now exists as a
+  post-submit accounting packet. It records a submit outcome review and, when
+  local order facts are resolved enough, derives the attempt-outcome policy for
+  the existing reservation. If the entry remains open/no-fill or facts are
+  missing, it returns a blocked accounting packet instead of inventing budget
+  release/consume behavior. The packet does not call exchange, call
+  OrderLifecycle, release budget, mutate runtime state, create/cancel/close
+  orders, or create withdrawal/transfer instructions.
 - **Position runtime semantic ID propagation** now exists as an additive local
   slice. `Position` and PG `positions` can carry nullable runtime / trial /
   strategy-version / signal-evaluation / order-candidate IDs; entry-fill
@@ -518,7 +526,10 @@ Key facts:
 - **Order / Reconciliation / Review** infrastructure is reusable. Nullable
   runtime semantic audit IDs and source-native ExecutionIntent metadata have
   been added to selected execution and review tables. Runtime execution submit
-  has not yet been integrated.
+  is now locally integrated through the Owner-controlled first-real-submit
+  action wrapper and post-submit accounting evidence, but deployment,
+  exchange-order reconciliation closure, and real-submit authorization remain
+  separately verified action boundaries.
 - **Tokyo deployment note:** current Tokyo deployment was verified on
   commit `ae9b209e` / Alembic head
   `2026-06-10-064_add_runtime_profile_proposal_snapshot.py` with

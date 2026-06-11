@@ -94,6 +94,9 @@ from src.domain.runtime_execution_exchange_submit_execution_result import (
 from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitOutcomeReview,
 )
+from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
+    RuntimeExecutionFirstRealSubmitOutcomeAccounting,
+)
 from src.domain.runtime_execution_submit_rehearsal import (
     RuntimeExecutionSubmitRehearsal,
 )
@@ -2151,6 +2154,33 @@ async def record_runtime_execution_submit_outcome_review_for_authorization(
     try:
         return await service.record_submit_outcome_review_for_authorization(
             authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-first-real-submit-outcome-accounting/"
+    "authorizations/{authorization_id}",
+    response_model=RuntimeExecutionFirstRealSubmitOutcomeAccounting,
+)
+async def record_runtime_execution_first_real_submit_outcome_accounting(
+    authorization_id: str,
+    reservation_id: str,
+) -> RuntimeExecutionFirstRealSubmitOutcomeAccounting:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await (
+            service
+            .record_first_real_submit_outcome_accounting_for_authorization(
+                authorization_id,
+                reservation_id=reservation_id,
+            )
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

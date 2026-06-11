@@ -136,6 +136,10 @@ from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitOutcomeReviewStatus,
     build_runtime_execution_submit_outcome_review,
 )
+from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
+    RuntimeExecutionFirstRealSubmitOutcomeAccounting,
+    build_runtime_execution_first_real_submit_outcome_accounting,
+)
 from src.domain.runtime_execution_exchange_submit_recovery_resolution import (
     RuntimeExecutionExchangeSubmitRecoveryResolution,
     RuntimeExecutionExchangeSubmitRecoveryResolutionStatus,
@@ -2586,6 +2590,51 @@ class RuntimeExecutionIntentAdapterService:
             exchange_submit_execution_result=exchange_submit_execution_result,
         )
         return await self._submit_outcome_review_repository.create(review)
+
+    async def record_first_real_submit_outcome_accounting_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        reservation_id: str,
+    ) -> RuntimeExecutionFirstRealSubmitOutcomeAccounting:
+        review = await self.record_submit_outcome_review_for_authorization(
+            authorization_id
+        )
+        if review.status != (
+            RuntimeExecutionSubmitOutcomeReviewStatus
+            .CLASSIFIED_READY_FOR_ATTEMPT_OUTCOME_POLICY
+        ):
+            return build_runtime_execution_first_real_submit_outcome_accounting(
+                reservation_id=reservation_id,
+                submit_outcome_review=review,
+                attempt_outcome_policy=None,
+                additional_blockers=list(review.blockers),
+                now_ms=_now_ms(),
+            )
+        try:
+            policy = await (
+                self.record_attempt_outcome_policy_from_submit_outcome_review(
+                    reservation_id,
+                    submit_outcome_review_id=review.review_id,
+                )
+            )
+        except ValueError as exc:
+            return build_runtime_execution_first_real_submit_outcome_accounting(
+                reservation_id=reservation_id,
+                submit_outcome_review=review,
+                attempt_outcome_policy=None,
+                additional_blockers=[
+                    "attempt_outcome_policy_recording_blocked",
+                    str(exc),
+                ],
+                now_ms=_now_ms(),
+            )
+        return build_runtime_execution_first_real_submit_outcome_accounting(
+            reservation_id=reservation_id,
+            submit_outcome_review=review,
+            attempt_outcome_policy=policy,
+            now_ms=_now_ms(),
+        )
 
     async def submit_rehearsal_for_authorization(
         self,

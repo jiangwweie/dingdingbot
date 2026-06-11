@@ -35,6 +35,9 @@ from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionStatus,
     RuntimeExecutionSubmittedExchangeOrder,
 )
+from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
+    RuntimeExecutionFirstRealSubmitOutcomeAccountingStatus,
+)
 from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitObservedOutcome,
     RuntimeExecutionSubmitOutcomeReviewStatus,
@@ -470,6 +473,83 @@ async def test_attempt_outcome_policy_from_submit_outcome_review_blocks_unresolv
     assert policy_repo.created == []
 
 
+async def test_first_real_submit_outcome_accounting_records_review_and_policy():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
+    reservation = _reservation()
+    mutation = _mutation(reservation)
+    review_repo = _SubmitOutcomeReviewRepo()
+    policy_repo = _AttemptOutcomePolicyRepo()
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        order_lifecycle_service=_Lifecycle([entry, sl]),
+        submit_outcome_review_repository=review_repo,
+        attempt_reservation_repository=_AttemptReservationRepo(reservation),
+        attempt_mutation_repository=_AttemptMutationRepo(mutation),
+        attempt_outcome_policy_repository=policy_repo,
+    )
+
+    accounting = await (
+        service.record_first_real_submit_outcome_accounting_for_authorization(
+            "auth-1",
+            reservation_id=reservation.reservation_id,
+        )
+    )
+
+    assert accounting.status == (
+        RuntimeExecutionFirstRealSubmitOutcomeAccountingStatus
+        .READY_FOR_ATTEMPT_BUDGET_OUTCOME_ACCOUNTING
+    )
+    assert accounting.submit_outcome_review_id == review_repo.created[0].review_id
+    assert accounting.attempt_outcome_policy_id == policy_repo.created[0].policy_id
+    assert accounting.outcome_kind == (
+        RuntimeExecutionAttemptOutcomeKind.SUBMITTED_FULL_FILL
+    )
+    assert accounting.attempt_should_be_consumed is True
+    assert accounting.budget_consumption_confirmed is True
+    assert accounting.runtime_state_mutated is False
+    assert accounting.budget_released is False
+    assert accounting.exchange_called is False
+    assert accounting.order_lifecycle_called is False
+
+
+async def test_first_real_submit_outcome_accounting_blocks_unresolved_review():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.OPEN, Decimal("0"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
+    reservation = _reservation()
+    policy_repo = _AttemptOutcomePolicyRepo()
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        order_lifecycle_service=_Lifecycle([entry, sl]),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo(),
+        attempt_reservation_repository=_AttemptReservationRepo(reservation),
+        attempt_mutation_repository=_AttemptMutationRepo(_mutation(reservation)),
+        attempt_outcome_policy_repository=policy_repo,
+    )
+
+    accounting = await (
+        service.record_first_real_submit_outcome_accounting_for_authorization(
+            "auth-1",
+            reservation_id=reservation.reservation_id,
+        )
+    )
+
+    assert (
+        accounting.status
+        == RuntimeExecutionFirstRealSubmitOutcomeAccountingStatus.BLOCKED
+    )
+    assert "submit_outcome_review_not_policy_ready" in accounting.blockers
+    assert "entry_order_still_open_no_fill_unresolved" in accounting.blockers
+    assert accounting.attempt_outcome_policy is None
+    assert policy_repo.created == []
+    assert accounting.runtime_state_mutated is False
+    assert accounting.exchange_called is False
+
+
 async def test_submit_outcome_review_repository_roundtrips_by_authorization():
     engine, session_maker = await _repo_engine(
         PGRuntimeExecutionSubmitOutcomeReviewORM.__table__
@@ -645,6 +725,52 @@ async def test_trading_console_records_attempt_outcome_from_submit_review_withou
     assert policy.submit_outcome_review_id == "review-1"
     assert policy.exchange_called is False
     assert policy.order_lifecycle_called is False
+
+
+async def test_trading_console_records_first_real_submit_accounting_without_gateway(
+    monkeypatch,
+):
+    factory_calls = []
+
+    class FakeService:
+        async def record_first_real_submit_outcome_accounting_for_authorization(
+            self,
+            authorization_id,
+            *,
+            reservation_id,
+        ):
+            return SimpleNamespace(
+                authorization_id=authorization_id,
+                reservation_id=reservation_id,
+                exchange_called=False,
+                order_lifecycle_called=False,
+                runtime_state_mutated=False,
+            )
+
+    async def fake_factory(*, include_runtime_exchange_gateway=False):
+        factory_calls.append(include_runtime_exchange_gateway)
+        return FakeService()
+
+    monkeypatch.setattr(
+        trading_console_api,
+        "_runtime_execution_intent_adapter_service",
+        fake_factory,
+    )
+
+    accounting = await (
+        trading_console_api
+        .record_runtime_execution_first_real_submit_outcome_accounting(
+            "auth-1",
+            reservation_id="reservation-1",
+        )
+    )
+
+    assert factory_calls == [False]
+    assert accounting.authorization_id == "auth-1"
+    assert accounting.reservation_id == "reservation-1"
+    assert accounting.exchange_called is False
+    assert accounting.order_lifecycle_called is False
+    assert accounting.runtime_state_mutated is False
 
 
 def _submitted_result() -> RuntimeExecutionExchangeSubmitExecutionResult:

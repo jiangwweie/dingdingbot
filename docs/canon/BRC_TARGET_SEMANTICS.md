@@ -86,11 +86,11 @@ StrategyFamily
 | SignalEvaluation | shadow implemented | Shadow model, PG table, repository, service, and inspection API exist; no executable trigger | Per-instance signal evaluation within risk boundaries |
 | OrderCandidate | shadow implemented | Shadow candidate model and PG table exist; candidate_executable=false and not_execution_intent=true are enforced | Executable order candidate from signal evaluation |
 | FinalGate | implemented + runtime preview | FinalGate exists as hard one-shot execution gate; runtime-aware preview/dry-run exists for OrderCandidate inspection only | Pre-execution safety validation |
-| ExecutionIntent | partially implemented | Execution permission system has 6 levels; source-native recorded intent audit, Owner submit authorization record, controlled-submit plan, submit-time FinalGate preflight, preflight-gated controlled-submit result, non-mutating attempt reservation preview, pending attempt reservation audit record, controlled runtime attempt mutation record, runtime-native protection plan preview/record, runtime protection-failure policy gate, runtime OrderLifecycle handoff draft record, non-executing OrderLifecycle adapter preview gate, typed local order registration draft preview, first-real-submit local-registration gate, evidence-based local-registration enablement decision, default-disabled adapter result, explicit local-order linkage to `local_orders_registered`, non-executing submit adapter preview, non-mutating submit rehearsal aggregate, exchange-submit packet/enablement/action evidence, default-disabled exchange-submit adapter/execution result stages, and a canonical first-real-submit action wrapper exist in the local working tree for `brc_runtime_order_candidate`; `recorded` is not submit-ready, `local_orders_registered` is not exchange-submitted, and exchange calls remain blocked unless explicit first-real-submit action confirmation plus action-point prerequisite evidence revalidation pass | Bounded execution intent from order candidate |
+| ExecutionIntent | partially implemented | Execution permission system has 6 levels; source-native recorded intent audit, Owner submit authorization record, controlled-submit plan, submit-time FinalGate preflight, preflight-gated controlled-submit result, non-mutating attempt reservation preview, pending attempt reservation audit record, controlled runtime attempt mutation record, runtime-native protection plan preview/record, runtime protection-failure policy gate, runtime OrderLifecycle handoff draft record, non-executing OrderLifecycle adapter preview gate, typed local order registration draft preview, first-real-submit local-registration gate, evidence-based local-registration enablement decision, default-disabled adapter result, explicit local-order linkage to `local_orders_registered`, non-executing submit adapter preview, non-mutating submit rehearsal aggregate, exchange-submit packet/enablement/action evidence, default-disabled exchange-submit adapter/execution result stages, a canonical first-real-submit action wrapper, and post-submit outcome accounting evidence exist in the local working tree for `brc_runtime_order_candidate`; `recorded` is not submit-ready, `local_orders_registered` is not exchange-submitted, and exchange calls remain blocked unless explicit first-real-submit action confirmation plus action-point prerequisite evidence revalidation pass | Bounded execution intent from order candidate |
 | OrderLifecycle | implemented | Order lifecycle service handles order placement and tracking | Order lifecycle management with strategy semantic IDs |
 | Order / Position | implemented | Order and position management through exchange gateway | Live order and position tracking |
 | Reconciliation | implemented | Reconciliation service exists | PG / exchange consistency verification |
-| Review | partially implemented | Review Ledger design exists; limited production review data | Full review with strategy semantic traceability |
+| Review | partially implemented | Review Ledger design exists; limited production review data; first-real-submit outcome accounting can record submit outcome review and derive attempt-outcome policy when order facts are resolved | Full review with strategy semantic traceability |
 
 Status legend:
 
@@ -385,8 +385,11 @@ Order
 Review
 ```
 
-Current Review Ledger does not carry strategy semantic IDs through the chain.
-This is a known gap (see `docs/canon/TECH_DEBT_BASELINE.md`).
+Current Review Ledger does not yet carry the full strategy semantic chain
+automatically from order/exchange facts. First-real-submit outcome accounting
+can now record submit outcome review evidence and derive an attempt-outcome
+policy when local order facts are resolved, but broader lifecycle review
+orchestration remains a known gap (see `docs/canon/TECH_DEBT_BASELINE.md`).
 
 Future Review should distinguish trading PnL from Owner manual withdrawal,
 capital injection, capital base reset, and strategy performance. Manual profit
