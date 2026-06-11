@@ -57,6 +57,39 @@ def _down_context_4h() -> list[dict[str, Any]]:
     ]
 
 
+def _cpm_long_1h() -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index in range(20):
+        close = Decimal("100") + Decimal(index) * Decimal("0.2")
+        candles.append(
+            _candle(
+                index,
+                str(close),
+                str(close + Decimal("0.2")),
+                str(close - Decimal("0.2")),
+                str(close),
+            )
+        )
+    candles.append(_candle(20, "103.5", "105.2", "102", "105"))
+    return candles
+
+
+def _cpm_up_context_4h() -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index in range(21):
+        close = Decimal("100") + Decimal(index) * Decimal("0.3")
+        candles.append(
+            _candle(
+                index,
+                str(close),
+                str(close + Decimal("0.2")),
+                str(close - Decimal("0.2")),
+                str(close),
+            )
+        )
+    return candles
+
+
 def _signal_input(
     *,
     family_id: str = "BRF-001",
@@ -195,6 +228,41 @@ def test_cpm_short_output_blocks_before_semantic_binding():
     assert result.exchange_called is False
 
 
+def test_cpm_live_reference_route_ready_for_semantic_binding():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="CPM-001",
+            version_id="CPM-001-v0",
+            one_hour=_cpm_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    assert result.blockers == []
+    assert result.evaluator_called is True
+    assert result.evaluator_id == "_CPM001LiveReferenceEvaluator"
+    assert result.output is not None
+    assert result.output.strategy_family_id == "CPM-001"
+    assert result.output.strategy_family_version_id == "CPM-001-v0"
+    assert result.output.signal_type == SignalType.WOULD_ENTER
+    assert result.output.side == SignalSide.LONG
+    assert (
+        result.output.evidence_payload["candidate_semantics"]["strategy_family_id"]
+        == "CPM-001"
+    )
+    assert (
+        result.output.evidence_payload["candidate_semantics"][
+            "strategy_family_version_id"
+        ]
+        == "CPM-001-v0"
+    )
+    assert result.can_call_semantic_binding is True
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.exchange_called is False
+
+
 def test_rmr_classifier_binding_observe_only_without_evaluator_call():
     result = RuntimeStrategySignalEvaluationService().evaluate(
         _signal_input(family_id="RMR-001", version_id="RMR-001-v0")
@@ -228,17 +296,26 @@ def test_data_backlog_binding_blocks_without_evaluator_call():
     assert result.exchange_called is False
 
 
-def test_missing_evaluator_blocks_candidate_strategy():
-    result = RuntimeStrategySignalEvaluationService().evaluate(
-        _signal_input(family_id="CPM-001", version_id="CPM-001-v0")
+def test_cpm_live_reference_short_output_blocks_before_semantic_binding():
+    result = RuntimeStrategySignalEvaluationService(
+        evaluators={
+            ("CPM-001", "CPM-001-v0"): _FakeShortEvaluator(),
+        }
+    ).evaluate(
+        _signal_input(
+            family_id="CPM-001",
+            version_id="CPM-001-v0",
+        )
     )
 
     assert result.status == RuntimeStrategySignalEvaluationStatus.BLOCKED
-    assert result.evaluator_called is False
+    assert result.evaluator_called is True
     assert result.semantics_binding_found is True
     assert result.strategy_candidate_mode == "shadow_order_candidate_allowed"
     assert result.runtime_confirmation_mode == "runtime_bounded_auto_attempts"
-    assert "strategy_evaluator_not_configured" in result.blockers
+    assert "strategy_output_side_not_supported_by_semantics" in result.blockers
+    assert result.output is not None
+    assert result.output.side == SignalSide.SHORT
     assert result.order_candidate_created is False
     assert result.execution_intent_created is False
 

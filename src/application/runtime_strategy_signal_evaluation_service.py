@@ -17,7 +17,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.domain.brf_price_action_evaluator import BRF001PriceActionEvaluator
-from src.domain.cpm_historical_evaluator import CPMRO001HistoricalEvaluator
+from src.domain.cpm_historical_evaluator import CPM_FAMILY_ID, CPMRO001HistoricalEvaluator
 from src.domain.reference_price_action_evaluators import (
     BTPC001PriceActionEvaluator,
     LSR001PriceActionEvaluator,
@@ -242,12 +242,69 @@ class RuntimeStrategySignalEvaluationService:
 def _default_evaluators() -> dict[tuple[str, str], RuntimeStrategySignalEvaluator]:
     return {
         ("CPM-RO-001", "CPM-RO-001-v0"): CPMRO001HistoricalEvaluator(),
+        ("CPM-001", "CPM-001-v0"): _CPM001LiveReferenceEvaluator(),
         ("BRF-001", "BRF-001-v0"): BRF001PriceActionEvaluator(),
         ("BTPC-001", "BTPC-001-v0"): BTPC001PriceActionEvaluator(),
         ("LSR-001", "LSR-001-v0"): LSR001PriceActionEvaluator(),
         ("RBR-001", "RBR-001-v0"): RBR001PriceActionEvaluator(),
         ("VCB-001", "VCB-001-v0"): VCB001PriceActionEvaluator(),
     }
+
+
+class _CPM001LiveReferenceEvaluator:
+    """Route CPM-001 live-reference inputs through the CPM price-action evaluator."""
+
+    def __init__(self, delegate: CPMRO001HistoricalEvaluator | None = None) -> None:
+        self._delegate = delegate or CPMRO001HistoricalEvaluator()
+
+    def evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+    ) -> StrategyFamilySignalOutput:
+        mapped_input = signal_input.model_copy(
+            update={
+                "strategy_family_id": CPM_FAMILY_ID,
+                "strategy_family_version_id": "CPM-RO-001-v0",
+            },
+            deep=True,
+        )
+        output = self._delegate.evaluate(mapped_input)
+        return _retarget_cpm_reference_output(
+            output,
+            strategy_family_id=signal_input.strategy_family_id,
+            strategy_family_version_id=signal_input.strategy_family_version_id,
+        )
+
+
+def _retarget_cpm_reference_output(
+    output: StrategyFamilySignalOutput,
+    *,
+    strategy_family_id: str,
+    strategy_family_version_id: str,
+) -> StrategyFamilySignalOutput:
+    evidence_payload = dict(output.evidence_payload)
+    candidate_semantics = evidence_payload.get("candidate_semantics")
+    if isinstance(candidate_semantics, dict):
+        evidence_payload["candidate_semantics"] = {
+            **candidate_semantics,
+            "strategy_family_id": strategy_family_id,
+            "strategy_family_version_id": strategy_family_version_id,
+        }
+
+    signal_snapshot = dict(output.signal_snapshot)
+    signal_snapshot["strategy_family"] = strategy_family_id
+    signal_snapshot["reference_strategy_family"] = CPM_FAMILY_ID
+    signal_snapshot["reference_logic_version"] = signal_snapshot.get("logic_version")
+
+    return output.model_copy(
+        update={
+            "strategy_family_id": strategy_family_id,
+            "strategy_family_version_id": strategy_family_version_id,
+            "signal_snapshot": signal_snapshot,
+            "evidence_payload": evidence_payload,
+        },
+        deep=True,
+    )
 
 
 def _output_mismatches(

@@ -60,7 +60,7 @@ def _runtime(runtime_id, *, status="active", symbol="AVAX/USDT:USDT", side="shor
     }
 
 
-def test_active_monitor_runs_only_active_runtimes_without_side_effects():
+def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path):
     client = _FakeClient(
         [
             _runtime("runtime-active-1"),
@@ -96,7 +96,7 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects():
         }
 
     packet = runtime_active_observation_monitor._build_packet(
-        _args(),
+        _args(output_dir=str(tmp_path)),
         client=client,
         monitor_builder=builder,
     )
@@ -111,6 +111,15 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects():
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
     assert packet["operator_command_plan"]["places_order"] is False
+    for summary in packet["runtime_summaries"]:
+        report_path = summary["report_path"]
+        with open(report_path, encoding="utf-8") as handle:
+            report = json.load(handle)
+        assert report["runtime_instance_id"] in {
+            "runtime-active-1",
+            "runtime-active-2",
+        }
+        assert report["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_active_monitor_allows_prepare_records_only_when_explicit():

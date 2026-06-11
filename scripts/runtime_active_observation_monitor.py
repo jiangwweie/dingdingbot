@@ -157,6 +157,16 @@ def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
+    output_path = Path(path).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _safety(
     *,
     allow_prepare_records: bool,
@@ -216,7 +226,9 @@ def _build_packet(
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
         packet = builder(runtime_args)
+        packet["runtime_instance_id"] = runtime_args.runtime_instance_id
         packet["output_json"] = runtime_args.output_json
+        _write_json(runtime_args.output_json, packet)
         packets.append(packet)
         summaries.append(_summary(runtime, packet))
 
@@ -312,9 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         packet = _build_packet(args)
     output = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(output + "\n", encoding="utf-8")
+        _write_json(args.output_json, packet)
     print(output)
     return 0 if packet["status"] in {
         "waiting_for_signal",
