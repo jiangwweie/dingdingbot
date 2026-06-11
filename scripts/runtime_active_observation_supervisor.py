@@ -89,6 +89,8 @@ def _followup_command(args: argparse.Namespace, loop_packet_path: Path, followup
     ]
     if args.env_file:
         command.extend(["--env-file", args.env_file])
+    if args.allow_arm_preview:
+        command.append("--allow-arm-preview")
     if args.allow_disabled_smoke:
         command.append("--allow-disabled-smoke")
     if args.skip_disabled_smoke_prerequisite_probe:
@@ -232,6 +234,7 @@ def build_supervisor_packet(
         "safety_invariants": {
             "supervisor_only": True,
             "allow_prepare_records": bool(args.allow_prepare_records),
+            "allow_arm_preview": bool(args.allow_arm_preview),
             "allow_disabled_smoke": bool(args.allow_disabled_smoke),
             "real_submit_requested": False,
             "exchange_order_requested": False,
@@ -282,6 +285,7 @@ def _running_supervisor_packet(
         "safety_invariants": {
             "supervisor_only": True,
             "allow_prepare_records": bool(args.allow_prepare_records),
+            "allow_arm_preview": bool(args.allow_arm_preview),
             "allow_disabled_smoke": bool(args.allow_disabled_smoke),
             "real_submit_requested": False,
             "exchange_order_requested": False,
@@ -309,6 +313,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--allow-prepare-records", action="store_true")
+    parser.add_argument("--allow-arm-preview", action="store_true")
     parser.add_argument("--allow-disabled-smoke", action="store_true")
     parser.add_argument("--include-packets", action="store_true")
     parser.add_argument("--skip-disabled-smoke-prerequisite-probe", action="store_true")

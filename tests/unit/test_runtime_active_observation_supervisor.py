@@ -21,6 +21,7 @@ def _args(tmp_path, **overrides):
         "one_hour_limit": 25,
         "four_hour_limit": 25,
         "allow_prepare_records": True,
+        "allow_arm_preview": True,
         "allow_disabled_smoke": True,
         "include_packets": False,
         "skip_disabled_smoke_prerequisite_probe": False,
@@ -88,6 +89,7 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
     assert packet["loop_status"] == "waiting_for_signal"
     assert packet["followup_status"] == "waiting_for_ready_final_gate_preflight"
     assert "--allow-prepare-records" in calls[0]
+    assert "--allow-arm-preview" in calls[1]
     assert "--allow-disabled-smoke" in calls[1]
     assert "--execute-real-submit" not in flat_commands
     assert "--mode execute" not in flat_commands
@@ -141,6 +143,7 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
     running = running_snapshots[0]
     assert running["status"] == "supervisor_running"
     assert running["operator_command_plan"]["real_submit_requested"] is False
+    assert running["safety_invariants"]["allow_arm_preview"] is True
     assert running["safety_invariants"]["exchange_order_requested"] is False
     loop_command = running["command_results"]["loop"]["command"]
     assert "--cycle-timeout-seconds" in loop_command

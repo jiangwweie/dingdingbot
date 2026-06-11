@@ -129,6 +129,26 @@ def _run_disabled_smoke(
     ).run()
 
 
+def _run_arm_preview(
+    *,
+    authorization_id: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    _load_env_file(args.env_file)
+    config = FlowConfig(
+        api_base=args.api_base,
+        mode="arm",
+        env_file=args.env_file,
+        authorization_id=authorization_id,
+        record_attempt_consumption=False,
+        preview_disabled_first_real_submit_action=False,
+    )
+    return FirstRealSubmitApiFlow(
+        client=UrlLibApiClient(api_base=config.api_base),
+        config=config,
+    ).run()
+
+
 def _disabled_smoke_forbidden_effects(report: dict[str, Any]) -> list[str]:
     effects: list[str] = []
     for step in report.get("steps") or []:
@@ -151,10 +171,38 @@ def _disabled_smoke_forbidden_effects(report: dict[str, Any]) -> list[str]:
     return sorted(set(effects))
 
 
+def _arm_preview_forbidden_effects(report: dict[str, Any]) -> list[str]:
+    effects: list[str] = []
+    for step in report.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        path = str(step.get("path") or "")
+        name = str(step.get("name") or "")
+        if "attempt-mutations" in path:
+            effects.append(f"{name}:attempt_mutation")
+        if "attempt-reservations" in path:
+            effects.append(f"{name}:attempt_reservation")
+        if "local-registration-action-authorizations" in path:
+            effects.append(f"{name}:local_registration_authorization")
+        if "exchange-submit-action-authorizations" in path:
+            effects.append(f"{name}:exchange_submit_authorization")
+        if "exchange-submit-adapter-results" in path:
+            effects.append(f"{name}:exchange_submit_adapter_arm")
+        if "order-lifecycle-adapter-results" in path:
+            effects.append(f"{name}:order_lifecycle_adapter_result")
+        if "first-real-submit-actions" in path:
+            effects.append(f"{name}:first_real_submit_action")
+    if report.get("ready_for_real_submit_action") is True:
+        effects.append("ready_for_real_submit_action_true")
+    return sorted(set(effects))
+
+
 def build_followup_packet(
     args: argparse.Namespace,
     *,
     loop_packet: dict[str, Any] | None = None,
+    arm_preview_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
+    | None = None,
     disabled_smoke_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
     | None = None,
 ) -> dict[str, Any]:
@@ -165,6 +213,8 @@ def build_followup_packet(
     loop_forbidden = _loop_forbidden_effects(packet)
     blockers: list[str] = []
     warnings: list[str] = []
+    arm_report: dict[str, Any] | None = None
+    arm_forbidden: list[str] = []
     disabled_report: dict[str, Any] | None = None
     disabled_forbidden: list[str] = []
 
@@ -181,6 +231,25 @@ def build_followup_packet(
     elif blockers:
         followup_status = "blocked"
     else:
+        if args.allow_arm_preview:
+            arm_runner = arm_preview_runner or (
+                lambda auth_id, parsed_args: _run_arm_preview(
+                    authorization_id=auth_id,
+                    args=parsed_args,
+                )
+            )
+            arm_report = arm_runner(authorization_id, args)
+            arm_forbidden = _arm_preview_forbidden_effects(arm_report)
+            warnings.extend(
+                f"arm_preview:{item}"
+                for item in arm_report.get("blockers") or []
+            )
+            warnings.extend(
+                f"arm_preview:{item}"
+                for item in arm_report.get("warnings") or []
+            )
+            if arm_forbidden:
+                blockers.append("arm_preview_contains_forbidden_effects")
         runner = disabled_smoke_runner or (
             lambda auth_id, parsed_args: _run_disabled_smoke(
                 authorization_id=auth_id,
@@ -211,18 +280,21 @@ def build_followup_packet(
         "source_loop_status": status,
         "source_loop_stop_reason": packet.get("stop_reason"),
         "prepared_authorization_id": authorization_id,
+        "arm_preview_report": arm_report,
         "disabled_smoke_report": disabled_report,
         "blockers": blockers,
         "warnings": warnings,
         "operator_command_plan": {
             "not_executed": followup_status
             not in {"disabled_smoke_completed", "disabled_smoke_blocked"},
+            "arm_preview_called": arm_report is not None,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
             "next_step": _next_step(followup_status),
         },
         "safety_invariants": {
             "loop_packet_read_only": True,
+            "arm_preview_called": arm_report is not None,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
             "real_submit_requested": False,
@@ -234,6 +306,7 @@ def build_followup_packet(
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
             "loop_forbidden_effects": loop_forbidden,
+            "arm_preview_forbidden_effects": arm_forbidden,
             "disabled_smoke_forbidden_effects": disabled_forbidden,
         },
     }
@@ -262,6 +335,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output-json")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--env-file")
+    parser.add_argument("--allow-arm-preview", action="store_true")
     parser.add_argument("--allow-disabled-smoke", action="store_true")
     parser.add_argument(
         "--skip-disabled-smoke-prerequisite-probe",

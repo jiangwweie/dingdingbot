@@ -5,12 +5,13 @@ from argparse import Namespace
 from scripts import runtime_active_observation_followup
 
 
-def _args(*, allow_disabled_smoke=False):
+def _args(*, allow_arm_preview=False, allow_disabled_smoke=False):
     return Namespace(
         loop_packet_json="unused.json",
         output_json=None,
         api_base="http://unit",
         env_file=None,
+        allow_arm_preview=allow_arm_preview,
         allow_disabled_smoke=allow_disabled_smoke,
         skip_disabled_smoke_prerequisite_probe=False,
     )
@@ -76,6 +77,50 @@ def _disabled_smoke_report(*, blockers=None, warnings=None):
     }
 
 
+def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False):
+    steps = [
+        {
+            "name": "hydrate_controlled_submit_plan",
+            "path": (
+                "/api/trading-console/"
+                "runtime-execution-controlled-submit-plans/"
+                "authorizations/auth-1"
+            ),
+        },
+        {
+            "name": "prepare_machine_evidence",
+            "path": (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-evidence-preparations/"
+                "authorizations/auth-1"
+            ),
+        },
+    ]
+    if forbidden:
+        steps.append(
+            {
+                "name": "apply_attempt_mutation",
+                "path": (
+                    "/api/trading-console/runtime-execution-attempt-mutations/"
+                    "reservations/reserve-1"
+                ),
+            }
+        )
+    return {
+        "script": "runtime_first_real_submit_api_flow",
+        "mode": "arm",
+        "ready_for_real_submit_action": False,
+        "ids": {"authorization_id": "auth-1"},
+        "steps": steps,
+        "blockers": blockers
+        if blockers is not None
+        else ["attempt_consumption_required_before_order_lifecycle_handoff"],
+        "warnings": warnings
+        if warnings is not None
+        else ["attempt_consumption_not_recorded_in_arm_preview"],
+    }
+
+
 def test_followup_waits_when_loop_is_not_ready():
     calls = []
 
@@ -123,6 +168,54 @@ def test_followup_runs_disabled_smoke_only_after_ready_and_allow_flag():
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
     assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+
+
+def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
+    calls = []
+
+    def arm_runner(auth_id, args):
+        calls.append(("arm", auth_id, args.api_base))
+        return _arm_preview_report()
+
+    def disabled_runner(auth_id, args):
+        calls.append(("disabled", auth_id, args.api_base))
+        return _disabled_smoke_report()
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        arm_preview_runner=arm_runner,
+        disabled_smoke_runner=disabled_runner,
+    )
+
+    assert packet["status"] == "disabled_smoke_completed"
+    assert calls == [
+        ("arm", "auth-1", "http://unit"),
+        ("disabled", "auth-1", "http://unit"),
+    ]
+    assert packet["operator_command_plan"]["arm_preview_called"] is True
+    assert packet["operator_command_plan"]["disabled_smoke_called"] is True
+    assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == []
+    assert (
+        "arm_preview:attempt_consumption_required_before_order_lifecycle_handoff"
+        in packet["warnings"]
+    )
+    assert packet["safety_invariants"]["real_submit_requested"] is False
+
+
+def test_followup_blocks_when_arm_preview_touches_forbidden_surfaces():
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        arm_preview_runner=lambda auth_id, args: _arm_preview_report(forbidden=True),
+        disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
+    )
+
+    assert packet["status"] == "disabled_smoke_blocked"
+    assert "arm_preview_contains_forbidden_effects" in packet["blockers"]
+    assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == [
+        "apply_attempt_mutation:attempt_mutation"
+    ]
 
 
 def test_followup_blocks_on_loop_forbidden_effects_before_smoke():
