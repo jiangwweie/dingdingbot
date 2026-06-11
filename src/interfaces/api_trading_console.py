@@ -3787,6 +3787,7 @@ async def _runtime_strategy_signal_planning_service() -> Any:
             "_trading_console_pg_position_repo",
             _build_pg_position_repo,
         )
+    account_facts_source = _trading_console_runtime_account_facts_source(api_module)
     service = RuntimeStrategySignalPlanningService(
         semantics_binding_service=StrategySemanticsShadowBindingService(
             shadow_service=await _signal_evaluation_shadow_service(),
@@ -3794,7 +3795,7 @@ async def _runtime_strategy_signal_planning_service() -> Any:
         runtime_execution_planning_service=await _runtime_execution_planning_service(),
         runtime_fact_overlay_service=StrategyRuntimeFactOverlayService(
             active_position_source=position_source,
-            account_facts_source=_TradingConsoleCachedAccountFactsSource(api_module),
+            account_facts_source=account_facts_source,
             market_fact_source=_trading_console_public_market_fact_source(),
         ),
     )
@@ -4293,6 +4294,180 @@ class _TradingConsoleCachedAccountFactsSource:
                 "no account API call performed by this source",
             ),
         )
+
+
+class _TradingConsoleLiveReadOnlyAccountFactsSource:
+    """Trial-readiness account facts from the Trading Console read-only gateway."""
+
+    def __init__(self, api_module: Any) -> None:
+        self._api_module = api_module
+
+    async def read_trial_readiness_account_facts(
+        self,
+        *,
+        candidate_id: str,
+        symbol: str,
+        side: str,
+        generated_at_ms: int,
+    ) -> Any:
+        from src.application.trial_readiness_account_facts import (
+            AccountFactsFreshnessStatus,
+            AccountFactsReconciliationStatus,
+            AccountFactsSourceType,
+            TrialReadinessAccountFacts,
+        )
+
+        if not _live_read_only_exchange_env_safe():
+            return TrialReadinessAccountFacts(
+                source_id="trading_console_live_read_only_env_not_safe",
+                source_type=AccountFactsSourceType.UNAVAILABLE,
+                freshness_status=AccountFactsFreshnessStatus.MISSING,
+                reconciliation_status=AccountFactsReconciliationStatus.UNKNOWN,
+                read_only_guarantee=True,
+                external_call_performed=False,
+                external_call_type="none",
+                notes=(
+                    f"candidate={candidate_id}",
+                    f"symbol={symbol}",
+                    f"side={side}",
+                    "live read-only account facts env is not safe",
+                ),
+            )
+
+        gateway = getattr(
+            self._api_module,
+            "_trading_console_read_only_exchange_gateway",
+            None,
+        )
+        if gateway is None:
+            gateway = _TradingConsoleLiveReadOnlyGateway()
+            setattr(
+                self._api_module,
+                "_trading_console_read_only_exchange_gateway",
+                gateway,
+            )
+
+        try:
+            snapshot = await gateway.fetch_account_balance()
+        except Exception as exc:
+            return TrialReadinessAccountFacts(
+                source_id="trading_console_live_read_only_account_read_failed",
+                source_type=AccountFactsSourceType.UNAVAILABLE,
+                freshness_status=AccountFactsFreshnessStatus.MISSING,
+                reconciliation_status=AccountFactsReconciliationStatus.UNKNOWN,
+                read_only_guarantee=True,
+                external_call_performed=True,
+                external_call_type="read_only_account_query",
+                notes=(
+                    f"candidate={candidate_id}",
+                    f"symbol={symbol}",
+                    f"side={side}",
+                    f"read failed: {type(exc).__name__}",
+                ),
+            )
+
+        if snapshot is None:
+            return TrialReadinessAccountFacts(
+                source_id="trading_console_live_read_only_account_snapshot_missing",
+                source_type=AccountFactsSourceType.UNAVAILABLE,
+                freshness_status=AccountFactsFreshnessStatus.MISSING,
+                reconciliation_status=AccountFactsReconciliationStatus.UNKNOWN,
+                read_only_guarantee=True,
+                external_call_performed=True,
+                external_call_type="read_only_account_query",
+                notes=(
+                    f"candidate={candidate_id}",
+                    f"symbol={symbol}",
+                    f"side={side}",
+                    "read-only gateway returned no account snapshot",
+                ),
+            )
+
+        timestamp_ms = (
+            _int_or_none(_read_snapshot_value(snapshot, "timestamp"))
+            or generated_at_ms
+        )
+        return TrialReadinessAccountFacts(
+            account_id="trading_console_live_read_only_account",
+            account_type="binance_usdt_futures",
+            source_id="trading_console_live_read_only_exchange_gateway",
+            source_type=AccountFactsSourceType.BINANCE_USDT_FUTURES_READ_ONLY,
+            account_equity=_decimal_or_none(
+                _read_snapshot_value(snapshot, "total_balance")
+            ),
+            available_margin=_decimal_or_none(
+                _read_snapshot_value(snapshot, "available_balance")
+            ),
+            timestamp_ms=timestamp_ms,
+            freshness_status=_cached_account_snapshot_freshness(
+                timestamp_ms,
+                generated_at_ms=generated_at_ms,
+            ),
+            reconciliation_status=AccountFactsReconciliationStatus.CLEAN,
+            read_only_guarantee=True,
+            external_call_performed=True,
+            external_call_type="read_only_account_query",
+            notes=(
+                f"candidate={candidate_id}",
+                f"symbol={symbol}",
+                f"side={side}",
+                "source=Trading Console live read-only exchange gateway",
+                "no order, transfer, withdrawal, or submit method is exposed",
+            ),
+        )
+
+
+class _TradingConsoleUnavailableAccountFactsSource:
+    """Fail-closed source for unsupported account fact source configuration."""
+
+    def __init__(self, reason: str) -> None:
+        self._reason = reason
+
+    async def read_trial_readiness_account_facts(
+        self,
+        *,
+        candidate_id: str,
+        symbol: str,
+        side: str,
+        generated_at_ms: int,
+    ) -> Any:
+        from src.application.trial_readiness_account_facts import (
+            AccountFactsFreshnessStatus,
+            AccountFactsReconciliationStatus,
+            AccountFactsSourceType,
+            TrialReadinessAccountFacts,
+        )
+
+        return TrialReadinessAccountFacts(
+            source_id="trading_console_account_facts_source_unavailable",
+            source_type=AccountFactsSourceType.UNAVAILABLE,
+            freshness_status=AccountFactsFreshnessStatus.MISSING,
+            reconciliation_status=AccountFactsReconciliationStatus.UNKNOWN,
+            read_only_guarantee=True,
+            external_call_performed=False,
+            external_call_type="none",
+            notes=(
+                f"candidate={candidate_id}",
+                f"symbol={symbol}",
+                f"side={side}",
+                self._reason,
+            ),
+        )
+
+
+def _trading_console_runtime_account_facts_source(api_module: Any) -> Any:
+    mode = (
+        os.environ.get("TRADING_CONSOLE_RUNTIME_ACCOUNT_FACTS_SOURCE", "")
+        .strip()
+        .lower()
+    )
+    if mode in {"", "cached", "cached_snapshot"}:
+        return _TradingConsoleCachedAccountFactsSource(api_module)
+    if mode in {"live_read_only", "exchange_read_only"}:
+        return _TradingConsoleLiveReadOnlyAccountFactsSource(api_module)
+    return _TradingConsoleUnavailableAccountFactsSource(
+        f"unsupported account facts source mode: {mode}"
+    )
 
 
 def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspectionView:

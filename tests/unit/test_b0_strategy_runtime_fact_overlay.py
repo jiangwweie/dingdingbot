@@ -747,3 +747,61 @@ async def test_trading_console_factory_can_enable_public_market_fact_source(monk
         == "binance_usdm_derivative_market_facts_read_only"
     )
     assert overlay._market_fact_source.is_live_read_only is True
+
+
+async def test_trading_console_factory_can_use_live_read_only_account_facts(monkeypatch):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    class _PlanningService:
+        pass
+
+    class _ShadowService:
+        pass
+
+    class _ReadOnlyGateway:
+        def __init__(self) -> None:
+            self.fetch_balance_calls = 0
+
+        async def fetch_account_balance(self):
+            self.fetch_balance_calls += 1
+            return AccountSnapshot(
+                total_balance=Decimal("30"),
+                available_balance=Decimal("28.5"),
+                unrealized_pnl=Decimal("0"),
+                positions=[],
+                timestamp=NOW_MS,
+            )
+
+    gateway = _ReadOnlyGateway()
+    monkeypatch.setenv("TRADING_CONSOLE_RUNTIME_ACCOUNT_FACTS_SOURCE", "live_read_only")
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "read_only")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("EXCHANGE_API_KEY", "unit-key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "unit-secret")
+    monkeypatch.setattr(api_module, "_runtime_strategy_signal_planning_service", None, raising=False)
+    monkeypatch.setattr(api_module, "_runtime_execution_planning_service", _PlanningService(), raising=False)
+    monkeypatch.setattr(api_module, "_signal_evaluation_shadow_service", _ShadowService(), raising=False)
+    monkeypatch.setattr(api_module, "_position_repo", _PositionSource(positions=[]), raising=False)
+    monkeypatch.setattr(
+        api_module,
+        "_trading_console_read_only_exchange_gateway",
+        gateway,
+        raising=False,
+    )
+
+    service = await api_trading_console._runtime_strategy_signal_planning_service()
+    overlay = service._runtime_fact_overlay_service
+    result = await overlay.apply(_signal_input(), output=_output(), runtime=_runtime())
+
+    assert result.blockers == []
+    assert gateway.fetch_balance_calls == 1
+    assert (
+        result.signal_input.account_facts_snapshot.source
+        == "binance_usdt_futures_read_only"
+    )
+    assert result.signal_input.account_facts_snapshot.available_balance == Decimal("28.5")
+    assert overlay._market_fact_source is None
