@@ -136,6 +136,27 @@ def test_followup_waits_when_loop_is_not_ready():
     assert calls == []
 
 
+def test_followup_surfaces_ready_for_prepare_without_running_smoke():
+    calls = []
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=_loop_packet("ready_for_prepare"),
+        arm_preview_runner=lambda auth_id, args: calls.append(("arm", auth_id)) or {},
+        disabled_smoke_runner=lambda auth_id, args: calls.append(("disabled", auth_id))
+        or {},
+    )
+
+    assert packet["status"] == "ready_for_prepare_records"
+    assert packet["operator_command_plan"]["next_step"] == (
+        "review_ready_signal_then_continue_prepare_record_path"
+    )
+    assert packet["operator_command_plan"]["arm_preview_called"] is False
+    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["safety_invariants"]["real_submit_requested"] is False
+    assert calls == []
+
+
 def test_followup_requires_explicit_disabled_smoke_flag_when_ready():
     packet = runtime_active_observation_followup.build_followup_packet(
         _args(),

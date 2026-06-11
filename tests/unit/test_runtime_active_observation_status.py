@@ -106,3 +106,28 @@ def test_status_blocks_on_forbidden_effects(tmp_path):
     assert packet["forbidden_effects"] == [
         "followup-packet.json:exchange_order_submitted"
     ]
+
+
+def test_status_marks_prepare_followup_as_attention(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "followup-packet.json",
+        {
+            "status": "ready_for_prepare_records",
+            "operator_command_plan": {
+                "next_step": "review_ready_signal_then_continue_prepare_record_path"
+            },
+            "safety_invariants": {
+                "exchange_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert packet["status"] == "attention"
+    assert packet["latest_status"] == "ready_for_prepare_records"
+    assert packet["operator_command_plan"]["followup_next_step"] == (
+        "review_ready_signal_then_continue_prepare_record_path"
+    )

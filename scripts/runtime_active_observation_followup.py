@@ -30,6 +30,7 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
 
 
 READY_STATUS = "ready_for_final_gate_preflight"
+READY_FOR_PREPARE_STATUS = "ready_for_prepare"
 FORBIDDEN_LOOP_FLAGS = (
     "exchange_write_called",
     "order_created",
@@ -220,7 +221,9 @@ def build_followup_packet(
 
     if loop_forbidden:
         blockers.append("loop_packet_contains_forbidden_effects")
-    if status != READY_STATUS:
+    if status == READY_FOR_PREPARE_STATUS:
+        followup_status = "ready_for_prepare_records"
+    elif status != READY_STATUS:
         followup_status = "waiting_for_ready_final_gate_preflight"
     elif not authorization_id:
         followup_status = "blocked"
@@ -313,6 +316,8 @@ def build_followup_packet(
 
 
 def _next_step(status: str) -> str:
+    if status == "ready_for_prepare_records":
+        return "review_ready_signal_then_continue_prepare_record_path"
     if status == "waiting_for_ready_final_gate_preflight":
         return "continue_active_observation_loop"
     if status == "ready_for_disabled_smoke":

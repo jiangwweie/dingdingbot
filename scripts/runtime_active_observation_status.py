@@ -176,7 +176,9 @@ def build_status_packet(
         status = "blocked"
     elif latest_status in {
         "ready_for_prepare",
+        "ready_for_prepare_records",
         "ready_for_final_gate_preflight",
+        "ready_for_disabled_smoke",
         "disabled_smoke_completed",
     }:
         status = "attention"
