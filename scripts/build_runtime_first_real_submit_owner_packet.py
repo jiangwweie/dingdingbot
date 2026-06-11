@@ -114,6 +114,9 @@ def build_first_real_submit_owner_packet(
         for blocker in operational_blockers
         if blocker not in {OWNER_REAL_SUBMIT_AUTH_MISSING}
     ]
+    non_owner_live_enablement_blockers = _non_owner_live_enablement_blockers(
+        live_enablement_blockers
+    )
 
     technical_ready = (
         checks.get("technical_rehearsal_passed") is True
@@ -130,6 +133,7 @@ def build_first_real_submit_owner_packet(
         and implementation_ready
         and deployment_ready
         and not non_owner_operational_blockers
+        and not non_owner_live_enablement_blockers
     )
     ready_for_first_real_submit = checks.get("ready_for_first_real_submit") is True
 
@@ -139,6 +143,7 @@ def build_first_real_submit_owner_packet(
         + deployment_blockers
         + non_owner_operational_blockers
         + implementation_blockers
+        + non_owner_live_enablement_blockers
         + forbidden_execution_flags
     )
     if checks.get("protection_failure_policy_passed") is not True:
@@ -207,6 +212,9 @@ def build_first_real_submit_owner_packet(
             "deployment_blockers": deployment_blockers,
             "owner_decision_items": owner_decision_items,
             "non_owner_operational_blockers": non_owner_operational_blockers,
+            "non_owner_live_enablement_blockers": (
+                non_owner_live_enablement_blockers
+            ),
             "implementation_blockers": implementation_blockers,
             "live_enablement_blockers": live_enablement_blockers,
             "forbidden_execution_flags": forbidden_execution_flags,
@@ -285,6 +293,22 @@ def _owner_decision_items(
     ):
         items.append("Owner live-runtime enablement authorization")
     return _dedupe(items)
+
+
+def _non_owner_live_enablement_blockers(
+    live_enablement_blockers: list[str],
+) -> list[str]:
+    owner_live_blockers = {
+        OWNER_LIVE_RUNTIME_AUTH_MISSING,
+        OWNER_REAL_SUBMIT_AUTH_MISSING,
+    }
+    return _dedupe(
+        [
+            blocker
+            for blocker in live_enablement_blockers
+            if blocker not in owner_live_blockers
+        ]
+    )
 
 
 def _dedupe(values: list[str]) -> list[str]:

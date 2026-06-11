@@ -62,6 +62,7 @@ class StrategyRuntimeLiveEnablementPreview(StrategyRuntimeLiveEnablementModel):
     owner_real_submit_authorization_present: bool
     submit_technical_rehearsal_passed: bool
     submit_adapter_implemented: bool
+    staged_submit_chain_available: bool = False
     forbidden_execution_flags: list[str] = Field(default_factory=list)
     not_execution_authority: Literal[True] = True
     runtime_state_mutated: Literal[False] = False
@@ -116,6 +117,7 @@ def build_strategy_runtime_live_enablement_preview(
     owner_real_submit_authorization_present: bool,
     submit_technical_rehearsal_passed: bool,
     submit_adapter_implemented: bool,
+    staged_submit_chain_available: bool = False,
     forbidden_execution_flags: list[str] | None = None,
 ) -> StrategyRuntimeLiveEnablementPreview:
     blockers: list[str] = []
@@ -159,7 +161,7 @@ def build_strategy_runtime_live_enablement_preview(
         blockers.append("owner_real_submit_authorization_missing")
     if not submit_technical_rehearsal_passed:
         blockers.append("submit_technical_rehearsal_not_passed")
-    if not submit_adapter_implemented:
+    if not submit_adapter_implemented and not staged_submit_chain_available:
         blockers.append("controlled_submit_adapter_not_implemented")
     if forbidden_flags:
         blockers.append("forbidden_execution_flags_present")
@@ -189,6 +191,7 @@ def build_strategy_runtime_live_enablement_preview(
         owner_real_submit_authorization_present=owner_real_submit_authorization_present,
         submit_technical_rehearsal_passed=submit_technical_rehearsal_passed,
         submit_adapter_implemented=submit_adapter_implemented,
+        staged_submit_chain_available=staged_submit_chain_available,
         forbidden_execution_flags=forbidden_flags,
     )
 

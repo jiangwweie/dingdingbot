@@ -436,16 +436,19 @@ Key facts:
   authorization all validate.
   `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` now exercises
   that chain with in-memory repositories and reports a first-real-submit packet:
-  the technical non-executing rehearsal can pass, but first real submit remains
-	  blocked while the current HEAD is not deployed, Owner real-submit
-	  authorization is absent, runtime remains shadow / execution-disabled, and the
-	  OrderLifecycle/local-registration runtime enablement gates remain closed.
+  the staged submit chain can be available without treating the legacy monolithic
+  submit adapter as a missing implementation blocker. First real submit remains
+  blocked by explicit Owner authorization, first-real-submit promotion evidence,
+  local-registration enablement, exchange-submit enablement, gateway/recovery
+  readiness, and action-time revalidation. A shadow / execution-disabled runtime
+  is the expected source state before a live-runtime enablement mutation, not
+  itself proof of a missing implementation.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime
   enablement authorization, Owner real-submit authorization, submit rehearsal
-  status, submit-adapter implementation status, and forbidden execution flags
-  into explicit blockers. A ready result means only
+  status, staged submit-chain availability, and forbidden execution flags into
+  explicit blockers. A ready result means only
   `ready_for_live_runtime_enablement_mutation_design`; it does not by itself
   mutate `StrategyRuntimeInstance`, enable `execution_enabled`, create
   ExecutionIntent/order records, call OwnerBoundedExecution, call OrderLifecycle,

@@ -212,7 +212,7 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "runtime_live_enablement_not_ready" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
-    assert "order_lifecycle_adapter_disabled" in (
+    assert "order_lifecycle_adapter_runtime_enablement_disabled" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
     assert "order_lifecycle_adapter_invocation_not_implemented" not in (

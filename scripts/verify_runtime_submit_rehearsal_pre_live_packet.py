@@ -533,13 +533,6 @@ async def build_pre_live_packet(
         operational_blockers.append("current_head_not_deployed_to_tokyo")
     if not owner_real_submit_authorized:
         operational_blockers.append("owner_real_submit_authorization_missing")
-    implementation_blockers: list[str] = []
-    if runtime.shadow_mode or not runtime.execution_enabled:
-        implementation_blockers.append("runtime_not_live_execution_enabled")
-    if not submit_adapter_preview.submit_adapter_implemented:
-        implementation_blockers.append("controlled_submit_adapter_not_implemented")
-    if not order_lifecycle_adapter_preview.order_lifecycle_adapter_implemented:
-        implementation_blockers.append("order_lifecycle_adapter_disabled")
 
     technical_rehearsal_passed = _technical_rehearsal_passed(
         plan=plan,
@@ -575,6 +568,17 @@ async def build_pre_live_packet(
         order_lifecycle_adapter_preview=order_lifecycle_adapter_preview,
         order_registration_draft_preview=order_registration_draft_preview,
     )
+    staged_submit_chain_available = (
+        technical_rehearsal_passed
+        and registration_draft_chain_passed
+        and protection_failure_policy_passed
+        and first_real_submit_packet is not None
+        and not forbidden_execution_flags
+    )
+    implementation_blockers: list[str] = []
+    if first_real_submit_packet is None:
+        implementation_blockers.append("first_real_submit_packet_not_available")
+
     safety_readiness = evaluate_strategy_runtime_safety_readiness(runtime)
     promotion_gate_result = _promotion_gate_result(
         runtime=runtime,
@@ -608,6 +612,7 @@ async def build_pre_live_packet(
         owner_real_submit_authorization_present=owner_real_submit_authorized,
         submit_technical_rehearsal_passed=technical_rehearsal_passed,
         submit_adapter_implemented=submit_adapter_preview.submit_adapter_implemented,
+        staged_submit_chain_available=staged_submit_chain_available,
         forbidden_execution_flags=forbidden_execution_flags,
     )
     ready_for_live_runtime_enablement = (
@@ -627,6 +632,7 @@ async def build_pre_live_packet(
             ready_for_live_runtime_enablement
         ),
         "ready_for_first_real_submit": False,
+        "staged_submit_chain_available": staged_submit_chain_available,
         "machine_evidence_preparation_status": _enum_value(
             evidence_preparation.status
         ),

@@ -62,11 +62,8 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
         "current_head_not_deployed_to_tokyo",
         "owner_real_submit_authorization_missing",
     ]
-    assert report["checks"]["implementation_blockers"] == [
-        "runtime_not_live_execution_enabled",
-        "controlled_submit_adapter_not_implemented",
-        "order_lifecycle_adapter_disabled",
-    ]
+    assert report["checks"]["implementation_blockers"] == []
+    assert report["checks"]["staged_submit_chain_available"] is True
     assert "current_head_not_deployed_to_tokyo" in (
         report["checks"]["live_enablement_blockers"]
     )
@@ -167,13 +164,9 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     assert report["checks"]["owner_live_runtime_enablement_authorization_present"] is True
     assert report["checks"]["protection_failure_policy_passed"] is True
     assert report["checks"]["operational_blockers"] == []
-    assert report["checks"]["implementation_blockers"] == [
-        "runtime_not_live_execution_enabled",
-        "controlled_submit_adapter_not_implemented",
-        "order_lifecycle_adapter_disabled",
-    ]
+    assert report["checks"]["implementation_blockers"] == []
+    assert report["checks"]["staged_submit_chain_available"] is True
     assert report["checks"]["live_enablement_blockers"] == [
-        "controlled_submit_adapter_not_implemented",
         "promotion_gate_first_real_submit_deployment_readiness_evidence_id_missing",
         "promotion_gate_first_real_submit_local_registration_enablement_decision_id_missing",
         "promotion_gate_first_real_submit_owner_real_submit_authorization_id_missing",

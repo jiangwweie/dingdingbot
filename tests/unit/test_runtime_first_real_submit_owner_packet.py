@@ -73,16 +73,15 @@ async def test_owner_packet_blocks_when_deploy_and_owner_auth_are_missing():
     assert packet["readiness_summary"]["technical_ready"] is True
     assert packet["readiness_summary"]["protection_failure_policy_ready"] is True
     assert packet["readiness_summary"]["deployment_ready"] is False
-    assert packet["readiness_summary"]["implementation_ready"] is False
+    assert packet["readiness_summary"]["implementation_ready"] is True
     assert packet["checks"]["packet_ready_for_owner_decision"] is False
     assert "current_head_not_deployed_to_tokyo" in packet["remaining_gates"]["deployment_blockers"]
     assert "Owner real-submit authorization" in packet["remaining_gates"]["owner_decision_items"]
     assert "Owner live-runtime enablement authorization" in packet["remaining_gates"]["owner_decision_items"]
-    assert packet["remaining_gates"]["implementation_blockers"] == [
-        "runtime_not_live_execution_enabled",
-        "controlled_submit_adapter_not_implemented",
-        "order_lifecycle_adapter_disabled",
-    ]
+    assert packet["remaining_gates"]["implementation_blockers"] == []
+    assert "current_head_not_deployed_to_tokyo" in (
+        packet["remaining_gates"]["non_owner_live_enablement_blockers"]
+    )
     assert packet["readiness_summary"]["machine_evidence_preparation_status"] == (
         "prepared_packet_blocked"
     )
@@ -116,12 +115,14 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
     assert packet["readiness_summary"]["technical_ready"] is True
     assert packet["readiness_summary"]["protection_failure_policy_ready"] is True
     assert packet["readiness_summary"]["deployment_ready"] is True
-    assert packet["readiness_summary"]["implementation_ready"] is False
+    assert packet["readiness_summary"]["implementation_ready"] is True
     assert packet["remaining_gates"]["owner_decision_items"] == []
-    assert packet["remaining_gates"]["implementation_blockers"] == [
-        "runtime_not_live_execution_enabled",
-        "controlled_submit_adapter_not_implemented",
-        "order_lifecycle_adapter_disabled",
+    assert packet["remaining_gates"]["implementation_blockers"] == []
+    assert packet["remaining_gates"]["non_owner_live_enablement_blockers"] == [
+        "promotion_gate_first_real_submit_deployment_readiness_evidence_id_missing",
+        "promotion_gate_first_real_submit_local_registration_enablement_decision_id_missing",
+        "promotion_gate_first_real_submit_owner_real_submit_authorization_id_missing",
+        "promotion_gate_not_ready_for_first_real_submit",
     ]
     assert packet["evidence_preparation"]["status"] == "prepared_packet_blocked"
     assert "attempt_outcome_policy_id" in (
