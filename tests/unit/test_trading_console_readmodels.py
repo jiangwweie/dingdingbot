@@ -944,6 +944,97 @@ def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
     assert exchange.cancel_calls == 0
 
 
+def test_trading_console_runtime_post_close_followup_completes_after_live_review(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    runtime = _live_enabled_runtime()
+    exchange = _FakeExchangeGateway(positions=[], normal_orders=[], stop_orders=[])
+    live_reviews = [
+        SimpleNamespace(
+            review_id="live-review-runtime-live-monitor-1-closed-reviewed",
+            authorization_id="runtime-review:runtime-live-monitor-1",
+            carrier_id="BTPC-001-live-runtime",
+            strategy_family_id="BTPC-001",
+            strategy_family_version_id="BTPC-001-v0",
+            runtime_instance_id="runtime-live-monitor-1",
+            order_candidate_id="candidate-1",
+            symbol=BNB,
+            side="long",
+            quantity="0.01",
+            lifecycle_status="closed_reviewed",
+            review_status="closed_reviewed",
+            metadata={"strategy_outcome": "ordinary_win"},
+            places_order=False,
+            mutates_exchange=False,
+            grants_trading_permission=False,
+            frontend_action_enabled=False,
+        )
+    ]
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        position_repo=_FakePositionRepo(),
+        order_repo=_FakeOrderRepo(
+            [
+                _FakeOrder(
+                    "entry-1",
+                    "ENTRY",
+                    "91085295446",
+                    parent_order_id=None,
+                    status="FILLED",
+                ),
+                _FakeOrder(
+                    "exit-1",
+                    "EXIT",
+                    "91085295500",
+                    parent_order_id="entry-1",
+                    status="FILLED",
+                ),
+            ]
+        ),
+        live_lifecycle_review_repo=_FakeLiveLifecycleReviewRepo(live_reviews),
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        _FakeStrategyRuntimeService(runtime),
+        raising=False,
+    )
+    monkeypatch.setattr(api_module, "_runtime_live_position_monitor_service", None, raising=False)
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_closed_trade_review_facts_service",
+        None,
+        raising=False,
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/strategy-runtimes/runtime-live-monitor-1/post-close-follow-up",
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    packet = payload["packet"]
+    plan = payload["operator_command_plan"]
+    assert payload["status"] == "post_close_complete"
+    assert packet["closed_review_recorded"] is True
+    assert packet["closed_review_id"] == "live-review-runtime-live-monitor-1-closed-reviewed"
+    assert packet["required_steps"] == ["verify_next_attempt_gate"]
+    assert "record_runtime_closed_trade_review" not in packet["required_steps"]
+    assert plan["closed_review_command_args"] == []
+    assert plan["post_close_required_sequence"] == ["verify_next_attempt_gate"]
+    assert payload["closed_lifecycle_review"]["review_status"] == "closed_reviewed"
+    assert payload["safety_invariants"]["review_record_created"] is False
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
 def test_trading_console_can_run_scheduled_observation_without_shadow_planning(
     monkeypatch,
 ):

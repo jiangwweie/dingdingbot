@@ -46,6 +46,8 @@ class RuntimePostCloseFollowupPacket(BaseModel):
     closed_review_facts_status: Optional[str] = None
     closed_review_entry_order_id: Optional[str] = None
     closed_review_exit_order_id: Optional[str] = None
+    closed_review_recorded: bool = False
+    closed_review_id: Optional[str] = None
     closed_review_command_args: list[str] = Field(default_factory=list)
     required_steps: list[str] = Field(default_factory=list)
     completed_steps: list[str] = Field(default_factory=list)
@@ -87,6 +89,8 @@ def build_runtime_post_close_followup_packet(
     monitor: RuntimeLivePositionMonitorPacket,
     owner_close_packet: RuntimeReduceOnlyCloseOwnerPacket | None,
     closed_review_facts_packet: RuntimeClosedTradeReviewFactsPacket | None = None,
+    closed_review_recorded: bool = False,
+    closed_review_id: str | None = None,
     now_ms: int,
 ) -> RuntimePostCloseFollowupPacket:
     blockers: list[str] = []
@@ -123,7 +127,18 @@ def build_runtime_post_close_followup_packet(
         ]
         completed_steps = ["fresh_monitor_read", "owner_close_packet_built"]
     elif monitor.review_required_before_next_attempt:
-        if (
+        if closed_review_recorded:
+            status = RuntimePostCloseFollowupStatus.POST_CLOSE_COMPLETE
+            recommended = "closed_review_recorded_verify_next_attempt_gate"
+            completed_steps = ["runtime_flat_observed", "closed_review_recorded"]
+            if (
+                closed_review_facts_packet is not None
+                and closed_review_facts_packet.status
+                == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
+            ):
+                completed_steps.append("closed_review_facts_resolved")
+            required_steps = ["verify_next_attempt_gate"]
+        elif (
             closed_review_facts_packet is not None
             and closed_review_facts_packet.status
             == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
@@ -141,14 +156,15 @@ def build_runtime_post_close_followup_packet(
             blockers.append("closed_review_facts_not_ready")
             recommended = "resolve_closed_review_facts_before_review"
             completed_steps = ["runtime_flat_observed"]
-        required_steps = [
-            "identify_entry_and_exit_order_ids"
-            if not closed_review_facts_packet
-            else "use_resolved_closed_review_order_ids",
-            "verify_reconciliation_severe_count_zero",
-            "record_runtime_closed_trade_review",
-            "verify_next_attempt_gate",
-        ]
+        if not closed_review_recorded:
+            required_steps = [
+                "identify_entry_and_exit_order_ids"
+                if not closed_review_facts_packet
+                else "use_resolved_closed_review_order_ids",
+                "verify_reconciliation_severe_count_zero",
+                "record_runtime_closed_trade_review",
+                "verify_next_attempt_gate",
+            ]
     else:
         status = RuntimePostCloseFollowupStatus.POST_CLOSE_COMPLETE
         recommended = "post_close_followup_complete_continue_runtime_planning"
@@ -180,6 +196,8 @@ def build_runtime_post_close_followup_packet(
             if closed_review_facts_packet is not None
             else None
         ),
+        closed_review_recorded=closed_review_recorded,
+        closed_review_id=closed_review_id,
         closed_review_command_args=(
             list(closed_review_facts_packet.review_command_args)
             if closed_review_facts_packet is not None
@@ -193,6 +211,7 @@ def build_runtime_post_close_followup_packet(
         metadata={
             "scope": "runtime_post_close_followup",
             "right_tail_objective": "Close follow-up preserves review and attempt learning rather than treating flatness as completion.",
+            "closed_review_recorded": closed_review_recorded,
         },
         created_at_ms=now_ms,
     )

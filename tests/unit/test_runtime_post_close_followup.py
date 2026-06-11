@@ -131,3 +131,57 @@ def test_post_close_followup_carries_resolved_closed_review_facts_when_flat():
     ]
     assert "closed_review_facts_resolved" in packet.completed_steps
     assert "use_resolved_closed_review_order_ids" in packet.required_steps
+
+
+def test_post_close_followup_completes_when_closed_review_already_recorded():
+    runtime = _runtime()
+    monitor = build_runtime_live_position_monitor_packet(
+        runtime=runtime,
+        local_positions=[],
+        local_open_orders=[],
+        exchange_positions=[],
+        exchange_open_stop_orders=[],
+        reconciliation_result=None,
+        now_ms=1,
+        exchange_facts_available=True,
+    )
+    entry_order = _order(
+        "entry-1",
+        OrderRole.ENTRY,
+        status=OrderStatus.FILLED,
+        filled_qty=Decimal("1"),
+        average_exec_price=Decimal("6.595"),
+        filled_at=1,
+    )
+    exit_order = _order(
+        "exit-1",
+        OrderRole.EXIT,
+        status=OrderStatus.FILLED,
+        filled_qty=Decimal("1"),
+        average_exec_price=Decimal("6.555"),
+        filled_at=2,
+        parent_order_id="entry-1",
+    )
+    review_facts = build_runtime_closed_trade_review_facts_packet(
+        runtime=runtime,
+        orders=[entry_order, exit_order],
+        active_positions=[],
+        open_orders=[],
+        now_ms=2,
+    )
+
+    packet = build_runtime_post_close_followup_packet(
+        monitor=monitor,
+        owner_close_packet=None,
+        closed_review_facts_packet=review_facts,
+        closed_review_recorded=True,
+        closed_review_id="live-review-1",
+        now_ms=3,
+    )
+
+    assert packet.status == RuntimePostCloseFollowupStatus.POST_CLOSE_COMPLETE
+    assert packet.closed_review_recorded is True
+    assert packet.closed_review_id == "live-review-1"
+    assert packet.required_steps == ["verify_next_attempt_gate"]
+    assert "closed_review_recorded" in packet.completed_steps
+    assert "record_runtime_closed_trade_review" not in packet.required_steps

@@ -3223,10 +3223,27 @@ async def _runtime_post_close_followup_payload(
             exit_plan=exit_plan,
             now_ms=int(time.time() * 1000),
         )
+    closed_review = (
+        None
+        if monitor.active_position_present
+        else await _runtime_latest_closed_lifecycle_review(
+            runtime_instance_id=runtime_instance_id,
+            symbol=monitor.symbol,
+        )
+    )
+    closed_review_recorded = _runtime_lifecycle_review_is_closed_reviewed(
+        closed_review
+    )
     packet = build_runtime_post_close_followup_packet(
         monitor=monitor,
         owner_close_packet=owner_close_packet,
         closed_review_facts_packet=closed_review_facts_packet,
+        closed_review_recorded=closed_review_recorded,
+        closed_review_id=(
+            getattr(closed_review, "review_id", None)
+            if closed_review_recorded
+            else None
+        ),
         now_ms=int(time.time() * 1000),
     )
     return {
@@ -3240,6 +3257,15 @@ async def _runtime_post_close_followup_payload(
             else None
         ),
         "closed_review_facts_packet": closed_review_facts_packet.model_dump(mode="json"),
+        "closed_lifecycle_review": (
+            closed_review.model_dump(mode="json")
+            if closed_review is not None and hasattr(closed_review, "model_dump")
+            else (
+                dict(closed_review.__dict__)
+                if closed_review is not None and hasattr(closed_review, "__dict__")
+                else None
+            )
+        ),
         "operator_command_plan": _runtime_post_close_operator_command_plan(
             runtime_instance_id=runtime_instance_id,
             env_file=env_file,
@@ -3260,6 +3286,45 @@ async def _runtime_post_close_followup_payload(
     }
 
 
+async def _runtime_latest_closed_lifecycle_review(
+    *,
+    runtime_instance_id: str,
+    symbol: str,
+) -> Any | None:
+    from src.interfaces import api as api_module
+
+    repo = getattr(api_module, "_live_lifecycle_review_repo", None)
+    if repo is None:
+        repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_live_lifecycle_review_repo",
+            _build_pg_live_lifecycle_review_repo,
+        )
+    if hasattr(repo, "initialize"):
+        await repo.initialize()
+    authorization_id = f"runtime-review:{runtime_instance_id}"
+    if hasattr(repo, "get_latest"):
+        return await repo.get_latest(authorization_id=authorization_id, symbol=symbol)
+    if hasattr(repo, "list"):
+        records = await repo.list(
+            authorization_id=authorization_id,
+            symbol=symbol,
+            limit=1,
+        )
+        return records[0] if records else None
+    return None
+
+
+def _runtime_lifecycle_review_is_closed_reviewed(review: Any | None) -> bool:
+    if review is None:
+        return False
+    return (
+        str(getattr(review, "review_status", "") or "").lower() == "closed_reviewed"
+        and str(getattr(review, "lifecycle_status", "") or "").lower()
+        == "closed_reviewed"
+    )
+
+
 def _runtime_post_close_operator_command_plan(
     *,
     runtime_instance_id: str,
@@ -3269,6 +3334,7 @@ def _runtime_post_close_operator_command_plan(
     def with_env_file(args: list[str]) -> list[str]:
         return [*args, "--env-file", env_file] if env_file else args
 
+    post_close_complete = str(packet.status.value) == "post_close_complete"
     close_args = with_env_file(
         [
             "scripts/runtime_owner_reduce_only_close_flow.py",
@@ -3304,16 +3370,22 @@ def _runtime_post_close_operator_command_plan(
                 runtime_instance_id,
             ]
         ),
-        "closed_review_command_args": list(packet.closed_review_command_args),
-        "post_close_required_sequence": [
-            "refresh_followup",
-            "owner_authorize_exact_reduce_only_close_value",
-            "run_owner_close_execute_command",
-            "refresh_followup_until_flat",
-            "run_closed_review_dry_run",
-            "run_closed_review_apply_if_ready",
-            "verify_next_attempt_gate",
-        ],
+        "closed_review_command_args": (
+            [] if post_close_complete else list(packet.closed_review_command_args)
+        ),
+        "post_close_required_sequence": (
+            list(packet.required_steps)
+            if post_close_complete
+            else [
+                "refresh_followup",
+                "owner_authorize_exact_reduce_only_close_value",
+                "run_owner_close_execute_command",
+                "refresh_followup_until_flat",
+                "run_closed_review_dry_run",
+                "run_closed_review_apply_if_ready",
+                "verify_next_attempt_gate",
+            ]
+        ),
         "safety_invariants": {
             "packet_only": True,
             "command_plan_only": True,
