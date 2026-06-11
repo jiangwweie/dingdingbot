@@ -13,6 +13,10 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.runtime_closed_trade_review_facts import (
+    RuntimeClosedTradeReviewFactsPacket,
+    RuntimeClosedTradeReviewFactsStatus,
+)
 from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorPacket
 from src.domain.runtime_reduce_only_close_authorization import (
     RuntimeReduceOnlyCloseOwnerPacket,
@@ -39,6 +43,10 @@ class RuntimePostCloseFollowupPacket(BaseModel):
     owner_close_packet_status: Optional[str] = None
     owner_close_approval_env: Optional[str] = None
     owner_close_approval_value: Optional[str] = None
+    closed_review_facts_status: Optional[str] = None
+    closed_review_entry_order_id: Optional[str] = None
+    closed_review_exit_order_id: Optional[str] = None
+    closed_review_command_args: list[str] = Field(default_factory=list)
     required_steps: list[str] = Field(default_factory=list)
     completed_steps: list[str] = Field(default_factory=list)
     recommended_next_action: str
@@ -78,11 +86,17 @@ def build_runtime_post_close_followup_packet(
     *,
     monitor: RuntimeLivePositionMonitorPacket,
     owner_close_packet: RuntimeReduceOnlyCloseOwnerPacket | None,
+    closed_review_facts_packet: RuntimeClosedTradeReviewFactsPacket | None = None,
     now_ms: int,
 ) -> RuntimePostCloseFollowupPacket:
     blockers: list[str] = []
     warnings = list(monitor.warnings)
     owner_status = owner_close_packet.status.value if owner_close_packet is not None else None
+    closed_review_status = (
+        closed_review_facts_packet.status.value
+        if closed_review_facts_packet is not None
+        else None
+    )
 
     if monitor.active_position_present:
         if owner_close_packet is None:
@@ -109,15 +123,32 @@ def build_runtime_post_close_followup_packet(
         ]
         completed_steps = ["fresh_monitor_read", "owner_close_packet_built"]
     elif monitor.review_required_before_next_attempt:
-        status = RuntimePostCloseFollowupStatus.READY_FOR_CLOSED_REVIEW
-        recommended = "record_runtime_closed_trade_review_before_next_attempt"
+        if (
+            closed_review_facts_packet is not None
+            and closed_review_facts_packet.status
+            == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
+        ):
+            status = RuntimePostCloseFollowupStatus.READY_FOR_CLOSED_REVIEW
+            recommended = "run_closed_trade_review_from_resolved_order_facts"
+            completed_steps = ["runtime_flat_observed", "closed_review_facts_resolved"]
+        elif closed_review_facts_packet is None:
+            status = RuntimePostCloseFollowupStatus.READY_FOR_CLOSED_REVIEW
+            recommended = "record_runtime_closed_trade_review_before_next_attempt"
+            completed_steps = ["runtime_flat_observed"]
+        else:
+            status = RuntimePostCloseFollowupStatus.BLOCKED
+            blockers.extend(closed_review_facts_packet.blockers)
+            blockers.append("closed_review_facts_not_ready")
+            recommended = "resolve_closed_review_facts_before_review"
+            completed_steps = ["runtime_flat_observed"]
         required_steps = [
-            "identify_entry_and_exit_order_ids",
+            "identify_entry_and_exit_order_ids"
+            if not closed_review_facts_packet
+            else "use_resolved_closed_review_order_ids",
             "verify_reconciliation_severe_count_zero",
             "record_runtime_closed_trade_review",
             "verify_next_attempt_gate",
         ]
-        completed_steps = ["runtime_flat_observed"]
     else:
         status = RuntimePostCloseFollowupStatus.POST_CLOSE_COMPLETE
         recommended = "post_close_followup_complete_continue_runtime_planning"
@@ -137,6 +168,22 @@ def build_runtime_post_close_followup_packet(
         ),
         owner_close_approval_value=(
             owner_close_packet.owner_approval_value if owner_close_packet is not None else None
+        ),
+        closed_review_facts_status=closed_review_status,
+        closed_review_entry_order_id=(
+            closed_review_facts_packet.entry_order_id
+            if closed_review_facts_packet is not None
+            else None
+        ),
+        closed_review_exit_order_id=(
+            closed_review_facts_packet.exit_order_id
+            if closed_review_facts_packet is not None
+            else None
+        ),
+        closed_review_command_args=(
+            list(closed_review_facts_packet.review_command_args)
+            if closed_review_facts_packet is not None
+            else []
         ),
         required_steps=required_steps,
         completed_steps=completed_steps,

@@ -56,6 +56,9 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     from src.application.runtime_live_position_monitor_service import (
         RuntimeLivePositionMonitorService,
     )
+    from src.application.runtime_closed_trade_review_facts_service import (
+        RuntimeClosedTradeReviewFactsService,
+    )
     from src.application.runtime_position_exit_plan_service import (
         RuntimePositionExitPlanService,
     )
@@ -115,6 +118,14 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
         monitor = await monitor_service.build_monitor_packet(
             runtime_instance_id=args.runtime_instance_id,
         )
+        closed_review_facts_service = RuntimeClosedTradeReviewFactsService(
+            runtime_repository=runtime_repository,
+            order_repository=order_repository,
+            position_repository=position_repository,
+        )
+        closed_review_facts_packet = await closed_review_facts_service.build_packet(
+            runtime_instance_id=args.runtime_instance_id,
+        )
         owner_close_packet = None
         if monitor.active_position_present:
             exit_plan_service = RuntimePositionExitPlanService(
@@ -134,6 +145,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
         packet = build_runtime_post_close_followup_packet(
             monitor=monitor,
             owner_close_packet=owner_close_packet,
+            closed_review_facts_packet=closed_review_facts_packet,
             now_ms=int(time.time() * 1000),
         )
         return {
@@ -144,10 +156,13 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             "owner_close_packet": _json_value(owner_close_packet)
             if owner_close_packet is not None
             else None,
+            "closed_review_facts_packet": _json_value(closed_review_facts_packet),
             "safety_invariants": {
                 "packet_only": True,
                 "exchange_read_only": gateway is not None,
+                "closed_review_facts_pg_read_only": True,
                 "exchange_write_called": False,
+                "review_record_created": False,
                 "order_created": False,
                 "order_cancelled": False,
                 "order_amended": False,

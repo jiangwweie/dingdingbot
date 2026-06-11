@@ -4,6 +4,11 @@ from decimal import Decimal
 
 from tests.unit.test_runtime_live_position_monitor import _order, _position, _runtime
 
+from src.domain.models import OrderRole, OrderStatus
+from src.domain.runtime_closed_trade_review_facts import (
+    RuntimeClosedTradeReviewFactsStatus,
+    build_runtime_closed_trade_review_facts_packet,
+)
 from src.domain.runtime_live_position_monitor import build_runtime_live_position_monitor_packet
 from src.domain.runtime_position_exit_plan import build_runtime_position_exit_plan
 from src.domain.runtime_post_close_followup import (
@@ -13,7 +18,6 @@ from src.domain.runtime_post_close_followup import (
 from src.domain.runtime_reduce_only_close_authorization import (
     build_runtime_reduce_only_close_owner_packet,
 )
-from src.domain.models import OrderRole
 
 
 def _active_monitor():
@@ -67,3 +71,63 @@ def test_post_close_followup_blocks_without_owner_packet_for_active_position():
 
     assert packet.status == RuntimePostCloseFollowupStatus.BLOCKED
     assert "owner_close_packet_missing" in packet.blockers
+
+
+def test_post_close_followup_carries_resolved_closed_review_facts_when_flat():
+    runtime = _runtime()
+    monitor = build_runtime_live_position_monitor_packet(
+        runtime=runtime,
+        local_positions=[],
+        local_open_orders=[],
+        exchange_positions=[],
+        exchange_open_stop_orders=[],
+        reconciliation_result=None,
+        now_ms=1,
+        exchange_facts_available=True,
+    )
+    entry_order = _order(
+        "entry-1",
+        OrderRole.ENTRY,
+        status=OrderStatus.FILLED,
+        filled_qty=Decimal("1"),
+        average_exec_price=Decimal("6.595"),
+        filled_at=1,
+    )
+    exit_order = _order(
+        "exit-1",
+        OrderRole.EXIT,
+        status=OrderStatus.FILLED,
+        filled_qty=Decimal("1"),
+        average_exec_price=Decimal("6.555"),
+        filled_at=2,
+        parent_order_id="entry-1",
+    )
+    review_facts = build_runtime_closed_trade_review_facts_packet(
+        runtime=runtime,
+        orders=[entry_order, exit_order],
+        active_positions=[],
+        open_orders=[],
+        now_ms=2,
+    )
+
+    packet = build_runtime_post_close_followup_packet(
+        monitor=monitor,
+        owner_close_packet=None,
+        closed_review_facts_packet=review_facts,
+        now_ms=3,
+    )
+
+    assert review_facts.status == RuntimeClosedTradeReviewFactsStatus.READY_FOR_CLOSED_REVIEW
+    assert packet.status == RuntimePostCloseFollowupStatus.READY_FOR_CLOSED_REVIEW
+    assert packet.closed_review_facts_status == "ready_for_closed_review"
+    assert packet.closed_review_entry_order_id == "entry-1"
+    assert packet.closed_review_exit_order_id == "exit-1"
+    assert packet.closed_review_command_args[:5] == [
+        "scripts/create_runtime_closed_trade_review.py",
+        "--runtime-instance-id",
+        runtime.runtime_instance_id,
+        "--entry-order-id",
+        "entry-1",
+    ]
+    assert "closed_review_facts_resolved" in packet.completed_steps
+    assert "use_resolved_closed_review_order_ids" in packet.required_steps
