@@ -46,11 +46,11 @@ def test_action_authorization_packet_waits_for_exact_owner_value():
         "name": "OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT",
         "value": APPROVAL_VALUE,
     }
-    assert packet["operator_command_plan"]["execute_command"][-3:] == [
-        "--authorization-id",
-        AUTHORIZATION_ID,
-        "--execute-real-submit",
-    ]
+    assert packet["operator_command_plan"]["execute_command"] is None
+    assert (
+        "prearmed_exchange_submit_evidence_required_for_execute_command"
+        in packet["operator_command_plan"]["execute_command_blockers"]
+    )
     assert packet["safety_invariants"]["exchange_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
 
@@ -94,9 +94,14 @@ def test_action_authorization_packet_marks_ready_with_exact_owner_value_only():
         owner_confirmation_value=APPROVAL_VALUE,
     )
 
-    assert packet["status"] == "owner_first_real_submit_action_authorization_packet_ready"
-    assert packet["checks"]["action_authorized"] is True
-    assert packet["owner_gate"]["authorized_execute_step_available"] is True
+    assert packet["status"] == "waiting_for_owner_first_real_submit_action_authorization"
+    assert packet["checks"]["owner_confirmation_value_matches"] is True
+    assert packet["checks"]["action_authorized"] is False
+    assert packet["owner_gate"]["authorized_execute_step_available"] is False
+    assert (
+        "prearmed_exchange_submit_evidence_required_for_execute_command"
+        in packet["checks"]["warnings"]
+    )
     assert packet["safety_invariants"]["api_called"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
 
@@ -168,9 +173,10 @@ def test_action_authorization_packet_cli_reads_json(tmp_path: Path, capsys):
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["checks"]["action_authorized"] is True
+    assert payload["checks"]["owner_confirmation_value_matches"] is True
+    assert payload["checks"]["action_authorized"] is False
     assert json.loads(output_path.read_text())["status"] == (
-        "owner_first_real_submit_action_authorization_packet_ready"
+        "waiting_for_owner_first_real_submit_action_authorization"
     )
 
 

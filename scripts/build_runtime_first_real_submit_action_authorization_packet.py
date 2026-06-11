@@ -114,8 +114,11 @@ def build_first_real_submit_action_authorization_packet(
     ready_for_owner_action_authorization = (
         final_review_ready and bool(target_head) and bool(normalized_authorization_id)
     )
+    prearmed_exchange_submit_evidence_available = False
     action_authorized = (
-        ready_for_owner_action_authorization and confirmation_matches
+        ready_for_owner_action_authorization
+        and confirmation_matches
+        and prearmed_exchange_submit_evidence_available
     )
 
     if not ready_for_owner_action_authorization:
@@ -180,8 +183,16 @@ def build_first_real_submit_action_authorization_packet(
                 action_context_authoritative
             ),
             "owner_confirmation_value_matches": confirmation_matches,
+            "prearmed_exchange_submit_evidence_available": (
+                prearmed_exchange_submit_evidence_available
+            ),
             "blockers": _dedupe(blockers),
-            "warnings": list(checks.get("warnings") or []),
+            "warnings": _dedupe(
+                [
+                    *(checks.get("warnings") or []),
+                    "prearmed_exchange_submit_evidence_required_for_execute_command",
+                ]
+            ),
         },
         "operator_command_plan": command_plan,
         "owner_gate": {
@@ -196,6 +207,7 @@ def build_first_real_submit_action_authorization_packet(
                 "withdrawal or transfer",
             ],
             "authorized_execute_step_available": action_authorized,
+            "next_packet_required": "exchange-arm-derived first-real-submit action packet",
         },
         "safety_invariants": {
             "packet_build_only": True,
@@ -233,6 +245,10 @@ def _command_plan(
             "authorization_id_required": True,
             "disabled_smoke_command": None,
             "execute_command": None,
+            "execute_command_blockers": [
+                "authorization_id_required",
+                "prearmed_exchange_submit_evidence_required_for_execute_command",
+            ],
         }
 
     base = [
@@ -251,24 +267,20 @@ def _command_plan(
         authorization_id,
         "--preview-disabled-first-real-submit-action",
     ]
-    execute = base + [
-        "--mode",
-        "execute",
-        "--authorization-id",
-        authorization_id,
-        "--execute-real-submit",
-    ]
     return {
         "not_executed": True,
         "uses_official_api_flow": True,
         "api_base_env": API_BASE_ENV,
         "api_base": api_base,
         "disabled_smoke_command": disabled_smoke,
-        "execute_command": execute,
+        "execute_command": None,
         "execute_env_required": {
             "name": APPROVAL_ENV,
             "value": expected_confirmation,
         },
+        "execute_command_blockers": [
+            "prearmed_exchange_submit_evidence_required_for_execute_command",
+        ],
         "execute_command_is_preview_only_in_this_packet": True,
     }
 

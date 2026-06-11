@@ -713,7 +713,7 @@ def test_execute_requires_exact_env_confirmation(monkeypatch):
     assert not any("first-real-submit-actions" in path for path in paths)
 
 
-def test_execute_calls_real_submit_when_env_guard_matches(monkeypatch):
+def test_execute_blocks_without_prearmed_exchange_submit_evidence(monkeypatch):
     monkeypatch.setenv(APPROVAL_ENV, _approval_value("auth-1"))
     client = _FakeClient()
     flow = FirstRealSubmitApiFlow(
@@ -721,9 +721,43 @@ def test_execute_calls_real_submit_when_env_guard_matches(monkeypatch):
         config=FlowConfig(
             api_base="http://unit",
             mode="execute",
-            order_candidate_id="candidate-1",
+            authorization_id="auth-1",
             execute_real_submit=True,
-            record_attempt_consumption=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert "prearmed_exchange_submit_evidence_required_for_execute" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-controlled-submit-plans" in path for path in paths)
+    assert any("runtime-execution-first-real-submit-evidence-preparations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
+    assert not any("first-real-submit-actions" in path for path in paths)
+
+
+def test_execute_calls_real_submit_only_with_prearmed_evidence(monkeypatch):
+    monkeypatch.setenv(APPROVAL_ENV, _approval_value("auth-1"))
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="execute",
+            authorization_id="auth-1",
+            execute_real_submit=True,
+            trusted_submit_fact_snapshot_id="facts-1",
+            submit_idempotency_policy_id="idem-1",
+            attempt_outcome_policy_id="policy-1",
+            protection_creation_failure_policy_id="protect-fail-1",
+            local_registration_enablement_decision_id="local-enable-1",
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+            exchange_submit_adapter_enablement_id="exchange-adapter-enable-1",
+            exchange_submit_action_authorization_id="exchange-action-1",
+            deployment_readiness_evidence_id="gateway-ready-1",
+            exchange_submit_adapter_result_id="exchange-adapter-1",
         ),
     )
 
@@ -733,8 +767,10 @@ def test_execute_calls_real_submit_when_env_guard_matches(monkeypatch):
     assert report["ids"]["execution_result_id"] == "exec-1"
     assert os.environ[APPROVAL_ENV] == "auth-1:first-real-submit:real_gateway_action"
     paths = [call["path"] for call in client.calls]
-    assert any("runtime-execution-attempt-mutations" in path for path in paths)
     assert any("first-real-submit-actions" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
 
 
 def test_env_loader_fills_operator_auth_from_file(monkeypatch, tmp_path):

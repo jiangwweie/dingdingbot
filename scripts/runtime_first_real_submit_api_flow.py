@@ -84,6 +84,17 @@ class FlowConfig:
     adapter_result_store_implemented: bool = True
     real_adapter_boundary_implemented: bool = True
     explain_disabled_smoke_prerequisites: bool = True
+    trusted_submit_fact_snapshot_id: str | None = None
+    submit_idempotency_policy_id: str | None = None
+    attempt_outcome_policy_id: str | None = None
+    protection_creation_failure_policy_id: str | None = None
+    local_registration_enablement_decision_id: str | None = None
+    owner_real_submit_authorization_id: str | None = None
+    order_lifecycle_submit_enablement_id: str | None = None
+    exchange_submit_adapter_enablement_id: str | None = None
+    exchange_submit_action_authorization_id: str | None = None
+    deployment_readiness_evidence_id: str | None = None
+    exchange_submit_adapter_result_id: str | None = None
 
 
 @dataclass
@@ -169,6 +180,7 @@ class FirstRealSubmitApiFlow:
         self._client = client
         self._config = config
         self.state = FlowState()
+        self._seed_explicit_evidence_ids()
 
     def run(self) -> dict[str, Any]:
         if self._config.mode == "inspect":
@@ -201,7 +213,16 @@ class FirstRealSubmitApiFlow:
                         self._require_final_execute_guard(authorization_id)
                     if self.state.blockers:
                         return self._report()
-                self._arm_for_exchange_submit()
+                if self._config.mode == "execute":
+                    self._hydrate_authorization_context()
+                    if self.state.blockers:
+                        return self._report()
+                    self._record_evidence_preparation(collect_body_blockers=False)
+                    self._require_prearmed_exchange_submit_evidence()
+                    if self.state.blockers:
+                        return self._report()
+                else:
+                    self._arm_for_exchange_submit()
             if self._config.mode == "execute":
                 self._execute_first_real_submit()
                 if self._config.record_post_submit_accounting:
@@ -211,6 +232,66 @@ class FirstRealSubmitApiFlow:
     def _inspect(self) -> None:
         self._step("list_strategy_runtimes", "GET", "/api/trading-console/strategy-runtimes")
         self._step("list_order_candidates", "GET", "/api/trading-console/order-candidates")
+
+    def _seed_explicit_evidence_ids(self) -> None:
+        self.state.merge_ids(
+            {
+                "trusted_submit_fact_snapshot_id": (
+                    self._config.trusted_submit_fact_snapshot_id
+                ),
+                "submit_idempotency_policy_id": (
+                    self._config.submit_idempotency_policy_id
+                ),
+                "attempt_outcome_policy_id": self._config.attempt_outcome_policy_id,
+                "protection_creation_failure_policy_id": (
+                    self._config.protection_creation_failure_policy_id
+                ),
+                "local_registration_enablement_decision_id": (
+                    self._config.local_registration_enablement_decision_id
+                ),
+                "owner_real_submit_authorization_id": (
+                    self._config.owner_real_submit_authorization_id
+                ),
+                "order_lifecycle_submit_enablement_id": (
+                    self._config.order_lifecycle_submit_enablement_id
+                ),
+                "exchange_submit_adapter_enablement_id": (
+                    self._config.exchange_submit_adapter_enablement_id
+                ),
+                "exchange_submit_action_authorization_id": (
+                    self._config.exchange_submit_action_authorization_id
+                ),
+                "deployment_readiness_evidence_id": (
+                    self._config.deployment_readiness_evidence_id
+                ),
+                "exchange_submit_adapter_result_id": (
+                    self._config.exchange_submit_adapter_result_id
+                ),
+            }
+        )
+
+    def _require_prearmed_exchange_submit_evidence(self) -> None:
+        required_ids = (
+            "trusted_submit_fact_snapshot_id",
+            "submit_idempotency_policy_id",
+            "attempt_outcome_policy_id",
+            "protection_creation_failure_policy_id",
+            "local_registration_enablement_decision_id",
+            "owner_real_submit_authorization_id",
+            "order_lifecycle_submit_enablement_id",
+            "exchange_submit_adapter_enablement_id",
+            "exchange_submit_action_authorization_id",
+            "deployment_readiness_evidence_id",
+            "exchange_submit_adapter_result_id",
+        )
+        missing = [key for key in required_ids if not self.state.ids.get(key)]
+        if missing:
+            self.state.add_blockers(
+                [
+                    "prearmed_exchange_submit_evidence_required_for_execute",
+                    *[f"{key}_missing_for_execute" for key in missing],
+                ]
+            )
 
     def _create_shadow_candidate_from_signal_input(self) -> None:
         if not self._config.runtime_instance_id:
@@ -1275,6 +1356,17 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     parser.add_argument("--skip-local-registration", action="store_true")
     parser.add_argument("--skip-exchange-arm", action="store_true")
     parser.add_argument("--skip-gateway-readiness", action="store_true")
+    parser.add_argument("--trusted-submit-fact-snapshot-id")
+    parser.add_argument("--submit-idempotency-policy-id")
+    parser.add_argument("--attempt-outcome-policy-id")
+    parser.add_argument("--protection-creation-failure-policy-id")
+    parser.add_argument("--local-registration-enablement-decision-id")
+    parser.add_argument("--owner-real-submit-authorization-id")
+    parser.add_argument("--order-lifecycle-submit-enablement-id")
+    parser.add_argument("--exchange-submit-adapter-enablement-id")
+    parser.add_argument("--exchange-submit-action-authorization-id")
+    parser.add_argument("--deployment-readiness-evidence-id")
+    parser.add_argument("--exchange-submit-adapter-result-id")
     parser.add_argument(
         "--record-attempt-consumption",
         action="store_true",
@@ -1343,6 +1435,27 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         explain_disabled_smoke_prerequisites=(
             not args.skip_disabled_smoke_prerequisite_probe
         ),
+        trusted_submit_fact_snapshot_id=args.trusted_submit_fact_snapshot_id,
+        submit_idempotency_policy_id=args.submit_idempotency_policy_id,
+        attempt_outcome_policy_id=args.attempt_outcome_policy_id,
+        protection_creation_failure_policy_id=(
+            args.protection_creation_failure_policy_id
+        ),
+        local_registration_enablement_decision_id=(
+            args.local_registration_enablement_decision_id
+        ),
+        owner_real_submit_authorization_id=args.owner_real_submit_authorization_id,
+        order_lifecycle_submit_enablement_id=(
+            args.order_lifecycle_submit_enablement_id
+        ),
+        exchange_submit_adapter_enablement_id=(
+            args.exchange_submit_adapter_enablement_id
+        ),
+        exchange_submit_action_authorization_id=(
+            args.exchange_submit_action_authorization_id
+        ),
+        deployment_readiness_evidence_id=args.deployment_readiness_evidence_id,
+        exchange_submit_adapter_result_id=args.exchange_submit_adapter_result_id,
     )
 
 
