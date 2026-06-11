@@ -606,12 +606,16 @@ class _LocalRegistrationActionAuthorizationRepo:
         self.owner_confirmed = owner_confirmed
         self.deployment_readiness_evidence_id = deployment_readiness_evidence_id
         self.created = []
+        self.by_id = {}
 
     async def create(self, authorization):
         self.created.append(authorization)
+        self.by_id[authorization.action_authorization_id] = authorization
         return authorization
 
     async def get(self, _action_authorization_id):
+        if _action_authorization_id in self.by_id:
+            return self.by_id[_action_authorization_id]
         if self.missing:
             return None
         return SimpleNamespace(
@@ -1319,6 +1323,103 @@ async def test_local_registration_enablement_blocks_missing_action_authorization
     assert "local_registration_action_authorization_not_found" in decision.blockers
     assert decision.local_order_registration_executed is False
     assert decision.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_service_smoke_records_action_authorization_then_registers_local_orders():
+    preview = _registration_preview()
+    lifecycle = _Lifecycle()
+    adapter_result_repo = _AdapterResultRepo()
+    action_repo = _LocalRegistrationActionAuthorizationRepo(
+        authorization_id=preview.authorization_id,
+        execution_intent_id=preview.execution_intent_id,
+        runtime_instance_id=preview.runtime_instance_id,
+        symbol=preview.symbol,
+    )
+    service = _service_with_preview(
+        preview,
+        lifecycle=lifecycle,
+        adapter_result_repo=adapter_result_repo,
+        local_registration_action_authorization_repo=action_repo,
+    )
+
+    action_authorization = (
+        await service.record_local_registration_action_authorization_for_authorization(
+            "auth-1",
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+            local_order_registration_enablement_id=(
+                "local-registration-enablement-1"
+            ),
+            owner_confirmed_for_local_registration_action=True,
+            owner_operator_id="owner",
+            reason="scoped local registration smoke",
+            deployment_readiness_evidence_id=(
+                "runtime-exchange-gateway-readiness-1"
+            ),
+        )
+    )
+    enablement = await service.local_registration_enablement_decision_for_authorization(
+        "auth-1",
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id="protection-failure-policy-intent-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+        local_order_registration_enablement_id="local-registration-enablement-1",
+        local_registration_action_authorization_id=(
+            action_authorization.action_authorization_id
+        ),
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    )
+    result = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=enablement,
+    )
+
+    assert (
+        action_authorization.status
+        == RuntimeExecutionLocalRegistrationActionAuthorizationStatus
+        .APPROVED_FOR_LOCAL_REGISTRATION_ACTION
+    )
+    assert (
+        enablement.status
+        == (
+            RuntimeExecutionLocalRegistrationEnablementStatus
+            .READY_FOR_LOCAL_REGISTRATION_ACTION
+        )
+    )
+    assert (
+        result.status
+        == (
+            RuntimeExecutionOrderLifecycleAdapterResultStatus
+            .REGISTERED_CREATED_LOCAL_ORDERS
+        )
+    )
+    assert result.local_order_ids == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert result.entry_order_ids == ["runtime-order-draft-auth-1-entry"]
+    assert result.protection_order_ids == ["runtime-order-draft-auth-1-sl"]
+    assert result.order_lifecycle_called is True
+    assert result.local_order_registration_executed is True
+    assert result.exchange_called is False
+    assert result.exchange_order_submitted is False
+    assert [call["order"].status for call in lifecycle.calls] == [
+        OrderStatus.CREATED,
+        OrderStatus.CREATED,
+    ]
+    assert adapter_result_repo.complete_calls == 1
 
 
 @pytest.mark.asyncio
