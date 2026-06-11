@@ -762,6 +762,7 @@ def _entry_price_reference(
 ) -> Decimal | None:
     evidence = output.evidence_payload
     for value in (
+        _nested(evidence, "candidate_semantics", "entry", "entry_price_reference"),
         evidence.get("latest_1h_close"),
         evidence.get("latest_close"),
         _nested(evidence, "price_action_structure", "latest_close"),
@@ -796,6 +797,11 @@ def _stop_price_reference(
             return structure_stop, "brf_rally_high"
         if atr is not None and atr > Decimal("0"):
             return entry_price + atr, "brf_atr_reference"
+    semantics_stop = _decimal_or_none(
+        _nested(evidence, "candidate_semantics", "protection", "stop_price_reference")
+    )
+    if semantics_stop is not None:
+        return semantics_stop, "strategy_semantics_protection"
     raise RuntimeStrategySignalPlanningError("strategy_stop_reference_unavailable")
 
 

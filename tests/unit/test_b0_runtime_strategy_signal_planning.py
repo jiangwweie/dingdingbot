@@ -299,6 +299,25 @@ def _brf_down_context_4h() -> list[dict[str, Any]]:
     ]
 
 
+def _btpc_1h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "110", "111", "108", "109"),
+        _candle(1, "109", "110", "107", "108"),
+        _candle(2, "108", "109", "106", "107"),
+        _candle(3, "107", "108", "105", "106"),
+        _candle(4, "106", "107", "104", "105"),
+        _candle(5, "105", "106", "103", "104"),
+        _candle(6, "104", "105", "102", "103"),
+        _candle(7, "103", "104", "101", "102"),
+        _candle(8, "102", "104", "100", "103"),
+        _candle(9, "103", "105", "101", "104"),
+        _candle(10, "104", "106", "102", "105"),
+        _candle(11, "105", "106", "100", "101"),
+        _candle(12, "101", "102", "99", "100"),
+        _candle(13, "100", "101", "95", "96"),
+    ]
+
+
 def _runtime_signal_input(
     *,
     family_id: str,
@@ -726,6 +745,51 @@ async def test_runtime_signal_input_brf_short_creates_shadow_candidate_with_rall
     assert result.candidate.risk_preview.leverage == Decimal("1")
     assert result.candidate.execution_enabled is False
     assert result.candidate.candidate_executable is False
+    assert result.execution_intent_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+
+
+async def test_runtime_signal_input_btpc_short_uses_candidate_semantics_stop():
+    runtime = _runtime_for_strategy(
+        family_id="BTPC-001",
+        version_id="BTPC-001-v0",
+        side="short",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+    )
+    service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="BTPC-001",
+            version_id="BTPC-001-v0",
+            one_hour=_btpc_1h(),
+            four_hour=_brf_down_context_4h(),
+            last_price=Decimal("96"),
+            atr=Decimal("4"),
+            side="short",
+        ),
+        runtime=runtime,
+        context_id="context-btpc-shadow-planning-v1",
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+    assert result.evaluation_result.output is not None
+    assert result.evaluation_result.output.side == SignalSide.SHORT
+    assert store.evaluation is not None
+    assert store.candidate is not None
+    assert result.proposal is not None
+    assert result.proposal.stop_source == "strategy_semantics_protection"
+    assert result.proposal.stop_price_reference == Decimal("108")
+    assert result.proposal.take_profit_references[0]["price_reference"] == "84.00000000"
+    assert result.candidate is store.candidate
+    assert result.candidate.side == "short"
+    assert result.candidate.protection_preview.stop_price_reference == Decimal("108")
+    assert result.candidate.not_order is True
+    assert result.candidate.not_execution_intent is True
     assert result.execution_intent_created is False
     assert result.order_lifecycle_called is False
     assert result.exchange_called is False
