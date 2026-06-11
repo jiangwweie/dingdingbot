@@ -30,8 +30,14 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.runtime_execution_intent_adapter_service import (
     RuntimeExecutionIntentAdapterService,
 )
+from src.application.runtime_execution_first_real_submit_evidence_preparation_service import (
+    RuntimeExecutionFirstRealSubmitEvidencePreparationService,
+)
 from src.application.runtime_execution_planning_service import (
     RuntimeExecutionPlanningService,
+)
+from src.application.runtime_execution_trusted_submit_facts_service import (
+    RuntimeExecutionTrustedSubmitFactsAssemblyService,
 )
 from src.application.runtime_final_gate_preview_service import (
     RuntimeFinalGatePreviewService,
@@ -42,6 +48,9 @@ from src.domain.runtime_execution_controlled_submit import (
 )
 from src.domain.runtime_execution_attempt_mutation import (
     RuntimeExecutionAttemptMutationStatus,
+)
+from src.domain.runtime_execution_attempt_outcome_policy import (
+    RuntimeExecutionAttemptOutcomeKind,
 )
 from src.domain.runtime_execution_order_lifecycle_adapter import (
     RuntimeExecutionOrderLifecycleAdapterPreviewStatus,
@@ -98,6 +107,9 @@ from src.domain.strategy_runtime_promotion_gate import (
 )
 from src.domain.strategy_runtime_safety_readiness import (
     evaluate_strategy_runtime_safety_readiness,
+)
+from src.domain.runtime_execution_trusted_submit_facts import (
+    RuntimeExecutionTrustedSubmitFactSource,
 )
 from src.domain.strategy_semantics import initial_strategy_semantics_catalog
 
@@ -239,6 +251,76 @@ class _OrderLifecycleAdapterResultRepository:
         return self.records.get(authorization_id)
 
 
+class _ExchangeSubmitAdapterResultRepository:
+    def __init__(self) -> None:
+        self.records: dict[str, Any] = {}
+
+    async def get_by_authorization_id(self, authorization_id: str) -> Any | None:
+        return self.records.get(authorization_id)
+
+    async def acquire_exchange_submit_lock(self, result: Any) -> tuple[bool, Any]:
+        existing = self.records.get(result.authorization_id)
+        if existing is not None:
+            return False, existing
+        self.records[result.authorization_id] = result
+        return True, result
+
+    async def complete_exchange_submit_result(self, result: Any) -> Any:
+        self.records[result.authorization_id] = result
+        return result
+
+
+class _ExchangeSubmitExecutionResultRepository:
+    def __init__(self) -> None:
+        self.records: dict[str, Any] = {}
+
+    async def get_by_authorization_id(self, authorization_id: str) -> Any | None:
+        return self.records.get(authorization_id)
+
+    async def acquire_exchange_submit_execution_lock(
+        self,
+        result: Any,
+    ) -> tuple[bool, Any]:
+        existing = self.records.get(result.authorization_id)
+        if existing is not None:
+            return False, existing
+        self.records[result.authorization_id] = result
+        return True, result
+
+    async def complete_exchange_submit_execution_result(self, result: Any) -> Any:
+        self.records[result.authorization_id] = result
+        return result
+
+
+class _TrustedSubmitFactReader:
+    async def read_trusted_submit_fact_source(
+        self,
+        *,
+        key: str,
+        execution_intent_id: str,
+        runtime_instance_id: str | None,
+        order_candidate_id: str | None,
+        symbol: str,
+        side: str | None,
+        now_ms: int,
+    ) -> RuntimeExecutionTrustedSubmitFactSource:
+        return RuntimeExecutionTrustedSubmitFactSource(
+            key=key,
+            source_id=f"pre-live-{key}-{symbol}",
+            source_type=f"pre_live_in_memory_{key}_snapshot",
+            observed_at_ms=now_ms - 50,
+            max_age_ms=300_000,
+            metadata={
+                "pre_live_rehearsal": True,
+                "execution_intent_id": execution_intent_id,
+                "runtime_instance_id": runtime_instance_id,
+                "order_candidate_id": order_candidate_id,
+                "symbol": symbol,
+                "side": side,
+            },
+        )
+
+
 async def build_pre_live_packet(
     *,
     deployed_head: str | None,
@@ -268,9 +350,23 @@ async def build_pre_live_packet(
     attempt_reservation_repository = _InMemoryRepository("reservation_id")
     attempt_mutation_repository = _InMemoryRepository("mutation_id")
     protection_plan_repository = _InMemoryRepository("protection_plan_id")
+    protection_failure_policy_repository = _InMemoryRepository("policy_id")
+    trusted_submit_facts_repository = _InMemoryRepository(
+        "trusted_submit_fact_snapshot_id"
+    )
+    submit_idempotency_repository = _InMemoryRepository(
+        "submit_idempotency_policy_id"
+    )
+    attempt_outcome_policy_repository = _InMemoryRepository("policy_id")
     order_lifecycle_handoff_repository = _InMemoryRepository("handoff_draft_id")
     order_lifecycle_adapter_result_repository = (
         _OrderLifecycleAdapterResultRepository()
+    )
+    exchange_submit_adapter_result_repository = (
+        _ExchangeSubmitAdapterResultRepository()
+    )
+    exchange_submit_execution_result_repository = (
+        _ExchangeSubmitExecutionResultRepository()
     )
     planning_service = RuntimeExecutionPlanningService(
         runtime_service=runtime_service,
@@ -284,10 +380,20 @@ async def build_pre_live_packet(
         submit_authorization_repository=authorization_repository,
         attempt_reservation_repository=attempt_reservation_repository,
         attempt_mutation_repository=attempt_mutation_repository,
+        attempt_outcome_policy_repository=attempt_outcome_policy_repository,
         protection_plan_repository=protection_plan_repository,
+        protection_failure_policy_repository=protection_failure_policy_repository,
         order_lifecycle_handoff_repository=order_lifecycle_handoff_repository,
         order_lifecycle_adapter_result_repository=(
             order_lifecycle_adapter_result_repository
+        ),
+        trusted_submit_facts_repository=trusted_submit_facts_repository,
+        submit_idempotency_repository=submit_idempotency_repository,
+        exchange_submit_adapter_result_repository=(
+            exchange_submit_adapter_result_repository
+        ),
+        exchange_submit_execution_result_repository=(
+            exchange_submit_execution_result_repository
         ),
         final_gate_preview_service=final_gate,
         runtime_service=runtime_service,
@@ -338,6 +444,15 @@ async def build_pre_live_packet(
     attempt_mutation = await adapter_service.apply_attempt_mutation_for_reservation(
         attempt_reservation.reservation_id
     )
+    attempt_outcome_policy = (
+        await adapter_service.record_attempt_outcome_policy_for_reservation(
+            attempt_reservation.reservation_id,
+            outcome_kind=(
+                RuntimeExecutionAttemptOutcomeKind
+                .ENTRY_FILLED_PROTECTION_CREATION_FAILED
+            ),
+        )
+    )
     order_lifecycle_handoff = (
         await adapter_service.record_order_lifecycle_handoff_draft_for_authorization(
             authorization.authorization_id
@@ -361,9 +476,37 @@ async def build_pre_live_packet(
     await order_lifecycle_adapter_result_repository.complete_registration(
         order_lifecycle_adapter_result
     )
-    rehearsal = await adapter_service.submit_rehearsal_for_authorization(
-        authorization.authorization_id
+    trusted_reader = _TrustedSubmitFactReader()
+    evidence_preparation_service = (
+        RuntimeExecutionFirstRealSubmitEvidencePreparationService(
+            runtime_execution_intent_adapter_service=adapter_service,
+            trusted_submit_facts_assembly_service=(
+                RuntimeExecutionTrustedSubmitFactsAssemblyService(
+                    repository=trusted_submit_facts_repository,
+                    account_fact_reader=trusted_reader,
+                    active_position_reader=trusted_reader,
+                    open_order_reader=trusted_reader,
+                    protection_state_reader=trusted_reader,
+                    market_rule_reader=trusted_reader,
+                    reconciliation_reader=trusted_reader,
+                )
+            ),
+        )
     )
+    evidence_preparation = (
+        await evidence_preparation_service.prepare_for_authorization(
+            authorization.authorization_id,
+            adapter_result_store_implemented=True,
+            real_adapter_boundary_implemented=False,
+        )
+    )
+    first_real_submit_packet = evidence_preparation.packet
+    if first_real_submit_packet is not None:
+        rehearsal = first_real_submit_packet.submit_rehearsal
+    else:
+        rehearsal = await adapter_service.submit_rehearsal_for_authorization(
+            authorization.authorization_id
+        )
 
     technical_blockers = _dedupe(
         list(plan.final_gate_preview.blockers)
@@ -374,9 +517,11 @@ async def build_pre_live_packet(
         + list(protection_failure_policy.blockers)
         + list(attempt_reservation.blockers)
         + list(attempt_mutation.blockers)
+        + list(attempt_outcome_policy.blockers)
         + list(order_lifecycle_handoff.blockers)
         + list(order_lifecycle_adapter_preview.blockers)
         + list(order_registration_draft_preview.blockers)
+        + list(evidence_preparation.blockers)
     )
     exchange_submit_rehearsal_blockers = _dedupe(
         list(order_lifecycle_adapter_result.blockers) + list(rehearsal.blockers)
@@ -482,6 +627,17 @@ async def build_pre_live_packet(
             ready_for_live_runtime_enablement
         ),
         "ready_for_first_real_submit": False,
+        "machine_evidence_preparation_status": _enum_value(
+            evidence_preparation.status
+        ),
+        "machine_evidence_prepared_ids": dict(
+            evidence_preparation.prepared_evidence_ids
+        ),
+        "machine_evidence_available_ids": dict(
+            evidence_preparation.available_evidence_ids
+        ),
+        "machine_evidence_skipped": list(evidence_preparation.skipped_evidence),
+        "machine_evidence_blockers": list(evidence_preparation.blockers),
         "technical_blockers": technical_blockers,
         "exchange_submit_rehearsal_blockers": exchange_submit_rehearsal_blockers,
         "protection_failure_policy_blockers": list(
@@ -554,6 +710,12 @@ async def build_pre_live_packet(
                 protection_failure_policy.status
             ),
             "attempt_mutation_status": _enum_value(attempt_mutation.status),
+            "attempt_outcome_policy_status": _enum_value(
+                attempt_outcome_policy.status
+            ),
+            "first_real_submit_evidence_preparation_status": _enum_value(
+                evidence_preparation.status
+            ),
             "order_lifecycle_handoff_status": _enum_value(
                 order_lifecycle_handoff.status
             ),
@@ -573,6 +735,12 @@ async def build_pre_live_packet(
         "safety_readiness": safety_readiness.model_dump(mode="json"),
         "promotion_gate": promotion_gate_result.model_dump(mode="json"),
         "live_enablement_preview": live_enablement_preview.model_dump(mode="json"),
+        "first_real_submit_packet": (
+            first_real_submit_packet.model_dump(mode="json")
+            if first_real_submit_packet is not None
+            else None
+        ),
+        "evidence_preparation": evidence_preparation.model_dump(mode="json"),
         "rehearsal": rehearsal.model_dump(mode="json"),
         "registration_draft_chain": {
             "scope": "runtime_order_registration_draft_pre_live_evidence",
@@ -584,6 +752,9 @@ async def build_pre_live_packet(
             ),
             "attempt_reservation": attempt_reservation.model_dump(mode="json"),
             "attempt_mutation": attempt_mutation.model_dump(mode="json"),
+            "attempt_outcome_policy": (
+                attempt_outcome_policy.model_dump(mode="json")
+            ),
             "order_lifecycle_handoff": order_lifecycle_handoff.model_dump(mode="json"),
             "order_lifecycle_adapter_preview": (
                 order_lifecycle_adapter_preview.model_dump(mode="json")

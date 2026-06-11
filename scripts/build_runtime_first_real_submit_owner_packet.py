@@ -84,6 +84,11 @@ def build_first_real_submit_owner_packet(
         if isinstance(pre_live_packet.get("pipeline"), dict)
         else {}
     )
+    evidence_preparation = (
+        pre_live_packet.get("evidence_preparation")
+        if isinstance(pre_live_packet.get("evidence_preparation"), dict)
+        else {}
+    )
 
     technical_blockers = list(checks.get("technical_blockers") or [])
     protection_failure_policy_blockers = list(
@@ -176,6 +181,9 @@ def build_first_real_submit_owner_packet(
             "implementation_ready": implementation_ready,
             "ready_for_owner_decision": ready_for_owner_decision,
             "ready_for_first_real_submit": ready_for_first_real_submit,
+            "machine_evidence_preparation_status": evidence_preparation.get(
+                "status"
+            ),
             "pipeline": {
                 "submit_rehearsal_status": pipeline.get("submit_rehearsal_status"),
                 "submit_adapter_preview_status": pipeline.get(
@@ -202,6 +210,27 @@ def build_first_real_submit_owner_packet(
             "implementation_blockers": implementation_blockers,
             "live_enablement_blockers": live_enablement_blockers,
             "forbidden_execution_flags": forbidden_execution_flags,
+            "machine_evidence_blockers": list(
+                evidence_preparation.get("blockers") or []
+            ),
+            "machine_evidence_skipped": list(
+                evidence_preparation.get("skipped_evidence") or []
+            ),
+        },
+        "evidence_preparation": {
+            "status": evidence_preparation.get("status"),
+            "prepared_evidence_ids": dict(
+                evidence_preparation.get("prepared_evidence_ids") or {}
+            ),
+            "available_evidence_ids": dict(
+                evidence_preparation.get("available_evidence_ids") or {}
+            ),
+            "packet_status": (
+                evidence_preparation.get("packet", {}).get("status")
+                if isinstance(evidence_preparation.get("packet"), dict)
+                else None
+            ),
+            "does_not_authorize_live_action": True,
         },
         "checks": {
             "packet_ready_for_owner_decision": ready_for_owner_decision,

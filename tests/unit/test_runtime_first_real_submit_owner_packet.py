@@ -83,6 +83,14 @@ async def test_owner_packet_blocks_when_deploy_and_owner_auth_are_missing():
         "controlled_submit_adapter_not_implemented",
         "order_lifecycle_adapter_disabled",
     ]
+    assert packet["readiness_summary"]["machine_evidence_preparation_status"] == (
+        "prepared_packet_blocked"
+    )
+    assert packet["evidence_preparation"]["status"] == "prepared_packet_blocked"
+    assert "trusted_submit_fact_snapshot_id" in (
+        packet["evidence_preparation"]["prepared_evidence_ids"]
+    )
+    assert packet["evidence_preparation"]["does_not_authorize_live_action"] is True
     assert packet["source_pre_live_packet"]["status"] == "blocked_before_first_real_submit"
     assert packet["safety_invariants"]["exchange_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
@@ -115,6 +123,10 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
         "controlled_submit_adapter_not_implemented",
         "order_lifecycle_adapter_disabled",
     ]
+    assert packet["evidence_preparation"]["status"] == "prepared_packet_blocked"
+    assert "attempt_outcome_policy_id" in (
+        packet["evidence_preparation"]["available_evidence_ids"]
+    )
     assert packet["checks"]["ready_for_first_real_submit"] is False
     assert packet["does_not_authorize"] == [
         "real runtime submit",
