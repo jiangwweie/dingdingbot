@@ -170,6 +170,12 @@ class FirstRealSubmitApiFlow:
     def run(self) -> dict[str, Any]:
         if self._config.mode == "inspect":
             self._inspect()
+        elif self._config.mode == "disabled-smoke":
+            if self._config.authorization_id:
+                self.state.remember("authorization_id", self._config.authorization_id)
+                self._preview_disabled_first_real_submit_action()
+            else:
+                self.state.add_blockers(["authorization_id_required_for_disabled_smoke"])
         else:
             self._verify_next_attempt_gate_if_available()
             if self.state.blockers:
@@ -1170,7 +1176,7 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     parser.add_argument("--env-file", help="Optional env file for operator auth/API config.")
     parser.add_argument(
         "--mode",
-        choices=["inspect", "prepare", "arm", "execute"],
+        choices=["inspect", "prepare", "arm", "execute", "disabled-smoke"],
         default="inspect",
     )
     parser.add_argument("--order-candidate-id")

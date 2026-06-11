@@ -422,6 +422,58 @@ def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit()
     )
 
 
+def test_disabled_smoke_calls_first_real_submit_action_without_attempt_mutation():
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="disabled-smoke",
+            authorization_id="auth-1",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ready_for_real_submit_action"] is False
+    assert report["ids"]["disabled_first_real_submit_execution_result_id"] == (
+        "exec-disabled-1"
+    )
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert "runtime-execution-first-real-submit-actions" in call["path"]
+    assert call["query"]["owner_confirmed_for_first_real_submit_action"] is False
+    assert not any(
+        "runtime-execution-attempt-mutations" in item["path"]
+        for item in client.calls
+    )
+    assert not any(
+        "runtime-execution-local-registration-action-authorizations" in item["path"]
+        for item in client.calls
+    )
+    assert not any(
+        "exchange-submit-adapter-results" in item["path"]
+        for item in client.calls
+    )
+
+
+def test_disabled_smoke_requires_authorization_id():
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="disabled-smoke",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "authorization_id_required_for_disabled_smoke" in report["blockers"]
+    assert client.calls == []
+
+
 def test_arm_blocks_before_attempt_mutation_when_submit_facts_are_stale():
     client = _FakeClient(
         evidence_blockers=[
