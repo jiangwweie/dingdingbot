@@ -52,6 +52,8 @@ def _loop_command(args: argparse.Namespace, loop_packet_path: Path) -> list[str]
         str(args.max_iterations),
         "--loop-interval-seconds",
         str(args.loop_interval_seconds),
+        "--cycle-timeout-seconds",
+        str(args.cycle_timeout_seconds),
         "--api-base",
         args.api_base,
         "--source",
@@ -152,11 +154,27 @@ def build_supervisor_packet(
     output_dir.mkdir(parents=True, exist_ok=True)
     loop_packet_path = Path(args.loop_output_json).expanduser() if args.loop_output_json else output_dir / "loop-packet.json"
     followup_path = Path(args.followup_output_json).expanduser() if args.followup_output_json else output_dir / "followup-packet.json"
+    supervisor_packet_path = (
+        Path(args.supervisor_output_json).expanduser()
+        if args.supervisor_output_json
+        else output_dir / "supervisor-packet.json"
+    )
     loop_stdout_path = output_dir / "loop-final-stdout.json"
     followup_stdout_path = output_dir / "followup-stdout.json"
 
     command_runner = runner or _run_subprocess
-    loop_result = command_runner(_loop_command(args, loop_packet_path), loop_stdout_path)
+    loop_command = _loop_command(args, loop_packet_path)
+    _write_json(
+        supervisor_packet_path,
+        _running_supervisor_packet(
+            args,
+            output_dir=output_dir,
+            loop_packet_path=loop_packet_path,
+            followup_path=followup_path,
+            loop_command=loop_command,
+        ),
+    )
+    loop_result = command_runner(loop_command, loop_stdout_path)
     loop_packet = _json_or_none(loop_packet_path)
 
     followup_result: CommandResult | None = None
@@ -183,7 +201,7 @@ def build_supervisor_packet(
     if forbidden_effects:
         blockers.append("supervisor_detected_forbidden_effects")
 
-    return {
+    packet = {
         "scope": "runtime_active_observation_supervisor",
         "status": "supervisor_completed" if not blockers else "supervisor_blocked",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -222,6 +240,56 @@ def build_supervisor_packet(
             "forbidden_effects": forbidden_effects,
         },
     }
+    _write_json(supervisor_packet_path, packet)
+    return packet
+
+
+def _running_supervisor_packet(
+    args: argparse.Namespace,
+    *,
+    output_dir: Path,
+    loop_packet_path: Path,
+    followup_path: Path,
+    loop_command: list[str],
+) -> dict[str, Any]:
+    return {
+        "scope": "runtime_active_observation_supervisor",
+        "status": "supervisor_running",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "output_dir": str(output_dir),
+        "loop_packet_json": str(loop_packet_path),
+        "followup_packet_json": str(followup_path),
+        "loop_status": None,
+        "followup_status": None,
+        "command_results": {
+            "loop": {
+                "command": loop_command,
+                "stdout_path": str(output_dir / "loop-final-stdout.json"),
+                "returncode": None,
+                "stderr_tail": "",
+            },
+            "followup": None,
+        },
+        "blockers": [],
+        "warnings": [],
+        "operator_command_plan": {
+            "not_executed": True,
+            "uses_existing_loop_and_followup_scripts": True,
+            "real_submit_requested": False,
+            "exchange_order_requested": False,
+            "next_step": "wait_for_loop_packet_or_supervisor_completion",
+        },
+        "safety_invariants": {
+            "supervisor_only": True,
+            "allow_prepare_records": bool(args.allow_prepare_records),
+            "allow_disabled_smoke": bool(args.allow_disabled_smoke),
+            "real_submit_requested": False,
+            "exchange_order_requested": False,
+            "order_lifecycle_submit_requested": False,
+            "withdrawal_or_transfer_requested": False,
+            "forbidden_effects": [],
+        },
+    }
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -237,6 +305,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
+    parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--allow-prepare-records", action="store_true")
