@@ -208,6 +208,11 @@ def build_status_packet(
         "loop_status": loop.get("status") if isinstance(loop, dict) else None,
         "followup_status": followup.get("status") if isinstance(followup, dict) else None,
         "iterations_completed": loop.get("iterations_completed") if isinstance(loop, dict) else None,
+        "latest_iteration": (
+            latest_summary.get("iteration")
+            if isinstance(latest_summary, dict)
+            else None
+        ),
         "stop_reason": loop.get("stop_reason") if isinstance(loop, dict) else None,
         "active_runtime_count": (
             latest_summary.get("active_runtime_count")

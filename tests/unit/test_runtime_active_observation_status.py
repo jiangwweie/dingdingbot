@@ -29,6 +29,7 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
             "iterations_completed": 2,
             "stop_reason": "running",
             "latest_summary": {
+                "iteration": 2,
                 "active_runtime_count": 1,
                 "runtime_signal_summaries": [
                     {
@@ -70,6 +71,7 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
 
     assert packet["status"] == "waiting_for_signal"
     assert packet["iterations_completed"] == 2
+    assert packet["latest_iteration"] == 2
     assert packet["active_runtime_count"] == 1
     assert packet["runtime_signal_summaries"][0]["strategy_family_id"] == "CPM-001"
     assert packet["runtime_signal_summaries"][0]["reason_codes"] == ["cpm_no_action"]
