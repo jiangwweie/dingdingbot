@@ -2624,3 +2624,62 @@ Use this file for session progress and handoff notes.
   - withdrawal or transfer created `false`;
   - `RuntimePositionExitPlan` remains explicitly not an order, not an
     execution intent, and not execution authority.
+
+## 2026-06-11 (Runtime Exit-plan Reduce-only Close Option)
+
+- Added and deployed `program/live-safe-v1` commit
+  `6454b4003c6f07d10462b4cee36dac399e1856a6` to Tokyo as
+  `brc-runtime-governance-6454b400-20260611Texitoption`.
+- Extended the non-executing `RuntimePositionExitPlan` so the active-position
+  review surface now distinguishes:
+  - TP1 partial + runner feasibility;
+  - full reduce-only close feasibility;
+  - full reduce-only close notional reference;
+  - the fact that a full reduce-only close is risk-reducing but still requires
+    explicit Owner authorization before any exchange write.
+- Fixed post-close operational scripts so env files are loaded before PG /
+  exchange infrastructure imports:
+  - `scripts/recover_runtime_exchange_close_projection.py`;
+  - `scripts/create_runtime_closed_trade_review.py`.
+  This prevents the same `PG_DATABASE_URL` snapshot issue that affected the
+  runtime monitor / exit-plan probes.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_live_position_monitor.py tests/unit/test_runtime_ops_scripts.py tests/unit/test_trading_console_readmodels.py::test_trading_console_runtime_active_position_exit_plan_surfaces_tp1_feasibility`
+    passed with `12 passed`;
+  - `python3 -m py_compile src/domain/runtime_position_exit_plan.py scripts/runtime_position_exit_plan.py scripts/runtime_live_position_monitor.py scripts/recover_runtime_exchange_close_projection.py scripts/create_runtime_closed_trade_review.py tests/unit/test_runtime_ops_scripts.py tests/unit/test_runtime_live_position_monitor.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed head is
+    `6454b4003c6f07d10462b4cee36dac399e1856a6`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote exit-plan verification for
+  `strategy-runtime-95655873b76c`:
+  - status `ready_for_owner_review`;
+  - symbol `AVAX/USDT:USDT`;
+  - side `short`;
+  - current quantity `1.0`;
+  - entry price `6.566`;
+  - stop price reference `6.639000000000000000`;
+  - TP1 price reference `6.493000000000000000`;
+  - TP1 quantity requested `0.50`;
+  - TP1 step-aligned quantity `0.0`;
+  - TP1 feasible `false`;
+  - full reduce-only close quantity `1.0`;
+  - full reduce-only close notional reference around `6.571937910`;
+  - full reduce-only close feasible `true`;
+  - full reduce-only close requires Owner authorization `true`;
+  - recommended Owner decision
+    `keep_hard_stop_only_or_owner_authorize_full_reduce_only_close`;
+  - no blockers; warning remains `tp1_partial_quantity_below_min_qty_or_step`.
+- Safety proof:
+  - the deployed change does not submit, cancel, amend, or close exchange
+    orders;
+  - exit-plan remains not an order, not an execution intent, and not execution
+    authority;
+  - remote probe reported exchange write called `false`, order created
+    `false`, position closed `false`, runtime state mutated `false`, and no
+    withdrawal / transfer.
