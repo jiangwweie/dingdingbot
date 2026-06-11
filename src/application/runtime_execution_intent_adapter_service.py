@@ -803,6 +803,85 @@ class RuntimeExecutionIntentAdapterService:
             )
         return await self._trusted_submit_facts_repository.create(snapshot)
 
+    async def resolve_first_real_submit_evidence_ids_for_authorization(
+        self,
+        authorization_id: str,
+    ) -> dict[str, str]:
+        """Resolve already-recorded deterministic evidence IDs for review packets.
+
+        This is a read-only convenience for Owner/Codex review surfaces. It
+        does not create evidence, approve missing evidence, mutate runtime
+        state, create orders, call OrderLifecycle, or call exchange.
+        """
+
+        resolved: dict[str, str] = {}
+        execution_intent_id: str | None = None
+        if self._submit_authorization_repository is not None:
+            authorization = await self._submit_authorization_repository.get(
+                authorization_id
+            )
+            if authorization is not None:
+                execution_intent_id = authorization.execution_intent_id
+
+        if self._submit_idempotency_repository is not None:
+            submit_idempotency_policy_id = (
+                f"runtime-submit-idempotency-{authorization_id}"
+            )
+            snapshot = await self._submit_idempotency_repository.get(
+                submit_idempotency_policy_id
+            )
+            if snapshot is not None:
+                resolved["submit_idempotency_policy_id"] = (
+                    submit_idempotency_policy_id
+                )
+                execution_intent_id = (
+                    execution_intent_id or snapshot.execution_intent_id
+                )
+
+        if (
+            execution_intent_id
+            and self._trusted_submit_facts_repository is not None
+        ):
+            trusted_submit_fact_snapshot_id = (
+                f"trusted-submit-facts-{execution_intent_id}"
+            )
+            snapshot = await self._trusted_submit_facts_repository.get(
+                trusted_submit_fact_snapshot_id
+            )
+            if snapshot is not None:
+                resolved["trusted_submit_fact_snapshot_id"] = (
+                    trusted_submit_fact_snapshot_id
+                )
+
+        if self._attempt_outcome_policy_repository is not None:
+            attempt_outcome_policy_id = (
+                "runtime-attempt-outcome-policy-"
+                f"runtime-attempt-reservation-{authorization_id}-"
+                f"{RuntimeExecutionAttemptOutcomeKind.ENTRY_FILLED_PROTECTION_CREATION_FAILED.value}"
+            )
+            policy = await self._attempt_outcome_policy_repository.get(
+                attempt_outcome_policy_id
+            )
+            if policy is not None:
+                resolved["attempt_outcome_policy_id"] = attempt_outcome_policy_id
+
+        if (
+            execution_intent_id
+            and self._protection_failure_policy_repository is not None
+        ):
+            protection_creation_failure_policy_id = (
+                f"runtime-protection-failure-policy-{execution_intent_id}"
+            )
+            policy = await self._protection_failure_policy_repository.get(
+                protection_creation_failure_policy_id
+            )
+            if policy is not None:
+                resolved["protection_creation_failure_policy_id"] = (
+                    protection_creation_failure_policy_id
+                )
+
+        return resolved
+
     async def create_submit_authorization_for_intent(
         self,
         execution_intent_id: str,

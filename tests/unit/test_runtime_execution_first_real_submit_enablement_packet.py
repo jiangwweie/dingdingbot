@@ -7,6 +7,9 @@ import pytest
 from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
     RuntimeExecutionFirstRealSubmitEnablementPacketService,
 )
+from src.application.runtime_execution_intent_adapter_service import (
+    RuntimeExecutionIntentAdapterService,
+)
 from src.application.strategy_runtime_promotion_gate_service import (
     StrategyRuntimePromotionGateService,
 )
@@ -804,6 +807,145 @@ async def test_first_real_submit_enablement_packet_service_uses_decision_evidenc
     )
     assert packet.order_created is False
     assert packet.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_first_real_submit_enablement_packet_service_resolves_recorded_evidence_ids():
+    calls: list[dict] = []
+
+    class FakeAdapterService:
+        async def resolve_first_real_submit_evidence_ids_for_authorization(
+            self,
+            authorization_id,
+        ):
+            calls.append({"method": "resolve", "authorization_id": authorization_id})
+            return {
+                "trusted_submit_fact_snapshot_id": "trusted-submit-facts-auth-1",
+                "submit_idempotency_policy_id": "submit-idempotency-auth-1",
+                "attempt_outcome_policy_id": "attempt-outcome-auth-1",
+                "protection_creation_failure_policy_id": "protection-failure-auth-1",
+            }
+
+        async def exchange_submit_enablement_decision_for_authorization(
+            self,
+            authorization_id,
+            **kwargs,
+        ):
+            calls.append({"method": "enablement", "kwargs": kwargs})
+            assert kwargs["trusted_submit_fact_snapshot_id"] == (
+                "trusted-submit-facts-auth-1"
+            )
+            assert kwargs["submit_idempotency_policy_id"] == (
+                "submit-idempotency-auth-1"
+            )
+            assert kwargs["attempt_outcome_policy_id"] == "attempt-outcome-auth-1"
+            assert kwargs["protection_creation_failure_policy_id"] == (
+                "protection-failure-auth-1"
+            )
+            return _decision(authorization_id=authorization_id)
+
+        async def submit_rehearsal_for_authorization(
+            self,
+            authorization_id,
+            *,
+            exchange_submit_enablement_decision,
+        ):
+            calls.append({"method": "rehearsal"})
+            return _submit_rehearsal(decision=exchange_submit_enablement_decision)
+
+        duplicate_submit_replay_proof_for_authorization = staticmethod(
+            _fake_duplicate_replay_proof
+        )
+        submit_prerequisite_evidence_proof_for_authorization = staticmethod(
+            _fake_prerequisite_evidence_proof
+        )
+
+    service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+        runtime_execution_intent_adapter_service=FakeAdapterService(),
+    )
+
+    packet = await service.preview_for_authorization(
+        "auth-1",
+        budget_release_or_consume_rule_confirmed=True,
+        protection_creation_failure_policy_confirmed=True,
+        duplicate_submit_policy_confirmed=True,
+        deployment_readiness_confirmed=True,
+        explicit_owner_real_submit_authorization=True,
+        semantic_confirmations=_semantic_confirmed(),
+        runtime_confirmations=_runtime_confirmed(),
+    )
+
+    assert [call["method"] for call in calls[:3]] == [
+        "resolve",
+        "enablement",
+        "rehearsal",
+    ]
+    assert packet.status == (
+        RuntimeExecutionFirstRealSubmitEnablementPacketStatus
+        .READY_FOR_OWNER_FINAL_REVIEW
+    )
+    assert packet.first_real_submit_confirmations.trusted_submit_fact_snapshot_id == (
+        "trusted-submit-facts-auth-1"
+    )
+    assert packet.order_created is False
+    assert packet.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_adapter_resolves_only_existing_deterministic_evidence_ids():
+    class _DraftRepo:
+        async def get(self, _draft_id):
+            return None
+
+    class _AuthorizationRepo:
+        async def get(self, authorization_id):
+            assert authorization_id == "auth-1"
+            return SimpleNamespace(execution_intent_id="intent-1")
+
+    class _Repo:
+        def __init__(self, existing):
+            self.existing = set(existing)
+            self.requested: list[str] = []
+
+        async def get(self, item_id):
+            self.requested.append(item_id)
+            if item_id not in self.existing:
+                return None
+            return SimpleNamespace(execution_intent_id="intent-1")
+
+    trusted_repo = _Repo({"trusted-submit-facts-intent-1"})
+    idempotency_repo = _Repo({"runtime-submit-idempotency-auth-1"})
+    attempt_repo = _Repo(
+        {
+            "runtime-attempt-outcome-policy-runtime-attempt-reservation-auth-1-"
+            "entry_filled_protection_creation_failed"
+        }
+    )
+    protection_repo = _Repo({"runtime-protection-failure-policy-intent-1"})
+    service = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        submit_authorization_repository=_AuthorizationRepo(),
+        trusted_submit_facts_repository=trusted_repo,
+        submit_idempotency_repository=idempotency_repo,
+        attempt_outcome_policy_repository=attempt_repo,
+        protection_failure_policy_repository=protection_repo,
+    )
+
+    resolved = await service.resolve_first_real_submit_evidence_ids_for_authorization(
+        "auth-1"
+    )
+
+    assert resolved == {
+        "submit_idempotency_policy_id": "runtime-submit-idempotency-auth-1",
+        "trusted_submit_fact_snapshot_id": "trusted-submit-facts-intent-1",
+        "attempt_outcome_policy_id": (
+            "runtime-attempt-outcome-policy-runtime-attempt-reservation-auth-1-"
+            "entry_filled_protection_creation_failed"
+        ),
+        "protection_creation_failure_policy_id": (
+            "runtime-protection-failure-policy-intent-1"
+        ),
+    }
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
 from src.application.strategy_runtime_promotion_gate_service import (
@@ -63,14 +64,39 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
         semantic_confirmations: StrategySemanticsConfirmationFacts | None = None,
         runtime_confirmations: RuntimeExecutionConfirmationFacts | None = None,
     ) -> RuntimeExecutionFirstRealSubmitEnablementPacket:
+        additional_blockers: list[str] = []
+        additional_warnings: list[str] = []
+        resolved_evidence_ids = (
+            await self._resolve_first_real_submit_evidence_ids(authorization_id)
+        )
+        effective_trusted_submit_fact_snapshot_id = _first_present(
+            trusted_submit_fact_snapshot_id,
+            resolved_evidence_ids.get("trusted_submit_fact_snapshot_id"),
+        )
+        effective_submit_idempotency_policy_id = _first_present(
+            submit_idempotency_policy_id,
+            resolved_evidence_ids.get("submit_idempotency_policy_id"),
+        )
+        effective_attempt_outcome_policy_id = _first_present(
+            attempt_outcome_policy_id,
+            resolved_evidence_ids.get("attempt_outcome_policy_id"),
+        )
+        effective_protection_creation_failure_policy_id = _first_present(
+            protection_creation_failure_policy_id,
+            resolved_evidence_ids.get("protection_creation_failure_policy_id"),
+        )
         enablement = await (
             self._adapter_service.exchange_submit_enablement_decision_for_authorization(
                 authorization_id,
-                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
-                submit_idempotency_policy_id=submit_idempotency_policy_id,
-                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                trusted_submit_fact_snapshot_id=(
+                    effective_trusted_submit_fact_snapshot_id
+                ),
+                submit_idempotency_policy_id=(
+                    effective_submit_idempotency_policy_id
+                ),
+                attempt_outcome_policy_id=effective_attempt_outcome_policy_id,
                 protection_creation_failure_policy_id=(
-                    protection_creation_failure_policy_id
+                    effective_protection_creation_failure_policy_id
                 ),
                 local_registration_enablement_decision_id=(
                     local_registration_enablement_decision_id
@@ -92,18 +118,22 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
         )
         effective_trusted_submit_fact_snapshot_id = _first_present(
             trusted_submit_fact_snapshot_id,
+            effective_trusted_submit_fact_snapshot_id,
             getattr(enablement, "trusted_submit_fact_snapshot_id", None),
         )
         effective_submit_idempotency_policy_id = _first_present(
             submit_idempotency_policy_id,
+            effective_submit_idempotency_policy_id,
             getattr(enablement, "submit_idempotency_policy_id", None),
         )
         effective_attempt_outcome_policy_id = _first_present(
             attempt_outcome_policy_id,
+            effective_attempt_outcome_policy_id,
             getattr(enablement, "attempt_outcome_policy_id", None),
         )
         effective_protection_creation_failure_policy_id = _first_present(
             protection_creation_failure_policy_id,
+            effective_protection_creation_failure_policy_id,
             getattr(enablement, "protection_creation_failure_policy_id", None),
         )
         effective_local_registration_enablement_decision_id = _first_present(
@@ -124,7 +154,6 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
                 exchange_submit_enablement_decision=enablement,
             )
         )
-        additional_blockers: list[str] = []
         duplicate_submit_replay_proof = None
         proof_method = getattr(
             self._adapter_service,
@@ -300,8 +329,30 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
             prerequisite_evidence_proof=prerequisite_evidence_proof,
             promotion_gate_error=promotion_gate_error,
             additional_blockers=additional_blockers,
+            additional_warnings=additional_warnings,
             now_ms=_now_ms(),
         )
+
+    async def _resolve_first_real_submit_evidence_ids(
+        self,
+        authorization_id: str,
+    ) -> dict[str, str]:
+        resolver = getattr(
+            self._adapter_service,
+            "resolve_first_real_submit_evidence_ids_for_authorization",
+            None,
+        )
+        if not callable(resolver):
+            return {}
+        resolved = await resolver(authorization_id)
+        if not isinstance(resolved, Mapping):
+            return {}
+        result: dict[str, str] = {}
+        for key, value in resolved.items():
+            normalized = _normalized_optional(value)
+            if normalized:
+                result[str(key)] = normalized
+        return result
 
 
 def _now_ms() -> int:
