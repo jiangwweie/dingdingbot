@@ -49,6 +49,12 @@ from src.application.runtime_final_gate_preview_service import (
     RuntimeFinalGatePreviewService,
 )
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
+from src.domain.models import (
+    Direction,
+    OrderPlacementResult,
+    OrderStatus,
+    OrderType,
+)
 from src.domain.runtime_execution_controlled_submit import (
     RuntimeExecutionControlledSubmitPreflightStatus,
 )
@@ -322,6 +328,64 @@ class _OrderLifecycleService:
     async def get_order(self, order_id: str) -> Any | None:
         return self.orders.get(order_id)
 
+    async def submit_order(
+        self,
+        order_id: str,
+        exchange_order_id: str | None = None,
+    ) -> Any:
+        order = self.orders.get(order_id)
+        if order is None:
+            raise ValueError(f"missing local order {order_id}")
+        order.exchange_order_id = exchange_order_id
+        order.status = OrderStatus.SUBMITTED
+        return order
+
+
+class _InMemoryExchangeGateway:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def place_order(
+        self,
+        *,
+        symbol: str,
+        order_type: str,
+        side: str,
+        amount: Decimal,
+        price: Decimal | None = None,
+        trigger_price: Decimal | None = None,
+        reduce_only: bool = False,
+        client_order_id: str | None = None,
+    ) -> OrderPlacementResult:
+        self.calls.append(
+            {
+                "symbol": symbol,
+                "order_type": order_type,
+                "side": side,
+                "amount": str(amount),
+                "price": str(price) if price is not None else None,
+                "trigger_price": (
+                    str(trigger_price) if trigger_price is not None else None
+                ),
+                "reduce_only": reduce_only,
+                "client_order_id": client_order_id,
+            }
+        )
+        return OrderPlacementResult(
+            order_id=f"in-memory-exchange-placement-{client_order_id}",
+            exchange_order_id=f"in-memory-exchange-{client_order_id}",
+            symbol=symbol,
+            order_type=OrderType(str(order_type).upper()),
+            direction=Direction.LONG if side == "buy" else Direction.SHORT,
+            side=side,
+            amount=amount,
+            price=price,
+            trigger_price=trigger_price,
+            reduce_only=reduce_only,
+            client_order_id=client_order_id,
+            status=OrderStatus.OPEN,
+        )
+
 
 class _TrustedSubmitFactReader:
     async def read_trusted_submit_fact_source(
@@ -361,6 +425,7 @@ async def build_pre_live_packet(
     active_positions: int = 0,
     exercise_local_registration_pre_exchange: bool = False,
     exercise_exchange_submit_adapter_pre_execution: bool = False,
+    exercise_in_memory_exchange_execution_simulation: bool = False,
     runner: Any | None = None,
 ) -> dict[str, Any]:
     repo_root = _repo_root(runner=runner)
@@ -371,6 +436,11 @@ async def build_pre_live_packet(
     exercise_local_registration_pre_exchange = (
         exercise_local_registration_pre_exchange
         or exercise_exchange_submit_adapter_pre_execution
+        or exercise_in_memory_exchange_execution_simulation
+    )
+    exercise_exchange_submit_adapter_pre_execution = (
+        exercise_exchange_submit_adapter_pre_execution
+        or exercise_in_memory_exchange_execution_simulation
     )
 
     runtime_service = _RuntimeService(runtime)
@@ -408,6 +478,11 @@ async def build_pre_live_packet(
     order_lifecycle_service = (
         _OrderLifecycleService()
         if exercise_local_registration_pre_exchange
+        else None
+    )
+    exchange_gateway = (
+        _InMemoryExchangeGateway()
+        if exercise_in_memory_exchange_execution_simulation
         else None
     )
     local_registration_action_authorization_repository = (
@@ -466,6 +541,7 @@ async def build_pre_live_packet(
         ),
         exchange_gateway_readiness_repository=exchange_gateway_readiness_repository,
         execution_recovery_repository=execution_recovery_repository,
+        exchange_gateway=exchange_gateway,
         final_gate_preview_service=final_gate,
         runtime_service=runtime_service,
     )
@@ -682,6 +758,16 @@ async def build_pre_live_packet(
         rehearsal = await adapter_service.submit_rehearsal_for_authorization(
             authorization.authorization_id
         )
+    if exercise_in_memory_exchange_execution_simulation:
+        exchange_submit_adapter_rehearsal["in_memory_execution_simulation"] = (
+            await _exercise_in_memory_exchange_execution_simulation(
+                adapter_service=adapter_service,
+                authorization_id=authorization.authorization_id,
+                exchange_submit_adapter_rehearsal=(
+                    exchange_submit_adapter_rehearsal
+                ),
+            )
+        )
 
     technical_blockers = _dedupe(
         list(plan.final_gate_preview.blockers)
@@ -826,6 +912,21 @@ async def build_pre_live_packet(
         ),
         "exchange_submit_adapter_pre_execution_ready": (
             exchange_submit_adapter_rehearsal["ready"]
+        ),
+        "in_memory_exchange_execution_simulation_exercised": (
+            exchange_submit_adapter_rehearsal[
+                "in_memory_execution_simulation"
+            ] is not None
+        ),
+        "in_memory_exchange_execution_simulation_submitted": (
+            exchange_submit_adapter_rehearsal[
+                "in_memory_execution_simulation"
+            ].status.value
+            == "exchange_submit_orders_submitted"
+            if exchange_submit_adapter_rehearsal[
+                "in_memory_execution_simulation"
+            ] is not None
+            else False
         ),
         "machine_evidence_preparation_status": _enum_value(
             evidence_preparation.status
@@ -1065,6 +1166,42 @@ async def build_pre_live_packet(
                 ] is not None
                 else False
             ),
+            "in_memory_exchange_execution_simulation_exchange_called": (
+                exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ].exchange_called
+                if exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ] is not None
+                else False
+            ),
+            "in_memory_exchange_execution_simulation_order_lifecycle_submit_called": (
+                exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ].order_lifecycle_submit_called
+                if exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ] is not None
+                else False
+            ),
+            "in_memory_exchange_execution_simulation_exchange_order_submitted": (
+                exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ].exchange_order_submitted
+                if exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ] is not None
+                else False
+            ),
+            "in_memory_exchange_execution_simulation_real_adapter_executed": (
+                exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ].real_exchange_submit_adapter_executed
+                if exchange_submit_adapter_rehearsal[
+                    "in_memory_execution_simulation"
+                ] is not None
+                else False
+            ),
             "protection_failure_policy_exchange_called": (
                 protection_failure_policy.exchange_called
             ),
@@ -1076,6 +1213,7 @@ async def build_pre_live_packet(
             "The dry-run submit adapter is ready; real order placement remains blocked by OrderLifecycle enablement.",
             "Optional local-registration rehearsal registers local CREATED orders in memory only and never calls exchange.",
             "Optional exchange-submit adapter pre-execution rehearsal assembles scoped exchange-submit evidence but still does not implement or call the exchange adapter.",
+            "Optional in-memory exchange execution simulation uses a fake gateway only; it is not a Binance call, live exchange write, or Owner real-submit authorization.",
         ],
     }
 
@@ -1442,6 +1580,7 @@ async def _exercise_exchange_submit_adapter_pre_execution(
         "enablement_decision": None,
         "adapter_result": None,
         "disabled_execution_result": None,
+        "in_memory_execution_simulation": None,
     }
     if not enabled:
         return result
@@ -1630,6 +1769,22 @@ async def _exercise_exchange_submit_adapter_pre_execution(
     return result
 
 
+async def _exercise_in_memory_exchange_execution_simulation(
+    *,
+    adapter_service: RuntimeExecutionIntentAdapterService,
+    authorization_id: str,
+    exchange_submit_adapter_rehearsal: dict[str, Any],
+) -> Any | None:
+    enablement_decision = exchange_submit_adapter_rehearsal["enablement_decision"]
+    if enablement_decision is None:
+        return None
+    return await adapter_service.exchange_submit_execution_result_for_authorization(
+        authorization_id,
+        exchange_submit_execution_enabled=True,
+        exchange_submit_enablement_decision=enablement_decision,
+    )
+
+
 def _local_registration_rehearsal_payload(rehearsal: dict[str, Any]) -> dict[str, Any]:
     return {
         "enabled": rehearsal["enabled"],
@@ -1716,6 +1871,9 @@ def _exchange_submit_adapter_rehearsal_payload(
         "adapter_result": _dump_optional_model(rehearsal["adapter_result"]),
         "disabled_execution_result": _dump_optional_model(
             rehearsal["disabled_execution_result"]
+        ),
+        "in_memory_execution_simulation": _dump_optional_model(
+            rehearsal["in_memory_execution_simulation"]
         ),
     }
 
@@ -2069,6 +2227,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "or submit orders."
         ),
     )
+    parser.add_argument(
+        "--exercise-in-memory-exchange-execution-simulation",
+        action="store_true",
+        help=(
+            "After exchange-submit pre-execution evidence is ready, run the "
+            "enabled execution-result path against an in-memory fake exchange "
+            "gateway and in-memory OrderLifecycle only. This never calls "
+            "Binance or any real exchange."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -2098,6 +2266,12 @@ def _print_human(report: dict[str, Any]) -> None:
     print(
         "exchange_submit_adapter_pre_execution_ready="
         + str(checks["exchange_submit_adapter_pre_execution_ready"]).lower()
+    )
+    print(
+        "in_memory_exchange_execution_simulation_submitted="
+        + str(
+            checks["in_memory_exchange_execution_simulation_submitted"]
+        ).lower()
     )
     print(f"submit_rehearsal_status={pipeline['submit_rehearsal_status']}")
     print(f"submit_adapter_preview_status={pipeline['submit_adapter_preview_status']}")
@@ -2134,6 +2308,9 @@ async def _amain(argv: list[str] | None = None) -> int:
         ),
         exercise_exchange_submit_adapter_pre_execution=(
             args.exercise_exchange_submit_adapter_pre_execution
+        ),
+        exercise_in_memory_exchange_execution_simulation=(
+            args.exercise_in_memory_exchange_execution_simulation
         ),
     )
     if args.json:

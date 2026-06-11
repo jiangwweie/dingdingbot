@@ -462,7 +462,12 @@ Key facts:
   order, call OrderLifecycle submit, execute the real exchange adapter, or
   change ExecutionIntent status. A shadow / execution-disabled runtime is the
   expected source state before a live-runtime enablement mutation, not itself
-  proof of a missing implementation.
+  proof of a missing implementation. With the additional
+  `--exercise-in-memory-exchange-execution-simulation` flag, the verifier can
+  run the enabled execution-result branch against an in-memory fake exchange
+  gateway and in-memory OrderLifecycle only, proving entry/protection submit
+  result wiring without Binance, network, credentials, deployment mutation, or
+  real-funds order placement.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

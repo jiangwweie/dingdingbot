@@ -357,3 +357,73 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
         ]
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_pre_live_packet_can_simulate_enabled_exchange_execution_in_memory():
+    module = _load_module()
+
+    report = await module.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_in_memory_exchange_execution_simulation=True,
+        runner=_runner(module),
+    )
+
+    exchange_rehearsal = report["exchange_submit_adapter_rehearsal"]
+    simulation = exchange_rehearsal["in_memory_execution_simulation"]
+    blockers = report["checks"]["exchange_submit_rehearsal_blockers"]
+
+    assert report["status"] == "blocked_before_first_real_submit"
+    assert report["checks"]["exchange_submit_adapter_pre_execution_ready"] is True
+    assert (
+        report["checks"]["in_memory_exchange_execution_simulation_exercised"]
+        is True
+    )
+    assert (
+        report["checks"]["in_memory_exchange_execution_simulation_submitted"]
+        is True
+    )
+    assert report["checks"]["ready_for_first_real_submit"] is False
+    assert simulation["status"] == "exchange_submit_orders_submitted"
+    assert simulation["exchange_submit_execution_enabled"] is True
+    assert simulation["exchange_called"] is True
+    assert simulation["exchange_order_submitted"] is True
+    assert simulation["order_lifecycle_submit_called"] is True
+    assert simulation["real_exchange_submit_adapter_executed"] is True
+    assert simulation["exchange_call_count"] == 2
+    assert simulation["order_lifecycle_submit_call_count"] == 2
+    assert simulation["entry_exchange_order_id"].startswith(
+        "in-memory-exchange-runtime-order-draft-"
+    )
+    assert simulation["entry_exchange_order_id"].endswith("-entry")
+    assert len(simulation["protection_exchange_order_ids"]) == 1
+    assert simulation["execution_intent_status_changed"] is False
+    assert simulation["owner_bounded_execution_called"] is False
+    assert simulation["withdrawal_or_transfer_created"] is False
+    assert "exchange_submit_adapter_not_implemented" in blockers
+    assert (
+        report["safety_invariants"][
+            "in_memory_exchange_execution_simulation_exchange_called"
+        ]
+        is True
+    )
+    assert (
+        report["safety_invariants"][
+            "in_memory_exchange_execution_simulation_order_lifecycle_submit_called"
+        ]
+        is True
+    )
+    assert (
+        report["safety_invariants"][
+            "in_memory_exchange_execution_simulation_exchange_order_submitted"
+        ]
+        is True
+    )
+    assert (
+        report["safety_invariants"][
+            "in_memory_exchange_execution_simulation_real_adapter_executed"
+        ]
+        is True
+    )

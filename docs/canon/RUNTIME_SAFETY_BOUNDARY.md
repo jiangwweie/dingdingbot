@@ -151,7 +151,13 @@ This document defines the runtime safety boundaries for the BRC project.
   `exchange_submit_execution_disabled` and keep `exchange_called=false`,
   `order_lifecycle_submit_called=false`, `exchange_order_submitted=false`,
   `real_exchange_submit_adapter_executed=false`, and
-  `execution_intent_status_changed=false`. The execution-result stage is the
+  `execution_intent_status_changed=false`. The verifier's separate
+  `--exercise-in-memory-exchange-execution-simulation` mode may run the
+  enabled execution-result branch only against an in-memory fake exchange
+  gateway and in-memory OrderLifecycle; any `exchange_called=true` flags in
+  that mode are simulation evidence, not Binance calls, exchange writes, live
+  credentials use, deployment changes, or real-funds order placement. The
+  execution-result stage is the
   only stage that may call the exchange gateway /
   `OrderLifecycleService.submit_order`, and only when the explicit execution
   flag, gateway readiness, recovery state, idempotency policy,
