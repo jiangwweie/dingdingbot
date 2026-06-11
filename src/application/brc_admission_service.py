@@ -284,6 +284,12 @@ class BrcAdmissionService:
             raise AdmissionRuleViolation(f"strategy family not found: {strategy_family_id}")
         return family
 
+    async def get_strategy_family_version(
+        self,
+        strategy_family_version_id: str,
+    ) -> StrategyFamilyVersion:
+        return await self._require_strategy_family_version(strategy_family_version_id)
+
     async def get_admission_request(self, admission_request_id: str) -> AdmissionRequest:
         return await self._require_admission_request(admission_request_id)
 
@@ -3522,13 +3528,14 @@ class BrcAdmissionService:
         *,
         family_key: str,
         name: str,
+        strategy_family_id: Optional[str] = None,
         description: str = "",
         status: StrategyFamilyStatus = StrategyFamilyStatus.INTAKE,
         owner: str = "owner",
     ) -> StrategyFamily:
         now = _now_ms()
         family = StrategyFamily(
-            strategy_family_id=_id("sf"),
+            strategy_family_id=strategy_family_id or _id("sf"),
             family_key=family_key,
             name=name,
             description=description,
@@ -3551,6 +3558,7 @@ class BrcAdmissionService:
         self,
         *,
         strategy_family_id: str,
+        strategy_family_version_id: Optional[str] = None,
         version: int,
         hypothesis: str = "",
         market_structure: str = "",
@@ -3574,7 +3582,7 @@ class BrcAdmissionService:
             raise AdmissionRuleViolation(f"strategy family not found: {strategy_family_id}")
         now = _now_ms()
         item = StrategyFamilyVersion(
-            strategy_family_version_id=_id("sfv"),
+            strategy_family_version_id=strategy_family_version_id or _id("sfv"),
             strategy_family_id=strategy_family_id,
             version=version,
             hypothesis=hypothesis,

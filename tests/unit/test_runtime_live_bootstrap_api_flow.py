@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from scripts.runtime_live_bootstrap_api_flow import (
+    BootstrapConfig,
+    RuntimeLiveBootstrapApiFlow,
+)
+
+
+class _FakeClient:
+    def __init__(self, *, profile_status: str = "ready_for_owner_codex_confirmation") -> None:
+        self.calls: list[dict] = []
+        self.profile_status = profile_status
+
+    def request_json(self, method, path, *, query=None, body=None):
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "query": dict(query or {}),
+                "body": body,
+            }
+        )
+        if path.endswith("/strategy-families/CPM-001"):
+            return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
+        if path.endswith("/strategy-family-versions/CPM-001-v0"):
+            return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
+        if path == "/api/brc/strategy-families":
+            return {"http_status": 200, "body": {"strategy_family_id": "CPM-001"}}
+        if path.endswith("/strategy-families/CPM-001/versions"):
+            return {
+                "http_status": 200,
+                "body": {"strategy_family_version_id": "CPM-001-v0"},
+            }
+        if path.endswith("/admissions/evidence-packets"):
+            return {"http_status": 200, "body": {"evidence_packet_id": "evidence-1"}}
+        if path.endswith("/admissions/owner-regime-inputs"):
+            return {
+                "http_status": 200,
+                "body": {"owner_market_regime_input_id": "regime-1"},
+            }
+        if path.endswith("/admissions/requests"):
+            return {"http_status": 200, "body": {"admission_request_id": "req-1"}}
+        if path.endswith("/admissions/requests/req-1/evaluate"):
+            return {
+                "http_status": 200,
+                "body": {
+                    "admission_decision_id": "decision-1",
+                    "trial_constraint_snapshot_id": "constraint-1",
+                    "decision": "admit_with_constraints",
+                },
+            }
+        if path.endswith("/admissions/risk-acceptances"):
+            return {
+                "http_status": 200,
+                "body": {"owner_risk_acceptance_id": "risk-acceptance-1"},
+            }
+        if path.endswith("/operations/preflight"):
+            return {
+                "http_status": 200,
+                "body": {
+                    "operation_id": "operation-1",
+                    "preflight_id": "preflight-1",
+                    "idempotency_key": "idem-1",
+                    "decision": "allow",
+                    "risk_summary": {"blockers": []},
+                },
+            }
+        if path.endswith("/operations/operation-1/confirm"):
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "executed",
+                    "result_summary": {"binding_id": "binding-1"},
+                },
+            }
+        if path.endswith("/strategy-runtime-profile-proposals"):
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": self.profile_status,
+                    "proposal_id": "proposal-1",
+                    "strategy_family_id": "CPM-001",
+                    "strategy_family_version_id": "CPM-001-v0",
+                    "symbol": "BNB/USDT:USDT",
+                    "side": "long",
+                },
+            }
+        if path.endswith("/strategy-runtime-promotion-confirmations"):
+            return {
+                "http_status": 200,
+                "body": {"confirmation": {"confirmation_id": "confirmation-1"}},
+            }
+        if path.endswith("/runtime-drafts"):
+            return {
+                "http_status": 200,
+                "body": {"runtime": {"runtime_instance_id": "runtime-1"}},
+            }
+        if path.endswith("/strategy-runtimes/runtime-1/lifecycle"):
+            return {
+                "http_status": 200,
+                "body": {"runtime": {"runtime_instance_id": "runtime-1", "status": "active"}},
+            }
+        return {"http_status": 200, "body": {"status": "ok"}}
+
+
+def test_bootstrap_creates_shadow_runtime_without_submit_endpoints():
+    client = _FakeClient()
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ready_for_shadow_candidate_planning"] is True
+    assert report["ids"]["runtime_instance_id"] == "runtime-1"
+    assert report["ids"]["runtime_status"] == "active"
+    paths = [call["path"] for call in client.calls]
+    assert any("strategy-runtime-promotion-confirmations" in path for path in paths)
+    assert not any("first-real-submit-actions" in path for path in paths)
+    assert not any("exchange-submit" in path for path in paths)
+    assert not any("order-candidates" in path for path in paths)
+
+
+def test_bootstrap_stops_when_profile_proposal_is_blocked():
+    client = _FakeClient(profile_status="blocked")
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "profile_proposal_blocked" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert not any(path.endswith("/runtime-drafts") for path in paths)
+    assert not any(path.endswith("/lifecycle") for path in paths)
+
+
+def test_inspect_only_reads_current_inventory():
+    client = _FakeClient()
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(api_base="http://unit", mode="inspect"),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert [call["method"] for call in client.calls] == ["GET", "GET", "GET", "GET"]

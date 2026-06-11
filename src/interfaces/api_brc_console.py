@@ -904,6 +904,7 @@ class BrcOperationCapabilitiesResponse(BaseModel):
 
 
 class BrcStrategyFamilyCreateRequest(BaseModel):
+    strategy_family_id: Optional[str] = Field(default=None, max_length=128)
     family_key: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=256)
     description: str = Field(default="", max_length=4096)
@@ -912,6 +913,7 @@ class BrcStrategyFamilyCreateRequest(BaseModel):
 
 
 class BrcStrategyFamilyVersionCreateRequest(BaseModel):
+    strategy_family_version_id: Optional[str] = Field(default=None, max_length=128)
     version: int = Field(ge=1)
     hypothesis: str = Field(default="", max_length=4096)
     market_structure: str = Field(default="", max_length=4096)
@@ -6522,6 +6524,21 @@ async def get_brc_strategy_family(strategy_family_id: str) -> StrategyFamily:
     service = await _get_admission_service()
     try:
         return await service.get_strategy_family(strategy_family_id)
+    except Exception as exc:
+        _raise_admission_error(exc)
+        raise
+
+
+@router.get(
+    "/strategy-family-versions/{strategy_family_version_id}",
+    response_model=StrategyFamilyVersion,
+)
+async def get_brc_strategy_family_version(
+    strategy_family_version_id: str,
+) -> StrategyFamilyVersion:
+    service = await _get_admission_service()
+    try:
+        return await service.get_strategy_family_version(strategy_family_version_id)
     except Exception as exc:
         _raise_admission_error(exc)
         raise
