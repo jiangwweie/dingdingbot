@@ -77,6 +77,7 @@ class FlowConfig:
     record_gateway_readiness: bool = True
     preview_disabled_first_real_submit_action: bool = False
     execute_real_submit: bool = False
+    record_attempt_consumption: bool = False
     record_post_submit_accounting: bool = True
     adapter_result_store_implemented: bool = True
     real_adapter_boundary_implemented: bool = True
@@ -554,7 +555,22 @@ class FirstRealSubmitApiFlow:
             return
         if self.state.blockers:
             return
-        self._record_attempt_reservation_and_policy()
+        if self._config.record_attempt_consumption:
+            self._record_attempt_reservation_and_policy()
+        else:
+            if self.state.ids.get("attempt_outcome_policy_id"):
+                self.state.add_warnings(
+                    [
+                        (
+                            "existing_attempt_outcome_policy_reused_"
+                            "no_new_attempt_mutation"
+                        )
+                    ]
+                )
+            else:
+                self.state.add_warnings(
+                    ["attempt_consumption_not_recorded_in_arm_preview"]
+                )
         self._record_order_lifecycle_handoff()
         if self.state.blockers:
             return
@@ -1167,6 +1183,14 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     parser.add_argument("--skip-exchange-arm", action="store_true")
     parser.add_argument("--skip-gateway-readiness", action="store_true")
     parser.add_argument(
+        "--record-attempt-consumption",
+        action="store_true",
+        help=(
+            "Record attempt reservation/mutation during arm. Defaults to true "
+            "only for execute mode; disabled previews should not consume attempts."
+        ),
+    )
+    parser.add_argument(
         "--preview-disabled-first-real-submit-action",
         action="store_true",
         help=(
@@ -1208,6 +1232,9 @@ def _parse_args(argv: list[str]) -> FlowConfig:
             args.preview_disabled_first_real_submit_action
         ),
         execute_real_submit=args.execute_real_submit,
+        record_attempt_consumption=(
+            args.record_attempt_consumption or args.mode == "execute"
+        ),
         record_post_submit_accounting=not args.skip_post_submit_accounting,
         adapter_result_store_implemented=args.adapter_result_store_implemented,
         real_adapter_boundary_implemented=args.real_adapter_boundary_implemented,

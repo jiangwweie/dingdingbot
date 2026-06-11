@@ -307,7 +307,10 @@ def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
     assert any("runtime-execution-controlled-submit-plans" in path for path in paths)
     assert any("runtime-execution-protection-plans" in path for path in paths)
     assert any("exchange-submit-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
+    assert "attempt_consumption_not_recorded_in_arm_preview" in report["warnings"]
 
 
 def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit():
@@ -336,6 +339,10 @@ def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit()
     assert len(action_calls) == 1
     assert action_calls[0]["query"]["owner_confirmed_for_first_real_submit_action"] is False
     assert report["ready_for_real_submit_action"] is False
+    assert not any(
+        "runtime-execution-attempt-mutations" in call["path"]
+        for call in client.calls
+    )
 
 
 def test_arm_blocks_before_attempt_mutation_when_submit_facts_are_stale():
@@ -403,6 +410,7 @@ def test_execute_requires_exact_env_confirmation(monkeypatch):
             mode="execute",
             order_candidate_id="candidate-1",
             execute_real_submit=True,
+            record_attempt_consumption=True,
         ),
     )
 
@@ -425,6 +433,7 @@ def test_execute_calls_real_submit_when_env_guard_matches(monkeypatch):
             mode="execute",
             order_candidate_id="candidate-1",
             execute_real_submit=True,
+            record_attempt_consumption=True,
         ),
     )
 
@@ -434,6 +443,7 @@ def test_execute_calls_real_submit_when_env_guard_matches(monkeypatch):
     assert report["ids"]["execution_result_id"] == "exec-1"
     assert os.environ[APPROVAL_ENV] == "auth-1:first-real-submit:real_gateway_action"
     paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
     assert any("first-real-submit-actions" in path for path in paths)
 
 
