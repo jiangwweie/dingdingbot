@@ -318,9 +318,12 @@ class FirstRealSubmitApiFlow:
             body=body,
         )
         body = _body(result)
+        candidate_planning = (
+            body.get("candidate_planning_result") if isinstance(body, dict) else None
+        )
         candidate = (
-            body.get("candidate_planning_result", {}).get("candidate")
-            if isinstance(body, dict)
+            candidate_planning.get("candidate")
+            if isinstance(candidate_planning, dict)
             else None
         )
         if isinstance(candidate, dict):

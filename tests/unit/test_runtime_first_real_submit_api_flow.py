@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 from scripts.runtime_first_real_submit_api_flow import (
@@ -25,6 +26,7 @@ class _FakeClient:
         candidate_reusable: bool | None = True,
         candidate_usage_status: str = "unused",
         evidence_blockers: list[str] | None = None,
+        shadow_plan_blockers: list[str] | None = None,
         handoff_http_status: int = 200,
         handoff_blockers: list[str] | None = None,
         disabled_action_http_status: int = 200,
@@ -37,6 +39,7 @@ class _FakeClient:
         self.candidate_reusable = candidate_reusable
         self.candidate_usage_status = candidate_usage_status
         self.evidence_blockers = evidence_blockers or []
+        self.shadow_plan_blockers = shadow_plan_blockers or []
         self.handoff_http_status = handoff_http_status
         self.handoff_blockers = handoff_blockers or []
         self.disabled_action_http_status = disabled_action_http_status
@@ -74,6 +77,33 @@ class _FakeClient:
                             }
                         }
                     }
+                },
+            }
+        if "strategy-signal-shadow-plans" in path:
+            if self.shadow_plan_blockers:
+                return {
+                    "http_status": 200,
+                    "body": {
+                        "status": "planner_blocked",
+                        "blockers": self.shadow_plan_blockers,
+                        "candidate_planning_result": None,
+                    },
+                }
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "shadow_candidate_created",
+                    "blockers": [],
+                    "candidate_planning_result": {
+                        "candidate": {
+                            "order_candidate_id": "candidate-from-signal-1",
+                            "shadow_mode": True,
+                        },
+                        "execution_intent_created": False,
+                        "order_created": False,
+                        "order_lifecycle_called": False,
+                        "exchange_called": False,
+                    },
                 },
             }
         if "/api/trading-console/order-candidates/" in path:
@@ -238,6 +268,97 @@ def test_prepare_from_order_candidate_stops_before_local_registration():
     assert not any("attempt-outcome-policies" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
     assert not any("exchange-submit-action-authorizations" in path for path in paths)
+
+
+def test_prepare_from_signal_input_creates_shadow_candidate_before_prepare(tmp_path):
+    signal_input_path = tmp_path / "signal-input.json"
+    signal_input_path.write_text(
+        json.dumps(
+            {
+                "evaluation_id": "eval-1",
+                "strategy_family_id": "BTPC-001",
+                "strategy_family_version_id": "BTPC-001-v0",
+                "symbol": "AVAX/USDT:USDT",
+            }
+        )
+    )
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="prepare",
+            runtime_instance_id="runtime-1",
+            signal_input_path=str(signal_input_path),
+            candidate_id="candidate-requested-1",
+            context_id="context-1",
+            next_attempt_symbol="AVAX/USDT:USDT",
+            next_attempt_side="short",
+            next_attempt_strategy_family_id="BTPC-001",
+            next_attempt_carrier_id="BTPC-001-v0",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["order_candidate_id"] == "candidate-from-signal-1"
+    assert report["ids"]["authorization_id"] == "auth-1"
+    paths = [call["path"] for call in client.calls]
+    shadow_index = next(
+        index for index, path in enumerate(paths) if "strategy-signal-shadow-plans" in path
+    )
+    draft_index = next(
+        index for index, path in enumerate(paths) if "runtime-execution-intent-drafts" in path
+    )
+    assert shadow_index < draft_index
+    shadow_call = client.calls[shadow_index]
+    assert shadow_call["body"]["allow_shadow_candidate_creation"] is True
+    assert shadow_call["body"]["signal_input"]["evaluation_id"] == "eval-1"
+    assert shadow_call["body"]["metadata"]["owner_authorized_first_real_submit"] is False
+    assert not any("first-real-submit-actions" in path for path in paths)
+    assert not any("exchange-submit-action-authorizations" in path for path in paths)
+
+
+def test_prepare_from_signal_input_stops_when_shadow_planner_blocks(tmp_path):
+    signal_input_path = tmp_path / "signal-input.json"
+    signal_input_path.write_text(
+        json.dumps(
+            {
+                "evaluation_id": "eval-blocked",
+                "strategy_family_id": "BTPC-001",
+                "strategy_family_version_id": "BTPC-001-v0",
+                "symbol": "AVAX/USDT:USDT",
+            }
+        )
+    )
+    client = _FakeClient(
+        shadow_plan_blockers=["trusted_runtime_fact_overlay_blocked"]
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="prepare",
+            runtime_instance_id="runtime-1",
+            signal_input_path=str(signal_input_path),
+            next_attempt_symbol="AVAX/USDT:USDT",
+            next_attempt_side="short",
+            next_attempt_strategy_family_id="BTPC-001",
+            next_attempt_carrier_id="BTPC-001-v0",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "trusted_runtime_fact_overlay_blocked" in report["blockers"]
+    assert "order_candidate_id_or_authorization_id_required" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert any("strategy-signal-shadow-plans" in path for path in paths)
+    assert not any("runtime-execution-intent-drafts" in path for path in paths)
+    assert not any("runtime-execution-protection-plans" in path for path in paths)
+    assert not any("runtime-execution-submit-authorizations" in path for path in paths)
+    assert not any("first-real-submit-actions" in path for path in paths)
 
 
 def test_prepare_checks_next_attempt_gate_when_symbol_is_provided():
