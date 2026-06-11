@@ -2367,3 +2367,42 @@ Use this file for session progress and handoff notes.
     or runtime-budget mutations were performed;
   - the next bounded-live attempt now requires a fresh shadow candidate instead
     of reusing the already-authorized first-attempt candidate.
+
+## 2026-06-11 (Tokyo Deploy c2e7ac6d Candidate Usage Guard)
+
+- Deployed `program/live-safe-v1` commit
+  `c2e7ac6de0242b55c6a38dd635bbb08af063bd7f` to Tokyo via the git-based
+  runtime-governance deploy path:
+  `brc-runtime-governance-c2e7ac6d-20260611T1015Z`.
+- This deployment includes:
+  - `ad175e93` first-real-submit flow next-attempt gate;
+  - `d14548a8` OrderCandidate usage guard and read-model fields;
+  - `c2e7ac6d` hotfix for string-vs-enum usage status compatibility.
+- Deploy evidence:
+  - owner deploy packet status `ready_for_owner_git_deploy_decision`;
+  - git deploy plan status `ready_for_owner_authorized_remote_git_deploy_plan`;
+  - executor dry-run status `dry_run_ready`;
+  - apply status `applied`, with `commands_executed=16` and
+    `commands_planned=16`;
+  - Tokyo `app/current` now points to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c2e7ac6d-20260611T1015Z`;
+  - health remains
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`;
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`.
+- Remote candidate usage acceptance:
+  - active runtime candidate `order-candidate-d0c432b4d869` now reports
+    `candidate_usage_status=submit_authorization_recorded`,
+    `candidate_reusable_for_new_attempt=false`, and
+    `reuse_blocker=order_candidate_already_has_submit_authorization`;
+  - it is linked to `ExecutionIntent`
+    `intent_rt_9564b635726f404b6a38c997` and submit authorization
+    `runtime-submit-authorization-intent_rt_9564b635726f404b6a38c997`;
+  - therefore the next AVAX attempt must use a fresh candidate instead of this
+    first-attempt candidate.
+- Safety result:
+  - deploy and acceptance did not create orders, create ExecutionIntent
+    records, call OrderLifecycle, call exchange, create withdrawal/transfer
+    instructions, or mutate runtime budget;
+  - the only remote mutation was the code deploy / service restart / Alembic
+    no-op head check through the existing deployment path.
