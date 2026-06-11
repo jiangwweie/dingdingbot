@@ -2458,3 +2458,88 @@ Use this file for session progress and handoff notes.
     exchange submit execution;
   - do not execute first-real-submit from this authorization until
     reconciliation facts are refreshed and the new evidence snapshot is clean.
+
+## 2026-06-11 (Tokyo First-real-submit AVAX Short)
+
+- Deployed `program/live-safe-v1` commit
+  `918d0632c24e340e2f199de81e0c74668ee14715` to Tokyo via the git-based
+  runtime-governance deploy path:
+  `brc-runtime-governance-918d0632-20260611T102708Z`.
+- Deploy verification:
+  - Tokyo `app/current` points to the new release;
+  - release manifest head is `918d0632c24e340e2f199de81e0c74668ee14715`;
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - service health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Refreshed AVAX reconciliation read model before submit:
+  - symbol `AVAX/USDT:USDT`;
+  - status `recorded`;
+  - severe mismatches `0`;
+  - warning mismatches `0` before submit.
+- Re-ran the fixed arm flow for authorization
+  `runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`:
+  - blockers `[]`;
+  - trusted submit facts fresh;
+  - local order registration result recorded;
+  - exchange submit adapter result recorded;
+  - first-real-submit packet status `ready_for_owner_final_review`;
+  - existing attempt policy was reused, so no second attempt mutation was
+    created by the re-arm.
+- Executed the Owner-authorized first real runtime submit with the exact env
+  confirmation value for this authorization.
+- Exchange result:
+  - entry local order `rtod-c4439560677fbd165a-entry`;
+  - entry exchange order `39006512474`;
+  - entry status `FILLED`;
+  - filled quantity `1.0` AVAX;
+  - average execution price `6.566`;
+  - protection local order `rtod-c4439560677fbd165a-sl`;
+  - protection exchange order `4000001548436778`;
+  - protection status `OPEN`;
+  - stop trigger price `6.639`;
+  - no withdrawal or transfer instructions were created.
+- Immediate post-submit issue:
+  - outcome review first saw `entry_order_still_open_no_fill_unresolved`
+    because local projection had not yet caught up to the exchange fill;
+  - runtime monitor showed exchange active position `1` while local active
+    position was still `0`, producing severe reconciliation mismatches.
+- Applied local projection recovery from read-only exchange facts:
+  - script `scripts/recover_runtime_exchange_submit_projection.py` dry-run
+    returned `dry_run_ready`;
+  - apply returned `applied`;
+  - projected position id `pos_signal-evaluation-2037e48d00b3`;
+  - recovery safety invariants reported exchange read-only and no exchange
+    write / cancel / amend / close / withdrawal / transfer.
+- Final monitor after recovery:
+  - status `active_protection_warning`;
+  - local active position count `1`;
+  - exchange active position count `1`;
+  - local open order count `1`;
+  - exchange open stop order count `1`;
+  - hard stop present `true`;
+  - current quantity `1.0`;
+  - entry price `6.566`;
+  - mark price around `6.55965069` at the check;
+  - unrealized PnL around `0.00634931` at the check;
+  - reconciliation severe count `0`;
+  - reconciliation warning count `1` for `missing_tp_protection`;
+  - monitor blocker `runtime_max_active_positions_in_use` correctly blocks new
+    entries while the active position is open.
+- Outcome accounting after recovery:
+  - submit outcome review status `classified_ready_for_attempt_outcome_policy`;
+  - observed outcome `submitted_full_fill`;
+  - first-real-submit outcome accounting status
+    `ready_for_attempt_budget_outcome_accounting`;
+  - post-submit budget settlement status `recorded_reserved_budget_consumed`;
+  - budget action `confirm_reserved_budget_consumed`;
+  - attempts used remain `2`, attempts remaining `1`;
+  - budget reserved remains `0.166864220000000000`, budget remaining
+    `5.833135780000000000`.
+- Known warning / follow-up:
+  - no TP order is mounted; current position is hard-stop-only;
+  - this is an exit-policy / right-tail runner warning, not an immediate
+    runaway-loss blocker, because the SL hard stop is present;
+  - next work should monitor the open position and decide whether to add a
+    bounded TP1 / runner-management action or keep it as a hard-stop-only
+    first submit evidence sample.
