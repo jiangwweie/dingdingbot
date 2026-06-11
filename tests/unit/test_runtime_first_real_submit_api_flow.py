@@ -508,7 +508,48 @@ def test_disabled_smoke_reports_missing_prerequisite_detail():
         "disabled_first_real_submit_action_prerequisite_missing:"
         "RuntimeExecutionExchangeSubmitPacketPreview not found"
     ) in report["warnings"]
+    assert report["steps"][1]["name"] == "prepare_machine_evidence"
+    assert report["ids"]["trusted_submit_fact_snapshot_id"] == "facts-1"
+    assert report["ids"]["submit_idempotency_policy_id"] == "idem-1"
+    assert report["ids"]["protection_creation_failure_policy_id"] == "protect-fail-1"
     assert report["ready_for_real_submit_action"] is False
+    assert not any(
+        "runtime-execution-attempt-mutations" in item["path"]
+        for item in client.calls
+    )
+    assert not any(
+        "runtime-execution-local-registration-action-authorizations" in item["path"]
+        for item in client.calls
+    )
+    assert not any(
+        "exchange-submit-adapter-results" in item["path"]
+        for item in client.calls
+    )
+
+
+def test_disabled_smoke_prerequisite_probe_can_be_skipped():
+    client = _FakeClient(
+        disabled_action_http_status=404,
+        disabled_action_detail="RuntimeExecutionOrderLifecycleAdapterResult not found",
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="disabled-smoke",
+            authorization_id="auth-1",
+            explain_disabled_smoke_prerequisites=False,
+        ),
+    )
+
+    report = flow.run()
+
+    assert "preview_disabled_first_real_submit_action_http_404" in report["blockers"]
+    assert [call["path"] for call in client.calls] == [
+        "/api/trading-console/"
+        "runtime-execution-first-real-submit-actions/authorizations/auth-1"
+    ]
+    assert len(report["steps"]) == 1
 
 
 def test_arm_blocks_before_attempt_mutation_when_submit_facts_are_stale():

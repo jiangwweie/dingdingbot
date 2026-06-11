@@ -81,6 +81,7 @@ class FlowConfig:
     record_post_submit_accounting: bool = True
     adapter_result_store_implemented: bool = True
     real_adapter_boundary_implemented: bool = True
+    explain_disabled_smoke_prerequisites: bool = True
 
 
 @dataclass
@@ -785,6 +786,8 @@ class FirstRealSubmitApiFlow:
                         )
                     ]
                 )
+            if self._config.explain_disabled_smoke_prerequisites:
+                self._record_evidence_preparation(collect_body_blockers=False)
 
     def _execute_first_real_submit(self) -> None:
         authorization_id = self._required_id("authorization_id")
@@ -1243,6 +1246,15 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     parser.add_argument("--skip-post-submit-accounting", action="store_true")
     parser.add_argument("--adapter-result-store-implemented", action="store_true", default=True)
     parser.add_argument("--real-adapter-boundary-implemented", action="store_true", default=True)
+    parser.add_argument(
+        "--skip-disabled-smoke-prerequisite-probe",
+        action="store_true",
+        help=(
+            "Do not call the evidence preparation surface after a disabled-smoke "
+            "404. By default, disabled smoke records the missing prerequisite "
+            "evidence in the same report without attempting submit."
+        ),
+    )
     args = parser.parse_args(argv)
     return FlowConfig(
         api_base=args.api_base,
@@ -1278,6 +1290,9 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         record_post_submit_accounting=not args.skip_post_submit_accounting,
         adapter_result_store_implemented=args.adapter_result_store_implemented,
         real_adapter_boundary_implemented=args.real_adapter_boundary_implemented,
+        explain_disabled_smoke_prerequisites=(
+            not args.skip_disabled_smoke_prerequisite_probe
+        ),
     )
 
 
