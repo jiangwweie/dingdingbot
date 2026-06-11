@@ -46,6 +46,27 @@ def _packet(status="waiting_for_signal", *, prepare=False):
             else []
         ),
         "warnings": [],
+        "runtime_summaries": [
+            {
+                "runtime_instance_id": "runtime-1",
+                "symbol": "BNB/USDT:USDT",
+                "side": "long",
+                "strategy_family_id": "CPM-001",
+                "strategy_family_version_id": "CPM-001-v0",
+                "status": status,
+                "blockers": (
+                    ["strategy_signal_not_ready_for_shadow_candidate_prepare"]
+                    if status == "waiting_for_signal"
+                    else []
+                ),
+                "signal_summary": {
+                    "evaluation_status": "observe_only",
+                    "signal_type": "no_action",
+                    "reason_codes": ["cpm_no_action_trend_ambiguous"],
+                    "human_summary": "4h trend is ambiguous under CPM v0.",
+                },
+            }
+        ],
         "operator_command_plan": {
             "creates_shadow_candidate": prepare,
             "creates_execution_intent": False,
@@ -94,6 +115,9 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
 
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
     assert latest["status"] == "waiting_for_signal"
+    assert latest["runtime_signal_summaries"][0]["signal_summary"]["reason_codes"] == [
+        "cpm_no_action_trend_ambiguous"
+    ]
     assert (tmp_path / "loop" / "latest-status.txt").read_text().strip() == (
         "waiting_for_signal"
     )

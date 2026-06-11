@@ -126,6 +126,51 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
     )
 
 
+def _signal_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    latest_packet = packet.get("latest_packet")
+    if not isinstance(latest_packet, dict):
+        latest_packet = packet
+    observation_payload = latest_packet.get("observation_payload")
+    if not isinstance(observation_payload, dict):
+        observation_payload = {}
+    signal_packet = observation_payload.get("signal_packet")
+    if not isinstance(signal_packet, dict):
+        signal_packet = latest_packet.get("signal_packet")
+    if not isinstance(signal_packet, dict):
+        signal_packet = {}
+    evaluation = signal_packet.get("evaluation_result")
+    if not isinstance(evaluation, dict):
+        evaluation = {}
+    output = evaluation.get("output")
+    if not isinstance(output, dict):
+        output = {}
+    signal_snapshot = output.get("signal_snapshot")
+    if not isinstance(signal_snapshot, dict):
+        signal_snapshot = {}
+    context_tags = signal_snapshot.get("context_tags")
+    if not isinstance(context_tags, dict):
+        context_tags = {}
+    data_quality = output.get("data_quality")
+    if not isinstance(data_quality, dict):
+        data_quality = {}
+    return {
+        "evaluation_status": evaluation.get("status"),
+        "evaluator_id": evaluation.get("evaluator_id"),
+        "signal_type": output.get("signal_type"),
+        "required_execution_mode": output.get("required_execution_mode"),
+        "side": output.get("side"),
+        "reason_codes": list(output.get("reason_codes") or []),
+        "human_summary": output.get("human_summary"),
+        "confidence": output.get("confidence"),
+        "data_quality_status": data_quality.get("status"),
+        "context_tags": context_tags,
+        "can_call_semantic_binding": evaluation.get("can_call_semantic_binding"),
+        "semantics_binding_found": evaluation.get("semantics_binding_found"),
+        "strategy_candidate_mode": evaluation.get("strategy_candidate_mode"),
+        "timestamp_ms": output.get("timestamp_ms"),
+    }
+
+
 def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
     safety = packet.get("safety_invariants")
     if not isinstance(safety, dict):
@@ -157,6 +202,7 @@ def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
         "prepared_authorization_id": (
             packet.get("operator_command_plan") or {}
         ).get("prepared_authorization_id"),
+        "signal_summary": _signal_summary(packet),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "created_records": {
             "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),

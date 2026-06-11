@@ -87,7 +87,33 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         "blockers": list(packet.get("blockers") or []),
         "warnings": list(packet.get("warnings") or []),
         "prepared_authorization_id": plan.get("prepared_authorization_id"),
+        "runtime_signal_summaries": _runtime_signal_summaries(packet),
     }
+
+
+def _runtime_signal_summaries(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    summaries = packet.get("runtime_summaries")
+    if not isinstance(summaries, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in summaries:
+        if not isinstance(item, dict):
+            continue
+        result.append(
+            {
+                "runtime_instance_id": item.get("runtime_instance_id"),
+                "symbol": item.get("symbol"),
+                "side": item.get("side"),
+                "strategy_family_id": item.get("strategy_family_id"),
+                "strategy_family_version_id": item.get(
+                    "strategy_family_version_id"
+                ),
+                "status": item.get("status"),
+                "blockers": list(item.get("blockers") or []),
+                "signal_summary": item.get("signal_summary") or {},
+            }
+        )
+    return result
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
