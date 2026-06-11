@@ -3678,3 +3678,50 @@ Use this file for session progress and handoff notes.
   - right-tail small-risk-capital semantics remain expressed as bounded
     experimentation: small bounded losses are allowed, but unbounded or
     unreviewable execution is forbidden.
+
+## 2026-06-12 (Active Observation Switched To Current Release)
+
+- Operational change:
+  - stopped the older overnight observation supervisor/loop that was still
+    running from
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-bb40a7ea-20260612Tstatus-iteration`;
+  - before stopping, old observation status was `waiting_for_signal`, latest
+    iteration `10`, `forbidden_effects=[]`, no prepared authorization ID, and
+    no shadow candidate ID;
+  - started a new overnight observation supervisor from current deployed
+    release
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-77cae7a2-20260612Tready-prepare-owner-gate`;
+  - new report directory:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-77cae7a2`;
+  - new supervisor PID: `4016306`.
+- New current-release observation status:
+  - status: `waiting_for_signal`;
+  - latest iteration: `1`;
+  - iterations requested: `87`;
+  - iterations remaining: `86`;
+  - stop reason: `running`;
+  - packet stale: `false`;
+  - prepared authorization ID: `null`;
+  - shadow candidate ID: `null`;
+  - forbidden effects: `[]`.
+- Current-release runtime + strategy watch packet:
+  - watch status: `watching_no_signal`;
+  - active runtime count: `2`;
+  - runtime ready signal count: `0`;
+  - strategy-group would-enter signal count: `0`;
+  - strategy-group no-action signal count: `8`;
+  - allowed next action: `continue_active_runtime_observation`;
+  - allowed non-executing follow-ups if a real ready signal appears:
+    shadow SignalEvaluation, shadow OrderCandidate, prepare authorization
+    record, FinalGate preview, arm preview, and disabled first-real-submit
+    smoke;
+  - forbidden follow-ups remain executable ExecutionIntent, OrderLifecycle
+    submit, executable first-real-submit, exchange order placement, withdrawal,
+    and transfer.
+- Safety:
+  - no parallel active observation loop remains for the old report directory;
+  - the switch did not create a shadow candidate, prepare record,
+    ExecutionIntent, order, OrderLifecycle submit, exchange write, attempt
+    mutation, runtime-budget mutation, withdrawal, or transfer;
+  - the current live observation path now uses the latest deployed
+    non-executing prepare/watch/supervisor audit behavior.
