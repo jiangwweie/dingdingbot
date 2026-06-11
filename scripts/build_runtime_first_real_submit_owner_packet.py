@@ -56,6 +56,15 @@ async def _build_packet_from_args(args: argparse.Namespace) -> dict[str, Any]:
         ),
         require_current_head_deployed=not args.skip_current_head_deployed_check,
         active_positions=args.active_positions,
+        exercise_local_registration_pre_exchange=(
+            args.exercise_local_registration_pre_exchange
+        ),
+        exercise_exchange_submit_adapter_pre_execution=(
+            args.exercise_exchange_submit_adapter_pre_execution
+        ),
+        exercise_in_memory_exchange_execution_simulation=(
+            args.exercise_in_memory_exchange_execution_simulation
+        ),
     )
     return build_first_real_submit_owner_packet(pre_live_packet=pre_live_packet)
 
@@ -88,6 +97,17 @@ def build_first_real_submit_owner_packet(
         pre_live_packet.get("evidence_preparation")
         if isinstance(pre_live_packet.get("evidence_preparation"), dict)
         else {}
+    )
+    exchange_rehearsal = (
+        pre_live_packet.get("exchange_submit_adapter_rehearsal")
+        if isinstance(pre_live_packet.get("exchange_submit_adapter_rehearsal"), dict)
+        else {}
+    )
+    disabled_execution_result = _as_dict(
+        exchange_rehearsal.get("disabled_execution_result")
+    )
+    in_memory_execution_simulation = _as_dict(
+        exchange_rehearsal.get("in_memory_execution_simulation")
     )
 
     technical_blockers = list(checks.get("technical_blockers") or [])
@@ -186,6 +206,22 @@ def build_first_real_submit_owner_packet(
             "implementation_ready": implementation_ready,
             "ready_for_owner_decision": ready_for_owner_decision,
             "ready_for_first_real_submit": ready_for_first_real_submit,
+            "local_registration_pre_exchange_ready": checks.get(
+                "local_registration_pre_exchange_ready"
+            ),
+            "exchange_submit_adapter_pre_execution_ready": checks.get(
+                "exchange_submit_adapter_pre_execution_ready"
+            ),
+            "exchange_submit_execution_disabled_proved": (
+                disabled_execution_result.get("status")
+                == "exchange_submit_execution_disabled"
+                and disabled_execution_result.get("exchange_called") is False
+                and disabled_execution_result.get("order_lifecycle_submit_called")
+                is False
+            ),
+            "in_memory_exchange_execution_simulation_submitted": checks.get(
+                "in_memory_exchange_execution_simulation_submitted"
+            ),
             "machine_evidence_preparation_status": evidence_preparation.get(
                 "status"
             ),
@@ -224,6 +260,40 @@ def build_first_real_submit_owner_packet(
             "machine_evidence_skipped": list(
                 evidence_preparation.get("skipped_evidence") or []
             ),
+            "exchange_submit_rehearsal_blockers": list(
+                checks.get("exchange_submit_rehearsal_blockers") or []
+            ),
+        },
+        "exchange_submit_rehearsal": {
+            "enabled": exchange_rehearsal.get("enabled"),
+            "ready": exchange_rehearsal.get("ready"),
+            "enablement_decision_id": exchange_rehearsal.get(
+                "enablement_decision_id"
+            ),
+            "adapter_result_status": _nested(
+                exchange_rehearsal,
+                "adapter_result",
+                "status",
+            ),
+            "disabled_execution_result_status": disabled_execution_result.get(
+                "status"
+            ),
+            "disabled_execution_result_exchange_called": (
+                disabled_execution_result.get("exchange_called")
+            ),
+            "disabled_execution_result_order_lifecycle_submit_called": (
+                disabled_execution_result.get("order_lifecycle_submit_called")
+            ),
+            "in_memory_simulation_status": (
+                in_memory_execution_simulation.get("status")
+            ),
+            "in_memory_simulation_exchange_called": (
+                in_memory_execution_simulation.get("exchange_called")
+            ),
+            "in_memory_simulation_is_fake_gateway_only": bool(
+                in_memory_execution_simulation
+            ),
+            "does_not_authorize_live_action": True,
         },
         "evidence_preparation": {
             "status": evidence_preparation.get("status"),
@@ -341,6 +411,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Do not block when local HEAD differs from --deployed-head.",
     )
     parser.add_argument("--active-positions", type=int, default=0)
+    parser.add_argument(
+        "--exercise-local-registration-pre-exchange",
+        action="store_true",
+        help="Include in-memory local-registration rehearsal evidence.",
+    )
+    parser.add_argument(
+        "--exercise-exchange-submit-adapter-pre-execution",
+        action="store_true",
+        help="Include exchange-submit pre-execution rehearsal evidence.",
+    )
+    parser.add_argument(
+        "--exercise-in-memory-exchange-execution-simulation",
+        action="store_true",
+        help=(
+            "Include fake-gateway enabled execution simulation evidence. This "
+            "does not call Binance or any real exchange."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -360,10 +448,33 @@ def _print_human(packet: dict[str, Any]) -> None:
     print("technical_ready=" + str(summary["technical_ready"]).lower())
     print("deployment_ready=" + str(summary["deployment_ready"]).lower())
     print("implementation_ready=" + str(summary["implementation_ready"]).lower())
+    print(
+        "exchange_submit_adapter_pre_execution_ready="
+        + str(summary["exchange_submit_adapter_pre_execution_ready"]).lower()
+    )
+    print(
+        "in_memory_exchange_execution_simulation_submitted="
+        + str(
+            summary["in_memory_exchange_execution_simulation_submitted"]
+        ).lower()
+    )
     if gates["owner_decision_items"]:
         print("owner_decision_items=" + ",".join(gates["owner_decision_items"]))
     if checks["blockers"]:
         print("blockers=" + ",".join(checks["blockers"]))
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _nested(payload: dict[str, Any], *keys: str) -> Any:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
 
 
 if __name__ == "__main__":

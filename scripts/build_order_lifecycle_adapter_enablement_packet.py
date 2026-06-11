@@ -77,6 +77,15 @@ async def _build_packet_from_args(args: argparse.Namespace) -> dict[str, Any]:
         ),
         require_current_head_deployed=not args.skip_current_head_deployed_check,
         active_positions=args.active_positions,
+        exercise_local_registration_pre_exchange=(
+            args.exercise_local_registration_pre_exchange
+        ),
+        exercise_exchange_submit_adapter_pre_execution=(
+            args.exercise_exchange_submit_adapter_pre_execution
+        ),
+        exercise_in_memory_exchange_execution_simulation=(
+            args.exercise_in_memory_exchange_execution_simulation
+        ),
     )
     return build_order_lifecycle_adapter_enablement_packet(
         pre_live_packet=pre_live_packet
@@ -102,6 +111,15 @@ def build_order_lifecycle_adapter_enablement_packet(
     )
     protection_failure_policy = _as_dict(
         registration_chain.get("protection_failure_policy")
+    )
+    exchange_rehearsal = _as_dict(
+        pre_live_packet.get("exchange_submit_adapter_rehearsal")
+    )
+    disabled_execution_result = _as_dict(
+        exchange_rehearsal.get("disabled_execution_result")
+    )
+    in_memory_execution_simulation = _as_dict(
+        exchange_rehearsal.get("in_memory_execution_simulation")
     )
 
     technical_blockers = list(checks.get("technical_blockers") or [])
@@ -242,6 +260,22 @@ def build_order_lifecycle_adapter_enablement_packet(
             "ready_for_runtime_adapter_enablement": (
                 ready_for_runtime_adapter_enablement
             ),
+            "local_registration_pre_exchange_ready": checks.get(
+                "local_registration_pre_exchange_ready"
+            ),
+            "exchange_submit_adapter_pre_execution_ready": checks.get(
+                "exchange_submit_adapter_pre_execution_ready"
+            ),
+            "exchange_submit_execution_disabled_proved": (
+                disabled_execution_result.get("status")
+                == "exchange_submit_execution_disabled"
+                and disabled_execution_result.get("exchange_called") is False
+                and disabled_execution_result.get("order_lifecycle_submit_called")
+                is False
+            ),
+            "in_memory_exchange_execution_simulation_submitted": checks.get(
+                "in_memory_exchange_execution_simulation_submitted"
+            ),
         },
         "adapter_enablement_gate": {
             "current_state": {
@@ -300,6 +334,34 @@ def build_order_lifecycle_adapter_enablement_packet(
             "protection_failure_policy_id": protection_failure_policy.get(
                 "policy_id"
             ),
+        },
+        "exchange_submit_evidence": {
+            "pre_execution_enabled": exchange_rehearsal.get("enabled"),
+            "pre_execution_ready": exchange_rehearsal.get("ready"),
+            "enablement_decision_id": exchange_rehearsal.get(
+                "enablement_decision_id"
+            ),
+            "adapter_result_status": _nested(
+                exchange_rehearsal,
+                "adapter_result",
+                "status",
+            ),
+            "disabled_execution_result_status": disabled_execution_result.get(
+                "status"
+            ),
+            "disabled_execution_result_exchange_called": (
+                disabled_execution_result.get("exchange_called")
+            ),
+            "disabled_execution_result_order_lifecycle_submit_called": (
+                disabled_execution_result.get("order_lifecycle_submit_called")
+            ),
+            "in_memory_simulation_status": (
+                in_memory_execution_simulation.get("status")
+            ),
+            "in_memory_simulation_is_fake_gateway_only": bool(
+                in_memory_execution_simulation
+            ),
+            "does_not_authorize_live_action": True,
         },
         "pipeline": {
             "submit_rehearsal_status": pipeline.get("submit_rehearsal_status"),
@@ -579,6 +641,24 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Do not block when local HEAD differs from --deployed-head.",
     )
     parser.add_argument("--active-positions", type=int, default=0)
+    parser.add_argument(
+        "--exercise-local-registration-pre-exchange",
+        action="store_true",
+        help="Include in-memory local-registration rehearsal evidence.",
+    )
+    parser.add_argument(
+        "--exercise-exchange-submit-adapter-pre-execution",
+        action="store_true",
+        help="Include exchange-submit pre-execution rehearsal evidence.",
+    )
+    parser.add_argument(
+        "--exercise-in-memory-exchange-execution-simulation",
+        action="store_true",
+        help=(
+            "Include fake-gateway enabled execution simulation evidence. This "
+            "does not call Binance or any real exchange."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -597,12 +677,31 @@ def _print_human(packet: dict[str, Any]) -> None:
     )
     print("technical_rehearsal_ready=" + str(summary["technical_rehearsal_ready"]).lower())
     print("registration_draft_chain_ready=" + str(summary["registration_draft_chain_ready"]).lower())
+    print(
+        "exchange_submit_adapter_pre_execution_ready="
+        + str(summary["exchange_submit_adapter_pre_execution_ready"]).lower()
+    )
+    print(
+        "in_memory_exchange_execution_simulation_submitted="
+        + str(
+            summary["in_memory_exchange_execution_simulation_submitted"]
+        ).lower()
+    )
     if checks["blockers"]:
         print("blockers=" + ",".join(checks["blockers"]))
     if gate["implementation_work_items"]:
         print("implementation_work_items=" + ",".join(gate["implementation_work_items"]))
     if gate["runtime_enablement_blockers"]:
         print("runtime_enablement_blockers=" + ",".join(gate["runtime_enablement_blockers"]))
+
+
+def _nested(payload: dict[str, Any], *keys: str) -> Any:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
 
 
 if __name__ == "__main__":

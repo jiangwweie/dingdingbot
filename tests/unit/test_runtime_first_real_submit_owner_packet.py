@@ -143,6 +143,61 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
     ]
 
 
+@pytest.mark.asyncio
+async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
+    module = _load_module()
+    pre_live = _load_pre_live_module()
+    pre_live_packet = await pre_live.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_exchange_submit_adapter_pre_execution=True,
+        runner=_runner(pre_live),
+    )
+
+    packet = module.build_first_real_submit_owner_packet(
+        pre_live_packet=pre_live_packet
+    )
+
+    assert packet["status"] == "ready_for_owner_first_real_submit_decision"
+    assert packet["checks"]["packet_ready_for_owner_decision"] is True
+    assert packet["checks"]["ready_for_first_real_submit"] is False
+    assert (
+        packet["readiness_summary"]["local_registration_pre_exchange_ready"]
+        is True
+    )
+    assert (
+        packet["readiness_summary"]["exchange_submit_adapter_pre_execution_ready"]
+        is True
+    )
+    assert (
+        packet["readiness_summary"]["exchange_submit_execution_disabled_proved"]
+        is True
+    )
+    assert (
+        packet["readiness_summary"][
+            "in_memory_exchange_execution_simulation_submitted"
+        ]
+        is False
+    )
+    assert packet["exchange_submit_rehearsal"]["ready"] is True
+    assert packet["exchange_submit_rehearsal"]["adapter_result_status"] == (
+        "exchange_submit_adapter_not_implemented"
+    )
+    assert packet["exchange_submit_rehearsal"][
+        "disabled_execution_result_status"
+    ] == "exchange_submit_execution_disabled"
+    assert (
+        packet["exchange_submit_rehearsal"][
+            "disabled_execution_result_exchange_called"
+        ]
+        is False
+    )
+    assert packet["exchange_submit_rehearsal"][
+        "does_not_authorize_live_action"
+    ] is True
+
+
 def test_owner_packet_can_be_ready_for_owner_decision_when_only_owner_is_missing():
     module = _load_module()
     pre_live_packet = _minimal_pre_live_packet(

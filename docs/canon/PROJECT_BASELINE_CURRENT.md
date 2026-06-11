@@ -467,7 +467,10 @@ Key facts:
   run the enabled execution-result branch against an in-memory fake exchange
   gateway and in-memory OrderLifecycle only, proving entry/protection submit
   result wiring without Binance, network, credentials, deployment mutation, or
-  real-funds order placement.
+  real-funds order placement. The Owner first-real-submit decision packet and
+  OrderLifecycle adapter enablement packet can now surface these exchange
+  pre-execution / fake-gateway simulation evidence fields without making them
+  live submit authority.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

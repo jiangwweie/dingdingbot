@@ -230,6 +230,55 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "scoped_local_registration_action_authorization_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
+
+
+@pytest.mark.asyncio
+async def test_adapter_enablement_packet_surfaces_exchange_simulation_evidence():
+    module = _load_module()
+    pre_live = _load_pre_live_module()
+    pre_live_packet = await pre_live.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_in_memory_exchange_execution_simulation=True,
+        runner=_runner(pre_live),
+    )
+
+    packet = module.build_order_lifecycle_adapter_enablement_packet(
+        pre_live_packet=pre_live_packet
+    )
+
+    assert packet["checks"]["ready_for_non_executing_implementation_task"] is True
+    assert packet["checks"]["ready_for_runtime_adapter_enablement"] is False
+    assert packet["readiness_summary"]["exchange_submit_adapter_pre_execution_ready"] is True
+    assert (
+        packet["readiness_summary"]["exchange_submit_execution_disabled_proved"]
+        is True
+    )
+    assert (
+        packet["readiness_summary"][
+            "in_memory_exchange_execution_simulation_submitted"
+        ]
+        is True
+    )
+    assert packet["exchange_submit_evidence"]["pre_execution_ready"] is True
+    assert packet["exchange_submit_evidence"]["adapter_result_status"] == (
+        "exchange_submit_adapter_not_implemented"
+    )
+    assert packet["exchange_submit_evidence"][
+        "disabled_execution_result_status"
+    ] == "exchange_submit_execution_disabled"
+    assert packet["exchange_submit_evidence"][
+        "in_memory_simulation_status"
+    ] == "exchange_submit_orders_submitted"
+    assert packet["exchange_submit_evidence"][
+        "in_memory_simulation_is_fake_gateway_only"
+    ] is True
+    assert packet["exchange_submit_evidence"]["does_not_authorize_live_action"] is True
+    assert packet["safety_invariants"]["exchange_called"] is False
+    assert packet["source_pre_live_packet"]["safety_invariants"][
+        "in_memory_exchange_execution_simulation_exchange_called"
+    ] is True
     assert "protection_order_failure_recovery_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
