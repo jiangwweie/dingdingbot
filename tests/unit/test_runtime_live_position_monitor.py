@@ -22,6 +22,10 @@ from src.domain.runtime_live_position_monitor import (
     RuntimeLiveProtectionStatus,
     build_runtime_live_position_monitor_packet,
 )
+from src.domain.runtime_position_exit_plan import (
+    RuntimePositionExitPlanStatus,
+    build_runtime_position_exit_plan,
+)
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
     StrategyRuntimeInstance,
@@ -186,6 +190,79 @@ def test_active_short_with_sl_only_is_holdable_warning_not_runaway_blocker():
     assert packet.unrealized_pnl == Decimal("-0.03344777")
     assert packet.order_created is False
     assert packet.exchange_order_submitted is False
+
+
+def test_exit_plan_proposes_tp1_runner_without_execution_authority():
+    monitor = build_runtime_live_position_monitor_packet(
+        runtime=_runtime(),
+        local_positions=[_position()],
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[_exchange_sl_order()],
+        reconciliation_result=_reconciliation_warning(),
+        now_ms=NOW_MS,
+    )
+
+    plan = build_runtime_position_exit_plan(
+        runtime=_runtime(),
+        monitor=monitor,
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_open_stop_orders=[_exchange_sl_order()],
+        market_rule={
+            "min_quantity": Decimal("0.1"),
+            "step_size": Decimal("0.1"),
+            "source": "unit_market_rule",
+        },
+        now_ms=NOW_MS,
+    )
+
+    assert plan.status == RuntimePositionExitPlanStatus.READY_FOR_OWNER_REVIEW
+    assert plan.tp1_price_reference == Decimal("6.555")
+    assert plan.risk_per_unit == Decimal("0.040")
+    assert plan.tp1_quantity_requested == Decimal("0.5")
+    assert plan.tp1_quantity_step_aligned == Decimal("0.5")
+    assert plan.runner_quantity_reference == Decimal("0.5")
+    assert plan.tp1_reduce_only_side == "buy"
+    assert plan.tp1_quantity_feasible is True
+    assert plan.not_order is True
+    assert plan.not_execution_intent is True
+    assert plan.exchange_order_submitted is False
+
+
+def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
+    monitor = build_runtime_live_position_monitor_packet(
+        runtime=_runtime(),
+        local_positions=[_position()],
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[_exchange_sl_order()],
+        reconciliation_result=_reconciliation_warning(),
+        now_ms=NOW_MS,
+    )
+
+    plan = build_runtime_position_exit_plan(
+        runtime=_runtime(),
+        monitor=monitor,
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_open_stop_orders=[_exchange_sl_order()],
+        market_rule={
+            "min_quantity": Decimal("1"),
+            "step_size": Decimal("1"),
+            "source": "avax_unit_step",
+        },
+        now_ms=NOW_MS,
+    )
+
+    assert plan.status == RuntimePositionExitPlanStatus.READY_FOR_OWNER_REVIEW
+    assert plan.tp1_quantity_requested == Decimal("0.5")
+    assert plan.tp1_quantity_step_aligned == Decimal("0")
+    assert plan.tp1_quantity_feasible is False
+    assert plan.runner_quantity_reference == Decimal("1")
+    assert plan.recommended_owner_decision == (
+        "keep_hard_stop_only_or_authorize_different_reduce_only_exit_shape"
+    )
+    assert "tp1_partial_quantity_below_min_qty_or_step" in plan.warnings
+    assert plan.order_created is False
 
 
 def test_active_position_without_hard_stop_requires_owner_action():

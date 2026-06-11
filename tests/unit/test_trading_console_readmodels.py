@@ -402,9 +402,14 @@ class _FakeOwnerCapitalBaselineSnapshotRepo:
 
 
 class _FakeExchangeGateway:
-    def __init__(self, *, positions=None, normal_orders=None, stop_orders=None):
+    def __init__(self, *, positions=None, normal_orders=None, stop_orders=None, market_info=None):
         self._positions = [] if positions is None else list(positions)
         self._normal_orders = [] if normal_orders is None else list(normal_orders)
+        self._market_info = market_info or {
+            "min_quantity": Decimal("0.001"),
+            "step_size": Decimal("0.001"),
+            "source": "unit_market_info",
+        }
         self._stop_orders = (
             [
                 {
@@ -426,6 +431,7 @@ class _FakeExchangeGateway:
         )
         self.open_order_calls = []
         self.position_calls = []
+        self.market_info_calls = []
         self.account_snapshot_calls = 0
         self.place_calls = 0
         self.cancel_calls = 0
@@ -443,6 +449,10 @@ class _FakeExchangeGateway:
         if params == {"stop": True}:
             return self._stop_orders
         return self._normal_orders
+
+    async def get_market_info(self, symbol):
+        self.market_info_calls.append(symbol)
+        return self._market_info
 
     async def place_order(self, *_args, **_kwargs):  # pragma: no cover
         self.place_calls += 1
@@ -734,6 +744,95 @@ def test_trading_console_runtime_live_position_monitor_endpoint_surfaces_sl_only
     assert payload["withdrawal_instruction_created"] is False
     assert payload["transfer_instruction_created"] is False
     assert (BNB, {"stop": True}) in exchange.open_order_calls
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_trading_console_runtime_active_position_exit_plan_surfaces_tp1_feasibility(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    runtime = _live_enabled_runtime()
+    exchange = _FakeExchangeGateway(
+        positions=[
+            {
+                "symbol": BNB,
+                "size": "0.01",
+                "entryPrice": "630",
+                "markPrice": "629.1",
+                "unrealizedPnl": "-0.009",
+                "liquidationPrice": "900",
+            }
+        ],
+        normal_orders=[],
+        stop_orders=[
+            {
+                "id": "4000001470395922",
+                "symbol": BNB,
+                "type": "stop_market",
+                "side": "sell",
+                "status": "open",
+                "amount": "0.01",
+                "info": {
+                    "stopPrice": "625.92",
+                    "reduceOnly": True,
+                    "positionSide": "LONG",
+                },
+            }
+        ],
+        market_info={
+            "min_quantity": Decimal("0.01"),
+            "step_size": Decimal("0.01"),
+            "source": "unit_bnb_min_qty",
+        },
+    )
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        position_repo=_FakeActivePositionRepo(symbol=BNB),
+        order_repo=_FakeOrderRepo(
+            [
+                _FakeOrder("entry-1", "ENTRY", "91085295446", parent_order_id=None, status="FILLED"),
+                _FakeOrder("sl-1", "SL", "4000001470395922"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        _FakeStrategyRuntimeService(runtime),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_position_exit_plan_service",
+        None,
+        raising=False,
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/strategy-runtimes/runtime-live-monitor-1/active-position-exit-plan",
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ready_for_owner_review"
+    assert payload["tp1_price_reference"] == "634.08"
+    assert payload["tp1_quantity_requested"] == "0.005"
+    assert payload["tp1_quantity_step_aligned"] == "0.00"
+    assert payload["tp1_quantity_feasible"] is False
+    assert payload["runner_quantity_reference"] == "0.01"
+    assert "tp1_partial_quantity_below_min_qty_or_step" in payload["warnings"]
+    assert payload["not_order"] is True
+    assert payload["not_execution_authority"] is True
+    assert payload["exchange_order_submitted"] is False
+    assert (BNB, {"stop": True}) in exchange.open_order_calls
+    assert exchange.market_info_calls == [BNB]
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 

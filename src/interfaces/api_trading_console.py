@@ -147,6 +147,7 @@ from src.domain.strategy_runtime_promotion_gate import (
     StrategySemanticsConfirmationFacts,
 )
 from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorPacket
+from src.domain.runtime_position_exit_plan import RuntimePositionExitPlan
 from src.domain.strategy_runtime_safety_readiness import StrategyRuntimeSafetyReadiness
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
@@ -549,6 +550,27 @@ async def runtime_live_position_monitor(
     try:
         service = await _runtime_live_position_monitor_service()
         return await service.build_monitor_packet(
+            runtime_instance_id=runtime_instance_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/strategy-runtimes/{runtime_instance_id}/active-position-exit-plan",
+    response_model=RuntimePositionExitPlan,
+)
+async def runtime_active_position_exit_plan(
+    runtime_instance_id: str,
+) -> RuntimePositionExitPlan:
+    try:
+        service = await _runtime_position_exit_plan_service()
+        return await service.build_exit_plan(
             runtime_instance_id=runtime_instance_id,
         )
     except HTTPException:
@@ -3026,6 +3048,73 @@ async def _runtime_live_position_monitor_service() -> Any:
         reconciliation_service=reconciliation_service,
     )
     setattr(api_module, "_runtime_live_position_monitor_service", service)
+    return service
+
+
+async def _runtime_position_exit_plan_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_position_exit_plan_service", None)
+    if injected is not None:
+        return injected
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None:
+        position_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        )
+    order_repo = getattr(api_module, "_order_repo", None)
+    if order_repo is None:
+        order_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_order_repo",
+            _build_pg_order_repo,
+        )
+    if position_repo is None or order_repo is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Runtime exit plan requires persistent position and order facts.",
+        )
+
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    if gateway is None and _live_read_only_exchange_env_safe():
+        gateway = getattr(
+            api_module,
+            "_trading_console_read_only_exchange_gateway",
+            None,
+        )
+        if gateway is None:
+            gateway = _TradingConsoleLiveReadOnlyGateway()
+            setattr(
+                api_module,
+                "_trading_console_read_only_exchange_gateway",
+                gateway,
+            )
+
+    reconciliation_service = None
+    if gateway is not None:
+        from src.application.reconciliation import ReconciliationService
+
+        reconciliation_service = ReconciliationService(
+            gateway=gateway,
+            position_mgr=position_repo,
+            order_repository=order_repo,
+        )
+
+    from src.application.runtime_position_exit_plan_service import (
+        RuntimePositionExitPlanService,
+    )
+
+    service = RuntimePositionExitPlanService(
+        runtime_repository=await _strategy_runtime_service(),
+        position_repository=position_repo,
+        order_repository=order_repo,
+        exchange_gateway=gateway,
+        reconciliation_service=reconciliation_service,
+    )
+    setattr(api_module, "_runtime_position_exit_plan_service", service)
     return service
 
 
