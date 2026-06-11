@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""Monitor all active strategy runtimes without submitting orders.
+
+This is an operator wrapper around ``runtime_next_attempt_observation_monitor``.
+It discovers ACTIVE runtimes from the Trading Console API, runs the existing
+per-runtime monitor for each one, and writes an auditable aggregate packet.
+
+By default it is observe-only. With ``--allow-prepare-records`` it may create
+shadow SignalEvaluation / shadow OrderCandidate / prepare authorization records
+only when a real strategy signal is ready for prepare. It never arms local
+registration, arms exchange submit, calls OrderLifecycle, submits orders, or
+moves funds.
+"""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import redirect_stdout
+import json
+from pathlib import Path
+import sys
+from typing import Any, Callable
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
+    API_BASE_ENV as FIRST_REAL_SUBMIT_API_BASE_ENV,
+    DEFAULT_API_BASE,
+    UrlLibApiClient,
+)
+from scripts import runtime_next_attempt_observation_api_prepare_flow as observation_flow  # noqa: E402
+from scripts import runtime_next_attempt_observation_monitor as monitor  # noqa: E402
+
+
+def _api_base(args: argparse.Namespace) -> str:
+    import os
+
+    return (
+        args.api_base
+        or os.environ.get(observation_flow.API_BASE_ENV)
+        or os.environ.get(FIRST_REAL_SUBMIT_API_BASE_ENV)
+        or DEFAULT_API_BASE
+    )
+
+
+def _active_runtimes(*, client: Any) -> list[dict[str, Any]]:
+    response = client.request_json("GET", "/api/trading-console/strategy-runtimes")
+    body = response.get("body")
+    if response.get("http_status", 0) >= 300 or response.get("error"):
+        raise RuntimeError(f"strategy_runtimes_http_{response.get('http_status')}")
+    items = body if isinstance(body, list) else (body or {}).get("items", [])
+    if not isinstance(items, list):
+        raise RuntimeError("strategy_runtimes_response_not_list")
+    return [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("status") or "").lower() == "active"
+    ]
+
+
+def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = runtime.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse.Namespace:
+    runtime_instance_id = str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
+    symbol = _runtime_value(runtime, "symbol")
+    side = _runtime_value(runtime, "side")
+    strategy_family_id = _runtime_value(runtime, "strategy_family_id", "family")
+    carrier_id = _runtime_value(
+        runtime,
+        "carrier_id",
+        "strategy_family_version_id",
+        "strategy_family_id",
+    )
+    return argparse.Namespace(
+        runtime_instance_id=runtime_instance_id,
+        env_file=args.env_file,
+        api_base=_api_base(args),
+        source=args.source,
+        include_exchange=args.include_exchange,
+        symbol=symbol,
+        side=side,
+        family=strategy_family_id,
+        strategy_family_id=strategy_family_id,
+        carrier_id=carrier_id,
+        quantity=None,
+        target_notional_usdt=None,
+        max_notional=None,
+        leverage=None,
+        max_attempts=None,
+        protection_mode=None,
+        review_requirement=None,
+        evaluation_id=None,
+        playbook_id=args.playbook_id,
+        one_hour_limit=args.one_hour_limit,
+        four_hour_limit=args.four_hour_limit,
+        timeout_seconds=args.timeout_seconds,
+        signal_output_json=None,
+        output_dir=str(Path(args.output_dir).expanduser() / runtime_instance_id),
+        allow_prepare_records=args.allow_prepare_records,
+        candidate_id=None,
+        context_id=None,
+        owner_operator_id=args.owner_operator_id,
+        owner_confirmation_reference=args.owner_confirmation_reference,
+        reason=args.reason,
+        next_attempt_symbol=symbol,
+        next_attempt_side=side,
+        next_attempt_family=strategy_family_id,
+        next_attempt_strategy_family_id=strategy_family_id,
+        next_attempt_carrier_id=carrier_id,
+        max_cycles=args.max_cycles_per_runtime,
+        interval_seconds=args.interval_seconds,
+        continue_on_blocked=args.continue_on_blocked,
+        output_json=str(
+            Path(args.output_dir).expanduser()
+            / runtime_instance_id
+            / "monitor-packet.json"
+        ),
+    )
+
+
+def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "runtime_instance_id": _runtime_value(runtime, "runtime_instance_id", "runtime_id"),
+        "status": packet.get("status"),
+        "symbol": _runtime_value(runtime, "symbol"),
+        "side": _runtime_value(runtime, "side"),
+        "strategy_family_id": _runtime_value(runtime, "strategy_family_id", "family"),
+        "strategy_family_version_id": _runtime_value(
+            runtime,
+            "strategy_family_version_id",
+            "carrier_id",
+        ),
+        "ready_for_prepare": packet.get("ready_for_prepare"),
+        "ready_for_final_gate_preflight": packet.get(
+            "ready_for_final_gate_preflight"
+        ),
+        "blockers": list(packet.get("blockers") or []),
+        "warnings": list(packet.get("warnings") or []),
+        "report_path": (
+            (packet.get("operator_command_plan") or {}).get("report_path")
+            or packet.get("output_json")
+        ),
+        "signal_input_json": (packet.get("operator_command_plan") or {}).get(
+            "signal_input_json"
+        ),
+        "prepared_authorization_id": (
+            packet.get("operator_command_plan") or {}
+        ).get("prepared_authorization_id"),
+    }
+
+
+def _safety(
+    *,
+    allow_prepare_records: bool,
+    packets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    def any_flag(name: str) -> bool:
+        return any(bool((packet.get("safety_invariants") or {}).get(name)) for packet in packets)
+
+    return {
+        "uses_official_trading_console_api": True,
+        "monitors_active_runtimes": True,
+        "allow_prepare_records": allow_prepare_records,
+        "prepare_records_created": any_flag("prepare_records_created"),
+        "local_registration_armed": any_flag("local_registration_armed"),
+        "exchange_submit_armed": any_flag("exchange_submit_armed"),
+        "execute_real_submit": any_flag("execute_real_submit"),
+        "exchange_write_called": any_flag("exchange_write_called"),
+        "order_created": any_flag("order_created"),
+        "order_lifecycle_called": any_flag("order_lifecycle_called"),
+        "attempt_counter_mutated": any_flag("attempt_counter_mutated"),
+        "runtime_budget_mutated": any_flag("runtime_budget_mutated"),
+        "position_opened": any_flag("position_opened"),
+        "position_closed": any_flag("position_closed"),
+        "withdrawal_or_transfer_created": any_flag("withdrawal_or_transfer_created"),
+    }
+
+
+def _overall_status(packets: list[dict[str, Any]]) -> str:
+    statuses = {str(packet.get("status") or "unknown") for packet in packets}
+    if not packets:
+        return "no_active_runtimes"
+    if "ready_for_final_gate_preflight" in statuses:
+        return "ready_for_final_gate_preflight"
+    if "ready_for_prepare" in statuses:
+        return "ready_for_prepare"
+    if statuses == {"waiting_for_signal"}:
+        return "waiting_for_signal"
+    if "blocked" in statuses:
+        return "blocked"
+    return "mixed"
+
+
+def _build_packet(
+    args: argparse.Namespace,
+    *,
+    client: Any | None = None,
+    monitor_builder: Callable[[argparse.Namespace], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    observation_flow._load_env_file(args.env_file)
+    api_client = client or UrlLibApiClient(api_base=_api_base(args))
+    builder = monitor_builder or monitor._build_monitor_packet
+    active = _active_runtimes(client=api_client)
+    selected = active[: max(int(args.max_runtimes or 100), 0)]
+
+    packets: list[dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
+    for runtime in selected:
+        runtime_args = _monitor_args(args, runtime)
+        packet = builder(runtime_args)
+        packet["output_json"] = runtime_args.output_json
+        packets.append(packet)
+        summaries.append(_summary(runtime, packet))
+
+    status = _overall_status(packets)
+    blockers: list[str] = []
+    for item in summaries:
+        for blocker in item["blockers"]:
+            scoped = f"{item['runtime_instance_id']}:{blocker}"
+            if scoped not in blockers:
+                blockers.append(scoped)
+
+    return {
+        "scope": "runtime_active_observation_monitor",
+        "status": status,
+        "active_runtime_count": len(active),
+        "monitored_runtime_count": len(selected),
+        "allow_prepare_records": args.allow_prepare_records,
+        "max_cycles_per_runtime": args.max_cycles_per_runtime,
+        "runtime_summaries": summaries,
+        "runtime_packets": packets if args.include_runtime_packets else [],
+        "blockers": blockers,
+        "warnings": [],
+        "operator_command_plan": {
+            "next_step": _next_step(status),
+            "not_executed": True,
+            "creates_shadow_candidate": any(
+                bool((packet.get("safety_invariants") or {}).get("prepare_records_created"))
+                for packet in packets
+            ),
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "requires_official_final_gate": True,
+            "requires_explicit_owner_real_submit_authorization": True,
+        },
+        "safety_invariants": _safety(
+            allow_prepare_records=args.allow_prepare_records,
+            packets=packets,
+        ),
+    }
+
+
+def _next_step(status: str) -> str:
+    if status == "ready_for_final_gate_preflight":
+        return "run_official_final_gate_preflight_for_prepared_authorization"
+    if status == "ready_for_prepare":
+        return "rerun_active_monitor_with_allow_prepare_records_after_owner_review"
+    if status == "blocked":
+        return "resolve_runtime_observation_blockers"
+    if status == "no_active_runtimes":
+        return "start_or_authorize_a_runtime_before_monitoring"
+    return "wait_for_next_observation_cycle"
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Monitor all ACTIVE strategy runtimes without live submit.",
+    )
+    parser.add_argument("--env-file")
+    parser.add_argument("--api-base")
+    parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
+    parser.add_argument("--include-exchange", action="store_true", default=False)
+    parser.add_argument("--allow-prepare-records", action="store_true", default=False)
+    parser.add_argument("--max-runtimes", type=int, default=100)
+    parser.add_argument("--max-cycles-per-runtime", type=int, default=1)
+    parser.add_argument("--interval-seconds", type=float, default=0.0)
+    parser.add_argument("--continue-on-blocked", action="store_true", default=False)
+    parser.add_argument("--one-hour-limit", type=int, default=25)
+    parser.add_argument("--four-hour-limit", type=int, default=12)
+    parser.add_argument("--timeout-seconds", type=float, default=10.0)
+    parser.add_argument("--playbook-id")
+    parser.add_argument(
+        "--output-dir",
+        default="output/runtime-active-observation-monitor",
+    )
+    parser.add_argument("--output-json")
+    parser.add_argument("--include-runtime-packets", action="store_true", default=False)
+    parser.add_argument("--owner-operator-id", default="owner")
+    parser.add_argument(
+        "--owner-confirmation-reference",
+        default="owner-authorized-active-runtime-observation-monitor",
+    )
+    parser.add_argument(
+        "--reason",
+        default="owner authorized active runtime observation monitor",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    with redirect_stdout(sys.stderr):
+        packet = _build_packet(args)
+    output = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    if args.output_json:
+        output_path = Path(args.output_json).expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output + "\n", encoding="utf-8")
+    print(output)
+    return 0 if packet["status"] in {
+        "waiting_for_signal",
+        "ready_for_prepare",
+        "ready_for_final_gate_preflight",
+        "no_active_runtimes",
+    } else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
