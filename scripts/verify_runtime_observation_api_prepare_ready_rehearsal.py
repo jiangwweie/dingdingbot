@@ -107,7 +107,7 @@ def _args(*, output_dir: Path, allow_prepare_records: bool) -> argparse.Namespac
         evaluation_id=None,
         playbook_id=None,
         one_hour_limit=25,
-        four_hour_limit=12,
+        four_hour_limit=25,
         timeout_seconds=10.0,
         signal_output_json=None,
         output_dir=str(output_dir),

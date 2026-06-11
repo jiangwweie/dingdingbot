@@ -35,7 +35,7 @@ def _args(**overrides):
         "interval_seconds": 0.0,
         "continue_on_blocked": False,
         "one_hour_limit": 25,
-        "four_hour_limit": 12,
+        "four_hour_limit": 25,
         "timeout_seconds": 10.0,
         "playbook_id": None,
         "output_dir": "output/unit-active-monitor",
@@ -77,6 +77,7 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
                 "symbol": args.symbol,
                 "side": args.side,
                 "allow_prepare_records": args.allow_prepare_records,
+                "four_hour_limit": args.four_hour_limit,
                 "output_json": args.output_json,
             }
         )
@@ -105,6 +106,7 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
         "runtime-active-1",
         "runtime-active-2",
     ]
+    assert {item["four_hour_limit"] for item in seen} == {25}
     assert packet["status"] == "waiting_for_signal"
     assert packet["active_runtime_count"] == 2
     assert packet["monitored_runtime_count"] == 2

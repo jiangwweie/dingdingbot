@@ -310,7 +310,7 @@ class RuntimeNextAttemptObservationCycleRequest(BaseModel):
     evaluation_id: str | None = None
     playbook_id: str | None = None
     one_hour_limit: int = Field(default=25, ge=5, le=200)
-    four_hour_limit: int = Field(default=12, ge=2, le=100)
+    four_hour_limit: int = Field(default=25, ge=2, le=100)
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     non_executing: Literal[True] = True
 

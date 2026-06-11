@@ -391,7 +391,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--evaluation-id")
     parser.add_argument("--playbook-id")
     parser.add_argument("--one-hour-limit", type=int, default=25)
-    parser.add_argument("--four-hour-limit", type=int, default=12)
+    parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
     parser.add_argument("--signal-output-json")
     parser.add_argument(

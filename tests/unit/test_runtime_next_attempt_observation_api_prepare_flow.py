@@ -29,7 +29,7 @@ def _args(**overrides):
         "evaluation_id": None,
         "playbook_id": None,
         "one_hour_limit": 25,
-        "four_hour_limit": 12,
+        "four_hour_limit": 25,
         "timeout_seconds": 10.0,
         "signal_output_json": None,
         "output_dir": "output/runtime-next-attempt-observation-api-prepare-flow",
