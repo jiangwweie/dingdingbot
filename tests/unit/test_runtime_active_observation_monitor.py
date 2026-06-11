@@ -141,6 +141,12 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
             },
             "safety_invariants": {
                 "prepare_records_created": True,
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": True,
+                "recorded_execution_intent_created": True,
+                "submit_authorization_created": True,
+                "protection_plan_created": True,
+                "executable_execution_intent_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -157,8 +163,21 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
     assert packet["operator_command_plan"]["creates_shadow_candidate"] is True
     assert packet["operator_command_plan"]["creates_execution_intent"] is False
     assert packet["safety_invariants"]["prepare_records_created"] is True
+    assert packet["safety_invariants"]["shadow_candidate_created"] is True
+    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert packet["safety_invariants"]["executable_execution_intent_created"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_created"] is False
+    summary = packet["runtime_summaries"][0]
+    assert summary["created_records"] == {
+        "shadow_candidate_created": True,
+        "runtime_execution_intent_draft_created": True,
+        "recorded_execution_intent_created": True,
+        "submit_authorization_created": True,
+        "protection_plan_created": True,
+        "executable_execution_intent_created": False,
+    }
+    assert summary["forbidden_effects"]["order_lifecycle_called"] is False
 
 
 def test_active_monitor_handles_no_active_runtimes():

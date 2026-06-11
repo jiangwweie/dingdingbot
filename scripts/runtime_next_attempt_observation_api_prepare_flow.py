@@ -173,6 +173,13 @@ def _run_prepare_flow(
 
 
 def _safety(*, allow_prepare_records: bool, prepare_packet: dict[str, Any] | None) -> dict[str, Any]:
+    created = (
+        prepare_packet.get("created_records")
+        if isinstance(prepare_packet, dict)
+        else None
+    )
+    if not isinstance(created, dict):
+        created = {}
     return {
         "uses_official_trading_console_api": True,
         "allow_prepare_records": allow_prepare_records,
@@ -180,6 +187,18 @@ def _safety(*, allow_prepare_records: bool, prepare_packet: dict[str, Any] | Non
             prepare_packet
             and prepare_packet.get("status") == "ready_for_final_gate_preflight"
         ),
+        "shadow_candidate_created": bool(created.get("shadow_candidate_created")),
+        "runtime_execution_intent_draft_created": bool(
+            created.get("runtime_execution_intent_draft_created")
+        ),
+        "recorded_execution_intent_created": bool(
+            created.get("execution_intent_created")
+        ),
+        "submit_authorization_created": bool(
+            created.get("submit_authorization_created")
+        ),
+        "protection_plan_created": bool(created.get("protection_plan_created")),
+        "executable_execution_intent_created": False,
         "local_registration_armed": False,
         "exchange_submit_armed": False,
         "execute_real_submit": False,

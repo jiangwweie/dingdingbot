@@ -167,6 +167,13 @@ def test_observation_api_prepare_runs_prepare_only_with_explicit_flag(monkeypatc
             "operator_command_plan": {
                 "prepared_authorization_id": "auth-1",
             },
+            "created_records": {
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": True,
+                "execution_intent_created": True,
+                "submit_authorization_created": True,
+                "protection_plan_created": True,
+            },
         }
 
     monkeypatch.setattr(
@@ -186,6 +193,9 @@ def test_observation_api_prepare_runs_prepare_only_with_explicit_flag(monkeypatc
     assert payload["operator_command_plan"]["prepared_authorization_id"] == "auth-1"
     assert payload["operator_command_plan"]["live_submit_allowed"] is False
     assert payload["safety_invariants"]["prepare_records_created"] is True
+    assert payload["safety_invariants"]["shadow_candidate_created"] is True
+    assert payload["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert payload["safety_invariants"]["executable_execution_intent_created"] is False
     assert payload["safety_invariants"]["exchange_write_called"] is False
     assert payload["safety_invariants"]["order_lifecycle_called"] is False
 

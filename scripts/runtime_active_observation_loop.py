@@ -55,6 +55,20 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         "active_runtime_count": packet.get("active_runtime_count"),
         "monitored_runtime_count": packet.get("monitored_runtime_count"),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
+        "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
+        "runtime_execution_intent_draft_created": bool(
+            safety.get("runtime_execution_intent_draft_created")
+        ),
+        "recorded_execution_intent_created": bool(
+            safety.get("recorded_execution_intent_created")
+        ),
+        "submit_authorization_created": bool(
+            safety.get("submit_authorization_created")
+        ),
+        "protection_plan_created": bool(safety.get("protection_plan_created")),
+        "executable_execution_intent_created": bool(
+            safety.get("executable_execution_intent_created")
+        ),
         "ready_for_final_gate_preflight": (
             packet.get("status") == "ready_for_final_gate_preflight"
         ),
@@ -157,6 +171,18 @@ def _loop_safety(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "monitor_loop_only": True,
         "prepare_records_created": any_flag("prepare_records_created"),
+        "shadow_candidate_created": any_flag("shadow_candidate_created"),
+        "runtime_execution_intent_draft_created": any_flag(
+            "runtime_execution_intent_draft_created"
+        ),
+        "recorded_execution_intent_created": any_flag(
+            "recorded_execution_intent_created"
+        ),
+        "submit_authorization_created": any_flag("submit_authorization_created"),
+        "protection_plan_created": any_flag("protection_plan_created"),
+        "executable_execution_intent_created": any_flag(
+            "executable_execution_intent_created"
+        ),
         "creates_execution_intent": any_flag("creates_execution_intent"),
         "places_order": any_flag("places_order"),
         "calls_order_lifecycle": any_flag("calls_order_lifecycle"),

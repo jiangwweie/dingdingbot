@@ -127,6 +127,9 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
 
 
 def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
+    safety = packet.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
     return {
         "runtime_instance_id": _runtime_value(runtime, "runtime_instance_id", "runtime_id"),
         "status": packet.get("status"),
@@ -154,6 +157,33 @@ def _summary(runtime: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any]:
         "prepared_authorization_id": (
             packet.get("operator_command_plan") or {}
         ).get("prepared_authorization_id"),
+        "prepare_records_created": bool(safety.get("prepare_records_created")),
+        "created_records": {
+            "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
+            "runtime_execution_intent_draft_created": bool(
+                safety.get("runtime_execution_intent_draft_created")
+            ),
+            "recorded_execution_intent_created": bool(
+                safety.get("recorded_execution_intent_created")
+            ),
+            "submit_authorization_created": bool(
+                safety.get("submit_authorization_created")
+            ),
+            "protection_plan_created": bool(safety.get("protection_plan_created")),
+            "executable_execution_intent_created": bool(
+                safety.get("executable_execution_intent_created")
+            ),
+        },
+        "forbidden_effects": {
+            "exchange_write_called": bool(safety.get("exchange_write_called")),
+            "order_created": bool(safety.get("order_created")),
+            "order_lifecycle_called": bool(safety.get("order_lifecycle_called")),
+            "attempt_counter_mutated": bool(safety.get("attempt_counter_mutated")),
+            "runtime_budget_mutated": bool(safety.get("runtime_budget_mutated")),
+            "withdrawal_or_transfer_created": bool(
+                safety.get("withdrawal_or_transfer_created")
+            ),
+        },
     }
 
 
@@ -180,6 +210,18 @@ def _safety(
         "monitors_active_runtimes": True,
         "allow_prepare_records": allow_prepare_records,
         "prepare_records_created": any_flag("prepare_records_created"),
+        "shadow_candidate_created": any_flag("shadow_candidate_created"),
+        "runtime_execution_intent_draft_created": any_flag(
+            "runtime_execution_intent_draft_created"
+        ),
+        "recorded_execution_intent_created": any_flag(
+            "recorded_execution_intent_created"
+        ),
+        "submit_authorization_created": any_flag("submit_authorization_created"),
+        "protection_plan_created": any_flag("protection_plan_created"),
+        "executable_execution_intent_created": any_flag(
+            "executable_execution_intent_created"
+        ),
         "local_registration_armed": any_flag("local_registration_armed"),
         "exchange_submit_armed": any_flag("exchange_submit_armed"),
         "execute_real_submit": any_flag("execute_real_submit"),

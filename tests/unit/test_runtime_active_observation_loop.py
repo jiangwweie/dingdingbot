@@ -47,6 +47,12 @@ def _packet(status="waiting_for_signal", *, prepare=False):
         },
         "safety_invariants": {
             "prepare_records_created": prepare,
+            "shadow_candidate_created": prepare,
+            "runtime_execution_intent_draft_created": prepare,
+            "recorded_execution_intent_created": prepare,
+            "submit_authorization_created": prepare,
+            "protection_plan_created": prepare,
+            "executable_execution_intent_created": False,
             "exchange_write_called": False,
             "order_created": False,
             "order_lifecycle_called": False,
@@ -107,11 +113,18 @@ def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path
     assert packet["iterations_completed"] == 2
     assert len(packet["cycle_packets"]) == 2
     assert packet["safety_invariants"]["prepare_records_created"] is True
+    assert packet["safety_invariants"]["shadow_candidate_created"] is True
+    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert packet["safety_invariants"]["executable_execution_intent_created"] is False
     assert packet["safety_invariants"]["creates_execution_intent"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["operator_command_plan"]["next_step"] == (
         "review_prepared_records_then_run_final_gate_preview"
     )
+    latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
+    assert latest["shadow_candidate_created"] is True
+    assert latest["recorded_execution_intent_created"] is True
+    assert latest["executable_execution_intent_created"] is False
 
 
 def test_active_observation_loop_cli_writes_aggregate_json(monkeypatch, capsys, tmp_path):
