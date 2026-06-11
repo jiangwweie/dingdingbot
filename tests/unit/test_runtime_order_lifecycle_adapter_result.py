@@ -44,6 +44,10 @@ from src.domain.runtime_execution_exchange_submit_action_authorization import (
     RuntimeExecutionExchangeSubmitActionAuthorizationStatus,
     build_runtime_execution_exchange_submit_action_authorization,
 )
+from src.domain.runtime_execution_local_registration_action_authorization import (
+    RuntimeExecutionLocalRegistrationActionAuthorizationStatus,
+    build_runtime_execution_local_registration_action_authorization,
+)
 from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionStatus,
     build_runtime_exchange_submit_execution_lock_result,
@@ -57,6 +61,7 @@ from src.domain.runtime_execution_exchange_gateway_readiness import (
     RuntimeExecutionExchangeGatewayReadinessStatus,
 )
 from src.domain.runtime_execution_local_registration_enablement import (
+    RuntimeExecutionLocalRegistrationEnablementStatus,
     build_runtime_execution_local_registration_enablement_decision,
 )
 from src.domain.runtime_execution_attempt_outcome_policy import (
@@ -94,6 +99,7 @@ from src.infrastructure.pg_models import (
     PGRuntimeExecutionExchangeSubmitActionAuthorizationORM,
     PGRuntimeExecutionExchangeSubmitAdapterResultORM,
     PGRuntimeExecutionExchangeSubmitExecutionResultORM,
+    PGRuntimeExecutionLocalRegistrationActionAuthorizationORM,
     PGRuntimeExecutionOrderLifecycleAdapterResultORM,
 )
 from src.infrastructure.pg_execution_recovery_repository import (
@@ -101,6 +107,9 @@ from src.infrastructure.pg_execution_recovery_repository import (
 )
 from src.infrastructure.pg_runtime_execution_exchange_submit_action_authorization_repository import (
     PgRuntimeExecutionExchangeSubmitActionAuthorizationRepository,
+)
+from src.infrastructure.pg_runtime_execution_local_registration_action_authorization_repository import (
+    PgRuntimeExecutionLocalRegistrationActionAuthorizationRepository,
 )
 from src.infrastructure.pg_runtime_execution_exchange_submit_adapter_result_repository import (
     PgRuntimeExecutionExchangeSubmitAdapterResultRepository,
@@ -569,6 +578,68 @@ class _AttemptOutcomePolicyRepo:
         )
 
 
+class _LocalRegistrationActionAuthorizationRepo:
+    def __init__(
+        self,
+        *,
+        authorization_id: str,
+        execution_intent_id: str,
+        runtime_instance_id: str,
+        symbol: str,
+        status=(
+            RuntimeExecutionLocalRegistrationActionAuthorizationStatus
+            .APPROVED_FOR_LOCAL_REGISTRATION_ACTION
+        ),
+        missing: bool = False,
+        expires_at_ms=None,
+        owner_confirmed=True,
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    ) -> None:
+        self.authorization_id = authorization_id
+        self.execution_intent_id = execution_intent_id
+        self.runtime_instance_id = runtime_instance_id
+        self.symbol = symbol
+        self.status = status
+        self.missing = missing
+        self.expires_at_ms = expires_at_ms
+        self.owner_confirmed = owner_confirmed
+        self.deployment_readiness_evidence_id = deployment_readiness_evidence_id
+        self.created = []
+
+    async def create(self, authorization):
+        self.created.append(authorization)
+        return authorization
+
+    async def get(self, _action_authorization_id):
+        if self.missing:
+            return None
+        return SimpleNamespace(
+            status=self.status,
+            authorization_id=self.authorization_id,
+            execution_intent_id=self.execution_intent_id,
+            runtime_instance_id=self.runtime_instance_id,
+            symbol=self.symbol,
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+            local_order_registration_enablement_id=(
+                "local-registration-enablement-1"
+            ),
+            deployment_readiness_evidence_id=self.deployment_readiness_evidence_id,
+            owner_confirmed_for_local_registration_action=self.owner_confirmed,
+            expires_at_ms=self.expires_at_ms,
+            order_created=False,
+            order_lifecycle_called=False,
+            exchange_called=False,
+            warnings=[],
+        )
+
+
 class _ExchangeSubmitActionAuthorizationRepo:
     def __init__(
         self,
@@ -808,6 +879,7 @@ def _service_with_preview(
     lifecycle=None,
     adapter_result_repo=None,
     exchange_submit_adapter_result_repo=None,
+    local_registration_action_authorization_repo=None,
     exchange_submit_action_authorization_repo=None,
     exchange_submit_execution_result_repo=None,
     exchange_gateway_readiness_repo=None,
@@ -857,6 +929,15 @@ def _service_with_preview(
         ),
         exchange_submit_adapter_result_repository=(
             exchange_submit_adapter_result_repo
+        ),
+        local_registration_action_authorization_repository=(
+            local_registration_action_authorization_repo
+            or _LocalRegistrationActionAuthorizationRepo(
+                authorization_id=preview.authorization_id,
+                execution_intent_id=preview.execution_intent_id,
+                runtime_instance_id=preview.runtime_instance_id,
+                symbol=preview.symbol,
+            )
         ),
         exchange_submit_action_authorization_repository=(
             exchange_submit_action_authorization_repo
@@ -978,6 +1059,164 @@ def test_registration_preview_maps_to_order_objects_with_runtime_semantics():
     assert orders[1].order_role == OrderRole.SL
     assert orders[1].reduce_only is True
     assert orders[1].parent_order_id == "runtime-order-draft-auth-1-entry"
+
+
+def test_local_registration_action_authorization_is_scope_bound_evidence():
+    preview = _registration_preview()
+
+    authorization = (
+        build_runtime_execution_local_registration_action_authorization(
+            registration_preview=preview,
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+            local_order_registration_enablement_id=(
+                "local-registration-enablement-1"
+            ),
+            owner_confirmed_for_local_registration_action=True,
+            owner_operator_id="owner",
+            reason="scope-bound local registration action confirmation",
+            deployment_readiness_evidence_id=(
+                "runtime-exchange-gateway-readiness-1"
+            ),
+            now_ms=NOW_MS + 1,
+        )
+    )
+
+    assert (
+        authorization.status
+        == RuntimeExecutionLocalRegistrationActionAuthorizationStatus
+        .APPROVED_FOR_LOCAL_REGISTRATION_ACTION
+    )
+    assert authorization.blockers == []
+    assert authorization.authorization_id == "auth-1"
+    assert authorization.execution_intent_id == "intent-1"
+    assert authorization.entry_order_draft_id == "runtime-order-draft-auth-1-entry"
+    assert authorization.local_order_draft_ids == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert authorization.protection_order_draft_ids == [
+        "runtime-order-draft-auth-1-sl"
+    ]
+    assert authorization.not_real_submit_authority is True
+    assert authorization.not_exchange_order_authority is True
+    assert authorization.local_order_registration_executed is False
+    assert authorization.order_created is False
+    assert authorization.order_lifecycle_called is False
+    assert authorization.execution_intent_status_changed is False
+    assert authorization.exchange_order_submitted is False
+    assert authorization.exchange_called is False
+    assert authorization.owner_bounded_execution_called is False
+    assert authorization.withdrawal_or_transfer_created is False
+
+
+def test_local_registration_action_authorization_blocks_without_owner_confirmation():
+    preview = _registration_preview()
+
+    authorization = (
+        build_runtime_execution_local_registration_action_authorization(
+            registration_preview=preview,
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+            local_order_registration_enablement_id=(
+                "local-registration-enablement-1"
+            ),
+            owner_confirmed_for_local_registration_action=False,
+            owner_operator_id="owner",
+            reason="missing confirmation should block",
+            now_ms=NOW_MS + 1,
+        )
+    )
+
+    assert (
+        authorization.status
+        == RuntimeExecutionLocalRegistrationActionAuthorizationStatus.BLOCKED
+    )
+    assert (
+        "owner_local_registration_action_confirmation_missing"
+        in authorization.blockers
+    )
+    assert authorization.local_order_registration_executed is False
+    assert authorization.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_local_registration_enablement_validates_action_authorization():
+    preview = _registration_preview()
+    service = _service_with_preview(preview)
+
+    decision = await service.local_registration_enablement_decision_for_authorization(
+        "auth-1",
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id="protection-failure-policy-intent-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+        local_order_registration_enablement_id="local-registration-enablement-1",
+        local_registration_action_authorization_id="local-registration-action-1",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    )
+
+    assert (
+        decision.status
+        == (
+            RuntimeExecutionLocalRegistrationEnablementStatus
+            .READY_FOR_LOCAL_REGISTRATION_ACTION
+        )
+    )
+    assert decision.blockers == []
+    assert decision.local_registration_action_authorization_id == (
+        "local-registration-action-1"
+    )
+    assert decision.local_order_registration_executed is False
+    assert decision.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_local_registration_enablement_blocks_missing_action_authorization():
+    preview = _registration_preview()
+    service = _service_with_preview(
+        preview,
+        local_registration_action_authorization_repo=(
+            _LocalRegistrationActionAuthorizationRepo(
+                authorization_id=preview.authorization_id,
+                execution_intent_id=preview.execution_intent_id,
+                runtime_instance_id=preview.runtime_instance_id,
+                symbol=preview.symbol,
+                missing=True,
+            )
+        ),
+    )
+
+    decision = await service.local_registration_enablement_decision_for_authorization(
+        "auth-1",
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id="protection-failure-policy-intent-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+        local_order_registration_enablement_id="local-registration-enablement-1",
+        local_registration_action_authorization_id="local-registration-action-1",
+    )
+
+    assert decision.status == RuntimeExecutionLocalRegistrationEnablementStatus.BLOCKED
+    assert "local_registration_action_authorization_not_found" in decision.blockers
+    assert decision.local_order_registration_executed is False
+    assert decision.exchange_called is False
 
 
 @pytest.mark.asyncio
@@ -3382,6 +3621,68 @@ async def test_pg_exchange_submit_action_authorization_repository_round_trips():
 
 
 @pytest.mark.asyncio
+async def test_pg_local_registration_action_authorization_repository_round_trips():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            PGRuntimeExecutionLocalRegistrationActionAuthorizationORM
+            .__table__.create
+        )
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    repo = PgRuntimeExecutionLocalRegistrationActionAuthorizationRepository(
+        session_maker=session_maker
+    )
+    preview = _registration_preview()
+    authorization = (
+        build_runtime_execution_local_registration_action_authorization(
+            registration_preview=preview,
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+            local_order_registration_enablement_id=(
+                "local-registration-enablement-1"
+            ),
+            owner_confirmed_for_local_registration_action=True,
+            owner_operator_id="owner",
+            reason="repository roundtrip",
+            deployment_readiness_evidence_id=(
+                "runtime-exchange-gateway-readiness-1"
+            ),
+            now_ms=NOW_MS + 1,
+        )
+    )
+
+    await repo.create(authorization)
+    loaded = await repo.get(authorization.action_authorization_id)
+    missing = await repo.get("missing-local-registration-action-auth")
+
+    await engine.dispose()
+
+    assert missing is None
+    assert loaded is not None
+    assert loaded.action_authorization_id == authorization.action_authorization_id
+    assert (
+        loaded.status
+        == RuntimeExecutionLocalRegistrationActionAuthorizationStatus
+        .APPROVED_FOR_LOCAL_REGISTRATION_ACTION
+    )
+    assert loaded.authorization_id == "auth-1"
+    assert loaded.entry_order_draft_id == "runtime-order-draft-auth-1-entry"
+    assert loaded.local_order_registration_executed is False
+    assert loaded.order_lifecycle_called is False
+    assert loaded.exchange_called is False
+
+
+@pytest.mark.asyncio
 async def test_adapter_result_migration_creates_lock_table():
     migration_path = (
         Path(__file__).resolve().parents[2]
@@ -4091,5 +4392,159 @@ async def test_exchange_submit_action_authorization_migration_creates_evidence_t
     assert "exchange_called" in columns
     assert "uq_rt_exchange_action_auth_authorization" in unique_constraints
     assert row[0] == "approved_for_exchange_submit_action"
+    assert row[1] == 0
+    assert row[2] == 0
+
+
+@pytest.mark.asyncio
+async def test_local_registration_action_authorization_migration_creates_evidence_table():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/"
+        "2026-06-11-080_create_runtime_local_registration_action_authorizations.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "runtime_local_registration_action_authorization_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+
+        def upgrade(sync_conn):
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration.upgrade()
+                inspector = inspect(sync_conn)
+                table = "runtime_execution_local_registration_action_authorizations"
+                assert inspector.has_table(table)
+                columns = {
+                    column["name"]
+                    for column in inspector.get_columns(table)
+                }
+                unique_constraints = {
+                    constraint["name"]
+                    for constraint in inspector.get_unique_constraints(table)
+                }
+                sync_conn.exec_driver_sql(
+                    """
+                    INSERT INTO runtime_execution_local_registration_action_authorizations (
+                        action_authorization_id,
+                        authorization_id,
+                        execution_intent_id,
+                        runtime_instance_id,
+                        source_type,
+                        source_id,
+                        status,
+                        symbol,
+                        side,
+                        trusted_submit_fact_snapshot_id,
+                        submit_idempotency_policy_id,
+                        attempt_outcome_policy_id,
+                        protection_creation_failure_policy_id,
+                        owner_real_submit_authorization_id,
+                        order_lifecycle_adapter_enablement_id,
+                        local_order_registration_enablement_id,
+                        deployment_readiness_evidence_id,
+                        registration_preview_id,
+                        adapter_preview_id,
+                        handoff_draft_id,
+                        entry_order_draft_id,
+                        local_order_draft_ids,
+                        protection_order_draft_ids,
+                        registration_draft_count,
+                        owner_confirmed_for_local_registration_action,
+                        owner_operator_id,
+                        owner_confirmation_reference,
+                        reason,
+                        expires_at_ms,
+                        blockers,
+                        warnings,
+                        local_order_registration_executed,
+                        order_created,
+                        order_lifecycle_called,
+                        execution_intent_status_changed,
+                        exchange_order_submitted,
+                        exchange_called,
+                        owner_bounded_execution_called,
+                        withdrawal_or_transfer_created,
+                        metadata,
+                        payload,
+                        created_at_ms
+                    ) VALUES (
+                        'local-registration-action-auth-1',
+                        'auth-1',
+                        'intent-1',
+                        'runtime-1',
+                        'brc_runtime_order_candidate',
+                        'candidate-1',
+                        'approved_for_local_registration_action',
+                        'BNB/USDT:USDT',
+                        'LONG',
+                        'trusted-submit-facts-intent-1',
+                        'runtime-submit-idempotency-auth-1',
+                        'runtime-attempt-outcome-policy-auth-1',
+                        'protection-failure-policy-intent-1',
+                        'owner-real-submit-auth-1',
+                        'adapter-enablement-1',
+                        'local-registration-enablement-1',
+                        NULL,
+                        'registration-preview-auth-1',
+                        'adapter-preview-auth-1',
+                        'handoff-draft-auth-1',
+                        'runtime-order-draft-auth-1-entry',
+                        '["runtime-order-draft-auth-1-entry"]',
+                        '["runtime-order-draft-auth-1-sl"]',
+                        2,
+                        1,
+                        'owner',
+                        NULL,
+                        'migration smoke',
+                        NULL,
+                        '[]',
+                        '[]',
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        '{}',
+                        '{}',
+                        1781090000000
+                    )
+                    """
+                )
+                row = sync_conn.exec_driver_sql(
+                    "SELECT status, exchange_called, order_lifecycle_called "
+                    f"FROM {table}"
+                ).one()
+                migration.downgrade()
+                inspector = inspect(sync_conn)
+                assert not inspector.has_table(table)
+                return columns, unique_constraints, row
+            finally:
+                migration.op = old_op
+
+        columns, unique_constraints, row = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert "action_authorization_id" in columns
+    assert "authorization_id" in columns
+    assert "owner_confirmed_for_local_registration_action" in columns
+    assert "order_lifecycle_called" in columns
+    assert "exchange_called" in columns
+    assert "uq_rt_local_reg_action_auth_authorization" in unique_constraints
+    assert row[0] == "approved_for_local_registration_action"
     assert row[1] == 0
     assert row[2] == 0

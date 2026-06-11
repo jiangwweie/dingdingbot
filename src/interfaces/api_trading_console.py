@@ -67,6 +67,9 @@ from src.domain.runtime_execution_order_registration_draft import (
 from src.domain.runtime_execution_local_registration_enablement import (
     RuntimeExecutionLocalRegistrationEnablementDecision,
 )
+from src.domain.runtime_execution_local_registration_action_authorization import (
+    RuntimeExecutionLocalRegistrationActionAuthorization,
+)
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
 )
@@ -1447,6 +1450,66 @@ async def runtime_execution_local_registration_enablement_for_authorization(
                 local_registration_action_authorization_id
             ),
             deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-local-registration-action-authorizations/"
+    "authorizations/{authorization_id}",
+    response_model=RuntimeExecutionLocalRegistrationActionAuthorization,
+)
+async def record_runtime_execution_local_registration_action_authorization(
+    authorization_id: str,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_adapter_enablement_id: Optional[str] = None,
+    local_order_registration_enablement_id: Optional[str] = None,
+    owner_confirmed_for_local_registration_action: bool = False,
+    owner_operator_id: str = "owner",
+    reason: str = "owner confirmed scoped local registration action",
+    deployment_readiness_evidence_id: Optional[str] = None,
+    owner_confirmation_reference: Optional[str] = None,
+    expires_at_ms: Optional[int] = None,
+) -> RuntimeExecutionLocalRegistrationActionAuthorization:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await (
+            service.record_local_registration_action_authorization_for_authorization(
+                authorization_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
+                ),
+                owner_real_submit_authorization_id=(
+                    owner_real_submit_authorization_id
+                ),
+                order_lifecycle_adapter_enablement_id=(
+                    order_lifecycle_adapter_enablement_id
+                ),
+                local_order_registration_enablement_id=(
+                    local_order_registration_enablement_id
+                ),
+                owner_confirmed_for_local_registration_action=(
+                    owner_confirmed_for_local_registration_action
+                ),
+                owner_operator_id=owner_operator_id,
+                reason=reason,
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+                owner_confirmation_reference=owner_confirmation_reference,
+                expires_at_ms=expires_at_ms,
+            )
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -2981,6 +3044,9 @@ async def _runtime_execution_intent_adapter_service(
     from src.infrastructure.pg_runtime_execution_exchange_submit_adapter_result_repository import (
         PgRuntimeExecutionExchangeSubmitAdapterResultRepository,
     )
+    from src.infrastructure.pg_runtime_execution_local_registration_action_authorization_repository import (
+        PgRuntimeExecutionLocalRegistrationActionAuthorizationRepository,
+    )
     from src.infrastructure.pg_runtime_execution_exchange_submit_action_authorization_repository import (
         PgRuntimeExecutionExchangeSubmitActionAuthorizationRepository,
     )
@@ -3033,6 +3099,9 @@ async def _runtime_execution_intent_adapter_service(
         ),
         exchange_submit_adapter_result_repository=(
             PgRuntimeExecutionExchangeSubmitAdapterResultRepository()
+        ),
+        local_registration_action_authorization_repository=(
+            PgRuntimeExecutionLocalRegistrationActionAuthorizationRepository()
         ),
         exchange_submit_action_authorization_repository=(
             PgRuntimeExecutionExchangeSubmitActionAuthorizationRepository()

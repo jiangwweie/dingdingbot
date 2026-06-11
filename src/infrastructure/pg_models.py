@@ -2994,6 +2994,230 @@ class PGRuntimeExecutionExchangeSubmitAdapterResultORM(PGCoreBase):
     )
 
 
+class PGRuntimeExecutionLocalRegistrationActionAuthorizationORM(PGCoreBase):
+    """Scope-bound Owner authorization for local CREATED-order registration.
+
+    This evidence authorizes only local registration of already-prepared order
+    drafts. It must not create orders by itself, call OrderLifecycle, submit to
+    an exchange, move funds, or change an ExecutionIntent status.
+    """
+
+    __tablename__ = "runtime_execution_local_registration_action_authorizations"
+
+    action_authorization_id: Mapped[str] = mapped_column(
+        String(360),
+        primary_key=True,
+    )
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[str] = mapped_column(String(32), nullable=False)
+    trusted_submit_fact_snapshot_id: Mapped[str] = mapped_column(
+        String(240),
+        nullable=False,
+    )
+    submit_idempotency_policy_id: Mapped[str] = mapped_column(
+        String(240),
+        nullable=False,
+    )
+    attempt_outcome_policy_id: Mapped[str] = mapped_column(
+        String(360),
+        nullable=False,
+    )
+    protection_creation_failure_policy_id: Mapped[str] = mapped_column(
+        String(300),
+        nullable=False,
+    )
+    owner_real_submit_authorization_id: Mapped[str] = mapped_column(
+        String(220),
+        nullable=False,
+    )
+    order_lifecycle_adapter_enablement_id: Mapped[str] = mapped_column(
+        String(220),
+        nullable=False,
+    )
+    local_order_registration_enablement_id: Mapped[str] = mapped_column(
+        String(220),
+        nullable=False,
+    )
+    deployment_readiness_evidence_id: Mapped[Optional[str]] = mapped_column(
+        String(220),
+        nullable=True,
+    )
+    registration_preview_id: Mapped[str] = mapped_column(String(380), nullable=False)
+    adapter_preview_id: Mapped[str] = mapped_column(String(360), nullable=False)
+    handoff_draft_id: Mapped[str] = mapped_column(String(360), nullable=False)
+    entry_order_draft_id: Mapped[Optional[str]] = mapped_column(
+        String(260),
+        nullable=True,
+    )
+    local_order_draft_ids_json: Mapped[list] = mapped_column(
+        "local_order_draft_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    protection_order_draft_ids_json: Mapped[list] = mapped_column(
+        "protection_order_draft_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    registration_draft_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    owner_confirmed_for_local_registration_action: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_operator_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_confirmation_reference: Mapped[Optional[str]] = mapped_column(
+        String(240),
+        nullable=True,
+    )
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    local_order_registration_executed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_local_reg_action_auth_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'approved_for_local_registration_action')",
+            name="ck_rt_local_reg_action_auth_status",
+        ),
+        CheckConstraint(
+            "registration_draft_count >= 0",
+            name="ck_rt_local_reg_action_auth_draft_count",
+        ),
+        CheckConstraint(
+            "status != 'approved_for_local_registration_action' "
+            "OR owner_confirmed_for_local_registration_action = true",
+            name="ck_rt_local_reg_action_auth_owner_confirmed",
+        ),
+        CheckConstraint(
+            "local_order_registration_executed = false",
+            name="ck_rt_local_reg_action_auth_no_registration",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_local_reg_action_auth_no_order_created",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_local_reg_action_auth_no_lifecycle",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_local_reg_action_auth_no_intent_status",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_local_reg_action_auth_no_exchange_submit",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_local_reg_action_auth_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_local_reg_action_auth_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_local_reg_action_auth_no_withdrawal",
+        ),
+        Index(
+            "idx_rt_local_reg_action_auth_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_local_reg_action_auth_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_local_reg_action_auth_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
 class PGRuntimeExecutionExchangeSubmitActionAuthorizationORM(PGCoreBase):
     """Scope-bound Owner authorization evidence for exchange-submit action.
 

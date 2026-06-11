@@ -83,6 +83,11 @@ from src.domain.runtime_execution_local_registration_gate import (
     RuntimeExecutionLocalRegistrationGate,
     RuntimeExecutionLocalRegistrationGateStatus,
 )
+from src.domain.runtime_execution_local_registration_action_authorization import (
+    RuntimeExecutionLocalRegistrationActionAuthorization,
+    RuntimeExecutionLocalRegistrationActionAuthorizationStatus,
+    build_runtime_execution_local_registration_action_authorization,
+)
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
     build_runtime_execution_order_lifecycle_adapter_lock_result,
@@ -429,6 +434,20 @@ class RuntimeExecutionExchangeSubmitActionAuthorizationRepositoryPort(Protocol):
         ...
 
 
+class RuntimeExecutionLocalRegistrationActionAuthorizationRepositoryPort(Protocol):
+    async def create(
+        self,
+        authorization: RuntimeExecutionLocalRegistrationActionAuthorization,
+    ) -> RuntimeExecutionLocalRegistrationActionAuthorization:
+        ...
+
+    async def get(
+        self,
+        action_authorization_id: str,
+    ) -> RuntimeExecutionLocalRegistrationActionAuthorization | None:
+        ...
+
+
 class RuntimeExecutionExchangeSubmitRecoveryResolutionRepositoryPort(Protocol):
     async def create(
         self,
@@ -569,6 +588,9 @@ class RuntimeExecutionIntentAdapterService:
         exchange_submit_action_authorization_repository: (
             RuntimeExecutionExchangeSubmitActionAuthorizationRepositoryPort | None
         ) = None,
+        local_registration_action_authorization_repository: (
+            RuntimeExecutionLocalRegistrationActionAuthorizationRepositoryPort | None
+        ) = None,
         exchange_submit_execution_result_repository: (
             RuntimeExecutionExchangeSubmitExecutionResultRepositoryPort | None
         ) = None,
@@ -611,6 +633,9 @@ class RuntimeExecutionIntentAdapterService:
         )
         self._exchange_submit_action_authorization_repository = (
             exchange_submit_action_authorization_repository
+        )
+        self._local_registration_action_authorization_repository = (
+            local_registration_action_authorization_repository
         )
         self._exchange_submit_execution_result_repository = (
             exchange_submit_execution_result_repository
@@ -1240,6 +1265,110 @@ class RuntimeExecutionIntentAdapterService:
             now_ms=_now_ms(),
         )
 
+    async def local_registration_action_authorization_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        trusted_submit_fact_snapshot_id: str | None = None,
+        submit_idempotency_policy_id: str | None = None,
+        attempt_outcome_policy_id: str | None = None,
+        protection_creation_failure_policy_id: str | None = None,
+        owner_real_submit_authorization_id: str | None = None,
+        order_lifecycle_adapter_enablement_id: str | None = None,
+        local_order_registration_enablement_id: str | None = None,
+        owner_confirmed_for_local_registration_action: bool = False,
+        owner_operator_id: str = "owner",
+        reason: str = "owner confirmed scoped local registration action",
+        deployment_readiness_evidence_id: str | None = None,
+        owner_confirmation_reference: str | None = None,
+        expires_at_ms: int | None = None,
+    ) -> RuntimeExecutionLocalRegistrationActionAuthorization:
+        registration_preview = (
+            await self.order_registration_draft_preview_for_authorization(
+                authorization_id
+            )
+        )
+        return build_runtime_execution_local_registration_action_authorization(
+            registration_preview=registration_preview,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_adapter_enablement_id=(
+                order_lifecycle_adapter_enablement_id
+            ),
+            local_order_registration_enablement_id=(
+                local_order_registration_enablement_id
+            ),
+            owner_confirmed_for_local_registration_action=(
+                owner_confirmed_for_local_registration_action
+            ),
+            owner_operator_id=owner_operator_id,
+            reason=reason,
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            owner_confirmation_reference=owner_confirmation_reference,
+            expires_at_ms=expires_at_ms,
+            now_ms=_now_ms(),
+        )
+
+    async def record_local_registration_action_authorization_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        trusted_submit_fact_snapshot_id: str | None = None,
+        submit_idempotency_policy_id: str | None = None,
+        attempt_outcome_policy_id: str | None = None,
+        protection_creation_failure_policy_id: str | None = None,
+        owner_real_submit_authorization_id: str | None = None,
+        order_lifecycle_adapter_enablement_id: str | None = None,
+        local_order_registration_enablement_id: str | None = None,
+        owner_confirmed_for_local_registration_action: bool = False,
+        owner_operator_id: str = "owner",
+        reason: str = "owner confirmed scoped local registration action",
+        deployment_readiness_evidence_id: str | None = None,
+        owner_confirmation_reference: str | None = None,
+        expires_at_ms: int | None = None,
+    ) -> RuntimeExecutionLocalRegistrationActionAuthorization:
+        if self._local_registration_action_authorization_repository is None:
+            raise RuntimeError(
+                "runtime_execution_local_registration_action_authorization_"
+                "repository_unavailable"
+            )
+        authorization = (
+            await self.local_registration_action_authorization_for_authorization(
+                authorization_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
+                ),
+                owner_real_submit_authorization_id=(
+                    owner_real_submit_authorization_id
+                ),
+                order_lifecycle_adapter_enablement_id=(
+                    order_lifecycle_adapter_enablement_id
+                ),
+                local_order_registration_enablement_id=(
+                    local_order_registration_enablement_id
+                ),
+                owner_confirmed_for_local_registration_action=(
+                    owner_confirmed_for_local_registration_action
+                ),
+                owner_operator_id=owner_operator_id,
+                reason=reason,
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+                owner_confirmation_reference=owner_confirmation_reference,
+                expires_at_ms=expires_at_ms,
+            )
+        )
+        return await self._local_registration_action_authorization_repository.create(
+            authorization
+        )
+
     async def local_registration_enablement_decision_for_authorization(
         self,
         authorization_id: str,
@@ -1270,6 +1399,15 @@ class RuntimeExecutionIntentAdapterService:
                 attempt_outcome_policy_id=attempt_outcome_policy_id,
                 protection_creation_failure_policy_id=(
                     protection_creation_failure_policy_id
+                ),
+                order_lifecycle_adapter_enablement_id=(
+                    order_lifecycle_adapter_enablement_id
+                ),
+                local_order_registration_enablement_id=(
+                    local_order_registration_enablement_id
+                ),
+                local_registration_action_authorization_id=(
+                    local_registration_action_authorization_id
                 ),
             )
         )
@@ -2595,8 +2733,11 @@ class RuntimeExecutionIntentAdapterService:
         symbol: str | None = None,
         local_registration_enablement_decision_id: str | None = None,
         owner_real_submit_authorization_id: str | None = None,
+        order_lifecycle_adapter_enablement_id: str | None = None,
+        local_order_registration_enablement_id: str | None = None,
         order_lifecycle_submit_enablement_id: str | None = None,
         exchange_submit_adapter_enablement_id: str | None = None,
+        local_registration_action_authorization_id: str | None = None,
         exchange_submit_action_authorization_id: str | None = None,
         deployment_readiness_evidence_id: str | None = None,
     ) -> tuple[list[str], list[str]]:
@@ -2824,6 +2965,160 @@ class RuntimeExecutionIntentAdapterService:
                     warnings.extend(
                         f"protection_failure_policy:{warning}"
                         for warning in policy.warnings
+                    )
+
+        if local_registration_action_authorization_id:
+            repository = self._local_registration_action_authorization_repository
+            if repository is None:
+                blockers.append(
+                    "local_registration_action_authorization_repository_unavailable"
+                )
+            else:
+                action_authorization = await repository.get(
+                    local_registration_action_authorization_id
+                )
+                if action_authorization is None:
+                    blockers.append("local_registration_action_authorization_not_found")
+                else:
+                    if action_authorization.status != (
+                        RuntimeExecutionLocalRegistrationActionAuthorizationStatus
+                        .APPROVED_FOR_LOCAL_REGISTRATION_ACTION
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_not_approved"
+                        )
+                    if action_authorization.authorization_id != authorization_id:
+                        blockers.append(
+                            "local_registration_action_authorization_authorization_"
+                            "mismatch"
+                        )
+                    if action_authorization.execution_intent_id != execution_intent_id:
+                        blockers.append(
+                            "local_registration_action_authorization_intent_"
+                            "mismatch"
+                        )
+                    if (
+                        runtime_instance_id
+                        and action_authorization.runtime_instance_id
+                        and action_authorization.runtime_instance_id
+                        != runtime_instance_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_runtime_"
+                            "mismatch"
+                        )
+                    if symbol and action_authorization.symbol != symbol:
+                        blockers.append(
+                            "local_registration_action_authorization_symbol_mismatch"
+                        )
+                    if (
+                        trusted_submit_fact_snapshot_id
+                        and action_authorization.trusted_submit_fact_snapshot_id
+                        != trusted_submit_fact_snapshot_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_trusted_facts_"
+                            "mismatch"
+                        )
+                    if (
+                        submit_idempotency_policy_id
+                        and action_authorization.submit_idempotency_policy_id
+                        != submit_idempotency_policy_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_idempotency_"
+                            "mismatch"
+                        )
+                    if (
+                        attempt_outcome_policy_id
+                        and action_authorization.attempt_outcome_policy_id
+                        != attempt_outcome_policy_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_attempt_"
+                            "outcome_mismatch"
+                        )
+                    if (
+                        protection_creation_failure_policy_id
+                        and action_authorization.protection_creation_failure_policy_id
+                        != protection_creation_failure_policy_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_protection_"
+                            "failure_mismatch"
+                        )
+                    if (
+                        owner_real_submit_authorization_id
+                        and action_authorization.owner_real_submit_authorization_id
+                        != owner_real_submit_authorization_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_owner_submit_"
+                            "mismatch"
+                        )
+                    if (
+                        order_lifecycle_adapter_enablement_id
+                        and action_authorization.order_lifecycle_adapter_enablement_id
+                        != order_lifecycle_adapter_enablement_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_lifecycle_"
+                            "adapter_mismatch"
+                        )
+                    if (
+                        local_order_registration_enablement_id
+                        and action_authorization.local_order_registration_enablement_id
+                        != local_order_registration_enablement_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_local_"
+                            "registration_enablement_mismatch"
+                        )
+                    action_deployment_readiness_evidence_id = getattr(
+                        action_authorization,
+                        "deployment_readiness_evidence_id",
+                        None,
+                    )
+                    if (
+                        deployment_readiness_evidence_id
+                        and action_deployment_readiness_evidence_id
+                        and action_deployment_readiness_evidence_id
+                        != deployment_readiness_evidence_id
+                    ):
+                        blockers.append(
+                            "local_registration_action_authorization_deployment_"
+                            "readiness_mismatch"
+                        )
+                    if not action_authorization.owner_confirmed_for_local_registration_action:
+                        blockers.append(
+                            "local_registration_action_authorization_owner_"
+                            "confirmation_missing"
+                        )
+                    expires_at_ms = getattr(
+                        action_authorization,
+                        "expires_at_ms",
+                        None,
+                    )
+                    if expires_at_ms is not None and expires_at_ms <= _now_ms():
+                        blockers.append(
+                            "local_registration_action_authorization_expired"
+                        )
+                    if getattr(action_authorization, "order_created", False):
+                        blockers.append(
+                            "local_registration_action_authorization_created_order"
+                        )
+                    if getattr(action_authorization, "order_lifecycle_called", False):
+                        blockers.append(
+                            "local_registration_action_authorization_called_"
+                            "lifecycle"
+                        )
+                    if getattr(action_authorization, "exchange_called", False):
+                        blockers.append(
+                            "local_registration_action_authorization_called_exchange"
+                        )
+                    warnings.extend(
+                        f"local_registration_action_authorization:{warning}"
+                        for warning in action_authorization.warnings
                     )
 
         if exchange_submit_action_authorization_id:
