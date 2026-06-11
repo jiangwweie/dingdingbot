@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import redirect_stdout
 import json
 import os
 from pathlib import Path
@@ -170,7 +171,8 @@ def main() -> int:
     parser.add_argument("--skip-exchange", action="store_true")
     parser.add_argument("--skip-reconciliation", action="store_true")
     args = parser.parse_args()
-    payload = asyncio.run(_build_packet(args))
+    with redirect_stdout(sys.stderr):
+        payload = asyncio.run(_build_packet(args))
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
     return 0 if payload["status"] != "blocked" else 2
 
