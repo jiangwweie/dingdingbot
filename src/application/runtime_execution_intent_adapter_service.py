@@ -121,6 +121,7 @@ from src.domain.runtime_execution_exchange_submit_action_authorization import (
     build_runtime_execution_exchange_submit_action_authorization,
 )
 from src.domain.runtime_execution_exchange_submit_execution_result import (
+    RuntimeExecutionExchangeSubmitExecutionMode,
     RuntimeExecutionExchangeSubmitExecutionResult,
     RuntimeExecutionExchangeSubmitExecutionStatus,
     build_runtime_exchange_submit_execution_blocked_result,
@@ -2214,6 +2215,7 @@ class RuntimeExecutionIntentAdapterService:
         authorization_id: str,
         *,
         exchange_submit_execution_enabled: bool = False,
+        exchange_submit_execution_mode: str = "disabled",
         exchange_submit_enablement_decision: (
             RuntimeExecutionExchangeSubmitEnablementDecision | None
         ) = None,
@@ -2227,6 +2229,9 @@ class RuntimeExecutionIntentAdapterService:
         )
         packet_preview = await self.exchange_submit_packet_preview_for_authorization(
             authorization_id
+        )
+        execution_mode = _exchange_submit_execution_mode(
+            exchange_submit_execution_mode
         )
         warnings = list(decision.warnings)
         blockers: list[str] = []
@@ -2257,6 +2262,22 @@ class RuntimeExecutionIntentAdapterService:
                     for blocker in blockers
                 ],
             )
+
+        if execution_mode not in {
+            RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION,
+            RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION,
+        }:
+            blockers.append("exchange_submit_execution_mode_not_explicit")
+        if (
+            execution_mode
+            == RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION
+        ):
+            warnings.append("exchange_submit_execution_mode_in_memory_simulation")
+        if (
+            execution_mode
+            == RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION
+        ):
+            warnings.append("exchange_submit_execution_mode_real_gateway_action")
 
         action_blockers, action_warnings = (
             await self._validate_first_real_submit_prerequisite_evidence(
@@ -2328,12 +2349,14 @@ class RuntimeExecutionIntentAdapterService:
                 warnings=warnings,
                 now_ms=_now_ms(),
                 exchange_submit_execution_enabled=True,
+                execution_mode=execution_mode,
             )
 
         lock_result = build_runtime_exchange_submit_execution_lock_result(
             enablement_decision=decision,
             packet_preview=packet_preview,
             now_ms=_now_ms(),
+            execution_mode=execution_mode,
         )
         acquired, existing = await (
             self._exchange_submit_execution_result_repository
@@ -2376,6 +2399,7 @@ class RuntimeExecutionIntentAdapterService:
                     exchange_call_count=exchange_call_count,
                     warnings=warnings,
                     now_ms=_now_ms(),
+                    execution_mode=execution_mode,
                 )
                 completed_failed_result = await (
                     self._exchange_submit_execution_result_repository
@@ -2412,6 +2436,7 @@ class RuntimeExecutionIntentAdapterService:
             exchange_call_count=exchange_call_count,
             warnings=warnings,
             now_ms=_now_ms(),
+            execution_mode=execution_mode,
         )
         return await (
             self._exchange_submit_execution_result_repository
@@ -3426,6 +3451,15 @@ def _intent_id_for_draft(draft_id: str) -> str:
 def _exchange_submit_recovery_task_id(authorization_id: str) -> str:
     digest = sha256(authorization_id.encode("utf-8")).hexdigest()[:24]
     return f"rt_ex_submit_recovery_{digest}"
+
+
+def _exchange_submit_execution_mode(
+    value: str,
+) -> RuntimeExecutionExchangeSubmitExecutionMode:
+    try:
+        return RuntimeExecutionExchangeSubmitExecutionMode(str(value or "").strip())
+    except ValueError:
+        return RuntimeExecutionExchangeSubmitExecutionMode.DISABLED
 
 
 def _submit_outcome_review_policy_blockers(

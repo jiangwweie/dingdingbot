@@ -378,6 +378,9 @@ def build_order_lifecycle_adapter_enablement_packet(
             "disabled_execution_result_status": disabled_execution_result.get(
                 "status"
             ),
+            "disabled_execution_mode": disabled_execution_result.get(
+                "execution_mode"
+            ),
             "disabled_execution_result_exchange_called": (
                 disabled_execution_result.get("exchange_called")
             ),
@@ -386,6 +389,9 @@ def build_order_lifecycle_adapter_enablement_packet(
             ),
             "in_memory_simulation_status": (
                 in_memory_execution_simulation.get("status")
+            ),
+            "in_memory_simulation_execution_mode": (
+                in_memory_execution_simulation.get("execution_mode")
             ),
             "in_memory_simulation_is_fake_gateway_only": bool(
                 in_memory_execution_simulation

@@ -102,6 +102,12 @@ def upgrade() -> None:
             server_default=sa.false(),
         ),
         sa.Column(
+            "execution_mode",
+            sa.String(length=48),
+            nullable=False,
+            server_default="disabled",
+        ),
+        sa.Column(
             "exchange_call_count",
             sa.Integer(),
             nullable=False,
@@ -172,6 +178,11 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "order_lifecycle_submit_call_count >= 0",
             name="ck_rt_exchange_exec_result_lifecycle_count",
+        ),
+        sa.CheckConstraint(
+            "execution_mode IN ('disabled', 'in_memory_simulation', "
+            "'real_gateway_action')",
+            name="ck_rt_exchange_exec_result_mode",
         ),
         sa.CheckConstraint(
             "execution_intent_status_changed = false",

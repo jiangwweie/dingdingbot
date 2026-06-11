@@ -30,6 +30,7 @@ from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservationStatus,
 )
 from src.domain.runtime_execution_exchange_submit_execution_result import (
+    RuntimeExecutionExchangeSubmitExecutionMode,
     RuntimeExecutionExchangeSubmitExecutionResult,
     RuntimeExecutionExchangeSubmitExecutionStatus,
     RuntimeExecutionSubmittedExchangeOrder,
@@ -710,6 +711,7 @@ def _execution_result(
         symbol="BNB/USDT:USDT",
         exchange_submit_action_authorization_id="exchange-submit-action-1",
         local_order_ids=["entry-1", "sl-1"],
+        execution_mode=RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION,
         entry_order_id="entry-1",
         protection_order_ids=["sl-1"],
         submitted_orders=submitted_orders,

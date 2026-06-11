@@ -331,8 +331,14 @@ async def test_adapter_enablement_packet_surfaces_exchange_simulation_evidence()
         "disabled_execution_result_status"
     ] == "exchange_submit_execution_disabled"
     assert packet["exchange_submit_evidence"][
+        "disabled_execution_mode"
+    ] == "disabled"
+    assert packet["exchange_submit_evidence"][
         "in_memory_simulation_status"
     ] == "exchange_submit_orders_submitted"
+    assert packet["exchange_submit_evidence"][
+        "in_memory_simulation_execution_mode"
+    ] == "in_memory_simulation"
     assert packet["exchange_submit_evidence"][
         "in_memory_simulation_is_fake_gateway_only"
     ] is True

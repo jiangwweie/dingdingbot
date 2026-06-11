@@ -464,10 +464,15 @@ Key facts:
   expected source state before a live-runtime enablement mutation, not itself
   proof of a missing implementation. With the additional
   `--exercise-in-memory-exchange-execution-simulation` flag, the verifier can
-  run the enabled execution-result branch against an in-memory fake exchange
-  gateway and in-memory OrderLifecycle only, proving entry/protection submit
-  result wiring without Binance, network, credentials, deployment mutation, or
-  real-funds order placement. The OrderLifecycle adapter enablement packet now
+  run the enabled execution-result branch only with
+  `execution_mode=in_memory_simulation` against an in-memory fake exchange
+  gateway and in-memory OrderLifecycle, proving entry/protection submit result
+  wiring without Binance, network, credentials, deployment mutation, or
+  real-funds order placement. The Trading Console execution-result endpoint
+  defaults to `execution_mode=disabled`; a real gateway action must explicitly
+  request `execution_mode=real_gateway_action` in addition to the existing
+  Owner/action/deployment/recovery/idempotency evidence. The OrderLifecycle
+  adapter enablement packet now
   treats local CREATED order registration capability as implemented separately
   from action-time enablement evidence: without explicit local-registration
   rehearsal it blocks on `local_registration_pre_exchange_not_ready`, and with

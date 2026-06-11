@@ -2021,6 +2021,7 @@ async def runtime_execution_exchange_submit_adapter_result_for_authorization(
 async def runtime_execution_exchange_submit_execution_result_for_authorization(
     authorization_id: str,
     exchange_submit_execution_enabled: bool = False,
+    exchange_submit_execution_mode: str = "disabled",
     trusted_submit_fact_snapshot_id: Optional[str] = None,
     submit_idempotency_policy_id: Optional[str] = None,
     attempt_outcome_policy_id: Optional[str] = None,
@@ -2033,7 +2034,10 @@ async def runtime_execution_exchange_submit_execution_result_for_authorization(
     deployment_readiness_evidence_id: Optional[str] = None,
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     service = await _runtime_execution_intent_adapter_service(
-        include_runtime_exchange_gateway=exchange_submit_execution_enabled,
+        include_runtime_exchange_gateway=(
+            exchange_submit_execution_enabled
+            and exchange_submit_execution_mode == "real_gateway_action"
+        ),
     )
     try:
         enablement = (
@@ -2064,6 +2068,7 @@ async def runtime_execution_exchange_submit_execution_result_for_authorization(
         return await service.exchange_submit_execution_result_for_authorization(
             authorization_id,
             exchange_submit_execution_enabled=exchange_submit_execution_enabled,
+            exchange_submit_execution_mode=exchange_submit_execution_mode,
             exchange_submit_enablement_decision=enablement,
         )
     except RuntimeError as exc:

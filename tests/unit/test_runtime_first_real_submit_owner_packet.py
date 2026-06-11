@@ -190,6 +190,9 @@ async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
     assert packet["exchange_submit_rehearsal"][
         "disabled_execution_result_status"
     ] == "exchange_submit_execution_disabled"
+    assert packet["exchange_submit_rehearsal"]["disabled_execution_mode"] == (
+        "disabled"
+    )
     assert (
         packet["exchange_submit_rehearsal"][
             "disabled_execution_result_exchange_called"

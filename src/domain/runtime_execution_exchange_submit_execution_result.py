@@ -37,6 +37,12 @@ class RuntimeExecutionExchangeSubmitExecutionStatus(str, Enum):
     EXCHANGE_SUBMIT_ORDERS_SUBMITTED = "exchange_submit_orders_submitted"
 
 
+class RuntimeExecutionExchangeSubmitExecutionMode(str, Enum):
+    DISABLED = "disabled"
+    IN_MEMORY_SIMULATION = "in_memory_simulation"
+    REAL_GATEWAY_ACTION = "real_gateway_action"
+
+
 class RuntimeExecutionSubmittedExchangeOrder(
     RuntimeExecutionExchangeSubmitExecutionModel
 ):
@@ -84,6 +90,9 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
     failed_order_role: Optional[str] = Field(default=None, max_length=32)
     failed_reason: Optional[str] = Field(default=None, max_length=500)
     exchange_submit_execution_enabled: bool = False
+    execution_mode: RuntimeExecutionExchangeSubmitExecutionMode = (
+        RuntimeExecutionExchangeSubmitExecutionMode.DISABLED
+    )
     exchange_call_count: int = Field(ge=0)
     order_lifecycle_submit_call_count: int = Field(ge=0)
     blockers: list[str] = Field(default_factory=list)
@@ -130,6 +139,11 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
         ):
             if not self.exchange_submit_execution_enabled:
                 raise ValueError("lock result requires execution enabled")
+            if self.execution_mode not in {
+                RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION,
+                RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION,
+            }:
+                raise ValueError("lock result requires explicit execution mode")
             if self.exchange_call_count != 0:
                 raise ValueError("lock result cannot record exchange calls")
         if self.status == (
@@ -140,6 +154,11 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
                 raise ValueError("submitted exchange result cannot have blockers")
             if not self.exchange_submit_execution_enabled:
                 raise ValueError("submitted exchange result requires execution enabled")
+            if self.execution_mode not in {
+                RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION,
+                RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION,
+            }:
+                raise ValueError("submitted exchange result requires explicit mode")
             if not self.real_exchange_submit_adapter_executed:
                 raise ValueError("submitted exchange result requires adapter executed")
             if not self.exchange_called or not self.exchange_order_submitted:
@@ -159,6 +178,11 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
         if self.status == (
             RuntimeExecutionExchangeSubmitExecutionStatus.ENTRY_SUBMIT_FAILED
         ):
+            if self.execution_mode not in {
+                RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION,
+                RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION,
+            }:
+                raise ValueError("entry submit failure requires explicit mode")
             if self.submitted_orders:
                 raise ValueError("entry submit failure cannot have submitted orders")
             if self.order_lifecycle_submit_called:
@@ -168,6 +192,11 @@ class RuntimeExecutionExchangeSubmitExecutionResult(
         if self.status == (
             RuntimeExecutionExchangeSubmitExecutionStatus.PROTECTION_SUBMIT_FAILED
         ):
+            if self.execution_mode not in {
+                RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION,
+                RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION,
+            }:
+                raise ValueError("protection submit failure requires explicit mode")
             if not self.entry_exchange_order_id:
                 raise ValueError(
                     "protection submit failure requires submitted entry evidence"
@@ -217,6 +246,7 @@ def build_runtime_exchange_submit_execution_disabled_result(
         failed_order_role=None,
         failed_reason=None,
         exchange_submit_execution_enabled=False,
+        execution_mode=RuntimeExecutionExchangeSubmitExecutionMode.DISABLED,
         exchange_call_count=0,
         now_ms=now_ms,
         blockers=list(enablement_decision.blockers) + list(additional_blockers or []),
@@ -233,6 +263,9 @@ def build_runtime_exchange_submit_execution_blocked_result(
     warnings: list[str],
     now_ms: int,
     exchange_submit_execution_enabled: bool = False,
+    execution_mode: RuntimeExecutionExchangeSubmitExecutionMode | str = (
+        RuntimeExecutionExchangeSubmitExecutionMode.DISABLED
+    ),
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     return _execution_result(
         enablement_decision=enablement_decision,
@@ -243,6 +276,7 @@ def build_runtime_exchange_submit_execution_blocked_result(
         failed_order_role=None,
         failed_reason=None,
         exchange_submit_execution_enabled=exchange_submit_execution_enabled,
+        execution_mode=execution_mode,
         exchange_call_count=0,
         now_ms=now_ms,
         blockers=blockers,
@@ -256,6 +290,7 @@ def build_runtime_exchange_submit_execution_lock_result(
     enablement_decision: RuntimeExecutionExchangeSubmitEnablementDecision,
     packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
     now_ms: int,
+    execution_mode: RuntimeExecutionExchangeSubmitExecutionMode | str,
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     warnings = list(enablement_decision.warnings)
     warnings.append("exchange_submit_execution_lock_acquired")
@@ -271,6 +306,7 @@ def build_runtime_exchange_submit_execution_lock_result(
         failed_order_role=None,
         failed_reason=None,
         exchange_submit_execution_enabled=True,
+        execution_mode=execution_mode,
         exchange_call_count=0,
         now_ms=now_ms,
         blockers=[],
@@ -286,6 +322,7 @@ def build_runtime_exchange_submit_execution_submitted_result(
     submitted_orders: list[RuntimeExecutionSubmittedExchangeOrder],
     exchange_call_count: int,
     now_ms: int,
+    execution_mode: RuntimeExecutionExchangeSubmitExecutionMode | str,
     warnings: list[str] | None = None,
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     return _execution_result(
@@ -300,6 +337,7 @@ def build_runtime_exchange_submit_execution_submitted_result(
         failed_order_role=None,
         failed_reason=None,
         exchange_submit_execution_enabled=True,
+        execution_mode=execution_mode,
         exchange_call_count=exchange_call_count,
         now_ms=now_ms,
         blockers=[],
@@ -318,6 +356,7 @@ def build_runtime_exchange_submit_execution_failed_result(
     failed_reason: str,
     exchange_call_count: int,
     now_ms: int,
+    execution_mode: RuntimeExecutionExchangeSubmitExecutionMode | str,
     warnings: list[str] | None = None,
 ) -> RuntimeExecutionExchangeSubmitExecutionResult:
     status = (
@@ -339,6 +378,7 @@ def build_runtime_exchange_submit_execution_failed_result(
         failed_order_role=failed_order_role,
         failed_reason=failed_reason,
         exchange_submit_execution_enabled=True,
+        execution_mode=execution_mode,
         exchange_call_count=exchange_call_count,
         now_ms=now_ms,
         blockers=blockers,
@@ -357,6 +397,7 @@ def _execution_result(
     failed_order_role: str | None,
     failed_reason: str | None,
     exchange_submit_execution_enabled: bool,
+    execution_mode: RuntimeExecutionExchangeSubmitExecutionMode | str,
     exchange_call_count: int,
     now_ms: int,
     blockers: list[str],
@@ -391,6 +432,7 @@ def _execution_result(
         1 for order in submitted_orders if order.order_lifecycle_submit_called
     )
     exchange_submitted = bool(submitted_orders)
+    mode = RuntimeExecutionExchangeSubmitExecutionMode(execution_mode)
     return RuntimeExecutionExchangeSubmitExecutionResult(
         execution_result_id=(
             "runtime-exchange-submit-execution-result-"
@@ -422,6 +464,7 @@ def _execution_result(
         failed_order_role=failed_order_role,
         failed_reason=failed_reason,
         exchange_submit_execution_enabled=exchange_submit_execution_enabled,
+        execution_mode=mode,
         exchange_call_count=exchange_call_count,
         order_lifecycle_submit_call_count=lifecycle_submit_count,
         blockers=_dedupe(blockers),
@@ -440,6 +483,15 @@ def _execution_result(
             "packet_preview_id": packet_preview.packet_preview_id,
             "exchange_submit_action_authorization_id": (
                 enablement_decision.exchange_submit_action_authorization_id
+            ),
+            "execution_mode": mode.value,
+            "in_memory_simulation": (
+                mode
+                == RuntimeExecutionExchangeSubmitExecutionMode.IN_MEMORY_SIMULATION
+            ),
+            "real_gateway_action": (
+                mode
+                == RuntimeExecutionExchangeSubmitExecutionMode.REAL_GATEWAY_ACTION
             ),
             "does_not_change_execution_intent_status": True,
             "does_not_call_owner_bounded_execution": True,

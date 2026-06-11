@@ -150,6 +150,7 @@ class PgRuntimeExecutionExchangeSubmitExecutionResultRepository:
             exchange_submit_execution_enabled=(
                 result.exchange_submit_execution_enabled
             ),
+            execution_mode=result.execution_mode.value,
             exchange_call_count=result.exchange_call_count,
             order_lifecycle_submit_call_count=(
                 result.order_lifecycle_submit_call_count

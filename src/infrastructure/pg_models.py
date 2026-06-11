@@ -3531,6 +3531,11 @@ class PGRuntimeExecutionExchangeSubmitExecutionResultORM(PGCoreBase):
         nullable=False,
         default=False,
     )
+    execution_mode: Mapped[str] = mapped_column(
+        String(48),
+        nullable=False,
+        default="disabled",
+    )
     exchange_call_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -3620,6 +3625,11 @@ class PGRuntimeExecutionExchangeSubmitExecutionResultORM(PGCoreBase):
         CheckConstraint(
             "order_lifecycle_submit_call_count >= 0",
             name="ck_rt_exchange_exec_result_lifecycle_count",
+        ),
+        CheckConstraint(
+            "execution_mode IN ('disabled', 'in_memory_simulation', "
+            "'real_gateway_action')",
+            name="ck_rt_exchange_exec_result_mode",
         ),
         CheckConstraint(
             "execution_intent_status_changed = false",

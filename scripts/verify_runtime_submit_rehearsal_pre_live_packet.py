@@ -1781,6 +1781,7 @@ async def _exercise_in_memory_exchange_execution_simulation(
     return await adapter_service.exchange_submit_execution_result_for_authorization(
         authorization_id,
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=enablement_decision,
     )
 

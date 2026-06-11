@@ -319,6 +319,9 @@ def build_first_real_submit_owner_packet(
             "disabled_execution_result_status": disabled_execution_result.get(
                 "status"
             ),
+            "disabled_execution_mode": disabled_execution_result.get(
+                "execution_mode"
+            ),
             "disabled_execution_result_exchange_called": (
                 disabled_execution_result.get("exchange_called")
             ),
@@ -327,6 +330,9 @@ def build_first_real_submit_owner_packet(
             ),
             "in_memory_simulation_status": (
                 in_memory_execution_simulation.get("status")
+            ),
+            "in_memory_simulation_execution_mode": (
+                in_memory_execution_simulation.get("execution_mode")
             ),
             "in_memory_simulation_exchange_called": (
                 in_memory_execution_simulation.get("exchange_called")

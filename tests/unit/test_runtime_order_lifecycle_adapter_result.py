@@ -2753,6 +2753,7 @@ async def test_service_duplicate_submit_replay_proof_blocks_existing_execution_r
         enablement_decision=exchange_decision,
         packet_preview=packet_preview,
         now_ms=NOW_MS + 4,
+        execution_mode="in_memory_simulation",
     )
 
     proof = await service.duplicate_submit_replay_proof_for_authorization(
@@ -3021,6 +3022,7 @@ async def test_service_exchange_submit_execution_blocks_without_replay_repositor
     result = await service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=exchange_decision,
     )
 
@@ -3035,6 +3037,28 @@ async def test_service_exchange_submit_execution_blocks_without_replay_repositor
     assert result.exchange_called is False
     assert result.order_lifecycle_submit_called is False
     assert intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_service_exchange_submit_execution_blocks_enabled_without_explicit_mode():
+    context = await _ready_exchange_submit_execution_context()
+
+    result = await context.service.exchange_submit_execution_result_for_authorization(
+        "auth-1",
+        exchange_submit_execution_enabled=True,
+        exchange_submit_enablement_decision=context.exchange_decision,
+    )
+
+    assert result.status == RuntimeExecutionExchangeSubmitExecutionStatus.BLOCKED
+    assert result.exchange_submit_execution_enabled is True
+    assert result.execution_mode.value == "disabled"
+    assert "exchange_submit_execution_mode_not_explicit" in result.blockers
+    assert context.gateway.calls == []
+    assert result.exchange_called is False
+    assert result.exchange_order_submitted is False
+    assert result.order_lifecycle_submit_called is False
+    assert context.exchange_submit_execution_result_repo.acquire_calls == 0
+    assert context.intent_repo.saved == []
 
 
 @pytest.mark.asyncio
@@ -3057,6 +3081,7 @@ async def test_exchange_submit_execution_revalidates_action_authorization_before
     result = await context.service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=context.exchange_decision,
     )
 
@@ -3080,6 +3105,7 @@ async def test_service_exchange_submit_execution_blocks_without_readiness_id():
         await context.service.exchange_submit_execution_result_for_authorization(
             "auth-1",
             exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode="in_memory_simulation",
             exchange_submit_enablement_decision=context.exchange_decision,
         )
     )
@@ -3103,6 +3129,7 @@ async def test_service_exchange_submit_execution_blocks_without_readiness_repo()
         await context.service.exchange_submit_execution_result_for_authorization(
             "auth-1",
             exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode="in_memory_simulation",
             exchange_submit_enablement_decision=context.exchange_decision,
         )
     )
@@ -3130,6 +3157,7 @@ async def test_service_exchange_submit_execution_blocks_missing_readiness_record
         await context.service.exchange_submit_execution_result_for_authorization(
             "auth-1",
             exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode="in_memory_simulation",
             exchange_submit_enablement_decision=context.exchange_decision,
         )
     )
@@ -3154,6 +3182,7 @@ async def test_service_exchange_submit_execution_blocks_stale_gateway_readiness(
         await context.service.exchange_submit_execution_result_for_authorization(
             "auth-1",
             exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode="in_memory_simulation",
             exchange_submit_enablement_decision=context.exchange_decision,
         )
     )
@@ -3180,6 +3209,7 @@ async def test_service_exchange_submit_execution_blocks_not_ready_readiness_reco
         await context.service.exchange_submit_execution_result_for_authorization(
             "auth-1",
             exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode="in_memory_simulation",
             exchange_submit_enablement_decision=context.exchange_decision,
         )
     )
@@ -3241,6 +3271,7 @@ async def test_service_exchange_submit_execution_blocks_readiness_side_effects(
         await context.service.exchange_submit_execution_result_for_authorization(
             "auth-1",
             exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode="in_memory_simulation",
             exchange_submit_enablement_decision=context.exchange_decision,
         )
     )
@@ -3273,6 +3304,7 @@ async def test_service_exchange_submit_execution_blocks_open_recovery_task_befor
     result = await context.service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=context.exchange_decision,
     )
 
@@ -3341,6 +3373,7 @@ async def test_service_exchange_submit_execution_submits_entry_and_protection():
     result = await service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=exchange_decision,
     )
 
@@ -3389,6 +3422,7 @@ async def test_service_exchange_submit_execution_reports_entry_failure_without_r
     result = await context.service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=context.exchange_decision,
     )
 
@@ -3466,11 +3500,13 @@ async def test_service_exchange_submit_execution_replays_by_authorization_id():
     first = await service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=exchange_decision,
     )
     second = await service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=exchange_decision,
     )
 
@@ -3544,6 +3580,7 @@ async def test_service_exchange_submit_execution_reports_protection_failure():
     result = await service.exchange_submit_execution_result_for_authorization(
         "auth-1",
         exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
         exchange_submit_enablement_decision=exchange_decision,
     )
 
@@ -3763,6 +3800,7 @@ async def test_pg_exchange_submit_execution_repository_replays_by_authorization(
         enablement_decision=decision,
         packet_preview=packet,
         now_ms=NOW_MS + 4,
+        execution_mode="in_memory_simulation",
     )
 
     acquired_first, stored_first = (
@@ -3817,6 +3855,7 @@ async def test_pg_exchange_submit_execution_repository_replays_by_authorization(
         submitted_orders=[entry_submit, protection_submit],
         exchange_call_count=2,
         now_ms=NOW_MS + 5,
+        execution_mode="in_memory_simulation",
     )
     await repo.complete_exchange_submit_execution_result(final_result)
     loaded = await repo.get_by_authorization_id("auth-1")
@@ -4243,6 +4282,7 @@ async def test_exchange_submit_execution_result_migration_creates_replay_table()
                         failed_order_role,
                         failed_reason,
                         exchange_submit_execution_enabled,
+                        execution_mode,
                         exchange_call_count,
                         order_lifecycle_submit_call_count,
                         blockers,
@@ -4282,6 +4322,7 @@ async def test_exchange_submit_execution_result_migration_creates_replay_table()
                         NULL,
                         NULL,
                         1,
+                        'in_memory_simulation',
                         0,
                         0,
                         '[]',
@@ -4301,7 +4342,7 @@ async def test_exchange_submit_execution_result_migration_creates_replay_table()
                 )
                 row = sync_conn.exec_driver_sql(
                     "SELECT status, exchange_called, "
-                    "order_lifecycle_submit_called "
+                    "order_lifecycle_submit_called, execution_mode "
                     "FROM runtime_execution_exchange_submit_execution_results"
                 ).one()
                 migration.downgrade()
@@ -4319,12 +4360,92 @@ async def test_exchange_submit_execution_result_migration_creates_replay_table()
     assert "execution_result_id" in columns
     assert "authorization_id" in columns
     assert "exchange_call_count" in columns
+    assert "execution_mode" in columns
     assert "order_lifecycle_submit_call_count" in columns
     assert "payload" in columns
     assert "uq_rt_exchange_exec_result_authorization" in unique_constraints
     assert row[0] == "exchange_submit_execution_lock_acquired"
     assert row[1] == 0
     assert row[2] == 0
+    assert row[3] == "in_memory_simulation"
+
+
+@pytest.mark.asyncio
+async def test_exchange_submit_execution_mode_migration_updates_legacy_table():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / (
+            "migrations/versions/"
+            "2026-06-11-083_add_exchange_submit_execution_mode.py"
+        )
+    )
+    spec = importlib.util.spec_from_file_location(
+        "runtime_exchange_submit_execution_mode_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+
+        def upgrade(sync_conn):
+            sync_conn.exec_driver_sql(
+                """
+                CREATE TABLE runtime_execution_exchange_submit_execution_results (
+                    execution_result_id VARCHAR(540) PRIMARY KEY,
+                    authorization_id VARCHAR(220) NOT NULL,
+                    status VARCHAR(96) NOT NULL,
+                    exchange_called BOOLEAN NOT NULL DEFAULT 0
+                )
+                """
+            )
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration.upgrade()
+                inspector = inspect(sync_conn)
+                columns = {
+                    column["name"]
+                    for column in inspector.get_columns(
+                        "runtime_execution_exchange_submit_execution_results"
+                    )
+                }
+                sync_conn.exec_driver_sql(
+                    """
+                    INSERT INTO runtime_execution_exchange_submit_execution_results (
+                        execution_result_id,
+                        authorization_id,
+                        status,
+                        execution_mode,
+                        exchange_called
+                    ) VALUES (
+                        'runtime-exchange-submit-execution-result-auth-1',
+                        'auth-1',
+                        'exchange_submit_execution_lock_acquired',
+                        'in_memory_simulation',
+                        0
+                    )
+                    """
+                )
+                row = sync_conn.exec_driver_sql(
+                    "SELECT execution_mode "
+                    "FROM runtime_execution_exchange_submit_execution_results"
+                ).one()
+                return columns, row
+            finally:
+                migration.op = old_op
+
+        columns, row = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert "execution_mode" in columns
+    assert row[0] == "in_memory_simulation"
 
 
 @pytest.mark.asyncio
