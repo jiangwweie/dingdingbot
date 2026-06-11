@@ -393,6 +393,27 @@ class RuntimeLiveBootstrapApiFlow:
         if profile_body.get("status") != "ready_for_owner_codex_confirmation":
             self.state.add_blockers([f"profile_proposal_{profile_body.get('status')}"])
             return
+        runtime_confirmations = _all_true(
+            [
+                "runtime_profile_confirmed",
+                "owner_confirmation_mode_confirmed",
+                "symbol_side_boundary_confirmed",
+                "max_loss_budget_confirmed",
+                "max_notional_boundary_confirmed",
+                "max_active_positions_boundary_confirmed",
+                "max_leverage_boundary_confirmed",
+                "margin_usage_boundary_confirmed",
+                "liquidation_buffer_boundary_confirmed",
+                "protection_readiness_source_confirmed",
+                "stale_fact_behavior_confirmed",
+                "attempt_consumption_rule_confirmed",
+                "budget_reservation_rule_confirmed",
+                "trusted_active_position_source_confirmed",
+                "trusted_account_fact_source_confirmed",
+            ]
+        )
+        if self._config.side.lower() == "short":
+            runtime_confirmations["short_side_conservative_profile_confirmed"] = True
         confirmation = self._step(
             "create_runtime_promotion_confirmation",
             "POST",
@@ -413,25 +434,7 @@ class RuntimeLiveBootstrapApiFlow:
                         "right_tail_review_metrics_confirmed",
                     ]
                 ),
-                "runtime_confirmations": _all_true(
-                    [
-                        "runtime_profile_confirmed",
-                        "owner_confirmation_mode_confirmed",
-                        "symbol_side_boundary_confirmed",
-                        "max_loss_budget_confirmed",
-                        "max_notional_boundary_confirmed",
-                        "max_active_positions_boundary_confirmed",
-                        "max_leverage_boundary_confirmed",
-                        "margin_usage_boundary_confirmed",
-                        "liquidation_buffer_boundary_confirmed",
-                        "protection_readiness_source_confirmed",
-                        "stale_fact_behavior_confirmed",
-                        "attempt_consumption_rule_confirmed",
-                        "budget_reservation_rule_confirmed",
-                        "trusted_active_position_source_confirmed",
-                        "trusted_account_fact_source_confirmed",
-                    ]
-                ),
+                "runtime_confirmations": runtime_confirmations,
                 "runtime_profile_proposal_snapshot": profile_body,
                 "reason": self._config.reason,
                 "evidence_refs": [
@@ -467,6 +470,11 @@ class RuntimeLiveBootstrapApiFlow:
             },
         )
         self.state.remember("runtime_instance_id", _body(draft).get("runtime", {}).get("runtime_instance_id"))
+        if self.state.blockers:
+            return
+        if not self.state.ids.get("runtime_instance_id"):
+            self.state.add_blockers(["runtime_instance_id_missing_after_draft"])
+            return
         activated = self._step(
             "activate_shadow_runtime",
             "POST",

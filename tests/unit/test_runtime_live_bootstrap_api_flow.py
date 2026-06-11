@@ -7,9 +7,15 @@ from scripts.runtime_live_bootstrap_api_flow import (
 
 
 class _FakeClient:
-    def __init__(self, *, profile_status: str = "ready_for_owner_codex_confirmation") -> None:
+    def __init__(
+        self,
+        *,
+        profile_status: str = "ready_for_owner_codex_confirmation",
+        runtime_draft_status: int = 200,
+    ) -> None:
         self.calls: list[dict] = []
         self.profile_status = profile_status
+        self.runtime_draft_status = runtime_draft_status
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -91,6 +97,12 @@ class _FakeClient:
                 "body": {"confirmation": {"confirmation_id": "confirmation-1"}},
             }
         if path.endswith("/runtime-drafts"):
+            if self.runtime_draft_status != 200:
+                return {
+                    "http_status": self.runtime_draft_status,
+                    "body": {"detail": "blocked runtime draft"},
+                    "error": True,
+                }
             return {
                 "http_status": 200,
                 "body": {"runtime": {"runtime_instance_id": "runtime-1"}},
@@ -143,6 +155,47 @@ def test_bootstrap_stops_when_profile_proposal_is_blocked():
     assert "profile_proposal_blocked" in report["blockers"]
     paths = [call["path"] for call in client.calls]
     assert not any(path.endswith("/runtime-drafts") for path in paths)
+    assert not any(path.endswith("/lifecycle") for path in paths)
+
+
+def test_short_bootstrap_confirms_conservative_short_profile():
+    client = _FakeClient()
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            side="short",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    promotion_calls = [
+        call for call in client.calls if call["path"].endswith("promotion-confirmations")
+    ]
+    assert promotion_calls
+    runtime_confirmations = promotion_calls[0]["body"]["runtime_confirmations"]
+    assert runtime_confirmations["short_side_conservative_profile_confirmed"] is True
+
+
+def test_bootstrap_stops_when_runtime_draft_blocks():
+    client = _FakeClient(runtime_draft_status=400)
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "create_runtime_draft_http_400" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
     assert not any(path.endswith("/lifecycle") for path in paths)
 
 
