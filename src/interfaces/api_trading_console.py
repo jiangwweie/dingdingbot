@@ -3149,6 +3149,9 @@ async def _runtime_execution_intent_adapter_service(
     from src.infrastructure.pg_runtime_execution_attempt_outcome_policy_repository import (
         PgRuntimeExecutionAttemptOutcomePolicyRepository,
     )
+    from src.infrastructure.pg_runtime_execution_post_submit_budget_settlement_repository import (
+        PgRuntimeExecutionPostSubmitBudgetSettlementRepository,
+    )
     from src.infrastructure.pg_runtime_execution_protection_plan_repository import (
         PgRuntimeExecutionProtectionPlanRepository,
     )
@@ -3203,6 +3206,9 @@ async def _runtime_execution_intent_adapter_service(
         attempt_mutation_repository=PgRuntimeExecutionAttemptMutationRepository(),
         attempt_outcome_policy_repository=(
             PgRuntimeExecutionAttemptOutcomePolicyRepository()
+        ),
+        post_submit_budget_settlement_repository=(
+            PgRuntimeExecutionPostSubmitBudgetSettlementRepository()
         ),
         protection_plan_repository=PgRuntimeExecutionProtectionPlanRepository(),
         order_lifecycle_handoff_repository=PgRuntimeExecutionOrderLifecycleHandoffRepository(),

@@ -65,8 +65,9 @@ This document defines the runtime safety boundaries for the BRC project.
   `RuntimeExecutionPostSubmitBudgetSettlement` may apply that resolved
   accounting to `StrategyRuntimeInstance` state by releasing reserved budget
   only for no-fill/rejected outcomes, or by recording that reserved budget
-  remains held/consumed for filled outcomes. It must not change attempt counts,
-  change ExecutionIntent status, create/cancel/close orders, call
+  remains held/consumed for filled outcomes. The settlement is persisted as a
+  PG audit fact before it is considered available for review. It must not
+  change attempt counts, change ExecutionIntent status, create/cancel/close orders, call
   OrderLifecycle, call exchange, or create withdrawal/transfer instructions.
   The runtime protection plan preview/record is runtime-native and must not
   reuse one-shot OwnerBounded authorization semantics as hidden execution

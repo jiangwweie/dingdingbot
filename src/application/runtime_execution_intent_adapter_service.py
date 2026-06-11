@@ -259,6 +259,20 @@ class RuntimeExecutionAttemptOutcomePolicyRepositoryPort(Protocol):
         ...
 
 
+class RuntimeExecutionPostSubmitBudgetSettlementRepositoryPort(Protocol):
+    async def create(
+        self,
+        settlement: RuntimeExecutionPostSubmitBudgetSettlement,
+    ) -> RuntimeExecutionPostSubmitBudgetSettlement:
+        ...
+
+    async def get(
+        self,
+        settlement_id: str,
+    ) -> RuntimeExecutionPostSubmitBudgetSettlement | None:
+        ...
+
+
 class RuntimeExecutionProtectionPlanRepositoryPort(Protocol):
     async def get(
         self,
@@ -579,6 +593,9 @@ class RuntimeExecutionIntentAdapterService:
         attempt_outcome_policy_repository: (
             RuntimeExecutionAttemptOutcomePolicyRepositoryPort | None
         ) = None,
+        post_submit_budget_settlement_repository: (
+            RuntimeExecutionPostSubmitBudgetSettlementRepositoryPort | None
+        ) = None,
         protection_plan_repository: (
             RuntimeExecutionProtectionPlanRepositoryPort | None
         ) = None,
@@ -635,6 +652,9 @@ class RuntimeExecutionIntentAdapterService:
         self._attempt_reservation_repository = attempt_reservation_repository
         self._attempt_mutation_repository = attempt_mutation_repository
         self._attempt_outcome_policy_repository = attempt_outcome_policy_repository
+        self._post_submit_budget_settlement_repository = (
+            post_submit_budget_settlement_repository
+        )
         self._protection_plan_repository = protection_plan_repository
         self._order_lifecycle_handoff_repository = order_lifecycle_handoff_repository
         self._order_lifecycle_service = order_lifecycle_service
@@ -2655,6 +2675,10 @@ class RuntimeExecutionIntentAdapterService:
         *,
         reservation_id: str,
     ) -> RuntimeExecutionPostSubmitBudgetSettlement:
+        if self._post_submit_budget_settlement_repository is None:
+            raise RuntimeError(
+                "runtime_execution_post_submit_budget_settlement_repository_unavailable"
+            )
         if self._attempt_mutation_repository is None:
             raise RuntimeError("runtime_execution_attempt_mutation_repository_unavailable")
         if self._runtime_service is None:
@@ -2682,7 +2706,7 @@ class RuntimeExecutionIntentAdapterService:
                 updated_runtime=updated_runtime,
                 settlement=settlement,
             )
-        return settlement
+        return await self._post_submit_budget_settlement_repository.create(settlement)
 
     async def submit_rehearsal_for_authorization(
         self,

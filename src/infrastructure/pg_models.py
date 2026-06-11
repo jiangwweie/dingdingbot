@@ -3948,6 +3948,217 @@ class PGRuntimeExecutionSubmitOutcomeReviewORM(PGCoreBase):
     )
 
 
+class PGRuntimeExecutionPostSubmitBudgetSettlementORM(PGCoreBase):
+    """Audit record for applying post-submit budget accounting to runtime state."""
+
+    __tablename__ = "runtime_execution_post_submit_budget_settlements"
+
+    settlement_id: Mapped[str] = mapped_column(String(420), primary_key=True)
+    accounting_id: Mapped[str] = mapped_column(String(360), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    reservation_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    mutation_id: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    attempt_outcome_policy_id: Mapped[Optional[str]] = mapped_column(
+        String(360),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    runtime_status_before: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_status_after: Mapped[str] = mapped_column(String(64), nullable=False)
+    budget_action: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
+    outcome_kind: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
+    budget_reservation_amount: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    budget_release_amount: Mapped[Decimal] = mapped_column(
+        Numeric(36, 18),
+        nullable=False,
+    )
+    budget_reserved_before: Mapped[Decimal] = mapped_column(
+        Numeric(36, 18),
+        nullable=False,
+    )
+    budget_reserved_after: Mapped[Decimal] = mapped_column(
+        Numeric(36, 18),
+        nullable=False,
+    )
+    budget_remaining_before: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    budget_remaining_after: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    attempts_used_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_used_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_remaining_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts_remaining_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    runtime_state_mutated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    runtime_budget_mutated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    attempt_counter_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    attempt_already_consumed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    budget_released: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    budget_consumption_recorded: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reserved_budget_remains_held: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    requires_reconciliation_before_retry: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    blocks_new_entries_until_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    not_execution_authority: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    position_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            "reservation_id",
+            name="uq_rt_post_submit_budget_settlement_auth_reservation",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'released_reserved_budget', "
+            "'recorded_reserved_budget_held', "
+            "'recorded_reserved_budget_consumed')",
+            name="ck_rt_post_submit_budget_settlement_status",
+        ),
+        CheckConstraint(
+            "attempt_counter_mutated = false",
+            name="ck_rt_post_submit_budget_settlement_no_attempt_mutation",
+        ),
+        CheckConstraint(
+            "not_execution_authority = true",
+            name="ck_rt_post_submit_budget_settlement_no_execution_authority",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_post_submit_budget_settlement_no_intent_status",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_post_submit_budget_settlement_no_order_create",
+        ),
+        CheckConstraint(
+            "order_cancelled = false",
+            name="ck_rt_post_submit_budget_settlement_no_order_cancel",
+        ),
+        CheckConstraint(
+            "position_closed = false",
+            name="ck_rt_post_submit_budget_settlement_no_position_close",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_post_submit_budget_settlement_no_exchange",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_post_submit_budget_settlement_no_exchange_order",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_post_submit_budget_settlement_no_lifecycle",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_post_submit_budget_settlement_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_rt_post_submit_budget_settlement_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_rt_post_submit_budget_settlement_no_transfer",
+        ),
+        Index(
+            "idx_rt_post_submit_budget_settlement_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_post_submit_budget_settlement_runtime_time",
+            "runtime_instance_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_post_submit_budget_settlement_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
 class PGRuntimeExecutionExchangeSubmitRecoveryResolutionORM(PGCoreBase):
     """Owner-reviewed resolution evidence for exchange-submit recovery tasks."""
 

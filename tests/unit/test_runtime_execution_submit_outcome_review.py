@@ -18,6 +18,7 @@ from src.application.runtime_execution_intent_adapter_service import (
 from src.domain.brc_audit_ids import BrcSemanticIds
 from src.domain.models import Direction, Order, OrderRole, OrderStatus, OrderType
 from src.domain.runtime_execution_attempt_outcome_policy import (
+    RuntimeExecutionAttemptBudgetAction,
     RuntimeExecutionAttemptOutcomeKind,
     RuntimeExecutionAttemptOutcomePolicyStatus,
 )
@@ -39,6 +40,7 @@ from src.domain.runtime_execution_first_real_submit_outcome_accounting import (
     RuntimeExecutionFirstRealSubmitOutcomeAccountingStatus,
 )
 from src.domain.runtime_execution_post_submit_budget_settlement import (
+    RuntimeExecutionPostSubmitBudgetSettlement,
     RuntimeExecutionPostSubmitBudgetSettlementStatus,
 )
 from src.domain.runtime_execution_submit_outcome_review import (
@@ -51,7 +53,13 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstance,
     StrategyRuntimeInstanceStatus,
 )
-from src.infrastructure.pg_models import PGRuntimeExecutionSubmitOutcomeReviewORM
+from src.infrastructure.pg_models import (
+    PGRuntimeExecutionPostSubmitBudgetSettlementORM,
+    PGRuntimeExecutionSubmitOutcomeReviewORM,
+)
+from src.infrastructure.pg_runtime_execution_post_submit_budget_settlement_repository import (
+    PgRuntimeExecutionPostSubmitBudgetSettlementRepository,
+)
 from src.infrastructure.pg_runtime_execution_submit_outcome_review_repository import (
     PgRuntimeExecutionSubmitOutcomeReviewRepository,
 )
@@ -162,6 +170,25 @@ class _AttemptOutcomePolicyRepo:
     async def get(self, policy_id):
         return next(
             (policy for policy in self.created if policy.policy_id == policy_id),
+            None,
+        )
+
+
+class _PostSubmitBudgetSettlementRepo:
+    def __init__(self) -> None:
+        self.created = []
+
+    async def create(self, settlement):
+        self.created.append(settlement)
+        return settlement
+
+    async def get(self, settlement_id):
+        return next(
+            (
+                settlement
+                for settlement in self.created
+                if settlement.settlement_id == settlement_id
+            ),
             None,
         )
 
@@ -595,6 +622,7 @@ async def test_post_submit_budget_settlement_releases_no_fill_reserved_budget():
     sl = _order("sl-1", OrderRole.SL, OrderStatus.CANCELED, Decimal("0"))
     reservation = _reservation()
     mutation = _mutation(reservation)
+    settlement_repo = _PostSubmitBudgetSettlementRepo()
     runtime_service = _RuntimeService(_runtime())
     service = RuntimeExecutionIntentAdapterService(
         draft_repository=_DraftRepo(),
@@ -604,6 +632,7 @@ async def test_post_submit_budget_settlement_releases_no_fill_reserved_budget():
         attempt_reservation_repository=_AttemptReservationRepo(reservation),
         attempt_mutation_repository=_AttemptMutationRepo(mutation),
         attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        post_submit_budget_settlement_repository=settlement_repo,
         runtime_service=runtime_service,
     )
 
@@ -628,6 +657,7 @@ async def test_post_submit_budget_settlement_releases_no_fill_reserved_budget():
     assert runtime_service.runtime.boundary.attempts_used == 1
     assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
     assert len(runtime_service.applied) == 1
+    assert settlement_repo.created == [settlement]
 
 
 async def test_post_submit_budget_settlement_records_full_fill_consumed_without_release():
@@ -636,6 +666,7 @@ async def test_post_submit_budget_settlement_records_full_fill_consumed_without_
     sl = _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0"))
     reservation = _reservation()
     mutation = _mutation(reservation)
+    settlement_repo = _PostSubmitBudgetSettlementRepo()
     runtime_service = _RuntimeService(_runtime())
     service = RuntimeExecutionIntentAdapterService(
         draft_repository=_DraftRepo(),
@@ -645,6 +676,7 @@ async def test_post_submit_budget_settlement_records_full_fill_consumed_without_
         attempt_reservation_repository=_AttemptReservationRepo(reservation),
         attempt_mutation_repository=_AttemptMutationRepo(mutation),
         attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        post_submit_budget_settlement_repository=settlement_repo,
         runtime_service=runtime_service,
     )
 
@@ -671,6 +703,7 @@ async def test_post_submit_budget_settlement_records_full_fill_consumed_without_
         runtime_service.runtime.metadata["last_post_submit_budget_action"]
         == "confirm_reserved_budget_consumed"
     )
+    assert settlement_repo.created == [settlement]
 
 
 async def test_post_submit_budget_settlement_blocks_runtime_budget_drift():
@@ -679,6 +712,7 @@ async def test_post_submit_budget_settlement_blocks_runtime_budget_drift():
     sl = _order("sl-1", OrderRole.SL, OrderStatus.CANCELED, Decimal("0"))
     reservation = _reservation()
     mutation = _mutation(reservation)
+    settlement_repo = _PostSubmitBudgetSettlementRepo()
     runtime_service = _RuntimeService(
         _runtime(boundary={"budget_reserved": Decimal("5")})
     )
@@ -690,6 +724,7 @@ async def test_post_submit_budget_settlement_blocks_runtime_budget_drift():
         attempt_reservation_repository=_AttemptReservationRepo(reservation),
         attempt_mutation_repository=_AttemptMutationRepo(mutation),
         attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        post_submit_budget_settlement_repository=settlement_repo,
         runtime_service=runtime_service,
     )
 
@@ -704,6 +739,7 @@ async def test_post_submit_budget_settlement_blocks_runtime_budget_drift():
     assert settlement.budget_released is False
     assert runtime_service.runtime.boundary.budget_reserved == Decimal("5")
     assert runtime_service.applied == []
+    assert settlement_repo.created == [settlement]
 
 
 async def test_submit_outcome_review_repository_roundtrips_by_authorization():
@@ -736,6 +772,35 @@ async def test_submit_outcome_review_repository_roundtrips_by_authorization():
         assert by_authorization is not None
         assert by_authorization.review_id == review.review_id
         assert by_authorization.exchange_called is False
+    finally:
+        await engine.dispose()
+
+
+async def test_post_submit_budget_settlement_repository_roundtrips_by_authorization():
+    engine, session_maker = await _repo_engine(
+        PGRuntimeExecutionPostSubmitBudgetSettlementORM.__table__
+    )
+    repo = PgRuntimeExecutionPostSubmitBudgetSettlementRepository(
+        session_maker=session_maker
+    )
+    try:
+        settlement = _settlement()
+
+        saved = await repo.create(settlement)
+        loaded = await repo.get(saved.settlement_id)
+        by_authorization = await repo.get_by_authorization_id("auth-1")
+
+        assert loaded is not None
+        assert loaded.settlement_id == settlement.settlement_id
+        assert loaded.status == (
+            RuntimeExecutionPostSubmitBudgetSettlementStatus
+            .RELEASED_RESERVED_BUDGET
+        )
+        assert loaded.budget_release_amount == Decimal("6")
+        assert loaded.budget_reserved_after == Decimal("0")
+        assert loaded.exchange_called is False
+        assert by_authorization is not None
+        assert by_authorization.settlement_id == settlement.settlement_id
     finally:
         await engine.dispose()
 
@@ -798,6 +863,70 @@ async def test_submit_outcome_review_migration_creates_and_downgrades_table():
     assert "exchange_called" in columns
     assert "exchange_order_submitted" in columns
     assert "uq_rt_submit_outcome_review_authorization" in unique_constraints
+
+
+async def test_post_submit_budget_settlement_migration_creates_and_downgrades_table():
+    migration_path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations/versions/"
+        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "runtime_post_submit_budget_settlement_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+
+        def upgrade(sync_conn):
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(sync_conn))
+            try:
+                migration.upgrade()
+                inspector = inspect(sync_conn)
+                assert inspector.has_table(
+                    "runtime_execution_post_submit_budget_settlements"
+                )
+                columns = {
+                    column["name"]
+                    for column in inspector.get_columns(
+                        "runtime_execution_post_submit_budget_settlements"
+                    )
+                }
+                unique_constraints = {
+                    constraint["name"]
+                    for constraint in inspector.get_unique_constraints(
+                        "runtime_execution_post_submit_budget_settlements"
+                    )
+                }
+                migration.downgrade()
+                inspector = inspect(sync_conn)
+                assert not inspector.has_table(
+                    "runtime_execution_post_submit_budget_settlements"
+                )
+                return columns, unique_constraints
+            finally:
+                migration.op = old_op
+
+        columns, unique_constraints = await conn.run_sync(upgrade)
+    await engine.dispose()
+
+    assert "settlement_id" in columns
+    assert "budget_release_amount" in columns
+    assert "attempt_counter_mutated" in columns
+    assert "exchange_called" in columns
+    assert (
+        "uq_rt_post_submit_budget_settlement_auth_reservation"
+        in unique_constraints
+    )
 
 
 async def test_trading_console_records_submit_outcome_review_without_gateway(
@@ -1251,6 +1380,57 @@ def _runtime(**overrides) -> StrategyRuntimeInstance:
     }
     values.update(overrides)
     return StrategyRuntimeInstance(**values)
+
+
+def _settlement(**overrides) -> RuntimeExecutionPostSubmitBudgetSettlement:
+    values = {
+        "settlement_id": (
+            "runtime-post-submit-budget-settlement-"
+            "runtime-first-real-submit-outcome-accounting-auth-1"
+        ),
+        "accounting_id": "runtime-first-real-submit-outcome-accounting-auth-1",
+        "authorization_id": "auth-1",
+        "execution_intent_id": "intent-1",
+        "runtime_instance_id": "runtime-1",
+        "reservation_id": "runtime-attempt-reservation-auth-1",
+        "mutation_id": "runtime-attempt-mutation-runtime-attempt-reservation-auth-1",
+        "attempt_outcome_policy_id": (
+            "runtime-attempt-outcome-policy-runtime-attempt-reservation-auth-1-"
+            "submitted_no_fill_cancelled"
+        ),
+        "status": (
+            RuntimeExecutionPostSubmitBudgetSettlementStatus
+            .RELEASED_RESERVED_BUDGET
+        ),
+        "runtime_status_before": StrategyRuntimeInstanceStatus.ACTIVE,
+        "runtime_status_after": StrategyRuntimeInstanceStatus.ACTIVE,
+        "budget_action": RuntimeExecutionAttemptBudgetAction.RELEASE_RESERVED_BUDGET,
+        "outcome_kind": "submitted_no_fill_cancelled",
+        "budget_reservation_amount": Decimal("6"),
+        "budget_release_amount": Decimal("6"),
+        "budget_reserved_before": Decimal("6"),
+        "budget_reserved_after": Decimal("0"),
+        "budget_remaining_before": Decimal("24"),
+        "budget_remaining_after": Decimal("30"),
+        "attempts_used_before": 1,
+        "attempts_used_after": 1,
+        "attempts_remaining_before": 2,
+        "attempts_remaining_after": 2,
+        "blockers": [],
+        "warnings": [],
+        "runtime_state_mutated": True,
+        "runtime_budget_mutated": True,
+        "attempt_already_consumed": True,
+        "budget_released": True,
+        "budget_consumption_recorded": False,
+        "reserved_budget_remains_held": False,
+        "requires_reconciliation_before_retry": True,
+        "blocks_new_entries_until_resolved": False,
+        "created_at_ms": NOW_MS + 2,
+        "metadata": {"scope": "test"},
+    }
+    values.update(overrides)
+    return RuntimeExecutionPostSubmitBudgetSettlement(**values)
 
 
 async def _repo_engine(*tables):
