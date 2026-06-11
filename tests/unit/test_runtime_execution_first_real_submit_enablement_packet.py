@@ -7,6 +7,9 @@ import pytest
 from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
     RuntimeExecutionFirstRealSubmitEnablementPacketService,
 )
+from src.application.runtime_execution_first_real_submit_evidence_preparation_service import (
+    RuntimeExecutionFirstRealSubmitEvidencePreparationService,
+)
 from src.application.runtime_execution_intent_adapter_service import (
     RuntimeExecutionIntentAdapterService,
 )
@@ -24,6 +27,9 @@ from src.domain.runtime_execution_first_real_submit_enablement_packet import (
     RuntimeExecutionFirstRealSubmitEnablementPacket,
     RuntimeExecutionFirstRealSubmitEnablementPacketStatus,
     build_runtime_execution_first_real_submit_enablement_packet,
+)
+from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
+    RuntimeExecutionFirstRealSubmitEvidencePreparationStatus,
 )
 from src.domain.runtime_execution_duplicate_submit_replay_proof import (
     RuntimeExecutionDuplicateSubmitReplayProofStatus,
@@ -949,6 +955,193 @@ async def test_runtime_adapter_resolves_only_existing_deterministic_evidence_ids
 
 
 @pytest.mark.asyncio
+async def test_first_real_submit_evidence_preparation_records_machine_evidence_only():
+    calls: list[dict] = []
+
+    class FakeAdapterService:
+        async def controlled_submit_plan_for_authorization(self, authorization_id):
+            calls.append({"method": "plan", "authorization_id": authorization_id})
+            return SimpleNamespace(
+                plan_id="runtime-controlled-submit-plan-auth-1",
+                execution_intent_id="intent-1",
+                runtime_instance_id="runtime-1",
+                source_id="candidate-1",
+                semantic_ids=_semantic_ids(),
+                symbol="BNB/USDT:USDT",
+                side="long",
+            )
+
+        async def record_submit_idempotency_snapshot_for_authorization(
+            self,
+            authorization_id,
+            **kwargs,
+        ):
+            calls.append(
+                {
+                    "method": "idempotency",
+                    "authorization_id": authorization_id,
+                    "kwargs": kwargs,
+                }
+            )
+            return SimpleNamespace(
+                submit_idempotency_policy_id="submit-idempotency-auth-1",
+                warnings=[],
+            )
+
+        async def record_protection_failure_policy_for_intent(
+            self,
+            execution_intent_id,
+        ):
+            calls.append(
+                {
+                    "method": "protection_failure",
+                    "execution_intent_id": execution_intent_id,
+                }
+            )
+            return SimpleNamespace(
+                policy_id="protection-failure-auth-1",
+                warnings=[],
+            )
+
+        async def resolve_first_real_submit_evidence_ids_for_authorization(
+            self,
+            authorization_id,
+        ):
+            calls.append({"method": "resolve", "authorization_id": authorization_id})
+            return {}
+
+        async def exchange_submit_enablement_decision_for_authorization(
+            self,
+            authorization_id,
+            **kwargs,
+        ):
+            calls.append({"method": "enablement", "kwargs": kwargs})
+            return _decision(
+                authorization_id=authorization_id,
+                trusted_submit_fact_snapshot_id=(
+                    kwargs["trusted_submit_fact_snapshot_id"]
+                ),
+                submit_idempotency_policy_id=(
+                    kwargs["submit_idempotency_policy_id"]
+                ),
+                attempt_outcome_policy_id=kwargs["attempt_outcome_policy_id"],
+                protection_creation_failure_policy_id=(
+                    kwargs["protection_creation_failure_policy_id"]
+                ),
+                owner_real_submit_authorization_id=None,
+                deployment_readiness_evidence_id=None,
+            )
+
+        async def submit_rehearsal_for_authorization(
+            self,
+            authorization_id,
+            *,
+            exchange_submit_enablement_decision,
+        ):
+            calls.append({"method": "rehearsal"})
+            return _submit_rehearsal(decision=exchange_submit_enablement_decision)
+
+        duplicate_submit_replay_proof_for_authorization = staticmethod(
+            _fake_duplicate_replay_proof
+        )
+
+        async def submit_prerequisite_evidence_proof_for_authorization(
+            self,
+            authorization_id,
+            *,
+            exchange_submit_enablement_decision,
+            trusted_submit_fact_snapshot_id=None,
+            attempt_outcome_policy_id=None,
+            protection_creation_failure_policy_id=None,
+        ):
+            calls.append(
+                {
+                    "method": "prerequisite",
+                    "attempt_outcome_policy_id": attempt_outcome_policy_id,
+                }
+            )
+            return build_runtime_execution_submit_prerequisite_evidence_proof(
+                enablement_decision=exchange_submit_enablement_decision,
+                trusted_submit_facts=_trusted_submit_facts(
+                    exchange_submit_enablement_decision
+                ),
+                attempt_outcome_policy=None,
+                protection_failure_policy=_protection_failure_policy(
+                    exchange_submit_enablement_decision
+                ),
+                trusted_submit_facts_repository_available=True,
+                attempt_outcome_policy_repository_available=True,
+                protection_failure_policy_repository_available=True,
+                now_ms=NOW_MS,
+            )
+
+    class FakeTrustedFactsAssembly:
+        async def assemble_and_record_snapshot_for_controlled_submit_plan(
+            self,
+            *,
+            plan,
+            now_ms,
+            metadata=None,
+        ):
+            calls.append(
+                {
+                    "method": "trusted_facts",
+                    "plan_id": plan.plan_id,
+                    "metadata": metadata,
+                }
+            )
+            return SimpleNamespace(
+                trusted_submit_fact_snapshot_id="trusted-submit-facts-auth-1",
+                warnings=[],
+            )
+
+    service = RuntimeExecutionFirstRealSubmitEvidencePreparationService(
+        runtime_execution_intent_adapter_service=FakeAdapterService(),
+        trusted_submit_facts_assembly_service=FakeTrustedFactsAssembly(),
+    )
+
+    preparation = await service.prepare_for_authorization("auth-1")
+
+    assert preparation.status == (
+        RuntimeExecutionFirstRealSubmitEvidencePreparationStatus
+        .PREPARED_PACKET_BLOCKED
+    )
+    assert preparation.prepared_evidence_ids == {
+        "submit_idempotency_policy_id": "submit-idempotency-auth-1",
+        "trusted_submit_fact_snapshot_id": "trusted-submit-facts-auth-1",
+        "protection_creation_failure_policy_id": "protection-failure-auth-1",
+    }
+    assert "attempt_outcome_policy_id" not in preparation.prepared_evidence_ids
+    assert (
+        "attempt_outcome_policy_not_auto_prepared_requires_existing_attempt_"
+        "reservation_or_submit_outcome_review"
+    ) in preparation.skipped_evidence
+    assert "owner_real_submit_authorization_not_auto_created" in (
+        preparation.skipped_evidence
+    )
+    assert "deployment_readiness_evidence_not_auto_created" in (
+        preparation.skipped_evidence
+    )
+    assert preparation.not_live_action_authorization is True
+    assert preparation.order_created is False
+    assert preparation.order_lifecycle_called is False
+    assert preparation.exchange_called is False
+    assert preparation.packet is not None
+    assert preparation.packet.status == (
+        RuntimeExecutionFirstRealSubmitEnablementPacketStatus.BLOCKED
+    )
+    assert preparation.packet.exchange_called is False
+    assert [call["method"] for call in calls[:5]] == [
+        "plan",
+        "idempotency",
+        "trusted_facts",
+        "protection_failure",
+        "resolve",
+    ]
+    assert "attempt_outcome_policy" not in [call["method"] for call in calls]
+
+
+@pytest.mark.asyncio
 async def test_first_real_submit_enablement_packet_blocks_mismatched_evidence_ids():
     class FakeAdapterService:
         async def exchange_submit_enablement_decision_for_authorization(
@@ -1163,3 +1356,147 @@ async def test_trading_console_first_real_submit_packet_api(monkeypatch):
     assert packet.promotion_gate_result.not_execution_authority is True
     assert packet.submit_rehearsal.not_live_action_authorization is True
     assert packet.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_trading_console_first_real_submit_evidence_preparation_api(
+    monkeypatch,
+):
+    class FakeAdapterService:
+        async def controlled_submit_plan_for_authorization(self, authorization_id):
+            return SimpleNamespace(
+                plan_id="runtime-controlled-submit-plan-auth-1",
+                execution_intent_id="intent-1",
+                runtime_instance_id="runtime-1",
+                source_id="candidate-1",
+                semantic_ids=_semantic_ids(),
+                symbol="BNB/USDT:USDT",
+                side="long",
+            )
+
+        async def record_submit_idempotency_snapshot_for_authorization(
+            self,
+            authorization_id,
+            **_kwargs,
+        ):
+            return SimpleNamespace(
+                submit_idempotency_policy_id="submit-idempotency-auth-1",
+                warnings=[],
+            )
+
+        async def record_protection_failure_policy_for_intent(
+            self,
+            execution_intent_id,
+        ):
+            return SimpleNamespace(
+                policy_id="protection-failure-auth-1",
+                warnings=[],
+            )
+
+        async def resolve_first_real_submit_evidence_ids_for_authorization(
+            self,
+            authorization_id,
+        ):
+            return {}
+
+        async def exchange_submit_enablement_decision_for_authorization(
+            self,
+            authorization_id,
+            **kwargs,
+        ):
+            return _decision(
+                authorization_id=authorization_id,
+                trusted_submit_fact_snapshot_id=(
+                    kwargs["trusted_submit_fact_snapshot_id"]
+                ),
+                submit_idempotency_policy_id=(
+                    kwargs["submit_idempotency_policy_id"]
+                ),
+                attempt_outcome_policy_id=kwargs["attempt_outcome_policy_id"],
+                protection_creation_failure_policy_id=(
+                    kwargs["protection_creation_failure_policy_id"]
+                ),
+            )
+
+        async def submit_rehearsal_for_authorization(
+            self,
+            authorization_id,
+            *,
+            exchange_submit_enablement_decision,
+        ):
+            return _submit_rehearsal(decision=exchange_submit_enablement_decision)
+
+        duplicate_submit_replay_proof_for_authorization = staticmethod(
+            _fake_duplicate_replay_proof
+        )
+
+        async def submit_prerequisite_evidence_proof_for_authorization(
+            self,
+            authorization_id,
+            *,
+            exchange_submit_enablement_decision,
+            trusted_submit_fact_snapshot_id=None,
+            attempt_outcome_policy_id=None,
+            protection_creation_failure_policy_id=None,
+        ):
+            return build_runtime_execution_submit_prerequisite_evidence_proof(
+                enablement_decision=exchange_submit_enablement_decision,
+                trusted_submit_facts=_trusted_submit_facts(
+                    exchange_submit_enablement_decision
+                ),
+                attempt_outcome_policy=None,
+                protection_failure_policy=_protection_failure_policy(
+                    exchange_submit_enablement_decision
+                ),
+                trusted_submit_facts_repository_available=True,
+                attempt_outcome_policy_repository_available=True,
+                protection_failure_policy_repository_available=True,
+                now_ms=NOW_MS,
+            )
+
+    class FakeTrustedFactsAssembly:
+        async def assemble_and_record_snapshot_for_controlled_submit_plan(
+            self,
+            *,
+            plan,
+            now_ms,
+            metadata=None,
+        ):
+            return SimpleNamespace(
+                trusted_submit_fact_snapshot_id="trusted-submit-facts-auth-1",
+                warnings=[],
+            )
+
+    async def fake_adapter_factory(*, include_runtime_exchange_gateway=False):
+        assert include_runtime_exchange_gateway is False
+        return FakeAdapterService()
+
+    monkeypatch.setattr(
+        trading_console_api,
+        "_runtime_execution_intent_adapter_service",
+        fake_adapter_factory,
+    )
+    monkeypatch.setattr(
+        trading_console_api,
+        "_runtime_execution_trusted_submit_facts_assembly_service",
+        lambda: FakeTrustedFactsAssembly(),
+    )
+
+    preparation = await (
+        trading_console_api
+        .runtime_execution_first_real_submit_evidence_preparation_for_authorization(
+            "auth-1",
+        )
+    )
+
+    assert preparation.authorization_id == "auth-1"
+    assert preparation.status == (
+        RuntimeExecutionFirstRealSubmitEvidencePreparationStatus
+        .PREPARED_PACKET_BLOCKED
+    )
+    assert preparation.prepared_evidence_ids[
+        "trusted_submit_fact_snapshot_id"
+    ] == "trusted-submit-facts-auth-1"
+    assert preparation.not_exchange_submit_authority is True
+    assert preparation.order_created is False
+    assert preparation.exchange_called is False

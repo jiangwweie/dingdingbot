@@ -97,6 +97,9 @@ from src.domain.runtime_execution_submit_rehearsal import (
 from src.domain.runtime_execution_first_real_submit_enablement_packet import (
     RuntimeExecutionFirstRealSubmitEnablementPacket,
 )
+from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
+    RuntimeExecutionFirstRealSubmitEvidencePreparation,
+)
 from src.domain.runtime_execution_exchange_submit_recovery_resolution import (
     RuntimeExecutionExchangeSubmitRecoveryResolution,
 )
@@ -2074,6 +2077,52 @@ async def record_runtime_execution_exchange_submit_recovery_resolution(
             ),
             owner_confirmation_reference=owner_confirmation_reference,
             reconciliation_evidence_id=reconciliation_evidence_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-first-real-submit-evidence-preparations/"
+    "authorizations/{authorization_id}",
+    response_model=RuntimeExecutionFirstRealSubmitEvidencePreparation,
+)
+async def runtime_execution_first_real_submit_evidence_preparation_for_authorization(
+    authorization_id: str,
+    adapter_result_store_implemented: bool = False,
+    real_adapter_boundary_implemented: bool = False,
+) -> RuntimeExecutionFirstRealSubmitEvidencePreparation:
+    from src.application.runtime_execution_first_real_submit_evidence_preparation_service import (
+        RuntimeExecutionFirstRealSubmitEvidencePreparationService,
+    )
+    from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
+        RuntimeExecutionFirstRealSubmitEnablementPacketService,
+    )
+
+    try:
+        adapter_service = await _runtime_execution_intent_adapter_service()
+        packet_service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+            runtime_execution_intent_adapter_service=adapter_service,
+            promotion_gate_service=(
+                await _strategy_runtime_promotion_gate_service()
+            ),
+        )
+        service = RuntimeExecutionFirstRealSubmitEvidencePreparationService(
+            runtime_execution_intent_adapter_service=adapter_service,
+            trusted_submit_facts_assembly_service=(
+                _runtime_execution_trusted_submit_facts_assembly_service()
+            ),
+            enablement_packet_service=packet_service,
+        )
+        return await service.prepare_for_authorization(
+            authorization_id,
+            adapter_result_store_implemented=adapter_result_store_implemented,
+            real_adapter_boundary_implemented=real_adapter_boundary_implemented,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
