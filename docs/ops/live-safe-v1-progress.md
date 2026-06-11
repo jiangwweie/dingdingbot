@@ -3758,19 +3758,27 @@ Use this file for session progress and handoff notes.
   - OrderLifecycle called: `false`;
   - secrets read by Codex: `false`.
 - Active overnight observation after deploy:
-  - the active loop continues from the prior current-release script path
-    `77cae7a2`, while `app/current` has advanced to `190ac471`;
+  - stopped the prior `77cae7a2` observation loop after confirming status
+    `waiting_for_signal`, latest iteration `10`, prepared authorization ID
+    `null`, shadow candidate ID `null`, and `forbidden_effects=[]`;
+  - started a new overnight observation supervisor from
+    `/home/ubuntu/brc-deploy/app/current` (`190ac471`) so the live night
+    observation command includes `--allow-prepare-records`,
+    `--allow-arm-preview`, and `--allow-disabled-smoke`;
+  - new report directory:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-190ac471`;
+  - new supervisor PID: `4031504`;
   - status packet: `waiting_for_signal`;
-  - latest iteration: `4`;
-  - iterations requested: `87`;
-  - iterations remaining: `83`;
+  - latest iteration: `1`;
+  - iterations requested: `77`;
+  - iterations remaining: `76`;
   - stop reason: `running`;
   - prepared authorization ID: `null`;
   - shadow candidate ID: `null`;
   - forbidden effects: `[]`.
 - Deployed operator packet evidence:
   - output path:
-    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-77cae7a2/operator-packet.json`;
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-190ac471/operator-packet.json`;
   - status: `observation_running_no_signal`;
   - watch status: `watching_no_signal`;
   - diagnostic status: `no_signal_observation_running`;
