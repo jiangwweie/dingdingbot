@@ -49,6 +49,80 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+def _with_env_file(args: list[str], env_file: str | None) -> list[str]:
+    if not env_file:
+        return args
+    return [*args, "--env-file", env_file]
+
+
+def _operator_command_plan(
+    *,
+    runtime_instance_id: str,
+    env_file: str | None,
+    packet: Any,
+) -> dict[str, Any]:
+    followup_args = _with_env_file(
+        [
+            "scripts/build_runtime_post_close_followup_packet.py",
+            "--runtime-instance-id",
+            runtime_instance_id,
+        ],
+        env_file,
+    )
+    close_args = _with_env_file(
+        [
+            "scripts/runtime_owner_reduce_only_close_flow.py",
+            "--runtime-instance-id",
+            runtime_instance_id,
+        ],
+        env_file,
+    )
+    review_facts_args = _with_env_file(
+        [
+            "scripts/build_runtime_closed_trade_review_facts_packet.py",
+            "--runtime-instance-id",
+            runtime_instance_id,
+        ],
+        env_file,
+    )
+    approval_env = getattr(packet, "owner_close_approval_env", None)
+    approval_value = getattr(packet, "owner_close_approval_value", None)
+    close_execute_args = [*close_args, "--execute-real-close"] if approval_value else []
+    return {
+        "scope": "runtime_post_close_operator_command_plan",
+        "not_executed": True,
+        "requires_explicit_owner_approval_before_execute": True,
+        "owner_close_approval_env": approval_env,
+        "owner_close_approval_value": approval_value,
+        "refresh_followup_command_args": followup_args,
+        "owner_close_dry_run_command_args": close_args if approval_value else [],
+        "owner_close_execute_command_args": close_execute_args,
+        "closed_review_facts_refresh_command_args": review_facts_args,
+        "closed_review_command_args": list(
+            getattr(packet, "closed_review_command_args", []) or []
+        ),
+        "post_close_required_sequence": [
+            "refresh_followup",
+            "owner_authorize_exact_reduce_only_close_value",
+            "run_owner_close_execute_command",
+            "refresh_followup_until_flat",
+            "run_closed_review_dry_run",
+            "run_closed_review_apply_if_ready",
+            "verify_next_attempt_gate",
+        ],
+        "safety_invariants": {
+            "packet_only": True,
+            "command_plan_only": True,
+            "exchange_write_called": False,
+            "review_record_created": False,
+            "order_created": False,
+            "position_closed": False,
+            "runtime_state_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
 async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
 
@@ -148,6 +222,11 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             closed_review_facts_packet=closed_review_facts_packet,
             now_ms=int(time.time() * 1000),
         )
+        operator_command_plan = _operator_command_plan(
+            runtime_instance_id=args.runtime_instance_id,
+            env_file=args.env_file,
+            packet=packet,
+        )
         return {
             "scope": "runtime_post_close_followup_packet",
             "status": packet.status.value,
@@ -157,6 +236,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             if owner_close_packet is not None
             else None,
             "closed_review_facts_packet": _json_value(closed_review_facts_packet),
+            "operator_command_plan": operator_command_plan,
             "safety_invariants": {
                 "packet_only": True,
                 "exchange_read_only": gateway is not None,
