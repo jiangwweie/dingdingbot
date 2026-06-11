@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a read-only runtime live-position monitor packet."""
+"""Build a read-only runtime active-position exit-management plan."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.application.reconciliation import ReconciliationService
-from src.application.runtime_live_position_monitor_service import (
-    RuntimeLivePositionMonitorService,
+from src.application.runtime_position_exit_plan_service import (
+    RuntimePositionExitPlanService,
 )
 from src.infrastructure.connection_pool import close_all_connections
 from src.infrastructure.exchange_gateway import ExchangeGateway
@@ -91,20 +91,20 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     try:
-        service = RuntimeLivePositionMonitorService(
+        service = RuntimePositionExitPlanService(
             runtime_repository=runtime_repository,
             position_repository=position_repository,
             order_repository=order_repository,
             exchange_gateway=gateway,
             reconciliation_service=reconciliation_service,
         )
-        packet = await service.build_monitor_packet(
+        plan = await service.build_exit_plan(
             runtime_instance_id=args.runtime_instance_id,
         )
         return {
-            "scope": "runtime_live_position_monitor",
-            "status": packet.status.value,
-            "packet": _json_value(packet),
+            "scope": "runtime_position_exit_plan",
+            "status": plan.status.value,
+            "plan": _json_value(plan),
             "safety_invariants": {
                 "exchange_read_only": gateway is not None,
                 "exchange_write_called": False,
@@ -124,7 +124,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a read-only runtime live-position monitor packet.",
+        description="Build a read-only runtime active-position exit-management plan.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
     parser.add_argument(
@@ -134,7 +134,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-exchange",
         action="store_true",
-        help="Use only local PG facts; packet will block on missing exchange facts.",
+        help="Use only local PG facts; packet may warn on missing exchange facts.",
     )
     parser.add_argument(
         "--skip-reconciliation",
