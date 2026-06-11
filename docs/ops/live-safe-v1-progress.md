@@ -2743,3 +2743,58 @@ Use this file for session progress and handoff notes.
 - Remaining live action:
   - a real reduce-only close still requires a separate explicit Owner action
     using the exact approval value above, followed by fresh fact revalidation.
+
+## 2026-06-11 (Owner-gated Runtime Reduce-only Close Flow)
+
+- Added and deployed `program/live-safe-v1` commit
+  `624ca044488c7e656d8a7f502013dac01d66c597` to Tokyo as
+  `brc-runtime-governance-624ca044-20260611Tcloseflow`.
+- Added `scripts/runtime_owner_reduce_only_close_flow.py`:
+  - default mode is dry-run;
+  - it rebuilds the reduce-only close Owner packet from fresh PG / exchange /
+    reconciliation facts;
+  - real close requires both:
+    - exact env var
+      `OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE`;
+    - explicit CLI flag `--execute-real-close`;
+  - before any exchange write it revalidates that the active local position
+    count is exactly `1` and the current quantity still matches the fresh
+    Owner packet.
+- Updated `ExecutionOrchestrator.execute_controlled_close()` with a `scope`
+  metadata parameter so the same reduce-only close primitive can preserve
+  `runtime_owner_reduce_only_close` semantics instead of pretending to be a
+  testnet smoke.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_owner_reduce_only_close_flow.py tests/unit/test_tiny001d4_controlled_close.py tests/unit/test_runtime_reduce_only_close_authorization.py`
+    passed with `8 passed`;
+  - `python3 -m py_compile scripts/runtime_owner_reduce_only_close_flow.py src/application/execution_orchestrator.py tests/unit/test_runtime_owner_reduce_only_close_flow.py tests/unit/test_tiny001d4_controlled_close.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed head is
+    `624ca044488c7e656d8a7f502013dac01d66c597`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote dry-run on `strategy-runtime-95655873b76c`:
+  - status `ready_for_owner_authorization`;
+  - executed `false`;
+  - reduce-only close side `buy`;
+  - close quantity `1.0`;
+  - close notional reference around `6.581158740`;
+  - blockers only
+    `OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE_missing_or_wrong`;
+  - required approval value remained
+    `runtime-reduce-only-close:strategy-runtime-95655873b76c:AVAX/USDT:USDT:short:qty=1.0:owner-authorized`.
+- Safety proof:
+  - dry-run rebuilt fresh facts and then stopped before exchange write;
+  - exchange write called `false`;
+  - order created `false`;
+  - position closed `false`;
+  - runtime state mutated `false`;
+  - no withdrawal / transfer.
+- Remaining live action:
+  - if Owner explicitly authorizes the exact value above, the next step can run
+    the same script with `--execute-real-close`, then verify projection,
+    reconciliation, closed review, and next-attempt gate.
