@@ -2210,6 +2210,71 @@ class RuntimeExecutionIntentAdapterService:
             now_ms=_now_ms(),
         )
 
+    async def first_real_submit_action_for_authorization(
+        self,
+        authorization_id: str,
+        *,
+        owner_confirmed_for_first_real_submit_action: bool = False,
+        trusted_submit_fact_snapshot_id: str | None = None,
+        submit_idempotency_policy_id: str | None = None,
+        attempt_outcome_policy_id: str | None = None,
+        protection_creation_failure_policy_id: str | None = None,
+        local_registration_enablement_decision_id: str | None = None,
+        owner_real_submit_authorization_id: str | None = None,
+        order_lifecycle_submit_enablement_id: str | None = None,
+        exchange_submit_adapter_enablement_id: str | None = None,
+        exchange_submit_action_authorization_id: str | None = None,
+        deployment_readiness_evidence_id: str | None = None,
+    ) -> RuntimeExecutionExchangeSubmitExecutionResult:
+        """Owner-facing wrapper for the first real submit action point.
+
+        The wrapper does not add an alternate execution path. It resolves the
+        same exchange-submit enablement evidence and then chooses between the
+        default-disabled proof path and the explicit real gateway action path.
+        """
+
+        decision = await self.exchange_submit_enablement_decision_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            local_registration_enablement_decision_id=(
+                local_registration_enablement_decision_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_submit_enablement_id=(
+                order_lifecycle_submit_enablement_id
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_enablement_id
+            ),
+            exchange_submit_action_authorization_id=(
+                exchange_submit_action_authorization_id
+            ),
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        )
+        if not owner_confirmed_for_first_real_submit_action:
+            return await self.exchange_submit_execution_result_for_authorization(
+                authorization_id,
+                exchange_submit_execution_enabled=False,
+                exchange_submit_execution_mode=(
+                    RuntimeExecutionExchangeSubmitExecutionMode.DISABLED.value
+                ),
+                exchange_submit_enablement_decision=decision,
+            )
+        return await self.exchange_submit_execution_result_for_authorization(
+            authorization_id,
+            exchange_submit_execution_enabled=True,
+            exchange_submit_execution_mode=(
+                RuntimeExecutionExchangeSubmitExecutionMode
+                .REAL_GATEWAY_ACTION.value
+            ),
+            exchange_submit_enablement_decision=decision,
+        )
+
     async def exchange_submit_execution_result_for_authorization(
         self,
         authorization_id: str,

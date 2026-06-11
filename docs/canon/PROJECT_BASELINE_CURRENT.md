@@ -471,7 +471,11 @@ Key facts:
   real-funds order placement. The Trading Console execution-result endpoint
   defaults to `execution_mode=disabled`; a real gateway action must explicitly
   request `execution_mode=real_gateway_action` in addition to the existing
-  Owner/action/deployment/recovery/idempotency evidence. The OrderLifecycle
+  Owner/action/deployment/recovery/idempotency evidence. A canonical
+  first-real-submit action wrapper now sits above that endpoint: without final
+  Owner action confirmation it returns the disabled proof path, and with final
+  Owner action confirmation it requests `real_gateway_action` while still
+  relying on the same action-time evidence revalidation. The OrderLifecycle
   adapter enablement packet now
   treats local CREATED order registration capability as implemented separately
   from action-time enablement evidence: without explicit local-registration

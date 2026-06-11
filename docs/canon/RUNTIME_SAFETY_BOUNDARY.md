@@ -162,7 +162,12 @@ This document defines the runtime safety boundaries for the BRC project.
   credentials use, deployment changes, or real-funds order placement. The
   Trading Console endpoint must request `execution_mode=real_gateway_action`
   before a real gateway can be injected, and that remains separate from Owner
-  authorization. The execution-result stage is the
+  authorization. A canonical Trading Console first-real-submit action wrapper
+  now resolves the same evidence set and defaults to the disabled proof path;
+  only an Owner-confirmed first-real-submit action requests
+  `real_gateway_action`, and the lower-level action-time evidence
+  revalidation still decides whether the gateway can be called. The
+  execution-result stage is the
   only stage that may call the exchange gateway /
   `OrderLifecycleService.submit_order`, and only when the explicit execution
   flag, gateway readiness, recovery state, idempotency policy,

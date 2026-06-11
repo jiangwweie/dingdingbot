@@ -1263,6 +1263,86 @@ async def test_api_records_local_registration_action_authorization(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_first_real_submit_action_controls_gateway_injection(monkeypatch):
+    class FakeService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def first_real_submit_action_for_authorization(
+            self,
+            authorization_id: str,
+            **kwargs,
+        ):
+            self.calls.append((authorization_id, kwargs))
+            mode = (
+                "real_gateway_action"
+                if kwargs["owner_confirmed_for_first_real_submit_action"]
+                else "disabled"
+            )
+            return SimpleNamespace(
+                authorization_id=authorization_id,
+                execution_mode=SimpleNamespace(value=mode),
+                exchange_called=False,
+                exchange_order_submitted=False,
+                order_lifecycle_submit_called=False,
+            )
+
+    factory_calls = []
+    service = FakeService()
+
+    async def fake_service_factory(*, include_runtime_exchange_gateway=False):
+        factory_calls.append(include_runtime_exchange_gateway)
+        return service
+
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_execution_intent_adapter_service",
+        fake_service_factory,
+    )
+
+    disabled_result = await (
+        api_module.runtime_execution_first_real_submit_action_for_authorization(
+            "auth-1",
+            owner_confirmed_for_first_real_submit_action=False,
+        )
+    )
+    confirmed_result = await (
+        api_module.runtime_execution_first_real_submit_action_for_authorization(
+            "auth-1",
+            owner_confirmed_for_first_real_submit_action=True,
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            local_registration_enablement_decision_id=(
+                "runtime-local-registration-enablement-auth-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_submit_enablement_id=(
+                "order-lifecycle-submit-enable-1"
+            ),
+            exchange_submit_adapter_enablement_id=(
+                "exchange-submit-adapter-enable-1"
+            ),
+            exchange_submit_action_authorization_id="exchange-submit-action-1",
+            deployment_readiness_evidence_id=(
+                "runtime-exchange-gateway-readiness-1"
+            ),
+        )
+    )
+
+    assert factory_calls == [False, True]
+    assert service.calls[0][1]["owner_confirmed_for_first_real_submit_action"] is False
+    assert service.calls[1][1]["owner_confirmed_for_first_real_submit_action"] is True
+    assert disabled_result.execution_mode.value == "disabled"
+    assert confirmed_result.execution_mode.value == "real_gateway_action"
+    assert disabled_result.exchange_called is False
+    assert confirmed_result.exchange_called is False
+
+
+@pytest.mark.asyncio
 async def test_local_registration_enablement_validates_action_authorization():
     preview = _registration_preview()
     service = _service_with_preview(preview)
@@ -3058,6 +3138,87 @@ async def test_service_exchange_submit_execution_blocks_enabled_without_explicit
     assert result.exchange_order_submitted is False
     assert result.order_lifecycle_submit_called is False
     assert context.exchange_submit_execution_result_repo.acquire_calls == 0
+    assert context.intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_first_real_submit_action_defaults_to_disabled_without_owner_final_action():
+    context = await _ready_exchange_submit_execution_context()
+
+    result = await context.service.first_real_submit_action_for_authorization(
+        "auth-1",
+        owner_confirmed_for_first_real_submit_action=False,
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id=(
+            "protection-failure-policy-intent-1"
+        ),
+        local_registration_enablement_decision_id=(
+            "runtime-local-registration-enablement-auth-1"
+        ),
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+        exchange_submit_adapter_enablement_id="exchange-submit-adapter-enable-1",
+        exchange_submit_action_authorization_id="exchange-submit-action-1",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    )
+
+    assert (
+        result.status
+        == RuntimeExecutionExchangeSubmitExecutionStatus
+        .EXCHANGE_SUBMIT_EXECUTION_DISABLED
+    )
+    assert result.execution_mode.value == "disabled"
+    assert result.exchange_submit_execution_enabled is False
+    assert context.gateway.calls == []
+    assert result.exchange_called is False
+    assert result.exchange_order_submitted is False
+    assert result.order_lifecycle_submit_called is False
+    assert context.exchange_submit_execution_result_repo.acquire_calls == 0
+    assert context.intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_first_real_submit_action_confirmed_uses_real_gateway_mode():
+    context = await _ready_exchange_submit_execution_context()
+
+    result = await context.service.first_real_submit_action_for_authorization(
+        "auth-1",
+        owner_confirmed_for_first_real_submit_action=True,
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id=(
+            "protection-failure-policy-intent-1"
+        ),
+        local_registration_enablement_decision_id=(
+            "runtime-local-registration-enablement-auth-1"
+        ),
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+        exchange_submit_adapter_enablement_id="exchange-submit-adapter-enable-1",
+        exchange_submit_action_authorization_id="exchange-submit-action-1",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    )
+
+    assert (
+        result.status
+        == RuntimeExecutionExchangeSubmitExecutionStatus
+        .EXCHANGE_SUBMIT_ORDERS_SUBMITTED
+    )
+    assert result.execution_mode.value == "real_gateway_action"
+    assert result.metadata["real_gateway_action"] is True
+    assert "exchange_submit_execution_mode_real_gateway_action" in result.warnings
+    assert [call["client_order_id"] for call in context.gateway.calls] == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert result.exchange_called is True
+    assert result.exchange_order_submitted is True
+    assert result.order_lifecycle_submit_called is True
+    assert context.exchange_submit_execution_result_repo.acquire_calls == 1
+    assert context.exchange_submit_execution_result_repo.complete_calls == 1
     assert context.intent_repo.saved == []
 
 

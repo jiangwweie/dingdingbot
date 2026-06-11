@@ -2081,6 +2081,66 @@ async def runtime_execution_exchange_submit_execution_result_for_authorization(
 
 
 @router.post(
+    "/runtime-execution-first-real-submit-actions/authorizations/"
+    "{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitExecutionResult,
+)
+async def runtime_execution_first_real_submit_action_for_authorization(
+    authorization_id: str,
+    owner_confirmed_for_first_real_submit_action: bool = False,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    exchange_submit_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+) -> RuntimeExecutionExchangeSubmitExecutionResult:
+    service = await _runtime_execution_intent_adapter_service(
+        include_runtime_exchange_gateway=(
+            owner_confirmed_for_first_real_submit_action
+        ),
+    )
+    try:
+        return await service.first_real_submit_action_for_authorization(
+            authorization_id,
+            owner_confirmed_for_first_real_submit_action=(
+                owner_confirmed_for_first_real_submit_action
+            ),
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            local_registration_enablement_decision_id=(
+                local_registration_enablement_decision_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_submit_enablement_id=(
+                order_lifecycle_submit_enablement_id
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_enablement_id
+            ),
+            exchange_submit_action_authorization_id=(
+                exchange_submit_action_authorization_id
+            ),
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
     "/runtime-execution-submit-outcome-reviews/authorizations/{authorization_id}",
     response_model=RuntimeExecutionSubmitOutcomeReview,
 )
