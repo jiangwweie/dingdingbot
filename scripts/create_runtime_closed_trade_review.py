@@ -20,20 +20,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.application.reconciliation import ReconciliationService
-from src.application.runtime_closed_trade_lifecycle_review_service import (
-    RuntimeClosedTradeLifecycleReviewService,
-)
-from src.infrastructure.connection_pool import close_all_connections
-from src.infrastructure.exchange_gateway import ExchangeGateway
-from src.infrastructure.pg_live_lifecycle_review_repository import (
-    PgLiveLifecycleReviewRepository,
-)
-from src.infrastructure.pg_order_repository import PgOrderRepository
-from src.infrastructure.pg_position_repository import PgPositionRepository
-from src.infrastructure.pg_strategy_runtime_repository import PgStrategyRuntimeRepository
-
-
 def _parse_bool_env(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -49,7 +35,7 @@ def _load_env_file(path: str | None) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip("'").strip('"')
-        if key and key not in os.environ:
+        if key and not os.environ.get(key):
             os.environ[key] = value
 
 
@@ -67,6 +53,22 @@ def _json_value(value: Any) -> Any:
 
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
+
+    from src.application.reconciliation import ReconciliationService
+    from src.application.runtime_closed_trade_lifecycle_review_service import (
+        RuntimeClosedTradeLifecycleReviewService,
+    )
+    from src.infrastructure.connection_pool import close_all_connections
+    from src.infrastructure.exchange_gateway import ExchangeGateway
+    from src.infrastructure.pg_live_lifecycle_review_repository import (
+        PgLiveLifecycleReviewRepository,
+    )
+    from src.infrastructure.pg_order_repository import PgOrderRepository
+    from src.infrastructure.pg_position_repository import PgPositionRepository
+    from src.infrastructure.pg_strategy_runtime_repository import (
+        PgStrategyRuntimeRepository,
+    )
+
     runtime_repository = PgStrategyRuntimeRepository()
     order_repository = PgOrderRepository()
     position_repository = PgPositionRepository()

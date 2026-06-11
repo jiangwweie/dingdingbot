@@ -47,6 +47,13 @@ class RuntimePositionExitPlan(RuntimePositionExitPlanModel):
     tp1_quantity_step_aligned: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     runner_quantity_reference: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     tp1_reduce_only_side: Optional[str] = None
+    full_reduce_only_close_quantity: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    full_reduce_only_close_notional_reference: Optional[Decimal] = Field(
+        default=None,
+        ge=Decimal("0"),
+    )
+    full_reduce_only_close_feasible: bool = False
+    full_reduce_only_close_requires_owner_authorization: bool = True
     market_min_qty: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     market_qty_step: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     tp1_quantity_feasible: bool = False
@@ -159,6 +166,27 @@ def build_runtime_position_exit_plan(
         warnings.append("tp1_partial_quantity_below_min_qty_or_step")
 
     reduce_only_side = "buy" if runtime.side.lower() == "short" else "sell"
+    aligned_full_close_qty = (
+        _floor_to_step(qty, qty_step)
+        if qty is not None and qty_step is not None and qty_step > Decimal("0")
+        else qty
+    )
+    full_close_feasible = bool(
+        aligned_full_close_qty is not None
+        and qty is not None
+        and aligned_full_close_qty == qty
+        and aligned_full_close_qty > Decimal("0")
+        and (min_qty is None or aligned_full_close_qty >= min_qty)
+    )
+    mark_price = monitor.mark_price or entry
+    full_close_notional = (
+        aligned_full_close_qty * mark_price
+        if aligned_full_close_qty is not None and mark_price is not None
+        else None
+    )
+    if not full_close_feasible and qty is not None and not blockers:
+        warnings.append("full_reduce_only_close_quantity_below_min_qty_or_step")
+
     status = RuntimePositionExitPlanStatus.READY_FOR_OWNER_REVIEW
     recommended = "review_tp1_partial_plus_runner"
     if blockers:
@@ -168,7 +196,11 @@ def build_runtime_position_exit_plan(
         status = RuntimePositionExitPlanStatus.NOT_APPLICABLE
         recommended = "tp_already_present_continue_monitoring"
     elif not feasible:
-        recommended = "keep_hard_stop_only_or_authorize_different_reduce_only_exit_shape"
+        recommended = (
+            "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+            if full_close_feasible
+            else "keep_hard_stop_only_or_authorize_different_reduce_only_exit_shape"
+        )
 
     return RuntimePositionExitPlan(
         plan_id=f"runtime-position-exit-plan-{runtime.runtime_instance_id}-{now_ms}",
@@ -193,6 +225,9 @@ def build_runtime_position_exit_plan(
             else qty
         ),
         tp1_reduce_only_side=reduce_only_side,
+        full_reduce_only_close_quantity=aligned_full_close_qty,
+        full_reduce_only_close_notional_reference=full_close_notional,
+        full_reduce_only_close_feasible=full_close_feasible,
         market_min_qty=min_qty,
         market_qty_step=qty_step,
         tp1_quantity_feasible=feasible,
@@ -204,6 +239,9 @@ def build_runtime_position_exit_plan(
             "right_tail_objective": "TP1 is optional only if it preserves a runner; avoid capping all upside.",
             "hard_stop_only_is_holdable_when_reconciliation_clean": (
                 monitor.can_continue_holding and monitor.hard_stop_boundary_present
+            ),
+            "full_reduce_only_close_is_risk_reducing_but_requires_owner_authorization": (
+                full_close_feasible
             ),
             "market_rule_source": _get(market_rule, "source", "unknown") if market_rule else None,
         },

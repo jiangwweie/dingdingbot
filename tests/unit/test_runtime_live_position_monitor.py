@@ -224,6 +224,10 @@ def test_exit_plan_proposes_tp1_runner_without_execution_authority():
     assert plan.runner_quantity_reference == Decimal("0.5")
     assert plan.tp1_reduce_only_side == "buy"
     assert plan.tp1_quantity_feasible is True
+    assert plan.full_reduce_only_close_quantity == Decimal("1.0")
+    assert plan.full_reduce_only_close_feasible is True
+    assert plan.full_reduce_only_close_notional_reference == Decimal("6.62844777")
+    assert plan.full_reduce_only_close_requires_owner_authorization is True
     assert plan.not_order is True
     assert plan.not_execution_intent is True
     assert plan.exchange_order_submitted is False
@@ -259,8 +263,11 @@ def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
     assert plan.tp1_quantity_feasible is False
     assert plan.runner_quantity_reference == Decimal("1")
     assert plan.recommended_owner_decision == (
-        "keep_hard_stop_only_or_authorize_different_reduce_only_exit_shape"
+        "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
     )
+    assert plan.full_reduce_only_close_quantity == Decimal("1")
+    assert plan.full_reduce_only_close_feasible is True
+    assert plan.full_reduce_only_close_notional_reference == Decimal("6.62844777")
     assert "tp1_partial_quantity_below_min_qty_or_step" in plan.warnings
     assert plan.order_created is False
 

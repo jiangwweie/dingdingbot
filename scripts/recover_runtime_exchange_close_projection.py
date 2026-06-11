@@ -15,20 +15,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.application.order_lifecycle_service import OrderLifecycleService
-from src.application.position_projection_service import PositionProjectionService
-from src.application.runtime_exchange_close_projection_recovery_service import (
-    RuntimeExchangeCloseProjectionRecoveryService,
-)
-from src.domain.runtime_exchange_close_projection_recovery import (
-    RuntimeExchangeCloseProjectionRecoveryRequest,
-)
-from src.infrastructure.connection_pool import close_all_connections
-from src.infrastructure.exchange_gateway import ExchangeGateway
-from src.infrastructure.pg_order_repository import PgOrderRepository
-from src.infrastructure.pg_position_repository import PgPositionRepository
-
-
 def _parse_bool_env(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -44,7 +30,7 @@ def _load_env_file(path: str | None) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip("'").strip('"')
-        if key and key not in os.environ:
+        if key and not os.environ.get(key):
             os.environ[key] = value
 
 
@@ -62,6 +48,20 @@ def _json_value(value: Any) -> Any:
 
 async def _recover(args: argparse.Namespace) -> dict[str, Any]:
     _load_env_file(args.env_file)
+
+    from src.application.order_lifecycle_service import OrderLifecycleService
+    from src.application.position_projection_service import PositionProjectionService
+    from src.application.runtime_exchange_close_projection_recovery_service import (
+        RuntimeExchangeCloseProjectionRecoveryService,
+    )
+    from src.domain.runtime_exchange_close_projection_recovery import (
+        RuntimeExchangeCloseProjectionRecoveryRequest,
+    )
+    from src.infrastructure.connection_pool import close_all_connections
+    from src.infrastructure.exchange_gateway import ExchangeGateway
+    from src.infrastructure.pg_order_repository import PgOrderRepository
+    from src.infrastructure.pg_position_repository import PgPositionRepository
+
     api_key = os.environ.get("EXCHANGE_API_KEY", "").strip()
     api_secret = os.environ.get("EXCHANGE_API_SECRET", "").strip()
     if not api_key or not api_secret:
@@ -146,4 +146,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
