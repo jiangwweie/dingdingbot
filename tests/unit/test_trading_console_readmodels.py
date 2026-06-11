@@ -136,6 +136,12 @@ class _FakeOrder:
         self.filled_at = None
         self.created_at = 1780496662000
         self.updated_at = 1780496663000
+        self.runtime_instance_id = "runtime-live-monitor-1"
+        self.trial_binding_id = "trial-binding-live-monitor-1"
+        self.strategy_family_id = "CPM-001"
+        self.strategy_family_version_id = "CPM-001@v1"
+        self.signal_evaluation_id = "signal-1"
+        self.order_candidate_id = "candidate-1"
 
 
 class _FakeOrderRepo:
@@ -145,6 +151,9 @@ class _FakeOrderRepo:
     async def get_orders(self, symbol=None, limit=100, offset=0):
         items = [item for item in self.orders if symbol is None or item.symbol == symbol]
         return {"items": items[offset : offset + limit], "total": len(items)}
+
+    async def get_orders_by_symbol(self, symbol, limit=100):
+        return [item for item in self.orders if item.symbol == symbol][:limit]
 
     async def get_open_orders(self, symbol=None):
         return [
@@ -180,6 +189,12 @@ class _FakeActivePositionRepo:
                 opened_at=1780496661000,
                 closed_at=None,
                 is_closed=False,
+                runtime_instance_id="runtime-live-monitor-1",
+                trial_binding_id="trial-binding-live-monitor-1",
+                strategy_family_id="CPM-001",
+                strategy_family_version_id="CPM-001@v1",
+                signal_evaluation_id="signal-1",
+                order_candidate_id="candidate-1",
             )
         ]
 
@@ -833,6 +848,98 @@ def test_trading_console_runtime_active_position_exit_plan_surfaces_tp1_feasibil
     assert payload["exchange_order_submitted"] is False
     assert (BNB, {"stop": True}) in exchange.open_order_calls
     assert exchange.market_info_calls == [BNB]
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
+
+
+def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    runtime = _live_enabled_runtime()
+    exchange = _FakeExchangeGateway(
+        positions=[
+            {
+                "symbol": BNB,
+                "size": "0.01",
+                "entryPrice": "630",
+                "markPrice": "629.1",
+                "unrealizedPnl": "-0.009",
+                "liquidationPrice": "900",
+            }
+        ],
+        normal_orders=[],
+        stop_orders=[
+            {
+                "id": "4000001470395922",
+                "symbol": BNB,
+                "type": "stop_market",
+                "side": "sell",
+                "status": "open",
+                "amount": "0.01",
+                "info": {
+                    "stopPrice": "625.92",
+                    "reduceOnly": True,
+                    "positionSide": "LONG",
+                },
+            }
+        ],
+        market_info={
+            "min_quantity": Decimal("0.01"),
+            "step_size": Decimal("0.01"),
+            "source": "unit_bnb_min_qty",
+        },
+    )
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        position_repo=_FakeActivePositionRepo(symbol=BNB),
+        order_repo=_FakeOrderRepo(
+            [
+                _FakeOrder("entry-1", "ENTRY", "91085295446", parent_order_id=None, status="FILLED"),
+                _FakeOrder("sl-1", "SL", "4000001470395922"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        _FakeStrategyRuntimeService(runtime),
+        raising=False,
+    )
+    monkeypatch.setattr(api_module, "_runtime_live_position_monitor_service", None, raising=False)
+    monkeypatch.setattr(api_module, "_runtime_position_exit_plan_service", None, raising=False)
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_closed_trade_review_facts_service",
+        None,
+        raising=False,
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/strategy-runtimes/runtime-live-monitor-1/post-close-follow-up",
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    packet = payload["packet"]
+    plan = payload["operator_command_plan"]
+    assert payload["status"] == "waiting_for_owner_close_authorization"
+    assert packet["owner_close_approval_env"] == "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE"
+    assert packet["closed_review_facts_status"] == "waiting_for_close"
+    assert packet["closed_review_entry_order_id"] == "entry-1"
+    assert packet["closed_review_exit_order_id"] is None
+    assert plan["not_executed"] is True
+    assert plan["requires_explicit_owner_approval_before_execute"] is True
+    assert plan["owner_close_execute_command_args"][-1] == "--execute-real-close"
+    assert plan["safety_invariants"]["exchange_write_called"] is False
+    assert payload["safety_invariants"]["api_read_only"] is True
+    assert payload["safety_invariants"]["review_record_created"] is False
     assert exchange.place_calls == 0
     assert exchange.cancel_calls == 0
 

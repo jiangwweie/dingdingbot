@@ -148,6 +148,7 @@ from src.domain.strategy_runtime_promotion_gate import (
 )
 from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorPacket
 from src.domain.runtime_position_exit_plan import RuntimePositionExitPlan
+from src.domain.runtime_post_close_followup import RuntimePostCloseFollowupPacket
 from src.domain.strategy_runtime_safety_readiness import StrategyRuntimeSafetyReadiness
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
@@ -572,6 +573,26 @@ async def runtime_active_position_exit_plan(
         service = await _runtime_position_exit_plan_service()
         return await service.build_exit_plan(
             runtime_instance_id=runtime_instance_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/strategy-runtimes/{runtime_instance_id}/post-close-follow-up",
+)
+async def runtime_post_close_follow_up(
+    runtime_instance_id: str,
+) -> dict[str, Any]:
+    try:
+        return await _runtime_post_close_followup_payload(
+            runtime_instance_id=runtime_instance_id,
+            env_file=None,
         )
     except HTTPException:
         raise
@@ -3116,6 +3137,194 @@ async def _runtime_position_exit_plan_service() -> Any:
     )
     setattr(api_module, "_runtime_position_exit_plan_service", service)
     return service
+
+
+async def _runtime_closed_trade_review_facts_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_closed_trade_review_facts_service", None)
+    if injected is not None:
+        return injected
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None:
+        position_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        )
+    order_repo = getattr(api_module, "_order_repo", None)
+    if order_repo is None:
+        order_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_order_repo",
+            _build_pg_order_repo,
+        )
+    if position_repo is None or order_repo is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Runtime closed-review facts require persistent position and order facts.",
+        )
+
+    from src.application.runtime_closed_trade_review_facts_service import (
+        RuntimeClosedTradeReviewFactsService,
+    )
+
+    runtime_service = await _strategy_runtime_service()
+    runtime_repository = (
+        runtime_service
+        if hasattr(runtime_service, "get")
+        else _RuntimeRepositoryGetAdapter(runtime_service)
+    )
+    service = RuntimeClosedTradeReviewFactsService(
+        runtime_repository=runtime_repository,
+        position_repository=position_repo,
+        order_repository=order_repo,
+    )
+    setattr(api_module, "_runtime_closed_trade_review_facts_service", service)
+    return service
+
+
+class _RuntimeRepositoryGetAdapter:
+    def __init__(self, runtime_service: Any) -> None:
+        self._runtime_service = runtime_service
+
+    async def get(self, runtime_instance_id: str) -> Any:
+        return await self._runtime_service.get_runtime(runtime_instance_id)
+
+
+async def _runtime_post_close_followup_payload(
+    *,
+    runtime_instance_id: str,
+    env_file: str | None,
+) -> dict[str, Any]:
+    from src.domain.runtime_post_close_followup import (
+        build_runtime_post_close_followup_packet,
+    )
+    from src.domain.runtime_reduce_only_close_authorization import (
+        build_runtime_reduce_only_close_owner_packet,
+    )
+
+    monitor_service = await _runtime_live_position_monitor_service()
+    monitor = await monitor_service.build_monitor_packet(
+        runtime_instance_id=runtime_instance_id,
+    )
+    review_facts_service = await _runtime_closed_trade_review_facts_service()
+    closed_review_facts_packet = await review_facts_service.build_packet(
+        runtime_instance_id=runtime_instance_id,
+    )
+    owner_close_packet = None
+    if monitor.active_position_present:
+        exit_plan_service = await _runtime_position_exit_plan_service()
+        exit_plan = await exit_plan_service.build_exit_plan(
+            runtime_instance_id=runtime_instance_id,
+        )
+        owner_close_packet = build_runtime_reduce_only_close_owner_packet(
+            exit_plan=exit_plan,
+            now_ms=int(time.time() * 1000),
+        )
+    packet = build_runtime_post_close_followup_packet(
+        monitor=monitor,
+        owner_close_packet=owner_close_packet,
+        closed_review_facts_packet=closed_review_facts_packet,
+        now_ms=int(time.time() * 1000),
+    )
+    return {
+        "scope": "runtime_post_close_followup_packet",
+        "status": packet.status.value,
+        "packet": packet.model_dump(mode="json"),
+        "source_monitor": monitor.model_dump(mode="json"),
+        "owner_close_packet": (
+            owner_close_packet.model_dump(mode="json")
+            if owner_close_packet is not None
+            else None
+        ),
+        "closed_review_facts_packet": closed_review_facts_packet.model_dump(mode="json"),
+        "operator_command_plan": _runtime_post_close_operator_command_plan(
+            runtime_instance_id=runtime_instance_id,
+            env_file=env_file,
+            packet=packet,
+        ),
+        "safety_invariants": {
+            "packet_only": True,
+            "api_read_only": True,
+            "exchange_write_called": False,
+            "review_record_created": False,
+            "order_created": False,
+            "order_cancelled": False,
+            "order_amended": False,
+            "position_closed": False,
+            "runtime_state_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _runtime_post_close_operator_command_plan(
+    *,
+    runtime_instance_id: str,
+    env_file: str | None,
+    packet: RuntimePostCloseFollowupPacket,
+) -> dict[str, Any]:
+    def with_env_file(args: list[str]) -> list[str]:
+        return [*args, "--env-file", env_file] if env_file else args
+
+    close_args = with_env_file(
+        [
+            "scripts/runtime_owner_reduce_only_close_flow.py",
+            "--runtime-instance-id",
+            runtime_instance_id,
+        ]
+    )
+    return {
+        "scope": "runtime_post_close_operator_command_plan",
+        "not_executed": True,
+        "requires_explicit_owner_approval_before_execute": True,
+        "owner_close_approval_env": packet.owner_close_approval_env,
+        "owner_close_approval_value": packet.owner_close_approval_value,
+        "refresh_followup_command_args": with_env_file(
+            [
+                "scripts/build_runtime_post_close_followup_packet.py",
+                "--runtime-instance-id",
+                runtime_instance_id,
+            ]
+        ),
+        "owner_close_dry_run_command_args": (
+            close_args if packet.owner_close_approval_value else []
+        ),
+        "owner_close_execute_command_args": (
+            [*close_args, "--execute-real-close"]
+            if packet.owner_close_approval_value
+            else []
+        ),
+        "closed_review_facts_refresh_command_args": with_env_file(
+            [
+                "scripts/build_runtime_closed_trade_review_facts_packet.py",
+                "--runtime-instance-id",
+                runtime_instance_id,
+            ]
+        ),
+        "closed_review_command_args": list(packet.closed_review_command_args),
+        "post_close_required_sequence": [
+            "refresh_followup",
+            "owner_authorize_exact_reduce_only_close_value",
+            "run_owner_close_execute_command",
+            "refresh_followup_until_flat",
+            "run_closed_review_dry_run",
+            "run_closed_review_apply_if_ready",
+            "verify_next_attempt_gate",
+        ],
+        "safety_invariants": {
+            "packet_only": True,
+            "command_plan_only": True,
+            "exchange_write_called": False,
+            "review_record_created": False,
+            "order_created": False,
+            "position_closed": False,
+            "runtime_state_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
 
 
 async def _signal_evaluation_shadow_service() -> Any:
