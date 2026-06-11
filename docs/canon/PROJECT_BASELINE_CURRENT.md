@@ -467,8 +467,14 @@ Key facts:
   run the enabled execution-result branch against an in-memory fake exchange
   gateway and in-memory OrderLifecycle only, proving entry/protection submit
   result wiring without Binance, network, credentials, deployment mutation, or
-  real-funds order placement. The Owner first-real-submit decision packet and
-  OrderLifecycle adapter enablement packet can now surface these exchange
+  real-funds order placement. The OrderLifecycle adapter enablement packet now
+  treats local CREATED order registration capability as implemented separately
+  from action-time enablement evidence: without explicit local-registration
+  rehearsal it blocks on `local_registration_pre_exchange_not_ready`, and with
+  Owner flags plus `--exercise-local-registration-pre-exchange` it can report
+  `ready_for_runtime_order_lifecycle_adapter_enablement` while still not
+  authorizing exchange submit. The Owner first-real-submit decision packet and
+  OrderLifecycle adapter enablement packet can also surface these exchange
   pre-execution / fake-gateway simulation evidence fields without making them
   live submit authority.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing

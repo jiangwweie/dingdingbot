@@ -182,6 +182,15 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert "owner_real_submit_authorization_missing" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
+    assert "local_registration_pre_exchange_not_ready" in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "order_lifecycle_adapter_runtime_enablement_disabled" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "local_order_registration_runtime_enablement_disabled" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
     assert packet["safety_invariants"]["exchange_called"] is False
     assert packet["safety_invariants"]["order_created"] is False
@@ -212,7 +221,13 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
     assert "runtime_live_enablement_not_ready" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
-    assert "order_lifecycle_adapter_runtime_enablement_disabled" in (
+    assert "order_lifecycle_adapter_runtime_enablement_disabled" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "local_order_registration_runtime_enablement_disabled" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "local_registration_pre_exchange_not_ready" in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
     assert "order_lifecycle_adapter_invocation_not_implemented" not in (
@@ -233,6 +248,53 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
 
 
 @pytest.mark.asyncio
+async def test_adapter_enablement_packet_surfaces_local_registration_rehearsal_flags():
+    module = _load_module()
+    pre_live = _load_pre_live_module()
+    pre_live_packet = await pre_live.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_local_registration_pre_exchange=True,
+        runner=_runner(pre_live),
+    )
+
+    packet = module.build_order_lifecycle_adapter_enablement_packet(
+        pre_live_packet=pre_live_packet
+    )
+
+    current_state = packet["adapter_enablement_gate"]["current_state"]
+    assert packet["checks"]["ready_for_non_executing_implementation_task"] is True
+    assert packet["checks"]["ready_for_runtime_adapter_enablement"] is True
+    assert current_state["local_registration_pre_exchange_exercised"] is True
+    assert current_state["local_registration_pre_exchange_ready"] is True
+    assert current_state["local_registration_rehearsal_enabled"] is True
+    assert (
+        current_state["local_registration_adapter_result_status"]
+        == "registered_created_local_orders"
+    )
+    assert (
+        current_state["local_registration_adapter_result_order_lifecycle_enabled"]
+        is True
+    )
+    assert (
+        current_state["local_registration_adapter_result_registration_enabled"]
+        is True
+    )
+    assert "order_lifecycle_adapter_runtime_enablement_disabled" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "local_order_registration_runtime_enablement_disabled" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "local_registration_pre_exchange_not_ready" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert packet["safety_invariants"]["exchange_called"] is False
+
+
+@pytest.mark.asyncio
 async def test_adapter_enablement_packet_surfaces_exchange_simulation_evidence():
     module = _load_module()
     pre_live = _load_pre_live_module()
@@ -249,7 +311,7 @@ async def test_adapter_enablement_packet_surfaces_exchange_simulation_evidence()
     )
 
     assert packet["checks"]["ready_for_non_executing_implementation_task"] is True
-    assert packet["checks"]["ready_for_runtime_adapter_enablement"] is False
+    assert packet["checks"]["ready_for_runtime_adapter_enablement"] is True
     assert packet["readiness_summary"]["exchange_submit_adapter_pre_execution_ready"] is True
     assert (
         packet["readiness_summary"]["exchange_submit_execution_disabled_proved"]

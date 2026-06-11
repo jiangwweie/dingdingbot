@@ -115,6 +115,12 @@ def build_order_lifecycle_adapter_enablement_packet(
     exchange_rehearsal = _as_dict(
         pre_live_packet.get("exchange_submit_adapter_rehearsal")
     )
+    local_registration_rehearsal = _as_dict(
+        pre_live_packet.get("local_registration_rehearsal")
+    )
+    local_registration_adapter_result = _as_dict(
+        local_registration_rehearsal.get("adapter_result")
+    )
     disabled_execution_result = _as_dict(
         exchange_rehearsal.get("disabled_execution_result")
     )
@@ -189,10 +195,7 @@ def build_order_lifecycle_adapter_enablement_packet(
         and not blockers
     )
 
-    implementation_work_items = _implementation_work_items(
-        adapter_preview=adapter_preview,
-        registration_preview=registration_preview,
-    )
+    implementation_work_items = _implementation_work_items()
     owner_real_submit_authorized = (
         owner_gate.get("owner_real_submit_authorized") is True
         or checks.get("owner_real_submit_authorization_present") is True
@@ -207,11 +210,15 @@ def build_order_lifecycle_adapter_enablement_packet(
         implementation_work_items=implementation_work_items,
         owner_real_submit_authorized=owner_real_submit_authorized,
         owner_live_runtime_enablement_authorized=owner_live_runtime_enablement_authorized,
+        local_registration_pre_exchange_ready=(
+            checks.get("local_registration_pre_exchange_ready") is True
+        ),
     )
     ready_for_runtime_adapter_enablement = (
         ready_for_non_executing_implementation_task
         and not implementation_work_items
         and not runtime_enablement_blockers
+        and checks.get("local_registration_pre_exchange_ready") is True
     )
 
     status = "blocked_before_order_lifecycle_adapter_implementation_task"
@@ -297,6 +304,28 @@ def build_order_lifecycle_adapter_enablement_packet(
                 ),
                 "local_order_registration_executed": registration_preview.get(
                     "local_order_registration_executed"
+                ),
+                "local_registration_pre_exchange_exercised": checks.get(
+                    "local_registration_pre_exchange_exercised"
+                ),
+                "local_registration_pre_exchange_ready": checks.get(
+                    "local_registration_pre_exchange_ready"
+                ),
+                "local_registration_rehearsal_enabled": (
+                    local_registration_rehearsal.get("enabled")
+                ),
+                "local_registration_adapter_result_status": (
+                    local_registration_adapter_result.get("status")
+                ),
+                "local_registration_adapter_result_order_lifecycle_enabled": (
+                    local_registration_adapter_result.get(
+                        "order_lifecycle_adapter_enabled"
+                    )
+                ),
+                "local_registration_adapter_result_registration_enabled": (
+                    local_registration_adapter_result.get(
+                        "local_order_registration_enabled"
+                    )
                 ),
                 "order_objects_constructed": registration_preview.get(
                     "order_objects_constructed"
@@ -484,11 +513,7 @@ def _draft_readiness(*, registration_preview: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _implementation_work_items(
-    *,
-    adapter_preview: dict[str, Any],
-    registration_preview: dict[str, Any],
-) -> list[str]:
+def _implementation_work_items() -> list[str]:
     items: list[str] = []
     if (
         ADAPTER_IMPLEMENTATION_CAPABILITIES[
@@ -569,10 +594,6 @@ def _implementation_work_items(
         is not True
     ):
         items.append("exchange_stage_protection_failure_policy_gate_not_implemented")
-    if adapter_preview.get("order_lifecycle_adapter_implemented") is not True:
-        items.append("order_lifecycle_adapter_runtime_enablement_disabled")
-    if registration_preview.get("local_order_registration_enabled") is not True:
-        items.append("local_order_registration_runtime_enablement_disabled")
     return _dedupe(items)
 
 
@@ -583,6 +604,7 @@ def _runtime_enablement_blockers(
     implementation_work_items: list[str],
     owner_real_submit_authorized: bool,
     owner_live_runtime_enablement_authorized: bool,
+    local_registration_pre_exchange_ready: bool,
 ) -> list[str]:
     blockers = list(implementation_blockers)
     blockers.extend(operational_blockers)
@@ -591,6 +613,8 @@ def _runtime_enablement_blockers(
         blockers.append("owner_real_submit_authorization_missing")
     if not owner_live_runtime_enablement_authorized:
         blockers.append("owner_live_runtime_enablement_authorization_missing")
+    if not local_registration_pre_exchange_ready:
+        blockers.append("local_registration_pre_exchange_not_ready")
     return _dedupe(blockers)
 
 
