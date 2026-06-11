@@ -324,6 +324,16 @@ Key facts:
   IDs when a later entry update lacks them; Trading Console position readmodels
   surface these IDs for active-position and review traceability. This does not
   create orders, call exchange, or alter one-shot execution authority.
+- **RuntimeLivePositionMonitorPacket** now exists as a pure post-submit
+  monitor slice. It can join StrategyRuntimeInstance attempt/budget boundaries,
+  local active position/open order projection, exchange position/stop-order
+  reads, and reconciliation mismatches into one read-only packet. It treats an
+  active position with a hard stop but no TP as holdable with a right-tail
+  exit-policy warning, while still blocking further attempts because the
+  runtime active-position slot is in use. Missing hard stop, missing exchange
+  facts, or severe reconciliation mismatch require Owner action. It does not
+  create, cancel, amend, close, submit, mutate runtime state, call
+  OrderLifecycle, withdraw, or transfer.
 - **Runtime-aware FinalGate preview** now exists as read-only dry-run
   inspection for runtime order candidates. It does not mutate runtime state,
   create ExecutionIntent records, place orders, or call the exchange. Its

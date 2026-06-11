@@ -457,6 +457,17 @@ Current local review/account-baseline implementation slice:
   orders into local active-position projection without creating orders or
   changing exchange state. Trading Console position readmodels surface these
   IDs for active-position and closed-trade review traceability.
+- `src/domain/runtime_live_position_monitor.py`,
+  `src/application/runtime_live_position_monitor_service.py`, and
+  `scripts/runtime_live_position_monitor.py` define a read-only runtime-native
+  live-position monitor packet for the post-submit state. It joins
+  StrategyRuntimeInstance boundary facts, local active position/open order
+  facts, exchange position/stop-order facts, and reconciliation mismatches into
+  a single Owner/Codex review surface. Missing TP is classified as a
+  right-tail exit-policy warning when a hard stop is present, not as a runaway
+  risk blocker; missing hard stop or severe reconciliation mismatch requires
+  Owner action. The packet cannot submit, cancel, amend, close, mutate runtime
+  state, call OrderLifecycle, withdraw, or transfer.
 - `tests/unit/test_owner_capital_adjustment_review.py` verifies manual
   withdrawals and profit extraction do not become strategy losses or risk
   events, capital injection and capital-base reset are separate review facts,

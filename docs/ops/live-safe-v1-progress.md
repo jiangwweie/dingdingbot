@@ -16,6 +16,26 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-11 (Runtime Live Position Monitor v1)
+
+- Added a read-only runtime-native live-position monitor packet for the
+  post-submit state after first real runtime submit. The packet joins runtime
+  attempt/budget boundaries, local active position/open order projection,
+  exchange position/stop-order reads, and reconciliation mismatches.
+- Preserved the right-tail risk-capital objective: an active position with a
+  hard stop but no TP is classified as holdable with an exit-policy warning,
+  not as a runaway-risk blocker. New attempts remain blocked while the runtime
+  active-position slot is in use.
+- Hard safety remains explicit: missing hard stop, missing exchange facts, or a
+  severe reconciliation mismatch require Owner action.
+- Preserved execution boundaries: this stage does not create, submit, cancel,
+  amend, or close orders; does not call OrderLifecycle; does not mutate runtime
+  state; and cannot withdraw or transfer funds.
+- Verification passed:
+  - `python3 -m pytest -q tests/unit/test_runtime_live_position_monitor.py`
+  - `python3 -m compileall -q src/domain/runtime_live_position_monitor.py src/application/runtime_live_position_monitor_service.py scripts/runtime_live_position_monitor.py`
+  - `git diff --check -- src/domain/runtime_live_position_monitor.py src/application/runtime_live_position_monitor_service.py scripts/runtime_live_position_monitor.py tests/unit/test_runtime_live_position_monitor.py`
+
 ## 2026-06-11 (LLM Advisory Asset Replay v1)
 
 - Created `codex/llm-advisory-replay-v1` from the current
