@@ -106,6 +106,10 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     assert "attempt_outcome_policy_id" in (
         report["checks"]["machine_evidence_available_ids"]
     )
+    assert (
+        "local_registration_action_authorization_not_auto_created"
+        in report["checks"]["machine_evidence_skipped"]
+    )
     assert report["checks"]["machine_evidence_blockers"] == []
     assert report["pipeline"]["order_lifecycle_handoff_status"] == (
         "ready_for_order_lifecycle_adapter"

@@ -73,6 +73,7 @@ class RuntimeExecutionFirstRealSubmitEvidencePreparationService:
             "owner_real_submit_authorization_not_auto_created",
             "deployment_readiness_evidence_not_auto_created",
             "local_registration_enablement_decision_not_persisted_by_preparation",
+            "local_registration_action_authorization_not_auto_created",
             "exchange_submit_action_authorization_not_auto_created",
         ]
 

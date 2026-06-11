@@ -127,6 +127,10 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
     assert "attempt_outcome_policy_id" in (
         packet["evidence_preparation"]["available_evidence_ids"]
     )
+    assert (
+        "local_registration_action_authorization_not_auto_created"
+        in packet["remaining_gates"]["machine_evidence_skipped"]
+    )
     assert packet["checks"]["ready_for_first_real_submit"] is False
     assert packet["does_not_authorize"] == [
         "real runtime submit",
