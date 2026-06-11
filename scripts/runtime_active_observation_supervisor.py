@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from scripts.runtime_active_observation_status import build_status_packet
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
@@ -161,6 +163,11 @@ def build_supervisor_packet(
         if args.supervisor_output_json
         else output_dir / "supervisor-packet.json"
     )
+    status_packet_path = (
+        Path(args.status_output_json).expanduser()
+        if args.status_output_json
+        else output_dir / "status-packet.json"
+    )
     loop_stdout_path = output_dir / "loop-final-stdout.json"
     followup_stdout_path = output_dir / "followup-stdout.json"
 
@@ -173,8 +180,14 @@ def build_supervisor_packet(
             output_dir=output_dir,
             loop_packet_path=loop_packet_path,
             followup_path=followup_path,
+            status_packet_path=status_packet_path,
             loop_command=loop_command,
         ),
+    )
+    _write_status_packet(
+        output_dir=output_dir,
+        status_packet_path=status_packet_path,
+        stale_after_seconds=args.status_stale_after_seconds,
     )
     loop_result = command_runner(loop_command, loop_stdout_path)
     loop_packet = _json_or_none(loop_packet_path)
@@ -210,6 +223,7 @@ def build_supervisor_packet(
         "output_dir": str(output_dir),
         "loop_packet_json": str(loop_packet_path),
         "followup_packet_json": str(followup_path),
+        "status_packet_json": str(status_packet_path),
         "loop_status": (loop_packet or {}).get("status") if loop_packet else None,
         "followup_status": (
             (followup_packet or {}).get("status") if followup_packet else None
@@ -244,6 +258,11 @@ def build_supervisor_packet(
         },
     }
     _write_json(supervisor_packet_path, packet)
+    _write_status_packet(
+        output_dir=output_dir,
+        status_packet_path=status_packet_path,
+        stale_after_seconds=args.status_stale_after_seconds,
+    )
     return packet
 
 
@@ -253,6 +272,7 @@ def _running_supervisor_packet(
     output_dir: Path,
     loop_packet_path: Path,
     followup_path: Path,
+    status_packet_path: Path,
     loop_command: list[str],
 ) -> dict[str, Any]:
     return {
@@ -262,6 +282,7 @@ def _running_supervisor_packet(
         "output_dir": str(output_dir),
         "loop_packet_json": str(loop_packet_path),
         "followup_packet_json": str(followup_path),
+        "status_packet_json": str(status_packet_path),
         "loop_status": None,
         "followup_status": None,
         "command_results": {
@@ -296,6 +317,19 @@ def _running_supervisor_packet(
     }
 
 
+def _write_status_packet(
+    *,
+    output_dir: Path,
+    status_packet_path: Path,
+    stale_after_seconds: float,
+) -> None:
+    packet = build_status_packet(
+        output_dir,
+        stale_after_seconds=stale_after_seconds,
+    )
+    _write_json(status_packet_path, packet)
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run active runtime observation loop and non-executing follow-up.",
@@ -304,12 +338,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--supervisor-output-json")
     parser.add_argument("--loop-output-json")
     parser.add_argument("--followup-output-json")
+    parser.add_argument("--status-output-json")
     parser.add_argument("--env-file")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--status-stale-after-seconds", type=float, default=900.0)
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--allow-prepare-records", action="store_true")

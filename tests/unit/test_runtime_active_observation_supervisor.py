@@ -12,12 +12,14 @@ def _args(tmp_path, **overrides):
         "supervisor_output_json": None,
         "loop_output_json": None,
         "followup_output_json": None,
+        "status_output_json": None,
         "env_file": "readonly.env",
         "api_base": "http://unit",
         "source": "live_market",
         "max_iterations": 2,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 180.0,
+        "status_stale_after_seconds": 900.0,
         "one_hour_limit": 25,
         "four_hour_limit": 25,
         "allow_prepare_records": True,
@@ -96,6 +98,15 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
     assert "--mode arm" not in flat_commands
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_requested"] is False
+    status_packet = json.loads(
+        (tmp_path / "supervisor" / "status-packet.json").read_text()
+    )
+    assert status_packet["scope"] == "runtime_active_observation_status"
+    assert status_packet["loop_status"] == "waiting_for_signal"
+    assert status_packet["followup_status"] == "waiting_for_ready_final_gate_preflight"
+    assert status_packet["safety_invariants"]["read_packets_only"] is True
+    assert status_packet["safety_invariants"]["connects_to_api"] is False
+    assert status_packet["safety_invariants"]["places_order"] is False
 
 
 def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
@@ -105,6 +116,10 @@ def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
         if "runtime_active_observation_loop.py" in command[1]:
             running_path = tmp_path / "supervisor" / "supervisor-packet.json"
             running_snapshots.append(json.loads(running_path.read_text()))
+            running_status_path = tmp_path / "supervisor" / "status-packet.json"
+            running_status = json.loads(running_status_path.read_text())
+            assert running_status["supervisor_status"] == "supervisor_running"
+            assert running_status["safety_invariants"]["read_packets_only"] is True
             _write_json(
                 tmp_path / "supervisor" / "loop-packet.json",
                 {
