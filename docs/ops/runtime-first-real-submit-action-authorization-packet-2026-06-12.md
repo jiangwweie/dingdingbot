@@ -30,12 +30,19 @@ The final review packet now carries:
 
 ```text
 first_real_submit_action_context.submit_authorization_id
+first_real_submit_action_context.submit_authorization_id_source
+first_real_submit_action_context.submit_authorization_id_authoritative_for_remote_execution
 ```
+
+When the id is inferred from owner-packet rehearsal evidence, it is a hint only
+and is not authoritative for remote execution.
 
 The new action authorization packet:
 
 - reads the final review packet;
-- inherits the submit authorization id when present;
+- requires an explicit submit authorization id, unless a future packet marks
+  its action-context id authoritative for remote execution;
+- carries a non-authoritative authorization id hint when present;
 - computes the exact required `OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT`
   value;
 - emits disabled-smoke and execute command previews;
@@ -52,17 +59,26 @@ output/first-real-submit-action-authorization/20260612Taction-auth-e778/action-a
 Current generated status:
 
 ```text
+status=blocked_before_first_real_submit_action_authorization
+ready_for_owner_action_authorization=false
+action_authorized=false
+authorization_id=null
+authorization_id_hint=runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5
+blocker=submit_authorization_id_missing_for_action_plan
+```
+
+The rehearsal-derived hint is not used for command generation.
+
+When an explicit authoritative Tokyo PG submit authorization id is supplied,
+the packet can produce a command preview while still requiring a separate Owner
+confirmation value. Example generated with the latest Tokyo PG authorization:
+
+```text
+authorization_id=runtime-submit-authorization-intent_rt_e8037454b07d3ab8cc5d8dd8
 status=waiting_for_owner_first_real_submit_action_authorization
 ready_for_owner_action_authorization=true
 action_authorized=false
-authorization_id=runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5
-```
-
-Required future confirmation value if Owner chooses to run the official execute
-step:
-
-```text
-OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT=runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5:first-real-submit:real_gateway_action
+OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT=runtime-submit-authorization-intent_rt_e8037454b07d3ab8cc5d8dd8:first-real-submit:real_gateway_action
 ```
 
 ## Verification
@@ -104,3 +120,73 @@ This stage does not authorize or execute:
 - withdrawal or transfer.
 
 Real submit remains a separate Owner action.
+
+## Follow-up Correction
+
+Tokyo disabled-smoke probing showed that the rehearsal-derived authorization id
+is not necessarily present in the deployed PG fact set. The action packet must
+therefore treat rehearsal-inferred ids as non-authoritative hints and require an
+explicit authoritative authorization id before command previews can be used for
+remote action.
+
+Remote evidence:
+
+```text
+/home/ubuntu/brc-deploy/reports/first-real-submit-disabled-action-smoke/20260612Taction-auth-e778/disabled-first-real-submit-smoke.json
+```
+
+Result:
+
+```text
+authorization_id=runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5
+status=blocked
+blocker=hydrate_controlled_submit_plan_http_404
+```
+
+The endpoint existed; the id was not present in current Tokyo PG controlled
+submit facts.
+
+Authoritative Tokyo PG fact check found latest submit authorization:
+
+```text
+authorization_id=runtime-submit-authorization-intent_rt_e8037454b07d3ab8cc5d8dd8
+runtime_instance_id=strategy-runtime-95655873b76c
+symbol=AVAX/USDT:USDT
+side=short
+strategy_family_id=BTPC-001
+strategy_family_version_id=BTPC-001-v0
+candidate_shadow_mode=true
+candidate_not_order=true
+candidate_not_execution_intent=true
+candidate_execution_enabled=false
+submit_executed=false
+order_created=false
+exchange_called=false
+order_lifecycle_called=false
+```
+
+Disabled first-real-submit smoke with that authoritative id:
+
+```text
+/home/ubuntu/brc-deploy/reports/first-real-submit-disabled-action-smoke/20260612Taction-auth-e778-authoritative/disabled-first-real-submit-smoke.json
+```
+
+Result:
+
+```text
+mode=arm
+ready_for_real_submit_action=false
+blocker=attempt_consumption_required_before_order_lifecycle_handoff
+hydrated_controlled_submit_plan=true
+recorded_protection_plan=true
+first_real_submit_action_endpoint_called=false
+submit_executed=false
+order_created=false
+exchange_called=false
+owner_bounded_execution_called=false
+order_lifecycle_called=false
+```
+
+The smoke stayed inside the authorized non-executing boundary. It did not reach
+the disabled first-real-submit action wrapper because arm preview stopped before
+OrderLifecycle handoff without attempt consumption.

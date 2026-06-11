@@ -55,12 +55,28 @@ def test_action_authorization_packet_waits_for_exact_owner_value():
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
 
 
-def test_action_authorization_packet_infers_authorization_id_from_final_review():
+def test_action_authorization_packet_does_not_use_non_authoritative_hint():
     module = _load_module()
 
     packet = module.build_first_real_submit_action_authorization_packet(
         final_review_packet=_final_review_packet(
             submit_authorization_id=AUTHORIZATION_ID
+        ),
+    )
+
+    assert packet["authorization_id"] is None
+    assert packet["authorization_id_hint"] == AUTHORIZATION_ID
+    assert packet["checks"]["ready_for_owner_action_authorization"] is False
+    assert packet["owner_confirmation"]["required_value"] is None
+
+
+def test_action_authorization_packet_uses_authoritative_context_id():
+    module = _load_module()
+
+    packet = module.build_first_real_submit_action_authorization_packet(
+        final_review_packet=_final_review_packet(
+            submit_authorization_id=AUTHORIZATION_ID,
+            submit_authorization_id_authoritative=True,
         ),
     )
 
@@ -162,6 +178,7 @@ def _final_review_packet(
     *,
     ready: bool = True,
     submit_authorization_id: str | None = None,
+    submit_authorization_id_authoritative: bool = False,
 ):
     return {
         "status": (
@@ -186,6 +203,12 @@ def _final_review_packet(
         },
         "first_real_submit_action_context": {
             "submit_authorization_id": submit_authorization_id,
+            "submit_authorization_id_source": (
+                "unit_test" if submit_authorization_id else None
+            ),
+            "submit_authorization_id_authoritative_for_remote_execution": (
+                submit_authorization_id_authoritative
+            ),
             "requires_exact_owner_action_confirmation": True,
             "does_not_authorize_live_action": True,
         },

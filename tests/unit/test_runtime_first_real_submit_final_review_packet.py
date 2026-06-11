@@ -46,6 +46,9 @@ def test_final_review_packet_can_reach_owner_action_review():
     assert packet["first_real_submit_action_context"][
         "submit_authorization_id"
     ] == "runtime-submit-authorization-intent_rt_1d7d7a346233063607e711f5"
+    assert packet["first_real_submit_action_context"][
+        "submit_authorization_id_authoritative_for_remote_execution"
+    ] is False
     assert packet["safety_invariants"]["exchange_called"] is False
     assert packet["safety_invariants"]["remote_files_modified"] is False
 

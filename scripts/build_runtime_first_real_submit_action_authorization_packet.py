@@ -71,10 +71,16 @@ def build_first_real_submit_action_authorization_packet(
     action_context = _as_dict(
         final_review_packet.get("first_real_submit_action_context")
     )
-    normalized_authorization_id = _first_present(
-        authorization_id,
-        action_context.get("submit_authorization_id"),
+    action_context_authoritative = (
+        action_context.get("submit_authorization_id_authoritative_for_remote_execution")
+        is True
     )
+    action_context_authorization_id_hint = _optional_str(
+        action_context.get("submit_authorization_id")
+    )
+    normalized_authorization_id = _optional_str(authorization_id)
+    if not normalized_authorization_id and action_context_authoritative:
+        normalized_authorization_id = action_context_authorization_id_hint
     expected_confirmation = (
         _approval_value(normalized_authorization_id)
         if normalized_authorization_id
@@ -132,6 +138,7 @@ def build_first_real_submit_action_authorization_packet(
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "target_head": target_head,
         "authorization_id": normalized_authorization_id,
+        "authorization_id_hint": action_context_authorization_id_hint,
         "evidence": {
             "final_review_status": final_review_packet.get("status"),
             "final_review_ready_for_owner_action": checks.get(
@@ -140,6 +147,12 @@ def build_first_real_submit_action_authorization_packet(
             "owner_action_ready": checks.get("owner_action_ready"),
             "target_head_consistent": checks.get("target_head_consistent"),
             "final_review_only": owner_gate.get("final_review_only"),
+            "action_context_authoritative_for_remote_execution": (
+                action_context_authoritative
+            ),
+            "action_context_submit_authorization_id_source": (
+                action_context.get("submit_authorization_id_source")
+            ),
         },
         "owner_confirmation": {
             "env_name": APPROVAL_ENV,
@@ -157,6 +170,15 @@ def build_first_real_submit_action_authorization_packet(
             "action_authorized": action_authorized,
             "final_review_ready": final_review_ready,
             "authorization_id_present": bool(normalized_authorization_id),
+            "authorization_id_hint_present": bool(
+                action_context_authorization_id_hint
+            ),
+            "authorization_id_explicitly_supplied": bool(
+                _optional_str(authorization_id)
+            ),
+            "action_context_authoritative_for_remote_execution": (
+                action_context_authoritative
+            ),
             "owner_confirmation_value_matches": confirmation_matches,
             "blockers": _dedupe(blockers),
             "warnings": list(checks.get("warnings") or []),

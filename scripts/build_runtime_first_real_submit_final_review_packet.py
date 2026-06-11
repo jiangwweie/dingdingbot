@@ -168,6 +168,12 @@ def build_first_real_submit_final_review_packet(
         },
         "first_real_submit_action_context": {
             "submit_authorization_id": submit_authorization_id,
+            "submit_authorization_id_source": (
+                "inferred_from_owner_packet_rehearsal_evidence"
+                if submit_authorization_id
+                else None
+            ),
+            "submit_authorization_id_authoritative_for_remote_execution": False,
             "requires_exact_owner_action_confirmation": True,
             "does_not_authorize_live_action": True,
         },
