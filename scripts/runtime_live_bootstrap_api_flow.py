@@ -152,7 +152,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "family_key": self._config.family_key,
                 "name": self._config.family_name,
                 "description": (
-                    "Reference CPM price-action family for bounded first live runtime."
+                    "Reference price-action family for bounded first live runtime."
                 ),
                 "status": "active",
                 "owner": self._config.owner_operator_id,
@@ -187,11 +187,11 @@ class RuntimeLiveBootstrapApiFlow:
                 "strategy_family_version_id": self._config.strategy_family_version_id,
                 "version": 1,
                 "hypothesis": (
-                    "CPM reference implementation can express bounded pullback "
-                    "continuation attempts; alpha is not assumed."
+                    "Reference implementation can express bounded price-action "
+                    "attempts; alpha is not assumed."
                 ),
                 "market_structure": "closed-candle price action",
-                "entry_logic_family": "pullback reclaim / continuation",
+                "entry_logic_family": "catalog-bound price-action trigger",
                 "exit_logic_family": "TP1 partial plus runner/trailing metadata",
                 "risk_model": "bounded small-capital attempts; no runaway",
                 "supported_symbols": [self._config.symbol],
