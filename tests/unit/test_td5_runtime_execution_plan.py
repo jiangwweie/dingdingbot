@@ -3024,8 +3024,15 @@ async def test_runtime_execution_order_lifecycle_handoff_repository_roundtrips_r
         saved = await service.record_order_lifecycle_handoff_draft_for_authorization(
             authorization.authorization_id
         )
+        saved_again = await service.record_order_lifecycle_handoff_draft_for_authorization(
+            authorization.authorization_id
+        )
         loaded = await repo.get(saved.handoff_draft_id)
 
+        assert saved_again.handoff_draft_id == saved.handoff_draft_id
+        assert saved_again.order_created is False
+        assert saved_again.exchange_called is False
+        assert saved_again.order_lifecycle_called is False
         assert loaded is not None
         assert loaded.status == RuntimeExecutionOrderLifecycleHandoffStatus.READY_FOR_ORDER_LIFECYCLE_ADAPTER
         assert loaded.execution_intent_id == intent.id

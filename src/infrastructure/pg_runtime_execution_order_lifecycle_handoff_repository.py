@@ -46,7 +46,7 @@ class PgRuntimeExecutionOrderLifecycleHandoffRepository:
         draft: RuntimeExecutionOrderLifecycleHandoffDraft,
     ) -> RuntimeExecutionOrderLifecycleHandoffDraft:
         async with self._session_maker() as session:
-            session.add(self._to_orm(draft))
+            await session.merge(self._to_orm(draft))
             await session.commit()
         return draft
 
