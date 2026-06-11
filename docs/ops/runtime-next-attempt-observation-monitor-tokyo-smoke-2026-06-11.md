@@ -88,3 +88,34 @@ is to wait for another observation cycle or closed candle, not to reuse stale
 authorization evidence.
 
 No real submit authorization was consumed or implied by this smoke.
+
+## Sample Rehearsal Check
+
+A second non-executing sample-source check verified that the monitor can
+surface a ready prepare state without creating prepare records by default.
+
+Report:
+
+```text
+/home/ubuntu/brc-deploy/reports/runtime-next-attempt-observation-monitor/20260611Tnext-attempt-monitor-sample/monitor-sample-once.json
+```
+
+Result:
+
+```text
+status=ready_for_prepare
+ready_for_prepare=true
+blockers=[]
+next_step=rerun_with_allow_prepare_records_after_owner_review
+creates_shadow_candidate=false
+exchange_write_called=false
+order_created=false
+```
+
+Interpretation:
+
+```text
+sample source can prove the ready-for-prepare branch;
+default monitor mode still does not create shadow candidates or orders;
+prepare record creation remains explicit via --allow-prepare-records.
+```
