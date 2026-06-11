@@ -3445,3 +3445,99 @@ Use this file for session progress and handoff notes.
   - because the current BTPC signal is observe-only, the correct next runtime
     behavior is to wait for the next closed bar or evaluate another eligible
     strategy/runtime rather than forcing a candidate.
+
+## 2026-06-12 (Active Runtime Observation + Non-executing Prepare Watch)
+
+- Added and pushed the active observation packet/status chain:
+  - `6f9f02e9 feat(ops): summarize active observation packets`;
+  - `0107d99d feat(ops): write active observation status packets`;
+  - `4995b0f5 fix(ops): surface prepare-ready observation followup`;
+  - `908bd28e fix(ops): allow direct active observation supervisor execution`;
+  - `2635c75f fix(ops): refresh active observation status each loop`;
+  - `bb40a7ea fix(ops): include latest active observation iteration`.
+- Latest verification-only commit:
+  - `aad19669 test(ops): prove ready observation followup stays disabled`.
+- New/updated scripts:
+  - `scripts/runtime_active_observation_monitor.py`;
+  - `scripts/runtime_active_observation_loop.py`;
+  - `scripts/runtime_active_observation_supervisor.py`;
+  - `scripts/runtime_active_observation_followup.py`;
+  - `scripts/runtime_active_observation_status.py`;
+  - `scripts/verify_runtime_observation_api_prepare_ready_rehearsal.py`;
+  - `scripts/verify_strategy_observation_shadow_planning_rehearsal.py`.
+- Purpose:
+  - continuously observe current ACTIVE strategy runtimes through the official
+    Trading Console/API path;
+  - stop the loop when a real strategy signal reaches `ready_for_prepare` or
+    `ready_for_final_gate_preflight`;
+  - allow explicitly authorized non-executing prepare records, FinalGate/arm
+    preview, and disabled first-real-submit smoke only after the earlier
+    non-executing prerequisites are present;
+  - keep real exchange submit, OrderLifecycle submit, executable
+    first-real-submit, withdrawal, and transfer outside the authorized scope.
+- Local rehearsal evidence:
+  - `python3 scripts/verify_runtime_observation_api_prepare_ready_rehearsal.py`
+    returned `rehearsal_passed`;
+  - `python3 scripts/verify_strategy_observation_shadow_planning_rehearsal.py`
+    returned `rehearsal_passed`;
+  - ready signal without `allow_prepare_records` stops at `ready_for_prepare`
+    and creates no prepare records;
+  - ready signal with explicit prepare permission reaches
+    `ready_for_final_gate_preflight` through shadow/prepare records only;
+  - forbidden execution flags remained empty.
+- Focused tests:
+  - `pytest -q tests/unit/test_runtime_observation_api_prepare_ready_rehearsal.py
+    tests/unit/test_runtime_active_observation_followup.py
+    tests/unit/test_runtime_active_observation_status.py
+    tests/unit/test_runtime_active_observation_loop.py
+    tests/unit/test_runtime_active_observation_supervisor.py
+    tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py`
+    passed with `28 passed`;
+  - `pytest -q tests/unit/test_runtime_active_observation_followup.py
+    tests/unit/test_runtime_order_lifecycle_adapter_result.py::test_api_first_real_submit_action_controls_gateway_injection
+    tests/unit/test_strategy_runtime_live_enablement.py` passed with
+    `14 passed`;
+  - `pytest -q tests/unit/test_runtime_active_observation_supervisor.py
+    tests/unit/test_runtime_active_observation_loop.py
+    tests/unit/test_runtime_active_observation_followup.py
+    tests/unit/test_runtime_active_observation_status.py` passed with
+    `23 passed`.
+- Tokyo deploys:
+  - deployed `4995b0f5` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-4995b0f5-20260612Tobs-status`;
+  - deployed `908bd28e` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-908bd28e-20260612Tsupervisor-import`;
+  - deployed `2635c75f` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2635c75f-20260612Tstatus-refresh`;
+  - deployed `bb40a7ea` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-bb40a7ea-20260612Tstatus-iteration`.
+- Current Tokyo observation run:
+  - report directory:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-bb40a7ea`;
+  - process command includes `--allow-prepare-records`,
+    `--allow-arm-preview`, and `--allow-disabled-smoke`;
+  - latest verified status: `waiting_for_signal`;
+  - latest verified iteration: `3`;
+  - `packet_stale=false`;
+  - `forbidden_effects=[]`.
+- Current runtime signal summaries:
+  - `strategy-runtime-95655873b76c`, `AVAX/USDT:USDT`, short,
+    `BTPC-001-v0`: `observe_only`, `no_action`,
+    `btpc_no_action_no_bear_pullback_continuation`;
+  - `strategy-runtime-e6138ad7c88f`, `BNB/USDT:USDT`, long,
+    `CPM-001-v0`: `observe_only`, `no_action`,
+    `cpm_no_action_no_reclaim` with `cpm_long_htf_trend_intact`.
+- Safety:
+  - no shadow candidate has been created from the live observation run yet;
+  - no prepare authorization record has been created from the live observation
+    run yet;
+  - no exchange order, OrderLifecycle submit, executable first-real-submit,
+    withdrawal, transfer, attempt mutation, or runtime-budget mutation occurred;
+  - real exchange order placement remains blocked pending a separate explicit
+    Owner authorization after prepare/preflight evidence exists.
+- Product implication:
+  - the current system is now waiting on a real strategy signal rather than a
+    missing execution skeleton;
+  - when a real signal becomes `ready_for_prepare`, the authorized path is
+    shadow prepare -> FinalGate/arm preview -> disabled first-real-submit smoke;
+  - actual exchange submit remains a later Owner-gated action point.
