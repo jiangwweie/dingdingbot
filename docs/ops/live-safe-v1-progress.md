@@ -16,6 +16,29 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-11 (Runtime Live Position Monitor Console Surface)
+
+- Wired `RuntimeLivePositionMonitorService` into Trading Console as
+  `GET /api/trading-console/strategy-runtimes/{runtime_instance_id}/live-position-monitor`.
+  The endpoint uses persistent runtime/position/order facts plus optional
+  read-only exchange and reconciliation reads; it remains non-mutating and
+  returns the packet's no-action flags.
+- Added the Runtime page "实盘持仓监控" panel between safety readiness and the
+  first-real-submit gate. It surfaces active-position count, SL/TP protection,
+  unrealized PnL, attempt/budget state, holdability, and whether the next
+  attempt is paused by the active-position slot.
+- Verified light/dark mode continuity with Playwright. The local Playwright
+  fixture showed `active_protection_warning`, `仅 SL`, `可继续持有`, `新尝试=暂停`,
+  and `交易所写入=无`; fixture-only missing read models returned expected
+  503/404 outside the new monitor endpoint.
+- Verification passed:
+  - `python3 -m pytest -q tests/unit/test_runtime_live_position_monitor.py tests/unit/test_trading_console_readmodels.py::test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted tests/unit/test_trading_console_readmodels.py::test_trading_console_runtime_live_position_monitor_endpoint_surfaces_sl_only_warning`
+  - `python3 -m compileall -q src/application/runtime_live_position_monitor_service.py src/interfaces/api_trading_console.py`
+  - `npm run lint --prefix trading-console`
+  - `npm run build --prefix trading-console`
+  - Playwright CLI local login + `/runtime` smoke against a temporary FastAPI
+    fixture and Trading Console proxy.
+
 ## 2026-06-11 (Runtime Live Position Monitor v1)
 
 - Added a read-only runtime-native live-position monitor packet for the

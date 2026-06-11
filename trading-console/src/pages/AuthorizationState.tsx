@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   FileSearch,
   Layers3,
+  ShieldAlert,
+  ShieldCheck,
   XCircle,
 } from 'lucide-react';
 import {
@@ -37,6 +39,53 @@ type RuntimeView = {
   shadow_mode?: boolean;
   updated_at_ms?: number;
   expires_at_ms?: number | null;
+};
+
+type RuntimeLivePositionMonitorView = {
+  monitor_id?: string;
+  runtime_instance_id?: string;
+  symbol?: string;
+  side?: string;
+  status?: string;
+  protection_status?: string;
+  runtime_status?: string;
+  runtime_execution_enabled?: boolean;
+  runtime_shadow_mode?: boolean;
+  active_position_present?: boolean;
+  local_active_position_count?: number;
+  exchange_active_position_count?: number;
+  local_open_order_count?: number;
+  exchange_open_stop_order_count?: number;
+  sl_protection_present?: boolean;
+  tp_protection_present?: boolean;
+  hard_stop_boundary_present?: boolean;
+  current_qty?: string | number | null;
+  entry_price?: string | number | null;
+  mark_price?: string | number | null;
+  unrealized_pnl?: string | number | null;
+  liquidation_price?: string | number | null;
+  attempts_used?: number;
+  attempts_remaining?: number;
+  max_attempts?: number;
+  budget_reserved?: string | number | null;
+  budget_remaining?: string | number | null;
+  max_active_positions?: number;
+  reconciliation_severe_count?: number;
+  reconciliation_warning_count?: number;
+  reconciliation_mismatch_types?: string[];
+  blocks_new_entries_until_resolved?: boolean;
+  can_continue_holding?: boolean;
+  review_required_before_next_attempt?: boolean;
+  owner_action_required?: boolean;
+  blockers?: string[];
+  warnings?: string[];
+  not_execution_authority?: boolean;
+  order_created?: boolean;
+  exchange_order_submitted?: boolean;
+  order_lifecycle_called?: boolean;
+  withdrawal_instruction_created?: boolean;
+  transfer_instruction_created?: boolean;
+  created_at_ms?: number;
 };
 
 type SignalEvaluationView = {
@@ -249,6 +298,7 @@ export default function AuthorizationState() {
           <RuntimeActivityPanel signals={signals} candidates={candidates} />
           <AuthorizationBridgePanel envelope={authState.envelope} data={authData} error={authState.error} />
           <RuntimeSafetyReadinessPanel runtimes={runtimes} />
+          <RuntimeLivePositionMonitorPanel runtime={selectedRuntime} />
           <RuntimePromotionGatePanel runtimes={runtimes} />
           <RuntimePromotionConfirmationLedger runtime={selectedRuntime} />
         </div>
@@ -467,6 +517,25 @@ function RuntimeSafetyReadinessPanel({ runtimes }: { runtimes: RuntimeView[] }) 
   }
 
   return <RuntimeSafetyReadinessDetail runtimeId={String(runtime.runtime_instance_id)} />;
+}
+
+function RuntimeLivePositionMonitorPanel({ runtime }: { runtime: RuntimeView | null }) {
+  const runtimeId = runtime?.runtime_instance_id ? String(runtime.runtime_instance_id) : null;
+
+  if (!runtimeId) {
+    return (
+      <ConsolePanel title="实盘持仓监控" caption="本地 / 交易所持仓与保护事实">
+        <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+          <BoundaryCell label="运行实例" value="暂无实例" tone="blocked" />
+          <BoundaryCell label="持仓" value="未读取" tone="unavailable" />
+          <BoundaryCell label="保护" value="未确认" tone="unavailable" />
+          <BoundaryCell label="新尝试" value="不可评估" tone="blocked" />
+        </div>
+      </ConsolePanel>
+    );
+  }
+
+  return <RuntimeLivePositionMonitorDetail runtimeId={runtimeId} />;
 }
 
 function RuntimePromotionGatePanel({ runtimes }: { runtimes: RuntimeView[] }) {
@@ -737,6 +806,104 @@ function usePromotionConfirmationLedger(runtimeId: string | null): {
   }, [runtimeId]);
 
   return { records, loading, error };
+}
+
+function RuntimeLivePositionMonitorDetail({ runtimeId }: { runtimeId: string }) {
+  const { envelope, loading, error } = useReadModel<RuntimeLivePositionMonitorView>(
+    `/api/trading-console/strategy-runtimes/${encodeURIComponent(runtimeId)}/live-position-monitor`,
+  );
+  const packet = (envelope || {}) as RuntimeLivePositionMonitorView;
+  const blockers = asArray<string>(packet.blockers);
+  const warnings = asArray<string>(packet.warnings);
+  const mismatches = asArray<string>(packet.reconciliation_mismatch_types);
+  const tone = liveMonitorTone(error ? 'blocked' : packet.status);
+  const Icon = tone === 'normal' ? ShieldCheck : tone === 'attention' ? ShieldAlert : XCircle;
+  const activeCount = `${displayValue(packet.local_active_position_count, '0')} / ${displayValue(packet.exchange_active_position_count, '0')}`;
+  const protectionText = liveProtectionStatusLabel(packet.protection_status);
+  const nextAttemptText = packet.blocks_new_entries_until_resolved ? '暂停' : '可评估';
+  const holdingText = packet.can_continue_holding ? '可继续持有' : packet.active_position_present ? '需介入' : '无持仓';
+
+  return (
+    <ConsolePanel
+      title="实盘持仓监控"
+      caption="本地 / 交易所持仓与保护事实"
+      action={(
+        <StatusChip tone={tone}>
+          <span className="inline-flex items-center gap-1">
+            <Icon className="h-3.5 w-3.5" />
+            {loading ? '读取中' : liveMonitorStatusLabel(error ? 'blocked' : packet.status)}
+          </span>
+        </StatusChip>
+      )}
+    >
+      {loading ? (
+        <div className="px-4 py-6 text-sm text-slate-500">正在读取实盘持仓监控...</div>
+      ) : error ? (
+        <div className="px-4 py-4">
+          <GuidanceLine tone="intervention" title="live monitor 暂不可用" body={error} />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+            <BoundaryCell label="持仓 本地/交易所" value={activeCount} tone={packet.active_position_present ? 'attention' : 'unavailable'} />
+            <BoundaryCell label="保护" value={protectionText} tone={packet.hard_stop_boundary_present ? (packet.tp_protection_present ? 'normal' : 'attention') : 'blocked'} />
+            <BoundaryCell label="未实现PnL" value={formatMoney(packet.unrealized_pnl)} tone={Number(packet.unrealized_pnl || 0) < 0 ? 'attention' : 'normal'} />
+            <BoundaryCell label="持仓动作" value={holdingText} tone={packet.can_continue_holding ? 'normal' : packet.active_position_present ? 'blocked' : 'unavailable'} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-px border-t border-slate-800 bg-slate-800/80 md:grid-cols-4">
+            <BoundaryCell label="尝试" value={`${displayValue(packet.attempts_remaining, '0')}/${displayValue(packet.max_attempts, '0')}`} tone="attention" />
+            <BoundaryCell label="预算剩余" value={formatMoney(packet.budget_remaining)} tone="attention" />
+            <BoundaryCell label="新尝试" value={nextAttemptText} tone={packet.blocks_new_entries_until_resolved ? 'blocked' : 'normal'} />
+            <BoundaryCell label="交易所写入" value={packet.exchange_order_submitted ? '异常' : '无'} tone={packet.exchange_order_submitted ? 'blocked' : 'unavailable'} />
+          </div>
+
+          {(blockers.length > 0 || warnings.length > 0) && (
+            <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-4 lg:grid-cols-2">
+              <RuntimeSafetyList
+                title="阻止下一次尝试"
+                empty="当前没有下一次尝试阻断"
+                items={blockers}
+                tone="danger"
+                mapLabel={liveMonitorReasonLabel}
+              />
+              <RuntimeSafetyList
+                title="持仓 / 出场提醒"
+                empty="暂无持仓提醒"
+                items={warnings}
+                tone="warning"
+                mapLabel={liveMonitorReasonLabel}
+              />
+            </div>
+          )}
+
+          <div className="border-t border-slate-800 px-4 py-3 text-xs leading-5 text-slate-500">
+            当前面板只读取 facts。SL 存在时，小额浮亏和缺少 TP 属于可复盘的持仓 / 出场状态；新尝试会在 active-position slot 释放前暂停。
+          </div>
+
+          <TechnicalDetails title="Live monitor facts">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <ScopeFact label="Runtime" value={displayValue(packet.runtime_instance_id, runtimeId)} />
+              <ScopeFact label="Symbol / side" value={`${displayValue(packet.symbol, '暂无')} / ${sideLabel(packet.side)}`} />
+              <ScopeFact label="Entry / mark" value={`${formatMoney(packet.entry_price)} / ${formatMoney(packet.mark_price)}`} />
+              <ScopeFact label="Qty / liq" value={`${formatMoney(packet.current_qty)} / ${formatMoney(packet.liquidation_price)}`} />
+              <ScopeFact label="Local open orders" value={displayValue(packet.local_open_order_count, '0')} />
+              <ScopeFact label="Exchange stop orders" value={displayValue(packet.exchange_open_stop_order_count, '0')} />
+              <ScopeFact label="Reconciliation" value={`${displayValue(packet.reconciliation_severe_count, '0')} severe / ${displayValue(packet.reconciliation_warning_count, '0')} warning`} />
+              <ScopeFact label="Created" value={formatTimestampMs(packet.created_at_ms)} />
+              <ScopeFact label="No OrderLifecycle" value={packet.order_lifecycle_called ? '异常' : '保持'} />
+              <ScopeFact label="No withdrawal" value={packet.withdrawal_instruction_created || packet.transfer_instruction_created ? '异常' : '保持'} />
+            </div>
+            {mismatches.length > 0 && (
+              <div className="mt-3 text-amber-700 dark:text-amber-300">
+                {mismatches.map(liveMonitorReasonLabel).join(' / ')}
+              </div>
+            )}
+          </TechnicalDetails>
+        </>
+      )}
+    </ConsolePanel>
+  );
 }
 
 function RuntimeSafetyReadinessDetail({ runtimeId }: { runtimeId: string }) {
@@ -1016,6 +1183,54 @@ function runtimeSafetyStatusLabel(status: string): string {
     unavailable: '不可用',
   };
   return map[status] || displayValue(status, '无法确认');
+}
+
+function liveMonitorTone(status?: string): ConsoleTone {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'active_protected') return 'normal';
+  if (normalized === 'active_protection_warning') return 'attention';
+  if (normalized === 'flat_review_required') return 'attention';
+  if (normalized === 'flat_no_review_required') return 'unavailable';
+  if (normalized === 'active_unprotected' || normalized === 'blocked') return 'blocked';
+  return 'unavailable';
+}
+
+function liveMonitorStatusLabel(status?: string): string {
+  const map: Record<string, string> = {
+    active_protected: '保护完整',
+    active_protection_warning: '保护提醒',
+    active_unprotected: '未保护',
+    flat_review_required: '平仓待复盘',
+    flat_no_review_required: '无持仓',
+    blocked: '阻断',
+  };
+  return map[String(status || '')] || displayValue(status, '无法确认');
+}
+
+function liveProtectionStatusLabel(status?: string): string {
+  const map: Record<string, string> = {
+    hard_stop_and_tp_present: 'SL + TP',
+    hard_stop_only: '仅 SL',
+    hard_stop_missing: '缺少 SL',
+    no_active_position: '无持仓',
+    unknown: '无法确认',
+  };
+  return map[String(status || 'unknown')] || displayValue(status, '无法确认');
+}
+
+function liveMonitorReasonLabel(value: string): string {
+  const map: Record<string, string> = {
+    runtime_not_active: 'Runtime 未处于 active',
+    reconciliation_severe_mismatch: '本地 / 交易所存在严重不一致',
+    exchange_facts_unavailable: '交易所事实暂不可用',
+    runtime_max_active_positions_in_use: 'active-position slot 已占用，新尝试暂停',
+    active_position_missing_hard_stop: '活跃仓位缺少硬止损',
+    missing_tp_protection_right_tail_exit_not_mounted: '仅有 SL，TP / runner 出场尚未挂载',
+    reconciliation_warning_present: '对账存在 warning',
+    local_exchange_active_position_count_differs: '本地 / 交易所活跃仓位数不同',
+    missing_tp_protection: '交易所存在 SL-only 保护提醒',
+  };
+  return map[value] || runtimeSafetyRequirementLabel(value);
 }
 
 function runtimeSafetyRequirementStatusLabel(status: string): string {

@@ -146,6 +146,7 @@ from src.domain.strategy_runtime_promotion_gate import (
     StrategyRuntimePromotionScope,
     StrategySemanticsConfirmationFacts,
 )
+from src.domain.runtime_live_position_monitor import RuntimeLivePositionMonitorPacket
 from src.domain.strategy_runtime_safety_readiness import StrategyRuntimeSafetyReadiness
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
 from src.interfaces.operator_auth import require_operator_session
@@ -524,6 +525,27 @@ async def runtime_strategy_safety_readiness_preview(
             runtime_service=await _strategy_runtime_service(),
         )
         return await service.preview(runtime_instance_id=runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/strategy-runtimes/{runtime_instance_id}/live-position-monitor",
+    response_model=RuntimeLivePositionMonitorPacket,
+)
+async def runtime_live_position_monitor(
+    runtime_instance_id: str,
+) -> RuntimeLivePositionMonitorPacket:
+    try:
+        service = await _runtime_live_position_monitor_service()
+        return await service.build_monitor_packet(
+            runtime_instance_id=runtime_instance_id,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
@@ -2930,6 +2952,73 @@ async def _strategy_runtime_service() -> Any:
             detail="Strategy runtime repository unavailable; persistent PG facts are required.",
         ) from exc
     setattr(api_module, "_strategy_runtime_service", service)
+    return service
+
+
+async def _runtime_live_position_monitor_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_live_position_monitor_service", None)
+    if injected is not None:
+        return injected
+
+    position_repo = getattr(api_module, "_position_repo", None)
+    if position_repo is None:
+        position_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        )
+    order_repo = getattr(api_module, "_order_repo", None)
+    if order_repo is None:
+        order_repo = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_order_repo",
+            _build_pg_order_repo,
+        )
+    if position_repo is None or order_repo is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Runtime live monitor requires persistent position and order facts.",
+        )
+
+    gateway = getattr(api_module, "_exchange_gateway", None)
+    if gateway is None and _live_read_only_exchange_env_safe():
+        gateway = getattr(
+            api_module,
+            "_trading_console_read_only_exchange_gateway",
+            None,
+        )
+        if gateway is None:
+            gateway = _TradingConsoleLiveReadOnlyGateway()
+            setattr(
+                api_module,
+                "_trading_console_read_only_exchange_gateway",
+                gateway,
+            )
+
+    reconciliation_service = None
+    if gateway is not None:
+        from src.application.reconciliation import ReconciliationService
+
+        reconciliation_service = ReconciliationService(
+            gateway=gateway,
+            position_mgr=position_repo,
+            order_repository=order_repo,
+        )
+
+    from src.application.runtime_live_position_monitor_service import (
+        RuntimeLivePositionMonitorService,
+    )
+
+    service = RuntimeLivePositionMonitorService(
+        runtime_repository=await _strategy_runtime_service(),
+        position_repository=position_repo,
+        order_repository=order_repo,
+        exchange_gateway=gateway,
+        reconciliation_service=reconciliation_service,
+    )
+    setattr(api_module, "_runtime_live_position_monitor_service", service)
     return service
 
 

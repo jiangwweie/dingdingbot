@@ -74,7 +74,11 @@ class RuntimeLivePositionMonitorService:
         now_ms: int | None = None,
     ) -> RuntimeLivePositionMonitorPacket:
         now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-        runtime = await self._runtime_repository.get(runtime_instance_id)
+        get_runtime = getattr(self._runtime_repository, "get_runtime", None)
+        if callable(get_runtime):
+            runtime = await get_runtime(runtime_instance_id)
+        else:
+            runtime = await self._runtime_repository.get(runtime_instance_id)
         if runtime is None:
             raise ValueError(f"strategy runtime not found: {runtime_instance_id}")
 
@@ -88,21 +92,29 @@ class RuntimeLivePositionMonitorService:
         exchange_open_stop_orders: list[Any] = []
         exchange_available = self._exchange_gateway is not None
         if self._exchange_gateway is not None:
-            exchange_positions = list(
-                await self._exchange_gateway.fetch_positions(symbol=runtime.symbol)
-            )
-            exchange_open_stop_orders = list(
-                await self._exchange_gateway.fetch_open_orders(
-                    runtime.symbol,
-                    params={"stop": True},
+            try:
+                exchange_positions = list(
+                    await self._exchange_gateway.fetch_positions(symbol=runtime.symbol)
                 )
-            )
+                exchange_open_stop_orders = list(
+                    await self._exchange_gateway.fetch_open_orders(
+                        runtime.symbol,
+                        params={"stop": True},
+                    )
+                )
+            except Exception:
+                exchange_positions = []
+                exchange_open_stop_orders = []
+                exchange_available = False
 
         reconciliation_result = None
         if self._reconciliation_service is not None:
-            reconciliation_result = await self._reconciliation_service.build_read_model(
-                runtime.symbol
-            )
+            try:
+                reconciliation_result = await self._reconciliation_service.build_read_model(
+                    runtime.symbol
+                )
+            except Exception:
+                reconciliation_result = None
 
         return build_runtime_live_position_monitor_packet(
             runtime=runtime,

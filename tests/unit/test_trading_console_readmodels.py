@@ -453,6 +453,65 @@ class _FakeExchangeGateway:
         raise AssertionError("trading-console read models must not cancel orders")
 
 
+class _FakeStrategyRuntimeService:
+    def __init__(self, runtime):
+        self.runtime = runtime
+
+    async def get_runtime(self, runtime_instance_id):
+        if runtime_instance_id != self.runtime.runtime_instance_id:
+            raise ValueError(f"strategy runtime not found: {runtime_instance_id}")
+        return self.runtime
+
+    async def list_runtimes(self, status=None, limit=100):
+        if status is not None and self.runtime.status != status:
+            return []
+        return [self.runtime][:limit]
+
+
+def _live_enabled_runtime(*, symbol: str = BNB):
+    from src.domain.strategy_runtime import (
+        StrategyRuntimeBoundary,
+        StrategyRuntimeInstance,
+        StrategyRuntimeInstanceStatus,
+    )
+
+    return StrategyRuntimeInstance(
+        runtime_instance_id="runtime-live-monitor-1",
+        trial_binding_id="trial-binding-live-monitor-1",
+        admission_decision_id="admission-live-monitor-1",
+        strategy_family_id="CPM-001",
+        strategy_family_version_id="CPM-001@v1",
+        owner_risk_acceptance_id="owner-risk-live-monitor-1",
+        carrier_id="carrier-live-monitor-1",
+        symbol=symbol,
+        side="long",
+        status=StrategyRuntimeInstanceStatus.ACTIVE,
+        boundary=StrategyRuntimeBoundary(
+            max_attempts=3,
+            attempts_used=1,
+            budget_reserved=Decimal("5"),
+            total_budget=Decimal("12"),
+            max_active_positions=1,
+            max_notional_per_attempt=Decimal("8"),
+            allowed_symbols=[symbol],
+            allowed_sides=["long"],
+            max_leverage=Decimal("1"),
+            requires_protection=True,
+            requires_review=True,
+        ),
+        execution_enabled=True,
+        shadow_mode=False,
+        metadata={
+            "live_runtime_enablement_mutation_id": "mut-live-monitor-1",
+            "owner_live_runtime_enablement_authorization_id": "owner-live-enable-1",
+            "owner_real_submit_authorization_id": "owner-first-real-submit-1",
+        },
+        created_at_ms=1780496660000,
+        updated_at_ms=1780496665000,
+        activated_at_ms=1780496660000,
+    )
+
+
 def _patch_deps(
     monkeypatch,
     *,
@@ -554,10 +613,28 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
         "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
         "/api/trading-console/runtime-execution-intents/drafts/{runtime_execution_intent_draft_id}",
         "/api/trading-console/runtime-execution-protection-plans/intents/{execution_intent_id}",
+        "/api/trading-console/runtime-execution-protection-failure-policies/intents/{execution_intent_id}",
+        "/api/trading-console/runtime-execution-submit-idempotency/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-trusted-submit-facts",
+        "/api/trading-console/runtime-execution-trusted-submit-facts/authorizations/{authorization_id}",
         "/api/trading-console/runtime-execution-submit-authorizations/intents/{execution_intent_id}",
         "/api/trading-console/runtime-execution-attempt-reservations/authorizations/{authorization_id}",
         "/api/trading-console/runtime-execution-attempt-mutations/reservations/{reservation_id}",
+        "/api/trading-console/runtime-execution-attempt-outcome-policies/reservations/{reservation_id}",
+        "/api/trading-console/runtime-execution-attempt-outcome-policies/reservations/{reservation_id}/from-submit-outcome-review",
         "/api/trading-console/runtime-execution-order-lifecycle-handoff-drafts/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-local-registration-action-authorizations/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-order-lifecycle-adapter-results/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-exchange-submit-action-authorizations/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-exchange-submit-adapter-results/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-exchange-submit-execution-results/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-first-real-submit-actions/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-submit-outcome-reviews/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-first-real-submit-outcome-accounting/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-post-submit-budget-settlements/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-exchange-submit-recovery-resolutions/recovery-tasks/{recovery_task_id}",
+        "/api/trading-console/runtime-execution-first-real-submit-evidence-preparations/authorizations/{authorization_id}",
+        "/api/trading-console/runtime-execution-exchange-gateway-readiness",
         "/api/trading-console/runtime-execution-controlled-submit/authorizations/{authorization_id}",
     }
     routes = [
@@ -571,6 +648,94 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
             assert route.path in allowed_post_paths
         else:
             assert route.methods == {"GET"}
+
+
+def test_trading_console_runtime_live_position_monitor_endpoint_surfaces_sl_only_warning(
+    monkeypatch,
+):
+    _configure_auth(monkeypatch)
+    from src.interfaces import api as api_module
+    from src.interfaces.api import app
+
+    runtime = _live_enabled_runtime()
+    exchange = _FakeExchangeGateway(
+        positions=[
+            {
+                "symbol": BNB,
+                "size": "0.01",
+                "entryPrice": "630",
+                "markPrice": "629.1",
+                "unrealizedPnl": "-0.009",
+                "liquidationPrice": "900",
+            }
+        ],
+        normal_orders=[],
+        stop_orders=[
+            {
+                "id": "4000001470395922",
+                "symbol": BNB,
+                "type": "stop_market",
+                "side": "sell",
+                "status": "open",
+                "amount": "0.01",
+                "info": {
+                    "stopPrice": "625.92",
+                    "reduceOnly": True,
+                    "positionSide": "LONG",
+                },
+            }
+        ],
+    )
+    _patch_deps(
+        monkeypatch,
+        exchange=exchange,
+        position_repo=_FakeActivePositionRepo(symbol=BNB),
+        order_repo=_FakeOrderRepo(
+            [
+                _FakeOrder("entry-1", "ENTRY", "91085295446", parent_order_id=None, status="FILLED"),
+                _FakeOrder("sl-1", "SL", "4000001470395922"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        _FakeStrategyRuntimeService(runtime),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_live_position_monitor_service",
+        None,
+        raising=False,
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get(
+            "/api/trading-console/strategy-runtimes/runtime-live-monitor-1/live-position-monitor",
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "active_protection_warning"
+    assert payload["protection_status"] == "hard_stop_only"
+    assert payload["sl_protection_present"] is True
+    assert payload["tp_protection_present"] is False
+    assert payload["active_position_present"] is True
+    assert payload["can_continue_holding"] is True
+    assert payload["owner_action_required"] is False
+    assert payload["blocks_new_entries_until_resolved"] is True
+    assert "runtime_max_active_positions_in_use" in payload["blockers"]
+    assert "missing_tp_protection_right_tail_exit_not_mounted" in payload["warnings"]
+    assert payload["order_created"] is False
+    assert payload["exchange_order_submitted"] is False
+    assert payload["order_lifecycle_called"] is False
+    assert payload["withdrawal_instruction_created"] is False
+    assert payload["transfer_instruction_created"] is False
+    assert (BNB, {"stop": True}) in exchange.open_order_calls
+    assert exchange.place_calls == 0
+    assert exchange.cancel_calls == 0
 
 
 def test_trading_console_can_run_scheduled_observation_without_shadow_planning(
