@@ -98,7 +98,8 @@ This document defines the runtime safety boundaries for the BRC project.
   `order_lifecycle_adapter_disabled` and does not construct or register orders.
   Only when an application caller explicitly provides adapter enablement, local
   registration enablement, a READY first-real-submit local-registration
-  enablement decision / gate, and acquires the PG-backed duplicate-submit lock
+  enablement decision / gate with a validated scoped local-registration action
+  authorization, and acquires the PG-backed duplicate-submit lock
   may it construct local
   `Order(status=CREATED)` objects from typed registration drafts and call
   `OrderLifecycleService.register_created_order`. A repeated call for the same

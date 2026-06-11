@@ -104,6 +104,12 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert (
         packet["adapter_enablement_gate"]["current_state"][
             "adapter_implementation_capabilities"
+        ]["scoped_local_registration_action_authorization_implemented"]
+        is True
+    )
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
+            "adapter_implementation_capabilities"
         ]["execution_intent_local_order_linkage_implemented"]
         is True
     )
@@ -122,6 +128,12 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
     assert (
         packet["adapter_enablement_gate"]["current_state"][
             "local_registration_requires_first_real_submit_enablement_decision"
+        ]
+        is True
+    )
+    assert (
+        packet["adapter_enablement_gate"]["current_state"][
+            "local_registration_requires_scoped_action_authorization"
         ]
         is True
     )
@@ -153,6 +165,9 @@ async def test_adapter_enablement_packet_allows_non_executing_implementation_tas
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "first_real_submit_local_registration_enablement_decision_not_implemented" not in (
+        packet["adapter_enablement_gate"]["implementation_work_items"]
+    )
+    assert "scoped_local_registration_action_authorization_not_implemented" not in (
         packet["adapter_enablement_gate"]["implementation_work_items"]
     )
     assert "execution_intent_local_order_linkage_not_implemented" not in (
@@ -210,6 +225,9 @@ async def test_adapter_enablement_packet_still_blocks_runtime_enablement_with_ow
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
     assert "local_registration_result_status_not_implemented" not in (
+        packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
+    )
+    assert "scoped_local_registration_action_authorization_not_implemented" not in (
         packet["adapter_enablement_gate"]["runtime_enablement_blockers"]
     )
     assert "protection_order_failure_recovery_not_implemented" not in (

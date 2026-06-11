@@ -49,6 +49,7 @@ ADAPTER_IMPLEMENTATION_CAPABILITIES = {
     "order_lifecycle_adapter_invocation_implemented": True,
     "first_real_submit_local_registration_gate_implemented": True,
     "first_real_submit_local_registration_enablement_decision_implemented": True,
+    "scoped_local_registration_action_authorization_implemented": True,
     "execution_intent_local_order_linkage_implemented": True,
     "persistent_duplicate_submit_lock_implemented": True,
     "local_registration_result_status_implemented": True,
@@ -274,6 +275,7 @@ def build_order_lifecycle_adapter_enablement_packet(
                 ),
                 "local_registration_requires_first_real_submit_gate": True,
                 "local_registration_requires_first_real_submit_enablement_decision": True,
+                "local_registration_requires_scoped_action_authorization": True,
             },
             "implementation_work_items": implementation_work_items,
             "runtime_enablement_blockers": runtime_enablement_blockers,
@@ -470,6 +472,13 @@ def _implementation_work_items(
         items.append(
             "first_real_submit_local_registration_enablement_decision_not_implemented"
         )
+    if (
+        ADAPTER_IMPLEMENTATION_CAPABILITIES[
+            "scoped_local_registration_action_authorization_implemented"
+        ]
+        is not True
+    ):
+        items.append("scoped_local_registration_action_authorization_not_implemented")
     if (
         ADAPTER_IMPLEMENTATION_CAPABILITIES[
             "execution_intent_local_order_linkage_implemented"
