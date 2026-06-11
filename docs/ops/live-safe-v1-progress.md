@@ -3187,3 +3187,82 @@ Use this file for session progress and handoff notes.
   - this deployment did not execute the real reduce-only close;
   - no exchange order, OrderLifecycle submit, withdrawal, or transfer was
     performed in this deploy stage.
+
+## 2026-06-11 (Owner-authorized AVAX Runtime Reduce-only Close)
+
+- Owner authorized the exact live close value:
+  `runtime-reduce-only-close:strategy-runtime-95655873b76c:AVAX/USDT:USDT:short:qty=1.0:owner-authorized`.
+- Scope:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - symbol: `AVAX/USDT:USDT`;
+  - side: short;
+  - authorized reduce-only close quantity: `1.0`;
+  - no new entry, withdrawal, transfer, or strategy self-authorization was
+    authorized.
+- First execute attempt:
+  - dry-run produced the same required approval value and was
+    `ready_for_owner_authorization`;
+  - the first real close attempt was rejected by Binance with `-4061`
+    `Order's position side does not match user's setting`;
+  - the root cause was that runtime controlled close did not pass Binance
+    hedge-mode `position_side=SHORT` for the short reduce-only close;
+  - the failure path also exposed a local lifecycle issue where a CREATED local
+    close order was being marked REJECTED, which is not a valid state-machine
+    transition.
+- Fix:
+  - committed and pushed `59c69006 fix(runtime): send hedge position side on
+    controlled close`;
+  - `ExecutionOrchestrator.execute_controlled_close` now passes
+    `position_side=LONG/SHORT` only for Binance;
+  - placement failures before exchange submit now terminalize the local CREATED
+    close order as CANCELED instead of masking the original exchange rejection
+    with a state transition error.
+- Tests:
+  - `pytest -q tests/unit/test_tiny001d4_controlled_close.py tests/unit/test_runtime_reduce_only_close_authorization.py tests/unit/test_runtime_post_close_followup.py tests/unit/test_runtime_owner_reduce_only_close_flow.py`
+    passed with `13 passed`.
+- Tokyo deploy:
+  - deployed `59c69006add2701d5be73477c5b95c7ff10ad951` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-59c69006-20260611Tclosefix`;
+  - deploy result was `status=applied`;
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - health remained `runtime_bound=true`, `live_ready=false`.
+- Successful close:
+  - refreshed dry-run after deploy still required the exact Owner approval
+    value above;
+  - real reduce-only close executed with status `executed_reduce_only_close`;
+  - exit order: `exit_controlled_c03b446704fa`;
+  - exchange exit order: `39007184328`;
+  - filled quantity: `1.0`;
+  - average exit price: `6.512`;
+  - projected realized PnL: `0.0540`;
+  - remaining SL protection order `rtod-c4439560677fbd165a-sl` /
+    `4000001548436778` was canceled.
+- Cleanup:
+  - local residual close order from the failed first attempt
+    `exit_controlled_1ad998f2aae9` had no exchange order id and was
+    terminalized to CANCELED with reason
+    `cleanup_failed_owner_reduce_only_close_attempt_no_exchange_order`.
+- Post-close facts:
+  - PG active positions for `AVAX/USDT:USDT`: `0`;
+  - exchange active positions from the runtime monitor: `0`;
+  - local open orders: `0`;
+  - exchange open stop orders: `0`;
+  - reconciliation severe count: `0`;
+  - reconciliation warning count: `0`.
+- Closed review:
+  - dry-run status was `ready_to_record`;
+  - applied closed lifecycle review:
+    `live-review-runtime-review:strategy-runtime-95655873b76c-closed-reviewed-exit_controlled_c03b446704fa`;
+  - review status: `closed_reviewed`;
+  - lifecycle status: `closed_reviewed`;
+  - strategy outcome: `ordinary_win`;
+  - R multiple: `0.3236`;
+  - review write did not create an ExecutionIntent, place an order, mutate
+    runtime budget, or create withdrawal / transfer instructions.
+- Remaining follow-up:
+  - post-close follow-up still renders `ready_for_closed_review` after the
+    review record exists because it resolves entry / exit facts but does not
+    yet check for an existing lifecycle review record;
+  - this is a read-model/product-state issue, not an exchange safety issue, and
+    should be fixed before relying on the panel as the sole next-attempt
+    operator signal.
