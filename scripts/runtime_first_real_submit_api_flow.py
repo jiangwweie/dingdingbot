@@ -70,6 +70,7 @@ class FlowConfig:
     next_attempt_strategy_family_id: str | None = None
     next_attempt_carrier_id: str | None = None
     skip_next_attempt_gate_check: bool = False
+    skip_order_candidate_usage_check: bool = False
     enable_local_registration: bool = True
     arm_exchange_submit_adapter: bool = True
     record_gateway_readiness: bool = True
@@ -314,6 +315,9 @@ class FirstRealSubmitApiFlow:
         candidate_id = self._required_id("order_candidate_id")
         if not candidate_id:
             return
+        self._verify_order_candidate_reusable(candidate_id)
+        if self.state.blockers:
+            return
         draft = self._step(
             "record_intent_draft",
             "POST",
@@ -431,6 +435,33 @@ class FirstRealSubmitApiFlow:
             self.state.remember(
                 "attempt_mutation_id",
                 f"runtime-attempt-mutation-{reservation_id}",
+            )
+
+    def _verify_order_candidate_reusable(self, candidate_id: str) -> None:
+        if self._config.skip_order_candidate_usage_check:
+            self.state.add_warnings(["order_candidate_usage_check_skipped_by_cli"])
+            return
+        result = self._step(
+            "verify_order_candidate_usage",
+            "GET",
+            f"/api/trading-console/order-candidates/{candidate_id}",
+            collect_body_blockers=False,
+        )
+        body = _body(result)
+        if result.get("http_status", 0) >= 300 or result.get("error"):
+            return
+        reusable = body.get("candidate_reusable_for_new_attempt")
+        if reusable is None:
+            self.state.add_warnings(["order_candidate_usage_check_unavailable"])
+            return
+        if reusable is not True:
+            usage_status = str(body.get("candidate_usage_status") or "unknown")
+            reuse_blocker = str(body.get("reuse_blocker") or "candidate_not_reusable")
+            self.state.add_blockers(
+                [
+                    f"order_candidate_not_reusable:{usage_status}",
+                    reuse_blocker,
+                ]
             )
 
     def _record_attempt_reservation_and_policy(self) -> None:
@@ -1051,6 +1082,7 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     parser.add_argument("--next-attempt-strategy-family-id")
     parser.add_argument("--next-attempt-carrier-id")
     parser.add_argument("--skip-next-attempt-gate-check", action="store_true")
+    parser.add_argument("--skip-order-candidate-usage-check", action="store_true")
     parser.add_argument("--skip-local-registration", action="store_true")
     parser.add_argument("--skip-exchange-arm", action="store_true")
     parser.add_argument("--skip-gateway-readiness", action="store_true")
@@ -1078,6 +1110,7 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         next_attempt_strategy_family_id=args.next_attempt_strategy_family_id,
         next_attempt_carrier_id=args.next_attempt_carrier_id,
         skip_next_attempt_gate_check=args.skip_next_attempt_gate_check,
+        skip_order_candidate_usage_check=args.skip_order_candidate_usage_check,
         enable_local_registration=not args.skip_local_registration,
         arm_exchange_submit_adapter=not args.skip_exchange_arm,
         record_gateway_readiness=not args.skip_gateway_readiness,

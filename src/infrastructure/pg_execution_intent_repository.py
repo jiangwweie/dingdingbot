@@ -67,6 +67,21 @@ class PgExecutionIntentRepository:
             orm = result.scalar_one_or_none()
             return self._to_domain(orm) if orm else None
 
+    async def get_by_order_candidate_id(
+        self,
+        order_candidate_id: str,
+    ) -> Optional[ExecutionIntent]:
+        async with self._session_maker() as session:
+            stmt = (
+                select(PGExecutionIntentORM)
+                .where(PGExecutionIntentORM.order_candidate_id == order_candidate_id)
+                .order_by(PGExecutionIntentORM.created_at.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            orm = result.scalar_one_or_none()
+            return self._to_domain(orm) if orm else None
+
     async def list_unfinished(self) -> List[ExecutionIntent]:
         async with self._session_maker() as session:
             stmt = (

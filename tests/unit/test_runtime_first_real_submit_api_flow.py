@@ -17,11 +17,15 @@ class _FakeClient:
         existing_attempt_policy: bool = False,
         next_attempt_gate_status: str = "clear_for_preflight",
         next_attempt_gate_name: str = "clear_for_next_preflight",
+        candidate_reusable: bool | None = True,
+        candidate_usage_status: str = "unused",
     ) -> None:
         self.calls: list[dict] = []
         self.existing_attempt_policy = existing_attempt_policy
         self.next_attempt_gate_status = next_attempt_gate_status
         self.next_attempt_gate_name = next_attempt_gate_name
+        self.candidate_reusable = candidate_reusable
+        self.candidate_usage_status = candidate_usage_status
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -55,6 +59,20 @@ class _FakeClient:
                             }
                         }
                     }
+                },
+            }
+        if "/api/trading-console/order-candidates/" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "order_candidate_id": path.rsplit("/", 1)[-1],
+                    "candidate_reusable_for_new_attempt": self.candidate_reusable,
+                    "candidate_usage_status": self.candidate_usage_status,
+                    "reuse_blocker": (
+                        None
+                        if self.candidate_reusable
+                        else "order_candidate_already_has_submit_authorization"
+                    ),
                 },
             }
         if "runtime-execution-intent-drafts" in path:
@@ -228,6 +246,32 @@ def test_prepare_blocks_before_draft_when_next_attempt_gate_is_not_clear():
     )
     paths = [call["path"] for call in client.calls]
     assert paths == ["/api/trading-console/owner-action-flow"]
+    assert "authorization_id" not in report["ids"]
+
+
+def test_prepare_blocks_before_draft_when_order_candidate_is_already_used():
+    client = _FakeClient(
+        candidate_reusable=False,
+        candidate_usage_status="submit_authorization_recorded",
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="prepare",
+            order_candidate_id="candidate-1",
+        ),
+    )
+
+    report = flow.run()
+
+    assert (
+        "order_candidate_not_reusable:submit_authorization_recorded"
+        in report["blockers"]
+    )
+    assert "order_candidate_already_has_submit_authorization" in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert paths == ["/api/trading-console/order-candidates/candidate-1"]
     assert "authorization_id" not in report["ids"]
 
 

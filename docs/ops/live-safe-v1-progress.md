@@ -2324,3 +2324,46 @@ Use this file for session progress and handoff notes.
   - the first-real-submit operator flow now carries machine-readable evidence
     that the previous bounded-live attempt was cleared for the next preflight
     before proceeding.
+
+## 2026-06-11 (OrderCandidate Usage Guard)
+
+- Tokyo read-only inspection found the current active AVAX runtime
+  `strategy-runtime-95655873b76c` and candidate
+  `order-candidate-d0c432b4d869`.
+- PG read-only inspection showed that this candidate is already tied to
+  `ExecutionIntent` `intent_rt_9564b635726f404b6a38c997` and submit
+  authorization
+  `runtime-submit-authorization-intent_rt_9564b635726f404b6a38c997`.
+  Therefore it must be treated as a used first-attempt candidate, not as the
+  fresh candidate for the next attempt.
+- Added read-only candidate usage fields to Trading Console
+  `/api/trading-console/order-candidates` and
+  `/api/trading-console/order-candidates/{order_candidate_id}`:
+  - `execution_intent_id`;
+  - `execution_intent_status`;
+  - `submit_authorization_id`;
+  - `submit_authorization_status`;
+  - `candidate_usage_status`;
+  - `candidate_reusable_for_new_attempt`;
+  - `reuse_blocker`.
+- Added repository lookups by `order_candidate_id` for ExecutionIntent and
+  runtime submit authorization records.
+- Updated `scripts/runtime_first_real_submit_api_flow.py` so prepare / arm /
+  execute from an existing `order_candidate_id` first checks candidate usage
+  and blocks before intent draft creation when the candidate already has an
+  ExecutionIntent or submit authorization.
+- Verification:
+  - `python3 -m pytest -q tests/unit/test_runtime_first_real_submit_api_flow.py tests/unit/test_order_candidate_usage_readmodel.py`
+    passed with `12 passed`;
+  - `python3 -m pytest -q tests/unit/test_trading_console_readmodels.py`
+    passed with `48 passed`;
+  - `python3 -m py_compile scripts/runtime_first_real_submit_api_flow.py src/interfaces/api_trading_console.py src/infrastructure/pg_execution_intent_repository.py src/infrastructure/pg_runtime_execution_submit_authorization_repository.py`
+    passed;
+  - `git diff --check` passed.
+- Safety result:
+  - all Tokyo checks were read-only;
+  - no exchange calls, order creation, OrderLifecycle calls, ExecutionIntent
+    creation, submit authorization creation, withdrawal/transfer instructions,
+    or runtime-budget mutations were performed;
+  - the next bounded-live attempt now requires a fresh shadow candidate instead
+    of reusing the already-authorized first-attempt candidate.

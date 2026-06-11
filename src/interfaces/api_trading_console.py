@@ -337,6 +337,13 @@ class OrderCandidateInspectionView(BaseModel):
     candidate_executable: bool
     not_order: bool
     not_execution_intent: bool
+    execution_intent_id: str | None = None
+    execution_intent_status: str | None = None
+    submit_authorization_id: str | None = None
+    submit_authorization_status: str | None = None
+    candidate_usage_status: str = "usage_lookup_unavailable"
+    candidate_reusable_for_new_attempt: bool = False
+    reuse_blocker: str | None = None
     created_at_ms: int
     updated_at_ms: int
     expires_at_ms: int | None = None
@@ -862,7 +869,7 @@ async def list_order_candidates(
         symbol=symbol,
         limit=limit,
     )
-    return [_order_candidate_view(item) for item in candidates]
+    return [await _order_candidate_view(item) for item in candidates]
 
 
 @router.get(
@@ -874,7 +881,7 @@ async def get_order_candidate(
 ) -> OrderCandidateInspectionView:
     service = await _signal_evaluation_shadow_service()
     try:
-        return _order_candidate_view(await service.get_order_candidate(order_candidate_id))
+        return await _order_candidate_view(await service.get_order_candidate(order_candidate_id))
     except Exception as exc:
         message = str(exc)
         if "not found" in message:
@@ -3699,7 +3706,8 @@ def _signal_evaluation_view(evaluation: SignalEvaluation) -> SignalEvaluationIns
     )
 
 
-def _order_candidate_view(candidate: OrderCandidate) -> OrderCandidateInspectionView:
+async def _order_candidate_view(candidate: OrderCandidate) -> OrderCandidateInspectionView:
+    usage = await _order_candidate_usage(candidate.order_candidate_id)
     return OrderCandidateInspectionView(
         order_candidate_id=candidate.order_candidate_id,
         signal_evaluation_id=candidate.signal_evaluation_id,
@@ -3723,11 +3731,68 @@ def _order_candidate_view(candidate: OrderCandidate) -> OrderCandidateInspection
         candidate_executable=candidate.candidate_executable,
         not_order=candidate.not_order,
         not_execution_intent=candidate.not_execution_intent,
+        **usage,
         created_at_ms=candidate.created_at_ms,
         updated_at_ms=candidate.updated_at_ms,
         expires_at_ms=candidate.expires_at_ms,
         metadata=dict(candidate.metadata),
     )
+
+
+async def _order_candidate_usage(order_candidate_id: str) -> dict[str, Any]:
+    from src.interfaces import api as api_module
+
+    intent_repo = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_execution_intent_repo",
+        _build_pg_execution_intent_repo,
+    )
+    auth_repo = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_runtime_submit_authorization_repo",
+        _build_pg_runtime_submit_authorization_repo,
+    )
+    if intent_repo is None or auth_repo is None:
+        return {
+            "candidate_usage_status": "usage_lookup_unavailable",
+            "candidate_reusable_for_new_attempt": False,
+            "reuse_blocker": "candidate_usage_lookup_repository_unavailable",
+        }
+    try:
+        intent = await intent_repo.get_by_order_candidate_id(order_candidate_id)
+        authorization = await auth_repo.get_by_order_candidate_id(order_candidate_id)
+    except Exception as exc:
+        return {
+            "candidate_usage_status": "usage_lookup_unavailable",
+            "candidate_reusable_for_new_attempt": False,
+            "reuse_blocker": f"candidate_usage_lookup_failed:{type(exc).__name__}",
+        }
+
+    if authorization is not None:
+        return {
+            "execution_intent_id": authorization.execution_intent_id,
+            "execution_intent_status": (
+                intent.status.value if intent is not None else None
+            ),
+            "submit_authorization_id": authorization.authorization_id,
+            "submit_authorization_status": authorization.status.value,
+            "candidate_usage_status": "submit_authorization_recorded",
+            "candidate_reusable_for_new_attempt": False,
+            "reuse_blocker": "order_candidate_already_has_submit_authorization",
+        }
+    if intent is not None:
+        return {
+            "execution_intent_id": intent.id,
+            "execution_intent_status": intent.status.value,
+            "candidate_usage_status": "execution_intent_recorded",
+            "candidate_reusable_for_new_attempt": False,
+            "reuse_blocker": "order_candidate_already_has_execution_intent",
+        }
+    return {
+        "candidate_usage_status": "unused",
+        "candidate_reusable_for_new_attempt": True,
+        "reuse_blocker": None,
+    }
 
 
 def _decimal_string(value: Any) -> str | None:
@@ -3830,6 +3895,14 @@ def _build_pg_execution_intent_repo() -> Any:
     from src.infrastructure.pg_execution_intent_repository import PgExecutionIntentRepository
 
     return PgExecutionIntentRepository()
+
+
+def _build_pg_runtime_submit_authorization_repo() -> Any:
+    from src.infrastructure.pg_runtime_execution_submit_authorization_repository import (
+        PgRuntimeExecutionSubmitAuthorizationRepository,
+    )
+
+    return PgRuntimeExecutionSubmitAuthorizationRepository()
 
 
 def _build_pg_execution_recovery_repo() -> Any:
