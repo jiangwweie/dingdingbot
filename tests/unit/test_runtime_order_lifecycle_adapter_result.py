@@ -984,6 +984,7 @@ async def _ready_exchange_submit_execution_context(
         "runtime-exchange-gateway-readiness-1"
     ),
     exchange_gateway=None,
+    exchange_submit_action_authorization_repo=None,
 ):
     preview = _registration_preview()
     lifecycle = _Lifecycle()
@@ -1003,6 +1004,9 @@ async def _ready_exchange_submit_execution_context(
         exchange_gateway=gateway,
         exchange_gateway_readiness_repo=exchange_gateway_readiness_repo,
         intent_repo=intent_repo,
+        exchange_submit_action_authorization_repo=(
+            exchange_submit_action_authorization_repo
+        ),
     )
     local_decision = _ready_enablement_decision(preview)
     await service.order_lifecycle_adapter_result_for_authorization(
@@ -2495,6 +2499,41 @@ async def test_service_exchange_submit_adapter_result_replays_not_implemented():
 
 
 @pytest.mark.asyncio
+async def test_exchange_submit_adapter_result_revalidates_action_authorization_before_lock():
+    preview = _registration_preview()
+    exchange_result_repo = _ExchangeSubmitAdapterResultRepo()
+    missing_action_repo = _ExchangeSubmitActionAuthorizationRepo(
+        authorization_id=preview.authorization_id,
+        execution_intent_id=preview.execution_intent_id,
+        runtime_instance_id=preview.runtime_instance_id,
+        symbol=preview.symbol,
+        local_registration_enablement_decision_id=(
+            "runtime-local-registration-enablement-auth-1"
+        ),
+        missing=True,
+    )
+    service = _service_with_preview(
+        preview,
+        exchange_submit_adapter_result_repo=exchange_result_repo,
+        exchange_submit_action_authorization_repo=missing_action_repo,
+    )
+    ready_decision = _ready_exchange_submit_enablement_decision(preview)
+
+    result = await service.exchange_submit_adapter_result_for_authorization(
+        "auth-1",
+        exchange_submit_adapter_enabled=True,
+        exchange_submit_enablement_decision=ready_decision,
+    )
+
+    assert result.status == RuntimeExecutionExchangeSubmitAdapterResultStatus.BLOCKED
+    assert "exchange_submit_action_authorization_not_found" in result.blockers
+    assert result.duplicate_submit_lock_acquired is False
+    assert result.order_lifecycle_submit_called is False
+    assert result.exchange_called is False
+    assert exchange_result_repo.acquire_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_service_exchange_submit_adapter_result_recovers_acquired_lock():
     preview = _registration_preview()
     lifecycle = _Lifecycle()
@@ -2970,6 +3009,39 @@ async def test_service_exchange_submit_execution_blocks_without_replay_repositor
     assert result.exchange_called is False
     assert result.order_lifecycle_submit_called is False
     assert intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_exchange_submit_execution_revalidates_action_authorization_before_gateway():
+    context = await _ready_exchange_submit_execution_context()
+    preview = _registration_preview()
+    context.service._exchange_submit_action_authorization_repository = (
+        _ExchangeSubmitActionAuthorizationRepo(
+            authorization_id=preview.authorization_id,
+            execution_intent_id=preview.execution_intent_id,
+            runtime_instance_id=preview.runtime_instance_id,
+            symbol=preview.symbol,
+            local_registration_enablement_decision_id=(
+                "runtime-local-registration-enablement-auth-1"
+            ),
+            missing=True,
+        )
+    )
+
+    result = await context.service.exchange_submit_execution_result_for_authorization(
+        "auth-1",
+        exchange_submit_execution_enabled=True,
+        exchange_submit_enablement_decision=context.exchange_decision,
+    )
+
+    assert result.status == RuntimeExecutionExchangeSubmitExecutionStatus.BLOCKED
+    assert "exchange_submit_action_authorization_not_found" in result.blockers
+    assert context.gateway.calls == []
+    assert result.exchange_called is False
+    assert result.exchange_order_submitted is False
+    assert result.order_lifecycle_submit_called is False
+    assert context.exchange_submit_execution_result_repo.acquire_calls == 0
+    assert context.intent_repo.saved == []
 
 
 @pytest.mark.asyncio

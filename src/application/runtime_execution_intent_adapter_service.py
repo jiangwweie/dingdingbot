@@ -1961,6 +1961,49 @@ class RuntimeExecutionIntentAdapterService:
         ):
             gate_blockers.append("exchange_submit_enablement_decision_not_ready")
             gate_blockers.extend(decision.blockers)
+        if (
+            exchange_submit_adapter_enabled
+            and decision.status
+            == RuntimeExecutionExchangeSubmitGateStatus.READY_FOR_EXCHANGE_SUBMIT_ACTION
+        ):
+            action_blockers, action_warnings = (
+                await self._validate_first_real_submit_prerequisite_evidence(
+                    authorization_id=authorization_id,
+                    execution_intent_id=decision.execution_intent_id,
+                    runtime_instance_id=decision.runtime_instance_id,
+                    symbol=decision.exchange_submit_gate.symbol,
+                    trusted_submit_fact_snapshot_id=(
+                        decision.trusted_submit_fact_snapshot_id
+                    ),
+                    submit_idempotency_policy_id=(
+                        decision.submit_idempotency_policy_id
+                    ),
+                    attempt_outcome_policy_id=decision.attempt_outcome_policy_id,
+                    protection_creation_failure_policy_id=(
+                        decision.protection_creation_failure_policy_id
+                    ),
+                    local_registration_enablement_decision_id=(
+                        decision.local_registration_enablement_decision_id
+                    ),
+                    owner_real_submit_authorization_id=(
+                        decision.owner_real_submit_authorization_id
+                    ),
+                    order_lifecycle_submit_enablement_id=(
+                        decision.order_lifecycle_submit_enablement_id
+                    ),
+                    exchange_submit_adapter_enablement_id=(
+                        decision.exchange_submit_adapter_enablement_id
+                    ),
+                    exchange_submit_action_authorization_id=(
+                        decision.exchange_submit_action_authorization_id
+                    ),
+                    deployment_readiness_evidence_id=(
+                        decision.deployment_readiness_evidence_id
+                    ),
+                )
+            )
+            gate_blockers.extend(action_blockers)
+            gate_warnings.extend(action_warnings)
         gate_warnings.extend(decision.warnings)
 
         should_lock = (
@@ -2215,6 +2258,42 @@ class RuntimeExecutionIntentAdapterService:
                 ],
             )
 
+        action_blockers, action_warnings = (
+            await self._validate_first_real_submit_prerequisite_evidence(
+                authorization_id=authorization_id,
+                execution_intent_id=decision.execution_intent_id,
+                runtime_instance_id=decision.runtime_instance_id,
+                symbol=decision.exchange_submit_gate.symbol,
+                trusted_submit_fact_snapshot_id=(
+                    decision.trusted_submit_fact_snapshot_id
+                ),
+                submit_idempotency_policy_id=decision.submit_idempotency_policy_id,
+                attempt_outcome_policy_id=decision.attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    decision.protection_creation_failure_policy_id
+                ),
+                local_registration_enablement_decision_id=(
+                    decision.local_registration_enablement_decision_id
+                ),
+                owner_real_submit_authorization_id=(
+                    decision.owner_real_submit_authorization_id
+                ),
+                order_lifecycle_submit_enablement_id=(
+                    decision.order_lifecycle_submit_enablement_id
+                ),
+                exchange_submit_adapter_enablement_id=(
+                    decision.exchange_submit_adapter_enablement_id
+                ),
+                exchange_submit_action_authorization_id=(
+                    decision.exchange_submit_action_authorization_id
+                ),
+                deployment_readiness_evidence_id=(
+                    decision.deployment_readiness_evidence_id
+                ),
+            )
+        )
+        blockers.extend(action_blockers)
+        warnings.extend(action_warnings)
         if self._exchange_gateway is None:
             blockers.append("runtime_exchange_gateway_unavailable")
         if self._order_lifecycle_service is None:
