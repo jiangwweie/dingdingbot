@@ -617,19 +617,32 @@ class ExecutionOrchestrator:
         )
 
         side = "sell" if direction == Direction.LONG else "buy"
-        placement_result = await self._gateway.place_order(
-            symbol=symbol,
-            order_type="market",
-            side=side,
-            amount=amount,
-            reduce_only=True,
-            client_order_id=close_order.id,
-        )
+        placement_kwargs = {
+            "symbol": symbol,
+            "order_type": "market",
+            "side": side,
+            "amount": amount,
+            "reduce_only": True,
+            "client_order_id": close_order.id,
+        }
+        if str(getattr(self._gateway, "exchange_name", "")).lower() == "binance":
+            placement_kwargs["position_side"] = Direction.normalize(direction)
+
+        placement_result = await self._gateway.place_order(**placement_kwargs)
         if not placement_result.is_success:
-            await self._order_lifecycle.reject_order(
-                close_order.id,
-                reason=placement_result.error_message or "controlled close placement failed",
+            failure_reason = (
+                placement_result.error_message or "controlled close placement failed"
             )
+            if close_order.status == OrderStatus.CREATED:
+                await self._order_lifecycle.cancel_order(
+                    close_order.id,
+                    reason=f"exchange_placement_rejected_before_submit:{failure_reason}",
+                )
+            else:
+                await self._order_lifecycle.reject_order(
+                    close_order.id,
+                    reason=failure_reason,
+                )
             raise RuntimeError(
                 f"controlled close placement failed: "
                 f"{placement_result.error_code}: {placement_result.error_message}"

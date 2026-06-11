@@ -77,13 +77,23 @@ class _Lifecycle:
 
 
 class _Gateway:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        exchange_name: str | None = None,
+        placement_result: OrderPlacementResult | None = None,
+    ) -> None:
+        if exchange_name is not None:
+            self.exchange_name = exchange_name
+        self.placement_result = placement_result
         self.place_calls = []
         self.cancel_calls = []
         self.cancel_not_found_ids: set[str] = set()
 
     async def place_order(self, **kwargs):
         self.place_calls.append(kwargs)
+        if self.placement_result is not None:
+            return self.placement_result
         return OrderPlacementResult(
             order_id="exchange-generated",
             exchange_order_id="ex-close",
@@ -140,6 +150,12 @@ def _position() -> Position:
         signal_evaluation_id="signal-controlled",
         order_candidate_id="candidate-controlled",
     )
+
+
+def _short_position() -> Position:
+    position = _position()
+    position.direction = Direction.SHORT
+    return position
 
 
 def _order(order_id: str, role: OrderRole, status: OrderStatus, exchange_order_id: str | None = None):
@@ -217,6 +233,93 @@ async def test_runtime_managed_controlled_close_projects_and_cancels_protection(
     assert {call["exchange_order_id"] for call in gateway.cancel_calls} == {"ex-sl", "ex-tp"}
     assert lifecycle.orders["sl"].status == OrderStatus.CANCELED
     assert lifecycle.orders["tp"].status == OrderStatus.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_binance_short_controlled_close_sends_hedge_position_side():
+    from src.application.position_projection_service import PositionProjectionService
+
+    position = _short_position()
+    position_repo = _PositionRepo(position)
+    lifecycle = _Lifecycle()
+    lifecycle.orders["entry"] = _order("entry", OrderRole.ENTRY, OrderStatus.FILLED, "ex-entry")
+    lifecycle.orders["entry"].direction = Direction.SHORT
+    gateway = _Gateway(exchange_name="binance")
+    capital = MagicMock()
+    capital.record_exit_projection = AsyncMock()
+
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital,
+        order_lifecycle=lifecycle,
+        gateway=gateway,
+        position_projection_service=PositionProjectionService(position_repo),
+    )
+
+    result = await orchestrator.execute_controlled_close(position=position)
+
+    close_order = result["close_order"]
+    assert close_order.status == OrderStatus.FILLED
+    assert gateway.place_calls == [
+        {
+            "symbol": SYMBOL,
+            "order_type": "market",
+            "side": "buy",
+            "amount": Decimal("0.01"),
+            "reduce_only": True,
+            "client_order_id": close_order.id,
+            "position_side": "SHORT",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_controlled_close_cancels_created_order_when_exchange_rejects_before_submit():
+    from src.application.position_projection_service import PositionProjectionService
+
+    position = _short_position()
+    position_repo = _PositionRepo(position)
+    lifecycle = _Lifecycle()
+    lifecycle.orders["entry"] = _order("entry", OrderRole.ENTRY, OrderStatus.FILLED, "ex-entry")
+    lifecycle.orders["entry"].direction = Direction.SHORT
+    gateway = _Gateway(
+        exchange_name="binance",
+        placement_result=OrderPlacementResult(
+            order_id="exchange-generated",
+            exchange_order_id=None,
+            symbol=SYMBOL,
+            order_type=OrderType.MARKET,
+            direction=Direction.SHORT,
+            side="buy",
+            amount=Decimal("0.01"),
+            reduce_only=True,
+            client_order_id="exit-controlled",
+            status=OrderStatus.CREATED,
+            error_code="-4061",
+            error_message="position side mismatch",
+        ),
+    )
+    capital = MagicMock()
+    capital.record_exit_projection = AsyncMock()
+
+    orchestrator = ExecutionOrchestrator(
+        capital_protection=capital,
+        order_lifecycle=lifecycle,
+        gateway=gateway,
+        position_projection_service=PositionProjectionService(position_repo),
+    )
+
+    with pytest.raises(RuntimeError, match="controlled close placement failed"):
+        await orchestrator.execute_controlled_close(position=position)
+
+    close_orders = [
+        order for order in lifecycle.orders.values() if order.order_role == OrderRole.EXIT
+    ]
+    assert len(close_orders) == 1
+    assert close_orders[0].status == OrderStatus.CANCELED
+    assert close_orders[0].exit_reason == (
+        "exchange_placement_rejected_before_submit:position side mismatch"
+    )
+    assert gateway.place_calls[0]["position_side"] == "SHORT"
 
 
 @pytest.mark.asyncio
