@@ -3112,3 +3112,39 @@ Use this file for session progress and handoff notes.
 - Remaining live action:
   - real reduce-only close is still not executed;
   - current panel is an operator evidence surface only.
+
+## 2026-06-11 (Strategy Shadow Planning Current-HEAD Reverification)
+
+- Re-entered the backend strategy integration line after the Trading Console
+  post-close follow-up panel stage.
+- Current mainline remains `program/live-safe-v1`.
+- Verified that Strategy Signal -> Shadow Candidate Planning v1 is already
+  integrated in tracked code on the current mainline:
+  - `RuntimeStrategySignalEvaluationService` routes CPM / BRF / P1-P3
+    reference price-action signals through the semantics gate;
+  - only `READY_FOR_SEMANTIC_BINDING` can proceed to shadow candidate
+    planning;
+  - CPM long and BRF short produce shadow-only candidate proposals with entry,
+    structure stop, notional / leverage / margin / max-loss preview, TP1 1R
+    partial, and runner / trailing metadata;
+  - CPM short mismatch blocks before shadow records;
+  - RMR / FCO remain non-trading in this stage;
+  - missing trusted account facts or trusted active-position projection block
+    before shadow records are created.
+- Current verification:
+  - `pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_strategy_signal_evaluation_service.py tests/unit/test_reference_price_action_evaluators.py tests/unit/test_brf_price_action_evaluator.py tests/unit/test_strategy_candidate_semantics.py tests/unit/test_b0_strategy_runtime_fact_overlay.py tests/unit/test_b0_runtime_strategy_signal_scheduler_assembly.py tests/unit/test_strategy_observation_shadow_planning_rehearsal.py`
+    passed with `50 passed`;
+  - `python3 scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json`
+    returned `status=rehearsal_passed`;
+  - rehearsal safety invariants were all false:
+    `exchange_called=false`, `execution_intent_created=false`,
+    `order_created=false`, `order_lifecycle_called=false`,
+    `owner_bounded_execution_called=false`, and
+    `withdrawal_or_transfer_created=false`.
+- Assessment:
+  - no immediate backend patch is required for Strategy Signal -> Shadow
+    Candidate Planning v1;
+  - the next mainline move should not add more planning gates by default;
+  - either deploy the current UI/API commit when useful, or proceed to the
+    Owner-authorized reduce-only close / closed-review loop before unlocking
+    the next bounded runtime attempt.
