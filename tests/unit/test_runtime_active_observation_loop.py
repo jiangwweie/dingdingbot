@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from scripts import runtime_active_observation_loop
 
@@ -10,6 +11,7 @@ def _args(
     *,
     max_iterations=3,
     interval=0.0,
+    cycle_timeout_seconds=0.0,
     include_packets=False,
     loop_output_json=None,
 ):
@@ -27,6 +29,7 @@ def _args(
         {
             "max_iterations": max_iterations,
             "loop_interval_seconds": interval,
+            "cycle_timeout_seconds": cycle_timeout_seconds,
             "loop_output_json": loop_output_json,
             "include_packets": include_packets,
             "output_dir": str(tmp_path / "loop"),
@@ -190,6 +193,69 @@ def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path
     assert latest["shadow_candidate_created"] is True
     assert latest["recorded_execution_intent_created"] is True
     assert latest["executable_execution_intent_created"] is False
+
+
+def test_active_observation_loop_blocks_and_writes_audit_packet_on_cycle_timeout(tmp_path):
+    def builder(args):
+        time.sleep(0.05)
+        return _packet()
+
+    output_path = tmp_path / "loop-packet.json"
+    packet = runtime_active_observation_loop._build_loop_packet(
+        _args(
+            tmp_path,
+            max_iterations=2,
+            cycle_timeout_seconds=0.01,
+            loop_output_json=str(output_path),
+        ),
+        packet_builder=builder,
+        sleeper=lambda seconds: None,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["stop_reason"] == "status_changed:blocked"
+    assert packet["iterations_completed"] == 1
+    assert packet["latest_summary"]["blockers"] == [
+        "active_observation_cycle_timeout:0.01s"
+    ]
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+
+    file_packet = json.loads(output_path.read_text())
+    assert file_packet == packet
+    blocked_cycle = json.loads(
+        (tmp_path / "loop" / "cycle-1" / "active-monitor.json").read_text()
+    )
+    assert blocked_cycle["status"] == "blocked"
+    assert blocked_cycle["operator_command_plan"]["places_order"] is False
+
+
+def test_active_observation_loop_blocks_and_writes_audit_packet_on_cycle_error(tmp_path):
+    def builder(args):
+        raise ValueError("boom")
+
+    output_path = tmp_path / "loop-packet.json"
+    packet = runtime_active_observation_loop._build_loop_packet(
+        _args(
+            tmp_path,
+            max_iterations=2,
+            loop_output_json=str(output_path),
+        ),
+        packet_builder=builder,
+        sleeper=lambda seconds: None,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["iterations_completed"] == 1
+    assert packet["latest_summary"]["blockers"] == [
+        "active_observation_cycle_failed:ValueError:boom"
+    ]
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert json.loads(output_path.read_text()) == packet
 
 
 def test_active_observation_loop_cli_writes_aggregate_json(monkeypatch, capsys, tmp_path):

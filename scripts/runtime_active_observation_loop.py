@@ -15,6 +15,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import signal
 import sys
 import time
 from typing import Any, Callable
@@ -147,7 +148,22 @@ def _build_loop_packet(
         cycle_args.output_dir = str(cycle_dir)
         cycle_args.output_json = str(cycle_dir / "active-monitor.json")
 
-        packet = builder(cycle_args)
+        try:
+            packet = _build_cycle_packet_with_timeout(
+                builder,
+                cycle_args,
+                timeout_seconds=float(getattr(args, "cycle_timeout_seconds", 0) or 0),
+            )
+        except RuntimeError as exc:
+            packet = _blocked_cycle_packet(
+                reason=str(exc),
+                output_json=str(cycle_dir / "active-monitor.json"),
+            )
+        except Exception as exc:
+            packet = _blocked_cycle_packet(
+                reason=_cycle_failure_reason(exc),
+                output_json=str(cycle_dir / "active-monitor.json"),
+            )
         status = str(packet.get("status") or "unknown")
         summary = _summary(packet, iteration=iteration, cycle_dir=cycle_dir)
         _write_json(cycle_dir / "active-monitor.json", packet)
@@ -195,6 +211,91 @@ def _build_loop_packet(
         stop_reason=stop_reason,
         max_iterations=max_iterations,
     )
+
+
+def _build_cycle_packet_with_timeout(
+    builder: Callable[[argparse.Namespace], dict[str, Any]],
+    cycle_args: argparse.Namespace,
+    *,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    if (
+        timeout_seconds <= 0
+        or not hasattr(signal, "SIGALRM")
+        or not hasattr(signal, "setitimer")
+    ):
+        return builder(cycle_args)
+
+    def _raise_timeout(signum: int, frame: Any) -> None:
+        raise TimeoutError("active_observation_cycle_timeout")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _raise_timeout)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        return builder(cycle_args)
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"active_observation_cycle_timeout:{timeout_seconds:g}s"
+        ) from exc
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+
+
+def _blocked_cycle_packet(*, reason: str, output_json: str) -> dict[str, Any]:
+    return {
+        "scope": "runtime_active_observation_monitor",
+        "status": "blocked",
+        "active_runtime_count": None,
+        "monitored_runtime_count": 0,
+        "runtime_summaries": [],
+        "runtime_packets": [],
+        "blockers": [reason],
+        "warnings": [],
+        "output_json": output_json,
+        "operator_command_plan": {
+            "next_step": "inspect_active_observation_cycle_timeout",
+            "not_executed": True,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "requires_official_final_gate": True,
+            "requires_explicit_owner_real_submit_authorization": True,
+        },
+        "safety_invariants": {
+            "uses_official_trading_console_api": True,
+            "monitors_active_runtimes": True,
+            "prepare_records_created": False,
+            "shadow_candidate_created": False,
+            "runtime_execution_intent_draft_created": False,
+            "recorded_execution_intent_created": False,
+            "submit_authorization_created": False,
+            "protection_plan_created": False,
+            "executable_execution_intent_created": False,
+            "local_registration_armed": False,
+            "exchange_submit_armed": False,
+            "execute_real_submit": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "position_opened": False,
+            "position_closed": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _cycle_failure_reason(exc: Exception) -> str:
+    message = str(exc).replace("\n", " ").strip()
+    if len(message) > 240:
+        message = message[:237] + "..."
+    return f"active_observation_cycle_failed:{type(exc).__name__}:{message}"
 
 
 def _loop_packet(
@@ -284,6 +385,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     loop_parser.add_argument("--max-iterations", type=int, default=1)
     loop_parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
+    loop_parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
     loop_parser.add_argument(
         "--loop-output-json",
         help="Optional path for the aggregate loop packet. Stdout remains JSON.",
@@ -294,6 +396,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return argparse.Namespace(
         max_iterations=loop_args.max_iterations,
         loop_interval_seconds=loop_args.loop_interval_seconds,
+        cycle_timeout_seconds=loop_args.cycle_timeout_seconds,
         loop_output_json=loop_args.loop_output_json,
         include_packets=loop_args.include_packets,
         output_dir=monitor_args.output_dir,
