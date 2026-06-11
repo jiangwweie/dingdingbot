@@ -144,6 +144,11 @@ def _forbidden_effects(loop_packet: dict[str, Any] | None, followup_packet: dict
             "exchange_write_called",
             "exchange_called",
             "exchange_order_submitted",
+            "executable_execution_intent_created",
+            "real_submit_requested",
+            "creates_execution_intent",
+            "places_order",
+            "calls_order_lifecycle",
             "order_created",
             "order_lifecycle_called",
             "order_lifecycle_submit_called",
@@ -155,6 +160,8 @@ def _forbidden_effects(loop_packet: dict[str, Any] | None, followup_packet: dict
                 effects.append(f"{source_name}.{key}")
         for item in safety.get("loop_forbidden_effects") or []:
             effects.append(f"{source_name}.loop_forbidden_effect:{item}")
+        for item in safety.get("arm_preview_forbidden_effects") or []:
+            effects.append(f"{source_name}.arm_preview_forbidden_effect:{item}")
         for item in safety.get("disabled_smoke_forbidden_effects") or []:
             effects.append(f"{source_name}.disabled_smoke_forbidden_effect:{item}")
     return sorted(set(effects))

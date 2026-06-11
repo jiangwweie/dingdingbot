@@ -242,6 +242,105 @@ def test_supervisor_blocks_when_child_packets_report_forbidden_effect(tmp_path):
     ]
 
 
+def test_supervisor_blocks_when_followup_reports_arm_preview_forbidden_effect(tmp_path):
+    def runner(command, stdout_path):
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-packet.json",
+                {
+                    "status": "ready_for_final_gate_preflight",
+                    "safety_invariants": {
+                        "exchange_write_called": False,
+                        "order_created": False,
+                        "order_lifecycle_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                    },
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-packet.json",
+                {
+                    "status": "disabled_smoke_blocked",
+                    "safety_invariants": {
+                        "exchange_called": False,
+                        "exchange_order_submitted": False,
+                        "order_lifecycle_submit_called": False,
+                        "arm_preview_forbidden_effects": [
+                            "handoff:order_lifecycle_adapter_result"
+                        ],
+                        "disabled_smoke_forbidden_effects": [],
+                    },
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+        _args(tmp_path),
+        runner=runner,
+    )
+
+    assert packet["status"] == "supervisor_blocked"
+    assert "supervisor_detected_forbidden_effects" in packet["blockers"]
+    assert packet["safety_invariants"]["forbidden_effects"] == [
+        "followup.arm_preview_forbidden_effect:handoff:order_lifecycle_adapter_result"
+    ]
+
+
+def test_supervisor_blocks_when_child_packet_requests_real_submit(tmp_path):
+    def runner(command, stdout_path):
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-packet.json",
+                {
+                    "status": "ready_for_final_gate_preflight",
+                    "safety_invariants": {
+                        "exchange_write_called": False,
+                        "order_created": False,
+                        "order_lifecycle_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                    },
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-packet.json",
+                {
+                    "status": "disabled_smoke_blocked",
+                    "safety_invariants": {
+                        "real_submit_requested": True,
+                        "creates_execution_intent": True,
+                    },
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+        _args(tmp_path),
+        runner=runner,
+    )
+
+    assert packet["status"] == "supervisor_blocked"
+    assert packet["safety_invariants"]["forbidden_effects"] == [
+        "followup.creates_execution_intent",
+        "followup.real_submit_requested",
+    ]
+
+
 def test_supervisor_runs_followup_after_ready_preflight_without_submit(tmp_path):
     calls = []
 
