@@ -2242,3 +2242,52 @@ Use this file for session progress and handoff notes.
   first live attempt state to decide the next controlled runtime attempt path,
   including whether to deploy the latest gate code before the next Tokyo
   rehearsal/live attempt.
+
+## 2026-06-11 (Tokyo Git Deploy 0e80bc5b)
+
+- Deployed `program/live-safe-v1` commit
+  `0e80bc5b345f3f4bce2c5a574a09c6f28de9aee0` to Tokyo via the git-based
+  runtime-governance deploy path:
+  `brc-runtime-governance-0e80bc5b-20260611T0947Z`.
+- The release includes:
+  - `3ba4158f6559389eb53bf1f8d1fd893242c38d26`
+    (`feat(console): require closed runtime review before retry`);
+  - `0e80bc5b345f3f4bce2c5a574a09c6f28de9aee0`
+    (`docs(ops): record strategy shadow planning verification`).
+- Deploy preflight:
+  - owner deploy packet status `ready_for_owner_git_deploy_decision`;
+  - git deploy plan status `ready_for_owner_authorized_remote_git_deploy_plan`;
+  - executor dry-run status `dry_run_ready`;
+  - first-real-submit remained blocked in the deploy packet;
+  - no new migrations were required (`084 -> 084`).
+- Apply result:
+  - `execute_tokyo_runtime_governance_git_deploy.py --apply` completed with
+    status `applied`;
+  - `commands_executed=16`, `commands_planned=16`;
+  - Tokyo `app/current` now points to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-0e80bc5b-20260611T0947Z`.
+- Postdeploy verification:
+  - HTTP health:
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`;
+  - `scripts/verify_tokyo_runtime_governance_postdeploy.py --json` returned
+    `postdeploy_acceptance_passed`;
+  - `scripts/probe_tokyo_runtime_governance_readonly.py --json` returned
+    `ready_for_controlled_deploy_preflight`.
+- Authenticated read-only Trading Console verification for
+  `AVAX/USDT:USDT` showed:
+  - `review_ledger.lifecycle_status=closed_reviewed`;
+  - `review_decision.status=closed_reviewed`;
+  - `strategy_outcome=small_bounded_loss`;
+  - `next_attempt_gate.gate=clear_for_next_preflight`;
+  - `next_attempt_gate.next_attempt_allowed_by_lifecycle=true`;
+  - `next_attempt_gate.action_allowed=false`;
+  - `next_attempt_gate.may_execute_live=false`;
+  - `review-state.right_tail_review.status=reviewed`;
+  - `small_loss_count=1`, `tail_win_count=0`, and
+    `max_r_multiple=-0.4558`.
+- Safety result:
+  - deployment did not create orders, ExecutionIntent records, OrderLifecycle
+    calls, exchange orders, withdrawal/transfer instructions, or runtime
+    budget mutations;
+  - the console now recognizes the first live attempt as a reviewed small
+    bounded loss and permits only the next preflight path, not direct trading.
