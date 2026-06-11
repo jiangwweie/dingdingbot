@@ -2683,3 +2683,63 @@ Use this file for session progress and handoff notes.
   - remote probe reported exchange write called `false`, order created
     `false`, position closed `false`, runtime state mutated `false`, and no
     withdrawal / transfer.
+
+## 2026-06-11 (Runtime Reduce-only Close Owner Packet)
+
+- Added and deployed `program/live-safe-v1` commit
+  `df5c4050f324c15c529059766689f2e8de03d96e` to Tokyo as
+  `brc-runtime-governance-df5c4050-20260611Tclosepacket`.
+- Added a non-executing Owner authorization packet for active runtime
+  reduce-only close review:
+  - domain model
+    `src/domain/runtime_reduce_only_close_authorization.py`;
+  - CLI
+    `scripts/build_runtime_reduce_only_close_owner_packet.py`;
+  - tests
+    `tests/unit/test_runtime_reduce_only_close_authorization.py`.
+- The packet converts the current `RuntimePositionExitPlan` into a reviewable
+  Owner authorization surface. It exposes:
+  - runtime / symbol / side;
+  - reduce-only close side;
+  - close quantity;
+  - notional reference;
+  - source monitor / exit-plan IDs;
+  - exact Owner approval env var and value.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_reduce_only_close_authorization.py tests/unit/test_runtime_live_position_monitor.py tests/unit/test_runtime_ops_scripts.py`
+    passed with `13 passed`;
+  - `python3 -m py_compile src/domain/runtime_reduce_only_close_authorization.py scripts/build_runtime_reduce_only_close_owner_packet.py tests/unit/test_runtime_reduce_only_close_authorization.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed head is
+    `df5c4050f324c15c529059766689f2e8de03d96e`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote Owner close packet for
+  `strategy-runtime-95655873b76c`:
+  - status `ready_for_owner_authorization`;
+  - symbol `AVAX/USDT:USDT`;
+  - side `short`;
+  - reduce-only side `buy`;
+  - close quantity `1.0`;
+  - close notional reference around `6.5730`;
+  - entry price `6.566`;
+  - stop price reference `6.639000000000000000`;
+  - blockers `[]`;
+  - warning `tp1_partial_quantity_below_min_qty_or_step`;
+  - Owner approval env
+    `OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE`;
+  - Owner approval value
+    `runtime-reduce-only-close:strategy-runtime-95655873b76c:AVAX/USDT:USDT:short:qty=1.0:owner-authorized`.
+- Safety proof:
+  - this stage did not submit, cancel, amend, or close any exchange order;
+  - it did not create an order, ExecutionIntent, withdrawal, or transfer;
+  - it did not mutate runtime state;
+  - the packet is explicitly not an order, not an execution intent, and not
+    execution authority.
+- Remaining live action:
+  - a real reduce-only close still requires a separate explicit Owner action
+    using the exact approval value above, followed by fresh fact revalidation.
