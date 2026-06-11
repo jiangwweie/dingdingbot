@@ -2517,7 +2517,17 @@ class RuntimeExecutionIntentAdapterService:
             .acquire_exchange_submit_execution_lock(lock_result)
         )
         if not acquired:
-            return existing
+            if _can_retry_exchange_submit_entry_failure(existing):
+                warnings.append(
+                    "retrying_entry_submit_failure_before_exchange_acceptance"
+                )
+            else:
+                return existing
+        retry_source_execution_result = existing if (
+            not acquired
+            and "retrying_entry_submit_failure_before_exchange_acceptance"
+            in warnings
+        ) else None
 
         submitted_orders = []
         exchange_call_count = 0
@@ -2536,6 +2546,7 @@ class RuntimeExecutionIntentAdapterService:
                 price=request.price,
                 trigger_price=request.trigger_price,
                 reduce_only=request.reduce_only,
+                position_side=request.position_side,
                 client_order_id=request.local_order_id,
             )
             if not getattr(placement_result, "is_success", False):
@@ -2555,6 +2566,11 @@ class RuntimeExecutionIntentAdapterService:
                     now_ms=_now_ms(),
                     execution_mode=execution_mode,
                 )
+                if retry_source_execution_result is not None:
+                    failed_result = _annotate_exchange_submit_execution_retry_result(
+                        failed_result,
+                        previous=retry_source_execution_result,
+                    )
                 completed_failed_result = await (
                     self._exchange_submit_execution_result_repository
                     .complete_exchange_submit_execution_result(failed_result)
@@ -2592,6 +2608,11 @@ class RuntimeExecutionIntentAdapterService:
             now_ms=_now_ms(),
             execution_mode=execution_mode,
         )
+        if retry_source_execution_result is not None:
+            result = _annotate_exchange_submit_execution_retry_result(
+                result,
+                previous=retry_source_execution_result,
+            )
         return await (
             self._exchange_submit_execution_result_repository
             .complete_exchange_submit_execution_result(result)
@@ -3796,6 +3817,81 @@ def _annotate_local_registration_retry_result(
     )
     warnings = list(result.warnings)
     warnings.append("retried_failed_local_order_registration_without_exchange")
+    return result.model_copy(
+        update={
+            "metadata": metadata,
+            "warnings": _dedupe(warnings),
+        }
+    )
+
+
+def _can_retry_exchange_submit_entry_failure(
+    result: RuntimeExecutionExchangeSubmitExecutionResult,
+) -> bool:
+    if result.status != RuntimeExecutionExchangeSubmitExecutionStatus.ENTRY_SUBMIT_FAILED:
+        return False
+    if result.exchange_order_submitted or result.order_lifecycle_submit_called:
+        return False
+    if result.submitted_orders or result.submitted_exchange_order_ids:
+        return False
+    if result.entry_exchange_order_id or result.protection_exchange_order_ids:
+        return False
+    if (
+        result.execution_intent_status_changed
+        or result.owner_bounded_execution_called
+        or result.withdrawal_or_transfer_created
+    ):
+        return False
+    metadata = dict(result.metadata or {})
+    if metadata.get("entry_submit_failed_before_exchange_acceptance") is not True:
+        return False
+    if metadata.get("does_not_change_execution_intent_status") is False:
+        return False
+    if metadata.get("does_not_call_owner_bounded_execution") is False:
+        return False
+    if metadata.get("does_not_create_withdrawal_or_transfer") is False:
+        return False
+    return True
+
+
+def _annotate_exchange_submit_execution_retry_result(
+    result: RuntimeExecutionExchangeSubmitExecutionResult,
+    *,
+    previous: RuntimeExecutionExchangeSubmitExecutionResult,
+) -> RuntimeExecutionExchangeSubmitExecutionResult:
+    metadata = dict(result.metadata or {})
+    metadata.update(
+        {
+            "retried_from_entry_submit_failure": True,
+            "previous_execution_result_id": previous.execution_result_id,
+            "previous_status": previous.status.value,
+            "previous_failed_local_order_id": previous.failed_local_order_id,
+            "previous_failed_order_role": previous.failed_order_role,
+            "previous_failed_reason": previous.failed_reason,
+            "previous_exchange_call_count": previous.exchange_call_count,
+            "previous_submitted_exchange_order_ids": list(
+                previous.submitted_exchange_order_ids
+            ),
+            "retry_safety": {
+                "exchange_order_submitted": previous.exchange_order_submitted,
+                "order_lifecycle_submit_called": (
+                    previous.order_lifecycle_submit_called
+                ),
+                "submitted_orders_count": len(previous.submitted_orders),
+                "execution_intent_status_changed": (
+                    previous.execution_intent_status_changed
+                ),
+                "owner_bounded_execution_called": (
+                    previous.owner_bounded_execution_called
+                ),
+                "withdrawal_or_transfer_created": (
+                    previous.withdrawal_or_transfer_created
+                ),
+            },
+        }
+    )
+    warnings = list(result.warnings)
+    warnings.append("retried_entry_submit_failure_before_exchange_acceptance")
     return result.model_copy(
         update={
             "metadata": metadata,

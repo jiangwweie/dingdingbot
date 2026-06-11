@@ -171,6 +171,7 @@ class _ExchangeGateway:
         price=None,
         trigger_price=None,
         reduce_only=False,
+        position_side=None,
         client_order_id=None,
     ):
         self.calls.append(
@@ -182,6 +183,7 @@ class _ExchangeGateway:
                 "price": price,
                 "trigger_price": trigger_price,
                 "reduce_only": reduce_only,
+                "position_side": position_side,
                 "client_order_id": client_order_id,
             }
         )
@@ -1885,6 +1887,7 @@ def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
     assert packet.entry_submit_request_preview is not None
     assert packet.entry_submit_request_preview.gateway_order_type == "market"
     assert packet.entry_submit_request_preview.gateway_side == "buy"
+    assert packet.entry_submit_request_preview.position_side == "LONG"
     assert packet.entry_submit_request_preview.reduce_only is False
     assert packet.entry_submit_request_preview.future_client_order_reference == (
         "runtime-order-draft-auth-1-entry"
@@ -1892,8 +1895,47 @@ def test_exchange_submit_packet_preview_maps_local_orders_without_submit():
     protection = packet.protection_submit_request_previews[0]
     assert protection.gateway_order_type == "stop_market"
     assert protection.gateway_side == "sell"
+    assert protection.position_side == "LONG"
     assert protection.trigger_price == Decimal("587.50")
     assert protection.reduce_only is True
+
+    short_preview = preview.model_copy(
+        update={
+            "side": "short",
+            "local_order_registration_drafts": [
+                draft.model_copy(update={"direction": Direction.SHORT})
+                for draft in preview.local_order_registration_drafts
+            ],
+        }
+    )
+    short_orders = build_runtime_execution_orders_for_registration(
+        registration_preview=short_preview
+    )
+    short_adapter_result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=short_preview,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        duplicate_submit_lock_acquired=True,
+        registered_orders=short_orders,
+        now_ms=NOW_MS,
+    )
+    short_binding = build_runtime_execution_intent_local_order_binding(
+        intent=_runtime_intent(short_preview),
+        adapter_result=short_adapter_result,
+        now_ms=NOW_MS + 1,
+    )
+    short_packet = build_runtime_execution_exchange_submit_packet_preview(
+        binding=short_binding,
+        local_orders=short_orders,
+        now_ms=NOW_MS + 2,
+    )
+    assert short_packet.entry_submit_request_preview is not None
+    assert short_packet.entry_submit_request_preview.gateway_side == "sell"
+    assert short_packet.entry_submit_request_preview.position_side == "SHORT"
+    short_protection = short_packet.protection_submit_request_previews[0]
+    assert short_protection.gateway_side == "buy"
+    assert short_protection.position_side == "SHORT"
+
     assert packet.exchange_submit_adapter_enabled is False
     assert packet.exchange_submit_adapter_implemented is False
     assert packet.execution_intent_status_changed is False
@@ -3633,6 +3675,7 @@ async def test_service_exchange_submit_execution_submits_entry_and_protection():
     ]
     assert gateway.calls[0]["reduce_only"] is False
     assert gateway.calls[1]["reduce_only"] is True
+    assert [call["position_side"] for call in gateway.calls] == ["LONG", "LONG"]
     assert result.exchange_called is True
     assert result.exchange_order_submitted is True
     assert result.order_lifecycle_submit_called is True
@@ -3691,6 +3734,60 @@ async def test_service_exchange_submit_execution_reports_entry_failure_without_r
     assert result.metadata["protection_failure_requires_recovery_task"] is False
     assert context.exchange_submit_execution_result_repo.acquire_calls == 1
     assert context.exchange_submit_execution_result_repo.complete_calls == 1
+    assert context.recovery_repo.create_calls == []
+    assert context.intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_service_exchange_submit_execution_retries_entry_failure_before_acceptance():
+    context = await _ready_exchange_submit_execution_context(
+        exchange_gateway=_ExchangeGateway(
+            fail_on_client_order_id="runtime-order-draft-auth-1-entry",
+        ),
+    )
+    first = await context.service.exchange_submit_execution_result_for_authorization(
+        "auth-1",
+        exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
+        exchange_submit_enablement_decision=context.exchange_decision,
+    )
+    retry_gateway = _ExchangeGateway()
+    context.service._exchange_gateway = retry_gateway
+
+    second = await context.service.exchange_submit_execution_result_for_authorization(
+        "auth-1",
+        exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="in_memory_simulation",
+        exchange_submit_enablement_decision=context.exchange_decision,
+    )
+
+    assert (
+        first.status
+        == RuntimeExecutionExchangeSubmitExecutionStatus.ENTRY_SUBMIT_FAILED
+    )
+    assert (
+        second.status
+        == RuntimeExecutionExchangeSubmitExecutionStatus
+        .EXCHANGE_SUBMIT_ORDERS_SUBMITTED
+    )
+    assert [call["client_order_id"] for call in retry_gateway.calls] == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert "retried_entry_submit_failure_before_exchange_acceptance" in (
+        second.warnings
+    )
+    assert second.metadata["retried_from_entry_submit_failure"] is True
+    assert second.metadata["previous_status"] == (
+        RuntimeExecutionExchangeSubmitExecutionStatus.ENTRY_SUBMIT_FAILED.value
+    )
+    assert second.metadata["previous_failed_local_order_id"] == (
+        "runtime-order-draft-auth-1-entry"
+    )
+    assert second.metadata["retry_safety"]["exchange_order_submitted"] is False
+    assert second.metadata["retry_safety"]["order_lifecycle_submit_called"] is False
+    assert context.exchange_submit_execution_result_repo.acquire_calls == 2
+    assert context.exchange_submit_execution_result_repo.complete_calls == 2
     assert context.recovery_repo.create_calls == []
     assert context.intent_repo.saved == []
 

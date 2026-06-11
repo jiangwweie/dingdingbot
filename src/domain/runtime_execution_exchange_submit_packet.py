@@ -45,6 +45,7 @@ class RuntimeExecutionExchangeOrderSubmitRequestPreview(
     direction: Direction
     gateway_order_type: str = Field(min_length=1, max_length=32)
     gateway_side: str = Field(pattern="^(buy|sell)$")
+    position_side: Optional[str] = Field(default=None, pattern="^(LONG|SHORT)$")
     amount: Decimal = Field(gt=Decimal("0"))
     price: Optional[Decimal] = None
     trigger_price: Optional[Decimal] = None
@@ -368,6 +369,7 @@ def _request_preview_for_order(
         direction=order.direction,
         gateway_order_type=gateway_order_type,
         gateway_side=_gateway_side(order),
+        position_side=_gateway_position_side(order),
         amount=order.requested_qty,
         price=order.price,
         trigger_price=order.trigger_price,
@@ -390,6 +392,10 @@ def _gateway_side(order: Order) -> str:
     if order.order_role == OrderRole.ENTRY:
         return "buy" if order.direction == Direction.LONG else "sell"
     return "sell" if order.direction == Direction.LONG else "buy"
+
+
+def _gateway_position_side(order: Order) -> str:
+    return "LONG" if order.direction == Direction.LONG else "SHORT"
 
 
 def _duplicates(items: list[str]) -> list[str]:
