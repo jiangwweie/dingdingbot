@@ -22,10 +22,11 @@ def _loop_packet(
     *,
     authorization_id="auth-1",
     forbidden: bool = False,
+    stop_reason: str = "running",
 ):
     return {
         "status": status,
-        "stop_reason": "running",
+        "stop_reason": stop_reason,
         "latest_summary": {
             "status": status,
             "prepared_authorization_id": authorization_id,
@@ -133,6 +134,34 @@ def test_followup_waits_when_loop_is_not_ready():
     assert packet["status"] == "waiting_for_ready_final_gate_preflight"
     assert packet["prepared_authorization_id"] == "auth-1"
     assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert calls == []
+
+
+def test_followup_marks_completed_no_signal_window_without_running_smoke():
+    calls = []
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=_loop_packet(
+            "waiting_for_signal",
+            authorization_id=None,
+            stop_reason="max_iterations_exhausted",
+        ),
+        arm_preview_runner=lambda auth_id, args: calls.append(("arm", auth_id)) or {},
+        disabled_smoke_runner=lambda auth_id, args: calls.append(("disabled", auth_id))
+        or {},
+    )
+
+    assert packet["status"] == "observation_window_complete_no_signal"
+    assert packet["source_loop_status"] == "waiting_for_signal"
+    assert packet["source_loop_stop_reason"] == "max_iterations_exhausted"
+    assert packet["operator_command_plan"]["next_step"] == (
+        "review_no_signal_window_or_start_new_observation"
+    )
+    assert packet["operator_command_plan"]["arm_preview_called"] is False
+    assert packet["operator_command_plan"]["disabled_smoke_called"] is False
+    assert packet["safety_invariants"]["real_submit_requested"] is False
+    assert packet["safety_invariants"]["exchange_order_submitted"] is False
     assert calls == []
 
 

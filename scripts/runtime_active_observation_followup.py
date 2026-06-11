@@ -31,6 +31,7 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
 
 READY_STATUS = "ready_for_final_gate_preflight"
 READY_FOR_PREPARE_STATUS = "ready_for_prepare"
+MAX_ITERATIONS_EXHAUSTED = "max_iterations_exhausted"
 FORBIDDEN_LOOP_FLAGS = (
     "exchange_write_called",
     "order_created",
@@ -223,6 +224,11 @@ def build_followup_packet(
         blockers.append("loop_packet_contains_forbidden_effects")
     if status == READY_FOR_PREPARE_STATUS:
         followup_status = "ready_for_prepare_records"
+    elif (
+        status == "waiting_for_signal"
+        and packet.get("stop_reason") == MAX_ITERATIONS_EXHAUSTED
+    ):
+        followup_status = "observation_window_complete_no_signal"
     elif status != READY_STATUS:
         followup_status = "waiting_for_ready_final_gate_preflight"
     elif not authorization_id:
@@ -318,6 +324,8 @@ def build_followup_packet(
 def _next_step(status: str) -> str:
     if status == "ready_for_prepare_records":
         return "review_ready_signal_then_continue_prepare_record_path"
+    if status == "observation_window_complete_no_signal":
+        return "review_no_signal_window_or_start_new_observation"
     if status == "waiting_for_ready_final_gate_preflight":
         return "continue_active_observation_loop"
     if status == "ready_for_disabled_smoke":
@@ -363,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if packet["status"] in {
+        "observation_window_complete_no_signal",
         "waiting_for_ready_final_gate_preflight",
         "ready_for_disabled_smoke",
         "disabled_smoke_completed",
