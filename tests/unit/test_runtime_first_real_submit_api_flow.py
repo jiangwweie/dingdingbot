@@ -23,6 +23,8 @@ class _FakeClient:
         evidence_blockers: list[str] | None = None,
         handoff_http_status: int = 200,
         handoff_blockers: list[str] | None = None,
+        disabled_action_http_status: int = 200,
+        disabled_action_detail: str | None = None,
     ) -> None:
         self.calls: list[dict] = []
         self.existing_attempt_policy = existing_attempt_policy
@@ -33,6 +35,8 @@ class _FakeClient:
         self.evidence_blockers = evidence_blockers or []
         self.handoff_http_status = handoff_http_status
         self.handoff_blockers = handoff_blockers or []
+        self.disabled_action_http_status = disabled_action_http_status
+        self.disabled_action_detail = disabled_action_detail
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -175,6 +179,12 @@ class _FakeClient:
             return {"http_status": 200, "body": {"status": "ready_for_owner_final_review"}}
         if "runtime-execution-first-real-submit-actions" in path:
             if query and query.get("owner_confirmed_for_first_real_submit_action") is False:
+                if self.disabled_action_http_status >= 300:
+                    return {
+                        "http_status": self.disabled_action_http_status,
+                        "body": {"detail": self.disabled_action_detail},
+                        "error": True,
+                    }
                 return {
                     "http_status": 200,
                     "body": {
@@ -472,6 +482,33 @@ def test_disabled_smoke_requires_authorization_id():
 
     assert "authorization_id_required_for_disabled_smoke" in report["blockers"]
     assert client.calls == []
+
+
+def test_disabled_smoke_reports_missing_prerequisite_detail():
+    client = _FakeClient(
+        disabled_action_http_status=404,
+        disabled_action_detail="RuntimeExecutionExchangeSubmitPacketPreview not found",
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="disabled-smoke",
+            authorization_id="auth-1",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "preview_disabled_first_real_submit_action_http_404" in report["blockers"]
+    assert report["steps"][0]["detail"] == (
+        "RuntimeExecutionExchangeSubmitPacketPreview not found"
+    )
+    assert (
+        "disabled_first_real_submit_action_prerequisite_missing:"
+        "RuntimeExecutionExchangeSubmitPacketPreview not found"
+    ) in report["warnings"]
+    assert report["ready_for_real_submit_action"] is False
 
 
 def test_arm_blocks_before_attempt_mutation_when_submit_facts_are_stale():

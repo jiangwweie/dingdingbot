@@ -774,6 +774,17 @@ class FirstRealSubmitApiFlow:
                     )
                 ]
             )
+        if result.get("http_status") == 404:
+            detail = _optional_detail(body)
+            if detail:
+                self.state.add_warnings(
+                    [
+                        (
+                            "disabled_first_real_submit_action_prerequisite_missing:"
+                            f"{detail}"
+                        )
+                    ]
+                )
 
     def _execute_first_real_submit(self) -> None:
         authorization_id = self._required_id("authorization_id")
@@ -1003,6 +1014,7 @@ class FirstRealSubmitApiFlow:
             "query_keys": sorted(k for k, v in (query or {}).items() if v is not None),
             "http_status": result.get("http_status"),
             "status": body_value.get("status") if isinstance(body_value, dict) else None,
+            "detail": _optional_detail(body_value),
             "id_summary": _id_summary(body_value),
             "blockers": body_value.get("blockers", []) if isinstance(body_value, dict) else [],
             "warnings": body_value.get("warnings", []) if isinstance(body_value, dict) else [],
@@ -1066,6 +1078,14 @@ class FirstRealSubmitApiFlow:
 def _body(result: dict[str, Any]) -> dict[str, Any]:
     body = result.get("body")
     return body if isinstance(body, dict) else {}
+
+
+def _optional_detail(value: dict[str, Any]) -> str | None:
+    detail = value.get("detail")
+    if detail is None:
+        return None
+    text = str(detail).strip()
+    return text or None
 
 
 def _id_summary(value: Any) -> dict[str, Any]:
