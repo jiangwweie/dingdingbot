@@ -4,6 +4,7 @@ import os
 import inspect
 import re
 import time
+import uuid
 from decimal import Decimal
 from typing import Any, Literal, Mapping, Optional
 
@@ -53,6 +54,12 @@ from src.application.strategy_trial_carrier_expansion import (
     SecondCarrierExpansionResponse,
     build_second_carrier_expansion_bootstrap,
 )
+from src.application.bounded_risk_campaign_service import BrcRuleViolation
+from src.application.llm_advisory_plane import (
+    LlmAdvisoryPlaneService,
+    NotificationServiceAdvisoryPush,
+)
+from src.application.llm_context_packet_builder import build_llm_context_packet
 from src.application.multi_carrier_budget_authorization import (
     MultiCarrierBudgetAuthorization,
     MultiCarrierBudgetAuthorizationCreateRequest,
@@ -148,6 +155,13 @@ from src.domain.owner_capital_baseline_snapshot import (
     OwnerCapitalBaselineSnapshot,
     OwnerCapitalBaselineSnapshotSource,
 )
+from src.domain.llm_advisory import (
+    LlmAdvisoryAllowedAction,
+    LlmAdvisoryDeliveryChannel,
+    LlmAdvisoryStatus,
+    LlmConsumableEvent,
+    LlmConsumableEventType,
+)
 from src.domain.experimental_runtime_profile_proposal import (
     ExperimentalRuntimeProfileProposal,
 )
@@ -170,6 +184,7 @@ from src.infrastructure.pg_owner_capital_baseline_snapshot_repository import (
 from src.infrastructure.pg_strategy_runtime_promotion_confirmation_repository import (
     PgStrategyRuntimePromotionConfirmationRepository,
 )
+from src.infrastructure.pg_llm_advisory_repository import PgLlmAdvisoryRepository
 
 
 router = APIRouter(
@@ -189,6 +204,64 @@ workflow_router = APIRouter(
     tags=["BRC LLM Workflows"],
     dependencies=[Depends(require_operator_session)],
 )
+
+advisory_router = APIRouter(
+    prefix="/api/brc/llm/advisory",
+    tags=["BRC LLM Advisory"],
+    dependencies=[Depends(require_operator_session)],
+)
+
+
+class LlmAdvisoryEventCreateRequest(BaseModel):
+    event_id: Optional[str] = Field(default=None, max_length=128)
+    event_type: LlmConsumableEventType
+    source_type: str = Field(default="owner_console", min_length=1, max_length=64)
+    source_id: str = Field(default="manual_advisory_event", min_length=1, max_length=128)
+    severity: str = Field(default="info", max_length=32)
+    symbol: Optional[str] = Field(default=None, max_length=64)
+    timeframe: Optional[str] = Field(default=None, max_length=32)
+    strategy_family_ids: list[str] = Field(default_factory=list)
+    dedupe_key: Optional[str] = Field(default=None, max_length=256)
+    occurred_at_ms: Optional[int] = Field(default=None, ge=0)
+    context_packet: dict[str, Any] = Field(default_factory=dict)
+    allowed_llm_actions: list[LlmAdvisoryAllowedAction] = Field(default_factory=list)
+    delivery_policy: list[LlmAdvisoryDeliveryChannel] = Field(default_factory=list)
+    push_to_feishu: bool = False
+
+
+class LlmAdvisoryEventResponse(BaseModel):
+    event: dict[str, Any]
+    recommendation: dict[str, Any]
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "LLM advisory only. This endpoint records advisory output and may push "
+        "Feishu, but it cannot create Owner action, ExecutionIntent, order, "
+        "exchange call, transfer, or withdrawal."
+    )
+
+
+class LlmAdvisoryEventListResponse(BaseModel):
+    events: list[dict[str, Any]]
+    live_ready: Literal[False] = False
+
+
+class LlmAdvisoryRecommendationResponse(BaseModel):
+    recommendation: dict[str, Any]
+    live_ready: Literal[False] = False
+
+
+class LlmAdvisoryRecommendationListResponse(BaseModel):
+    recommendations: list[dict[str, Any]]
+    live_ready: Literal[False] = False
+
+
+class LlmAdvisoryInboxResponse(BaseModel):
+    inbox: dict[str, Any]
+    live_ready: Literal[False] = False
+    access_boundary: str = (
+        "LLM advisory inbox is push-only/read-only for Owner review. It cannot "
+        "authorize execution, create orders, call exchange, transfer, or withdraw."
+    )
 
 
 class BrcLiveLifecyclePendingOpenReviewRequest(BaseModel):
@@ -7446,6 +7519,172 @@ async def run_operator_action(
     body: runtime.BrcOperatorRunRequest,
 ) -> runtime.BrcOperatorRunResponse:
     return await runtime.run_brc_operator_action(request, body)
+
+
+def _get_llm_advisory_service(request: Request) -> LlmAdvisoryPlaneService:
+    repository = getattr(request.app.state, "llm_advisory_repository", None)
+    if repository is None:
+        repository = PgLlmAdvisoryRepository()
+        request.app.state.llm_advisory_repository = repository
+    runtime_context = getattr(request.app.state, "runtime", None)
+    notification_service = getattr(runtime_context, "notification_service", None)
+    push_service = (
+        NotificationServiceAdvisoryPush(notification_service=notification_service)
+        if notification_service is not None
+        else None
+    )
+    return LlmAdvisoryPlaneService(repository=repository, push_service=push_service)
+
+
+def _default_allowed_llm_actions(
+    event_type: LlmConsumableEventType,
+) -> list[LlmAdvisoryAllowedAction]:
+    if event_type in {
+        LlmConsumableEventType.MARKET_REGIME_CHANGED,
+        LlmConsumableEventType.STRATEGY_CANDIDATE_OBSERVED,
+    }:
+        return [
+            LlmAdvisoryAllowedAction.EXPLAIN_MARKET_CONTEXT,
+            LlmAdvisoryAllowedAction.RECOMMEND_REGISTERED_STRATEGY_FAMILY,
+        ]
+    if event_type in {
+        LlmConsumableEventType.FINAL_GATE_BLOCKED,
+        LlmConsumableEventType.PROTECTION_ANOMALY_DETECTED,
+        LlmConsumableEventType.RECONCILIATION_MISMATCH,
+    }:
+        return [
+            LlmAdvisoryAllowedAction.EXPLAIN_BLOCKER,
+            LlmAdvisoryAllowedAction.SUMMARIZE_AUDIT,
+        ]
+    if event_type == LlmConsumableEventType.TRADE_CLOSED:
+        return [LlmAdvisoryAllowedAction.REVIEW_CLOSED_TRADE]
+    if event_type in {
+        LlmConsumableEventType.REVIEW_DUE,
+        LlmConsumableEventType.DAILY_AUDIT_DIGEST,
+        LlmConsumableEventType.RUNTIME_BUDGET_CHANGED,
+    }:
+        return [LlmAdvisoryAllowedAction.SUMMARIZE_AUDIT]
+    return [
+        LlmAdvisoryAllowedAction.SUMMARIZE_AUDIT,
+        LlmAdvisoryAllowedAction.EXPLAIN_MARKET_CONTEXT,
+    ]
+
+
+@advisory_router.post("/events", response_model=LlmAdvisoryEventResponse)
+async def create_llm_advisory_event(
+    request: Request,
+    body: LlmAdvisoryEventCreateRequest,
+) -> LlmAdvisoryEventResponse:
+    service = _get_llm_advisory_service(request)
+    await service.initialize()
+    now_ms = int(time.time() * 1000)
+    delivery_policy = list(body.delivery_policy or [LlmAdvisoryDeliveryChannel.LEDGER_ONLY])
+    if body.push_to_feishu and LlmAdvisoryDeliveryChannel.FEISHU_PUSH not in delivery_policy:
+        delivery_policy.append(LlmAdvisoryDeliveryChannel.FEISHU_PUSH)
+    event = LlmConsumableEvent(
+        event_id=body.event_id or f"llm-event-{uuid.uuid4().hex[:12]}",
+        event_type=body.event_type,
+        source_type=body.source_type,
+        source_id=body.source_id,
+        severity=body.severity,
+        symbol=body.symbol,
+        timeframe=body.timeframe,
+        strategy_family_ids=list(body.strategy_family_ids),
+        dedupe_key=body.dedupe_key,
+        occurred_at_ms=body.occurred_at_ms or now_ms,
+        context_packet=build_llm_context_packet(
+            raw_packet=body.context_packet,
+            now_ms=now_ms,
+            fallback_packet_id=f"llm-packet-{uuid.uuid4().hex[:12]}",
+        ),
+        allowed_llm_actions=list(
+            body.allowed_llm_actions or _default_allowed_llm_actions(body.event_type)
+        ),
+        delivery_policy=delivery_policy,
+        created_at_ms=now_ms,
+    )
+    try:
+        result = await service.consume_event(event)
+    except BrcRuleViolation as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return LlmAdvisoryEventResponse(
+        event=result.event.model_dump(mode="json"),
+        recommendation=result.recommendation.model_dump(mode="json"),
+    )
+
+
+@advisory_router.get("/events", response_model=LlmAdvisoryEventListResponse)
+async def list_llm_advisory_events(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    event_type: Optional[LlmConsumableEventType] = Query(default=None),
+) -> LlmAdvisoryEventListResponse:
+    service = _get_llm_advisory_service(request)
+    await service.initialize()
+    events = await service.list_events(
+        limit=limit,
+        event_type=event_type.value if event_type is not None else None,
+    )
+    return LlmAdvisoryEventListResponse(
+        events=[event.model_dump(mode="json") for event in events],
+    )
+
+
+@advisory_router.get(
+    "/recommendations",
+    response_model=LlmAdvisoryRecommendationListResponse,
+)
+async def list_llm_advisory_recommendations(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    event_type: Optional[LlmConsumableEventType] = Query(default=None),
+    status: Optional[LlmAdvisoryStatus] = Query(default=None),
+) -> LlmAdvisoryRecommendationListResponse:
+    service = _get_llm_advisory_service(request)
+    await service.initialize()
+    recommendations = await service.list_recommendations(
+        limit=limit,
+        event_type=event_type.value if event_type is not None else None,
+        status=status.value if status is not None else None,
+    )
+    return LlmAdvisoryRecommendationListResponse(
+        recommendations=[item.model_dump(mode="json") for item in recommendations],
+    )
+
+
+@advisory_router.get(
+    "/recommendations/{recommendation_id}",
+    response_model=LlmAdvisoryRecommendationResponse,
+)
+async def get_llm_advisory_recommendation(
+    recommendation_id: str,
+    request: Request,
+) -> LlmAdvisoryRecommendationResponse:
+    service = _get_llm_advisory_service(request)
+    await service.initialize()
+    recommendation = await service.get_recommendation(recommendation_id)
+    if recommendation is None:
+        raise HTTPException(status_code=404, detail="llm_advisory_recommendation_not_found")
+    return LlmAdvisoryRecommendationResponse(
+        recommendation=recommendation.model_dump(mode="json"),
+    )
+
+
+@advisory_router.get("/inbox", response_model=LlmAdvisoryInboxResponse)
+async def get_llm_advisory_inbox(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    event_type: Optional[LlmConsumableEventType] = Query(default=None),
+    status: Optional[LlmAdvisoryStatus] = Query(default=None),
+) -> LlmAdvisoryInboxResponse:
+    service = _get_llm_advisory_service(request)
+    await service.initialize()
+    inbox = await service.inbox_summary(
+        limit=limit,
+        event_type=event_type.value if event_type is not None else None,
+        status=status.value if status is not None else None,
+    )
+    return LlmAdvisoryInboxResponse(inbox=inbox.model_dump(mode="json"))
 
 
 @workflow_router.post("", response_model=runtime.BrcLlmWorkflowResponse)

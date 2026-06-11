@@ -34,6 +34,7 @@ from src.infrastructure.connection_pool import close_all_connections
 from src.infrastructure.database import close_db
 from src.interfaces import api_config_globals as _config_globals
 from src.interfaces.api_brc_console import (
+    advisory_router,
     close_owner_bounded_exchange_gateway,
     dev_testnet_router,
     operator_router,
@@ -282,6 +283,7 @@ app.include_router(trading_console_router)
 app.include_router(brc_router)
 app.include_router(operator_router)
 app.include_router(workflow_router)
+app.include_router(advisory_router)
 app.include_router(dev_testnet_router)
 
 

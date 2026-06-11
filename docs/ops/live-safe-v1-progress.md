@@ -16,6 +16,33 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-11 (LLM Advisory Asset Replay v1)
+
+- Created `codex/llm-advisory-replay-v1` from the current
+  `program/live-safe-v1` integration baseline to replay useful LLM assets
+  without merging the stale submit-chain work from
+  `codex/llm-advisory-plane-feishu-design`.
+- Replayed the non-overlapping advisory assets:
+  - LLM advisory domain/event/recommendation models;
+  - context packet builder;
+  - provider-output safety checks;
+  - Feishu push-only card formatting;
+  - advisory eval and event auto-publisher helpers;
+  - PG advisory repository and Alembic migration `081`;
+  - operator-auth `/api/brc/llm/advisory/*` API surface;
+  - ADR-0013 and strategy evolution agent plan.
+- Explicitly did not merge the old LLM branch's runtime submit-chain commits.
+  Trusted submit facts, first-submit packets, gateway readiness, recovery, and
+  submit outcome review remain governed by the current mainline implementation
+  unless a later gap audit identifies a precise missing slice.
+- Preserved execution boundaries: LLM advisory can record events, produce
+  recommendations, and optionally push Feishu notifications, but it cannot
+  create Owner actions, SignalEvaluation, OrderCandidate, ExecutionIntent,
+  orders, exchange calls, transfers, or withdrawals.
+- Verification passed:
+  - `python3 -m compileall -q src/domain/llm_advisory.py src/application/llm_advisory_cards.py src/application/llm_advisory_eval.py src/application/llm_advisory_plane.py src/application/llm_advisory_safety.py src/application/llm_context_packet_builder.py src/application/llm_event_autopublisher.py src/infrastructure/pg_llm_advisory_repository.py src/infrastructure/pg_models.py src/interfaces/api.py src/interfaces/api_brc_console.py tests/unit/test_llm_advisory_plane.py migrations/versions/2026-06-11-081_create_llm_advisory_plane.py`
+  - `pytest -q tests/unit/test_llm_advisory_plane.py` -> 16 passed
+
 ## 2026-06-08 (BRC Candidate-to-Action Product Loop Sprint)
 
 - Added backend-owned `CandidateActionProductLoop` contract that composes

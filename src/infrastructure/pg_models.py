@@ -4763,6 +4763,285 @@ class PGRuntimeExecutionProtectionFailurePolicyORM(PGCoreBase):
     )
 
 
+class PGLlmConsumableEventORM(PGCoreBase):
+    """Typed event consumed by the LLM advisory plane."""
+
+    __tablename__ = "llm_consumable_events"
+
+    event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False, default="info")
+    symbol: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    timeframe: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    strategy_family_ids: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    dedupe_key: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    occurred_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    context_packet: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    allowed_llm_actions: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    delivery_policy: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    not_execution_authority: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    owner_action_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    execution_intent_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('market_regime_changed', 'strategy_candidate_observed', "
+            "'runtime_budget_changed', 'final_gate_blocked', 'order_candidate_created', "
+            "'protection_anomaly_detected', 'reconciliation_mismatch', 'trade_closed', "
+            "'review_due', 'daily_audit_digest', 'owner_requested_analysis')",
+            name="ck_llm_consumable_events_type",
+        ),
+        CheckConstraint(
+            "not_execution_authority = true",
+            name="ck_llm_consumable_events_not_authority",
+        ),
+        CheckConstraint(
+            "owner_action_enabled = false",
+            name="ck_llm_consumable_events_no_owner_action",
+        ),
+        CheckConstraint(
+            "execution_intent_created = false",
+            name="ck_llm_consumable_events_no_intent",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_llm_consumable_events_no_order",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_llm_consumable_events_no_exchange",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_llm_consumable_events_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_llm_consumable_events_no_transfer",
+        ),
+        CheckConstraint("live_ready = false", name="ck_llm_consumable_events_no_live"),
+        Index("idx_llm_consumable_events_type_time", "event_type", "created_at_ms"),
+        Index("idx_llm_consumable_events_source", "source_type", "source_id"),
+        Index("idx_llm_consumable_events_dedupe", "dedupe_key"),
+    )
+
+
+class PGLlmAdvisoryRecommendationORM(PGCoreBase):
+    """Persisted LLM advisory recommendation ledger."""
+
+    __tablename__ = "llm_advisory_recommendations"
+
+    recommendation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    recommendation_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(8, 6), nullable=False)
+    recommended_strategy_family_ids: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    observe_only_strategy_family_ids: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    reason_codes: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    risk_notes: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    missing_facts: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    research_idea_notes: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    review_notes: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    feishu_card_type: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="generic_advisory",
+    )
+    provider_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_response_summary: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    delivery_channels: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    owner_action_route: Mapped[str] = mapped_column(
+        String(256),
+        nullable=False,
+        default="/console",
+    )
+    owner_action_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pushed_to_feishu_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    push_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    updated_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    not_execution_authority: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    strategy_execution_authorized: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    live_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "recommendation_type IN ('strategy_family_candidate', 'audit_digest', "
+            "'blocker_explanation', 'trade_review', 'market_context', 'unknown')",
+            name="ck_llm_advisory_recommendations_type",
+        ),
+        CheckConstraint(
+            "status IN ('generated', 'blocked', 'pushed', 'push_failed')",
+            name="ck_llm_advisory_recommendations_status",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_llm_advisory_recommendations_confidence",
+        ),
+        CheckConstraint(
+            "feishu_card_type IN ('candidate_review', 'final_gate_blocked', "
+            "'daily_audit_digest', 'trade_closed_review', 'market_context', "
+            "'generic_advisory')",
+            name="ck_llm_advisory_recommendations_card_type",
+        ),
+        CheckConstraint(
+            "not_execution_authority = true",
+            name="ck_llm_advisory_recommendations_not_authority",
+        ),
+        CheckConstraint(
+            "owner_action_enabled = false",
+            name="ck_llm_advisory_recommendations_push_only",
+        ),
+        CheckConstraint(
+            "strategy_execution_authorized = false",
+            name="ck_llm_advisory_recommendations_no_strategy_auth",
+        ),
+        CheckConstraint(
+            "execution_intent_created = false",
+            name="ck_llm_advisory_recommendations_no_intent",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_llm_advisory_recommendations_no_order",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_llm_advisory_recommendations_no_exchange",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_llm_advisory_recommendations_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_llm_advisory_recommendations_no_transfer",
+        ),
+        CheckConstraint(
+            "live_ready = false",
+            name="ck_llm_advisory_recommendations_no_live",
+        ),
+        Index("idx_llm_advisory_recommendations_event", "event_id"),
+        Index(
+            "idx_llm_advisory_recommendations_type_time",
+            "event_type",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_llm_advisory_recommendations_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
 class PGBrcLlmIntentORM(PGCoreBase):
     """Persisted normalized BRC LLM intent ledger."""
 

@@ -51,10 +51,10 @@ Production and Tokyo pre-live should expose only these groups:
 | `BRC_OPERATOR_TOTP_SECRET` | `operator_auth.py` | yes | console login | required | all | keep as server secret |
 | `BRC_OPERATOR_SESSION_SECRET` | `operator_auth.py`, smoke scripts | yes | session signing | required | all | keep as server secret |
 | `BRC_OPERATOR_SESSION_TTL_SECONDS` | `operator_auth.py` | no | session TTL | `86400` in templates | all | keep |
-| `BRC_LLM_ENABLED` | `brc_operator_workflow.py`, tests | no | optional assistant feature | `false` | all | keep disabled by default |
-| `BRC_LLM_BASE_URL` | `brc_operator_workflow.py` | no | optional LLM endpoint | unset | optional | optional |
-| `BRC_LLM_API_KEY` | `brc_operator_workflow.py` | yes | optional LLM credential | unset | optional | server secret only |
-| `BRC_LLM_MODEL` | `brc_operator_workflow.py` | no | optional LLM model | unset | optional | optional |
+| `BRC_LLM_ENABLED` | `brc_operator_workflow.py`, `llm_advisory_plane.py`, tests | no | optional assistant feature | `false` | all | keep disabled by default |
+| `BRC_LLM_BASE_URL` | `brc_operator_workflow.py`, `llm_advisory_plane.py` | no | optional LLM endpoint | unset | optional | optional |
+| `BRC_LLM_API_KEY` | `brc_operator_workflow.py`, `llm_advisory_plane.py` | yes | optional LLM credential | unset | optional | server secret only |
+| `BRC_LLM_MODEL` | `brc_operator_workflow.py`, `llm_advisory_plane.py` | no | optional LLM model | unset | optional | optional |
 | `FEISHU_WEBHOOK_URL` | `runtime_config.py`, seed tests | yes | notification only | unset | optional | server secret only |
 
 ## Guardrails Implemented
