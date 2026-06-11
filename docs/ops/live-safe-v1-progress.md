@@ -3339,3 +3339,47 @@ Use this file for session progress and handoff notes.
     authorization and official FinalGate preflight;
   - it does not authorize live submit, create an ExecutionIntent, place an
     order, call OrderLifecycle, withdraw funds, or transfer funds.
+
+## 2026-06-11 (Runtime Next-attempt Prepare Wrapper)
+
+- Added and pushed `85b340ce feat(ops): add runtime next-attempt prepare flow`.
+- New script:
+  `scripts/runtime_next_attempt_prepare_api_flow.py`.
+- Purpose:
+  - provide a clearly named next-attempt prepare entrypoint after a runtime has
+    passed the post-close / closed-review / next-attempt gate;
+  - reuse the existing official `runtime_first_real_submit_api_flow.py`
+    prepare mode instead of creating a separate execution path;
+  - make the second-and-later attempt path explicit for operators and future
+    agents.
+- Allowed effects:
+  - may create the next attempt's shadow candidate when given a strategy signal
+    input;
+  - may create `RuntimeExecutionIntentDraft`, recorded `ExecutionIntent`,
+    protection plan, and submit authorization records through the official
+    Trading Console API.
+- Forbidden effects:
+  - no local registration arm;
+  - no exchange submit arm;
+  - no attempt reservation / mutation;
+  - no OrderLifecycle call;
+  - no exchange write;
+  - no order creation;
+  - no withdrawal or transfer.
+- Output semantics:
+  - success status is `ready_for_final_gate_preflight`;
+  - the next step is `run_official_final_gate_preflight`;
+  - `live_submit_allowed=false`;
+  - explicit Owner real-submit authorization remains required for any later
+    real gateway action.
+- Tests:
+  - `pytest -q tests/unit/test_runtime_next_attempt_prepare_api_flow.py
+    tests/unit/test_runtime_next_attempt_gate_packet_script.py
+    tests/unit/test_runtime_first_real_submit_api_flow.py` passed with
+    `19 passed`;
+  - `python3 -m py_compile scripts/runtime_next_attempt_prepare_api_flow.py`
+    passed.
+- Deployment:
+  - not deployed in this stage;
+  - deploy only when the wrapper is needed on Tokyo for an actual next-attempt
+    prepare run.
