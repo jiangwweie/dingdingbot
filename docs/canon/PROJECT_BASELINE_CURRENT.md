@@ -2,7 +2,7 @@
 title: PROJECT_BASELINE_CURRENT
 status: CURRENT_CANON
 authority: owner-correction + code-verification + semantic-audit
-last_verified: 2026-06-10
+last_verified: 2026-06-11
 supersedes:
   - docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md (for canon reading order)
 source_of_truth:
@@ -449,8 +449,15 @@ Key facts:
   local-order binding, and exchange-submit packet-preview readiness. First real
   submit still remains blocked by exchange-submit enablement, scoped exchange
   submit action authorization, gateway/recovery readiness, and action-time
-  revalidation. A shadow / execution-disabled runtime is the expected source
-  state before a live-runtime enablement mutation, not itself proof of a missing
+  revalidation unless the explicit exchange-submit pre-execution rehearsal is
+  requested. With `--exercise-exchange-submit-adapter-pre-execution`, the same
+  verifier can assemble in-memory gateway readiness, scoped exchange-submit
+  action authorization, exchange-submit enablement, and an exchange-submit
+  adapter-result duplicate-submit lock. That path intentionally stops at
+  `exchange_submit_adapter_not_implemented`: it does not call exchange, submit
+  an order, call OrderLifecycle submit, or change ExecutionIntent status. A
+  shadow / execution-disabled runtime is the expected source state before a
+  live-runtime enablement mutation, not itself proof of a missing
   implementation.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit

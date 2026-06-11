@@ -117,6 +117,9 @@ from src.domain.strategy_runtime_safety_readiness import (
 from src.domain.runtime_execution_trusted_submit_facts import (
     RuntimeExecutionTrustedSubmitFactSource,
 )
+from src.domain.runtime_execution_exchange_gateway_readiness import (
+    build_runtime_execution_exchange_gateway_readiness,
+)
 from src.domain.strategy_semantics import initial_strategy_semantics_catalog
 
 
@@ -298,6 +301,14 @@ class _ExchangeSubmitExecutionResultRepository:
         return result
 
 
+class _ExecutionRecoveryRepository:
+    async def list_blocking(self) -> list[dict[str, Any]]:
+        return []
+
+    async def list_active(self) -> list[dict[str, Any]]:
+        return []
+
+
 class _OrderLifecycleService:
     def __init__(self) -> None:
         self.orders: dict[str, Any] = {}
@@ -349,6 +360,7 @@ async def build_pre_live_packet(
     require_current_head_deployed: bool = True,
     active_positions: int = 0,
     exercise_local_registration_pre_exchange: bool = False,
+    exercise_exchange_submit_adapter_pre_execution: bool = False,
     runner: Any | None = None,
 ) -> dict[str, Any]:
     repo_root = _repo_root(runner=runner)
@@ -356,6 +368,10 @@ async def build_pre_live_packet(
     short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD", runner=runner).stdout
     runtime = _runtime()
     candidate = _candidate()
+    exercise_local_registration_pre_exchange = (
+        exercise_local_registration_pre_exchange
+        or exercise_exchange_submit_adapter_pre_execution
+    )
 
     runtime_service = _RuntimeService(runtime)
     candidate_service = _CandidateService(candidate)
@@ -399,6 +415,21 @@ async def build_pre_live_packet(
         if exercise_local_registration_pre_exchange
         else None
     )
+    exchange_submit_action_authorization_repository = (
+        _InMemoryRepository("action_authorization_id")
+        if exercise_exchange_submit_adapter_pre_execution
+        else None
+    )
+    exchange_gateway_readiness_repository = (
+        _InMemoryRepository("readiness_id")
+        if exercise_exchange_submit_adapter_pre_execution
+        else None
+    )
+    execution_recovery_repository = (
+        _ExecutionRecoveryRepository()
+        if exercise_exchange_submit_adapter_pre_execution
+        else None
+    )
     planning_service = RuntimeExecutionPlanningService(
         runtime_service=runtime_service,
         signal_evaluation_service=candidate_service,
@@ -430,6 +461,11 @@ async def build_pre_live_packet(
         local_registration_action_authorization_repository=(
             local_registration_action_authorization_repository
         ),
+        exchange_submit_action_authorization_repository=(
+            exchange_submit_action_authorization_repository
+        ),
+        exchange_gateway_readiness_repository=exchange_gateway_readiness_repository,
+        execution_recovery_repository=execution_recovery_repository,
         final_gate_preview_service=final_gate,
         runtime_service=runtime_service,
     )
@@ -571,6 +607,18 @@ async def build_pre_live_packet(
         await order_lifecycle_adapter_result_repository.complete_registration(
             order_lifecycle_adapter_result
         )
+    exchange_submit_adapter_rehearsal = (
+        await _exercise_exchange_submit_adapter_pre_execution(
+            adapter_service=adapter_service,
+            exchange_gateway_readiness_repository=(
+                exchange_gateway_readiness_repository
+            ),
+            authorization_id=authorization.authorization_id,
+            local_registration_rehearsal=local_registration_rehearsal,
+            owner_real_submit_authorized=owner_real_submit_authorized,
+            enabled=exercise_exchange_submit_adapter_pre_execution,
+        )
+    )
     first_real_submit_packet = evidence_preparation.packet
     if local_registration_rehearsal["enablement_decision_id"]:
         packet_service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
@@ -593,12 +641,33 @@ async def build_pre_live_packet(
             local_registration_enablement_decision_id=(
                 local_registration_rehearsal["enablement_decision_id"]
             ),
+            exchange_submit_enablement_decision_id=(
+                exchange_submit_adapter_rehearsal["enablement_decision_id"]
+            ),
             owner_real_submit_authorization_id=local_registration_rehearsal[
                 "owner_real_submit_authorization_id"
             ],
-            deployment_readiness_evidence_id=local_registration_rehearsal[
-                "deployment_readiness_evidence_id"
-            ],
+            order_lifecycle_submit_enablement_id=(
+                exchange_submit_adapter_rehearsal[
+                    "order_lifecycle_submit_enablement_id"
+                ]
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_rehearsal[
+                    "exchange_submit_adapter_enablement_id"
+                ]
+            ),
+            exchange_submit_action_authorization_id=(
+                exchange_submit_adapter_rehearsal[
+                    "exchange_submit_action_authorization_id"
+                ]
+            ),
+            deployment_readiness_evidence_id=(
+                exchange_submit_adapter_rehearsal[
+                    "deployment_readiness_evidence_id"
+                ]
+                or local_registration_rehearsal["deployment_readiness_evidence_id"]
+            ),
             budget_release_or_consume_rule_confirmed=True,
             protection_creation_failure_policy_confirmed=True,
             duplicate_submit_policy_confirmed=True,
@@ -629,8 +698,15 @@ async def build_pre_live_packet(
         + list(order_registration_draft_preview.blockers)
         + list(evidence_preparation.blockers)
     )
+    exchange_submit_adapter_blockers: list[str] = []
+    if exchange_submit_adapter_rehearsal["adapter_result"] is not None:
+        exchange_submit_adapter_blockers = list(
+            exchange_submit_adapter_rehearsal["adapter_result"].blockers
+        )
     exchange_submit_rehearsal_blockers = _dedupe(
-        list(order_lifecycle_adapter_result.blockers) + list(rehearsal.blockers)
+        list(order_lifecycle_adapter_result.blockers)
+        + list(rehearsal.blockers)
+        + exchange_submit_adapter_blockers
     )
     operational_blockers: list[str] = []
     deployed_head = deployed_head or ""
@@ -744,6 +820,12 @@ async def build_pre_live_packet(
         ),
         "local_registration_pre_exchange_ready": (
             local_registration_rehearsal["ready"]
+        ),
+        "exchange_submit_adapter_pre_execution_exercised": (
+            exchange_submit_adapter_rehearsal["enabled"]
+        ),
+        "exchange_submit_adapter_pre_execution_ready": (
+            exchange_submit_adapter_rehearsal["ready"]
         ),
         "machine_evidence_preparation_status": _enum_value(
             evidence_preparation.status
@@ -887,6 +969,11 @@ async def build_pre_live_packet(
         "local_registration_rehearsal": _local_registration_rehearsal_payload(
             local_registration_rehearsal
         ),
+        "exchange_submit_adapter_rehearsal": (
+            _exchange_submit_adapter_rehearsal_payload(
+                exchange_submit_adapter_rehearsal
+            )
+        ),
         "safety_invariants": {
             "database_connected": False,
             "remote_files_modified": False,
@@ -923,6 +1010,25 @@ async def build_pre_live_packet(
                 protection_failure_policy.order_lifecycle_called
             ),
             "exchange_called": rehearsal.exchange_called,
+            "exchange_submit_adapter_exchange_called": (
+                exchange_submit_adapter_rehearsal["adapter_result"].exchange_called
+                if exchange_submit_adapter_rehearsal["adapter_result"] is not None
+                else False
+            ),
+            "exchange_submit_adapter_order_lifecycle_submit_called": (
+                exchange_submit_adapter_rehearsal[
+                    "adapter_result"
+                ].order_lifecycle_submit_called
+                if exchange_submit_adapter_rehearsal["adapter_result"] is not None
+                else False
+            ),
+            "exchange_submit_adapter_exchange_order_submitted": (
+                exchange_submit_adapter_rehearsal[
+                    "adapter_result"
+                ].exchange_order_submitted
+                if exchange_submit_adapter_rehearsal["adapter_result"] is not None
+                else False
+            ),
             "protection_failure_policy_exchange_called": (
                 protection_failure_policy.exchange_called
             ),
@@ -933,6 +1039,7 @@ async def build_pre_live_packet(
             "The recorded ExecutionIntent is an in-memory audit artifact, not a persistent executable submit.",
             "The dry-run submit adapter is ready; real order placement remains blocked by OrderLifecycle enablement.",
             "Optional local-registration rehearsal registers local CREATED orders in memory only and never calls exchange.",
+            "Optional exchange-submit adapter pre-execution rehearsal assembles scoped exchange-submit evidence but still does not implement or call the exchange adapter.",
         ],
     }
 
@@ -1270,6 +1377,207 @@ async def _exercise_local_registration_pre_exchange(
     return result
 
 
+async def _exercise_exchange_submit_adapter_pre_execution(
+    *,
+    adapter_service: RuntimeExecutionIntentAdapterService,
+    exchange_gateway_readiness_repository: _InMemoryRepository | None,
+    authorization_id: str,
+    local_registration_rehearsal: dict[str, Any],
+    owner_real_submit_authorized: bool,
+    enabled: bool,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "enabled": enabled,
+        "ready": False,
+        "blockers": [],
+        "trusted_submit_fact_snapshot_id": None,
+        "submit_idempotency_policy_id": None,
+        "attempt_outcome_policy_id": None,
+        "protection_creation_failure_policy_id": None,
+        "local_registration_enablement_decision_id": None,
+        "owner_real_submit_authorization_id": None,
+        "order_lifecycle_submit_enablement_id": None,
+        "exchange_submit_adapter_enablement_id": None,
+        "exchange_submit_action_authorization_id": None,
+        "deployment_readiness_evidence_id": None,
+        "enablement_decision_id": None,
+        "gateway_readiness": None,
+        "action_authorization": None,
+        "enablement_decision": None,
+        "adapter_result": None,
+    }
+    if not enabled:
+        return result
+    if not local_registration_rehearsal["ready"]:
+        result["blockers"] = ["local_registration_rehearsal_not_ready"]
+        return result
+    if exchange_gateway_readiness_repository is None:
+        result["blockers"] = ["exchange_gateway_readiness_repository_unavailable"]
+        return result
+
+    trusted_submit_fact_snapshot_id = local_registration_rehearsal[
+        "trusted_submit_fact_snapshot_id"
+    ]
+    submit_idempotency_policy_id = local_registration_rehearsal[
+        "submit_idempotency_policy_id"
+    ]
+    attempt_outcome_policy_id = local_registration_rehearsal[
+        "attempt_outcome_policy_id"
+    ]
+    protection_creation_failure_policy_id = local_registration_rehearsal[
+        "protection_creation_failure_policy_id"
+    ]
+    local_registration_enablement_decision_id = local_registration_rehearsal[
+        "enablement_decision_id"
+    ]
+    owner_real_submit_authorization_id = local_registration_rehearsal[
+        "owner_real_submit_authorization_id"
+    ]
+    order_lifecycle_submit_enablement_id = (
+        f"order-lifecycle-submit-enable-{authorization_id}"
+    )
+    exchange_submit_adapter_enablement_id = (
+        f"exchange-submit-adapter-enable-{authorization_id}"
+    )
+    gateway_readiness = build_runtime_execution_exchange_gateway_readiness(
+        env={
+            "EXCHANGE_NAME": "binance",
+            "TRADING_ENV": "live",
+            "EXCHANGE_TESTNET": "false",
+            "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+            "RUNTIME_CONTROL_API_ENABLED": "false",
+            "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+            "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
+            "EXCHANGE_API_KEY": "present",
+            "EXCHANGE_API_SECRET": "present",
+        },
+        owner_confirmed_gateway_readiness_review=owner_real_submit_authorized,
+        owner_operator_id="owner",
+        owner_confirmation_reference=(
+            "pre-live-owner-real-submit-flag"
+            if owner_real_submit_authorized
+            else None
+        ),
+        reason="pre-live exchange-submit adapter rehearsal readiness",
+        now_ms=_now_ms(),
+    )
+    await exchange_gateway_readiness_repository.create(gateway_readiness)
+    deployment_readiness_evidence_id = gateway_readiness.readiness_id
+    action_authorization = (
+        await adapter_service.record_exchange_submit_action_authorization_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            local_registration_enablement_decision_id=(
+                local_registration_enablement_decision_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_submit_enablement_id=(
+                order_lifecycle_submit_enablement_id
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_enablement_id
+            ),
+            owner_confirmed_for_exchange_submit_action=(
+                owner_real_submit_authorized
+            ),
+            owner_operator_id="owner",
+            reason="pre-live scoped exchange submit adapter rehearsal",
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            owner_confirmation_reference=(
+                "pre-live-owner-real-submit-flag"
+                if owner_real_submit_authorized
+                else None
+            ),
+        )
+    )
+    enablement_decision = (
+        await adapter_service.exchange_submit_enablement_decision_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            local_registration_enablement_decision_id=(
+                local_registration_enablement_decision_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_submit_enablement_id=(
+                order_lifecycle_submit_enablement_id
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_enablement_id
+            ),
+            exchange_submit_action_authorization_id=(
+                action_authorization.action_authorization_id
+            ),
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        )
+    )
+    adapter_result = await adapter_service.exchange_submit_adapter_result_for_authorization(
+        authorization_id,
+        exchange_submit_adapter_enabled=True,
+        exchange_submit_enablement_decision=enablement_decision,
+    )
+    ready = (
+        enablement_decision.status.value == "ready_for_exchange_submit_action"
+        and adapter_result.status.value == "exchange_submit_adapter_not_implemented"
+        and adapter_result.duplicate_submit_lock_acquired is True
+        and adapter_result.exchange_called is False
+        and adapter_result.order_lifecycle_submit_called is False
+        and adapter_result.exchange_order_submitted is False
+    )
+    result.update(
+        {
+            "ready": ready,
+            "blockers": (
+                []
+                if ready
+                else _dedupe(
+                    list(gateway_readiness.blockers)
+                    + list(action_authorization.blockers)
+                    + list(enablement_decision.blockers)
+                    + list(adapter_result.blockers)
+                )
+            ),
+            "trusted_submit_fact_snapshot_id": trusted_submit_fact_snapshot_id,
+            "submit_idempotency_policy_id": submit_idempotency_policy_id,
+            "attempt_outcome_policy_id": attempt_outcome_policy_id,
+            "protection_creation_failure_policy_id": (
+                protection_creation_failure_policy_id
+            ),
+            "local_registration_enablement_decision_id": (
+                local_registration_enablement_decision_id
+            ),
+            "owner_real_submit_authorization_id": (
+                owner_real_submit_authorization_id
+            ),
+            "order_lifecycle_submit_enablement_id": (
+                order_lifecycle_submit_enablement_id
+            ),
+            "exchange_submit_adapter_enablement_id": (
+                exchange_submit_adapter_enablement_id
+            ),
+            "exchange_submit_action_authorization_id": (
+                action_authorization.action_authorization_id
+            ),
+            "deployment_readiness_evidence_id": deployment_readiness_evidence_id,
+            "enablement_decision_id": enablement_decision.decision_id,
+            "gateway_readiness": gateway_readiness,
+            "action_authorization": action_authorization,
+            "enablement_decision": enablement_decision,
+            "adapter_result": adapter_result,
+        }
+    )
+    return result
+
+
 def _local_registration_rehearsal_payload(rehearsal: dict[str, Any]) -> dict[str, Any]:
     return {
         "enabled": rehearsal["enabled"],
@@ -1309,6 +1617,51 @@ def _local_registration_rehearsal_payload(rehearsal: dict[str, Any]) -> dict[str
         "exchange_submit_packet_preview": _dump_optional_model(
             rehearsal["exchange_submit_packet_preview"]
         ),
+    }
+
+
+def _exchange_submit_adapter_rehearsal_payload(
+    rehearsal: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "enabled": rehearsal["enabled"],
+        "ready": rehearsal["ready"],
+        "blockers": list(rehearsal["blockers"]),
+        "trusted_submit_fact_snapshot_id": rehearsal[
+            "trusted_submit_fact_snapshot_id"
+        ],
+        "submit_idempotency_policy_id": rehearsal["submit_idempotency_policy_id"],
+        "attempt_outcome_policy_id": rehearsal["attempt_outcome_policy_id"],
+        "protection_creation_failure_policy_id": rehearsal[
+            "protection_creation_failure_policy_id"
+        ],
+        "local_registration_enablement_decision_id": rehearsal[
+            "local_registration_enablement_decision_id"
+        ],
+        "owner_real_submit_authorization_id": rehearsal[
+            "owner_real_submit_authorization_id"
+        ],
+        "order_lifecycle_submit_enablement_id": rehearsal[
+            "order_lifecycle_submit_enablement_id"
+        ],
+        "exchange_submit_adapter_enablement_id": rehearsal[
+            "exchange_submit_adapter_enablement_id"
+        ],
+        "exchange_submit_action_authorization_id": rehearsal[
+            "exchange_submit_action_authorization_id"
+        ],
+        "deployment_readiness_evidence_id": rehearsal[
+            "deployment_readiness_evidence_id"
+        ],
+        "enablement_decision_id": rehearsal["enablement_decision_id"],
+        "gateway_readiness": _dump_optional_model(rehearsal["gateway_readiness"]),
+        "action_authorization": _dump_optional_model(
+            rehearsal["action_authorization"]
+        ),
+        "enablement_decision": _dump_optional_model(
+            rehearsal["enablement_decision"]
+        ),
+        "adapter_result": _dump_optional_model(rehearsal["adapter_result"]),
     }
 
 
@@ -1651,6 +2004,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "does not call exchange or submit orders."
         ),
     )
+    parser.add_argument(
+        "--exercise-exchange-submit-adapter-pre-execution",
+        action="store_true",
+        help=(
+            "After local CREATED-order registration, assemble exchange-submit "
+            "action/readiness/enablement evidence and acquire the in-memory "
+            "exchange-submit adapter lock. This still does not call exchange "
+            "or submit orders."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1676,6 +2039,10 @@ def _print_human(report: dict[str, Any]) -> None:
     print(
         "local_registration_pre_exchange_ready="
         + str(checks["local_registration_pre_exchange_ready"]).lower()
+    )
+    print(
+        "exchange_submit_adapter_pre_execution_ready="
+        + str(checks["exchange_submit_adapter_pre_execution_ready"]).lower()
     )
     print(f"submit_rehearsal_status={pipeline['submit_rehearsal_status']}")
     print(f"submit_adapter_preview_status={pipeline['submit_adapter_preview_status']}")
@@ -1709,6 +2076,9 @@ async def _amain(argv: list[str] | None = None) -> int:
         active_positions=args.active_positions,
         exercise_local_registration_pre_exchange=(
             args.exercise_local_registration_pre_exchange
+        ),
+        exercise_exchange_submit_adapter_pre_execution=(
+            args.exercise_exchange_submit_adapter_pre_execution
         ),
     )
     if args.json:

@@ -263,3 +263,63 @@ async def test_pre_live_packet_can_exercise_local_registration_before_exchange_s
     )
     assert report["safety_invariants"]["exchange_called"] is False
     assert report["safety_invariants"]["execution_intent_status_changed"] is False
+
+
+@pytest.mark.asyncio
+async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_boundary():
+    module = _load_module()
+
+    report = await module.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_exchange_submit_adapter_pre_execution=True,
+        runner=_runner(module),
+    )
+
+    exchange_rehearsal = report["exchange_submit_adapter_rehearsal"]
+    action_authorization = exchange_rehearsal["action_authorization"]
+    enablement_decision = exchange_rehearsal["enablement_decision"]
+    gateway_readiness = exchange_rehearsal["gateway_readiness"]
+    adapter_result = exchange_rehearsal["adapter_result"]
+    blockers = report["checks"]["exchange_submit_rehearsal_blockers"]
+
+    assert report["status"] == "blocked_before_first_real_submit"
+    assert report["checks"]["local_registration_pre_exchange_exercised"] is True
+    assert report["checks"]["local_registration_pre_exchange_ready"] is True
+    assert (
+        report["checks"]["exchange_submit_adapter_pre_execution_exercised"]
+        is True
+    )
+    assert report["checks"]["exchange_submit_adapter_pre_execution_ready"] is True
+    assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is True
+    assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["checks"]["live_enablement_blockers"] == []
+    assert report["rehearsal"]["status"] == "ready_for_owner_live_action_review"
+    assert action_authorization["status"] == "approved_for_exchange_submit_action"
+    assert enablement_decision["status"] == "ready_for_exchange_submit_action"
+    assert gateway_readiness["status"] == "ready_for_manual_gateway_binding"
+    assert adapter_result["status"] == "exchange_submit_adapter_not_implemented"
+    assert adapter_result["duplicate_submit_lock_acquired"] is True
+    assert adapter_result["exchange_called"] is False
+    assert adapter_result["order_lifecycle_submit_called"] is False
+    assert adapter_result["exchange_order_submitted"] is False
+    assert "exchange_submit_adapter_not_implemented" in blockers
+    assert "exchange_submit_action_authorization_missing" not in blockers
+    assert "runtime_exchange_gateway_readiness_missing" not in blockers
+    assert "runtime_exchange_gateway_readiness_repository_unavailable" not in blockers
+    assert report["safety_invariants"]["exchange_called"] is False
+    assert (
+        report["safety_invariants"]["exchange_submit_adapter_exchange_called"]
+        is False
+    )
+    assert (
+        report["safety_invariants"][
+            "exchange_submit_adapter_order_lifecycle_submit_called"
+        ]
+        is False
+    )
+    assert (
+        report["safety_invariants"]["exchange_submit_adapter_exchange_order_submitted"]
+        is False
+    )
