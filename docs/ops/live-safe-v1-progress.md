@@ -3725,3 +3725,67 @@ Use this file for session progress and handoff notes.
     mutation, runtime-budget mutation, withdrawal, or transfer;
   - the current live observation path now uses the latest deployed
     non-executing prepare/watch/supervisor audit behavior.
+
+## 2026-06-12 (Night Non-executing Observation Authorization + Operator Packet Deploy)
+
+- Owner night authorization scope:
+  - allowed continued live read-only observation for current ACTIVE runtimes;
+  - allowed shadow SignalEvaluation, shadow OrderCandidate, and prepare
+    authorization records only when a real strategy signal becomes
+    `ready_for_prepare`;
+  - allowed FinalGate preview, arm preview, and disabled first-real-submit
+    smoke;
+  - still forbids real exchange orders, OrderLifecycle submit, executable
+    first-real-submit, withdrawal, and transfer.
+- Added and pushed before deployment:
+  - `0f190f95 feat(ops): add no-signal diagnostic packet`;
+  - `190ac471 feat(ops): add observation operator packet`.
+- Tokyo git deploy:
+  - deployed branch head `190ac471` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-190ac471-20260612Toperator-packet`;
+  - `/home/ubuntu/brc-deploy/app/current` now points to that release;
+  - deploy execution status: `applied`;
+  - command count: `16/16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - health smoke passed at `/api/health` with
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`;
+  - postdeploy read-only acceptance passed;
+  - exchange called: `false`;
+  - execution intent created: `false`;
+  - order created: `false`;
+  - OrderLifecycle called: `false`;
+  - secrets read by Codex: `false`.
+- Active overnight observation after deploy:
+  - the active loop continues from the prior current-release script path
+    `77cae7a2`, while `app/current` has advanced to `190ac471`;
+  - status packet: `waiting_for_signal`;
+  - latest iteration: `4`;
+  - iterations requested: `87`;
+  - iterations remaining: `83`;
+  - stop reason: `running`;
+  - prepared authorization ID: `null`;
+  - shadow candidate ID: `null`;
+  - forbidden effects: `[]`.
+- Deployed operator packet evidence:
+  - output path:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-77cae7a2/operator-packet.json`;
+  - status: `observation_running_no_signal`;
+  - watch status: `watching_no_signal`;
+  - diagnostic status: `no_signal_observation_running`;
+  - active runtime count: `2`;
+  - active runtime families: `BTPC-001`, `CPM-001`;
+  - broader strategy preview families: `BRF-001`, `BTPC-001`,
+    `CPM-RO-001`, `LSR-001`, `MI-001`, `RBR-001`, `VCB-001`;
+  - runtime ready signal count: `0`;
+  - strategy-group would-enter signal count: `0`;
+  - strategy-group no-action signal count: `8`;
+  - allowed next action: `continue_active_runtime_observation`.
+- Safety:
+  - the operator packet is read-only and does not write PG observation rows;
+  - it does not call runtime resolver;
+  - it does not create shadow candidate, SignalEvaluation, ExecutionIntent,
+    order, OrderLifecycle submit, exchange write, withdrawal, or transfer;
+  - current no-signal state is an observation result, not a strategy failure
+    and not a reason to force entry.
