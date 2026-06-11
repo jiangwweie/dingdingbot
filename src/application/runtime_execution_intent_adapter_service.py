@@ -90,6 +90,7 @@ from src.domain.runtime_execution_local_registration_action_authorization import
 )
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
+    RuntimeExecutionOrderLifecycleAdapterResultStatus,
     build_runtime_execution_order_lifecycle_adapter_lock_result,
     build_runtime_execution_order_lifecycle_adapter_registration_failure_result,
     build_runtime_execution_order_lifecycle_adapter_result,
@@ -1676,10 +1677,22 @@ class RuntimeExecutionIntentAdapterService:
                 .acquire_registration_lock(lock_result)
             )
             if not acquired:
-                return existing
-            duplicate_submit_lock_acquired = True
+                if _can_retry_local_order_registration_result(existing):
+                    gate_warnings.append(
+                        "retrying_failed_local_order_registration_without_exchange"
+                    )
+                    duplicate_submit_lock_acquired = True
+                else:
+                    return existing
+            else:
+                duplicate_submit_lock_acquired = True
 
         should_register = should_register and duplicate_submit_lock_acquired
+        retry_source_result = existing if (
+            should_register
+            and "retrying_failed_local_order_registration_without_exchange"
+            in gate_warnings
+        ) else None
         if not should_register:
             return build_runtime_execution_order_lifecycle_adapter_result(
                 registration_preview=registration_preview,
@@ -1737,6 +1750,11 @@ class RuntimeExecutionIntentAdapterService:
                         now_ms=_now_ms(),
                     )
                 )
+                if retry_source_result is not None:
+                    result = _annotate_local_registration_retry_result(
+                        result,
+                        previous=retry_source_result,
+                    )
                 result = await (
                     self._order_lifecycle_adapter_result_repository
                     .complete_registration(result)
@@ -1757,6 +1775,11 @@ class RuntimeExecutionIntentAdapterService:
             additional_warnings=gate_warnings,
             now_ms=_now_ms(),
         )
+        if retry_source_result is not None:
+            result = _annotate_local_registration_retry_result(
+                result,
+                previous=retry_source_result,
+            )
         return await (
             self._order_lifecycle_adapter_result_repository
             .complete_registration(result)
@@ -3705,6 +3728,80 @@ def _intent_id_for_draft(draft_id: str) -> str:
 def _exchange_submit_recovery_task_id(authorization_id: str) -> str:
     digest = sha256(authorization_id.encode("utf-8")).hexdigest()[:24]
     return f"rt_ex_submit_recovery_{digest}"
+
+
+def _can_retry_local_order_registration_result(
+    result: RuntimeExecutionOrderLifecycleAdapterResult,
+) -> bool:
+    """Allow replay only for local registration failures with no live side effects."""
+
+    if result.status != (
+        RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .LOCAL_ORDER_REGISTRATION_FAILED
+    ):
+        return False
+    if (
+        result.exchange_called
+        or result.exchange_order_submitted
+        or result.execution_intent_status_changed
+        or result.owner_bounded_execution_called
+        or result.withdrawal_or_transfer_created
+    ):
+        return False
+    metadata = dict(result.metadata or {})
+    if metadata.get("does_not_call_exchange") is False:
+        return False
+    if metadata.get("does_not_submit_exchange_order") is False:
+        return False
+    if metadata.get("does_not_change_execution_intent_status") is False:
+        return False
+    if metadata.get("does_not_call_owner_bounded_execution") is False:
+        return False
+    if metadata.get("does_not_create_withdrawal_or_transfer") is False:
+        return False
+    return True
+
+
+def _annotate_local_registration_retry_result(
+    result: RuntimeExecutionOrderLifecycleAdapterResult,
+    *,
+    previous: RuntimeExecutionOrderLifecycleAdapterResult,
+) -> RuntimeExecutionOrderLifecycleAdapterResult:
+    metadata = dict(result.metadata or {})
+    metadata.update(
+        {
+            "retried_from_failed_local_registration": True,
+            "previous_adapter_result_id": previous.adapter_result_id,
+            "previous_status": previous.status.value,
+            "previous_blockers": list(previous.blockers),
+            "previous_warnings": list(previous.warnings),
+            "previous_local_order_ids": list(previous.local_order_ids),
+            "previous_protection_order_ids": list(previous.protection_order_ids),
+            "previous_failure_reason": previous.metadata.get("failure_reason"),
+            "previous_failure_message": previous.metadata.get("failure_message"),
+            "retry_safety": {
+                "exchange_called": previous.exchange_called,
+                "exchange_order_submitted": previous.exchange_order_submitted,
+                "execution_intent_status_changed": (
+                    previous.execution_intent_status_changed
+                ),
+                "owner_bounded_execution_called": (
+                    previous.owner_bounded_execution_called
+                ),
+                "withdrawal_or_transfer_created": (
+                    previous.withdrawal_or_transfer_created
+                ),
+            },
+        }
+    )
+    warnings = list(result.warnings)
+    warnings.append("retried_failed_local_order_registration_without_exchange")
+    return result.model_copy(
+        update={
+            "metadata": metadata,
+            "warnings": _dedupe(warnings),
+        }
+    )
 
 
 def _exchange_submit_execution_mode(

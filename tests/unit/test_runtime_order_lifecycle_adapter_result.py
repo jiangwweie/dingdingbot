@@ -1651,24 +1651,31 @@ async def test_adapter_result_registers_created_local_orders_and_replays():
 
 
 @pytest.mark.asyncio
-async def test_adapter_result_records_protection_registration_failure_and_replays():
+async def test_adapter_result_retries_safe_local_registration_failure():
     preview = _registration_preview()
-    lifecycle = _Lifecycle(fail_on_role=OrderRole.SL)
+    failing_lifecycle = _Lifecycle(fail_on_role=OrderRole.SL)
     adapter_result_repo = _AdapterResultRepo()
-    service = _service_with_preview(
+    failing_service = _service_with_preview(
         preview,
-        lifecycle=lifecycle,
+        lifecycle=failing_lifecycle,
         adapter_result_repo=adapter_result_repo,
     )
     decision = _ready_enablement_decision(preview)
 
-    first = await service.order_lifecycle_adapter_result_for_authorization(
+    first = await failing_service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
         local_registration_enablement_decision=decision,
     )
-    second = await service.order_lifecycle_adapter_result_for_authorization(
+    retry_lifecycle = _Lifecycle()
+    retry_service = _service_with_preview(
+        preview,
+        lifecycle=retry_lifecycle,
+        adapter_result_repo=adapter_result_repo,
+    )
+
+    second = await retry_service.order_lifecycle_adapter_result_for_authorization(
         "auth-1",
         order_lifecycle_adapter_enabled=True,
         local_order_registration_enabled=True,
@@ -1680,16 +1687,94 @@ async def test_adapter_result_records_protection_registration_failure_and_replay
         == RuntimeExecutionOrderLifecycleAdapterResultStatus
         .LOCAL_ORDER_REGISTRATION_FAILED
     )
-    assert second == first
+    assert (
+        second.status
+        == RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .REGISTERED_CREATED_LOCAL_ORDERS
+    )
     assert adapter_result_repo.acquire_calls == 2
-    assert adapter_result_repo.complete_calls == 1
-    assert [call["order"].id for call in lifecycle.calls] == [
+    assert adapter_result_repo.complete_calls == 2
+    assert [call["order"].id for call in failing_lifecycle.calls] == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert [call["order"].id for call in retry_lifecycle.calls] == [
         "runtime-order-draft-auth-1-entry",
         "runtime-order-draft-auth-1-sl",
     ]
     assert first.local_order_ids == ["runtime-order-draft-auth-1-entry"]
     assert first.protection_order_ids == []
     assert "protection_order_registration_failed" in first.blockers
+    assert second.local_order_ids == [
+        "runtime-order-draft-auth-1-entry",
+        "runtime-order-draft-auth-1-sl",
+    ]
+    assert "retried_failed_local_order_registration_without_exchange" in (
+        second.warnings
+    )
+    assert second.metadata["retried_from_failed_local_registration"] is True
+    assert second.metadata["previous_status"] == (
+        RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .LOCAL_ORDER_REGISTRATION_FAILED
+        .value
+    )
+    assert second.metadata["previous_local_order_ids"] == [
+        "runtime-order-draft-auth-1-entry"
+    ]
+    assert second.exchange_called is False
+    assert second.exchange_order_submitted is False
+    assert second.execution_intent_status_changed is False
+
+
+@pytest.mark.asyncio
+async def test_adapter_result_replays_failed_result_when_no_exchange_proof_is_missing():
+    preview = _registration_preview()
+    failing_lifecycle = _Lifecycle(fail_on_role=OrderRole.SL)
+    adapter_result_repo = _AdapterResultRepo()
+    failing_service = _service_with_preview(
+        preview,
+        lifecycle=failing_lifecycle,
+        adapter_result_repo=adapter_result_repo,
+    )
+    decision = _ready_enablement_decision(preview)
+
+    first = await failing_service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=decision,
+    )
+    adapter_result_repo.stored = first.model_copy(
+        update={
+            "metadata": {
+                **first.metadata,
+                "does_not_call_exchange": False,
+            }
+        }
+    )
+    retry_lifecycle = _Lifecycle()
+    retry_service = _service_with_preview(
+        preview,
+        lifecycle=retry_lifecycle,
+        adapter_result_repo=adapter_result_repo,
+    )
+
+    second = await retry_service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=decision,
+    )
+
+    assert second == adapter_result_repo.stored
+    assert adapter_result_repo.acquire_calls == 2
+    assert adapter_result_repo.complete_calls == 1
+    assert retry_lifecycle.calls == []
+    assert (
+        second.status
+        == RuntimeExecutionOrderLifecycleAdapterResultStatus
+        .LOCAL_ORDER_REGISTRATION_FAILED
+    )
     assert first.exchange_called is False
     assert first.exchange_order_submitted is False
     assert first.execution_intent_status_changed is False
