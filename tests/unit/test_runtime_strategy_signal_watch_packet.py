@@ -24,7 +24,13 @@ def _load_module():
     return module
 
 
-def _status_packet(*, status="waiting_for_signal", signal_type="no_action"):
+def _status_packet(
+    *,
+    status="waiting_for_signal",
+    signal_type="no_action",
+    prepared_authorization_id=None,
+    shadow_candidate_id=None,
+):
     return {
         "status": status,
         "latest_status": status,
@@ -33,6 +39,8 @@ def _status_packet(*, status="waiting_for_signal", signal_type="no_action"):
         "packet_stale": False,
         "stop_reason": "running",
         "active_runtime_count": 1,
+        "prepared_authorization_id": prepared_authorization_id,
+        "shadow_candidate_id": shadow_candidate_id,
         "runtime_signal_summaries": [
             {
                 "runtime_instance_id": "runtime-1",
@@ -135,8 +143,65 @@ def test_watch_packet_summarizes_waiting_no_signal():
     assert packet["operator_command_plan"]["next_step"] == (
         "continue_active_runtime_observation"
     )
+    assert packet["operator_command_plan"]["allowed_next_actions"] == [
+        "continue_active_runtime_observation"
+    ]
     assert packet["safety_invariants"]["order_created"] is False
     assert packet["safety_invariants"]["execution_intent_created"] is False
+
+
+def test_watch_packet_surfaces_runtime_ready_prepare_context():
+    module = _load_module()
+
+    packet = module.build_watch_packet(
+        active_status_packet=_status_packet(
+            status="ready_for_prepare",
+            signal_type="would_enter",
+        ),
+        strategy_preview_packet=_strategy_preview(),
+    )
+
+    assert packet["status"] == "runtime_signal_ready"
+    assert packet["checks"]["runtime_ready_signal_count"] == 1
+    assert packet["runtime_prepare_context"]["ready_for_prepare_count"] == 1
+    assert (
+        packet["operator_command_plan"]["next_step"]
+        == "review_runtime_ready_signal_prepare_path"
+    )
+    assert packet["operator_command_plan"]["allowed_next_actions"] == [
+        "review_runtime_ready_signal",
+        "create_shadow_prepare_records_if_authorized",
+    ]
+    assert "place_exchange_order" in packet["runtime_prepare_context"]["forbidden_followups"]
+    assert packet["operator_command_plan"]["places_order"] is False
+
+
+def test_watch_packet_surfaces_prepared_records_preview_only_context():
+    module = _load_module()
+
+    packet = module.build_watch_packet(
+        active_status_packet=_status_packet(
+            status="ready_for_final_gate_preflight",
+            signal_type="would_enter",
+            prepared_authorization_id="prep-auth-1",
+            shadow_candidate_id="shadow-candidate-1",
+        ),
+        strategy_preview_packet=_strategy_preview(),
+    )
+
+    assert packet["status"] == "runtime_prepare_records_ready_for_preview"
+    assert (
+        packet["runtime_prepare_context"]["ready_for_final_gate_preflight_count"] == 1
+    )
+    assert packet["runtime_prepare_context"]["prepared_authorization_id"] == "prep-auth-1"
+    assert packet["runtime_prepare_context"]["shadow_candidate_id"] == "shadow-candidate-1"
+    assert packet["operator_command_plan"]["allowed_next_actions"] == [
+        "run_final_gate_preview",
+        "run_arm_preview",
+        "run_disabled_first_real_submit_smoke",
+    ]
+    assert "execute_first_real_submit" in packet["runtime_prepare_context"]["forbidden_followups"]
+    assert packet["operator_command_plan"]["creates_execution_intent"] is False
 
 
 def test_watch_packet_surfaces_strategy_group_would_enter_without_execution():

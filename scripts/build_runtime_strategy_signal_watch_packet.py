@@ -42,6 +42,14 @@ def build_watch_packet(
         if row.get("signal_type") == "would_enter"
         or row.get("status") in {"ready_for_prepare", "ready_for_final_gate_preflight"}
     ]
+    runtime_ready_for_prepare = [
+        row for row in runtime_ready if row.get("status") == "ready_for_prepare"
+    ]
+    runtime_ready_for_preflight = [
+        row
+        for row in runtime_ready
+        if row.get("status") == "ready_for_final_gate_preflight"
+    ]
     strategy_would_enter = [
         _strategy_summary(row)
         for row in strategy_preview_packet.get("would_enter_signals") or []
@@ -59,7 +67,10 @@ def build_watch_packet(
     status = "blocked_forbidden_effect"
     next_step = "resolve_signal_watch_forbidden_effects"
     if not forbidden_effects:
-        if runtime_ready:
+        if runtime_ready_for_preflight:
+            status = "runtime_prepare_records_ready_for_preview"
+            next_step = "run_final_gate_arm_preview_and_disabled_smoke_only"
+        elif runtime_ready:
             status = "runtime_signal_ready"
             next_step = "review_runtime_ready_signal_prepare_path"
         elif strategy_would_enter:
@@ -94,6 +105,29 @@ def build_watch_packet(
         },
         "runtime_signals": runtime_summaries,
         "runtime_ready_signals": runtime_ready,
+        "runtime_prepare_context": {
+            "ready_for_prepare_count": len(runtime_ready_for_prepare),
+            "ready_for_final_gate_preflight_count": len(runtime_ready_for_preflight),
+            "prepared_authorization_id": active_status_packet.get(
+                "prepared_authorization_id"
+            ),
+            "shadow_candidate_id": active_status_packet.get("shadow_candidate_id"),
+            "allowed_non_executing_followups": [
+                "create_shadow_signal_evaluation",
+                "create_shadow_order_candidate",
+                "create_prepare_authorization_record",
+                "run_final_gate_preview",
+                "run_arm_preview",
+                "run_disabled_first_real_submit_smoke",
+            ],
+            "forbidden_followups": [
+                "create_executable_execution_intent",
+                "submit_order_lifecycle",
+                "execute_first_real_submit",
+                "place_exchange_order",
+                "withdrawal_or_transfer",
+            ],
+        },
         "strategy_group_preview": {
             "status": strategy_preview_packet.get("status"),
             "source_requested": strategy_preview_packet.get("source_requested"),
@@ -111,6 +145,7 @@ def build_watch_packet(
         "operator_command_plan": {
             "not_executed": True,
             "next_step": next_step,
+            "allowed_next_actions": _allowed_next_actions(status),
             "records_observation": False,
             "creates_shadow_candidate": False,
             "creates_execution_intent": False,
@@ -191,6 +226,27 @@ def _strategy_summary(row: dict[str, Any]) -> dict[str, Any]:
         "no_order_permission": row.get("no_order_permission"),
         "no_runtime_start": row.get("no_runtime_start"),
     }
+
+
+def _allowed_next_actions(status: str) -> list[str]:
+    if status == "runtime_signal_ready":
+        return [
+            "review_runtime_ready_signal",
+            "create_shadow_prepare_records_if_authorized",
+        ]
+    if status == "runtime_prepare_records_ready_for_preview":
+        return [
+            "run_final_gate_preview",
+            "run_arm_preview",
+            "run_disabled_first_real_submit_smoke",
+        ]
+    if status == "strategy_group_signal_review_available":
+        return ["review_strategy_group_would_enter_signal_without_execution"]
+    if status == "watching_no_signal":
+        return ["continue_active_runtime_observation"]
+    if status == "watch_window_complete_no_signal":
+        return ["review_no_signal_window", "start_new_observation_window"]
+    return ["review_signal_watch_packet"]
 
 
 def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
