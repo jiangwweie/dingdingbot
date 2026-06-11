@@ -2543,3 +2543,84 @@ Use this file for session progress and handoff notes.
   - next work should monitor the open position and decide whether to add a
     bounded TP1 / runner-management action or keep it as a hard-stop-only
     first submit evidence sample.
+
+## 2026-06-11 (Runtime Active-position Exit-plan Probe)
+
+- Added and deployed a read-only runtime exit-management probe:
+  - local commit `aa30b26616cbe2b7cbe315365800330265b7907f`
+    added `scripts/runtime_position_exit_plan.py`;
+  - follow-up commit `c261b81e54e20f8bd0b92bc6d4d3e95f622aa25c`
+    fixed runtime probe env loading so env files are loaded before PG
+    infrastructure imports snapshot `PG_DATABASE_URL`;
+  - both commits were pushed to `origin/program/live-safe-v1`;
+  - Tokyo now runs
+    `brc-runtime-governance-c261b81e-20260611Topsprobe2`.
+- Verification before deploy:
+  - `pytest -q tests/unit/test_runtime_ops_scripts.py tests/unit/test_runtime_live_position_monitor.py tests/unit/test_trading_console_readmodels.py::test_trading_console_runtime_active_position_exit_plan_surfaces_tp1_feasibility`
+    passed with `11 passed`;
+  - `python3 -m py_compile scripts/runtime_live_position_monitor.py scripts/runtime_position_exit_plan.py tests/unit/test_runtime_ops_scripts.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - `verify_tokyo_runtime_governance_postdeploy.py` returned
+    `postdeploy_acceptance_passed`;
+  - `probe_tokyo_runtime_governance_readonly.py` returned
+    `ready_for_controlled_deploy_preflight`;
+  - deployed head is
+    `c261b81e54e20f8bd0b92bc6d4d3e95f622aa25c`;
+  - migration count remains `84`;
+  - latest migration remains
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - service health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote live-position monitor for
+  `strategy-runtime-95655873b76c`:
+  - status `active_protection_warning`;
+  - symbol `AVAX/USDT:USDT`;
+  - side `short`;
+  - runtime status `active`;
+  - current quantity `1.0`;
+  - entry price `6.566`;
+  - mark price around `6.57`;
+  - local active position count `1`;
+  - exchange active position count `1`;
+  - local open order count `1`;
+  - exchange open stop order count `1`;
+  - SL protection present `true`;
+  - TP protection present `false`;
+  - hard stop boundary present `true`;
+  - liquidation price reported around `36.81301033`;
+  - reconciliation severe count `0`;
+  - reconciliation warning count `1` for `missing_tp_protection`;
+  - attempts used `2`, attempts remaining `1`, max attempts `3`;
+  - budget reserved `0.166864220000000000`;
+  - budget remaining `5.833135780000000000`;
+  - new entries remain blocked by `runtime_max_active_positions_in_use`.
+- Remote active-position exit plan:
+  - status `ready_for_owner_review`;
+  - action kind `tp1_partial_plus_runner_review`;
+  - active position present `true`;
+  - hard stop boundary present `true`;
+  - existing TP protection present `false`;
+  - stop price reference `6.639000000000000000`;
+  - risk per unit `0.073000000000000000`;
+  - TP1 price reference `6.493000000000000000`;
+  - requested TP1 quantity `0.50`;
+  - step-aligned TP1 quantity `0.0`;
+  - runner quantity reference `1.0`;
+  - reduce-only side would be `buy`;
+  - market min quantity `1.0`;
+  - market quantity step `1.0`;
+  - TP1 quantity feasible `false`;
+  - warning `tp1_partial_quantity_below_min_qty_or_step`;
+  - recommended Owner decision
+    `keep_hard_stop_only_or_authorize_different_reduce_only_exit_shape`.
+- Safety proof:
+  - both runtime monitor and exit-plan probe reported exchange read-only facts;
+  - exchange write called `false`;
+  - order created / cancelled / amended `false`;
+  - position closed `false`;
+  - runtime state mutated `false`;
+  - withdrawal or transfer created `false`;
+  - `RuntimePositionExitPlan` remains explicitly not an order, not an
+    execution intent, and not execution authority.
