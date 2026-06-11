@@ -155,6 +155,15 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert all(value is False for value in report["safety_invariants"].values())
 
 
+def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
+    module = _load_module()
+
+    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 81
+    assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
+        "2026-06-11-081_create_llm_advisory_plane.py"
+    )
+
+
 def test_postdeploy_verifier_blocks_live_ready_true_and_unblocked_generic_post():
     module = _load_module()
 

@@ -42,7 +42,7 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
 
 DEFAULT_GIT_REF = "dev"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
+    "2026-06-11-081_create_llm_advisory_plane.py"
 )
 
 
@@ -111,11 +111,29 @@ def build_git_deploy_plan(
     branch = _git(repo_root, "branch", "--show-current").stdout
     target = target_commit or head
     tracked_dirty = _tracked_dirty(repo_root)
+    migration_files = _migration_files(repo_root)
+    target_migration_count = len(migration_files)
+    local_latest_migration = migration_files[-1] if migration_files else None
+    remote_migration_revision = _migration_revision(expected_remote_latest_migration)
+    target_migration_revision = _migration_revision(expected_latest_migration)
+    migration_gap_revision_count = (
+        target_migration_count - expected_remote_migration_count
+    )
     blockers: list[str] = []
     warnings: list[str] = []
 
     if tracked_dirty:
         blockers.append("tracked_worktree_dirty")
+    if not migration_files:
+        blockers.append("local_migration_files_missing")
+    if local_latest_migration != expected_latest_migration:
+        blockers.append("expected_latest_migration_not_local_latest")
+    if remote_migration_revision is None:
+        blockers.append("expected_remote_latest_migration_revision_unparseable")
+    if target_migration_revision is None:
+        blockers.append("expected_latest_migration_revision_unparseable")
+    if migration_gap_revision_count < 0:
+        blockers.append("target_migration_count_less_than_remote_baseline")
     if not repo_url.strip():
         blockers.append("git_repo_url_required")
     if git_ref.startswith("refs/"):
@@ -180,6 +198,10 @@ def build_git_deploy_plan(
         expected_remote_migration_count=expected_remote_migration_count,
         expected_remote_latest_migration=expected_remote_latest_migration,
         expected_latest_migration=expected_latest_migration,
+        target_migration_count=target_migration_count,
+        remote_migration_revision=remote_migration_revision,
+        target_migration_revision=target_migration_revision,
+        migration_gap_revision_count=migration_gap_revision_count,
         manifest_payload=manifest_payload,
     )
 
@@ -208,6 +230,11 @@ def build_git_deploy_plan(
             "expected_remote_migration_count": expected_remote_migration_count,
             "expected_remote_latest_migration": expected_remote_latest_migration,
             "expected_latest_migration": expected_latest_migration,
+            "target_migration_count": target_migration_count,
+            "local_latest_migration": local_latest_migration,
+            "remote_migration_revision": remote_migration_revision,
+            "target_migration_revision": target_migration_revision,
+            "migration_gap_revision_count": migration_gap_revision_count,
         },
         "release": {
             "head": target,
@@ -221,6 +248,8 @@ def build_git_deploy_plan(
             "remote_tmp_release_path": remote_tmp_release_path,
             "remote_release_manifest_path": release_manifest,
             "backup_path": backup_path,
+            "target_migration_count": target_migration_count,
+            "latest_migration": local_latest_migration,
         },
         "checks": {
             "ready_for_owner_authorized_remote_deploy": not blockers,
@@ -271,6 +300,10 @@ def _plan_phases(
     expected_remote_migration_count: int,
     expected_remote_latest_migration: str,
     expected_latest_migration: str,
+    target_migration_count: int,
+    remote_migration_revision: str | None,
+    target_migration_revision: str | None,
+    migration_gap_revision_count: int,
     manifest_payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
     q = shlex.quote
@@ -285,6 +318,9 @@ def _plan_phases(
         "done; "
         'curl -fsS "$HEALTH_URL"'
     )
+    base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
+    head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
+    expected_gap_count = max(migration_gap_revision_count, 0)
     remote_fetch_ref = f"refs/heads/{git_ref}:refs/remotes/origin/{git_ref}"
     remote_export_command = (
         f"set -eu; mkdir -p {q(source_root)} {q(reports_dir)} {q(backups_dir)}; "
@@ -313,11 +349,14 @@ def _plan_phases(
             "commands": [
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/prepare_tokyo_runtime_governance_release.py --json "
-                f"--deployed-head {q(expected_deployed_head)}",
+                f"--deployed-head {q(expected_deployed_head)} "
+                f"--expected-min-migrations {target_migration_count} "
+                f"--expected-latest-migration {q(expected_latest_migration)}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
-                "--base-revision 064 --head-revision 070 "
-                "--expected-revision-count 6",
+                f"--base-revision {q(base_revision)} "
+                f"--head-revision {q(head_revision)} "
+                f"--expected-revision-count {expected_gap_count}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
@@ -420,13 +459,15 @@ def _plan_phases(
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
                     f"--expected-current-head {q(target_commit)} "
-                    "--expected-migration-count 70 "
+                    f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/verify_tokyo_runtime_governance_postdeploy.py --json "
-                    f"--expected-current-head {q(target_commit)}"
+                    f"--expected-current-head {q(target_commit)} "
+                    f"--expected-migration-count {target_migration_count} "
+                    f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 _ssh(
                     host,
@@ -486,6 +527,19 @@ def _ssh(host: str, remote_command: str) -> str:
 def _default_release_name(short_head: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"brc-runtime-governance-{short_head}-{stamp}"
+
+
+def _migration_files(repo_root: Path) -> list[str]:
+    versions_dir = repo_root / "migrations" / "versions"
+    if not versions_dir.is_dir():
+        return []
+    return sorted(path.name for path in versions_dir.glob("*.py"))
+
+
+def _migration_revision(filename: str) -> str | None:
+    prefix = Path(filename).name.split("_", 1)[0]
+    revision = prefix.rsplit("-", 1)[-1]
+    return revision if revision.isdigit() else None
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

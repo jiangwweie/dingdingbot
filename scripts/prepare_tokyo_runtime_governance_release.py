@@ -20,9 +20,9 @@ from typing import Any
 
 
 DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIN_MIGRATIONS = 70
+DEFAULT_EXPECTED_MIN_MIGRATIONS = 81
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
+    "2026-06-11-081_create_llm_advisory_plane.py"
 )
 DEFAULT_OUTPUT_DIR = "output/tokyo-runtime-governance-release"
 

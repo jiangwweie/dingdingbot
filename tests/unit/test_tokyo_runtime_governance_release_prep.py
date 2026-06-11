@@ -95,6 +95,15 @@ def test_release_readiness_report_passes_for_clean_ancestor_release(tmp_path: Pa
     assert report["secret_scan"]["tracked_secret_candidates"] == []
 
 
+def test_release_readiness_defaults_track_current_stage_migration_head():
+    module = _load_module()
+
+    assert module.DEFAULT_EXPECTED_MIN_MIGRATIONS == 81
+    assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
+        "2026-06-11-081_create_llm_advisory_plane.py"
+    )
+
+
 def test_release_readiness_blocks_dirty_tracked_tree_and_refuses_artifacts(
     tmp_path: Path,
 ):
