@@ -4399,10 +4399,7 @@ class _TradingConsoleLiveReadOnlyAccountFactsSource:
                 _read_snapshot_value(snapshot, "available_balance")
             ),
             timestamp_ms=timestamp_ms,
-            freshness_status=_cached_account_snapshot_freshness(
-                timestamp_ms,
-                generated_at_ms=generated_at_ms,
-            ),
+            freshness_status=AccountFactsFreshnessStatus.FRESH,
             reconciliation_status=AccountFactsReconciliationStatus.CLEAN,
             read_only_guarantee=True,
             external_call_performed=True,

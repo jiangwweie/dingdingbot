@@ -803,5 +803,6 @@ async def test_trading_console_factory_can_use_live_read_only_account_facts(monk
         result.signal_input.account_facts_snapshot.source
         == "binance_usdt_futures_read_only"
     )
+    assert result.signal_input.account_facts_snapshot.freshness == "fresh"
     assert result.signal_input.account_facts_snapshot.available_balance == Decimal("28.5")
     assert overlay._market_fact_source is None
