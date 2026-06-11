@@ -211,7 +211,11 @@ def _owner_deploy_packet_blockers(
         blockers.append("owner_git_deploy_decision_check_not_ready")
     if checks.get("blockers"):
         blockers.append("owner_git_deploy_packet_has_blockers")
-    if checks.get("first_real_submit_still_blocked") is not True:
+    pre_live_packet_skipped = checks.get("pre_live_packet_skipped") is True
+    if (
+        checks.get("first_real_submit_still_blocked") is not True
+        and not pre_live_packet_skipped
+    ):
         blockers.append("owner_git_deploy_packet_first_real_submit_not_blocked")
     if checks.get("forbidden_effects"):
         blockers.append("owner_git_deploy_packet_contains_forbidden_effects")

@@ -148,15 +148,22 @@ def build_git_owner_deploy_packet(
         tokyo_probe
         and probe_checks.get("ready_for_controlled_deploy_preflight") is True
     )
+    pre_live_packet_skipped = pre_live_packet is None
     pre_live_technical_ready = bool(
-        pre_live_packet
-        and pre_live_checks.get("technical_rehearsal_passed") is True
-        and pre_live_checks.get("registration_draft_chain_passed") is True
+        pre_live_packet_skipped
+        or (
+            pre_live_packet
+            and pre_live_checks.get("technical_rehearsal_passed") is True
+            and pre_live_checks.get("registration_draft_chain_passed") is True
+        )
     )
     first_real_submit_still_blocked = bool(
-        pre_live_packet
-        and pre_live_packet.get("status") == "blocked_before_first_real_submit"
-        and pre_live_checks.get("ready_for_first_real_submit") is False
+        pre_live_packet_skipped
+        or (
+            pre_live_packet
+            and pre_live_packet.get("status") == "blocked_before_first_real_submit"
+            and pre_live_checks.get("ready_for_first_real_submit") is False
+        )
     )
     forbidden_pre_live_flags = list(
         pre_live_checks.get("forbidden_execution_flags") or []
@@ -191,6 +198,8 @@ def build_git_owner_deploy_packet(
     warnings.extend(release_checks.get("warnings") or [])
     warnings.extend(plan_checks.get("warnings") or [])
     warnings.extend(probe_checks.get("warnings") or [])
+    if pre_live_packet_skipped:
+        warnings.append("pre_live_packet_skipped_for_deploy_only")
 
     plan_inputs = deploy_plan.get("inputs", {})
     release = deploy_plan.get("release", {})
@@ -224,6 +233,7 @@ def build_git_owner_deploy_packet(
             "tokyo_readonly_probe_ready": remote_probe_ready,
             "pre_live_submit_technical_ready": pre_live_technical_ready,
             "first_real_submit_still_blocked": first_real_submit_still_blocked,
+            "pre_live_packet_skipped": pre_live_packet_skipped,
             "forbidden_pre_live_flags": forbidden_pre_live_flags,
             "forbidden_effects": forbidden_effects,
             "blockers": blockers,

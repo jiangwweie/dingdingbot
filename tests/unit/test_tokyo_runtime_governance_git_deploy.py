@@ -106,6 +106,56 @@ def _owner_packet_for_plan(plan: dict, *, head: str | None = None) -> dict:
     }
 
 
+def _owner_deploy_packet_inputs() -> tuple[dict, dict, dict, dict]:
+    plan = _ready_git_plan()
+    deploy_dry_run = {
+        "status": "dry_run_ready",
+        "apply_requested": False,
+        "checks": {"commands_executed": 0},
+        "effects": {
+            "remote_files_modified": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
+    release_report = {
+        "release_checks": {
+            "ready_for_packaging": True,
+            "warnings": ["untracked_files_exist_and_are_not_in_git_archive"],
+        },
+        "local_git": {
+            "branch": "release/test",
+            "head": plan["release"]["head"],
+            "short_head": plan["release"]["short_head"],
+        },
+        "migrations": {"count": 69},
+        "tokyo_baseline": {"deployed_head_is_ancestor": True},
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "migrations_run": False,
+            "order_created": False,
+            "exchange_called": False,
+        },
+    }
+    tokyo_probe = {
+        "checks": {
+            "ready_for_controlled_deploy_preflight": True,
+            "warnings": ["remote_release_identity_from_manifest_without_git_status"],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "migrations_run": False,
+            "order_created": False,
+            "exchange_called": False,
+        },
+    }
+    return plan, deploy_dry_run, release_report, tokyo_probe
+
+
 def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
     module = _load_plan_module()
     head = _git("rev-parse", "HEAD")
@@ -339,3 +389,36 @@ def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit
     assert "real runtime submit" in (
         packet["owner_gate"]["deploy_confirmation_does_not_authorize"]
     )
+
+
+def test_git_owner_deploy_packet_can_skip_pre_live_packet_for_deploy_only():
+    module = _load_packet_module()
+    plan, deploy_dry_run, release_report, tokyo_probe = (
+        _owner_deploy_packet_inputs()
+    )
+
+    packet = module.build_git_owner_deploy_packet(
+        release_report=release_report,
+        deploy_plan=plan,
+        deploy_dry_run=deploy_dry_run,
+        tokyo_probe=tokyo_probe,
+        pre_live_packet=None,
+    )
+
+    assert packet["status"] == "ready_for_owner_git_deploy_decision"
+    assert packet["checks"]["ready_for_owner_git_deploy_decision"] is True
+    assert packet["checks"]["pre_live_packet_skipped"] is True
+    assert packet["checks"]["first_real_submit_still_blocked"] is True
+    assert "pre_live_packet_skipped_for_deploy_only" in packet["checks"]["warnings"]
+
+
+def test_git_deploy_executor_allows_deploy_only_packet_when_pre_live_skipped():
+    module = _load_execute_module()
+    plan = _ready_git_plan()
+    packet = _owner_packet_for_plan(plan)
+    packet["checks"]["first_real_submit_still_blocked"] = False
+    packet["checks"]["pre_live_packet_skipped"] = True
+
+    blockers = module._owner_deploy_packet_blockers(plan, packet)
+
+    assert "owner_git_deploy_packet_first_real_submit_not_blocked" not in blockers
