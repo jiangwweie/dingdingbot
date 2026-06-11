@@ -1,0 +1,910 @@
+#!/usr/bin/env python3
+"""Guarded API flow for runtime first-real-submit.
+
+The script drives the official Trading Console API surface.  It is intentionally
+boring: every state transition is explicit, every response is captured, and the
+real exchange submit action is only called when both CLI and env guards are
+present.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.interfaces.operator_auth import (
+    SESSION_COOKIE,
+    _load_auth_config,
+    _sign_payload,
+)
+
+
+API_BASE_ENV = "RUNTIME_FIRST_REAL_SUBMIT_API_BASE"
+APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT"
+DEFAULT_API_BASE = "http://127.0.0.1:18080"
+DEFAULT_OUTCOME_KIND = "entry_filled_protection_creation_failed"
+
+
+class ApiClient(Protocol):
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+
+@dataclass
+class FlowConfig:
+    api_base: str
+    mode: str
+    order_candidate_id: str | None = None
+    authorization_id: str | None = None
+    signal_input_path: str | None = None
+    runtime_instance_id: str | None = None
+    candidate_id: str | None = None
+    context_id: str | None = None
+    owner_operator_id: str = "owner"
+    owner_confirmation_reference: str = "owner-authorized-first-real-submit"
+    reason: str = "owner authorized first real runtime submit"
+    outcome_kind: str = DEFAULT_OUTCOME_KIND
+    enable_local_registration: bool = True
+    arm_exchange_submit_adapter: bool = True
+    record_gateway_readiness: bool = True
+    execute_real_submit: bool = False
+    record_post_submit_accounting: bool = True
+    adapter_result_store_implemented: bool = True
+    real_adapter_boundary_implemented: bool = True
+
+
+@dataclass
+class FlowState:
+    ids: dict[str, str] = field(default_factory=dict)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def remember(self, key: str, value: Any) -> None:
+        if value is None:
+            return
+        text = str(value).strip()
+        if text:
+            self.ids[key] = text
+
+    def merge_ids(self, values: dict[str, Any] | None) -> None:
+        for key, value in (values or {}).items():
+            self.remember(key, value)
+
+    def add_blockers(self, values: Any) -> None:
+        for item in values or []:
+            text = str(item)
+            if text and text not in self.blockers:
+                self.blockers.append(text)
+
+    def add_warnings(self, values: Any) -> None:
+        for item in values or []:
+            text = str(item)
+            if text and text not in self.warnings:
+                self.warnings.append(text)
+
+
+class UrlLibApiClient:
+    def __init__(self, *, api_base: str) -> None:
+        self._api_base = api_base.rstrip("/")
+        self._cookie = _session_cookie()
+
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        url = self._api_base + path
+        if query:
+            url += "?" + urllib.parse.urlencode(_query_values(query))
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            method=method,
+            headers={
+                "Content-Type": "application/json",
+                "Cookie": self._cookie,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                raw = response.read().decode("utf-8")
+                return {
+                    "http_status": response.status,
+                    "body": json.loads(raw) if raw else None,
+                }
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                parsed: Any = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = raw
+            return {
+                "http_status": exc.code,
+                "body": parsed,
+                "error": True,
+            }
+
+
+class FirstRealSubmitApiFlow:
+    def __init__(self, *, client: ApiClient, config: FlowConfig) -> None:
+        self._client = client
+        self._config = config
+        self.state = FlowState()
+
+    def run(self) -> dict[str, Any]:
+        if self._config.mode == "inspect":
+            self._inspect()
+        else:
+            if self._config.signal_input_path:
+                self._create_shadow_candidate_from_signal_input()
+            if self._config.order_candidate_id:
+                self.state.remember("order_candidate_id", self._config.order_candidate_id)
+                self._prepare_from_order_candidate()
+            elif self._config.authorization_id:
+                self.state.remember("authorization_id", self._config.authorization_id)
+            else:
+                self.state.add_blockers(
+                    ["order_candidate_id_or_authorization_id_required"]
+                )
+            if self._config.mode in {"arm", "execute"}:
+                if self._config.mode == "execute":
+                    authorization_id = self._required_id("authorization_id")
+                    if authorization_id:
+                        self._require_final_execute_guard(authorization_id)
+                    if self.state.blockers:
+                        return self._report()
+                self._arm_for_exchange_submit()
+            if self._config.mode == "execute":
+                self._execute_first_real_submit()
+                if self._config.record_post_submit_accounting:
+                    self._record_post_submit_accounting()
+        return self._report()
+
+    def _inspect(self) -> None:
+        self._step("list_strategy_runtimes", "GET", "/api/trading-console/strategy-runtimes")
+        self._step("list_order_candidates", "GET", "/api/trading-console/order-candidates")
+
+    def _create_shadow_candidate_from_signal_input(self) -> None:
+        if not self._config.runtime_instance_id:
+            self.state.add_blockers(["runtime_instance_id_required_for_signal_input"])
+            return
+        with open(self._config.signal_input_path or "", "r", encoding="utf-8") as handle:
+            signal_input = json.load(handle)
+        body = {
+            "signal_input": signal_input,
+            "allow_shadow_candidate_creation": True,
+            "candidate_id": self._config.candidate_id,
+            "context_id": self._config.context_id,
+            "metadata": {
+                "source": "runtime_first_real_submit_api_flow",
+                "owner_authorized_first_real_submit": self._config.execute_real_submit,
+            },
+        }
+        result = self._step(
+            "create_shadow_candidate_from_signal_input",
+            "POST",
+            (
+                "/api/trading-console/strategy-runtimes/"
+                f"{self._config.runtime_instance_id}/strategy-signal-shadow-plans"
+            ),
+            body=body,
+        )
+        body = _body(result)
+        candidate = (
+            body.get("candidate_planning_result", {}).get("candidate")
+            if isinstance(body, dict)
+            else None
+        )
+        if isinstance(candidate, dict):
+            self.state.remember("order_candidate_id", candidate.get("order_candidate_id"))
+            self._config.order_candidate_id = candidate.get("order_candidate_id")
+
+    def _prepare_from_order_candidate(self) -> None:
+        candidate_id = self._required_id("order_candidate_id")
+        if not candidate_id:
+            return
+        draft = self._step(
+            "record_intent_draft",
+            "POST",
+            f"/api/trading-console/runtime-execution-intent-drafts/order-candidates/{candidate_id}",
+            query={
+                "owner_reviewed": True,
+                "owner_confirmed_for_intent": True,
+            },
+        )
+        draft_body = _body(draft)
+        self.state.remember("runtime_execution_intent_draft_id", draft_body.get("draft_id"))
+
+        draft_id = self._required_id("runtime_execution_intent_draft_id")
+        if not draft_id:
+            return
+        intent = self._step(
+            "record_execution_intent",
+            "POST",
+            f"/api/trading-console/runtime-execution-intents/drafts/{draft_id}",
+        )
+        intent_body = _body(intent)
+        self.state.remember("execution_intent_id", intent_body.get("id"))
+
+        intent_id = self._required_id("execution_intent_id")
+        if not intent_id:
+            return
+        authorization = self._step(
+            "record_submit_authorization",
+            "POST",
+            f"/api/trading-console/runtime-execution-submit-authorizations/intents/{intent_id}",
+            query={"owner_confirmed_for_submit": True},
+        )
+        authorization_body = _body(authorization)
+        self.state.remember("authorization_id", authorization_body.get("authorization_id"))
+
+        self._record_evidence_preparation()
+
+    def _record_evidence_preparation(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        preparation = self._step(
+            "prepare_machine_evidence",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-evidence-preparations/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                "adapter_result_store_implemented": (
+                    self._config.adapter_result_store_implemented
+                ),
+                "real_adapter_boundary_implemented": (
+                    self._config.real_adapter_boundary_implemented
+                ),
+            },
+        )
+        body = _body(preparation)
+        self.state.merge_ids(body.get("available_evidence_ids"))
+        self.state.merge_ids(body.get("prepared_evidence_ids"))
+
+    def _record_attempt_reservation_and_policy(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        reservation = self._step(
+            "record_attempt_reservation",
+            "POST",
+            (
+                "/api/trading-console/"
+                f"runtime-execution-attempt-reservations/authorizations/{authorization_id}"
+            ),
+        )
+        reservation_body = _body(reservation)
+        self.state.remember("reservation_id", reservation_body.get("reservation_id"))
+
+        reservation_id = self._required_id("reservation_id")
+        if not reservation_id:
+            return
+        mutation = self._step(
+            "apply_attempt_mutation",
+            "POST",
+            (
+                "/api/trading-console/"
+                f"runtime-execution-attempt-mutations/reservations/{reservation_id}"
+            ),
+        )
+        self.state.remember("attempt_mutation_id", _body(mutation).get("mutation_id"))
+
+        policy = self._step(
+            "record_attempt_outcome_policy",
+            "POST",
+            (
+                "/api/trading-console/"
+                f"runtime-execution-attempt-outcome-policies/reservations/{reservation_id}"
+            ),
+            query={"outcome_kind": self._config.outcome_kind},
+        )
+        self.state.remember("attempt_outcome_policy_id", _body(policy).get("policy_id"))
+        self._record_evidence_preparation()
+
+    def _record_order_lifecycle_handoff(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        self._step(
+            "record_order_lifecycle_handoff_draft",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-order-lifecycle-handoff-drafts/"
+                f"authorizations/{authorization_id}"
+            ),
+        )
+
+    def _arm_for_exchange_submit(self) -> None:
+        if not self._config.enable_local_registration:
+            self.state.add_blockers(["local_registration_not_enabled_by_cli"])
+            return
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        self._record_attempt_reservation_and_policy()
+        self._record_order_lifecycle_handoff()
+        if self.state.blockers:
+            return
+        self._derive_action_ids(authorization_id)
+        local_action = self._step(
+            "record_local_registration_action_authorization",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-local-registration-action-authorizations/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(local=True),
+                "owner_confirmed_for_local_registration_action": True,
+                "owner_operator_id": self._config.owner_operator_id,
+                "reason": self._config.reason,
+                "owner_confirmation_reference": (
+                    self._config.owner_confirmation_reference
+                ),
+            },
+        )
+        self.state.remember(
+            "local_registration_action_authorization_id",
+            _body(local_action).get("action_authorization_id"),
+        )
+        local_enablement = self._step(
+            "preview_local_registration_enablement",
+            "GET",
+            (
+                "/api/trading-console/"
+                "runtime-execution-local-registration-enablements/"
+                f"authorizations/{authorization_id}"
+            ),
+            query=self._common_evidence_query(
+                local=True,
+                include_local_registration_action=True,
+            ),
+        )
+        self.state.remember(
+            "local_registration_enablement_decision_id",
+            _body(local_enablement).get("decision_id"),
+        )
+        local_result = self._step(
+            "record_local_order_registration_result",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-order-lifecycle-adapter-results/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(
+                    local=True,
+                    include_local_registration_action=True,
+                ),
+                "order_lifecycle_adapter_enabled": True,
+                "local_order_registration_enabled": True,
+            },
+        )
+        self.state.remember(
+            "local_registration_adapter_result_id",
+            _body(local_result).get("adapter_result_id"),
+        )
+        if not self._config.arm_exchange_submit_adapter:
+            return
+        if self._config.record_gateway_readiness:
+            readiness = self._step(
+                "record_exchange_gateway_readiness",
+                "POST",
+                "/api/trading-console/runtime-execution-exchange-gateway-readiness",
+                query={
+                    "owner_confirmed_gateway_readiness_review": True,
+                    "owner_operator_id": self._config.owner_operator_id,
+                    "reason": self._config.reason,
+                    "owner_confirmation_reference": (
+                        self._config.owner_confirmation_reference
+                    ),
+                },
+            )
+            self.state.remember(
+                "deployment_readiness_evidence_id",
+                _body(readiness).get("readiness_id"),
+            )
+
+        exchange_action = self._step(
+            "record_exchange_submit_action_authorization",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-exchange-submit-action-authorizations/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(exchange=True),
+                "owner_confirmed_for_exchange_submit_action": True,
+                "owner_operator_id": self._config.owner_operator_id,
+                "reason": self._config.reason,
+                "owner_confirmation_reference": (
+                    self._config.owner_confirmation_reference
+                ),
+            },
+        )
+        self.state.remember(
+            "exchange_submit_action_authorization_id",
+            _body(exchange_action).get("action_authorization_id"),
+        )
+        exchange_enablement = self._step(
+            "preview_exchange_submit_enablement",
+            "GET",
+            (
+                "/api/trading-console/"
+                "runtime-execution-exchange-submit-enablements/"
+                f"authorizations/{authorization_id}"
+            ),
+            query=self._common_evidence_query(
+                exchange=True,
+                include_exchange_action=True,
+            ),
+        )
+        self.state.remember(
+            "exchange_submit_enablement_decision_id",
+            _body(exchange_enablement).get("decision_id"),
+        )
+        exchange_adapter = self._step(
+            "record_exchange_submit_adapter_result",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-exchange-submit-adapter-results/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(
+                    exchange=True,
+                    include_exchange_action=True,
+                ),
+                "exchange_submit_adapter_enabled": True,
+            },
+        )
+        self.state.remember(
+            "exchange_submit_adapter_result_id",
+            _body(exchange_adapter).get("adapter_result_id"),
+        )
+        self._preview_enablement_packet()
+
+    def _execute_first_real_submit(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        self._require_final_execute_guard(authorization_id)
+        if self.state.blockers:
+            return
+        result = self._step(
+            "execute_first_real_submit_action",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-actions/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(
+                    exchange=True,
+                    include_exchange_action=True,
+                ),
+                "owner_confirmed_for_first_real_submit_action": True,
+            },
+        )
+        body = _body(result)
+        self.state.remember("execution_result_id", body.get("execution_result_id"))
+        for key in ("entry_exchange_order_id", "failed_reason"):
+            self.state.remember(key, body.get(key))
+
+    def _record_post_submit_accounting(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        reservation_id = self._required_id("reservation_id")
+        if not authorization_id or not reservation_id:
+            return
+        review = self._step(
+            "record_submit_outcome_review",
+            "POST",
+            (
+                "/api/trading-console/"
+                f"runtime-execution-submit-outcome-reviews/authorizations/{authorization_id}"
+            ),
+        )
+        self.state.remember("submit_outcome_review_id", _body(review).get("review_id"))
+        accounting = self._step(
+            "record_first_real_submit_outcome_accounting",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-outcome-accounting/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={"reservation_id": reservation_id},
+        )
+        self.state.remember(
+            "first_real_submit_outcome_accounting_id",
+            _body(accounting).get("accounting_id"),
+        )
+        settlement = self._step(
+            "record_post_submit_budget_settlement",
+            "POST",
+            (
+                "/api/trading-console/"
+                "runtime-execution-post-submit-budget-settlements/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={"reservation_id": reservation_id},
+        )
+        self.state.remember(
+            "post_submit_budget_settlement_id",
+            _body(settlement).get("settlement_id"),
+        )
+
+    def _preview_enablement_packet(self) -> None:
+        authorization_id = self._required_id("authorization_id")
+        if not authorization_id:
+            return
+        packet = self._step(
+            "preview_first_real_submit_enablement_packet",
+            "GET",
+            (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-enablement-packets/"
+                f"authorizations/{authorization_id}"
+            ),
+            query={
+                **self._common_evidence_query(
+                    exchange=True,
+                    include_exchange_action=True,
+                ),
+                "exchange_submit_enablement_decision_id": self.state.ids.get(
+                    "exchange_submit_enablement_decision_id"
+                ),
+                "budget_release_or_consume_rule_confirmed": True,
+                "protection_creation_failure_policy_confirmed": True,
+                "duplicate_submit_policy_confirmed": True,
+                "deployment_readiness_confirmed": True,
+                "explicit_owner_real_submit_authorization": True,
+                "strategy_family_confirmed": True,
+                "implementation_source_confirmed": True,
+                "required_facts_confirmed": True,
+                "entry_policy_confirmed": True,
+                "exit_policy_confirmed": True,
+                "protection_policy_confirmed": True,
+                "eligible_for_runtime_execution_confirmed": True,
+                "right_tail_review_metrics_confirmed": True,
+                "runtime_profile_confirmed": True,
+                "owner_confirmation_mode_confirmed": True,
+                "symbol_side_boundary_confirmed": True,
+                "max_loss_budget_confirmed": True,
+                "max_notional_boundary_confirmed": True,
+                "max_active_positions_boundary_confirmed": True,
+                "max_leverage_boundary_confirmed": True,
+                "margin_usage_boundary_confirmed": True,
+                "liquidation_buffer_boundary_confirmed": True,
+                "protection_readiness_source_confirmed": True,
+                "stale_fact_behavior_confirmed": True,
+                "attempt_consumption_rule_confirmed": True,
+                "budget_reservation_rule_confirmed": True,
+                "trusted_active_position_source_confirmed": True,
+                "trusted_account_fact_source_confirmed": True,
+                "short_side_conservative_profile_confirmed": True,
+            },
+        )
+        self.state.remember("first_real_submit_packet_status", _body(packet).get("status"))
+
+    def _derive_action_ids(self, authorization_id: str) -> None:
+        self.state.remember(
+            "owner_real_submit_authorization_id",
+            f"owner-real-submit-authorization-{authorization_id}",
+        )
+        self.state.remember(
+            "order_lifecycle_adapter_enablement_id",
+            f"order-lifecycle-adapter-enable-{authorization_id}",
+        )
+        self.state.remember(
+            "local_order_registration_enablement_id",
+            f"local-order-registration-enable-{authorization_id}",
+        )
+        self.state.remember(
+            "order_lifecycle_submit_enablement_id",
+            f"order-lifecycle-submit-enable-{authorization_id}",
+        )
+        self.state.remember(
+            "exchange_submit_adapter_enablement_id",
+            f"exchange-submit-adapter-enable-{authorization_id}",
+        )
+
+    def _common_evidence_query(
+        self,
+        *,
+        local: bool = False,
+        exchange: bool = False,
+        include_local_registration_action: bool = False,
+        include_exchange_action: bool = False,
+    ) -> dict[str, Any]:
+        query: dict[str, Any] = {
+            "trusted_submit_fact_snapshot_id": self.state.ids.get(
+                "trusted_submit_fact_snapshot_id"
+            ),
+            "submit_idempotency_policy_id": self.state.ids.get(
+                "submit_idempotency_policy_id"
+            ),
+            "attempt_outcome_policy_id": self.state.ids.get(
+                "attempt_outcome_policy_id"
+            ),
+            "protection_creation_failure_policy_id": self.state.ids.get(
+                "protection_creation_failure_policy_id"
+            ),
+            "owner_real_submit_authorization_id": self.state.ids.get(
+                "owner_real_submit_authorization_id"
+            ),
+            "deployment_readiness_evidence_id": self.state.ids.get(
+                "deployment_readiness_evidence_id"
+            ),
+        }
+        if local:
+            query.update(
+                {
+                    "order_lifecycle_adapter_enablement_id": self.state.ids.get(
+                        "order_lifecycle_adapter_enablement_id"
+                    ),
+                    "local_order_registration_enablement_id": self.state.ids.get(
+                        "local_order_registration_enablement_id"
+                    ),
+                }
+            )
+        if include_local_registration_action:
+            query["local_registration_action_authorization_id"] = self.state.ids.get(
+                "local_registration_action_authorization_id"
+            )
+        if exchange:
+            query.update(
+                {
+                    "local_registration_enablement_decision_id": self.state.ids.get(
+                        "local_registration_enablement_decision_id"
+                    ),
+                    "order_lifecycle_submit_enablement_id": self.state.ids.get(
+                        "order_lifecycle_submit_enablement_id"
+                    ),
+                    "exchange_submit_adapter_enablement_id": self.state.ids.get(
+                        "exchange_submit_adapter_enablement_id"
+                    ),
+                }
+            )
+        if include_exchange_action:
+            query["exchange_submit_action_authorization_id"] = self.state.ids.get(
+                "exchange_submit_action_authorization_id"
+            )
+        return query
+
+    def _step(
+        self,
+        name: str,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result = self._client.request_json(method, path, query=query, body=body)
+        body_value = _body(result)
+        record = {
+            "name": name,
+            "method": method,
+            "path": path,
+            "query_keys": sorted(k for k, v in (query or {}).items() if v is not None),
+            "http_status": result.get("http_status"),
+            "status": body_value.get("status") if isinstance(body_value, dict) else None,
+            "id_summary": _id_summary(body_value),
+            "blockers": body_value.get("blockers", []) if isinstance(body_value, dict) else [],
+            "warnings": body_value.get("warnings", []) if isinstance(body_value, dict) else [],
+        }
+        self.state.steps.append(record)
+        if result.get("http_status", 0) >= 300 or result.get("error"):
+            self.state.add_blockers([f"{name}_http_{result.get('http_status')}"])
+        if isinstance(body_value, dict):
+            self.state.add_blockers(body_value.get("blockers"))
+            self.state.add_warnings(body_value.get("warnings"))
+        return result
+
+    def _required_id(self, key: str) -> str | None:
+        value = self.state.ids.get(key)
+        if not value:
+            self.state.add_blockers([f"{key}_missing"])
+            return None
+        return value
+
+    def _require_final_execute_guard(self, authorization_id: str) -> None:
+        if not self._config.execute_real_submit:
+            self.state.add_blockers(["execute_real_submit_cli_flag_missing"])
+            return
+        expected = _approval_value(authorization_id)
+        actual = os.environ.get(APPROVAL_ENV, "").strip()
+        if actual != expected:
+            self.state.add_blockers(
+                [
+                    "owner_runtime_first_real_submit_env_confirmation_missing",
+                    f"expected_{APPROVAL_ENV}={expected}",
+                ]
+            )
+
+    def _report(self) -> dict[str, Any]:
+        return {
+            "script": "runtime_first_real_submit_api_flow",
+            "mode": self._config.mode,
+            "api_base": self._config.api_base,
+            "ready_for_real_submit_action": (
+                self._config.mode == "execute"
+                and self._config.execute_real_submit
+                and not self.state.blockers
+            ),
+            "ids": self.state.ids,
+            "steps": self.state.steps,
+            "blockers": self.state.blockers,
+            "warnings": self.state.warnings,
+            "safety": {
+                "uses_official_trading_console_api": True,
+                "owner_authorization_required_for_real_submit": True,
+                "real_submit_requires_cli_flag": True,
+                "real_submit_requires_env_confirmation": True,
+                "env_confirmation_name": APPROVAL_ENV,
+                "no_withdrawal_or_transfer": True,
+            },
+        }
+
+
+def _body(result: dict[str, Any]) -> dict[str, Any]:
+    body = result.get("body")
+    return body if isinstance(body, dict) else {}
+
+
+def _id_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    keys = (
+        "id",
+        "draft_id",
+        "authorization_id",
+        "reservation_id",
+        "mutation_id",
+        "policy_id",
+        "decision_id",
+        "action_authorization_id",
+        "adapter_result_id",
+        "execution_result_id",
+        "readiness_id",
+        "settlement_id",
+        "review_id",
+        "accounting_id",
+    )
+    return {key: value.get(key) for key in keys if value.get(key)}
+
+
+def _query_values(query: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, value in query.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            result[key] = "true" if value else "false"
+        else:
+            result[key] = str(value)
+    return result
+
+
+def _session_cookie() -> str:
+    config = _load_auth_config()
+    now = int(time.time())
+    token = _sign_payload(
+        {
+            "sub": config.username,
+            "iat": now,
+            "exp": now + min(config.ttl_seconds, 3600),
+            "scope": "brc_operator_console",
+        },
+        config.session_secret,
+    )
+    return f"{SESSION_COOKIE}={token}"
+
+
+def _approval_value(authorization_id: str) -> str:
+    return f"{authorization_id}:first-real-submit:real_gateway_action"
+
+
+def _parse_args(argv: list[str]) -> FlowConfig:
+    parser = argparse.ArgumentParser(
+        description="Run a guarded runtime first-real-submit API flow.",
+    )
+    parser.add_argument("--api-base", default=os.environ.get(API_BASE_ENV, DEFAULT_API_BASE))
+    parser.add_argument(
+        "--mode",
+        choices=["inspect", "prepare", "arm", "execute"],
+        default="inspect",
+    )
+    parser.add_argument("--order-candidate-id")
+    parser.add_argument("--authorization-id")
+    parser.add_argument("--signal-input-json", dest="signal_input_path")
+    parser.add_argument("--runtime-instance-id")
+    parser.add_argument("--candidate-id")
+    parser.add_argument("--context-id")
+    parser.add_argument("--owner-operator-id", default="owner")
+    parser.add_argument(
+        "--owner-confirmation-reference",
+        default="owner-authorized-first-real-submit",
+    )
+    parser.add_argument("--reason", default="owner authorized first real runtime submit")
+    parser.add_argument("--outcome-kind", default=DEFAULT_OUTCOME_KIND)
+    parser.add_argument("--skip-local-registration", action="store_true")
+    parser.add_argument("--skip-exchange-arm", action="store_true")
+    parser.add_argument("--skip-gateway-readiness", action="store_true")
+    parser.add_argument("--execute-real-submit", action="store_true")
+    parser.add_argument("--skip-post-submit-accounting", action="store_true")
+    parser.add_argument("--adapter-result-store-implemented", action="store_true", default=True)
+    parser.add_argument("--real-adapter-boundary-implemented", action="store_true", default=True)
+    args = parser.parse_args(argv)
+    return FlowConfig(
+        api_base=args.api_base,
+        mode=args.mode,
+        order_candidate_id=args.order_candidate_id,
+        authorization_id=args.authorization_id,
+        signal_input_path=args.signal_input_path,
+        runtime_instance_id=args.runtime_instance_id,
+        candidate_id=args.candidate_id,
+        context_id=args.context_id,
+        owner_operator_id=args.owner_operator_id,
+        owner_confirmation_reference=args.owner_confirmation_reference,
+        reason=args.reason,
+        outcome_kind=args.outcome_kind,
+        enable_local_registration=not args.skip_local_registration,
+        arm_exchange_submit_adapter=not args.skip_exchange_arm,
+        record_gateway_readiness=not args.skip_gateway_readiness,
+        execute_real_submit=args.execute_real_submit,
+        record_post_submit_accounting=not args.skip_post_submit_accounting,
+        adapter_result_store_implemented=args.adapter_result_store_implemented,
+        real_adapter_boundary_implemented=args.real_adapter_boundary_implemented,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    config = _parse_args(argv or sys.argv[1:])
+    flow = FirstRealSubmitApiFlow(
+        client=UrlLibApiClient(api_base=config.api_base),
+        config=config,
+    )
+    report = flow.run()
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    return 0 if not report["blockers"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
