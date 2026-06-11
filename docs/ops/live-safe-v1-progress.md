@@ -2406,3 +2406,55 @@ Use this file for session progress and handoff notes.
     instructions, or mutate runtime budget;
   - the only remote mutation was the code deploy / service restart / Alembic
     no-op head check through the existing deployment path.
+
+## 2026-06-11 (First-real-submit Arm Evidence Ordering Fix)
+
+- Tokyo fresh-candidate path created the next active-runtime AVAX short shadow
+  candidate:
+  - runtime `strategy-runtime-95655873b76c`;
+  - candidate `order-candidate-44cd97753e3e`;
+  - signal evaluation `signal-evaluation-2037e48d00b3`;
+  - symbol `AVAX/USDT:USDT`, side `short`, intended notional `8`.
+- Prepare recorded:
+  - `ExecutionIntent` `intent_rt_6ca3cecd63fafbd1d25760df`;
+  - submit authorization
+    `runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - status `approved_pending_controlled_submit`.
+- Tokyo arm-state inspection found:
+  - no local `orders` row for the new candidate / intent;
+  - no `runtime_execution_order_lifecycle_adapter_results` row;
+  - no exchange-submit action authorization;
+  - no exchange-submit adapter result;
+  - no exchange-submit execution result;
+  - no submit-outcome review or post-submit settlement;
+  - `ExecutionIntent` remains `recorded`.
+- Important finding:
+  - the previous arm attempt recorded an attempt reservation and applied an
+    attempt mutation before trusted submit facts were fresh;
+  - trusted submit facts were blocked by
+    `trusted_reconciliation_fact_stale` and
+    `trusted_submit_facts_not_fresh_enough`;
+  - runtime attempts therefore moved from `attempts_used=1` to
+    `attempts_used=2` even though no real submit occurred.
+- Fix:
+  - updated `scripts/runtime_first_real_submit_api_flow.py` so arm may tolerate
+    the expected pre-adapter blocker
+    `runtimeexecutionorderlifecycleadapterresult_not_found`, but stops before
+    attempt reservation / attempt mutation when trusted submit facts or
+    reconciliation blockers are present;
+  - added unit coverage proving stale trusted facts block before attempt
+    reservation, attempt mutation, local registration authorization, and
+    exchange-submit authorization.
+- Verification:
+  - `pytest -q tests/unit/test_runtime_first_real_submit_api_flow.py` passed
+    with `9 passed`;
+  - `python3 -m py_compile scripts/runtime_first_real_submit_api_flow.py tests/unit/test_runtime_first_real_submit_api_flow.py`
+    passed;
+  - `git diff --check` passed.
+- Safety result:
+  - this local fix did not call exchange, create orders, call OrderLifecycle,
+    create withdrawal/transfer instructions, or submit a real order;
+  - Tokyo remote inspection confirms the current authorization has not reached
+    exchange submit execution;
+  - do not execute first-real-submit from this authorization until
+    reconciliation facts are refreshed and the new evidence snapshot is clean.

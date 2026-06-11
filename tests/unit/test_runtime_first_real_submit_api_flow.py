@@ -19,6 +19,7 @@ class _FakeClient:
         next_attempt_gate_name: str = "clear_for_next_preflight",
         candidate_reusable: bool | None = True,
         candidate_usage_status: str = "unused",
+        evidence_blockers: list[str] | None = None,
     ) -> None:
         self.calls: list[dict] = []
         self.existing_attempt_policy = existing_attempt_policy
@@ -26,6 +27,7 @@ class _FakeClient:
         self.next_attempt_gate_name = next_attempt_gate_name
         self.candidate_reusable = candidate_reusable
         self.candidate_usage_status = candidate_usage_status
+        self.evidence_blockers = evidence_blockers or []
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -126,7 +128,8 @@ class _FakeClient:
                     "blockers": [
                         "first_real_submit_packet_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
-                    ],
+                    ]
+                    + self.evidence_blockers,
                 },
             }
         if "runtime-execution-attempt-reservations" in path:
@@ -296,6 +299,37 @@ def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
     assert any("runtime-execution-protection-plans" in path for path in paths)
     assert any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
+
+
+def test_arm_blocks_before_attempt_mutation_when_submit_facts_are_stale():
+    client = _FakeClient(
+        evidence_blockers=[
+            "trusted_reconciliation_fact_stale",
+            "trusted_submit_facts_not_fresh_enough",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "trusted_reconciliation_fact_stale" in report["blockers"]
+    assert "trusted_submit_facts_not_fresh_enough" in report["blockers"]
+    assert not any(
+        "runtimeexecutionorderlifecycleadapterresult_not_found" in blocker
+        for blocker in report["blockers"]
+    )
+    paths = [call["path"] for call in client.calls]
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-action-authorizations" in path for path in paths)
 
 
 def test_arm_existing_authorization_reuses_existing_attempt_policy():

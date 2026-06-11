@@ -404,10 +404,14 @@ class FirstRealSubmitApiFlow:
             _body(protection_plan).get("protection_plan_id"),
         )
 
-    def _record_evidence_preparation(self, *, collect_body_blockers: bool = True) -> None:
+    def _record_evidence_preparation(
+        self,
+        *,
+        collect_body_blockers: bool = True,
+    ) -> dict[str, Any]:
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
-            return
+            return {}
         preparation = self._step(
             "prepare_machine_evidence",
             "POST",
@@ -436,6 +440,7 @@ class FirstRealSubmitApiFlow:
                 "attempt_mutation_id",
                 f"runtime-attempt-mutation-{reservation_id}",
             )
+        return body
 
     def _verify_order_candidate_reusable(self, candidate_id: str) -> None:
         if self._config.skip_order_candidate_usage_check:
@@ -541,8 +546,11 @@ class FirstRealSubmitApiFlow:
         self._record_protection_plan()
         if self.state.blockers:
             return
-        self._record_evidence_preparation(collect_body_blockers=False)
+        evidence_body = self._record_evidence_preparation(collect_body_blockers=False)
+        self.state.add_blockers(_pre_adapter_evidence_blockers(evidence_body))
         if any(blocker.endswith("_http_404") for blocker in self.state.blockers):
+            return
+        if self.state.blockers:
             return
         self._record_attempt_reservation_and_policy()
         self._record_order_lifecycle_handoff()
@@ -1020,6 +1028,22 @@ def _extract_next_attempt_gate(body: dict[str, Any]) -> dict[str, Any]:
         return post_action["next_attempt_gate"]
     gate = body.get("next_attempt_gate")
     return gate if isinstance(gate, dict) else {}
+
+
+def _pre_adapter_evidence_blockers(body: dict[str, Any]) -> list[str]:
+    """Block arm on submit facts while tolerating the expected missing adapter result."""
+    tolerated_fragments = (
+        "runtimeexecutionorderlifecycleadapterresult_not_found",
+        "runtime_execution_order_lifecycle_adapter_result_not_found",
+    )
+    blockers = body.get("blockers") if isinstance(body, dict) else None
+    result: list[str] = []
+    for blocker in blockers or []:
+        text = str(blocker)
+        if any(fragment in text for fragment in tolerated_fragments):
+            continue
+        result.append(text)
+    return result
 
 
 def _query_values(query: dict[str, Any]) -> dict[str, str]:
