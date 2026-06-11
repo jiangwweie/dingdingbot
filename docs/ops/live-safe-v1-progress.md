@@ -3885,3 +3885,52 @@ Use this file for session progress and handoff notes.
     submits, exchange writes, withdrawals, or transfers;
   - first-real-submit remains blocked until a separate explicit Owner action
     authorization and live submit evidence review.
+
+## 2026-06-12 (Runtime Coverage Review Packet)
+
+- Added a local non-executing ACTIVE runtime coverage review packet builder:
+  - `scripts/build_runtime_coverage_review_packet.py`;
+  - `tests/unit/test_runtime_coverage_review_packet.py`.
+- Purpose:
+  - consume an existing runtime observation operator packet;
+  - compare ACTIVE runtime strategy/symbol coverage with the broader
+    read-only strategy preview shelf;
+  - summarize no-action reason codes and whether a no-signal window should
+    lead to coverage review;
+  - explicitly avoid starting runtimes, changing strategy parameters, creating
+    candidates, creating ExecutionIntents, placing orders, calling
+    OrderLifecycle, or moving funds.
+- Current Tokyo-derived coverage review input:
+  - source operator packet:
+    `/home/ubuntu/brc-deploy/reports/runtime-active-observation-loop/20260612Tovernight-190ac471/operator-packet-3d2e744c.json`;
+  - observation iteration: `21/77`;
+  - runtime ready signal count: `0`;
+  - strategy-group would-enter signal count: `0`;
+  - strategy-group no-action signal count: `8`;
+  - active runtime families: `BTPC-001`, `CPM-001`;
+  - broader preview families: `BRF-001`, `BTPC-001`, `CPM-RO-001`,
+    `LSR-001`, `MI-001`, `RBR-001`, `VCB-001`;
+  - coverage ratio: `2/7`;
+  - uncovered preview families: `BRF-001`, `CPM-RO-001`, `LSR-001`,
+    `MI-001`, `RBR-001`, `VCB-001`;
+  - packet status: `coverage_review_observation_running`;
+  - allowed next actions: continue active runtime observation and review
+    coverage if no-signal persists;
+  - source forbidden effects: `[]`.
+- Focused verification:
+  - `pytest -q tests/unit/test_runtime_coverage_review_packet.py
+    tests/unit/test_runtime_observation_operator_packet.py
+    tests/unit/test_runtime_no_signal_diagnostic_packet.py` passed with
+    `13 passed`;
+  - `python3 -m py_compile
+    scripts/build_runtime_coverage_review_packet.py
+    scripts/build_runtime_observation_operator_packet.py
+    scripts/build_runtime_no_signal_diagnostic_packet.py` passed.
+- Safety:
+  - the coverage review packet reads JSON only;
+  - it does not call APIs, connect to PG, start runtimes, resolve runtimes,
+    change strategy parameters, create shadow candidates, create
+    ExecutionIntents, create orders, call OrderLifecycle, call exchange,
+    mutate attempts/budget, withdraw, or transfer;
+  - future runtime coverage expansion remains an Owner/Codex review decision,
+    not an automatic side effect of a no-signal window.
