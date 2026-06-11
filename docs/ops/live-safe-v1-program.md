@@ -140,6 +140,18 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Each task uses one focused branch from `program/live-safe-v1`.
 - Use `fix/*` for bug fixes and `feature/*` for new scoped features.
 - Core execution files must not be modified by multiple agents at the same time.
+- Long-running goal mode is reserved for the main controller window. Side-task
+  and parallel-agent branches must be bounded by a task card and must stop after
+  their `Done When` / `Hard Stop` conditions are reached.
+- Side-task branch names must match scope. A branch scoped to advisory, docs,
+  UI, testing, or strategy semantics must not drift into submit, exchange,
+  `OrderLifecycle`, or other core execution-chain work without a new
+  Owner-approved task.
+- Side-task output enters this program only after controller review via
+  cherry-pick, replay, or explicit merge into `program/live-safe-v1`; it must
+  not be treated as automatically integrated capability.
+- `dev` receives reviewed integration snapshots only. Deployment branches are
+  cut from named, verified commits.
 
 ## Runtime Safety
 

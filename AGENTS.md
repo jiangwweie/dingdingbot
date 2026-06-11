@@ -302,3 +302,19 @@ Do not run long suites without user confirmation.
 - Each task should use a focused branch from the program branch.
 - Do not commit or push unless the user asks or the active task explicitly includes it.
 - Never revert user changes unless explicitly asked.
+
+## Branch And Side-Task Discipline
+
+- Long-running goal mode belongs only in the main controller window.
+- Side-task, worker, or parallel-agent branches must use a bounded task card
+  with explicit `Goal`, `Allowed files`, `Forbidden files`, `Done When`, and
+  `Hard Stop` conditions.
+- Side-task branches must stop after their stated task is done and report back;
+  they must not continue the broader runtime-governance goal on their own.
+- Branch names must match the task scope. For example, an `llm-advisory-*`
+  branch must not drift into submit, exchange, `OrderLifecycle`, or other core
+  execution-chain work unless a new Owner-approved task explicitly allows it.
+- Side-task output is not automatically integrated. The main controller must
+  review, cherry-pick, replay, or merge the work into `program/live-safe-v1`.
+- `dev` receives only reviewed integration snapshots. Deployment branches must
+  be cut from a named, verified commit rather than from an arbitrary side branch.
