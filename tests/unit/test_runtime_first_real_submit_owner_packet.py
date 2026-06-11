@@ -162,6 +162,9 @@ async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
     assert packet["status"] == "ready_for_owner_first_real_submit_decision"
     assert packet["checks"]["packet_ready_for_owner_decision"] is True
     assert packet["checks"]["ready_for_first_real_submit"] is False
+    assert packet["readiness_summary"]["owner_decision_scope"] == (
+        "owner_review_not_submit_authority"
+    )
     assert (
         packet["readiness_summary"]["local_registration_pre_exchange_ready"]
         is True
@@ -196,6 +199,86 @@ async def test_owner_packet_surfaces_exchange_pre_execution_evidence():
     assert packet["exchange_submit_rehearsal"][
         "does_not_authorize_live_action"
     ] is True
+    assert packet["local_registration_rehearsal"]["ready"] is True
+    assert packet["local_registration_rehearsal"]["adapter_result_status"] == (
+        "registered_created_local_orders"
+    )
+    assert packet["local_registration_rehearsal"]["registered_order_count"] == 2
+    assert packet["local_registration_rehearsal"]["order_lifecycle_called"] is True
+    assert packet["local_registration_rehearsal"]["exchange_called"] is False
+    assert packet["first_real_submit_action_boundary"][
+        "owner_packet_ready_for_decision"
+    ] is True
+    assert packet["first_real_submit_action_boundary"][
+        "ready_for_first_real_submit"
+    ] is False
+    assert packet["first_real_submit_action_boundary"][
+        "owner_decision_is_submit_authority"
+    ] is False
+    assert packet["first_real_submit_action_boundary"][
+        "requires_separate_action_authorization"
+    ] is True
+    assert "exchange_submit_adapter_not_implemented" in (
+        packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
+    )
+    assert "first_real_submit_action_not_ready" in (
+        packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_owner_packet_distinguishes_local_registration_ready_from_exchange_submit_ready():
+    module = _load_module()
+    pre_live = _load_pre_live_module()
+    pre_live_packet = await pre_live.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_local_registration_pre_exchange=True,
+        runner=_runner(pre_live),
+    )
+
+    packet = module.build_first_real_submit_owner_packet(
+        pre_live_packet=pre_live_packet
+    )
+
+    assert packet["status"] == "ready_for_owner_first_real_submit_decision"
+    assert packet["checks"]["packet_ready_for_owner_decision"] is True
+    assert packet["checks"]["ready_for_first_real_submit"] is False
+    assert packet["readiness_summary"][
+        "local_order_registration_adapter_enablement_ready"
+    ] is True
+    assert (
+        packet["readiness_summary"]["exchange_submit_adapter_pre_execution_ready"]
+        is False
+    )
+    assert packet["readiness_summary"]["exchange_submit_action_ready"] is False
+    assert packet["readiness_summary"]["owner_decision_scope"] == (
+        "owner_review_not_submit_authority"
+    )
+    assert packet["local_registration_rehearsal"]["ready"] is True
+    assert packet["local_registration_rehearsal"]["adapter_result_status"] == (
+        "registered_created_local_orders"
+    )
+    assert packet["exchange_submit_rehearsal"]["ready"] is False
+    assert packet["first_real_submit_action_boundary"][
+        "local_registration_pre_exchange_ready"
+    ] is True
+    assert packet["first_real_submit_action_boundary"][
+        "exchange_submit_adapter_pre_execution_ready"
+    ] is False
+    assert packet["first_real_submit_action_boundary"][
+        "ready_for_first_real_submit"
+    ] is False
+    assert "exchange_submit_adapter_pre_execution_not_ready" in (
+        packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
+    )
+    assert "first_real_submit_action_not_ready" in (
+        packet["first_real_submit_action_boundary"]["remaining_action_blockers"]
+    )
+    assert packet["first_real_submit_action_boundary"][
+        "does_not_authorize_live_action"
+    ] is True
 
 
 def test_owner_packet_can_be_ready_for_owner_decision_when_only_owner_is_missing():
@@ -216,6 +299,9 @@ def test_owner_packet_can_be_ready_for_owner_decision_when_only_owner_is_missing
     assert packet["status"] == "ready_for_owner_first_real_submit_decision"
     assert packet["checks"]["packet_ready_for_owner_decision"] is True
     assert packet["checks"]["ready_for_first_real_submit"] is False
+    assert packet["readiness_summary"]["owner_decision_scope"] == (
+        "owner_review_not_submit_authority"
+    )
     assert packet["remaining_gates"]["owner_decision_items"] == [
         "Owner live-runtime enablement authorization",
         "Owner real-submit authorization",

@@ -476,7 +476,12 @@ Key facts:
   authorizing exchange submit. The Owner first-real-submit decision packet and
   OrderLifecycle adapter enablement packet can also surface these exchange
   pre-execution / fake-gateway simulation evidence fields without making them
-  live submit authority.
+  live submit authority. The Owner first-real-submit packet now exposes an
+  explicit `first_real_submit_action_boundary` so
+  `packet_ready_for_owner_decision=true` is not confused with
+  `ready_for_first_real_submit=true`; local registration readiness, exchange
+  pre-execution readiness, and true exchange-submit action readiness remain
+  separate facts.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

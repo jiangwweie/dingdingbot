@@ -103,6 +103,12 @@ def build_first_real_submit_owner_packet(
         if isinstance(pre_live_packet.get("exchange_submit_adapter_rehearsal"), dict)
         else {}
     )
+    local_registration_rehearsal = _as_dict(
+        pre_live_packet.get("local_registration_rehearsal")
+    )
+    local_registration_adapter_result = _as_dict(
+        local_registration_rehearsal.get("adapter_result")
+    )
     disabled_execution_result = _as_dict(
         exchange_rehearsal.get("disabled_execution_result")
     )
@@ -171,6 +177,10 @@ def build_first_real_submit_owner_packet(
     if not ready_for_owner_decision:
         blockers.append("first_real_submit_prerequisites_not_ready")
         blockers = _dedupe(blockers)
+    exchange_submit_action_blockers = _exchange_submit_action_blockers(
+        checks=checks,
+        ready_for_first_real_submit=ready_for_first_real_submit,
+    )
 
     status = "blocked_before_owner_first_real_submit_decision"
     if ready_for_first_real_submit:
@@ -206,6 +216,14 @@ def build_first_real_submit_owner_packet(
             "implementation_ready": implementation_ready,
             "ready_for_owner_decision": ready_for_owner_decision,
             "ready_for_first_real_submit": ready_for_first_real_submit,
+            "owner_decision_scope": _owner_decision_scope(
+                ready_for_owner_decision=ready_for_owner_decision,
+                ready_for_first_real_submit=ready_for_first_real_submit,
+            ),
+            "local_order_registration_adapter_enablement_ready": (
+                checks.get("local_registration_pre_exchange_ready") is True
+            ),
+            "exchange_submit_action_ready": ready_for_first_real_submit,
             "local_registration_pre_exchange_ready": checks.get(
                 "local_registration_pre_exchange_ready"
             ),
@@ -264,6 +282,29 @@ def build_first_real_submit_owner_packet(
                 checks.get("exchange_submit_rehearsal_blockers") or []
             ),
         },
+        "local_registration_rehearsal": {
+            "enabled": local_registration_rehearsal.get("enabled"),
+            "ready": local_registration_rehearsal.get("ready"),
+            "enablement_decision_id": local_registration_rehearsal.get(
+                "enablement_decision_id"
+            ),
+            "action_authorization_id": local_registration_rehearsal.get(
+                "action_authorization_id"
+            ),
+            "adapter_result_status": local_registration_adapter_result.get(
+                "status"
+            ),
+            "registered_order_count": local_registration_adapter_result.get(
+                "registered_order_count"
+            ),
+            "order_lifecycle_called": local_registration_adapter_result.get(
+                "order_lifecycle_called"
+            ),
+            "exchange_called": local_registration_adapter_result.get(
+                "exchange_called"
+            ),
+            "does_not_authorize_live_action": True,
+        },
         "exchange_submit_rehearsal": {
             "enabled": exchange_rehearsal.get("enabled"),
             "ready": exchange_rehearsal.get("ready"),
@@ -293,6 +334,27 @@ def build_first_real_submit_owner_packet(
             "in_memory_simulation_is_fake_gateway_only": bool(
                 in_memory_execution_simulation
             ),
+            "does_not_authorize_live_action": True,
+        },
+        "first_real_submit_action_boundary": {
+            "owner_packet_ready_for_decision": ready_for_owner_decision,
+            "ready_for_first_real_submit": ready_for_first_real_submit,
+            "local_registration_pre_exchange_ready": checks.get(
+                "local_registration_pre_exchange_ready"
+            ),
+            "exchange_submit_adapter_pre_execution_ready": checks.get(
+                "exchange_submit_adapter_pre_execution_ready"
+            ),
+            "exchange_submit_execution_disabled_proved": (
+                disabled_execution_result.get("status")
+                == "exchange_submit_execution_disabled"
+                and disabled_execution_result.get("exchange_called") is False
+                and disabled_execution_result.get("order_lifecycle_submit_called")
+                is False
+            ),
+            "remaining_action_blockers": exchange_submit_action_blockers,
+            "owner_decision_is_submit_authority": False,
+            "requires_separate_action_authorization": True,
             "does_not_authorize_live_action": True,
         },
         "evidence_preparation": {
@@ -381,6 +443,33 @@ def _non_owner_live_enablement_blockers(
     )
 
 
+def _exchange_submit_action_blockers(
+    *,
+    checks: dict[str, Any],
+    ready_for_first_real_submit: bool,
+) -> list[str]:
+    items = list(checks.get("exchange_submit_rehearsal_blockers") or [])
+    if checks.get("local_registration_pre_exchange_ready") is not True:
+        items.append("local_registration_pre_exchange_not_ready")
+    if checks.get("exchange_submit_adapter_pre_execution_ready") is not True:
+        items.append("exchange_submit_adapter_pre_execution_not_ready")
+    if not ready_for_first_real_submit:
+        items.append("first_real_submit_action_not_ready")
+    return _dedupe(items)
+
+
+def _owner_decision_scope(
+    *,
+    ready_for_owner_decision: bool,
+    ready_for_first_real_submit: bool,
+) -> str:
+    if ready_for_first_real_submit:
+        return "owner_controlled_first_real_submit_review"
+    if ready_for_owner_decision:
+        return "owner_review_not_submit_authority"
+    return "blocked_before_owner_review"
+
+
 def _dedupe(values: list[str]) -> list[str]:
     return sorted(dict.fromkeys(values))
 
@@ -448,6 +537,10 @@ def _print_human(packet: dict[str, Any]) -> None:
     print("technical_ready=" + str(summary["technical_ready"]).lower())
     print("deployment_ready=" + str(summary["deployment_ready"]).lower())
     print("implementation_ready=" + str(summary["implementation_ready"]).lower())
+    print(
+        "local_registration_pre_exchange_ready="
+        + str(summary["local_registration_pre_exchange_ready"]).lower()
+    )
     print(
         "exchange_submit_adapter_pre_execution_ready="
         + str(summary["exchange_submit_adapter_pre_execution_ready"]).lower()
