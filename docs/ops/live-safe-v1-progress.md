@@ -3075,3 +3075,40 @@ Use this file for session progress and handoff notes.
   - real reduce-only close is still not executed;
   - the Trading Console can now read the post-close plan, but actual close still
     requires exact Owner authorization and the explicit execute flag.
+
+## 2026-06-11 (Trading Console Post-close Follow-up Panel)
+
+- Added a Trading Console runtime page panel for the authenticated
+  post-close follow-up API.
+- The panel surfaces:
+  - current post-close status;
+  - active-position / flat state;
+  - Owner exact reduce-only close approval env and value as evidence only;
+  - resolved closed-review entry / exit order facts;
+  - completed and required follow-up steps;
+  - operator command plan as non-executing command evidence;
+  - no-write safety invariants.
+- UI safety boundary:
+  - no close button;
+  - no auto-filled execution action;
+  - no order submit / cancel / amend affordance;
+  - no review write action from this panel;
+  - no withdrawal / transfer affordance.
+- Local verification:
+  - `npm run lint` passed in `trading-console`;
+  - `npm run build` passed in `trading-console`;
+  - `pytest -q tests/unit/test_trading_console_readmodels.py -k "post_close_followup or live_position_monitor or active_position_exit_plan or requires_operator_session or router_keeps_read_models"`
+    passed with `5 passed`;
+  - `git diff --check` passed.
+- Playwright verification:
+  - opened `http://127.0.0.1:3016/runtime` through the Trading Console
+    frontend proxy;
+  - used a local mock read-only API upstream, not exchange or Tokyo writes;
+  - confirmed the page rendered the new `平仓后跟进` panel with
+    `等待 Owner 平仓授权`, `控制台不执行平仓`, `仅计划`, and
+    `交易所写入 无`;
+  - toggled from dark mode to light mode and confirmed the runtime page remained
+    rendered without console runtime errors.
+- Remaining live action:
+  - real reduce-only close is still not executed;
+  - current panel is an operator evidence surface only.

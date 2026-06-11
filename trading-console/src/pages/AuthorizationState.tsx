@@ -16,6 +16,7 @@ import {
   MetricRailItem,
   StatusChip,
   type ConsoleTone,
+  toneClass,
 } from '@/components/console/ConsolePrimitives';
 import { Badge, DeferredActionSlot, TechnicalDetails } from '@/components/ui';
 import { actionSlotEntries, asArray, displayValue, formatTimestampMs, useReadModel } from '@/lib/tradingConsoleApi';
@@ -86,6 +87,64 @@ type RuntimeLivePositionMonitorView = {
   withdrawal_instruction_created?: boolean;
   transfer_instruction_created?: boolean;
   created_at_ms?: number;
+};
+
+type RuntimePostCloseFollowupPacketView = {
+  packet_id?: string;
+  status?: string;
+  runtime_instance_id?: string;
+  symbol?: string;
+  active_position_present?: boolean;
+  source_monitor_id?: string;
+  owner_close_packet_status?: string | null;
+  owner_close_approval_env?: string | null;
+  owner_close_approval_value?: string | null;
+  closed_review_facts_status?: string | null;
+  closed_review_entry_order_id?: string | null;
+  closed_review_exit_order_id?: string | null;
+  closed_review_command_args?: string[];
+  required_steps?: string[];
+  completed_steps?: string[];
+  recommended_next_action?: string;
+  blockers?: string[];
+  warnings?: string[];
+  packet_only?: boolean;
+  not_execution_authority?: boolean;
+  exchange_called?: boolean;
+  exchange_order_submitted?: boolean;
+  order_lifecycle_called?: boolean;
+  order_created?: boolean;
+  position_closed?: boolean;
+  runtime_state_mutated?: boolean;
+  withdrawal_instruction_created?: boolean;
+  transfer_instruction_created?: boolean;
+  created_at_ms?: number;
+};
+
+type RuntimePostCloseOperatorPlanView = {
+  scope?: string;
+  not_executed?: boolean;
+  requires_explicit_owner_approval_before_execute?: boolean;
+  owner_close_approval_env?: string | null;
+  owner_close_approval_value?: string | null;
+  refresh_followup_command_args?: string[];
+  owner_close_dry_run_command_args?: string[];
+  owner_close_execute_command_args?: string[];
+  closed_review_facts_refresh_command_args?: string[];
+  closed_review_command_args?: string[];
+  post_close_required_sequence?: string[];
+  safety_invariants?: Record<string, any>;
+};
+
+type RuntimePostCloseFollowupView = {
+  scope?: string;
+  status?: string;
+  packet?: RuntimePostCloseFollowupPacketView;
+  source_monitor?: RuntimeLivePositionMonitorView;
+  owner_close_packet?: Record<string, any> | null;
+  closed_review_facts_packet?: Record<string, any> | null;
+  operator_command_plan?: RuntimePostCloseOperatorPlanView;
+  safety_invariants?: Record<string, any>;
 };
 
 type SignalEvaluationView = {
@@ -299,6 +358,7 @@ export default function AuthorizationState() {
           <AuthorizationBridgePanel envelope={authState.envelope} data={authData} error={authState.error} />
           <RuntimeSafetyReadinessPanel runtimes={runtimes} />
           <RuntimeLivePositionMonitorPanel runtime={selectedRuntime} />
+          <RuntimePostCloseFollowupPanel runtime={selectedRuntime} />
           <RuntimePromotionGatePanel runtimes={runtimes} />
           <RuntimePromotionConfirmationLedger runtime={selectedRuntime} />
         </div>
@@ -536,6 +596,25 @@ function RuntimeLivePositionMonitorPanel({ runtime }: { runtime: RuntimeView | n
   }
 
   return <RuntimeLivePositionMonitorDetail runtimeId={runtimeId} />;
+}
+
+function RuntimePostCloseFollowupPanel({ runtime }: { runtime: RuntimeView | null }) {
+  const runtimeId = runtime?.runtime_instance_id ? String(runtime.runtime_instance_id) : null;
+
+  if (!runtimeId) {
+    return (
+      <ConsolePanel title="平仓后跟进" caption="Owner 平仓授权、closed-review facts 与下一次尝试解锁">
+        <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+          <BoundaryCell label="运行实例" value="暂无实例" tone="blocked" />
+          <BoundaryCell label="Owner 授权" value="未生成" tone="unavailable" />
+          <BoundaryCell label="复盘事实" value="未读取" tone="unavailable" />
+          <BoundaryCell label="控制台动作" value="不执行" tone="unavailable" />
+        </div>
+      </ConsolePanel>
+    );
+  }
+
+  return <RuntimePostCloseFollowupDetail runtimeId={runtimeId} />;
 }
 
 function RuntimePromotionGatePanel({ runtimes }: { runtimes: RuntimeView[] }) {
@@ -906,6 +985,144 @@ function RuntimeLivePositionMonitorDetail({ runtimeId }: { runtimeId: string }) 
   );
 }
 
+function RuntimePostCloseFollowupDetail({ runtimeId }: { runtimeId: string }) {
+  const { envelope, loading, error } = useReadModel<RuntimePostCloseFollowupView>(
+    `/api/trading-console/strategy-runtimes/${encodeURIComponent(runtimeId)}/post-close-follow-up`,
+  );
+  const payload = (envelope || {}) as RuntimePostCloseFollowupView;
+  const packet = payload.packet || {};
+  const plan = payload.operator_command_plan || {};
+  const safety = payload.safety_invariants || {};
+  const planSafety = plan.safety_invariants || {};
+  const status = error ? 'blocked' : displayValue(payload.status || packet.status, 'unavailable');
+  const blockers = asArray<string>(packet.blockers);
+  const warnings = asArray<string>(packet.warnings);
+  const requiredSteps = asArray<string>(packet.required_steps);
+  const completedSteps = asArray<string>(packet.completed_steps);
+  const sequence = asArray<string>(plan.post_close_required_sequence);
+  const tone = postCloseFollowupTone(status);
+  const readyToReview = status === 'ready_for_closed_review';
+  const activePosition = packet.active_position_present === true;
+  const hasOwnerValue = Boolean(packet.owner_close_approval_value || plan.owner_close_approval_value);
+
+  return (
+    <ConsolePanel
+      title="平仓后跟进"
+      caption="Owner 平仓授权、closed-review facts 与下一次尝试解锁"
+      action={<StatusChip tone={tone}>{loading ? '读取中' : postCloseFollowupStatusLabel(status)}</StatusChip>}
+    >
+      {loading ? (
+        <div className="px-4 py-6 text-sm text-slate-500">正在读取平仓后跟进包...</div>
+      ) : error ? (
+        <div className="px-4 py-4">
+          <GuidanceLine tone="intervention" title="post-close follow-up 暂不可用" body={error} />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-px bg-slate-800/80 md:grid-cols-4">
+            <BoundaryCell label="跟进状态" value={postCloseFollowupStatusLabel(status)} tone={tone} />
+            <BoundaryCell label="当前持仓" value={activePosition ? '仍有仓位' : '已观察到 flat'} tone={activePosition ? 'attention' : 'normal'} />
+            <BoundaryCell label="Owner 授权值" value={hasOwnerValue ? '待 Owner 明确使用' : '暂无'} tone={hasOwnerValue ? 'attention' : 'unavailable'} />
+            <BoundaryCell label="复盘事实" value={postCloseFactsStatusLabel(packet.closed_review_facts_status)} tone={readyToReview ? 'normal' : activePosition ? 'attention' : 'blocked'} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-px border-t border-slate-800 bg-slate-800/80 md:grid-cols-4">
+            <BoundaryCell label="Entry order" value={displayValue(packet.closed_review_entry_order_id, '未解析')} tone={packet.closed_review_entry_order_id ? 'normal' : 'attention'} />
+            <BoundaryCell label="Exit order" value={displayValue(packet.closed_review_exit_order_id, activePosition ? '等待平仓' : '未解析')} tone={packet.closed_review_exit_order_id ? 'normal' : activePosition ? 'attention' : 'blocked'} />
+            <BoundaryCell label="命令计划" value={plan.not_executed === true ? '仅计划' : '需核查'} tone={plan.not_executed === true ? 'unavailable' : 'blocked'} />
+            <BoundaryCell label="交易所写入" value={safety.exchange_write_called || planSafety.exchange_write_called ? '异常' : '无'} tone={safety.exchange_write_called || planSafety.exchange_write_called ? 'blocked' : 'unavailable'} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="space-y-3">
+              <GuidanceLine
+                tone={tone === 'blocked' ? 'intervention' : tone}
+                title="当前下一步"
+                body={postCloseNextActionLabel(packet.recommended_next_action)}
+              />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <StepList title="已完成" empty="暂无已完成步骤" items={completedSteps} tone="normal" />
+                <StepList title="仍需完成" empty="暂无待处理步骤" items={requiredSteps} tone={blockers.length > 0 ? 'blocked' : 'attention'} />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <DeferredActionSlot
+                actionName="控制台不执行平仓"
+                reason="真实 reduce-only close 需要 Owner 精确授权值与 CLI execute flag"
+              />
+              <div className="rounded-md border border-slate-800 bg-slate-950/45 p-3">
+                <div className="text-xs font-medium text-slate-300">Owner 授权证据</div>
+                <div className="mt-2 space-y-2">
+                  <ScopeFact label="Env" value={displayValue(packet.owner_close_approval_env || plan.owner_close_approval_env, '未生成')} />
+                  <ScopeFact label="Value" value={displayValue(packet.owner_close_approval_value || plan.owner_close_approval_value, '未生成')} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {(blockers.length > 0 || warnings.length > 0) && (
+            <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-4 lg:grid-cols-2">
+              <RuntimeSafetyList
+                title="阻断项"
+                empty="暂无阻断"
+                items={blockers}
+                tone="danger"
+                mapLabel={postCloseReasonLabel}
+              />
+              <RuntimeSafetyList
+                title="提醒"
+                empty="暂无提醒"
+                items={warnings}
+                tone="warning"
+                mapLabel={postCloseReasonLabel}
+              />
+            </div>
+          )}
+
+          <div className="border-t border-slate-800 px-4 py-3 text-xs leading-5 text-slate-500">
+            这个面板只呈现 post-close follow-up 证据。显示 execute 参数不等于执行；控制台不会创建订单、不会平仓、不会写复盘、不会转账或提现。
+          </div>
+
+          <TechnicalDetails title="Post-close command evidence">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <ScopeFact label="Runtime" value={displayValue(packet.runtime_instance_id, runtimeId)} />
+                <ScopeFact label="Packet" value={displayValue(packet.packet_id, '暂无')} />
+                <ScopeFact label="Source monitor" value={displayValue(packet.source_monitor_id, '暂无')} />
+                <ScopeFact label="Created" value={formatTimestampMs(packet.created_at_ms)} />
+                <ScopeFact label="API read-only" value={safety.api_read_only === false ? '异常' : '保持'} />
+                <ScopeFact label="Review record" value={safety.review_record_created || planSafety.review_record_created ? '已写入 / 需核查' : '未写入'} />
+                <ScopeFact label="Order created" value={safety.order_created || planSafety.order_created ? '异常' : '未创建'} />
+                <ScopeFact label="Position closed" value={safety.position_closed || planSafety.position_closed ? '已关闭 / 需核查' : '未由此面板关闭'} />
+              </div>
+
+              {sequence.length > 0 && (
+                <div>
+                  <div className="mb-2 text-xs font-medium text-slate-300">Required sequence</div>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {sequence.map((step) => (
+                      <div key={step} className="rounded-md border border-slate-800 bg-slate-950/45 px-3 py-2">
+                        {postCloseStepLabel(step)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <CommandEvidenceBlock label="刷新 follow-up" args={plan.refresh_followup_command_args} />
+              <CommandEvidenceBlock label="Owner close dry-run" args={plan.owner_close_dry_run_command_args} />
+              <CommandEvidenceBlock label="Owner close execute 参数" args={plan.owner_close_execute_command_args} />
+              <CommandEvidenceBlock label="Closed-review facts refresh" args={plan.closed_review_facts_refresh_command_args} />
+              <CommandEvidenceBlock label="Closed-review command" args={plan.closed_review_command_args || packet.closed_review_command_args} />
+            </div>
+          </TechnicalDetails>
+        </>
+      )}
+    </ConsolePanel>
+  );
+}
+
 function RuntimeSafetyReadinessDetail({ runtimeId }: { runtimeId: string }) {
   const { envelope, loading, error } = useReadModel<any>(`/api/trading-console/strategy-runtimes/${encodeURIComponent(runtimeId)}/safety-readiness`);
   const readiness: any = envelope || {};
@@ -1131,6 +1348,58 @@ function RuntimeSafetyList({
   );
 }
 
+function StepList({
+  title,
+  empty,
+  items,
+  tone,
+}: {
+  title: string;
+  empty: string;
+  items: string[];
+  tone: ConsoleTone;
+}) {
+  return (
+    <div className={cn('rounded-md border bg-slate-950/45 p-4', toneClass(tone, 'border'))}>
+      <div className="mb-3 text-sm font-semibold text-slate-100">{title}</div>
+      {items.length === 0 ? (
+        <div className="text-sm text-slate-500">{empty}</div>
+      ) : (
+        <div className="space-y-2 text-sm">
+          {items.slice(0, 8).map((item) => (
+            <div key={item} className="flex gap-2 rounded bg-slate-900/80 px-2 py-1.5 text-slate-300">
+              <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', toneClass(tone, 'dot'))} />
+              <span>{postCloseStepLabel(item)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommandEvidenceBlock({
+  label,
+  args,
+}: {
+  label: string;
+  args?: string[];
+}) {
+  const command = asArray<string>(args).join(' ');
+  if (!command) return null;
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/45 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-300">{label}</span>
+        <Badge variant="muted">仅证据</Badge>
+      </div>
+      <div className="overflow-x-auto rounded bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-slate-300">
+        <span className="whitespace-pre-wrap break-words">{command}</span>
+      </div>
+    </div>
+  );
+}
+
 function runtimePageStatusLabel(runtime: RuntimeView | null, errors: string[]): string {
   if (errors.length > 0) return '需要介入';
   if (!runtime) return '等待运行实例';
@@ -1231,6 +1500,86 @@ function liveMonitorReasonLabel(value: string): string {
     missing_tp_protection: '交易所存在 SL-only 保护提醒',
   };
   return map[value] || runtimeSafetyRequirementLabel(value);
+}
+
+function postCloseFollowupTone(status?: string): ConsoleTone {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'post_close_complete') return 'normal';
+  if (normalized === 'ready_for_closed_review') return 'attention';
+  if (normalized === 'waiting_for_owner_close_authorization') return 'attention';
+  if (normalized === 'blocked') return 'blocked';
+  return 'unavailable';
+}
+
+function postCloseFollowupStatusLabel(status?: string): string {
+  const map: Record<string, string> = {
+    blocked: '阻断',
+    waiting_for_owner_close_authorization: '等待 Owner 平仓授权',
+    ready_for_closed_review: '可进入平仓复盘',
+    post_close_complete: '平仓后跟进完成',
+    unavailable: '不可用',
+  };
+  return map[String(status || '')] || displayValue(status, '无法确认');
+}
+
+function postCloseFactsStatusLabel(status?: string | null): string {
+  const map: Record<string, string> = {
+    waiting_for_close: '等待平仓',
+    ready_for_closed_review: '复盘事实就绪',
+    blocked: '事实阻断',
+    not_available: '暂无',
+  };
+  return map[String(status || 'not_available')] || displayValue(status, '无法确认');
+}
+
+function postCloseNextActionLabel(code?: string): string {
+  const map: Record<string, string> = {
+    owner_authorize_reduce_only_close_or_continue_holding: 'Owner 可选择继续持有，或用精确授权值执行 reduce-only 平仓；系统不会自动平仓。',
+    repair_owner_close_packet_before_close_followup: '先修复 Owner close packet 或 exit plan，再重新读取 follow-up。',
+    run_closed_trade_review_from_resolved_order_facts: '仓位已 flat，使用解析出的 entry / exit order facts 生成 closed review。',
+    record_runtime_closed_trade_review_before_next_attempt: '仓位已 flat，下一次尝试前需要记录 closed review。',
+    resolve_closed_review_facts_before_review: '先补齐 closed-review facts，再进入复盘写入。',
+    post_close_followup_complete_continue_runtime_planning: '平仓后跟进已完成，可以继续 runtime planning / next-attempt gate。',
+  };
+  return map[String(code || '')] || displayValue(code, '等待系统给出下一步');
+}
+
+function postCloseStepLabel(code: string): string {
+  const map: Record<string, string> = {
+    fresh_monitor_read: '已读取最新持仓监控',
+    owner_close_packet_built: '已生成 Owner close packet',
+    runtime_flat_observed: '已观察到 runtime flat',
+    closed_review_facts_resolved: '已解析 closed-review facts',
+    review_gate_not_required: '当前无需复盘门禁',
+    owner_authorize_exact_reduce_only_close_value: 'Owner 明确授权精确 reduce-only close 值',
+    execute_runtime_owner_reduce_only_close_flow: '执行 runtime Owner reduce-only close flow',
+    verify_runtime_live_position_monitor_flat: '确认 live-position monitor 已 flat',
+    verify_reconciliation_severe_count_zero: '确认严重对账差异为 0',
+    record_runtime_closed_trade_review: '记录 runtime closed trade review',
+    verify_next_attempt_gate: '确认下一次尝试 gate',
+    identify_entry_and_exit_order_ids: '识别 entry / exit order IDs',
+    use_resolved_closed_review_order_ids: '使用已解析的 entry / exit order IDs',
+    refresh_followup: '刷新 follow-up packet',
+    run_owner_close_execute_command: '运行 Owner close execute 命令',
+    refresh_followup_until_flat: '刷新 follow-up 直到 flat',
+    run_closed_review_dry_run: '运行 closed-review dry-run',
+    run_closed_review_apply_if_ready: '事实就绪后 apply closed review',
+  };
+  return map[code] || code;
+}
+
+function postCloseReasonLabel(value: string): string {
+  const map: Record<string, string> = {
+    owner_close_packet_missing: '缺少 Owner close packet',
+    owner_close_packet_not_ready: 'Owner close packet 尚未就绪',
+    closed_review_facts_not_ready: 'closed-review facts 尚未就绪',
+    active_position_missing_hard_stop: '活跃仓位缺少硬止损',
+    missing_tp_protection_right_tail_exit_not_mounted: '仅有 SL，TP / runner 出场尚未挂载',
+    missing_tp_protection: '交易所存在 SL-only 保护提醒',
+    reconciliation_warning_present: '对账存在 warning',
+    local_exchange_active_position_count_differs: '本地 / 交易所活跃仓位数不同',
+  };
+  return map[value] || liveMonitorReasonLabel(value);
 }
 
 function runtimeSafetyRequirementStatusLabel(status: string): string {
