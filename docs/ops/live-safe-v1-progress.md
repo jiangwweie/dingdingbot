@@ -16,6 +16,26 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-11 (Runtime Exchange Close Projection Recovery)
+
+- Added `RuntimeExchangeCloseProjectionRecoveryService` and
+  `scripts/recover_runtime_exchange_close_projection.py` to recover local
+  runtime order/position projection from an already-observed exchange close
+  trade. This covers the first-real-submit post-close case where exchange is
+  flat but local PG still shows an active position and stale SL.
+- The recovery path is default dry-run. `--apply` only mutates local PG
+  projection: mark the local exit/protection order filled and project the
+  position closed/realized PnL through existing `OrderLifecycleService` and
+  `PositionProjectionService`.
+- Safety boundary: it reads exchange trades only and never submits, cancels,
+  amends, or closes exchange orders; it never creates withdrawal or transfer
+  instructions.
+- Verification passed:
+  - `python3 -m pytest -q tests/unit/test_runtime_exchange_close_projection_recovery.py`
+  - `python3 -m compileall -q src/domain/runtime_exchange_close_projection_recovery.py src/application/runtime_exchange_close_projection_recovery_service.py scripts/recover_runtime_exchange_close_projection.py`
+  - `python3 scripts/recover_runtime_exchange_close_projection.py --help`
+  - `git diff --check`
+
 ## 2026-06-11 (Runtime Live Position Monitor Console Surface)
 
 - Wired `RuntimeLivePositionMonitorService` into Trading Console as
