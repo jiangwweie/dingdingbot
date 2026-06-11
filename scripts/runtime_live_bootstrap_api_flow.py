@@ -62,6 +62,7 @@ class BootstrapConfig:
     max_notional: Decimal = Decimal("10")
     max_leverage: int = 1
     max_attempts: int = 3
+    min_liquidation_stop_buffer: Decimal | None = None
     playbook_id: str = "PB-BRC-LIVE-RUNTIME-V1"
     account_facts_source: str = "binance_readonly"
     account_facts_json: str | None = None
@@ -393,6 +394,7 @@ class RuntimeLiveBootstrapApiFlow:
         if profile_body.get("status") != "ready_for_owner_codex_confirmation":
             self.state.add_blockers([f"profile_proposal_{profile_body.get('status')}"])
             return
+        profile_body = _profile_with_owner_overrides(profile_body, self._config)
         runtime_confirmations = _all_true(
             [
                 "runtime_profile_confirmed",
@@ -446,6 +448,9 @@ class RuntimeLiveBootstrapApiFlow:
                     "script": "runtime_live_bootstrap_api_flow",
                     "creates_order": False,
                     "exchange_called": False,
+                    "owner_profile_overrides": _profile_override_metadata(
+                        self._config
+                    ),
                 },
             },
         )
@@ -652,6 +657,36 @@ def _all_true(keys: list[str]) -> dict[str, bool]:
     return {key: True for key in keys}
 
 
+def _profile_with_owner_overrides(
+    profile_body: dict[str, Any],
+    config: BootstrapConfig,
+) -> dict[str, Any]:
+    result = dict(profile_body)
+    if config.min_liquidation_stop_buffer is None:
+        return result
+    buffer_value = str(config.min_liquidation_stop_buffer)
+    result["min_liquidation_stop_buffer"] = buffer_value
+    boundary = dict(result.get("boundary") or {})
+    boundary["min_liquidation_stop_buffer"] = buffer_value
+    result["boundary"] = boundary
+    metadata = dict(result.get("metadata") or {})
+    metadata["owner_runtime_profile_overrides"] = {
+        "min_liquidation_stop_buffer": buffer_value,
+        "reason": "symbol_price_unit_adjustment_for_small_capital_trial",
+    }
+    result["metadata"] = metadata
+    return result
+
+
+def _profile_override_metadata(config: BootstrapConfig) -> dict[str, Any]:
+    if config.min_liquidation_stop_buffer is None:
+        return {}
+    return {
+        "min_liquidation_stop_buffer": str(config.min_liquidation_stop_buffer),
+        "reason": "symbol_price_unit_adjustment_for_small_capital_trial",
+    }
+
+
 def _body(result: dict[str, Any]) -> dict[str, Any]:
     body = result.get("body")
     return body if isinstance(body, dict) else {}
@@ -714,6 +749,7 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
     parser.add_argument("--max-notional", type=Decimal, default=Decimal("10"))
     parser.add_argument("--max-leverage", type=int, default=1)
     parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--min-liquidation-stop-buffer", type=Decimal)
     parser.add_argument("--playbook-id", default="PB-BRC-LIVE-RUNTIME-V1")
     parser.add_argument(
         "--account-facts-source",
@@ -742,6 +778,7 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         max_notional=args.max_notional,
         max_leverage=args.max_leverage,
         max_attempts=args.max_attempts,
+        min_liquidation_stop_buffer=args.min_liquidation_stop_buffer,
         playbook_id=args.playbook_id,
         account_facts_source=args.account_facts_source,
         account_facts_json=args.account_facts_json,

@@ -89,6 +89,9 @@ class _FakeClient:
                     "strategy_family_version_id": "CPM-001-v0",
                     "symbol": "BNB/USDT:USDT",
                     "side": "long",
+                    "min_liquidation_stop_buffer": "25",
+                    "boundary": {"min_liquidation_stop_buffer": "25"},
+                    "metadata": {},
                 },
             }
         if path.endswith("/strategy-runtime-promotion-confirmations"):
@@ -179,6 +182,33 @@ def test_short_bootstrap_confirms_conservative_short_profile():
     assert promotion_calls
     runtime_confirmations = promotion_calls[0]["body"]["runtime_confirmations"]
     assert runtime_confirmations["short_side_conservative_profile_confirmed"] is True
+
+
+def test_bootstrap_can_override_liquidation_buffer_for_low_price_symbol():
+    client = _FakeClient()
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="bootstrap",
+            account_facts_source="static",
+            min_liquidation_stop_buffer="0.05",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    promotion_calls = [
+        call for call in client.calls if call["path"].endswith("promotion-confirmations")
+    ]
+    snapshot = promotion_calls[0]["body"]["runtime_profile_proposal_snapshot"]
+    assert snapshot["min_liquidation_stop_buffer"] == "0.05"
+    assert snapshot["boundary"]["min_liquidation_stop_buffer"] == "0.05"
+    assert snapshot["metadata"]["owner_runtime_profile_overrides"] == {
+        "min_liquidation_stop_buffer": "0.05",
+        "reason": "symbol_price_unit_adjustment_for_small_capital_trial",
+    }
 
 
 def test_bootstrap_stops_when_runtime_draft_blocks():

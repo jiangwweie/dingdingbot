@@ -784,10 +784,22 @@ async def test_runtime_signal_input_btpc_short_uses_candidate_semantics_stop():
     assert result.proposal is not None
     assert result.proposal.stop_source == "strategy_semantics_protection"
     assert result.proposal.stop_price_reference == Decimal("108")
+    assert result.proposal.liquidation_price_reference == Decimal("192.00000000")
+    assert result.proposal.liquidation_stop_buffer == Decimal("84.00000000")
     assert result.proposal.take_profit_references[0]["price_reference"] == "84.00000000"
+    assert (
+        result.proposal.metadata["liquidation_reference_source"]
+        == "conservative_leverage_based_estimate"
+    )
     assert result.candidate is store.candidate
     assert result.candidate.side == "short"
     assert result.candidate.protection_preview.stop_price_reference == Decimal("108")
+    assert result.candidate.risk_preview.liquidation_price_reference == Decimal(
+        "192.00000000"
+    )
+    assert result.candidate.risk_preview.liquidation_stop_buffer == Decimal(
+        "84.00000000"
+    )
     assert result.candidate.not_order is True
     assert result.candidate.not_execution_intent is True
     assert result.execution_intent_created is False

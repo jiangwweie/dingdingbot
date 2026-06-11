@@ -684,7 +684,16 @@ def _build_candidate_planning_proposal(
     if available_balance is None or margin_required > available_balance:
         raise RuntimeStrategySignalPlanningError("trusted_account_balance_insufficient")
 
-    liquidation_stop_buffer = boundary.min_liquidation_stop_buffer
+    liquidation_price_reference = _estimated_liquidation_price_reference(
+        output.side,
+        entry=entry_price,
+        leverage=leverage,
+    )
+    liquidation_stop_buffer = _directional_liquidation_stop_buffer(
+        output.side,
+        liquidation=liquidation_price_reference,
+        stop=stop_price,
+    )
     take_profit_references = _take_profit_references(
         output.side,
         entry=entry_price,
@@ -700,6 +709,7 @@ def _build_candidate_planning_proposal(
         max_loss_reference=max_loss_reference,
         leverage=leverage,
         margin_required=margin_required,
+        liquidation_price_reference=liquidation_price_reference,
         liquidation_stop_buffer=liquidation_stop_buffer,
         take_profit_references=take_profit_references,
         metadata={
@@ -709,6 +719,7 @@ def _build_candidate_planning_proposal(
             "right_tail_exit_shape": "tp1_1r_partial_plus_runner_trailing_metadata",
             "small_bounded_losses_allowed": True,
             "not_proven_alpha": True,
+            "liquidation_reference_source": "conservative_leverage_based_estimate",
         },
     )
 
@@ -839,6 +850,32 @@ def _risk_per_unit(side: SignalSide, *, entry: Decimal, stop: Decimal) -> Decima
     if side == SignalSide.SHORT:
         return stop - entry
     return entry - stop
+
+
+def _estimated_liquidation_price_reference(
+    side: SignalSide,
+    *,
+    entry: Decimal,
+    leverage: Decimal,
+) -> Decimal | None:
+    if leverage <= Decimal("0"):
+        return None
+    if side == SignalSide.SHORT:
+        return _quantize_money(entry + (entry / leverage))
+    return _quantize_money(max(Decimal("0"), entry - (entry / leverage)))
+
+
+def _directional_liquidation_stop_buffer(
+    side: SignalSide,
+    *,
+    liquidation: Decimal | None,
+    stop: Decimal,
+) -> Decimal | None:
+    if liquidation is None:
+        return None
+    if side == SignalSide.SHORT:
+        return _quantize_money(liquidation - stop)
+    return _quantize_money(stop - liquidation)
 
 
 def _active_positions_count(signal_input: StrategyFamilySignalInput) -> int | None:
