@@ -177,6 +177,8 @@ def build_runtime_execution_intent_local_order_binding(
             "scope": "runtime_execution_intent_local_order_binding",
             "local_order_binding_preview_only": True,
             "adapter_result_id": adapter_result.adapter_result_id,
+            "symbol": adapter_result.symbol,
+            "side": adapter_result.side,
             "does_not_mutate_execution_intent": True,
             "does_not_register_created_orders": True,
             "does_not_submit_exchange_order": True,

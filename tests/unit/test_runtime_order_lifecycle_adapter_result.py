@@ -1771,6 +1771,32 @@ def test_exchange_submit_packet_preview_blocks_unresolved_or_submitted_orders():
     assert packet.order_lifecycle_submit_called is False
 
 
+def test_exchange_submit_packet_preview_preserves_source_symbol_without_local_orders():
+    preview = _registration_preview()
+    adapter_result = build_runtime_execution_order_lifecycle_adapter_result(
+        registration_preview=preview,
+        now_ms=NOW_MS,
+    )
+    binding = build_runtime_execution_intent_local_order_binding(
+        intent=_runtime_intent(preview),
+        adapter_result=adapter_result,
+        now_ms=NOW_MS + 1,
+    )
+
+    packet = build_runtime_execution_exchange_submit_packet_preview(
+        binding=binding,
+        local_orders=[],
+        now_ms=NOW_MS + 2,
+    )
+
+    assert packet.status == RuntimeExecutionExchangeSubmitPacketPreviewStatus.BLOCKED
+    assert packet.symbol == preview.symbol
+    assert "local_orders_not_registered" in packet.blockers
+    assert "symbol_missing_from_local_orders" not in packet.blockers
+    assert packet.exchange_called is False
+    assert packet.order_lifecycle_submit_called is False
+
+
 def test_exchange_submit_enablement_blocks_missing_evidence_ids():
     preview = _registration_preview()
     orders = build_runtime_execution_orders_for_registration(
