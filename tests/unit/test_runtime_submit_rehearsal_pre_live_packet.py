@@ -209,3 +209,57 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     assert report["rehearsal"]["order_created"] is False
     assert report["rehearsal"]["order_lifecycle_called"] is False
     assert report["rehearsal"]["exchange_called"] is False
+
+
+@pytest.mark.asyncio
+async def test_pre_live_packet_can_exercise_local_registration_before_exchange_submit():
+    module = _load_module()
+
+    report = await module.build_pre_live_packet(
+        deployed_head=LOCAL_HEAD,
+        owner_real_submit_authorized=True,
+        owner_live_runtime_enablement_authorized=True,
+        exercise_local_registration_pre_exchange=True,
+        runner=_runner(module),
+    )
+
+    local_rehearsal = report["local_registration_rehearsal"]
+    adapter_result = local_rehearsal["adapter_result"]
+    binding = local_rehearsal["intent_local_order_binding"]
+    packet_preview = local_rehearsal["exchange_submit_packet_preview"]
+
+    assert report["status"] == "blocked_before_first_real_submit"
+    assert report["checks"]["local_registration_pre_exchange_exercised"] is True
+    assert report["checks"]["local_registration_pre_exchange_ready"] is True
+    assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is True
+    assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["checks"]["live_enablement_blockers"] == []
+    assert report["promotion_gate"]["status"] == "ready_for_first_real_submit_gate_review"
+    assert adapter_result["status"] == "registered_created_local_orders"
+    assert adapter_result["local_order_registration_executed"] is True
+    assert adapter_result["order_lifecycle_called"] is True
+    assert adapter_result["exchange_called"] is False
+    assert len(adapter_result["local_order_ids"]) == 2
+    assert len(adapter_result["entry_order_ids"]) == 1
+    assert len(adapter_result["protection_order_ids"]) == 1
+    assert binding["status"] == "ready_for_exchange_submit_design"
+    assert binding["execution_intent_status_changed"] is False
+    assert packet_preview["status"] == "ready_for_exchange_submit_adapter_design"
+    assert packet_preview["exchange_called"] is False
+    assert packet_preview["exchange_order_submitted"] is False
+    assert "local_orders_not_registered" not in (
+        report["checks"]["exchange_submit_rehearsal_blockers"]
+    )
+    assert "exchange_submit_action_authorization_missing" in (
+        report["checks"]["exchange_submit_rehearsal_blockers"]
+    )
+    assert "runtime_exchange_gateway_readiness_missing" in (
+        report["checks"]["exchange_submit_rehearsal_blockers"]
+    )
+    assert report["safety_invariants"]["local_order_registration_executed"] is True
+    assert (
+        report["safety_invariants"]["local_registration_order_lifecycle_called"]
+        is True
+    )
+    assert report["safety_invariants"]["exchange_called"] is False
+    assert report["safety_invariants"]["execution_intent_status_changed"] is False

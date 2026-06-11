@@ -384,12 +384,17 @@ Key facts:
   `order_objects_constructed=false`, `local_order_registration_executed=false`,
   `order_created=false`, `order_lifecycle_called=false`, and
   `exchange_called=false`.
-  RuntimeExecutionLocalRegistrationGate can require current-head deployment,
-  Owner real-submit authorization, Owner live-runtime enablement authorization,
-  runtime live-execution state, adapter/local-registration enablement, and an
-  explicit local-registration action authorization before any local
+  RuntimeExecutionLocalRegistrationGate can require Owner real-submit
+  authorization evidence, trusted submit facts, submit idempotency evidence,
+  attempt-outcome policy evidence, protection-failure policy evidence,
+  adapter/local-registration enablement, and an explicit scoped
+  local-registration action authorization before any local
   `Order(status=CREATED)` registration. It is not real-submit authority and
-  cannot call exchange or change ExecutionIntent status.
+  cannot call exchange or change ExecutionIntent status. The pre-live verifier
+  can now explicitly exercise this pre-exchange local-registration path in
+  memory: it registers local CREATED entry/protection orders and reaches
+  exchange-submit packet-preview readiness while still keeping exchange submit
+  disabled.
   RuntimeExecutionIntentLocalOrderLinkage can separately mark a source-native
   ExecutionIntent as `local_orders_registered` and link the entry local
   `order_id` after a successful adapter result plus explicit linkage enablement.
@@ -437,12 +442,16 @@ Key facts:
   `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` now exercises
   that chain with in-memory repositories and reports a first-real-submit packet:
   the staged submit chain can be available without treating the legacy monolithic
-  submit adapter as a missing implementation blocker. First real submit remains
-  blocked by explicit Owner authorization, first-real-submit promotion evidence,
-  local-registration enablement, exchange-submit enablement, gateway/recovery
-  readiness, and action-time revalidation. A shadow / execution-disabled runtime
-  is the expected source state before a live-runtime enablement mutation, not
-  itself proof of a missing implementation.
+  submit adapter as a missing implementation blocker. With explicit Owner flags
+  and `--exercise-local-registration-pre-exchange`, it can also prove the
+  pre-exchange local-registration segment: scoped local-registration action
+  authorization, local CREATED entry/protection order registration, intent
+  local-order binding, and exchange-submit packet-preview readiness. First real
+  submit still remains blocked by exchange-submit enablement, scoped exchange
+  submit action authorization, gateway/recovery readiness, and action-time
+  revalidation. A shadow / execution-disabled runtime is the expected source
+  state before a live-runtime enablement mutation, not itself proof of a missing
+  implementation.
 - **StrategyRuntimeLiveEnablementPreview** now exists as a pure non-executing
   pre-live gate. It combines concrete runtime safety readiness, first-real-submit
   promotion gate status, current-head deployment status, Owner live-runtime

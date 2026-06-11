@@ -6,8 +6,11 @@ in-memory repositories. It proves the non-executing chain can reach the submit
 adapter boundary while separately reporting first-real-submit blockers such as
 current-head deployment and explicit Owner live-submit authorization.
 
-It never connects to a database, mutates Tokyo, starts a runtime, creates an
-order, calls OrderLifecycle, or calls exchange APIs.
+By default it never connects to a database, mutates Tokyo, starts a runtime,
+creates orders, calls OrderLifecycle, or calls exchange APIs. With the explicit
+``--exercise-local-registration-pre-exchange`` flag, it may call an in-memory
+OrderLifecycle fake to register local CREATED orders only; it still must not
+call exchange APIs, submit exchange orders, or change ExecutionIntent status.
 """
 
 from __future__ import annotations
@@ -32,6 +35,9 @@ from src.application.runtime_execution_intent_adapter_service import (
 )
 from src.application.runtime_execution_first_real_submit_evidence_preparation_service import (
     RuntimeExecutionFirstRealSubmitEvidencePreparationService,
+)
+from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
+    RuntimeExecutionFirstRealSubmitEnablementPacketService,
 )
 from src.application.runtime_execution_planning_service import (
     RuntimeExecutionPlanningService,
@@ -292,6 +298,20 @@ class _ExchangeSubmitExecutionResultRepository:
         return result
 
 
+class _OrderLifecycleService:
+    def __init__(self) -> None:
+        self.orders: dict[str, Any] = {}
+        self.register_calls: list[dict[str, Any]] = []
+
+    async def register_created_order(self, order: Any, *, metadata: Any = None) -> Any:
+        self.orders[order.id] = order
+        self.register_calls.append({"order": order, "metadata": dict(metadata or {})})
+        return order
+
+    async def get_order(self, order_id: str) -> Any | None:
+        return self.orders.get(order_id)
+
+
 class _TrustedSubmitFactReader:
     async def read_trusted_submit_fact_source(
         self,
@@ -328,6 +348,7 @@ async def build_pre_live_packet(
     owner_live_runtime_enablement_authorized: bool = False,
     require_current_head_deployed: bool = True,
     active_positions: int = 0,
+    exercise_local_registration_pre_exchange: bool = False,
     runner: Any | None = None,
 ) -> dict[str, Any]:
     repo_root = _repo_root(runner=runner)
@@ -368,6 +389,16 @@ async def build_pre_live_packet(
     exchange_submit_execution_result_repository = (
         _ExchangeSubmitExecutionResultRepository()
     )
+    order_lifecycle_service = (
+        _OrderLifecycleService()
+        if exercise_local_registration_pre_exchange
+        else None
+    )
+    local_registration_action_authorization_repository = (
+        _InMemoryRepository("action_authorization_id")
+        if exercise_local_registration_pre_exchange
+        else None
+    )
     planning_service = RuntimeExecutionPlanningService(
         runtime_service=runtime_service,
         signal_evaluation_service=candidate_service,
@@ -394,6 +425,10 @@ async def build_pre_live_packet(
         ),
         exchange_submit_execution_result_repository=(
             exchange_submit_execution_result_repository
+        ),
+        order_lifecycle_service=order_lifecycle_service,
+        local_registration_action_authorization_repository=(
+            local_registration_action_authorization_repository
         ),
         final_gate_preview_service=final_gate,
         runtime_service=runtime_service,
@@ -468,14 +503,16 @@ async def build_pre_live_packet(
             authorization.authorization_id
         )
     )
-    order_lifecycle_adapter_result = (
-        await adapter_service.order_lifecycle_adapter_result_for_authorization(
-            authorization.authorization_id
+    order_lifecycle_adapter_result = None
+    if not exercise_local_registration_pre_exchange:
+        order_lifecycle_adapter_result = (
+            await adapter_service.order_lifecycle_adapter_result_for_authorization(
+                authorization.authorization_id
+            )
         )
-    )
-    await order_lifecycle_adapter_result_repository.complete_registration(
-        order_lifecycle_adapter_result
-    )
+        await order_lifecycle_adapter_result_repository.complete_registration(
+            order_lifecycle_adapter_result
+        )
     trusted_reader = _TrustedSubmitFactReader()
     evidence_preparation_service = (
         RuntimeExecutionFirstRealSubmitEvidencePreparationService(
@@ -500,7 +537,76 @@ async def build_pre_live_packet(
             real_adapter_boundary_implemented=False,
         )
     )
+    deployed_head_for_gate = deployed_head or ""
+    current_head_deployed = bool(
+        deployed_head_for_gate and deployed_head_for_gate == local_head
+    )
+    local_registration_rehearsal = await _exercise_local_registration_pre_exchange(
+        adapter_service=adapter_service,
+        adapter_result_repository=order_lifecycle_adapter_result_repository,
+        authorization_id=authorization.authorization_id,
+        evidence_ids=evidence_preparation.available_evidence_ids,
+        owner_real_submit_authorized=owner_real_submit_authorized,
+        current_head_deployed=current_head_deployed,
+        short_head=short_head,
+        enabled=exercise_local_registration_pre_exchange,
+    )
+    if local_registration_rehearsal["adapter_result"] is not None:
+        order_lifecycle_adapter_result = local_registration_rehearsal[
+            "adapter_result"
+        ]
+        evidence_preparation = (
+            await evidence_preparation_service.prepare_for_authorization(
+                authorization.authorization_id,
+                adapter_result_store_implemented=True,
+                real_adapter_boundary_implemented=False,
+            )
+        )
+    if order_lifecycle_adapter_result is None:
+        order_lifecycle_adapter_result = (
+            await adapter_service.order_lifecycle_adapter_result_for_authorization(
+                authorization.authorization_id
+            )
+        )
+        await order_lifecycle_adapter_result_repository.complete_registration(
+            order_lifecycle_adapter_result
+        )
     first_real_submit_packet = evidence_preparation.packet
+    if local_registration_rehearsal["enablement_decision_id"]:
+        packet_service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+            runtime_execution_intent_adapter_service=adapter_service
+        )
+        first_real_submit_packet = await packet_service.preview_for_authorization(
+            authorization.authorization_id,
+            trusted_submit_fact_snapshot_id=local_registration_rehearsal[
+                "trusted_submit_fact_snapshot_id"
+            ],
+            submit_idempotency_policy_id=local_registration_rehearsal[
+                "submit_idempotency_policy_id"
+            ],
+            attempt_outcome_policy_id=local_registration_rehearsal[
+                "attempt_outcome_policy_id"
+            ],
+            protection_creation_failure_policy_id=local_registration_rehearsal[
+                "protection_creation_failure_policy_id"
+            ],
+            local_registration_enablement_decision_id=(
+                local_registration_rehearsal["enablement_decision_id"]
+            ),
+            owner_real_submit_authorization_id=local_registration_rehearsal[
+                "owner_real_submit_authorization_id"
+            ],
+            deployment_readiness_evidence_id=local_registration_rehearsal[
+                "deployment_readiness_evidence_id"
+            ],
+            budget_release_or_consume_rule_confirmed=True,
+            protection_creation_failure_policy_confirmed=True,
+            duplicate_submit_policy_confirmed=True,
+            deployment_readiness_confirmed=current_head_deployed,
+            explicit_owner_real_submit_authorization=owner_real_submit_authorized,
+            semantic_confirmations=_confirmed_strategy_semantics(),
+            runtime_confirmations=_confirmed_runtime_execution(),
+        )
     if first_real_submit_packet is not None:
         rehearsal = first_real_submit_packet.submit_rehearsal
     else:
@@ -633,6 +739,12 @@ async def build_pre_live_packet(
         ),
         "ready_for_first_real_submit": False,
         "staged_submit_chain_available": staged_submit_chain_available,
+        "local_registration_pre_exchange_exercised": (
+            local_registration_rehearsal["enabled"]
+        ),
+        "local_registration_pre_exchange_ready": (
+            local_registration_rehearsal["ready"]
+        ),
         "machine_evidence_preparation_status": _enum_value(
             evidence_preparation.status
         ),
@@ -772,6 +884,9 @@ async def build_pre_live_packet(
                 order_lifecycle_adapter_result.model_dump(mode="json")
             ),
         },
+        "local_registration_rehearsal": _local_registration_rehearsal_payload(
+            local_registration_rehearsal
+        ),
         "safety_invariants": {
             "database_connected": False,
             "remote_files_modified": False,
@@ -787,6 +902,12 @@ async def build_pre_live_packet(
             "attempt_consumed": getattr(rehearsal, "attempt_consumed", False),
             "execution_intent_status_changed": rehearsal.execution_intent_status_changed,
             "order_created": rehearsal.order_created,
+            "local_order_objects_constructed": (
+                order_lifecycle_adapter_result.order_objects_constructed
+            ),
+            "local_order_registration_executed": (
+                order_lifecycle_adapter_result.local_order_registration_executed
+            ),
             "protection_failure_policy_order_created": (
                 protection_failure_policy.order_created
             ),
@@ -795,6 +916,9 @@ async def build_pre_live_packet(
                 protection_failure_policy.owner_bounded_execution_called
             ),
             "order_lifecycle_called": rehearsal.order_lifecycle_called,
+            "local_registration_order_lifecycle_called": (
+                order_lifecycle_adapter_result.order_lifecycle_called
+            ),
             "protection_failure_policy_order_lifecycle_called": (
                 protection_failure_policy.order_lifecycle_called
             ),
@@ -808,6 +932,7 @@ async def build_pre_live_packet(
             "This packet uses in-memory repositories for rehearsal evidence only.",
             "The recorded ExecutionIntent is an in-memory audit artifact, not a persistent executable submit.",
             "The dry-run submit adapter is ready; real order placement remains blocked by OrderLifecycle enablement.",
+            "Optional local-registration rehearsal registers local CREATED orders in memory only and never calls exchange.",
         ],
     }
 
@@ -963,6 +1088,266 @@ def _registration_draft_chain_passed(
         and order_registration_draft_preview.order_created is False
         and order_registration_draft_preview.order_lifecycle_called is False
         and order_registration_draft_preview.exchange_called is False
+    )
+
+
+async def _exercise_local_registration_pre_exchange(
+    *,
+    adapter_service: RuntimeExecutionIntentAdapterService,
+    adapter_result_repository: _OrderLifecycleAdapterResultRepository,
+    authorization_id: str,
+    evidence_ids: dict[str, str],
+    owner_real_submit_authorized: bool,
+    current_head_deployed: bool,
+    short_head: str,
+    enabled: bool,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "enabled": enabled,
+        "ready": False,
+        "trusted_submit_fact_snapshot_id": None,
+        "submit_idempotency_policy_id": None,
+        "attempt_outcome_policy_id": None,
+        "protection_creation_failure_policy_id": None,
+        "owner_real_submit_authorization_id": None,
+        "order_lifecycle_adapter_enablement_id": None,
+        "local_order_registration_enablement_id": None,
+        "deployment_readiness_evidence_id": None,
+        "action_authorization_id": None,
+        "enablement_decision_id": None,
+        "action_authorization": None,
+        "enablement_decision": None,
+        "adapter_result": None,
+        "intent_local_order_binding": None,
+        "exchange_submit_packet_preview": None,
+    }
+    if not enabled:
+        return result
+
+    trusted_submit_fact_snapshot_id = evidence_ids.get(
+        "trusted_submit_fact_snapshot_id"
+    )
+    submit_idempotency_policy_id = evidence_ids.get("submit_idempotency_policy_id")
+    attempt_outcome_policy_id = evidence_ids.get("attempt_outcome_policy_id")
+    protection_creation_failure_policy_id = evidence_ids.get(
+        "protection_creation_failure_policy_id"
+    )
+    owner_real_submit_authorization_id = (
+        f"owner-real-submit-authorization-{authorization_id}"
+        if owner_real_submit_authorized
+        else None
+    )
+    order_lifecycle_adapter_enablement_id = (
+        f"order-lifecycle-adapter-enable-{authorization_id}"
+    )
+    local_order_registration_enablement_id = (
+        f"local-order-registration-enable-{authorization_id}"
+    )
+    deployment_readiness_evidence_id = (
+        f"tokyo-current-head-deployed-{short_head}"
+        if current_head_deployed
+        else None
+    )
+    result.update(
+        {
+            "trusted_submit_fact_snapshot_id": trusted_submit_fact_snapshot_id,
+            "submit_idempotency_policy_id": submit_idempotency_policy_id,
+            "attempt_outcome_policy_id": attempt_outcome_policy_id,
+            "protection_creation_failure_policy_id": (
+                protection_creation_failure_policy_id
+            ),
+            "owner_real_submit_authorization_id": (
+                owner_real_submit_authorization_id
+            ),
+            "order_lifecycle_adapter_enablement_id": (
+                order_lifecycle_adapter_enablement_id
+            ),
+            "local_order_registration_enablement_id": (
+                local_order_registration_enablement_id
+            ),
+            "deployment_readiness_evidence_id": deployment_readiness_evidence_id,
+        }
+    )
+
+    action_authorization = await (
+        adapter_service.record_local_registration_action_authorization_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_adapter_enablement_id=(
+                order_lifecycle_adapter_enablement_id
+            ),
+            local_order_registration_enablement_id=(
+                local_order_registration_enablement_id
+            ),
+            owner_confirmed_for_local_registration_action=(
+                owner_real_submit_authorized
+            ),
+            owner_operator_id="owner",
+            reason="pre-live scoped local registration rehearsal",
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            owner_confirmation_reference=(
+                "pre-live-owner-real-submit-flag"
+                if owner_real_submit_authorized
+                else None
+            ),
+        )
+    )
+    enablement_decision = (
+        await adapter_service.local_registration_enablement_decision_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_adapter_enablement_id=(
+                order_lifecycle_adapter_enablement_id
+            ),
+            local_order_registration_enablement_id=(
+                local_order_registration_enablement_id
+            ),
+            local_registration_action_authorization_id=(
+                action_authorization.action_authorization_id
+            ),
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        )
+    )
+    adapter_result = await adapter_service.order_lifecycle_adapter_result_for_authorization(
+        authorization_id,
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=enablement_decision,
+    )
+    await adapter_result_repository.complete_registration(adapter_result)
+    if adapter_result.status.value != "registered_created_local_orders":
+        result.update(
+            {
+                "action_authorization_id": (
+                    action_authorization.action_authorization_id
+                ),
+                "enablement_decision_id": enablement_decision.decision_id,
+                "action_authorization": action_authorization,
+                "enablement_decision": enablement_decision,
+                "adapter_result": adapter_result,
+            }
+        )
+        return result
+    binding = await adapter_service.intent_local_order_binding_for_authorization(
+        authorization_id
+    )
+    packet_preview = await adapter_service.exchange_submit_packet_preview_for_authorization(
+        authorization_id
+    )
+    result.update(
+        {
+            "ready": (
+                adapter_result.status.value == "registered_created_local_orders"
+                and binding.status.value == "ready_for_exchange_submit_design"
+                and packet_preview.status.value
+                == "ready_for_exchange_submit_adapter_design"
+                and adapter_result.exchange_called is False
+                and packet_preview.exchange_called is False
+            ),
+            "action_authorization_id": (
+                action_authorization.action_authorization_id
+            ),
+            "enablement_decision_id": enablement_decision.decision_id,
+            "action_authorization": action_authorization,
+            "enablement_decision": enablement_decision,
+            "adapter_result": adapter_result,
+            "intent_local_order_binding": binding,
+            "exchange_submit_packet_preview": packet_preview,
+        }
+    )
+    return result
+
+
+def _local_registration_rehearsal_payload(rehearsal: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": rehearsal["enabled"],
+        "ready": rehearsal["ready"],
+        "trusted_submit_fact_snapshot_id": rehearsal[
+            "trusted_submit_fact_snapshot_id"
+        ],
+        "submit_idempotency_policy_id": rehearsal["submit_idempotency_policy_id"],
+        "attempt_outcome_policy_id": rehearsal["attempt_outcome_policy_id"],
+        "protection_creation_failure_policy_id": rehearsal[
+            "protection_creation_failure_policy_id"
+        ],
+        "owner_real_submit_authorization_id": rehearsal[
+            "owner_real_submit_authorization_id"
+        ],
+        "order_lifecycle_adapter_enablement_id": rehearsal[
+            "order_lifecycle_adapter_enablement_id"
+        ],
+        "local_order_registration_enablement_id": rehearsal[
+            "local_order_registration_enablement_id"
+        ],
+        "deployment_readiness_evidence_id": rehearsal[
+            "deployment_readiness_evidence_id"
+        ],
+        "action_authorization_id": rehearsal["action_authorization_id"],
+        "enablement_decision_id": rehearsal["enablement_decision_id"],
+        "action_authorization": _dump_optional_model(
+            rehearsal["action_authorization"]
+        ),
+        "enablement_decision": _dump_optional_model(
+            rehearsal["enablement_decision"]
+        ),
+        "adapter_result": _dump_optional_model(rehearsal["adapter_result"]),
+        "intent_local_order_binding": _dump_optional_model(
+            rehearsal["intent_local_order_binding"]
+        ),
+        "exchange_submit_packet_preview": _dump_optional_model(
+            rehearsal["exchange_submit_packet_preview"]
+        ),
+    }
+
+
+def _dump_optional_model(value: Any) -> Any | None:
+    if value is None:
+        return None
+    return value.model_dump(mode="json")
+
+
+def _confirmed_strategy_semantics() -> StrategySemanticsConfirmationFacts:
+    return StrategySemanticsConfirmationFacts(
+        strategy_family_confirmed=True,
+        implementation_source_confirmed=True,
+        required_facts_confirmed=True,
+        entry_policy_confirmed=True,
+        exit_policy_confirmed=True,
+        protection_policy_confirmed=True,
+        eligible_for_runtime_execution_confirmed=True,
+        right_tail_review_metrics_confirmed=True,
+    )
+
+
+def _confirmed_runtime_execution() -> RuntimeExecutionConfirmationFacts:
+    return RuntimeExecutionConfirmationFacts(
+        runtime_profile_confirmed=True,
+        owner_confirmation_mode_confirmed=True,
+        symbol_side_boundary_confirmed=True,
+        max_loss_budget_confirmed=True,
+        max_notional_boundary_confirmed=True,
+        max_active_positions_boundary_confirmed=True,
+        max_leverage_boundary_confirmed=True,
+        margin_usage_boundary_confirmed=True,
+        liquidation_buffer_boundary_confirmed=True,
+        protection_readiness_source_confirmed=True,
+        stale_fact_behavior_confirmed=True,
+        attempt_consumption_rule_confirmed=True,
+        budget_reservation_rule_confirmed=True,
+        trusted_active_position_source_confirmed=True,
+        trusted_account_fact_source_confirmed=True,
     )
 
 
@@ -1257,6 +1642,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=0,
         help="Injected local active-position count for the in-memory rehearsal.",
     )
+    parser.add_argument(
+        "--exercise-local-registration-pre-exchange",
+        action="store_true",
+        help=(
+            "Register local CREATED orders through an in-memory OrderLifecycle "
+            "fake after scoped local-registration authorization. This still "
+            "does not call exchange or submit orders."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1279,6 +1673,10 @@ def _print_human(report: dict[str, Any]) -> None:
         + str(checks["ready_for_live_runtime_enablement_mutation_design"]).lower()
     )
     print(f"ready_for_first_real_submit={str(checks['ready_for_first_real_submit']).lower()}")
+    print(
+        "local_registration_pre_exchange_ready="
+        + str(checks["local_registration_pre_exchange_ready"]).lower()
+    )
     print(f"submit_rehearsal_status={pipeline['submit_rehearsal_status']}")
     print(f"submit_adapter_preview_status={pipeline['submit_adapter_preview_status']}")
     if checks["technical_blockers"]:
@@ -1309,6 +1707,9 @@ async def _amain(argv: list[str] | None = None) -> int:
         ),
         require_current_head_deployed=not args.skip_current_head_deployed_check,
         active_positions=args.active_positions,
+        exercise_local_registration_pre_exchange=(
+            args.exercise_local_registration_pre_exchange
+        ),
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
