@@ -34,6 +34,7 @@ from src.interfaces.operator_auth import (
 
 API_BASE_ENV = "RUNTIME_FIRST_REAL_SUBMIT_API_BASE"
 APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT"
+LOCAL_REGISTRATION_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_OUTCOME_KIND = "entry_filled_protection_creation_failed"
 
@@ -568,6 +569,14 @@ class FirstRealSubmitApiFlow:
             return
         if self.state.blockers:
             return
+        will_continue_to_local_registration = (
+            self._config.record_attempt_consumption
+            or bool(self.state.ids.get("attempt_outcome_policy_id"))
+        )
+        if self._config.mode == "arm" and will_continue_to_local_registration:
+            self._require_local_registration_guard(authorization_id)
+            if self.state.blockers:
+                return
         if not self._config.record_attempt_consumption:
             if self.state.ids.get("attempt_outcome_policy_id"):
                 self.state.add_warnings(
@@ -1052,6 +1061,17 @@ class FirstRealSubmitApiFlow:
                 ]
             )
 
+    def _require_local_registration_guard(self, authorization_id: str) -> None:
+        expected = _local_registration_approval_value(authorization_id)
+        actual = os.environ.get(LOCAL_REGISTRATION_APPROVAL_ENV, "").strip()
+        if actual != expected:
+            self.state.add_blockers(
+                [
+                    "owner_runtime_local_registration_env_confirmation_missing",
+                    f"expected_{LOCAL_REGISTRATION_APPROVAL_ENV}={expected}",
+                ]
+            )
+
     def _report(self) -> dict[str, Any]:
         return {
             "script": "runtime_first_real_submit_api_flow",
@@ -1073,6 +1093,10 @@ class FirstRealSubmitApiFlow:
                 "real_submit_requires_cli_flag": True,
                 "real_submit_requires_env_confirmation": True,
                 "env_confirmation_name": APPROVAL_ENV,
+                "local_registration_requires_env_confirmation": True,
+                "local_registration_env_confirmation_name": (
+                    LOCAL_REGISTRATION_APPROVAL_ENV
+                ),
                 "no_withdrawal_or_transfer": True,
             },
         }
@@ -1189,6 +1213,10 @@ def _session_cookie() -> str:
 
 def _approval_value(authorization_id: str) -> str:
     return f"{authorization_id}:first-real-submit:real_gateway_action"
+
+
+def _local_registration_approval_value(authorization_id: str) -> str:
+    return f"{authorization_id}:attempt-local-registration:no-exchange-submit"
 
 
 def _parse_args(argv: list[str]) -> FlowConfig:

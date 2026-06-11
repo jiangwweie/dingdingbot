@@ -22,10 +22,12 @@ if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     API_BASE_ENV,
     DEFAULT_API_BASE,
+    LOCAL_REGISTRATION_APPROVAL_ENV,
+    _local_registration_approval_value,
 )
 
 
-APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP"
+APPROVAL_ENV = LOCAL_REGISTRATION_APPROVAL_ENV
 
 
 class LocalRegistrationAuthorizationPacketError(RuntimeError):
@@ -297,7 +299,7 @@ def _command_plan(
 
 
 def _approval_value(authorization_id: str) -> str:
-    return f"{authorization_id}:attempt-local-registration:no-exchange-submit"
+    return _local_registration_approval_value(authorization_id)
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
