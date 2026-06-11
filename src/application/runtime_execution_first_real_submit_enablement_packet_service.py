@@ -90,6 +90,34 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
                 deployment_readiness_evidence_id=deployment_readiness_evidence_id,
             )
         )
+        effective_trusted_submit_fact_snapshot_id = _first_present(
+            trusted_submit_fact_snapshot_id,
+            getattr(enablement, "trusted_submit_fact_snapshot_id", None),
+        )
+        effective_submit_idempotency_policy_id = _first_present(
+            submit_idempotency_policy_id,
+            getattr(enablement, "submit_idempotency_policy_id", None),
+        )
+        effective_attempt_outcome_policy_id = _first_present(
+            attempt_outcome_policy_id,
+            getattr(enablement, "attempt_outcome_policy_id", None),
+        )
+        effective_protection_creation_failure_policy_id = _first_present(
+            protection_creation_failure_policy_id,
+            getattr(enablement, "protection_creation_failure_policy_id", None),
+        )
+        effective_local_registration_enablement_decision_id = _first_present(
+            local_registration_enablement_decision_id,
+            getattr(enablement, "local_registration_enablement_decision_id", None),
+        )
+        effective_owner_real_submit_authorization_id = _first_present(
+            owner_real_submit_authorization_id,
+            getattr(enablement, "owner_real_submit_authorization_id", None),
+        )
+        effective_deployment_readiness_evidence_id = _first_present(
+            deployment_readiness_evidence_id,
+            getattr(enablement, "deployment_readiness_evidence_id", None),
+        )
         submit_rehearsal = await (
             self._adapter_service.submit_rehearsal_for_authorization(
                 authorization_id,
@@ -107,7 +135,9 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
             duplicate_submit_replay_proof = await proof_method(
                 authorization_id,
                 exchange_submit_enablement_decision=enablement,
-                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                submit_idempotency_policy_id=(
+                    effective_submit_idempotency_policy_id
+                ),
             )
         else:
             additional_blockers.append("duplicate_submit_replay_proof_unavailable")
@@ -121,10 +151,12 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
             prerequisite_evidence_proof = await prerequisite_proof_method(
                 authorization_id,
                 exchange_submit_enablement_decision=enablement,
-                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
-                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                trusted_submit_fact_snapshot_id=(
+                    effective_trusted_submit_fact_snapshot_id
+                ),
+                attempt_outcome_policy_id=effective_attempt_outcome_policy_id,
                 protection_creation_failure_policy_id=(
-                    protection_creation_failure_policy_id
+                    effective_protection_creation_failure_policy_id
                 ),
             )
         else:
@@ -138,6 +170,14 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
             submit_rehearsal,
             "rehearsal_id",
             None,
+        )
+        effective_exchange_submit_enablement_decision_id = _first_present(
+            exchange_submit_enablement_decision_id,
+            actual_exchange_submit_enablement_decision_id,
+        )
+        effective_runtime_submit_rehearsal_id = _first_present(
+            runtime_submit_rehearsal_id,
+            actual_runtime_submit_rehearsal_id,
         )
         if (
             exchange_submit_enablement_decision_id
@@ -188,30 +228,32 @@ class RuntimeExecutionFirstRealSubmitEnablementPacketService:
             budget_release_or_consume_rule_confirmed=(
                 budget_release_or_consume_rule_confirmed
             ),
-            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            attempt_outcome_policy_id=effective_attempt_outcome_policy_id,
             protection_creation_failure_policy_confirmed=(
                 protection_creation_failure_policy_confirmed
             ),
             protection_creation_failure_policy_id=(
-                protection_creation_failure_policy_id
+                effective_protection_creation_failure_policy_id
             ),
             duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
-            submit_idempotency_policy_id=submit_idempotency_policy_id,
-            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=(
+                effective_submit_idempotency_policy_id
+            ),
+            trusted_submit_fact_snapshot_id=(
+                effective_trusted_submit_fact_snapshot_id
+            ),
             local_registration_enablement_decision_id=(
-                local_registration_enablement_decision_id
+                effective_local_registration_enablement_decision_id
             ),
             exchange_submit_enablement_decision_id=(
-                exchange_submit_enablement_decision_id
-                or actual_exchange_submit_enablement_decision_id
+                effective_exchange_submit_enablement_decision_id
             ),
-            runtime_submit_rehearsal_id=(
-                runtime_submit_rehearsal_id
-                or actual_runtime_submit_rehearsal_id
+            runtime_submit_rehearsal_id=effective_runtime_submit_rehearsal_id,
+            deployment_readiness_evidence_id=(
+                effective_deployment_readiness_evidence_id
             ),
-            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
             owner_real_submit_authorization_id=(
-                owner_real_submit_authorization_id
+                effective_owner_real_submit_authorization_id
             ),
             deployment_readiness_confirmed=deployment_readiness_confirmed,
             explicit_owner_real_submit_authorization=(
@@ -281,6 +323,14 @@ def _append_evidence_id_mismatches(
             if actual != normalized_expected:
                 blockers.append(f"{field_name}_mismatch")
                 break
+
+
+def _first_present(*values: object) -> str | None:
+    for value in values:
+        normalized = _normalized_optional(value)
+        if normalized:
+            return normalized
+    return None
 
 
 def _normalized_optional(value: object) -> str | None:
