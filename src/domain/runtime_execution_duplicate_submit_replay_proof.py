@@ -17,6 +17,7 @@ from src.domain.runtime_execution_exchange_submit_enablement import (
 )
 from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionResult,
+    RuntimeExecutionExchangeSubmitExecutionStatus,
 )
 from src.domain.runtime_execution_submit_idempotency import (
     RuntimeExecutionSubmitIdempotencySnapshot,
@@ -209,7 +210,15 @@ def build_runtime_execution_duplicate_submit_replay_proof(
             blockers=blockers,
             warnings=warnings,
         )
-        blockers.append("exchange_submit_execution_result_already_exists_replay_only")
+        if _execution_result_retryable_entry_failure(existing_execution_result):
+            first_submit_not_already_executed = execution_replay_safe
+            warnings.append(
+                "existing_exchange_submit_execution_result_retryable_entry_failure"
+            )
+        else:
+            blockers.append(
+                "exchange_submit_execution_result_already_exists_replay_only"
+            )
 
     blockers = _dedupe(blockers)
     warnings = _dedupe(warnings)
@@ -358,6 +367,27 @@ def _execution_result_replay_safe(
         safe = False
     warnings.append("existing_exchange_submit_execution_result_will_replay")
     return safe
+
+
+def _execution_result_retryable_entry_failure(
+    result: RuntimeExecutionExchangeSubmitExecutionResult,
+) -> bool:
+    if result.status != RuntimeExecutionExchangeSubmitExecutionStatus.ENTRY_SUBMIT_FAILED:
+        return False
+    if result.exchange_order_submitted or result.order_lifecycle_submit_called:
+        return False
+    if result.submitted_orders or result.submitted_exchange_order_ids:
+        return False
+    if result.entry_exchange_order_id or result.protection_exchange_order_ids:
+        return False
+    if (
+        result.execution_intent_status_changed
+        or result.owner_bounded_execution_called
+        or result.withdrawal_or_transfer_created
+    ):
+        return False
+    metadata = dict(result.metadata or {})
+    return metadata.get("entry_submit_failed_before_exchange_acceptance") is True
 
 
 def _reject_forbidden_execution_fields(context: str, value: Any) -> None:

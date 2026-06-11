@@ -50,6 +50,7 @@ from src.domain.runtime_execution_local_registration_action_authorization import
 )
 from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionStatus,
+    build_runtime_exchange_submit_execution_failed_result,
     build_runtime_exchange_submit_execution_lock_result,
     build_runtime_exchange_submit_execution_submitted_result,
     submitted_exchange_order_from_placement,
@@ -2977,6 +2978,88 @@ async def test_service_duplicate_submit_replay_proof_blocks_existing_execution_r
         "runtime-exchange-submit-execution-result-auth-1"
     )
     assert proof.first_submit_not_already_executed is False
+    assert execution_result_repo.acquire_calls == 0
+    assert proof.exchange_called is False
+    assert proof.order_lifecycle_called is False
+    assert intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_service_duplicate_submit_replay_proof_allows_retryable_entry_failure():
+    preview = _registration_preview()
+    lifecycle = _Lifecycle()
+    adapter_result_repo = _AdapterResultRepo()
+    exchange_result_repo = _ExchangeSubmitAdapterResultRepo()
+    execution_result_repo = _ExchangeSubmitExecutionResultRepo()
+    intent_repo = _IntentRepo(_runtime_intent(preview))
+    service = _service_with_preview(
+        preview,
+        lifecycle=lifecycle,
+        adapter_result_repo=adapter_result_repo,
+        exchange_submit_adapter_result_repo=exchange_result_repo,
+        exchange_submit_execution_result_repo=execution_result_repo,
+        intent_repo=intent_repo,
+    )
+    local_decision = _ready_enablement_decision(preview)
+    await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=local_decision,
+    )
+    exchange_decision = (
+        await service.exchange_submit_enablement_decision_for_authorization(
+            "auth-1",
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            local_registration_enablement_decision_id=local_decision.decision_id,
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_submit_enablement_id=(
+                "order-lifecycle-submit-enable-1"
+            ),
+            exchange_submit_adapter_enablement_id=(
+                "exchange-submit-adapter-enable-1"
+            ),
+            exchange_submit_action_authorization_id="exchange-submit-action-1",
+            deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+        )
+    )
+    packet_preview = await service.exchange_submit_packet_preview_for_authorization(
+        "auth-1"
+    )
+    execution_result_repo.stored = build_runtime_exchange_submit_execution_failed_result(
+        enablement_decision=exchange_decision,
+        packet_preview=packet_preview,
+        submitted_orders=[],
+        failed_local_order_id="runtime-order-draft-auth-1-entry",
+        failed_order_role="ENTRY",
+        failed_reason="binance -4061 position side mismatch",
+        exchange_call_count=1,
+        now_ms=NOW_MS + 4,
+        execution_mode="in_memory_simulation",
+    )
+
+    proof = await service.duplicate_submit_replay_proof_for_authorization(
+        "auth-1",
+        exchange_submit_enablement_decision=exchange_decision,
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+    )
+
+    assert proof.status == (
+        RuntimeExecutionDuplicateSubmitReplayProofStatus
+        .READY_FOR_FIRST_REAL_SUBMIT_REPLAY_GUARD
+    )
+    assert proof.blockers == []
+    assert proof.existing_execution_result_status == "entry_submit_failed"
+    assert proof.first_submit_not_already_executed is True
+    assert (
+        "existing_exchange_submit_execution_result_retryable_entry_failure"
+        in proof.warnings
+    )
     assert execution_result_repo.acquire_calls == 0
     assert proof.exchange_called is False
     assert proof.order_lifecycle_called is False
