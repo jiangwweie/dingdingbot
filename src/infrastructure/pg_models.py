@@ -173,8 +173,9 @@ class PGExecutionIntentORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('recorded', 'pending', 'blocked', 'submitted', 'failed', "
-            "'protecting', 'partially_protected', 'completed')",
+            "status IN ('recorded', 'local_orders_registered', 'pending', "
+            "'blocked', 'submitted', 'failed', 'protecting', "
+            "'partially_protected', 'completed')",
             name="ck_execution_intents_status",
         ),
         Index("idx_execution_intents_status", "status"),
@@ -1113,10 +1114,11 @@ class PGOwnerCapitalBaselineSnapshotORM(PGCoreBase):
 
 
 class PGStrategyRuntimeInstanceORM(PGCoreBase):
-    """Shadow StrategyRuntimeInstance governance record.
+    """StrategyRuntimeInstance governance record.
 
-    Rows in this table do not grant execution permission, create intents, place
-    orders, mutate exchange state, or replace one-shot OwnerBoundedExecution.
+    Live-enabled rows authorize only bounded runtime candidate attempts. They
+    do not create intents, place orders, mutate exchange state, or replace the
+    downstream submit gates.
     """
 
     __tablename__ = "strategy_runtime_instances"
@@ -1169,11 +1171,6 @@ class PGStrategyRuntimeInstanceORM(PGCoreBase):
             "review_requirement IN ('required', 'optional', 'not_required')",
             name="ck_strategy_runtime_instances_review_requirement",
         ),
-        CheckConstraint(
-            "execution_enabled = false",
-            name="ck_strategy_runtime_instances_execution_disabled",
-        ),
-        CheckConstraint("shadow_mode = true", name="ck_strategy_runtime_instances_shadow_mode"),
         Index(
             "uq_strategy_runtime_instances_trial_binding",
             "trial_binding_id",
@@ -1656,6 +1653,11 @@ class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
     )
     promotion_gate_result_snapshot_json: Mapped[Optional[dict]] = mapped_column(
         "promotion_gate_result_snapshot",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
+    runtime_profile_proposal_snapshot_json: Mapped[Optional[dict]] = mapped_column(
+        "runtime_profile_proposal_snapshot",
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
     )

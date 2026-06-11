@@ -62,8 +62,16 @@ def _runtime_confirmed(
 def _first_real_submit_confirmed() -> FirstRealSubmitConfirmationFacts:
     return FirstRealSubmitConfirmationFacts(
         budget_release_or_consume_rule_confirmed=True,
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-test",
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-snapshot-test",
+        submit_idempotency_policy_id="runtime-submit-idempotency-policy-test",
         protection_creation_failure_policy_confirmed=True,
         protection_creation_failure_policy_id="runtime-protection-failure-policy-test",
+        local_registration_enablement_decision_id="runtime-local-registration-enable-test",
+        exchange_submit_enablement_decision_id="runtime-exchange-submit-enable-test",
+        runtime_submit_rehearsal_id="runtime-submit-rehearsal-test",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-test",
+        owner_real_submit_authorization_id="owner-real-submit-authorization-test",
         duplicate_submit_policy_confirmed=True,
         deployment_readiness_confirmed=True,
         explicit_owner_real_submit_authorization=True,

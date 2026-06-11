@@ -64,6 +64,7 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     ]
     assert report["checks"]["implementation_blockers"] == [
         "runtime_not_live_execution_enabled",
+        "controlled_submit_adapter_not_implemented",
         "order_lifecycle_adapter_disabled",
     ]
     assert "current_head_not_deployed_to_tokyo" in (
@@ -79,12 +80,17 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     assert report["live_enablement_preview"]["exchange_called"] is False
     assert report["checks"]["forbidden_execution_flags"] == []
     assert all(value is False for value in report["safety_invariants"].values())
-    assert report["pipeline"]["submit_rehearsal_status"] == (
-        "ready_for_non_executing_submit_adapter_boundary"
-    )
+    assert report["pipeline"]["submit_rehearsal_status"] == "blocked"
     assert report["pipeline"]["submit_adapter_preview_status"] == (
-        "inputs_ready_dry_run_adapter_only"
+        "inputs_ready_adapter_not_implemented"
     )
+    assert {
+        "local_orders_not_registered",
+        "trusted_submit_fact_snapshot_id_missing",
+        "submit_idempotency_policy_id_missing",
+        "exchange_submit_enablement_not_ready",
+        "runtime_exchange_gateway_readiness_missing",
+    }.issubset(set(report["checks"]["exchange_submit_rehearsal_blockers"]))
     assert report["pipeline"]["order_lifecycle_handoff_status"] == (
         "ready_for_order_lifecycle_adapter"
     )
@@ -143,12 +149,32 @@ async def test_pre_live_packet_still_blocks_when_owner_and_deploy_gates_are_pres
     assert report["checks"]["operational_blockers"] == []
     assert report["checks"]["implementation_blockers"] == [
         "runtime_not_live_execution_enabled",
+        "controlled_submit_adapter_not_implemented",
         "order_lifecycle_adapter_disabled",
     ]
-    assert report["checks"]["live_enablement_blockers"] == []
-    assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is True
-    assert report["promotion_gate"]["status"] == "ready_for_first_real_submit_gate_review"
+    assert report["checks"]["live_enablement_blockers"] == [
+        "controlled_submit_adapter_not_implemented",
+        "promotion_gate_first_real_submit_attempt_outcome_policy_id_missing",
+        "promotion_gate_first_real_submit_deployment_readiness_evidence_id_missing",
+        "promotion_gate_first_real_submit_local_registration_enablement_decision_id_missing",
+        "promotion_gate_first_real_submit_owner_real_submit_authorization_id_missing",
+        "promotion_gate_first_real_submit_submit_idempotency_policy_id_missing",
+        "promotion_gate_first_real_submit_trusted_submit_fact_snapshot_id_missing",
+        "promotion_gate_not_ready_for_first_real_submit",
+    ]
+    assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is False
+    assert report["promotion_gate"]["status"] == "blocked"
+    assert {
+        "first_real_submit_attempt_outcome_policy_id_missing",
+        "first_real_submit_trusted_submit_fact_snapshot_id_missing",
+        "first_real_submit_submit_idempotency_policy_id_missing",
+        "first_real_submit_owner_real_submit_authorization_id_missing",
+    }.issubset(set(report["promotion_gate"]["blockers"]))
     assert report["checks"]["ready_for_first_real_submit"] is False
+    assert report["pipeline"]["submit_rehearsal_status"] == "blocked"
+    assert report["pipeline"]["submit_adapter_preview_status"] == (
+        "inputs_ready_adapter_not_implemented"
+    )
     assert report["pipeline"]["order_registration_draft_preview_status"] == (
         "inputs_ready_registration_draft_only"
     )

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
+from fastapi import HTTPException
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -38,9 +39,6 @@ from src.domain.runtime_execution_submit_authorization import (
 )
 from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreviewStatus,
-)
-from src.domain.runtime_execution_submit_rehearsal import (
-    RuntimeExecutionSubmitRehearsalStatus,
 )
 from src.domain.runtime_execution_protection_plan import (
     RuntimeExecutionProtectionPlanStatus,
@@ -2381,13 +2379,12 @@ async def test_runtime_execution_submit_adapter_preview_inputs_ready_for_dry_run
         authorization.authorization_id
     )
 
-    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
+    assert preview.status == (
+        RuntimeExecutionSubmitAdapterPreviewStatus
+        .INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    )
     assert preview.blockers == []
-    assert preview.submit_adapter_implemented is True
-    assert preview.dry_run_only is True
-    assert preview.real_submit_enabled is False
-    assert preview.order_lifecycle_adapter_enabled is False
-    assert preview.requires_explicit_real_submit_enablement is True
+    assert preview.submit_adapter_implemented is False
     assert "take_profit_or_exit_policy_snapshot_missing" in preview.warnings
     assert preview.entry_price_reference == Decimal("600")
     assert preview.risk_preview["intended_notional"] == "6"
@@ -2408,7 +2405,7 @@ async def test_runtime_execution_submit_adapter_preview_inputs_ready_for_dry_run
     assert preview.order_lifecycle_called is False
 
 
-async def test_runtime_execution_submit_rehearsal_aggregates_ready_non_mutating_path():
+async def test_runtime_execution_submit_rehearsal_requires_local_order_binding_repository():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -2428,54 +2425,13 @@ async def test_runtime_execution_submit_rehearsal_aggregates_ready_non_mutating_
         owner_confirmed_for_submit=True,
     )
 
-    rehearsal = await service.submit_rehearsal_for_authorization(
-        authorization.authorization_id
-    )
-
-    assert rehearsal.status == (
-        RuntimeExecutionSubmitRehearsalStatus
-        .READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
-    )
-    assert rehearsal.safe_stop_stage == "inputs_ready_dry_run_adapter_only"
-    assert rehearsal.next_required_gate == (
-        "order_lifecycle_adapter_enablement_gate"
-    )
-    assert rehearsal.blockers == []
-    assert rehearsal.submit_readiness.status == (
-        RuntimeExecutionSubmitReadinessStatus.OWNER_SUBMIT_AUTHORIZATION_REQUIRED
-    )
-    assert rehearsal.controlled_submit_plan.status == (
-        RuntimeExecutionControlledSubmitPlanStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER
-    )
-    assert rehearsal.controlled_submit_preflight.status == (
-        RuntimeExecutionControlledSubmitPreflightStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER
-    )
-    assert rehearsal.protection_plan_preview.status == (
-        RuntimeExecutionProtectionPlanPreviewStatus.READY_FOR_SUBMIT_ADAPTER
-    )
-    assert rehearsal.attempt_reservation_preview.status == (
-        RuntimeExecutionAttemptReservationPreviewStatus.READY_TO_RESERVE_ATTEMPT
-    )
-    assert rehearsal.submit_adapter_preview.status == (
-        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
-    )
-    assert rehearsal.submit_adapter_preview.submit_adapter_implemented is True
-    assert rehearsal.submit_adapter_preview.order_lifecycle_adapter_enabled is False
-    assert rehearsal.attempt_reservation_preview.attempts_remaining_before == 2
-    assert rehearsal.attempt_reservation_preview.attempts_remaining_after == 1
-    assert rehearsal.attempt_reservation_preview.budget_remaining_before == Decimal("20")
-    assert rehearsal.attempt_reservation_preview.budget_remaining_after == Decimal("14")
-    assert rehearsal.non_mutating_rehearsal is True
-    assert rehearsal.runtime_budget_mutated is False
-    assert rehearsal.attempt_consumed is False
-    assert rehearsal.execution_intent_status_changed is False
-    assert rehearsal.order_created is False
-    assert rehearsal.exchange_called is False
-    assert rehearsal.owner_bounded_execution_called is False
-    assert rehearsal.order_lifecycle_called is False
-    assert runtime_service.runtime.boundary.attempts_used == 0
-    assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
-    assert runtime_service.events == []
+    with pytest.raises(
+        RuntimeError,
+        match="runtime_execution_order_lifecycle_adapter_result_repository_unavailable",
+    ):
+        await service.submit_rehearsal_for_authorization(
+            authorization.authorization_id
+        )
 
 
 async def test_runtime_execution_submit_rehearsal_blocks_final_gate_drift():
@@ -2498,22 +2454,22 @@ async def test_runtime_execution_submit_rehearsal_blocks_final_gate_drift():
         owner_confirmed_for_submit=True,
     )
 
-    rehearsal = await service.submit_rehearsal_for_authorization(
+    with pytest.raises(
+        RuntimeError,
+        match="runtime_execution_order_lifecycle_adapter_result_repository_unavailable",
+    ):
+        await service.submit_rehearsal_for_authorization(
+            authorization.authorization_id
+        )
+
+    preflight = await service.controlled_submit_preflight_for_authorization(
         authorization.authorization_id
     )
-
-    assert rehearsal.status == RuntimeExecutionSubmitRehearsalStatus.BLOCKED
-    assert rehearsal.safe_stop_stage == "blocked_before_submit_adapter"
-    assert "runtime_final_gate_execution_check_not_passed" in rehearsal.blockers
-    assert "active_position_capacity_exhausted" in rehearsal.blockers
-    assert "submit_adapter_preview_not_ready" in rehearsal.blockers
-    assert rehearsal.controlled_submit_preflight.status == (
-        RuntimeExecutionControlledSubmitPreflightStatus.BLOCKED
-    )
-    assert rehearsal.runtime_budget_mutated is False
-    assert rehearsal.attempt_consumed is False
-    assert rehearsal.order_created is False
-    assert rehearsal.exchange_called is False
+    assert preflight.status == RuntimeExecutionControlledSubmitPreflightStatus.BLOCKED
+    assert "runtime_final_gate_execution_check_not_passed" in preflight.blockers
+    assert "active_position_capacity_exhausted" in preflight.blockers
+    assert preflight.order_created is False
+    assert preflight.exchange_called is False
     assert runtime_service.runtime.boundary.attempts_used == 0
     assert runtime_service.events == []
 
@@ -3277,7 +3233,6 @@ async def test_runtime_execution_controlled_submit_result_defaults_to_adapter_di
     assert result.final_gate_verdict.value == "PASS"
     assert "controlled_submit_adapter_disabled" in result.blockers
     assert result.submit_enabled is False
-    assert result.order_lifecycle_adapter_enabled is False
     assert result.submit_executed is False
     assert result.order_created is False
     assert result.exchange_called is False
@@ -3319,7 +3274,6 @@ async def test_runtime_execution_controlled_submit_result_repository_roundtrips_
         assert loaded.final_gate_verdict.value == "PASS"
         assert "controlled_submit_adapter_disabled" in loaded.blockers
         assert loaded.submit_enabled is False
-        assert loaded.order_lifecycle_adapter_enabled is False
         assert loaded.submit_executed is False
         assert loaded.order_created is False
         assert loaded.exchange_called is False
@@ -3355,13 +3309,12 @@ async def test_runtime_execution_controlled_submit_result_is_recorded_for_audit(
 
     assert result_repo.items == [result]
     assert result.status == RuntimeExecutionControlledSubmitResultStatus.SUBMIT_ADAPTER_NOT_ENABLED
-    assert result.order_lifecycle_adapter_enabled is False
     assert result.submit_executed is False
     assert result.order_created is False
     assert result.exchange_called is False
 
 
-async def test_runtime_execution_controlled_submit_result_blocks_enabled_until_order_lifecycle_adapter_enabled():
+async def test_runtime_execution_controlled_submit_result_blocks_enabled_until_submit_adapter_implemented():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
         owner_reviewed=True,
@@ -3386,10 +3339,11 @@ async def test_runtime_execution_controlled_submit_result_blocks_enabled_until_o
         submit_enabled=True,
     )
 
-    assert result.status == RuntimeExecutionControlledSubmitResultStatus.ORDER_LIFECYCLE_ADAPTER_DISABLED
-    assert "order_lifecycle_adapter_disabled" in result.blockers
+    assert result.status == (
+        RuntimeExecutionControlledSubmitResultStatus.SUBMIT_ADAPTER_NOT_IMPLEMENTED
+    )
+    assert "controlled_submit_adapter_not_implemented" in result.blockers
     assert result.submit_enabled is True
-    assert result.order_lifecycle_adapter_enabled is False
     assert result.submit_executed is False
     assert result.order_created is False
     assert result.exchange_called is False
@@ -3913,10 +3867,12 @@ async def test_trading_console_runtime_execution_submit_adapter_preview_endpoint
         authorization.authorization_id
     )
 
-    assert preview.status == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
+    assert preview.status == (
+        RuntimeExecutionSubmitAdapterPreviewStatus
+        .INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
+    )
     assert preview.blockers == []
-    assert preview.submit_adapter_implemented is True
-    assert preview.order_lifecycle_adapter_enabled is False
+    assert preview.submit_adapter_implemented is False
     assert preview.order_created is False
     assert preview.exchange_called is False
     assert preview.owner_bounded_execution_called is False
@@ -3951,23 +3907,15 @@ async def test_trading_console_runtime_execution_submit_rehearsal_endpoint_is_no
         raising=False,
     )
 
-    rehearsal = await runtime_execution_submit_rehearsal_for_authorization(
-        authorization.authorization_id
+    with pytest.raises(HTTPException) as exc_info:
+        await runtime_execution_submit_rehearsal_for_authorization(
+            authorization.authorization_id
+        )
+    assert exc_info.value.status_code == 503
+    assert (
+        "runtime_execution_order_lifecycle_adapter_result_repository_unavailable"
+        in str(exc_info.value.detail)
     )
-
-    assert rehearsal.status == (
-        RuntimeExecutionSubmitRehearsalStatus
-        .READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
-    )
-    assert rehearsal.submit_adapter_preview.status == (
-        RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
-    )
-    assert rehearsal.runtime_budget_mutated is False
-    assert rehearsal.attempt_consumed is False
-    assert rehearsal.order_created is False
-    assert rehearsal.exchange_called is False
-    assert rehearsal.owner_bounded_execution_called is False
-    assert rehearsal.order_lifecycle_called is False
     assert runtime_service.runtime.boundary.attempts_used == 0
     assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
     assert runtime_service.events == []
