@@ -66,10 +66,69 @@ def build_rehearsal_report() -> dict[str, Any]:
         and checks["prepared_authorization_id_present"]
         and not forbidden_flags
     )
+    prepared_authorization_id = (
+        allow_payload.get("operator_command_plan", {}).get("prepared_authorization_id")
+    )
     return {
         "status": "rehearsal_passed" if passed else "blocked",
         "scope": "runtime_observation_api_prepare_ready_rehearsal",
+        "summary": {
+            "ready_signal_rehearsed": True,
+            "dry_run_stops_before_prepare": checks[
+                "ready_without_allow_stops_before_prepare"
+            ],
+            "explicit_prepare_permission_reaches_preflight": checks[
+                "allow_prepare_reaches_final_gate_preflight"
+            ],
+            "prepared_authorization_id": prepared_authorization_id,
+            "real_submit_authorized": False,
+        },
         "checks": checks,
+        "operator_command_plan": {
+            "not_executed": True,
+            "next_step": (
+                "use_same_boundary_for_real_ready_signal_then_run_final_gate_arm_preview_and_disabled_smoke"
+                if passed
+                else "resolve_ready_prepare_rehearsal_blockers"
+            ),
+            "allowed_after_real_ready_signal": [
+                "create_shadow_signal_evaluation",
+                "create_shadow_order_candidate",
+                "create_prepare_authorization_record",
+                "run_final_gate_preview",
+                "run_arm_preview",
+                "run_disabled_first_real_submit_smoke",
+            ],
+            "still_requires_separate_owner_authorization": [
+                "executable_first_real_submit",
+                "exchange_order_placement",
+                "OrderLifecycle_submit",
+            ],
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_gate": {
+            "rehearsal_only": True,
+            "does_not_authorize": [
+                "real runtime submit",
+                "exchange order placement",
+                "OrderLifecycle submit",
+                "executable ExecutionIntent",
+                "withdrawal or transfer",
+            ],
+            "next_authorization_if_ready": (
+                "explicit first-real-submit action authorization after real prepared evidence"
+                if passed
+                else None
+            ),
+        },
+        "right_tail_objective_context": {
+            "small_bounded_losses_allowed": True,
+            "unbounded_or_unreviewable_execution_forbidden": True,
+            "automatic_compounding_assumed": False,
+            "automatic_withdrawal_assumed": False,
+        },
         "dry_run_payload": dry_payload,
         "allow_prepare_payload": allow_payload,
         "safety_invariants": {
@@ -250,9 +309,21 @@ def _forbidden_flags(*payloads: dict[str, Any]) -> list[str]:
     return forbidden
 
 
-def main() -> int:
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-json")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
     report = build_rehearsal_report()
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    if args.output_json:
+        output_path = Path(args.output_json).expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(payload + "\n", encoding="utf-8")
+    print(payload)
     return 0 if report["status"] == "rehearsal_passed" else 2
 
 
