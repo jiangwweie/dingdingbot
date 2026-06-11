@@ -3148,3 +3148,42 @@ Use this file for session progress and handoff notes.
   - either deploy the current UI/API commit when useful, or proceed to the
     Owner-authorized reduce-only close / closed-review loop before unlocking
     the next bounded runtime attempt.
+
+## 2026-06-11 (Tokyo Deploy 24d3e580 + Public Smoke)
+
+- Deployed current mainline commit
+  `24d3e5800d8a5f93f28bb8850eb4cdb4b1562fe9` from
+  `program/live-safe-v1` to Tokyo.
+- Release identity:
+  - release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-24d3e580-20260611Tpostcloseui`;
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-03229c78-20260611Tpostcloseapi`;
+  - database backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-24d3e580-20260611Tpostcloseui.pgdump`.
+- Backend deploy result:
+  - deployment script returned `status=applied`;
+  - `current` symlink points at the 24d3e580 release;
+  - service health returned
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`;
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`.
+- Frontend static deploy:
+  - nginx public root is `/var/www/brc-owner-console`;
+  - the git release deploy does not automatically refresh that static root, so
+    the Trading Console was built on Tokyo from the deployed release and synced
+    atomically to nginx static root;
+  - public bundle now references `assets/index-MSAucmV7.js` and
+    `assets/index-DTVIUMuM.css`;
+  - previous static root backup:
+    `/home/ubuntu/brc-deploy/backups/brc-owner-console-static-24d3e580-20260611T122042Z`.
+- Public smoke:
+  - `http://43.133.176.150/` returned 200 and referenced the new JS/CSS assets;
+  - `http://43.133.176.150/assets/index-MSAucmV7.js` returned 200;
+  - `http://43.133.176.150/assets/index-DTVIUMuM.css` returned 200;
+  - `http://43.133.176.150/api/health` returned ok with `live_ready=false`;
+  - unauthenticated post-close follow-up API returned 401
+    `Operator login required`.
+- Safety:
+  - this deployment did not execute the real reduce-only close;
+  - no exchange order, OrderLifecycle submit, withdrawal, or transfer was
+    performed in this deploy stage.
