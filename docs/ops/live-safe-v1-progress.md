@@ -3541,3 +3541,61 @@ Use this file for session progress and handoff notes.
   - when a real signal becomes `ready_for_prepare`, the authorized path is
     shadow prepare -> FinalGate/arm preview -> disabled first-real-submit smoke;
   - actual exchange submit remains a later Owner-gated action point.
+
+## 2026-06-12 (Runtime + Strategy-group Signal Watch Evidence)
+
+- Added and pushed:
+  - `fc059ee4 feat(ops): add strategy group readonly preview`;
+  - `75e7eee4 feat(ops): add runtime strategy signal watch packet`.
+- New scripts:
+  - `scripts/preview_strategy_group_readonly_observation.py`;
+  - `scripts/build_runtime_strategy_signal_watch_packet.py`.
+- Purpose:
+  - provide a pure preview command for the broader strategy-group signal shelf
+    without login, PG writes, runtime resolver calls, shadow candidate creation,
+    ExecutionIntent creation, order paths, or runtime mutation;
+  - combine the ACTIVE runtime observation packet with the broader strategy
+    preview so the operator can distinguish "execution chain blocked" from
+    "market/strategy signals are simply not firing".
+- Focused tests:
+  - `pytest -q tests/unit/test_strategy_group_readonly_preview_script.py
+    tests/unit/test_strategy_group_live_readonly_observation.py
+    tests/unit/test_strategy_group_observation_script.py` passed with
+    `25 passed`;
+  - `pytest -q tests/unit/test_runtime_strategy_signal_watch_packet.py
+    tests/unit/test_strategy_group_readonly_preview_script.py
+    tests/unit/test_runtime_active_observation_status.py` passed with
+    `11 passed`;
+  - `python3 -m py_compile
+    scripts/preview_strategy_group_readonly_observation.py
+    scripts/build_runtime_strategy_signal_watch_packet.py` passed.
+- Live public-market preview evidence:
+  - source: `binance_usdm_public_klines_read_only`;
+  - candidate count: `8`;
+  - current signal count: `8`;
+  - would-enter signal count: `0`;
+  - no-action signal count: `8`;
+  - invalid signal count: `0`;
+  - forbidden effects: none.
+- Runtime + strategy watch evidence built from the Tokyo ACTIVE observation
+  status packet and live public klines:
+  - watch status: `watching_no_signal`;
+  - active runtime count: `2`;
+  - latest runtime observation iteration: `6`;
+  - runtime ready signal count: `0`;
+  - strategy-group would-enter signal count: `0`;
+  - strategy-group no-action signal count: `8`;
+  - next step: `continue_active_runtime_observation`.
+- Safety:
+  - no PG observation row was written by the preview/watch packet;
+  - no runtime resolver was called;
+  - no shadow candidate, SignalEvaluation, ExecutionIntent, order, or
+    OrderLifecycle action was created;
+  - no exchange write, attempt counter mutation, runtime budget mutation,
+    withdrawal, or transfer occurred.
+- Product implication:
+  - the current no-action state is now an evidence-backed market/strategy
+    signal conclusion across both ACTIVE runtimes and the broader strategy
+    shelf;
+  - if this persists through the observation window, the next product question
+    is strategy/runtime coverage review, not forcing execution.
