@@ -3266,3 +3266,76 @@ Use this file for session progress and handoff notes.
   - this is a read-model/product-state issue, not an exchange safety issue, and
     should be fixed before relying on the panel as the sole next-attempt
     operator signal.
+
+## 2026-06-11 (Post-close Complete + Next-attempt Gate)
+
+- Post-close read-model fix:
+  - committed and pushed `ae0c0ad6 fix(console): complete runtime post-close
+    after review`;
+  - the Trading Console post-close follow-up now checks the latest
+    `brc_live_lifecycle_reviews` record for
+    `runtime-review:{runtime_instance_id}` and marks the packet
+    `post_close_complete` when the runtime is flat and the lifecycle review is
+    `closed_reviewed`;
+  - the operator plan no longer suggests a duplicate closed-review command
+    after review is recorded.
+- Ops script parity fix:
+  - committed and pushed `a638dfc8 fix(ops): complete post-close followup
+    script after review`;
+  - `scripts/build_runtime_post_close_followup_packet.py` now reads the same
+    lifecycle-review fact and returns `post_close_complete` for the AVAX runtime
+    after the closed review exists.
+- Tokyo deploys:
+  - deployed `ae0c0ad6` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ae0c0ad6-20260611Tpostclosecomplete`;
+  - deployed `a638dfc8` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-a638dfc8-20260611Tpostclisync`;
+  - both deployments returned `status=applied` and postdeploy acceptance
+    passed.
+- Post-close script verification on Tokyo:
+  - `scripts/build_runtime_post_close_followup_packet.py --runtime-instance-id
+    strategy-runtime-95655873b76c --env-file
+    /home/ubuntu/brc-deploy/env/live-readonly.env` returned
+    `post_close_complete`;
+  - `closed_review_recorded=true`;
+  - closed review id:
+    `live-review-runtime-review:strategy-runtime-95655873b76c-closed-reviewed-exit_controlled_c03b446704fa`;
+  - required sequence is now only `verify_next_attempt_gate`.
+- Next-attempt gate packet:
+  - committed and pushed `e6b90dbb feat(ops): add runtime next-attempt gate
+    packet`;
+  - added `scripts/verify_runtime_next_attempt_gate_packet.py`, a read-only
+    ops packet that signs a local operator session and calls the official
+    Trading Console `owner-action-flow` next-attempt gate;
+  - the packet reads runtime context from PG, can include exchange read-only
+    facts, and explicitly does not create an ExecutionIntent, order, runtime
+    mutation, withdrawal, or transfer.
+- Tests:
+  - `pytest -q tests/unit/test_runtime_next_attempt_gate_packet_script.py
+    tests/unit/test_runtime_post_close_followup_script.py
+    tests/unit/test_runtime_post_close_followup.py` passed with `13 passed`.
+- Tokyo deploy:
+  - deployed `e6b90dbb693dcaa74eb48a6ab78254497ec7b96a` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-e6b90dbb-20260611Tnextattemptgate`;
+  - deploy result was `status=applied`;
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - public health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- AVAX runtime next-attempt gate verification:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - lifecycle classification: `closed_reviewed`;
+  - PG active position count: `0`;
+  - PG open order count: `0`;
+  - exchange position count: `0`;
+  - exchange open protection count: `0`;
+  - gate: `clear_for_next_preflight`;
+  - status: `clear_for_preflight`;
+  - blockers: none;
+  - JIT lifecycle audit decision: `continue_to_owner_budget_final_gate`;
+  - `can_continue_to_authorization=true`;
+  - `can_execute_live=false`.
+- Safety:
+  - this stage only proves the runtime may move into fresh Owner/Budget
+    authorization and official FinalGate preflight;
+  - it does not authorize live submit, create an ExecutionIntent, place an
+    order, call OrderLifecycle, withdraw funds, or transfer funds.
