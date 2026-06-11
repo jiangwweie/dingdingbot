@@ -2923,3 +2923,57 @@ Use this file for session progress and handoff notes.
   - after close, rerun the resolver; expected next status is
     `ready_for_closed_review` with entry / exit order IDs and the dry-run
     review command args.
+
+## 2026-06-11 (Post-close Follow-up Carries Review Facts)
+
+- Added and deployed `program/live-safe-v1` commit
+  `c89ce4f0c71a95f4c075e029ed8b0d16fbebbdd7`
+  `feat(runtime): attach closed review facts to follow-up`.
+- `RuntimePostCloseFollowupPacket` now carries the read-only closed-review
+  facts summary:
+  - `closed_review_facts_status`;
+  - resolved `closed_review_entry_order_id`;
+  - resolved `closed_review_exit_order_id`;
+  - `closed_review_command_args` for
+    `scripts/create_runtime_closed_trade_review.py` once the runtime is flat.
+- `scripts/build_runtime_post_close_followup_packet.py` now builds and returns
+  `closed_review_facts_packet` alongside the monitor and Owner close packet.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_post_close_followup.py tests/unit/test_runtime_post_close_followup_script.py tests/unit/test_runtime_closed_trade_review_facts.py tests/unit/test_runtime_closed_trade_review_facts_script.py tests/unit/test_runtime_owner_reduce_only_close_flow.py`
+    passed with `13 passed`;
+  - `python3 -m py_compile src/domain/runtime_post_close_followup.py scripts/build_runtime_post_close_followup_packet.py tests/unit/test_runtime_post_close_followup.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed release is
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c89ce4f0-20260611Tfollowup-reviewfacts`;
+  - deployed head is
+    `c89ce4f0c71a95f4c075e029ed8b0d16fbebbdd7`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote post-close follow-up packet for
+  `strategy-runtime-95655873b76c`:
+  - status `waiting_for_owner_close_authorization`;
+  - active position present `true`;
+  - `closed_review_facts_status=waiting_for_close`;
+  - closed-review facts packet status `waiting_for_close`;
+  - resolved entry order id `rtod-c4439560677fbd165a-entry`;
+  - terminal exit order id `None`;
+  - Owner close approval value remains
+    `runtime-reduce-only-close:strategy-runtime-95655873b76c:AVAX/USDT:USDT:short:qty=1.0:owner-authorized`;
+  - blockers `[]`.
+- Safety proof:
+  - `closed_review_facts_pg_read_only=true`;
+  - exchange write called `false`;
+  - review record created `false`;
+  - order created / cancelled / amended `false`;
+  - position closed `false`;
+  - runtime state mutated `false`;
+  - no withdrawal / transfer.
+- Remaining live action:
+  - real reduce-only close is still not executed;
+  - after close, this same post-close follow-up packet should progress from
+    close authorization to closed-review command args and next-attempt gate
+    verification.
