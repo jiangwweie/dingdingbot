@@ -3383,3 +3383,65 @@ Use this file for session progress and handoff notes.
   - not deployed in this stage;
   - deploy only when the wrapper is needed on Tokyo for an actual next-attempt
     prepare run.
+
+## 2026-06-11 (Runtime Strategy Signal Input Packet)
+
+- Added and pushed `28b9cc20 feat(ops): add runtime strategy signal input
+  packet`.
+- New script:
+  `scripts/build_runtime_strategy_signal_input_packet.py`.
+- Purpose:
+  - build one `StrategyFamilySignalInput` for an existing active runtime;
+  - default to Binance USD-M public closed candles through a read-only source;
+  - evaluate the signal through `RuntimeStrategySignalEvaluationService`;
+  - output a signal-input JSON file that can feed the next-attempt prepare
+    wrapper only when the evaluator reaches `READY_FOR_SEMANTIC_BINDING`.
+- Safety model:
+  - account facts inside the generated signal input are explicit placeholders;
+  - candidate planning must replace them through the trusted runtime fact
+    overlay before any shadow candidate can be created;
+  - the script does not create `SignalEvaluation`, `OrderCandidate`,
+    `ExecutionIntent`, orders, runtime mutations, withdrawals, or transfers.
+- Tests:
+  - `pytest -q tests/unit/test_runtime_strategy_signal_input_packet_script.py
+    tests/unit/test_runtime_next_attempt_prepare_api_flow.py
+    tests/unit/test_runtime_next_attempt_gate_packet_script.py
+    tests/unit/test_runtime_strategy_signal_evaluation_service.py
+    tests/unit/test_reference_price_action_evaluators.py` passed with
+    `24 passed`;
+  - `python3 -m py_compile
+    scripts/build_runtime_strategy_signal_input_packet.py
+    scripts/runtime_next_attempt_prepare_api_flow.py` passed.
+- Tokyo deploy:
+  - deployed `28b9cc20dbb56d844482acada1034676a5958250` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-28b9cc20-20260611Tsignalinput`;
+  - deploy result was `status=applied`;
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - public health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- AVAX/BTPC live read-only signal check:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - strategy: `BTPC-001` / `BTPC-001-v0`;
+  - source: `binance_usdm_public_klines_read_only`;
+  - output signal input path:
+    `/home/ubuntu/brc-deploy/reports/runtime-strategy-signal-input/avax-btpc-next-attempt-signal-input.json`;
+  - status: `observe_only`;
+  - evaluator: `BTPC001PriceActionEvaluator`;
+  - reason: `strategy_signal_not_would_enter`;
+  - evaluator output signal type: `no_action`;
+  - reason code: `btpc_no_action_no_bear_pullback_continuation`;
+  - market state: `UNCERTAIN`;
+  - BTPC did not confirm bear-trend pullback continuation on the latest closed
+    candle.
+- Safety:
+  - no shadow candidate was created;
+  - no execution intent was created;
+  - no order or OrderLifecycle call occurred;
+  - no exchange write, withdrawal, transfer, or runtime state mutation
+    occurred.
+- Product implication:
+  - the repeat-attempt chain is now connected up to real read-only market
+    signal evaluation;
+  - because the current BTPC signal is observe-only, the correct next runtime
+    behavior is to wait for the next closed bar or evaluate another eligible
+    strategy/runtime rather than forcing a candidate.
