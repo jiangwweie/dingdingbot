@@ -55,6 +55,7 @@ async def test_pre_live_packet_blocks_current_head_not_deployed_and_owner_auth_m
     assert report["checks"]["registration_draft_chain_passed"] is True
     assert report["checks"]["protection_failure_policy_passed"] is True
     assert report["checks"]["protection_failure_policy_blockers"] == []
+    assert report["checks"]["disabled_first_real_submit_smoke_ready"] is False
     assert report["checks"]["ready_for_first_real_submit"] is False
     assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is False
     assert report["checks"]["technical_blockers"] == []
@@ -305,6 +306,7 @@ async def test_pre_live_packet_can_reach_exchange_submit_adapter_pre_execution_b
         is True
     )
     assert report["checks"]["exchange_submit_adapter_pre_execution_ready"] is True
+    assert report["checks"]["disabled_first_real_submit_smoke_ready"] is True
     assert report["checks"]["ready_for_live_runtime_enablement_mutation_design"] is True
     assert report["checks"]["ready_for_first_real_submit"] is True
     assert report["checks"]["live_enablement_blockers"] == []
@@ -390,6 +392,7 @@ async def test_pre_live_packet_can_simulate_enabled_exchange_execution_in_memory
 
     assert report["status"] == "ready_for_owner_controlled_first_real_submit_review"
     assert report["checks"]["exchange_submit_adapter_pre_execution_ready"] is True
+    assert report["checks"]["disabled_first_real_submit_smoke_ready"] is True
     assert (
         report["checks"]["in_memory_exchange_execution_simulation_exercised"]
         is True

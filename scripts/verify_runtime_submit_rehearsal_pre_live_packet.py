@@ -803,6 +803,21 @@ async def build_pre_live_packet(
         exchange_submit_adapter_blockers = list(
             exchange_submit_adapter_rehearsal["adapter_result"].blockers
         )
+    disabled_execution_result = exchange_submit_adapter_rehearsal[
+        "disabled_execution_result"
+    ]
+    disabled_first_real_submit_smoke_ready = bool(
+        exchange_submit_adapter_rehearsal["ready"]
+        and disabled_execution_result is not None
+        and not disabled_execution_result.blockers
+        and disabled_execution_result.exchange_submit_execution_enabled is False
+        and disabled_execution_result.exchange_called is False
+        and disabled_execution_result.exchange_order_submitted is False
+        and disabled_execution_result.order_lifecycle_submit_called is False
+        and disabled_execution_result.real_exchange_submit_adapter_executed is False
+        and disabled_execution_result.execution_intent_status_changed is False
+        and disabled_execution_result.withdrawal_or_transfer_created is False
+    )
     exchange_submit_rehearsal_blockers = _dedupe(
         list(order_lifecycle_adapter_result.blockers)
         + list(rehearsal.blockers)
@@ -931,6 +946,9 @@ async def build_pre_live_packet(
         ),
         "exchange_submit_adapter_pre_execution_ready": (
             exchange_submit_adapter_rehearsal["ready"]
+        ),
+        "disabled_first_real_submit_smoke_ready": (
+            disabled_first_real_submit_smoke_ready
         ),
         "in_memory_exchange_execution_simulation_exercised": (
             exchange_submit_adapter_rehearsal[
@@ -2293,6 +2311,10 @@ def _print_human(report: dict[str, Any]) -> None:
     print(
         "exchange_submit_adapter_pre_execution_ready="
         + str(checks["exchange_submit_adapter_pre_execution_ready"]).lower()
+    )
+    print(
+        "disabled_first_real_submit_smoke_ready="
+        + str(checks["disabled_first_real_submit_smoke_ready"]).lower()
     )
     print(
         "in_memory_exchange_execution_simulation_submitted="
