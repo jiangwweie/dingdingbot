@@ -3797,3 +3797,43 @@ Use this file for session progress and handoff notes.
     order, OrderLifecycle submit, exchange write, withdrawal, or transfer;
   - current no-signal state is an observation result, not a strategy failure
     and not a reason to force entry.
+
+## 2026-06-12 (Owner Wake-up Observation Handoff Packet)
+
+- Added a local non-executing Owner wake-up packet builder:
+  - `scripts/build_runtime_observation_wakeup_packet.py`;
+  - `tests/unit/test_runtime_observation_wakeup_packet.py`.
+- Purpose:
+  - consume an existing runtime observation operator packet;
+  - summarize whether Owner attention is needed now, whether observation can
+    continue while Owner is away, and which actions still require Owner before
+    any real submit;
+  - keep no-signal as a valid observation state, not as a reason to force
+    entry.
+- Current Tokyo operator-packet input produced:
+  - status: `owner_sleep_safe_observation_running`;
+  - owner attention: `no_owner_action_needed_now`;
+  - next step: `continue_active_runtime_observation`;
+  - active runtime count: `2`;
+  - runtime ready signal count: `0`;
+  - strategy-group would-enter signal count: `0`;
+  - strategy-group no-action signal count: `8`;
+  - prepared authorization ID: `null`;
+  - shadow candidate ID: `null`;
+  - source forbidden effects: `[]`.
+- Focused verification:
+  - `pytest -q tests/unit/test_runtime_observation_wakeup_packet.py
+    tests/unit/test_runtime_observation_operator_packet.py
+    tests/unit/test_runtime_no_signal_diagnostic_packet.py` passed with
+    `13 passed`;
+  - `python3 -m py_compile
+    scripts/build_runtime_observation_wakeup_packet.py
+    scripts/build_runtime_observation_operator_packet.py
+    scripts/build_runtime_no_signal_diagnostic_packet.py` passed.
+- Safety:
+  - the wake-up packet reads JSON only;
+  - it does not call APIs, connect to PG, resolve runtimes, create shadow
+    candidates, create ExecutionIntents, create orders, call OrderLifecycle,
+    call exchange, mutate attempts/budget, withdraw, or transfer;
+  - executable first-real-submit, exchange order placement, OrderLifecycle
+    submit, withdrawal, and transfer remain Owner-authorized-only.
