@@ -2291,3 +2291,36 @@ Use this file for session progress and handoff notes.
     budget mutations;
   - the console now recognizes the first live attempt as a reviewed small
     bounded loss and permits only the next preflight path, not direct trading.
+
+## 2026-06-11 (First-real-submit Flow Next-attempt Gate)
+
+- Added a next-attempt lifecycle/review gate check to
+  `scripts/runtime_first_real_submit_api_flow.py`.
+- The guarded API flow now checks Trading Console
+  `/api/trading-console/owner-action-flow` before `prepare`, `arm`, or
+  `execute` when a symbol is available:
+  - with `--signal-input-json`, the symbol and strategy ids can be derived from
+    the signal input;
+  - with existing candidate / authorization ids, the operator can provide
+    `--next-attempt-symbol` plus optional side / family ids;
+  - if no symbol is available, the script records
+    `next_attempt_gate_check_skipped_symbol_missing` as a warning and continues
+    rather than inventing a new hard gate.
+- If the backend-owned `next_attempt_gate.status` is not
+  `clear_for_preflight`, or
+  `next_attempt_allowed_by_lifecycle` is not true, the flow stops before
+  creating an intent draft, submit authorization, local registration,
+  exchange-submit action authorization, or first-real-submit action.
+- Verification:
+  - `python3 -m pytest -q tests/unit/test_runtime_first_real_submit_api_flow.py`
+    passed with `7 passed`;
+  - `python3 -m py_compile scripts/runtime_first_real_submit_api_flow.py`
+    passed;
+  - `git diff --check` passed.
+- Safety result:
+  - no exchange calls, orders, ExecutionIntent records, OrderLifecycle calls,
+    withdrawal/transfer instructions, or runtime-budget mutations were made by
+    this code change or verification;
+  - the first-real-submit operator flow now carries machine-readable evidence
+    that the previous bounded-live attempt was cleared for the next preflight
+    before proceeding.

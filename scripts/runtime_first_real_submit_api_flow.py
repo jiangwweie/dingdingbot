@@ -64,6 +64,12 @@ class FlowConfig:
     owner_confirmation_reference: str = "owner-authorized-first-real-submit"
     reason: str = "owner authorized first real runtime submit"
     outcome_kind: str = DEFAULT_OUTCOME_KIND
+    next_attempt_symbol: str | None = None
+    next_attempt_side: str | None = None
+    next_attempt_family: str | None = None
+    next_attempt_strategy_family_id: str | None = None
+    next_attempt_carrier_id: str | None = None
+    skip_next_attempt_gate_check: bool = False
     enable_local_registration: bool = True
     arm_exchange_submit_adapter: bool = True
     record_gateway_readiness: bool = True
@@ -79,6 +85,7 @@ class FlowState:
     steps: list[dict[str, Any]] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    next_attempt_gate: dict[str, Any] | None = None
 
     def remember(self, key: str, value: Any) -> None:
         if value is None:
@@ -160,6 +167,9 @@ class FirstRealSubmitApiFlow:
         if self._config.mode == "inspect":
             self._inspect()
         else:
+            self._verify_next_attempt_gate_if_available()
+            if self.state.blockers:
+                return self._report()
             if self._config.signal_input_path:
                 self._create_shadow_candidate_from_signal_input()
             if self._config.order_candidate_id:
@@ -193,8 +203,7 @@ class FirstRealSubmitApiFlow:
         if not self._config.runtime_instance_id:
             self.state.add_blockers(["runtime_instance_id_required_for_signal_input"])
             return
-        with open(self._config.signal_input_path or "", "r", encoding="utf-8") as handle:
-            signal_input = json.load(handle)
+        signal_input = self._load_signal_input()
         body = {
             "signal_input": signal_input,
             "allow_shadow_candidate_creation": True,
@@ -223,6 +232,83 @@ class FirstRealSubmitApiFlow:
         if isinstance(candidate, dict):
             self.state.remember("order_candidate_id", candidate.get("order_candidate_id"))
             self._config.order_candidate_id = candidate.get("order_candidate_id")
+
+    def _verify_next_attempt_gate_if_available(self) -> None:
+        if self._config.skip_next_attempt_gate_check:
+            self.state.add_warnings(["next_attempt_gate_check_skipped_by_cli"])
+            return
+
+        scope = self._next_attempt_gate_scope()
+        symbol = scope.get("symbol")
+        if not symbol:
+            self.state.add_warnings(["next_attempt_gate_check_skipped_symbol_missing"])
+            return
+
+        result = self._step(
+            "verify_next_attempt_gate",
+            "GET",
+            "/api/trading-console/owner-action-flow",
+            query={
+                "include_exchange": False,
+                "symbol": symbol,
+                "side": scope.get("side"),
+                "family": scope.get("family"),
+                "strategy_family_id": scope.get("strategy_family_id"),
+                "carrier_id": scope.get("carrier_id"),
+            },
+            collect_body_blockers=False,
+        )
+        body = _body(result)
+        gate = _extract_next_attempt_gate(body)
+        self.state.next_attempt_gate = gate
+        if result.get("http_status", 0) >= 300 or result.get("error"):
+            return
+        if not gate:
+            self.state.add_blockers(["next_attempt_gate_missing_from_owner_action_flow"])
+            return
+        status = str(gate.get("status") or "")
+        gate_name = str(gate.get("gate") or "")
+        if (
+            status != "clear_for_preflight"
+            or gate.get("next_attempt_allowed_by_lifecycle") is not True
+        ):
+            self.state.add_blockers(
+                [f"next_attempt_gate_not_clear:{gate_name or status or 'unknown'}"]
+            )
+            for blocker in gate.get("blockers") or []:
+                if isinstance(blocker, dict) and blocker.get("id"):
+                    self.state.add_blockers([f"next_attempt_gate:{blocker['id']}"])
+
+    def _next_attempt_gate_scope(self) -> dict[str, Any]:
+        scope: dict[str, Any] = {
+            "symbol": self._config.next_attempt_symbol,
+            "side": self._config.next_attempt_side,
+            "family": self._config.next_attempt_family,
+            "strategy_family_id": self._config.next_attempt_strategy_family_id,
+            "carrier_id": self._config.next_attempt_carrier_id,
+        }
+        if self._config.signal_input_path:
+            try:
+                signal_input = self._load_signal_input()
+            except (OSError, json.JSONDecodeError):
+                return scope
+            scope["symbol"] = scope.get("symbol") or signal_input.get("symbol")
+            scope["strategy_family_id"] = (
+                scope.get("strategy_family_id")
+                or signal_input.get("strategy_family_id")
+            )
+            scope["carrier_id"] = (
+                scope.get("carrier_id")
+                or signal_input.get("strategy_family_version_id")
+            )
+        return scope
+
+    def _load_signal_input(self) -> dict[str, Any]:
+        with open(self._config.signal_input_path or "", "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            raise ValueError("signal_input_json_must_be_object")
+        return payload
 
     def _prepare_from_order_candidate(self) -> None:
         candidate_id = self._required_id("order_candidate_id")
@@ -847,6 +933,7 @@ class FirstRealSubmitApiFlow:
                 and not self.state.blockers
             ),
             "ids": self.state.ids,
+            "next_attempt_gate": self.state.next_attempt_gate or {},
             "steps": self.state.steps,
             "blockers": self.state.blockers,
             "warnings": self.state.warnings,
@@ -886,6 +973,22 @@ def _id_summary(value: Any) -> dict[str, Any]:
         "accounting_id",
     )
     return {key: value.get(key) for key in keys if value.get(key)}
+
+
+def _extract_next_attempt_gate(body: dict[str, Any]) -> dict[str, Any]:
+    data = body.get("data")
+    if isinstance(data, dict):
+        post_action = data.get("post_action_state")
+        if isinstance(post_action, dict) and isinstance(
+            post_action.get("next_attempt_gate"),
+            dict,
+        ):
+            return post_action["next_attempt_gate"]
+    post_action = body.get("post_action_state")
+    if isinstance(post_action, dict) and isinstance(post_action.get("next_attempt_gate"), dict):
+        return post_action["next_attempt_gate"]
+    gate = body.get("next_attempt_gate")
+    return gate if isinstance(gate, dict) else {}
 
 
 def _query_values(query: dict[str, Any]) -> dict[str, str]:
@@ -942,6 +1045,12 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     )
     parser.add_argument("--reason", default="owner authorized first real runtime submit")
     parser.add_argument("--outcome-kind", default=DEFAULT_OUTCOME_KIND)
+    parser.add_argument("--next-attempt-symbol")
+    parser.add_argument("--next-attempt-side")
+    parser.add_argument("--next-attempt-family")
+    parser.add_argument("--next-attempt-strategy-family-id")
+    parser.add_argument("--next-attempt-carrier-id")
+    parser.add_argument("--skip-next-attempt-gate-check", action="store_true")
     parser.add_argument("--skip-local-registration", action="store_true")
     parser.add_argument("--skip-exchange-arm", action="store_true")
     parser.add_argument("--skip-gateway-readiness", action="store_true")
@@ -963,6 +1072,12 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         owner_confirmation_reference=args.owner_confirmation_reference,
         reason=args.reason,
         outcome_kind=args.outcome_kind,
+        next_attempt_symbol=args.next_attempt_symbol,
+        next_attempt_side=args.next_attempt_side,
+        next_attempt_family=args.next_attempt_family,
+        next_attempt_strategy_family_id=args.next_attempt_strategy_family_id,
+        next_attempt_carrier_id=args.next_attempt_carrier_id,
+        skip_next_attempt_gate_check=args.skip_next_attempt_gate_check,
         enable_local_registration=not args.skip_local_registration,
         arm_exchange_submit_adapter=not args.skip_exchange_arm,
         record_gateway_readiness=not args.skip_gateway_readiness,

@@ -11,9 +11,17 @@ from scripts.runtime_first_real_submit_api_flow import (
 
 
 class _FakeClient:
-    def __init__(self, *, existing_attempt_policy: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        existing_attempt_policy: bool = False,
+        next_attempt_gate_status: str = "clear_for_preflight",
+        next_attempt_gate_name: str = "clear_for_next_preflight",
+    ) -> None:
         self.calls: list[dict] = []
         self.existing_attempt_policy = existing_attempt_policy
+        self.next_attempt_gate_status = next_attempt_gate_status
+        self.next_attempt_gate_name = next_attempt_gate_name
 
     def request_json(self, method, path, *, query=None, body=None):
         self.calls.append(
@@ -24,6 +32,31 @@ class _FakeClient:
                 "body": body,
             }
         )
+        if "owner-action-flow" in path:
+            blocked = self.next_attempt_gate_status != "clear_for_preflight"
+            return {
+                "http_status": 200,
+                "body": {
+                    "data": {
+                        "post_action_state": {
+                            "next_attempt_gate": {
+                                "gate": self.next_attempt_gate_name,
+                                "status": self.next_attempt_gate_status,
+                                "next_attempt_allowed_by_lifecycle": not blocked,
+                                "blockers": (
+                                    [
+                                        {
+                                            "id": "NEXT-ATTEMPT-CLOSED-TRADE-REVIEW-REQUIRED",
+                                        }
+                                    ]
+                                    if blocked
+                                    else []
+                                ),
+                            }
+                        }
+                    }
+                },
+            }
         if "runtime-execution-intent-drafts" in path:
             return {"http_status": 200, "body": {"draft_id": "draft-1", "status": "ready_for_intent_creation"}}
         if "runtime-execution-intents/drafts" in path:
@@ -145,6 +178,57 @@ def test_prepare_from_order_candidate_stops_before_local_registration():
     assert not any("attempt-outcome-policies" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
     assert not any("exchange-submit-action-authorizations" in path for path in paths)
+
+
+def test_prepare_checks_next_attempt_gate_when_symbol_is_provided():
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="prepare",
+            order_candidate_id="candidate-1",
+            next_attempt_symbol="AVAX/USDT:USDT",
+            next_attempt_side="short",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["next_attempt_gate"]["status"] == "clear_for_preflight"
+    assert report["ids"]["authorization_id"] == "auth-1"
+    owner_flow_call = client.calls[0]
+    assert owner_flow_call["path"] == "/api/trading-console/owner-action-flow"
+    assert owner_flow_call["query"]["symbol"] == "AVAX/USDT:USDT"
+    assert owner_flow_call["query"]["side"] == "short"
+
+
+def test_prepare_blocks_before_draft_when_next_attempt_gate_is_not_clear():
+    client = _FakeClient(
+        next_attempt_gate_status="blocked",
+        next_attempt_gate_name="closed_trade_review_required",
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="prepare",
+            order_candidate_id="candidate-1",
+            next_attempt_symbol="AVAX/USDT:USDT",
+        ),
+    )
+
+    report = flow.run()
+
+    assert "next_attempt_gate_not_clear:closed_trade_review_required" in report["blockers"]
+    assert (
+        "next_attempt_gate:NEXT-ATTEMPT-CLOSED-TRADE-REVIEW-REQUIRED"
+        in report["blockers"]
+    )
+    paths = [call["path"] for call in client.calls]
+    assert paths == ["/api/trading-console/owner-action-flow"]
+    assert "authorization_id" not in report["ids"]
 
 
 def test_arm_records_local_and_exchange_submit_evidence_without_real_submit():
