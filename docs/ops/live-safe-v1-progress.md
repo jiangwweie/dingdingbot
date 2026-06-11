@@ -2862,3 +2862,64 @@ Use this file for session progress and handoff notes.
   - it still requires the exact Owner approval value above plus the explicit
     `--execute-real-close` flag, followed by flat / reconciliation / review /
     next-attempt verification.
+
+## 2026-06-11 (Runtime Closed-review Facts Resolver)
+
+- Added and deployed `program/live-safe-v1` commit
+  `7a59d64b2425d8a46f331c84cdd84abd3ad458ae`
+  `feat(runtime): resolve closed review facts`.
+- Tightened the real reduce-only close audit chain:
+  - `ExecutionOrchestrator.execute_controlled_close()` now makes the generated
+    EXIT order inherit runtime semantic IDs from the active position or entry
+    order;
+  - this preserves `runtime_instance_id`, trial binding, strategy family,
+    strategy family version, signal evaluation, and order candidate IDs on the
+    terminal close order.
+- Added a read-only closed-review facts resolver:
+  - domain packet `src/domain/runtime_closed_trade_review_facts.py`;
+  - application service
+    `src/application/runtime_closed_trade_review_facts_service.py`;
+  - CLI `scripts/build_runtime_closed_trade_review_facts_packet.py`;
+  - tests
+    `tests/unit/test_runtime_closed_trade_review_facts.py` and
+    `tests/unit/test_runtime_closed_trade_review_facts_script.py`.
+- The resolver bridges close -> review by identifying the entry and terminal
+  exit order IDs that should be passed to
+  `scripts/create_runtime_closed_trade_review.py`.
+- It remains non-executing:
+  - no review record is created;
+  - no exchange is called;
+  - no order is created, cancelled, amended, or submitted;
+  - no runtime state is mutated;
+  - no withdrawal / transfer is created.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_closed_trade_review_facts.py tests/unit/test_runtime_closed_trade_review_facts_script.py tests/unit/test_tiny001d4_controlled_close.py tests/unit/test_runtime_closed_trade_lifecycle_review.py tests/unit/test_runtime_owner_reduce_only_close_flow.py`
+    passed with `16 passed`;
+  - `python3 -m py_compile src/domain/runtime_closed_trade_review_facts.py src/application/runtime_closed_trade_review_facts_service.py scripts/build_runtime_closed_trade_review_facts_packet.py src/application/execution_orchestrator.py tests/unit/test_runtime_closed_trade_review_facts.py tests/unit/test_runtime_closed_trade_review_facts_script.py tests/unit/test_tiny001d4_controlled_close.py`
+    passed;
+  - `git diff --check` passed.
+- Tokyo deploy acceptance:
+  - postdeploy acceptance returned `postdeploy_acceptance_passed`;
+  - readonly probe returned `ready_for_controlled_deploy_preflight`;
+  - deployed release is
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-7a59d64b-20260611Treviewfacts`;
+  - deployed head is
+    `7a59d64b2425d8a46f331c84cdd84abd3ad458ae`;
+  - health remained
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`.
+- Remote closed-review facts packet for
+  `strategy-runtime-95655873b76c`:
+  - status `waiting_for_close`;
+  - active position count `1`;
+  - resolved entry order id `rtod-c4439560677fbd165a-entry`;
+  - terminal exit order id `None`;
+  - blockers `[]`;
+  - safety invariants reported `pg_read_only=true`, `exchange_called=false`,
+    `exchange_write_called=false`, `review_record_created=false`,
+    `order_created=false`, `position_closed=false`, and
+    `runtime_state_mutated=false`.
+- Remaining live action:
+  - real reduce-only close is still not executed;
+  - after close, rerun the resolver; expected next status is
+    `ready_for_closed_review` with entry / exit order IDs and the dry-run
+    review command args.
