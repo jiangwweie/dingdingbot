@@ -3599,3 +3599,82 @@ Use this file for session progress and handoff notes.
     shelf;
   - if this persists through the observation window, the next product question
     is strategy/runtime coverage review, not forcing execution.
+
+## 2026-06-12 (Ready-Prepare Owner Gate + Tokyo Current-head Deploy)
+
+- Added and pushed:
+  - `c492f240 feat(ops): surface runtime prepare watch context`;
+  - `5b815934 fix(ops): propagate observation preview forbidden effects`;
+  - `77cae7a2 feat(ops): add ready prepare rehearsal owner gate`.
+- Watch/observation improvements:
+  - `scripts/build_runtime_strategy_signal_watch_packet.py` now surfaces
+    `runtime_prepare_context`, including ready-for-prepare count,
+    ready-for-final-gate-preflight count, prepared authorization ID, shadow
+    candidate ID, allowed non-executing follow-ups, and forbidden follow-ups;
+  - `scripts/runtime_active_observation_supervisor.py` now propagates arm
+    preview forbidden effects and direct real-submit / execution-intent /
+    OrderLifecycle flags from child packets into the supervisor packet;
+  - `scripts/verify_runtime_observation_api_prepare_ready_rehearsal.py` now
+    emits an Owner-readable ready-prepare rehearsal packet with `owner_gate`,
+    `operator_command_plan`, right-tail objective context, and `--output-json`.
+- Focused verification:
+  - `pytest -q tests/unit/test_runtime_strategy_signal_watch_packet.py
+    tests/unit/test_strategy_group_readonly_preview_script.py
+    tests/unit/test_runtime_active_observation_status.py` passed with
+    `13 passed`;
+  - `pytest -q tests/unit/test_runtime_active_observation_supervisor.py
+    tests/unit/test_runtime_active_observation_followup.py
+    tests/unit/test_runtime_active_observation_status.py
+    tests/unit/test_runtime_strategy_signal_watch_packet.py` passed with
+    `27 passed`;
+  - `pytest -q tests/unit/test_runtime_observation_api_prepare_ready_rehearsal.py
+    tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py
+    tests/unit/test_runtime_active_observation_followup.py
+    tests/unit/test_runtime_strategy_signal_watch_packet.py` passed with
+    `22 passed`;
+  - `python3 -m py_compile` passed for the touched observation/watch/rehearsal
+    scripts.
+- Tokyo git deploy:
+  - deployed current branch head `77cae7a2` to
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-77cae7a2-20260612Tready-prepare-owner-gate`;
+  - `/home/ubuntu/brc-deploy/app/current` now points to that release;
+  - deploy execution status: `applied`;
+  - command count: `16/16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - health: `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`;
+  - postdeploy acceptance: `postdeploy_acceptance_passed`;
+  - exchange called: `false`;
+  - execution intent created: `false`;
+  - order created: `false`;
+  - OrderLifecycle called: `false`.
+- Active observation after deploy:
+  - the existing overnight observation process remains running from the older
+    `bb40a7ea` release path, so the deploy did not interrupt the observation
+    loop;
+  - current-head status script read the same report directory and reported
+    `waiting_for_signal`, latest iteration `9`, `stop_reason=running`,
+    `observation_running=true`, and `forbidden_effects=[]`;
+  - no prepared authorization ID and no shadow candidate ID exist yet.
+- Deployed ready-prepare rehearsal:
+  - running the new deployed script from `/home/ubuntu/brc-deploy/app/current`
+    produced `rehearsal_passed`;
+  - dry run stops at `ready_for_prepare` before records;
+  - explicit prepare permission reaches `ready_for_final_gate_preflight`;
+  - generated prepared authorization ID in rehearsal:
+    `auth-ready-rehearsal`;
+  - `real_submit_authorized=false`;
+  - allowed after a real ready signal: shadow SignalEvaluation, shadow
+    OrderCandidate, prepare authorization record, FinalGate preview, arm
+    preview, and disabled first-real-submit smoke;
+  - still requires separate Owner authorization for executable
+    first-real-submit, exchange order placement, and OrderLifecycle submit.
+- Safety:
+  - this deployment and rehearsal did not place exchange orders;
+  - it did not call OrderLifecycle;
+  - it did not authorize executable first-real-submit;
+  - it did not create withdrawal or transfer instructions;
+  - right-tail small-risk-capital semantics remain expressed as bounded
+    experimentation: small bounded losses are allowed, but unbounded or
+    unreviewable execution is forbidden.
