@@ -3772,10 +3772,10 @@ async def _order_candidate_usage(order_candidate_id: str) -> dict[str, Any]:
         return {
             "execution_intent_id": authorization.execution_intent_id,
             "execution_intent_status": (
-                intent.status.value if intent is not None else None
+                _status_value(intent.status) if intent is not None else None
             ),
             "submit_authorization_id": authorization.authorization_id,
-            "submit_authorization_status": authorization.status.value,
+            "submit_authorization_status": _status_value(authorization.status),
             "candidate_usage_status": "submit_authorization_recorded",
             "candidate_reusable_for_new_attempt": False,
             "reuse_blocker": "order_candidate_already_has_submit_authorization",
@@ -3783,7 +3783,7 @@ async def _order_candidate_usage(order_candidate_id: str) -> dict[str, Any]:
     if intent is not None:
         return {
             "execution_intent_id": intent.id,
-            "execution_intent_status": intent.status.value,
+            "execution_intent_status": _status_value(intent.status),
             "candidate_usage_status": "execution_intent_recorded",
             "candidate_reusable_for_new_attempt": False,
             "reuse_blocker": "order_candidate_already_has_execution_intent",
@@ -3793,6 +3793,12 @@ async def _order_candidate_usage(order_candidate_id: str) -> dict[str, Any]:
         "candidate_reusable_for_new_attempt": True,
         "reuse_blocker": None,
     }
+
+
+def _status_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
 
 
 def _decimal_string(value: Any) -> str | None:

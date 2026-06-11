@@ -116,6 +116,41 @@ async def test_order_candidate_usage_blocks_candidate_with_submit_authorization(
 
 
 @pytest.mark.asyncio
+async def test_order_candidate_usage_accepts_string_status_values(monkeypatch):
+    monkeypatch.setattr(
+        api_module,
+        "_trading_console_pg_execution_intent_repo",
+        _IntentRepo(
+            SimpleNamespace(
+                id="intent-1",
+                status="recorded",
+            )
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_trading_console_pg_runtime_submit_authorization_repo",
+        _AuthorizationRepo(
+            SimpleNamespace(
+                authorization_id="auth-1",
+                execution_intent_id="intent-1",
+                status="approved_pending_controlled_submit",
+            )
+        ),
+        raising=False,
+    )
+
+    usage = await api_trading_console._order_candidate_usage("candidate-1")
+
+    assert usage["execution_intent_status"] == "recorded"
+    assert (
+        usage["submit_authorization_status"]
+        == "approved_pending_controlled_submit"
+    )
+
+
+@pytest.mark.asyncio
 async def test_order_candidate_usage_fails_closed_when_lookup_errors(monkeypatch):
     monkeypatch.setattr(
         api_module,
