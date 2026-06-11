@@ -1,8 +1,9 @@
 """First-real-submit local registration gate.
 
-This gate is narrower than real submit authority. It can allow a future runtime
-adapter to register CREATED local orders through OrderLifecycle, but it cannot
-submit exchange orders, change ExecutionIntent status, or create withdrawals.
+This gate is narrower than real submit authority. It can prove whether a future
+runtime adapter may proceed toward local CREATED-order registration, but it
+cannot submit exchange orders, change ExecutionIntent status, or create
+withdrawals/transfers.
 """
 
 from __future__ import annotations
@@ -47,10 +48,11 @@ class RuntimeExecutionLocalRegistrationGate(
     status: RuntimeExecutionLocalRegistrationGateStatus
     symbol: str = Field(min_length=1, max_length=128)
     side: str = Field(min_length=1, max_length=32)
-    current_head_deployed: bool = False
     owner_real_submit_authorized: bool = False
-    owner_live_runtime_enablement_authorized: bool = False
-    runtime_live_execution_enabled: bool = False
+    trusted_submit_facts_ready: bool = False
+    submit_idempotency_policy_ready: bool = False
+    attempt_outcome_policy_ready: bool = False
+    protection_failure_policy_ready: bool = False
     order_lifecycle_adapter_enabled: bool = False
     local_order_registration_enabled: bool = False
     local_registration_action_authorized: bool = False
@@ -103,10 +105,11 @@ class RuntimeExecutionLocalRegistrationGate(
 def build_runtime_execution_local_registration_gate(
     *,
     registration_preview: RuntimeExecutionOrderRegistrationDraftPreview,
-    current_head_deployed: bool = False,
     owner_real_submit_authorized: bool = False,
-    owner_live_runtime_enablement_authorized: bool = False,
-    runtime_live_execution_enabled: bool = False,
+    trusted_submit_facts_ready: bool = False,
+    submit_idempotency_policy_ready: bool = False,
+    attempt_outcome_policy_ready: bool = False,
+    protection_failure_policy_ready: bool = False,
     order_lifecycle_adapter_enabled: bool = False,
     local_order_registration_enabled: bool = False,
     local_registration_action_authorized: bool = False,
@@ -119,14 +122,16 @@ def build_runtime_execution_local_registration_gate(
         != RuntimeExecutionOrderRegistrationDraftPreviewStatus.INPUTS_READY_REGISTRATION_DRAFT_ONLY
     ):
         blockers.append("order_registration_draft_preview_not_ready")
-    if not current_head_deployed:
-        blockers.append("current_head_not_deployed_to_tokyo")
     if not owner_real_submit_authorized:
         blockers.append("owner_real_submit_authorization_missing")
-    if not owner_live_runtime_enablement_authorized:
-        blockers.append("owner_live_runtime_enablement_authorization_missing")
-    if not runtime_live_execution_enabled:
-        blockers.append("runtime_not_live_execution_enabled")
+    if not trusted_submit_facts_ready:
+        blockers.append("trusted_submit_fact_snapshot_missing")
+    if not submit_idempotency_policy_ready:
+        blockers.append("submit_idempotency_policy_missing")
+    if not attempt_outcome_policy_ready:
+        blockers.append("attempt_outcome_policy_missing")
+    if not protection_failure_policy_ready:
+        blockers.append("protection_failure_policy_missing")
     if not order_lifecycle_adapter_enabled:
         blockers.append("order_lifecycle_adapter_disabled")
     if not local_order_registration_enabled:
@@ -157,12 +162,11 @@ def build_runtime_execution_local_registration_gate(
         status=status,
         symbol=registration_preview.symbol,
         side=registration_preview.side,
-        current_head_deployed=current_head_deployed,
         owner_real_submit_authorized=owner_real_submit_authorized,
-        owner_live_runtime_enablement_authorized=(
-            owner_live_runtime_enablement_authorized
-        ),
-        runtime_live_execution_enabled=runtime_live_execution_enabled,
+        trusted_submit_facts_ready=trusted_submit_facts_ready,
+        submit_idempotency_policy_ready=submit_idempotency_policy_ready,
+        attempt_outcome_policy_ready=attempt_outcome_policy_ready,
+        protection_failure_policy_ready=protection_failure_policy_ready,
         order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
         local_order_registration_enabled=local_order_registration_enabled,
         local_registration_action_authorized=local_registration_action_authorized,

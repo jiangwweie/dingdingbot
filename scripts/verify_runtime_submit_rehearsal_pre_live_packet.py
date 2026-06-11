@@ -71,9 +71,6 @@ from src.domain.runtime_execution_submit_authorization import (
     RuntimeExecutionSubmitAuthorization,
     RuntimeExecutionSubmitAuthorizationStatus,
 )
-from src.domain.runtime_execution_submit_rehearsal import (
-    RuntimeExecutionSubmitRehearsalStatus,
-)
 from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreviewStatus,
 )
@@ -223,6 +220,25 @@ class _InMemoryRepository:
         return item
 
 
+class _OrderLifecycleAdapterResultRepository:
+    def __init__(self) -> None:
+        self.records: dict[str, Any] = {}
+
+    async def acquire_registration_lock(self, result: Any) -> tuple[bool, Any]:
+        existing = self.records.get(result.authorization_id)
+        if existing is not None:
+            return False, existing
+        self.records[result.authorization_id] = result
+        return True, result
+
+    async def complete_registration(self, result: Any) -> Any:
+        self.records[result.authorization_id] = result
+        return result
+
+    async def get_by_authorization_id(self, authorization_id: str) -> Any | None:
+        return self.records.get(authorization_id)
+
+
 async def build_pre_live_packet(
     *,
     deployed_head: str | None,
@@ -253,6 +269,9 @@ async def build_pre_live_packet(
     attempt_mutation_repository = _InMemoryRepository("mutation_id")
     protection_plan_repository = _InMemoryRepository("protection_plan_id")
     order_lifecycle_handoff_repository = _InMemoryRepository("handoff_draft_id")
+    order_lifecycle_adapter_result_repository = (
+        _OrderLifecycleAdapterResultRepository()
+    )
     planning_service = RuntimeExecutionPlanningService(
         runtime_service=runtime_service,
         signal_evaluation_service=candidate_service,
@@ -267,6 +286,9 @@ async def build_pre_live_packet(
         attempt_mutation_repository=attempt_mutation_repository,
         protection_plan_repository=protection_plan_repository,
         order_lifecycle_handoff_repository=order_lifecycle_handoff_repository,
+        order_lifecycle_adapter_result_repository=(
+            order_lifecycle_adapter_result_repository
+        ),
         final_gate_preview_service=final_gate,
         runtime_service=runtime_service,
     )
@@ -287,8 +309,23 @@ async def build_pre_live_packet(
         intent.id,
         owner_confirmed_for_submit=True,
     )
-    rehearsal = await adapter_service.submit_rehearsal_for_authorization(
-        authorization.authorization_id
+    controlled_submit_preflight = (
+        await adapter_service.controlled_submit_preflight_for_authorization(
+            authorization.authorization_id
+        )
+    )
+    attempt_reservation_preview = (
+        await adapter_service.attempt_reservation_preview_for_authorization(
+            authorization.authorization_id
+        )
+    )
+    protection_plan_preview = await adapter_service.protection_plan_preview_for_intent(
+        intent.id
+    )
+    submit_adapter_preview = (
+        await adapter_service.controlled_submit_adapter_preview_for_authorization(
+            authorization.authorization_id
+        )
     )
     protection_plan = await adapter_service.record_protection_plan_for_intent(intent.id)
     protection_failure_policy = build_runtime_execution_protection_failure_policy(
@@ -316,13 +353,23 @@ async def build_pre_live_packet(
             authorization.authorization_id
         )
     )
+    order_lifecycle_adapter_result = (
+        await adapter_service.order_lifecycle_adapter_result_for_authorization(
+            authorization.authorization_id
+        )
+    )
+    await order_lifecycle_adapter_result_repository.complete_registration(
+        order_lifecycle_adapter_result
+    )
+    rehearsal = await adapter_service.submit_rehearsal_for_authorization(
+        authorization.authorization_id
+    )
 
     technical_blockers = _dedupe(
         list(plan.final_gate_preview.blockers)
         + list(draft.blockers)
         + list(intent_preview.blockers)
         + list(submit_readiness.blockers)
-        + list(rehearsal.blockers)
         + list(protection_plan.blockers)
         + list(protection_failure_policy.blockers)
         + list(attempt_reservation.blockers)
@@ -330,6 +377,9 @@ async def build_pre_live_packet(
         + list(order_lifecycle_handoff.blockers)
         + list(order_lifecycle_adapter_preview.blockers)
         + list(order_registration_draft_preview.blockers)
+    )
+    exchange_submit_rehearsal_blockers = _dedupe(
+        list(order_lifecycle_adapter_result.blockers) + list(rehearsal.blockers)
     )
     operational_blockers: list[str] = []
     deployed_head = deployed_head or ""
@@ -341,9 +391,9 @@ async def build_pre_live_packet(
     implementation_blockers: list[str] = []
     if runtime.shadow_mode or not runtime.execution_enabled:
         implementation_blockers.append("runtime_not_live_execution_enabled")
-    if not rehearsal.submit_adapter_preview.submit_adapter_implemented:
+    if not submit_adapter_preview.submit_adapter_implemented:
         implementation_blockers.append("controlled_submit_adapter_not_implemented")
-    if not rehearsal.submit_adapter_preview.order_lifecycle_adapter_enabled:
+    if not order_lifecycle_adapter_preview.order_lifecycle_adapter_implemented:
         implementation_blockers.append("order_lifecycle_adapter_disabled")
 
     technical_rehearsal_passed = _technical_rehearsal_passed(
@@ -352,7 +402,8 @@ async def build_pre_live_packet(
         intent=intent,
         submit_readiness=submit_readiness,
         authorization=authorization,
-        rehearsal=rehearsal,
+        controlled_submit_preflight=controlled_submit_preflight,
+        submit_adapter_preview=submit_adapter_preview,
     )
     registration_draft_chain_passed = _registration_draft_chain_passed(
         protection_plan=protection_plan,
@@ -386,6 +437,22 @@ async def build_pre_live_packet(
         owner_real_submit_authorized=owner_real_submit_authorized,
         protection_failure_policy_id=protection_failure_policy.policy_id,
         protection_failure_policy_passed=protection_failure_policy_passed,
+        attempt_outcome_policy_id=rehearsal.attempt_outcome_policy_id,
+        trusted_submit_fact_snapshot_id=rehearsal.trusted_submit_fact_snapshot_id,
+        submit_idempotency_policy_id=rehearsal.submit_idempotency_policy_id,
+        local_registration_enablement_decision_id=(
+            rehearsal.local_registration_enablement_decision_id
+        ),
+        exchange_submit_enablement_decision_id=(
+            rehearsal.exchange_submit_enablement_decision_id
+        ),
+        runtime_submit_rehearsal_id=rehearsal.rehearsal_id,
+        deployment_readiness_evidence_id=(
+            rehearsal.deployment_readiness_evidence_id
+        ),
+        owner_real_submit_authorization_id=(
+            rehearsal.owner_real_submit_authorization_id
+        ),
     )
     live_enablement_preview = build_strategy_runtime_live_enablement_preview(
         runtime=runtime,
@@ -395,9 +462,7 @@ async def build_pre_live_packet(
         owner_live_runtime_enablement_authorized=owner_live_runtime_enablement_authorized,
         owner_real_submit_authorization_present=owner_real_submit_authorized,
         submit_technical_rehearsal_passed=technical_rehearsal_passed,
-        submit_adapter_implemented=(
-            rehearsal.submit_adapter_preview.submit_adapter_implemented
-        ),
+        submit_adapter_implemented=submit_adapter_preview.submit_adapter_implemented,
         forbidden_execution_flags=forbidden_execution_flags,
     )
     ready_for_live_runtime_enablement = (
@@ -418,6 +483,7 @@ async def build_pre_live_packet(
         ),
         "ready_for_first_real_submit": False,
         "technical_blockers": technical_blockers,
+        "exchange_submit_rehearsal_blockers": exchange_submit_rehearsal_blockers,
         "protection_failure_policy_blockers": list(
             protection_failure_policy.blockers
         ),
@@ -432,6 +498,7 @@ async def build_pre_live_packet(
         and checks["protection_failure_policy_passed"]
         and checks["ready_for_live_runtime_enablement_mutation_design"]
         and not technical_blockers
+        and not exchange_submit_rehearsal_blockers
         and not operational_blockers
         and not implementation_blockers
         and not checks["forbidden_execution_flags"]
@@ -470,16 +537,16 @@ async def build_pre_live_packet(
             "submit_readiness_status": _enum_value(submit_readiness.status),
             "submit_authorization_status": _enum_value(authorization.status),
             "controlled_submit_preflight_status": (
-                _enum_value(rehearsal.controlled_submit_preflight.status)
+                _enum_value(controlled_submit_preflight.status)
             ),
             "attempt_reservation_preview_status": (
-                _enum_value(rehearsal.attempt_reservation_preview.status)
+                _enum_value(attempt_reservation_preview.status)
             ),
             "protection_plan_preview_status": (
-                _enum_value(rehearsal.protection_plan_preview.status)
+                _enum_value(protection_plan_preview.status)
             ),
             "submit_adapter_preview_status": _enum_value(
-                rehearsal.submit_adapter_preview.status
+                submit_adapter_preview.status
             ),
             "submit_rehearsal_status": _enum_value(rehearsal.status),
             "protection_plan_status": _enum_value(protection_plan.status),
@@ -496,8 +563,11 @@ async def build_pre_live_packet(
             "order_registration_draft_preview_status": _enum_value(
                 order_registration_draft_preview.status
             ),
-            "safe_stop_stage": rehearsal.safe_stop_stage,
-            "next_required_gate": rehearsal.next_required_gate,
+            "order_lifecycle_adapter_result_status": _enum_value(
+                order_lifecycle_adapter_result.status
+            ),
+            "safe_stop_stage": getattr(rehearsal, "safe_stop_stage", None),
+            "next_required_gate": getattr(rehearsal, "next_required_gate", None),
         },
         "checks": checks,
         "safety_readiness": safety_readiness.model_dump(mode="json"),
@@ -521,6 +591,9 @@ async def build_pre_live_packet(
             "order_registration_draft_preview": (
                 order_registration_draft_preview.model_dump(mode="json")
             ),
+            "order_lifecycle_adapter_result": (
+                order_lifecycle_adapter_result.model_dump(mode="json")
+            ),
         },
         "safety_invariants": {
             "database_connected": False,
@@ -529,8 +602,12 @@ async def build_pre_live_packet(
             "migrations_run": False,
             "runtime_started": False,
             "persistent_runtime_budget_mutated": False,
-            "runtime_budget_mutated": rehearsal.runtime_budget_mutated,
-            "attempt_consumed": rehearsal.attempt_consumed,
+            "runtime_budget_mutated": getattr(
+                rehearsal,
+                "runtime_budget_mutated",
+                False,
+            ),
+            "attempt_consumed": getattr(rehearsal, "attempt_consumed", False),
             "execution_intent_status_changed": rehearsal.execution_intent_status_changed,
             "order_created": rehearsal.order_created,
             "protection_failure_policy_order_created": (
@@ -665,7 +742,8 @@ def _technical_rehearsal_passed(
     intent: ExecutionIntent,
     submit_readiness: Any,
     authorization: RuntimeExecutionSubmitAuthorization,
-    rehearsal: Any,
+    controlled_submit_preflight: Any,
+    submit_adapter_preview: Any,
 ) -> bool:
     return (
         plan.status == RuntimeExecutionPlanStatus.READY_FOR_INTENT_DRAFT
@@ -675,12 +753,10 @@ def _technical_rehearsal_passed(
         == RuntimeExecutionSubmitReadinessStatus.OWNER_SUBMIT_AUTHORIZATION_REQUIRED
         and authorization.status
         == RuntimeExecutionSubmitAuthorizationStatus.APPROVED_PENDING_CONTROLLED_SUBMIT
-        and rehearsal.controlled_submit_preflight.status
+        and controlled_submit_preflight.status
         == RuntimeExecutionControlledSubmitPreflightStatus.READY_FOR_CONTROLLED_SUBMIT_ADAPTER
-        and rehearsal.submit_adapter_preview.status
-        == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_DRY_RUN_ADAPTER_ONLY
-        and rehearsal.status
-        == RuntimeExecutionSubmitRehearsalStatus.READY_FOR_NON_EXECUTING_SUBMIT_ADAPTER_BOUNDARY
+        and submit_adapter_preview.status
+        == RuntimeExecutionSubmitAdapterPreviewStatus.INPUTS_READY_ADAPTER_NOT_IMPLEMENTED
     )
 
 
@@ -720,6 +796,14 @@ def _promotion_gate_result(
     owner_real_submit_authorized: bool,
     protection_failure_policy_id: str,
     protection_failure_policy_passed: bool,
+    attempt_outcome_policy_id: str | None,
+    trusted_submit_fact_snapshot_id: str | None,
+    submit_idempotency_policy_id: str | None,
+    local_registration_enablement_decision_id: str | None,
+    exchange_submit_enablement_decision_id: str | None,
+    runtime_submit_rehearsal_id: str | None,
+    deployment_readiness_evidence_id: str | None,
+    owner_real_submit_authorization_id: str | None,
 ):
     binding = initial_strategy_semantics_catalog().get_binding(
         strategy_family_id=runtime.strategy_family_id,
@@ -761,7 +845,19 @@ def _promotion_gate_result(
                 protection_creation_failure_policy_confirmed=(
                     protection_failure_policy_passed
                 ),
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
                 protection_creation_failure_policy_id=protection_failure_policy_id,
+                local_registration_enablement_decision_id=(
+                    local_registration_enablement_decision_id
+                ),
+                exchange_submit_enablement_decision_id=(
+                    exchange_submit_enablement_decision_id
+                ),
+                runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+                owner_real_submit_authorization_id=owner_real_submit_authorization_id,
                 duplicate_submit_policy_confirmed=True,
                 deployment_readiness_confirmed=current_head_deployed,
                 explicit_owner_real_submit_authorization=owner_real_submit_authorized,
@@ -794,9 +890,17 @@ def _forbidden_execution_flags(
             authorization.owner_bounded_execution_called
         ),
         "authorization_order_lifecycle_called": authorization.order_lifecycle_called,
-        "rehearsal_submit_executed": rehearsal.submit_executed,
-        "rehearsal_runtime_budget_mutated": rehearsal.runtime_budget_mutated,
-        "rehearsal_attempt_consumed": rehearsal.attempt_consumed,
+        "rehearsal_submit_executed": getattr(rehearsal, "submit_executed", False),
+        "rehearsal_runtime_budget_mutated": getattr(
+            rehearsal,
+            "runtime_budget_mutated",
+            False,
+        ),
+        "rehearsal_attempt_consumed": getattr(
+            rehearsal,
+            "attempt_consumed",
+            False,
+        ),
         "rehearsal_execution_intent_status_changed": (
             rehearsal.execution_intent_status_changed
         ),

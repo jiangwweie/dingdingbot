@@ -1,8 +1,8 @@
 """Runtime OrderLifecycle adapter result.
 
-This module is the first implementation-oriented adapter boundary after the
-dry-run registration preview. It can turn typed registration drafts into local
-Order objects and report whether they were registered through OrderLifecycle.
+This is the first implementation-oriented adapter boundary after the dry-run
+registration preview. It can turn typed registration drafts into local Order
+objects and report whether they were registered through OrderLifecycle.
 
 It must never submit exchange orders, build exchange payloads, or authorize
 live runtime execution by itself.
@@ -87,7 +87,8 @@ class RuntimeExecutionOrderLifecycleAdapterResult(
         for key in _walk_keys({"metadata": self.metadata}):
             if key.lower() in forbidden:
                 raise ValueError(
-                    f"order lifecycle adapter result contains forbidden execution field: {key}"
+                    "order lifecycle adapter result contains forbidden "
+                    f"execution field: {key}"
                 )
         if self.exchange_called or self.exchange_order_submitted:
             raise ValueError("runtime OrderLifecycle adapter result cannot call exchange")
@@ -186,7 +187,12 @@ def build_runtime_execution_order_lifecycle_adapter_result(
 
     status = RuntimeExecutionOrderLifecycleAdapterResultStatus.BLOCKED
     if blockers:
-        if "order_lifecycle_adapter_disabled" in blockers:
+        if registered_orders:
+            status = (
+                RuntimeExecutionOrderLifecycleAdapterResultStatus
+                .LOCAL_ORDER_REGISTRATION_FAILED
+            )
+        elif "order_lifecycle_adapter_disabled" in blockers:
             status = (
                 RuntimeExecutionOrderLifecycleAdapterResultStatus
                 .ORDER_LIFECYCLE_ADAPTER_DISABLED
@@ -208,7 +214,9 @@ def build_runtime_execution_order_lifecycle_adapter_result(
         )
 
     local_order_ids = [order.id for order in registered_orders]
-    entry_ids = [order.id for order in registered_orders if order.order_role.value == "ENTRY"]
+    entry_ids = [
+        order.id for order in registered_orders if order.order_role.value == "ENTRY"
+    ]
     protection_ids = [
         order.id for order in registered_orders if order.order_role.value != "ENTRY"
     ]
@@ -283,7 +291,9 @@ def build_runtime_execution_order_lifecycle_adapter_registration_failure_result(
         blockers.append("protection_order_registration_failed")
 
     local_order_ids = [order.id for order in registered_orders]
-    entry_ids = [order.id for order in registered_orders if order.order_role.value == "ENTRY"]
+    entry_ids = [
+        order.id for order in registered_orders if order.order_role.value == "ENTRY"
+    ]
     protection_ids = [
         order.id for order in registered_orders if order.order_role.value != "ENTRY"
     ]

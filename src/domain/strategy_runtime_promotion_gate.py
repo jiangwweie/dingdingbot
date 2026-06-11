@@ -13,10 +13,6 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.domain.experimental_runtime_profile_proposal import (
-    ExperimentalRuntimeProfileProposal,
-    ExperimentalRuntimeProfileProposalStatus,
-)
 from src.domain.strategy_semantics import (
     StrategyCandidateMode,
     StrategyImplementationBinding,
@@ -75,12 +71,53 @@ class RuntimeExecutionConfirmationFacts(StrategyRuntimePromotionGateModel):
 
 class FirstRealSubmitConfirmationFacts(StrategyRuntimePromotionGateModel):
     budget_release_or_consume_rule_confirmed: bool = False
+    attempt_outcome_policy_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=360,
+    )
     protection_creation_failure_policy_confirmed: bool = False
     protection_creation_failure_policy_id: Optional[str] = Field(
         default=None,
+        min_length=1,
         max_length=300,
     )
     duplicate_submit_policy_confirmed: bool = False
+    submit_idempotency_policy_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=240,
+    )
+    trusted_submit_fact_snapshot_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=240,
+    )
+    local_registration_enablement_decision_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=300,
+    )
+    exchange_submit_enablement_decision_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=300,
+    )
+    runtime_submit_rehearsal_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=560,
+    )
+    deployment_readiness_evidence_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=220,
+    )
+    owner_real_submit_authorization_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=220,
+    )
     deployment_readiness_confirmed: bool = False
     explicit_owner_real_submit_authorization: bool = False
 
@@ -143,9 +180,6 @@ class StrategyRuntimePromotionGateConfirmationRecord(
     first_real_submit_confirmations: FirstRealSubmitConfirmationFacts = Field(
         default_factory=FirstRealSubmitConfirmationFacts
     )
-    runtime_profile_proposal_snapshot: Optional[
-        ExperimentalRuntimeProfileProposal
-    ] = None
     promotion_gate_result_snapshot: Optional[StrategyRuntimePromotionGateResult] = None
     recorded_by: str = Field(default="owner", min_length=1, max_length=128)
     reason: str = Field(min_length=1, max_length=512)
@@ -167,12 +201,6 @@ class StrategyRuntimePromotionGateConfirmationRecord(
     def _reject_execution_metadata(
         self,
     ) -> "StrategyRuntimePromotionGateConfirmationRecord":
-        if self.runtime_profile_proposal_snapshot is not None:
-            _validate_runtime_profile_proposal_snapshot(
-                self.runtime_profile_proposal_snapshot,
-                strategy_family_id=self.strategy_family_id,
-                strategy_family_version_id=self.strategy_family_version_id,
-            )
         forbidden = {
             "client_order_id",
             "exchange_order_id",
@@ -348,9 +376,6 @@ def _check_first_real_submit_confirmations(
         "protection_creation_failure_policy_confirmed": (
             facts.protection_creation_failure_policy_confirmed
         ),
-        "protection_creation_failure_policy_id": (
-            _present(facts.protection_creation_failure_policy_id)
-        ),
         "duplicate_submit_policy_confirmed": facts.duplicate_submit_policy_confirmed,
         "deployment_readiness_confirmed": facts.deployment_readiness_confirmed,
         "explicit_owner_real_submit_authorization": (
@@ -358,6 +383,41 @@ def _check_first_real_submit_confirmations(
         ),
     }
     _append_missing(required, "first_real_submit", blockers, missing_owner_decisions)
+    if not facts.attempt_outcome_policy_id:
+        blockers.append("first_real_submit_attempt_outcome_policy_id_missing")
+        missing_owner_decisions.append("attempt_outcome_policy_id")
+    if not facts.trusted_submit_fact_snapshot_id:
+        blockers.append("first_real_submit_trusted_submit_fact_snapshot_id_missing")
+        missing_owner_decisions.append("trusted_submit_fact_snapshot_id")
+    if not facts.submit_idempotency_policy_id:
+        blockers.append("first_real_submit_submit_idempotency_policy_id_missing")
+        missing_owner_decisions.append("submit_idempotency_policy_id")
+    if not facts.protection_creation_failure_policy_id:
+        blockers.append(
+            "first_real_submit_protection_creation_failure_policy_id_missing"
+        )
+        missing_owner_decisions.append("protection_creation_failure_policy_id")
+    if not facts.local_registration_enablement_decision_id:
+        blockers.append(
+            "first_real_submit_local_registration_enablement_decision_id_missing"
+        )
+        missing_owner_decisions.append("local_registration_enablement_decision_id")
+    if not facts.exchange_submit_enablement_decision_id:
+        blockers.append(
+            "first_real_submit_exchange_submit_enablement_decision_id_missing"
+        )
+        missing_owner_decisions.append("exchange_submit_enablement_decision_id")
+    if not facts.runtime_submit_rehearsal_id:
+        blockers.append("first_real_submit_runtime_submit_rehearsal_id_missing")
+        missing_owner_decisions.append("runtime_submit_rehearsal_id")
+    if not facts.deployment_readiness_evidence_id:
+        blockers.append("first_real_submit_deployment_readiness_evidence_id_missing")
+        missing_owner_decisions.append("deployment_readiness_evidence_id")
+    if not facts.owner_real_submit_authorization_id:
+        blockers.append(
+            "first_real_submit_owner_real_submit_authorization_id_missing"
+        )
+        missing_owner_decisions.append("owner_real_submit_authorization_id")
 
 
 def _append_missing(
@@ -373,10 +433,6 @@ def _append_missing(
         missing_owner_decisions.append(key)
 
 
-def _present(value: str | None) -> bool:
-    return bool(str(value or "").strip())
-
-
 def _binding_requires_short_side_conservative_profile(
     binding: StrategyImplementationBinding,
 ) -> bool:
@@ -384,32 +440,6 @@ def _binding_requires_short_side_conservative_profile(
     if "short" in supported_sides:
         return True
     return bool(binding.metadata.get("short_side_conservative_profile_required"))
-
-
-def _validate_runtime_profile_proposal_snapshot(
-    proposal: ExperimentalRuntimeProfileProposal,
-    *,
-    strategy_family_id: str,
-    strategy_family_version_id: str,
-) -> None:
-    if proposal.status != (
-        ExperimentalRuntimeProfileProposalStatus.READY_FOR_OWNER_CODEX_CONFIRMATION
-    ):
-        raise ValueError("runtime profile proposal snapshot is not ready")
-    if proposal.strategy_family_id != strategy_family_id:
-        raise ValueError("runtime profile proposal strategy_family_id mismatch")
-    if proposal.strategy_family_version_id != strategy_family_version_id:
-        raise ValueError("runtime profile proposal strategy_family_version_id mismatch")
-    if proposal.blockers:
-        raise ValueError("runtime profile proposal snapshot has blockers")
-    if (
-        not proposal.not_execution_authority
-        or proposal.creates_runtime
-        or proposal.creates_execution_intent
-        or proposal.order_created
-        or proposal.exchange_called
-    ):
-        raise ValueError("runtime profile proposal snapshot contains action authority")
 
 
 def _walk_keys(value: Any) -> list[str]:

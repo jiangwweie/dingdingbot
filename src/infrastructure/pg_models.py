@@ -173,7 +173,7 @@ class PGExecutionIntentORM(PGCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('recorded', 'local_orders_registered', 'pending', 'blocked', 'submitted', 'failed', "
+            "status IN ('recorded', 'pending', 'blocked', 'submitted', 'failed', "
             "'protecting', 'partially_protected', 'completed')",
             name="ck_execution_intents_status",
         ),
@@ -284,14 +284,18 @@ class PGExecutionRecoveryTaskORM(PGCoreBase):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_retry_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
-    context_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    context_payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=True,
+    )
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     resolved_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
-            "recovery_type IN ('replace_sl_failed')",
+            "recovery_type IN ('replace_sl_failed', "
+            "'exchange_submit_protection_fail')",
             name="ck_execution_recovery_tasks_recovery_type",
         ),
         CheckConstraint(
@@ -1109,11 +1113,10 @@ class PGOwnerCapitalBaselineSnapshotORM(PGCoreBase):
 
 
 class PGStrategyRuntimeInstanceORM(PGCoreBase):
-    """StrategyRuntimeInstance governance record.
+    """Shadow StrategyRuntimeInstance governance record.
 
-    Live-enabled rows authorize only bounded runtime candidate attempts. They
-    do not create intents, place orders, mutate exchange state, or replace the
-    downstream submit gates.
+    Rows in this table do not grant execution permission, create intents, place
+    orders, mutate exchange state, or replace one-shot OwnerBoundedExecution.
     """
 
     __tablename__ = "strategy_runtime_instances"
@@ -1166,6 +1169,11 @@ class PGStrategyRuntimeInstanceORM(PGCoreBase):
             "review_requirement IN ('required', 'optional', 'not_required')",
             name="ck_strategy_runtime_instances_review_requirement",
         ),
+        CheckConstraint(
+            "execution_enabled = false",
+            name="ck_strategy_runtime_instances_execution_disabled",
+        ),
+        CheckConstraint("shadow_mode = true", name="ck_strategy_runtime_instances_shadow_mode"),
         Index(
             "uq_strategy_runtime_instances_trial_binding",
             "trial_binding_id",
@@ -1651,11 +1659,6 @@ class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
     )
-    runtime_profile_proposal_snapshot_json: Mapped[Optional[dict]] = mapped_column(
-        "runtime_profile_proposal_snapshot",
-        JSONB().with_variant(JSON(), "sqlite"),
-        nullable=True,
-    )
     recorded_by: Mapped[str] = mapped_column(String(128), nullable=False, default="owner")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_refs: Mapped[list] = mapped_column(
@@ -1685,47 +1688,47 @@ class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
     __table_args__ = (
         CheckConstraint(
             "scope IN ('controlled_runtime_execution', 'first_real_submit_gate_review')",
-            name="ck_srpc_scope",
+            name="ck_strategy_runtime_promotion_confirmations_scope",
         ),
         CheckConstraint(
             "records_promotion_gate_confirmation = true",
-            name="ck_srpc_records_confirmation",
+            name="ck_strategy_runtime_promo_records_confirmation",
         ),
         CheckConstraint(
             "not_execution_authority = true",
-            name="ck_srpc_not_authority",
+            name="ck_strategy_runtime_promotion_confirmations_not_authority",
         ),
         CheckConstraint(
             "execution_intent_created = false",
-            name="ck_srpc_no_intent",
+            name="ck_strategy_runtime_promotion_confirmations_no_intent",
         ),
         CheckConstraint(
             "order_created = false",
-            name="ck_srpc_no_order",
+            name="ck_strategy_runtime_promotion_confirmations_no_order",
         ),
         CheckConstraint(
             "exchange_called = false",
-            name="ck_srpc_no_exchange",
+            name="ck_strategy_runtime_promotion_confirmations_no_exchange",
         ),
         CheckConstraint(
             "owner_bounded_execution_called = false",
-            name="ck_srpc_no_one_shot",
+            name="ck_strategy_runtime_promotion_confirmations_no_one_shot",
         ),
         CheckConstraint(
             "order_lifecycle_called = false",
-            name="ck_srpc_no_lifecycle",
+            name="ck_strategy_runtime_promotion_confirmations_no_lifecycle",
         ),
         CheckConstraint(
             "runtime_mutation_created = false",
-            name="ck_srpc_no_runtime_mutation",
+            name="ck_strategy_runtime_promotion_confirmations_no_runtime_mutation",
         ),
         CheckConstraint(
             "withdrawal_instruction_created = false",
-            name="ck_srpc_no_withdrawal",
+            name="ck_strategy_runtime_promotion_confirmations_no_withdrawal",
         ),
         CheckConstraint(
             "transfer_instruction_created = false",
-            name="ck_srpc_no_transfer",
+            name="ck_strategy_runtime_promotion_confirmations_no_transfer",
         ),
         Index(
             "idx_strategy_runtime_promotion_confirmations_runtime_time",
@@ -1749,7 +1752,7 @@ class PGStrategyRuntimePromotionConfirmationORM(PGCoreBase):
 class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
     """Audit record for the runtime controlled-submit adapter boundary.
 
-    Disabled/blocked/dry-run-only submit attempts are recorded here. Rows in
+    Disabled/blocked/not-implemented submit attempts are recorded here. Rows in
     this table are not orders and must not imply exchange interaction.
     """
 
@@ -1776,11 +1779,6 @@ class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
         default=list,
     )
     submit_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    order_lifecycle_adapter_enabled: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-    )
     submit_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -1797,7 +1795,6 @@ class PGRuntimeExecutionControlledSubmitResultORM(PGCoreBase):
     __table_args__ = (
         CheckConstraint(
             "status IN ('blocked', 'submit_adapter_not_enabled', "
-            "'order_lifecycle_adapter_disabled', "
             "'submit_adapter_not_implemented')",
             name="ck_runtime_execution_controlled_submit_results_status",
         ),
@@ -2083,6 +2080,221 @@ class PGRuntimeExecutionAttemptMutationORM(PGCoreBase):
         Index(
             "idx_runtime_execution_attempt_mutations_status_time",
             "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionAttemptOutcomePolicyORM(PGCoreBase):
+    """Non-executing attempt/budget outcome accounting policy evidence."""
+
+    __tablename__ = "runtime_execution_attempt_outcome_policies"
+
+    policy_id: Mapped[str] = mapped_column(String(360), primary_key=True)
+    reservation_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    reservation_preview_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    mutation_id: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    outcome_kind: Mapped[str] = mapped_column(String(96), nullable=False)
+    budget_action: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    any_fill: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    partial_fill: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    submitted_to_exchange: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    protection_creation_failed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    attempt_should_be_consumed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    budget_release_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    budget_consumption_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    reserved_budget_should_remain_held: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    requires_reconciliation_before_retry: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    requires_owner_recovery_review: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    requires_reduce_only_recovery_mode: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    blocks_new_entries_until_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    budget_reservation_basis: Mapped[Optional[str]] = mapped_column(
+        String(96),
+        nullable=True,
+    )
+    budget_reservation_amount: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    budget_reserved_before: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    budget_reserved_after: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    runtime_state_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    attempt_counter_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    budget_released: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    position_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_attempt_budget_outcome_accounting')",
+            name="ck_rt_attempt_outcome_policy_status",
+        ),
+        CheckConstraint(
+            "runtime_state_mutated = false",
+            name="ck_rt_attempt_outcome_policy_no_runtime_mutation",
+        ),
+        CheckConstraint(
+            "attempt_counter_mutated = false",
+            name="ck_rt_attempt_outcome_policy_no_attempt_mutation",
+        ),
+        CheckConstraint(
+            "budget_released = false",
+            name="ck_rt_attempt_outcome_policy_no_budget_release",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_attempt_outcome_policy_no_intent_status",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_attempt_outcome_policy_no_order_create",
+        ),
+        CheckConstraint(
+            "order_cancelled = false",
+            name="ck_rt_attempt_outcome_policy_no_order_cancel",
+        ),
+        CheckConstraint(
+            "position_closed = false",
+            name="ck_rt_attempt_outcome_policy_no_position_close",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_attempt_outcome_policy_no_exchange",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_attempt_outcome_policy_no_exchange_order",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_attempt_outcome_policy_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_attempt_outcome_policy_no_lifecycle",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_rt_attempt_outcome_policy_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_rt_attempt_outcome_policy_no_transfer",
+        ),
+        Index(
+            "idx_rt_attempt_outcome_policy_reservation_time",
+            "reservation_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_attempt_outcome_policy_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_attempt_outcome_policy_kind_time",
+            "outcome_kind",
             "created_at_ms",
         ),
     )
@@ -2410,7 +2622,11 @@ class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
         nullable=False,
         default=list,
     )
-    registered_order_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    registered_order_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
     blockers_json: Mapped[list] = mapped_column(
         "blockers",
         JSONB().with_variant(JSON(), "sqlite"),
@@ -2423,17 +2639,61 @@ class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
         nullable=False,
         default=list,
     )
-    order_lifecycle_adapter_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    local_order_registration_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    duplicate_submit_lock_acquired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    order_objects_constructed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    local_order_registration_executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    execution_intent_status_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    exchange_order_submitted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    owner_bounded_execution_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    order_lifecycle_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_adapter_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    local_order_registration_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    duplicate_submit_lock_acquired: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_objects_constructed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    local_order_registration_executed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
     created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     metadata_json: Mapped[dict] = mapped_column(
         "metadata",
@@ -2479,21 +2739,25 @@ class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
             name="ck_rt_ol_adapter_result_no_withdrawal",
         ),
         CheckConstraint(
-            "status != 'registered_created_local_orders' OR local_order_registration_executed = true",
+            "status NOT IN ('registered_created_local_orders', "
+            "'local_order_registration_failed') "
+            "OR local_order_registration_executed = true",
             name="ck_rt_ol_adapter_result_registered_exec",
         ),
         CheckConstraint(
-            "status != 'registered_created_local_orders' OR order_lifecycle_called = true",
+            "status NOT IN ('registered_created_local_orders', "
+            "'local_order_registration_failed') OR order_lifecycle_called = true",
             name="ck_rt_ol_adapter_result_registered_lifecycle",
         ),
         CheckConstraint(
-            "status IN ('registered_created_local_orders', 'local_order_registration_failed') "
+            "status IN ('registered_created_local_orders', "
+            "'local_order_registration_failed') "
             "OR local_order_registration_executed = false",
             name="ck_rt_ol_adapter_result_nonreg_no_exec",
         ),
         CheckConstraint(
-            "status IN ('registered_created_local_orders', 'local_order_registration_failed') "
-            "OR order_lifecycle_called = false",
+            "status IN ('registered_created_local_orders', "
+            "'local_order_registration_failed') OR order_lifecycle_called = false",
             name="ck_rt_ol_adapter_result_nonreg_no_lifecycle",
         ),
         Index(
@@ -2508,6 +2772,1765 @@ class PGRuntimeExecutionOrderLifecycleAdapterResultORM(PGCoreBase):
         ),
         Index(
             "idx_rt_ol_adapter_result_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionExchangeSubmitAdapterResultORM(PGCoreBase):
+    """Runtime exchange-submit adapter duplicate-submit lock/result.
+
+    This table is the persistent duplicate-submit boundary immediately before a
+    future runtime exchange submit adapter. Current rows must not record
+    exchange submits, exchange calls, OrderLifecycle submit calls,
+    withdrawal/transfer instructions, or ExecutionIntent status changes.
+    """
+
+    __tablename__ = "runtime_execution_exchange_submit_adapter_results"
+
+    adapter_result_id: Mapped[str] = mapped_column(String(520), primary_key=True)
+    enablement_decision_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    gate_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    packet_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    binding_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    local_registration_adapter_result_id: Mapped[str] = mapped_column(
+        String(420),
+        nullable=False,
+    )
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(72), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    local_order_ids_json: Mapped[list] = mapped_column(
+        "local_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    entry_order_id: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+    protection_order_ids_json: Mapped[list] = mapped_column(
+        "protection_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submit_request_previews_json: Mapped[list] = mapped_column(
+        "submit_request_previews",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submit_request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    entry_submit_request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    protection_submit_request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    order_lifecycle_submit_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_submit_adapter_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_submit_action_authorized: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_submit_action_authorization_id: Mapped[Optional[str]] = mapped_column(
+        String(360),
+        nullable=True,
+    )
+    duplicate_submit_lock_acquired: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_submit_adapter_implemented: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_submit_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_exchange_submit_result_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'exchange_submit_adapter_disabled', "
+            "'exchange_submit_lock_required', 'exchange_submit_lock_acquired', "
+            "'exchange_submit_adapter_not_implemented')",
+            name="ck_rt_exchange_submit_result_status",
+        ),
+        CheckConstraint(
+            "submit_request_count >= 0",
+            name="ck_rt_exchange_submit_result_request_count",
+        ),
+        CheckConstraint(
+            "entry_submit_request_count >= 0",
+            name="ck_rt_exchange_submit_result_entry_count",
+        ),
+        CheckConstraint(
+            "protection_submit_request_count >= 0",
+            name="ck_rt_exchange_submit_result_protection_count",
+        ),
+        CheckConstraint(
+            "order_lifecycle_submit_called = false",
+            name="ck_rt_exchange_submit_result_no_lifecycle_submit",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_exchange_submit_result_no_intent_status",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_exchange_submit_result_no_exchange_submit",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_exchange_submit_result_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_exchange_submit_result_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_exchange_submit_result_no_withdrawal",
+        ),
+        CheckConstraint(
+            "exchange_submit_adapter_implemented = false",
+            name="ck_rt_exchange_submit_result_not_implemented",
+        ),
+        Index(
+            "idx_rt_exchange_submit_result_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_submit_result_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_submit_result_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionExchangeSubmitActionAuthorizationORM(PGCoreBase):
+    """Scope-bound Owner authorization evidence for exchange-submit action.
+
+    This row is auditable Owner confirmation evidence only. It must not record
+    exchange submits, OrderLifecycle submit calls, withdrawal/transfer
+    instructions, or ExecutionIntent status changes.
+    """
+
+    __tablename__ = "runtime_execution_exchange_submit_action_authorizations"
+
+    action_authorization_id: Mapped[str] = mapped_column(
+        String(360),
+        primary_key=True,
+    )
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    local_registration_enablement_decision_id: Mapped[str] = mapped_column(
+        String(300),
+        nullable=False,
+    )
+    trusted_submit_fact_snapshot_id: Mapped[str] = mapped_column(
+        String(240),
+        nullable=False,
+    )
+    submit_idempotency_policy_id: Mapped[str] = mapped_column(
+        String(240),
+        nullable=False,
+    )
+    attempt_outcome_policy_id: Mapped[str] = mapped_column(
+        String(360),
+        nullable=False,
+    )
+    protection_creation_failure_policy_id: Mapped[str] = mapped_column(
+        String(300),
+        nullable=False,
+    )
+    owner_real_submit_authorization_id: Mapped[str] = mapped_column(
+        String(220),
+        nullable=False,
+    )
+    order_lifecycle_submit_enablement_id: Mapped[str] = mapped_column(
+        String(220),
+        nullable=False,
+    )
+    exchange_submit_adapter_enablement_id: Mapped[str] = mapped_column(
+        String(220),
+        nullable=False,
+    )
+    deployment_readiness_evidence_id: Mapped[Optional[str]] = mapped_column(
+        String(220),
+        nullable=True,
+    )
+    packet_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    binding_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    local_registration_adapter_result_id: Mapped[str] = mapped_column(
+        String(420),
+        nullable=False,
+    )
+    entry_order_id: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+    local_order_ids_json: Mapped[list] = mapped_column(
+        "local_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    protection_order_ids_json: Mapped[list] = mapped_column(
+        "protection_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submit_request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    entry_submit_request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    protection_submit_request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    owner_confirmed_for_exchange_submit_action: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_operator_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_confirmation_reference: Mapped[Optional[str]] = mapped_column(
+        String(240),
+        nullable=True,
+    )
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    expires_at_ms: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    order_lifecycle_submit_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_exchange_action_auth_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'approved_for_exchange_submit_action')",
+            name="ck_rt_exchange_action_auth_status",
+        ),
+        CheckConstraint(
+            "submit_request_count >= 0",
+            name="ck_rt_exchange_action_auth_request_count",
+        ),
+        CheckConstraint(
+            "entry_submit_request_count >= 0",
+            name="ck_rt_exchange_action_auth_entry_count",
+        ),
+        CheckConstraint(
+            "protection_submit_request_count >= 0",
+            name="ck_rt_exchange_action_auth_protection_count",
+        ),
+        CheckConstraint(
+            "status != 'approved_for_exchange_submit_action' "
+            "OR owner_confirmed_for_exchange_submit_action = true",
+            name="ck_rt_exchange_action_auth_owner_confirmed",
+        ),
+        CheckConstraint(
+            "order_lifecycle_submit_called = false",
+            name="ck_rt_exchange_action_auth_no_lifecycle_submit",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_exchange_action_auth_no_intent_status",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_exchange_action_auth_no_exchange_submit",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_exchange_action_auth_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_exchange_action_auth_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_exchange_action_auth_no_withdrawal",
+        ),
+        Index(
+            "idx_rt_exchange_action_auth_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_action_auth_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_action_auth_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionExchangeSubmitExecutionResultORM(PGCoreBase):
+    """Default-off exchange-submit execution result lock/replay row.
+
+    This table is the durable replay boundary for the future real
+    exchange-submit adapter. Disabled, blocked, and lock-acquired rows must not
+    record exchange calls; submitted/failure rows may record fake-gateway-tested
+    exchange evidence only when an explicit execution path completed through
+    the service.
+    """
+
+    __tablename__ = "runtime_execution_exchange_submit_execution_results"
+
+    execution_result_id: Mapped[str] = mapped_column(String(540), primary_key=True)
+    enablement_decision_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    packet_preview_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    binding_id: Mapped[str] = mapped_column(String(460), nullable=False)
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    exchange_submit_action_authorization_id: Mapped[Optional[str]] = mapped_column(
+        String(360),
+        nullable=True,
+    )
+    local_order_ids_json: Mapped[list] = mapped_column(
+        "local_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    entry_order_id: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+    protection_order_ids_json: Mapped[list] = mapped_column(
+        "protection_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submitted_orders_json: Mapped[list] = mapped_column(
+        "submitted_orders",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submitted_local_order_ids_json: Mapped[list] = mapped_column(
+        "submitted_local_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submitted_exchange_order_ids_json: Mapped[list] = mapped_column(
+        "submitted_exchange_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    entry_exchange_order_id: Mapped[Optional[str]] = mapped_column(
+        String(260),
+        nullable=True,
+    )
+    protection_exchange_order_ids_json: Mapped[list] = mapped_column(
+        "protection_exchange_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    failed_local_order_id: Mapped[Optional[str]] = mapped_column(
+        String(260),
+        nullable=True,
+    )
+    failed_order_role: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    failed_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    exchange_submit_execution_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_call_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    order_lifecycle_submit_call_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    real_exchange_submit_adapter_executed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_submit_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_exchange_exec_result_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'exchange_submit_execution_disabled', "
+            "'exchange_submit_execution_lock_acquired', 'entry_submit_failed', "
+            "'protection_submit_failed', 'exchange_submit_orders_submitted')",
+            name="ck_rt_exchange_exec_result_status",
+        ),
+        CheckConstraint(
+            "exchange_call_count >= 0",
+            name="ck_rt_exchange_exec_result_exchange_count",
+        ),
+        CheckConstraint(
+            "order_lifecycle_submit_call_count >= 0",
+            name="ck_rt_exchange_exec_result_lifecycle_count",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_exchange_exec_result_no_intent_status",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_exchange_exec_result_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_exchange_exec_result_no_withdrawal",
+        ),
+        CheckConstraint(
+            "status NOT IN ('blocked', 'exchange_submit_execution_disabled', "
+            "'exchange_submit_execution_lock_acquired') "
+            "OR exchange_called = false",
+            name="ck_rt_exchange_exec_result_no_exchange_before_exec",
+        ),
+        CheckConstraint(
+            "status NOT IN ('blocked', 'exchange_submit_execution_disabled', "
+            "'exchange_submit_execution_lock_acquired') "
+            "OR exchange_order_submitted = false",
+            name="ck_rt_exchange_exec_result_no_order_before_exec",
+        ),
+        CheckConstraint(
+            "status NOT IN ('blocked', 'exchange_submit_execution_disabled', "
+            "'exchange_submit_execution_lock_acquired') "
+            "OR order_lifecycle_submit_called = false",
+            name="ck_rt_exchange_exec_result_no_lifecycle_before_exec",
+        ),
+        CheckConstraint(
+            "status != 'exchange_submit_execution_lock_acquired' "
+            "OR exchange_submit_execution_enabled = true",
+            name="ck_rt_exchange_exec_result_lock_enabled",
+        ),
+        CheckConstraint(
+            "status != 'exchange_submit_execution_lock_acquired' "
+            "OR real_exchange_submit_adapter_executed = false",
+            name="ck_rt_exchange_exec_result_lock_not_executed",
+        ),
+        CheckConstraint(
+            "status != 'exchange_submit_orders_submitted' "
+            "OR exchange_called = true",
+            name="ck_rt_exchange_exec_result_submitted_exchange_called",
+        ),
+        CheckConstraint(
+            "status != 'exchange_submit_orders_submitted' "
+            "OR exchange_order_submitted = true",
+            name="ck_rt_exchange_exec_result_submitted_exchange_order",
+        ),
+        CheckConstraint(
+            "status != 'exchange_submit_orders_submitted' "
+            "OR order_lifecycle_submit_called = true",
+            name="ck_rt_exchange_exec_result_submitted_lifecycle",
+        ),
+        Index(
+            "idx_rt_exchange_exec_result_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_exec_result_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_exec_result_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionSubmitOutcomeReviewORM(PGCoreBase):
+    """Read-only post-submit outcome classification evidence."""
+
+    __tablename__ = "runtime_execution_submit_outcome_reviews"
+
+    review_id: Mapped[str] = mapped_column(String(620), primary_key=True)
+    exchange_submit_execution_result_id: Mapped[str] = mapped_column(
+        String(540),
+        nullable=False,
+    )
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    observed_outcome: Mapped[str] = mapped_column(String(96), nullable=False)
+    recommended_attempt_outcome_kind: Mapped[Optional[str]] = mapped_column(
+        String(96),
+        nullable=True,
+    )
+    attempt_outcome_policy_ready: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    entry_order_id: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+    entry_order_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    entry_requested_qty: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    entry_filled_qty: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(36, 18),
+        nullable=True,
+    )
+    protection_order_ids_json: Mapped[list] = mapped_column(
+        "protection_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    missing_order_ids_json: Mapped[list] = mapped_column(
+        "missing_order_ids",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    submitted_to_exchange: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    any_fill: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    partial_fill: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    full_fill: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    no_fill: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    protection_creation_failed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    requires_reconciliation_before_retry: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blocks_attempt_outcome_policy_until_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    runtime_state_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    attempt_counter_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    budget_released: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    budget_consumed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    position_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_submit_outcome_review_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', "
+            "'classified_ready_for_attempt_outcome_policy')",
+            name="ck_rt_submit_outcome_review_status",
+        ),
+        CheckConstraint(
+            "runtime_state_mutated = false",
+            name="ck_rt_submit_outcome_review_no_runtime_mutation",
+        ),
+        CheckConstraint(
+            "attempt_counter_mutated = false",
+            name="ck_rt_submit_outcome_review_no_attempt_mutation",
+        ),
+        CheckConstraint(
+            "budget_released = false",
+            name="ck_rt_submit_outcome_review_no_budget_release",
+        ),
+        CheckConstraint(
+            "budget_consumed = false",
+            name="ck_rt_submit_outcome_review_no_budget_consume",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_submit_outcome_review_no_intent_status",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_submit_outcome_review_no_order_create",
+        ),
+        CheckConstraint(
+            "order_cancelled = false",
+            name="ck_rt_submit_outcome_review_no_order_cancel",
+        ),
+        CheckConstraint(
+            "position_closed = false",
+            name="ck_rt_submit_outcome_review_no_position_close",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_submit_outcome_review_no_exchange",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_submit_outcome_review_no_exchange_order",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_submit_outcome_review_no_lifecycle",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_submit_outcome_review_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_rt_submit_outcome_review_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_rt_submit_outcome_review_no_transfer",
+        ),
+        Index(
+            "idx_rt_submit_outcome_review_auth_time",
+            "authorization_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_submit_outcome_review_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_submit_outcome_review_status_time",
+            "status",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_submit_outcome_review_observed_time",
+            "observed_outcome",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionExchangeSubmitRecoveryResolutionORM(PGCoreBase):
+    """Owner-reviewed resolution evidence for exchange-submit recovery tasks."""
+
+    __tablename__ = "runtime_execution_exchange_submit_recovery_resolutions"
+
+    resolution_id: Mapped[str] = mapped_column(String(300), primary_key=True)
+    recovery_task_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    recovery_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    authorization_id: Mapped[Optional[str]] = mapped_column(String(220), nullable=True)
+    execution_result_id: Mapped[Optional[str]] = mapped_column(String(540), nullable=True)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    related_order_id: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+    related_exchange_order_id: Mapped[Optional[str]] = mapped_column(
+        String(260),
+        nullable=True,
+    )
+    entry_order_id: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+    entry_exchange_order_id: Mapped[Optional[str]] = mapped_column(
+        String(260),
+        nullable=True,
+    )
+    failed_protection_order_id: Mapped[Optional[str]] = mapped_column(
+        String(260),
+        nullable=True,
+    )
+    failed_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    owner_operator_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_confirmation_reference: Mapped[Optional[str]] = mapped_column(
+        String(240),
+        nullable=True,
+    )
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    reconciliation_evidence_id: Mapped[Optional[str]] = mapped_column(
+        String(240),
+        nullable=True,
+    )
+    owner_confirmed_recovery_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_confirmed_reconciliation_reviewed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_confirmed_no_unprotected_position: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_confirmed_no_unresolved_exchange_order: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_confirmed_budget_reconciled_or_held: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_confirmed_attempt_consumed_or_accounted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    recovery_task_marked_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    order_lifecycle_submit_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "recovery_task_id",
+            name="uq_rt_exchange_recovery_resolution_task",
+        ),
+        CheckConstraint(
+            "recovery_type = 'exchange_submit_protection_fail'",
+            name="ck_rt_exchange_recovery_resolution_type",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'resolved')",
+            name="ck_rt_exchange_recovery_resolution_status",
+        ),
+        CheckConstraint(
+            "status != 'resolved' OR owner_confirmed_recovery_resolved = true",
+            name="ck_rt_exchange_recovery_resolution_owner",
+        ),
+        CheckConstraint(
+            "status != 'resolved' OR owner_confirmed_reconciliation_reviewed = true",
+            name="ck_rt_exchange_recovery_resolution_reconciled",
+        ),
+        CheckConstraint(
+            "status != 'resolved' "
+            "OR owner_confirmed_no_unprotected_position = true",
+            name="ck_rt_exchange_recovery_resolution_no_unprotected",
+        ),
+        CheckConstraint(
+            "status != 'resolved' "
+            "OR owner_confirmed_no_unresolved_exchange_order = true",
+            name="ck_rt_exchange_recovery_resolution_no_unresolved_order",
+        ),
+        CheckConstraint(
+            "status != 'resolved' "
+            "OR owner_confirmed_budget_reconciled_or_held = true",
+            name="ck_rt_exchange_recovery_resolution_budget",
+        ),
+        CheckConstraint(
+            "status != 'resolved' "
+            "OR owner_confirmed_attempt_consumed_or_accounted = true",
+            name="ck_rt_exchange_recovery_resolution_attempt",
+        ),
+        CheckConstraint(
+            "status != 'resolved' OR recovery_task_marked_resolved = true",
+            name="ck_rt_exchange_recovery_resolution_marked",
+        ),
+        CheckConstraint(
+            "order_lifecycle_submit_called = false",
+            name="ck_rt_exchange_recovery_resolution_no_lifecycle",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_exchange_recovery_resolution_no_intent_status",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_exchange_recovery_resolution_no_exchange_submit",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_exchange_recovery_resolution_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_exchange_recovery_resolution_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_exchange_recovery_resolution_no_withdrawal",
+        ),
+        Index(
+            "idx_rt_exchange_recovery_resolution_task_time",
+            "recovery_task_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_recovery_resolution_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionExchangeGatewayReadinessORM(PGCoreBase):
+    """Deployment readiness evidence for manual runtime gateway binding."""
+
+    __tablename__ = "runtime_execution_exchange_gateway_readiness"
+
+    readiness_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    exchange_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    trading_env: Mapped[str] = mapped_column(String(64), nullable=False)
+    exchange_testnet: Mapped[str] = mapped_column(String(16), nullable=False)
+    execution_permission_max: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_control_api_enabled: Mapped[str] = mapped_column(String(16), nullable=False)
+    runtime_test_signal_injection_enabled: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+    )
+    runtime_exchange_submit_gateway_binding_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_credentials_present: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_confirmed_gateway_readiness_review: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_operator_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_confirmation_reference: Mapped[Optional[str]] = mapped_column(
+        String(240),
+        nullable=True,
+    )
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    required_gateway_methods_json: Mapped[list] = mapped_column(
+        "required_gateway_methods",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    gateway_injected: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_submit_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_or_transfer_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_manual_gateway_binding')",
+            name="ck_rt_exchange_gateway_readiness_status",
+        ),
+        CheckConstraint(
+            "status != 'ready_for_manual_gateway_binding' "
+            "OR owner_confirmed_gateway_readiness_review = true",
+            name="ck_rt_exchange_gateway_readiness_owner",
+        ),
+        CheckConstraint(
+            "status != 'ready_for_manual_gateway_binding' "
+            "OR runtime_exchange_submit_gateway_binding_enabled = true",
+            name="ck_rt_exchange_gateway_readiness_binding_enabled",
+        ),
+        CheckConstraint(
+            "status != 'ready_for_manual_gateway_binding' "
+            "OR exchange_credentials_present = true",
+            name="ck_rt_exchange_gateway_readiness_credentials",
+        ),
+        CheckConstraint(
+            "gateway_injected = false",
+            name="ck_rt_exchange_gateway_readiness_not_injected",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_exchange_gateway_readiness_no_exchange",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_exchange_gateway_readiness_no_exchange_submit",
+        ),
+        CheckConstraint(
+            "order_lifecycle_submit_called = false",
+            name="ck_rt_exchange_gateway_readiness_no_lifecycle",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_exchange_gateway_readiness_no_intent_status",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_exchange_gateway_readiness_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "withdrawal_or_transfer_created = false",
+            name="ck_rt_exchange_gateway_readiness_no_withdrawal",
+        ),
+        Index(
+            "idx_rt_exchange_gateway_readiness_status_time",
+            "status",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_exchange_gateway_readiness_env_time",
+            "trading_env",
+            "exchange_testnet",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionTrustedSubmitFactsSnapshotORM(PGCoreBase):
+    """Persisted trusted submit-time fact snapshot for first-real-submit gates."""
+
+    __tablename__ = "runtime_execution_trusted_submit_fact_snapshots"
+
+    trusted_submit_fact_snapshot_id: Mapped[str] = mapped_column(
+        String(240),
+        primary_key=True,
+    )
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    order_candidate_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    facts_fresh_enough: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    missing_or_stale_facts_block: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    owner_supplied_allow_facts_rejected: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    read_only_sources_only: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    runtime_state_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_first_real_submit_confirmation')",
+            name="ck_rt_trusted_submit_facts_status",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_trusted_submit_facts_no_intent_status",
+        ),
+        CheckConstraint(
+            "runtime_state_mutated = false",
+            name="ck_rt_trusted_submit_facts_no_runtime_mutation",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_trusted_submit_facts_no_order",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_trusted_submit_facts_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_trusted_submit_facts_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_trusted_submit_facts_no_lifecycle",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_rt_trusted_submit_facts_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_rt_trusted_submit_facts_no_transfer",
+        ),
+        Index(
+            "idx_rt_trusted_submit_facts_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_trusted_submit_facts_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionSubmitIdempotencySnapshotORM(PGCoreBase):
+    """Persisted submit idempotency policy evidence."""
+
+    __tablename__ = "runtime_execution_submit_idempotency_snapshots"
+
+    submit_idempotency_policy_id: Mapped[str] = mapped_column(
+        String(240),
+        primary_key=True,
+    )
+    authorization_id: Mapped[str] = mapped_column(String(220), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_execution_intent_draft_id: Mapped[Optional[str]] = mapped_column(
+        String(180),
+        nullable=True,
+    )
+    runtime_instance_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    stable_submit_key: Mapped[str] = mapped_column(String(260), nullable=False)
+    replay_lock_key: Mapped[str] = mapped_column(String(260), nullable=False)
+    adapter_result_store_implemented: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    real_adapter_boundary_implemented: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    runtime_state_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "authorization_id",
+            name="uq_rt_submit_idempotency_authorization",
+        ),
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_non_executing_policy_confirmation')",
+            name="ck_rt_submit_idempotency_status",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_submit_idempotency_no_intent_status",
+        ),
+        CheckConstraint(
+            "runtime_state_mutated = false",
+            name="ck_rt_submit_idempotency_no_runtime_mutation",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_submit_idempotency_no_order",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_submit_idempotency_no_exchange",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_submit_idempotency_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_submit_idempotency_no_lifecycle",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_rt_submit_idempotency_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_rt_submit_idempotency_no_transfer",
+        ),
+        Index(
+            "idx_rt_submit_idempotency_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_submit_idempotency_status_time",
+            "status",
+            "created_at_ms",
+        ),
+    )
+
+
+class PGRuntimeExecutionProtectionFailurePolicyORM(PGCoreBase):
+    """Persisted fail-closed protection-creation failure policy."""
+
+    __tablename__ = "runtime_execution_protection_failure_policies"
+
+    policy_id: Mapped[str] = mapped_column(String(300), primary_key=True)
+    protection_plan_id: Mapped[str] = mapped_column(String(260), nullable=False)
+    execution_intent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_instance_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(96), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    side: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    block_new_entries_until_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    mark_position_unprotected_until_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    require_owner_recovery_review: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    require_reduce_only_recovery_mode: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    require_reconciliation_before_retry: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    consume_attempt_on_any_fill: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    hold_or_reconcile_budget_until_position_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    must_not_mark_unprotected_position_as_protected: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    order_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    order_lifecycle_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exchange_called: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exchange_order_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    owner_bounded_execution_called: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    execution_intent_status_changed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    runtime_state_mutated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    withdrawal_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    transfer_instruction_created: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    blockers_json: Mapped[list] = mapped_column(
+        "blockers",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    warnings_json: Mapped[list] = mapped_column(
+        "warnings",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    payload_json: Mapped[dict] = mapped_column(
+        "payload",
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=dict,
+    )
+    created_at_ms: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('blocked', 'ready_for_first_real_submit_confirmation')",
+            name="ck_rt_protection_failure_policy_status",
+        ),
+        CheckConstraint(
+            "order_created = false",
+            name="ck_rt_protection_failure_policy_no_order",
+        ),
+        CheckConstraint(
+            "order_lifecycle_called = false",
+            name="ck_rt_protection_failure_policy_no_lifecycle",
+        ),
+        CheckConstraint(
+            "exchange_called = false",
+            name="ck_rt_protection_failure_policy_no_exchange",
+        ),
+        CheckConstraint(
+            "exchange_order_submitted = false",
+            name="ck_rt_protection_failure_policy_no_exchange_order",
+        ),
+        CheckConstraint(
+            "owner_bounded_execution_called = false",
+            name="ck_rt_protection_failure_policy_no_owner_bounded",
+        ),
+        CheckConstraint(
+            "execution_intent_status_changed = false",
+            name="ck_rt_protection_failure_policy_no_intent_status",
+        ),
+        CheckConstraint(
+            "runtime_state_mutated = false",
+            name="ck_rt_protection_failure_policy_no_runtime_mutation",
+        ),
+        CheckConstraint(
+            "withdrawal_instruction_created = false",
+            name="ck_rt_protection_failure_policy_no_withdrawal",
+        ),
+        CheckConstraint(
+            "transfer_instruction_created = false",
+            name="ck_rt_protection_failure_policy_no_transfer",
+        ),
+        Index(
+            "idx_rt_protection_failure_policy_intent_time",
+            "execution_intent_id",
+            "created_at_ms",
+        ),
+        Index(
+            "idx_rt_protection_failure_policy_status_time",
             "status",
             "created_at_ms",
         ),

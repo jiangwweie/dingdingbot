@@ -42,12 +42,18 @@ from src.domain.runtime_execution_submit_authorization import (
 from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreview,
 )
-from src.domain.runtime_execution_submit_rehearsal import (
-    RuntimeExecutionSubmitRehearsal,
-)
 from src.domain.runtime_execution_protection_plan import (
     RuntimeExecutionProtectionPlan,
     RuntimeExecutionProtectionPlanPreview,
+)
+from src.domain.runtime_execution_protection_failure_policy import (
+    RuntimeExecutionProtectionFailurePolicy,
+)
+from src.domain.runtime_execution_submit_idempotency import (
+    RuntimeExecutionSubmitIdempotencySnapshot,
+)
+from src.domain.runtime_execution_trusted_submit_facts import (
+    RuntimeExecutionTrustedSubmitFactsSnapshot,
 )
 from src.domain.runtime_execution_order_lifecycle_handoff import (
     RuntimeExecutionOrderLifecycleHandoffDraft,
@@ -58,17 +64,45 @@ from src.domain.runtime_execution_order_lifecycle_adapter import (
 from src.domain.runtime_execution_order_registration_draft import (
     RuntimeExecutionOrderRegistrationDraftPreview,
 )
-from src.domain.runtime_execution_local_registration_gate import (
-    RuntimeExecutionLocalRegistrationGate,
-)
 from src.domain.runtime_execution_local_registration_enablement import (
     RuntimeExecutionLocalRegistrationEnablementDecision,
 )
 from src.domain.runtime_execution_order_lifecycle_adapter_result import (
     RuntimeExecutionOrderLifecycleAdapterResult,
 )
-from src.domain.runtime_execution_intent_local_order_linkage import (
-    RuntimeExecutionIntentLocalOrderLinkage,
+from src.domain.runtime_execution_intent_local_order_binding import (
+    RuntimeExecutionIntentLocalOrderBinding,
+)
+from src.domain.runtime_execution_exchange_submit_packet import (
+    RuntimeExecutionExchangeSubmitPacketPreview,
+)
+from src.domain.runtime_execution_exchange_submit_enablement import (
+    RuntimeExecutionExchangeSubmitEnablementDecision,
+)
+from src.domain.runtime_execution_exchange_submit_adapter_result import (
+    RuntimeExecutionExchangeSubmitAdapterResult,
+)
+from src.domain.runtime_execution_exchange_submit_action_authorization import (
+    RuntimeExecutionExchangeSubmitActionAuthorization,
+)
+from src.domain.runtime_execution_exchange_submit_execution_result import (
+    RuntimeExecutionExchangeSubmitExecutionResult,
+)
+from src.domain.runtime_execution_submit_outcome_review import (
+    RuntimeExecutionSubmitOutcomeReview,
+)
+from src.domain.runtime_execution_submit_rehearsal import (
+    RuntimeExecutionSubmitRehearsal,
+)
+from src.domain.runtime_execution_first_real_submit_enablement_packet import (
+    RuntimeExecutionFirstRealSubmitEnablementPacket,
+)
+from src.domain.runtime_execution_exchange_submit_recovery_resolution import (
+    RuntimeExecutionExchangeSubmitRecoveryResolution,
+)
+from src.domain.runtime_execution_exchange_gateway_readiness import (
+    GATEWAY_BINDING_ENABLED_ENV,
+    RuntimeExecutionExchangeGatewayReadiness,
 )
 from src.domain.runtime_execution_attempt_reservation import (
     RuntimeExecutionAttemptReservation,
@@ -76,6 +110,10 @@ from src.domain.runtime_execution_attempt_reservation import (
 )
 from src.domain.runtime_execution_attempt_mutation import (
     RuntimeExecutionAttemptMutation,
+)
+from src.domain.runtime_execution_attempt_outcome_policy import (
+    RuntimeExecutionAttemptOutcomeKind,
+    RuntimeExecutionAttemptOutcomePolicy,
 )
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, RuntimeExecutionPlan
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
@@ -367,9 +405,17 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
     trusted_account_fact_source_confirmed: bool = False,
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
+    attempt_outcome_policy_id: Optional[str] = None,
     protection_creation_failure_policy_confirmed: bool = False,
-    protection_creation_failure_policy_id: str | None = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
     duplicate_submit_policy_confirmed: bool = False,
+    submit_idempotency_policy_id: Optional[str] = None,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    exchange_submit_enablement_decision_id: Optional[str] = None,
+    runtime_submit_rehearsal_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
     deployment_readiness_confirmed: bool = False,
     explicit_owner_real_submit_authorization: bool = False,
 ) -> StrategyRuntimePromotionGateResult:
@@ -422,11 +468,23 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
         budget_release_or_consume_rule_confirmed=(
             budget_release_or_consume_rule_confirmed
         ),
+        attempt_outcome_policy_id=attempt_outcome_policy_id,
         protection_creation_failure_policy_confirmed=(
             protection_creation_failure_policy_confirmed
         ),
         protection_creation_failure_policy_id=protection_creation_failure_policy_id,
         duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
+        submit_idempotency_policy_id=submit_idempotency_policy_id,
+        trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+        local_registration_enablement_decision_id=(
+            local_registration_enablement_decision_id
+        ),
+        exchange_submit_enablement_decision_id=(
+            exchange_submit_enablement_decision_id
+        ),
+        runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
+        deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        owner_real_submit_authorization_id=owner_real_submit_authorization_id,
         deployment_readiness_confirmed=deployment_readiness_confirmed,
         explicit_owner_real_submit_authorization=(
             explicit_owner_real_submit_authorization
@@ -541,7 +599,9 @@ async def run_scheduled_strategy_observation(
                 "runtime_signal_planning_service": (
                     await _runtime_strategy_signal_scheduler_planning_service()
                 ),
-                "allow_shadow_candidate_creation": request.allow_shadow_candidate_creation,
+                "allow_shadow_candidate_creation": (
+                    request.allow_shadow_candidate_creation
+                ),
             }
         )
     try:
@@ -587,9 +647,17 @@ async def runtime_strategy_promotion_gate_preview(
     trusted_account_fact_source_confirmed: bool = False,
     short_side_conservative_profile_confirmed: bool = False,
     budget_release_or_consume_rule_confirmed: bool = False,
+    attempt_outcome_policy_id: Optional[str] = None,
     protection_creation_failure_policy_confirmed: bool = False,
-    protection_creation_failure_policy_id: str | None = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
     duplicate_submit_policy_confirmed: bool = False,
+    submit_idempotency_policy_id: Optional[str] = None,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    exchange_submit_enablement_decision_id: Optional[str] = None,
+    runtime_submit_rehearsal_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
     deployment_readiness_confirmed: bool = False,
     explicit_owner_real_submit_authorization: bool = False,
 ) -> StrategyRuntimePromotionGateResult:
@@ -647,6 +715,7 @@ async def runtime_strategy_promotion_gate_preview(
                 budget_release_or_consume_rule_confirmed=(
                     budget_release_or_consume_rule_confirmed
                 ),
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
                 protection_creation_failure_policy_confirmed=(
                     protection_creation_failure_policy_confirmed
                 ),
@@ -654,6 +723,19 @@ async def runtime_strategy_promotion_gate_preview(
                     protection_creation_failure_policy_id
                 ),
                 duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                local_registration_enablement_decision_id=(
+                    local_registration_enablement_decision_id
+                ),
+                exchange_submit_enablement_decision_id=(
+                    exchange_submit_enablement_decision_id
+                ),
+                runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+                owner_real_submit_authorization_id=(
+                    owner_real_submit_authorization_id
+                ),
                 deployment_readiness_confirmed=deployment_readiness_confirmed,
                 explicit_owner_real_submit_authorization=(
                     explicit_owner_real_submit_authorization
@@ -949,6 +1031,127 @@ async def record_runtime_execution_protection_plan_for_intent(
         raise HTTPException(status_code=400, detail=message) from exc
 
 
+@router.get(
+    "/runtime-execution-protection-failure-policies/intents/{execution_intent_id}",
+    response_model=RuntimeExecutionProtectionFailurePolicy,
+)
+async def runtime_execution_protection_failure_policy_for_intent(
+    execution_intent_id: str,
+) -> RuntimeExecutionProtectionFailurePolicy:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.protection_failure_policy_for_intent(
+            execution_intent_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-protection-failure-policies/intents/{execution_intent_id}",
+    response_model=RuntimeExecutionProtectionFailurePolicy,
+)
+async def record_runtime_execution_protection_failure_policy_for_intent(
+    execution_intent_id: str,
+) -> RuntimeExecutionProtectionFailurePolicy:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_protection_failure_policy_for_intent(
+            execution_intent_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-submit-idempotency/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionSubmitIdempotencySnapshot,
+)
+async def record_runtime_execution_submit_idempotency_for_authorization(
+    authorization_id: str,
+    adapter_result_store_implemented: bool = False,
+    real_adapter_boundary_implemented: bool = False,
+) -> RuntimeExecutionSubmitIdempotencySnapshot:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_submit_idempotency_snapshot_for_authorization(
+            authorization_id,
+            adapter_result_store_implemented=adapter_result_store_implemented,
+            real_adapter_boundary_implemented=real_adapter_boundary_implemented,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-trusted-submit-facts",
+    response_model=RuntimeExecutionTrustedSubmitFactsSnapshot,
+)
+async def record_runtime_execution_trusted_submit_facts_snapshot(
+    snapshot: RuntimeExecutionTrustedSubmitFactsSnapshot,
+) -> RuntimeExecutionTrustedSubmitFactsSnapshot:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_trusted_submit_facts_snapshot(snapshot)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/runtime-execution-trusted-submit-facts/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionTrustedSubmitFactsSnapshot,
+)
+async def record_runtime_execution_trusted_submit_facts_for_authorization(
+    authorization_id: str,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+) -> RuntimeExecutionTrustedSubmitFactsSnapshot:
+    adapter_service = await _runtime_execution_intent_adapter_service()
+    assembly_service = _runtime_execution_trusted_submit_facts_assembly_service()
+    try:
+        plan = await adapter_service.controlled_submit_plan_for_authorization(
+            authorization_id
+        )
+        return await (
+            assembly_service
+            .assemble_and_record_snapshot_for_controlled_submit_plan(
+                plan=plan,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                now_ms=int(time.time() * 1000),
+                metadata={
+                    "api": (
+                        "runtime_execution_trusted_submit_facts_for_authorization"
+                    ),
+                    "authorization_id": authorization_id,
+                    "owner_supplied_allow_facts_accepted": False,
+                },
+            )
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
 @router.post(
     "/runtime-execution-submit-authorizations/intents/{execution_intent_id}",
     response_model=RuntimeExecutionSubmitAuthorization,
@@ -1032,25 +1235,6 @@ async def runtime_execution_submit_adapter_preview_for_authorization(
 
 
 @router.get(
-    "/runtime-execution-submit-rehearsals/authorizations/{authorization_id}",
-    response_model=RuntimeExecutionSubmitRehearsal,
-)
-async def runtime_execution_submit_rehearsal_for_authorization(
-    authorization_id: str,
-) -> RuntimeExecutionSubmitRehearsal:
-    service = await _runtime_execution_intent_adapter_service()
-    try:
-        return await service.submit_rehearsal_for_authorization(authorization_id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
-
-
-@router.get(
     "/runtime-execution-attempt-reservation-previews/authorizations/{authorization_id}",
     response_model=RuntimeExecutionAttemptReservationPreview,
 )
@@ -1103,6 +1287,53 @@ async def apply_runtime_execution_attempt_mutation_for_reservation(
     try:
         return await service.apply_attempt_mutation_for_reservation(
             reservation_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-attempt-outcome-policies/reservations/{reservation_id}",
+    response_model=RuntimeExecutionAttemptOutcomePolicy,
+)
+async def record_runtime_execution_attempt_outcome_policy_for_reservation(
+    reservation_id: str,
+    outcome_kind: RuntimeExecutionAttemptOutcomeKind,
+) -> RuntimeExecutionAttemptOutcomePolicy:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_attempt_outcome_policy_for_reservation(
+            reservation_id,
+            outcome_kind=outcome_kind,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-attempt-outcome-policies/reservations/"
+    "{reservation_id}/from-submit-outcome-review",
+    response_model=RuntimeExecutionAttemptOutcomePolicy,
+)
+async def record_runtime_execution_attempt_outcome_policy_from_submit_outcome_review(
+    reservation_id: str,
+    submit_outcome_review_id: Optional[str] = None,
+) -> RuntimeExecutionAttemptOutcomePolicy:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_attempt_outcome_policy_from_submit_outcome_review(
+            reservation_id,
+            submit_outcome_review_id=submit_outcome_review_id,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1177,74 +1408,32 @@ async def runtime_execution_order_registration_draft_preview_for_authorization(
 
 
 @router.get(
-    "/runtime-execution-local-registration-gates/authorizations/{authorization_id}",
-    response_model=RuntimeExecutionLocalRegistrationGate,
-)
-async def runtime_execution_local_registration_gate_for_authorization(
-    authorization_id: str,
-    current_head_deployed: bool = False,
-    owner_real_submit_authorized: bool = False,
-    owner_live_runtime_enablement_authorized: bool = False,
-    runtime_live_execution_enabled: bool = False,
-    order_lifecycle_adapter_enabled: bool = False,
-    local_order_registration_enabled: bool = False,
-    local_registration_action_authorized: bool = False,
-) -> RuntimeExecutionLocalRegistrationGate:
-    service = await _runtime_execution_intent_adapter_service()
-    try:
-        return await service.local_registration_gate_for_authorization(
-            authorization_id,
-            current_head_deployed=current_head_deployed,
-            owner_real_submit_authorized=owner_real_submit_authorized,
-            owner_live_runtime_enablement_authorized=(
-                owner_live_runtime_enablement_authorized
-            ),
-            runtime_live_execution_enabled=runtime_live_execution_enabled,
-            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
-            local_order_registration_enabled=local_order_registration_enabled,
-            local_registration_action_authorized=(
-                local_registration_action_authorized
-            ),
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
-
-
-@router.get(
-    "/runtime-execution-local-registration-enablement-decisions/authorizations/{authorization_id}",
+    "/runtime-execution-local-registration-enablements/authorizations/{authorization_id}",
     response_model=RuntimeExecutionLocalRegistrationEnablementDecision,
 )
-async def runtime_execution_local_registration_enablement_decision_for_authorization(
+async def runtime_execution_local_registration_enablement_for_authorization(
     authorization_id: str,
-    current_head_deployed: bool = False,
-    runtime_live_execution_enabled: bool = False,
-    order_lifecycle_adapter_enabled: bool = False,
-    local_order_registration_enabled: bool = False,
-    deployment_evidence_id: str | None = None,
-    owner_real_submit_authorization_id: str | None = None,
-    owner_live_runtime_enablement_authorization_id: str | None = None,
-    order_lifecycle_adapter_enablement_id: str | None = None,
-    local_order_registration_enablement_id: str | None = None,
-    local_registration_action_authorization_id: str | None = None,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_adapter_enablement_id: Optional[str] = None,
+    local_order_registration_enablement_id: Optional[str] = None,
+    local_registration_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
 ) -> RuntimeExecutionLocalRegistrationEnablementDecision:
     service = await _runtime_execution_intent_adapter_service()
     try:
         return await service.local_registration_enablement_decision_for_authorization(
             authorization_id,
-            current_head_deployed=current_head_deployed,
-            runtime_live_execution_enabled=runtime_live_execution_enabled,
-            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
-            local_order_registration_enabled=local_order_registration_enabled,
-            deployment_evidence_id=deployment_evidence_id,
-            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
-            owner_live_runtime_enablement_authorization_id=(
-                owner_live_runtime_enablement_authorization_id
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
             ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
             order_lifecycle_adapter_enablement_id=(
                 order_lifecycle_adapter_enablement_id
             ),
@@ -1254,6 +1443,7 @@ async def runtime_execution_local_registration_enablement_decision_for_authoriza
             local_registration_action_authorization_id=(
                 local_registration_action_authorization_id
             ),
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1270,45 +1460,360 @@ async def runtime_execution_local_registration_enablement_decision_for_authoriza
 )
 async def runtime_execution_order_lifecycle_adapter_result_for_authorization(
     authorization_id: str,
-    current_head_deployed: bool = False,
-    runtime_live_execution_enabled: bool = False,
     order_lifecycle_adapter_enabled: bool = False,
     local_order_registration_enabled: bool = False,
-    deployment_evidence_id: str | None = None,
-    owner_real_submit_authorization_id: str | None = None,
-    owner_live_runtime_enablement_authorization_id: str | None = None,
-    order_lifecycle_adapter_enablement_id: str | None = None,
-    local_order_registration_enablement_id: str | None = None,
-    local_registration_action_authorization_id: str | None = None,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_adapter_enablement_id: Optional[str] = None,
+    local_order_registration_enablement_id: Optional[str] = None,
+    local_registration_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
 ) -> RuntimeExecutionOrderLifecycleAdapterResult:
     service = await _runtime_execution_intent_adapter_service()
     try:
-        decision = await service.local_registration_enablement_decision_for_authorization(
-            authorization_id,
-            current_head_deployed=current_head_deployed,
-            runtime_live_execution_enabled=runtime_live_execution_enabled,
-            order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
-            local_order_registration_enabled=local_order_registration_enabled,
-            deployment_evidence_id=deployment_evidence_id,
-            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
-            owner_live_runtime_enablement_authorization_id=(
-                owner_live_runtime_enablement_authorization_id
-            ),
-            order_lifecycle_adapter_enablement_id=(
-                order_lifecycle_adapter_enablement_id
-            ),
-            local_order_registration_enablement_id=(
-                local_order_registration_enablement_id
-            ),
-            local_registration_action_authorization_id=(
-                local_registration_action_authorization_id
-            ),
-        )
+        enablement = None
+        if order_lifecycle_adapter_enabled or local_order_registration_enabled:
+            enablement = (
+                await service.local_registration_enablement_decision_for_authorization(
+                    authorization_id,
+                    trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                    submit_idempotency_policy_id=submit_idempotency_policy_id,
+                    attempt_outcome_policy_id=attempt_outcome_policy_id,
+                    protection_creation_failure_policy_id=(
+                        protection_creation_failure_policy_id
+                    ),
+                    owner_real_submit_authorization_id=(
+                        owner_real_submit_authorization_id
+                    ),
+                    order_lifecycle_adapter_enablement_id=(
+                        order_lifecycle_adapter_enablement_id
+                    ),
+                    local_order_registration_enablement_id=(
+                        local_order_registration_enablement_id
+                    ),
+                    local_registration_action_authorization_id=(
+                        local_registration_action_authorization_id
+                    ),
+                    deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+                )
+            )
         return await service.order_lifecycle_adapter_result_for_authorization(
             authorization_id,
             order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
             local_order_registration_enabled=local_order_registration_enabled,
-            local_registration_enablement_decision=decision,
+            local_registration_enablement_decision=enablement,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-intent-local-order-bindings/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionIntentLocalOrderBinding,
+)
+async def runtime_execution_intent_local_order_binding_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionIntentLocalOrderBinding:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.intent_local_order_binding_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-exchange-submit-packet-previews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitPacketPreview,
+)
+async def runtime_execution_exchange_submit_packet_preview_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionExchangeSubmitPacketPreview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.exchange_submit_packet_preview_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-exchange-submit-enablements/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitEnablementDecision,
+)
+async def runtime_execution_exchange_submit_enablement_for_authorization(
+    authorization_id: str,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    exchange_submit_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+) -> RuntimeExecutionExchangeSubmitEnablementDecision:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.exchange_submit_enablement_decision_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            local_registration_enablement_decision_id=(
+                local_registration_enablement_decision_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_submit_enablement_id=(
+                order_lifecycle_submit_enablement_id
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_enablement_id
+            ),
+            exchange_submit_action_authorization_id=(
+                exchange_submit_action_authorization_id
+            ),
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-submit-rehearsals/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionSubmitRehearsal,
+)
+async def runtime_execution_submit_rehearsal_for_authorization(
+    authorization_id: str,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    exchange_submit_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+) -> RuntimeExecutionSubmitRehearsal:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        enablement = (
+            await service.exchange_submit_enablement_decision_for_authorization(
+                authorization_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
+                ),
+                local_registration_enablement_decision_id=(
+                    local_registration_enablement_decision_id
+                ),
+                owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+                order_lifecycle_submit_enablement_id=(
+                    order_lifecycle_submit_enablement_id
+                ),
+                exchange_submit_adapter_enablement_id=(
+                    exchange_submit_adapter_enablement_id
+                ),
+                exchange_submit_action_authorization_id=(
+                    exchange_submit_action_authorization_id
+                ),
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            )
+        )
+        return await service.submit_rehearsal_for_authorization(
+            authorization_id,
+            exchange_submit_enablement_decision=enablement,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-execution-first-real-submit-enablement-packets/authorizations/"
+    "{authorization_id}",
+    response_model=RuntimeExecutionFirstRealSubmitEnablementPacket,
+)
+async def runtime_execution_first_real_submit_enablement_packet_for_authorization(
+    authorization_id: str,
+    strategy_family_confirmed: bool = False,
+    implementation_source_confirmed: bool = False,
+    required_facts_confirmed: bool = False,
+    entry_policy_confirmed: bool = False,
+    exit_policy_confirmed: bool = False,
+    protection_policy_confirmed: bool = False,
+    eligible_for_runtime_execution_confirmed: bool = False,
+    right_tail_review_metrics_confirmed: bool = False,
+    runtime_profile_confirmed: bool = False,
+    owner_confirmation_mode_confirmed: bool = False,
+    symbol_side_boundary_confirmed: bool = False,
+    max_loss_budget_confirmed: bool = False,
+    max_notional_boundary_confirmed: bool = False,
+    max_active_positions_boundary_confirmed: bool = False,
+    max_leverage_boundary_confirmed: bool = False,
+    margin_usage_boundary_confirmed: bool = False,
+    liquidation_buffer_boundary_confirmed: bool = False,
+    protection_readiness_source_confirmed: bool = False,
+    stale_fact_behavior_confirmed: bool = False,
+    attempt_consumption_rule_confirmed: bool = False,
+    budget_reservation_rule_confirmed: bool = False,
+    trusted_active_position_source_confirmed: bool = False,
+    trusted_account_fact_source_confirmed: bool = False,
+    short_side_conservative_profile_confirmed: bool = False,
+    budget_release_or_consume_rule_confirmed: bool = False,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_confirmed: bool = False,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    duplicate_submit_policy_confirmed: bool = False,
+    submit_idempotency_policy_id: Optional[str] = None,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    exchange_submit_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    exchange_submit_action_authorization_id: Optional[str] = None,
+    runtime_submit_rehearsal_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+    deployment_readiness_confirmed: bool = False,
+    explicit_owner_real_submit_authorization: bool = False,
+) -> RuntimeExecutionFirstRealSubmitEnablementPacket:
+    from src.application.runtime_execution_first_real_submit_enablement_packet_service import (
+        RuntimeExecutionFirstRealSubmitEnablementPacketService,
+    )
+
+    try:
+        service = RuntimeExecutionFirstRealSubmitEnablementPacketService(
+            runtime_execution_intent_adapter_service=(
+                await _runtime_execution_intent_adapter_service()
+            ),
+            promotion_gate_service=(
+                await _strategy_runtime_promotion_gate_service()
+            ),
+        )
+        return await service.preview_for_authorization(
+            authorization_id,
+            trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+            submit_idempotency_policy_id=submit_idempotency_policy_id,
+            attempt_outcome_policy_id=attempt_outcome_policy_id,
+            protection_creation_failure_policy_id=(
+                protection_creation_failure_policy_id
+            ),
+            local_registration_enablement_decision_id=(
+                local_registration_enablement_decision_id
+            ),
+            exchange_submit_enablement_decision_id=(
+                exchange_submit_enablement_decision_id
+            ),
+            owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+            order_lifecycle_submit_enablement_id=(
+                order_lifecycle_submit_enablement_id
+            ),
+            exchange_submit_adapter_enablement_id=(
+                exchange_submit_adapter_enablement_id
+            ),
+            exchange_submit_action_authorization_id=(
+                exchange_submit_action_authorization_id
+            ),
+            runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
+            deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            budget_release_or_consume_rule_confirmed=(
+                budget_release_or_consume_rule_confirmed
+            ),
+            protection_creation_failure_policy_confirmed=(
+                protection_creation_failure_policy_confirmed
+            ),
+            duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
+            deployment_readiness_confirmed=deployment_readiness_confirmed,
+            explicit_owner_real_submit_authorization=(
+                explicit_owner_real_submit_authorization
+            ),
+            semantic_confirmations=StrategySemanticsConfirmationFacts(
+                strategy_family_confirmed=strategy_family_confirmed,
+                implementation_source_confirmed=implementation_source_confirmed,
+                required_facts_confirmed=required_facts_confirmed,
+                entry_policy_confirmed=entry_policy_confirmed,
+                exit_policy_confirmed=exit_policy_confirmed,
+                protection_policy_confirmed=protection_policy_confirmed,
+                eligible_for_runtime_execution_confirmed=(
+                    eligible_for_runtime_execution_confirmed
+                ),
+                right_tail_review_metrics_confirmed=(
+                    right_tail_review_metrics_confirmed
+                ),
+            ),
+            runtime_confirmations=RuntimeExecutionConfirmationFacts(
+                runtime_profile_confirmed=runtime_profile_confirmed,
+                owner_confirmation_mode_confirmed=(
+                    owner_confirmation_mode_confirmed
+                ),
+                symbol_side_boundary_confirmed=symbol_side_boundary_confirmed,
+                max_loss_budget_confirmed=max_loss_budget_confirmed,
+                max_notional_boundary_confirmed=max_notional_boundary_confirmed,
+                max_active_positions_boundary_confirmed=(
+                    max_active_positions_boundary_confirmed
+                ),
+                max_leverage_boundary_confirmed=max_leverage_boundary_confirmed,
+                margin_usage_boundary_confirmed=margin_usage_boundary_confirmed,
+                liquidation_buffer_boundary_confirmed=(
+                    liquidation_buffer_boundary_confirmed
+                ),
+                protection_readiness_source_confirmed=(
+                    protection_readiness_source_confirmed
+                ),
+                stale_fact_behavior_confirmed=stale_fact_behavior_confirmed,
+                attempt_consumption_rule_confirmed=(
+                    attempt_consumption_rule_confirmed
+                ),
+                budget_reservation_rule_confirmed=(
+                    budget_reservation_rule_confirmed
+                ),
+                trusted_active_position_source_confirmed=(
+                    trusted_active_position_source_confirmed
+                ),
+                trusted_account_fact_source_confirmed=(
+                    trusted_account_fact_source_confirmed
+                ),
+                short_side_conservative_profile_confirmed=(
+                    short_side_conservative_profile_confirmed
+                ),
+            ),
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1320,20 +1825,59 @@ async def runtime_execution_order_lifecycle_adapter_result_for_authorization(
 
 
 @router.post(
-    "/runtime-execution-intent-local-order-linkages/authorizations/{authorization_id}",
-    response_model=RuntimeExecutionIntentLocalOrderLinkage,
+    "/runtime-execution-exchange-submit-action-authorizations/authorizations/"
+    "{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitActionAuthorization,
 )
-async def runtime_execution_intent_local_order_linkage_for_authorization(
+async def record_runtime_execution_exchange_submit_action_authorization(
     authorization_id: str,
-    execution_intent_local_order_linkage_enabled: bool = False,
-) -> RuntimeExecutionIntentLocalOrderLinkage:
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    owner_confirmed_for_exchange_submit_action: bool = False,
+    owner_operator_id: str = "owner",
+    reason: str = "owner confirmed scoped exchange submit action",
+    deployment_readiness_evidence_id: Optional[str] = None,
+    owner_confirmation_reference: Optional[str] = None,
+    expires_at_ms: Optional[int] = None,
+) -> RuntimeExecutionExchangeSubmitActionAuthorization:
     service = await _runtime_execution_intent_adapter_service()
     try:
-        return await service.intent_local_order_linkage_for_authorization(
-            authorization_id,
-            execution_intent_local_order_linkage_enabled=(
-                execution_intent_local_order_linkage_enabled
-            ),
+        return await (
+            service.record_exchange_submit_action_authorization_for_authorization(
+                authorization_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
+                ),
+                local_registration_enablement_decision_id=(
+                    local_registration_enablement_decision_id
+                ),
+                owner_real_submit_authorization_id=(
+                    owner_real_submit_authorization_id
+                ),
+                order_lifecycle_submit_enablement_id=(
+                    order_lifecycle_submit_enablement_id
+                ),
+                exchange_submit_adapter_enablement_id=(
+                    exchange_submit_adapter_enablement_id
+                ),
+                owner_confirmed_for_exchange_submit_action=(
+                    owner_confirmed_for_exchange_submit_action
+                ),
+                owner_operator_id=owner_operator_id,
+                reason=reason,
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+                owner_confirmation_reference=owner_confirmation_reference,
+                expires_at_ms=expires_at_ms,
+            )
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1342,6 +1886,228 @@ async def runtime_execution_intent_local_order_linkage_for_authorization(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-exchange-submit-adapter-results/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitAdapterResult,
+)
+async def runtime_execution_exchange_submit_adapter_result_for_authorization(
+    authorization_id: str,
+    exchange_submit_adapter_enabled: bool = False,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    exchange_submit_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+) -> RuntimeExecutionExchangeSubmitAdapterResult:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        enablement = (
+            await service.exchange_submit_enablement_decision_for_authorization(
+                authorization_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
+                ),
+                local_registration_enablement_decision_id=(
+                    local_registration_enablement_decision_id
+                ),
+                owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+                order_lifecycle_submit_enablement_id=(
+                    order_lifecycle_submit_enablement_id
+                ),
+                exchange_submit_adapter_enablement_id=(
+                    exchange_submit_adapter_enablement_id
+                ),
+                exchange_submit_action_authorization_id=(
+                    exchange_submit_action_authorization_id
+                ),
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            )
+        )
+        return await service.exchange_submit_adapter_result_for_authorization(
+            authorization_id,
+            exchange_submit_adapter_enabled=exchange_submit_adapter_enabled,
+            exchange_submit_enablement_decision=enablement,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-exchange-submit-execution-results/authorizations/"
+    "{authorization_id}",
+    response_model=RuntimeExecutionExchangeSubmitExecutionResult,
+)
+async def runtime_execution_exchange_submit_execution_result_for_authorization(
+    authorization_id: str,
+    exchange_submit_execution_enabled: bool = False,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    submit_idempotency_policy_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    order_lifecycle_submit_enablement_id: Optional[str] = None,
+    exchange_submit_adapter_enablement_id: Optional[str] = None,
+    exchange_submit_action_authorization_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+) -> RuntimeExecutionExchangeSubmitExecutionResult:
+    service = await _runtime_execution_intent_adapter_service(
+        include_runtime_exchange_gateway=exchange_submit_execution_enabled,
+    )
+    try:
+        enablement = (
+            await service.exchange_submit_enablement_decision_for_authorization(
+                authorization_id,
+                trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+                submit_idempotency_policy_id=submit_idempotency_policy_id,
+                attempt_outcome_policy_id=attempt_outcome_policy_id,
+                protection_creation_failure_policy_id=(
+                    protection_creation_failure_policy_id
+                ),
+                local_registration_enablement_decision_id=(
+                    local_registration_enablement_decision_id
+                ),
+                owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+                order_lifecycle_submit_enablement_id=(
+                    order_lifecycle_submit_enablement_id
+                ),
+                exchange_submit_adapter_enablement_id=(
+                    exchange_submit_adapter_enablement_id
+                ),
+                exchange_submit_action_authorization_id=(
+                    exchange_submit_action_authorization_id
+                ),
+                deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+            )
+        )
+        return await service.exchange_submit_execution_result_for_authorization(
+            authorization_id,
+            exchange_submit_execution_enabled=exchange_submit_execution_enabled,
+            exchange_submit_enablement_decision=enablement,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-submit-outcome-reviews/authorizations/{authorization_id}",
+    response_model=RuntimeExecutionSubmitOutcomeReview,
+)
+async def record_runtime_execution_submit_outcome_review_for_authorization(
+    authorization_id: str,
+) -> RuntimeExecutionSubmitOutcomeReview:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_submit_outcome_review_for_authorization(
+            authorization_id
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-exchange-submit-recovery-resolutions/"
+    "recovery-tasks/{recovery_task_id}",
+    response_model=RuntimeExecutionExchangeSubmitRecoveryResolution,
+)
+async def record_runtime_execution_exchange_submit_recovery_resolution(
+    recovery_task_id: str,
+    owner_confirmed_recovery_resolved: bool = False,
+    owner_confirmed_reconciliation_reviewed: bool = False,
+    owner_confirmed_no_unprotected_position: bool = False,
+    owner_confirmed_no_unresolved_exchange_order: bool = False,
+    owner_confirmed_budget_reconciled_or_held: bool = False,
+    owner_confirmed_attempt_consumed_or_accounted: bool = False,
+    owner_operator_id: str = "owner",
+    reason: str = "owner reviewed exchange submit recovery block",
+    owner_confirmation_reference: Optional[str] = None,
+    reconciliation_evidence_id: Optional[str] = None,
+) -> RuntimeExecutionExchangeSubmitRecoveryResolution:
+    service = await _runtime_execution_intent_adapter_service()
+    try:
+        return await service.record_exchange_submit_recovery_resolution(
+            recovery_task_id,
+            owner_operator_id=owner_operator_id,
+            reason=reason,
+            owner_confirmed_recovery_resolved=(
+                owner_confirmed_recovery_resolved
+            ),
+            owner_confirmed_reconciliation_reviewed=(
+                owner_confirmed_reconciliation_reviewed
+            ),
+            owner_confirmed_no_unprotected_position=(
+                owner_confirmed_no_unprotected_position
+            ),
+            owner_confirmed_no_unresolved_exchange_order=(
+                owner_confirmed_no_unresolved_exchange_order
+            ),
+            owner_confirmed_budget_reconciled_or_held=(
+                owner_confirmed_budget_reconciled_or_held
+            ),
+            owner_confirmed_attempt_consumed_or_accounted=(
+                owner_confirmed_attempt_consumed_or_accounted
+            ),
+            owner_confirmation_reference=owner_confirmation_reference,
+            reconciliation_evidence_id=reconciliation_evidence_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/runtime-execution-exchange-gateway-readiness",
+    response_model=RuntimeExecutionExchangeGatewayReadiness,
+)
+async def record_runtime_execution_exchange_gateway_readiness(
+    owner_confirmed_gateway_readiness_review: bool = False,
+    owner_operator_id: str = "owner",
+    reason: str = "owner reviewed runtime exchange gateway readiness",
+    owner_confirmation_reference: Optional[str] = None,
+) -> RuntimeExecutionExchangeGatewayReadiness:
+    service = _runtime_exchange_gateway_readiness_service()
+    try:
+        return await service.record_readiness(
+            owner_confirmed_gateway_readiness_review=(
+                owner_confirmed_gateway_readiness_review
+            ),
+            owner_operator_id=owner_operator_id,
+            reason=reason,
+            owner_confirmation_reference=owner_confirmation_reference,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post(
@@ -2107,11 +2873,23 @@ async def _strategy_runtime_promotion_gate_service() -> Any:
     return service
 
 
-async def _runtime_execution_intent_adapter_service() -> Any:
+async def _runtime_execution_intent_adapter_service(
+    *,
+    include_runtime_exchange_gateway: bool = False,
+) -> Any:
     from src.interfaces import api as api_module
 
     injected = getattr(api_module, "_runtime_execution_intent_adapter_service", None)
     if injected is not None:
+        if include_runtime_exchange_gateway and getattr(
+            injected,
+            "_exchange_gateway",
+            None,
+        ) is None:
+            gateway_binding = await _runtime_exchange_submit_gateway_binding(
+                api_module,
+            )
+            injected._exchange_gateway = gateway_binding.get("gateway")
         return injected
     from src.application.runtime_execution_intent_adapter_service import (
         RuntimeExecutionIntentAdapterService,
@@ -2134,6 +2912,9 @@ async def _runtime_execution_intent_adapter_service() -> Any:
     from src.infrastructure.pg_runtime_execution_attempt_mutation_repository import (
         PgRuntimeExecutionAttemptMutationRepository,
     )
+    from src.infrastructure.pg_runtime_execution_attempt_outcome_policy_repository import (
+        PgRuntimeExecutionAttemptOutcomePolicyRepository,
+    )
     from src.infrastructure.pg_runtime_execution_protection_plan_repository import (
         PgRuntimeExecutionProtectionPlanRepository,
     )
@@ -2143,7 +2924,39 @@ async def _runtime_execution_intent_adapter_service() -> Any:
     from src.infrastructure.pg_runtime_execution_order_lifecycle_adapter_result_repository import (
         PgRuntimeExecutionOrderLifecycleAdapterResultRepository,
     )
+    from src.infrastructure.pg_runtime_execution_submit_prerequisite_repositories import (
+        PgRuntimeExecutionProtectionFailurePolicyRepository,
+        PgRuntimeExecutionSubmitIdempotencyRepository,
+        PgRuntimeExecutionTrustedSubmitFactsRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_exchange_submit_adapter_result_repository import (
+        PgRuntimeExecutionExchangeSubmitAdapterResultRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_exchange_submit_action_authorization_repository import (
+        PgRuntimeExecutionExchangeSubmitActionAuthorizationRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_exchange_submit_execution_result_repository import (
+        PgRuntimeExecutionExchangeSubmitExecutionResultRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_submit_outcome_review_repository import (
+        PgRuntimeExecutionSubmitOutcomeReviewRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_exchange_submit_recovery_resolution_repository import (
+        PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository,
+    )
+    from src.application.order_lifecycle_service import OrderLifecycleService
 
+    order_repository = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_order_repo",
+        _build_pg_order_repo,
+    )
+    exchange_gateway = None
+    if include_runtime_exchange_gateway:
+        gateway_binding = await _runtime_exchange_submit_gateway_binding(
+            api_module,
+        )
+        exchange_gateway = gateway_binding.get("gateway")
     service = RuntimeExecutionIntentAdapterService(
         draft_repository=PgRuntimeExecutionIntentDraftRepository(),
         intent_repository=PgExecutionIntentRepository(),
@@ -2151,16 +2964,232 @@ async def _runtime_execution_intent_adapter_service() -> Any:
         controlled_submit_result_repository=PgRuntimeExecutionControlledSubmitResultRepository(),
         attempt_reservation_repository=PgRuntimeExecutionAttemptReservationRepository(),
         attempt_mutation_repository=PgRuntimeExecutionAttemptMutationRepository(),
+        attempt_outcome_policy_repository=(
+            PgRuntimeExecutionAttemptOutcomePolicyRepository()
+        ),
         protection_plan_repository=PgRuntimeExecutionProtectionPlanRepository(),
         order_lifecycle_handoff_repository=PgRuntimeExecutionOrderLifecycleHandoffRepository(),
+        order_lifecycle_service=(
+            OrderLifecycleService(repository=order_repository)
+            if order_repository is not None
+            else None
+        ),
         order_lifecycle_adapter_result_repository=(
             PgRuntimeExecutionOrderLifecycleAdapterResultRepository()
         ),
+        trusted_submit_facts_repository=PgRuntimeExecutionTrustedSubmitFactsRepository(),
+        submit_idempotency_repository=PgRuntimeExecutionSubmitIdempotencyRepository(),
+        protection_failure_policy_repository=(
+            PgRuntimeExecutionProtectionFailurePolicyRepository()
+        ),
+        exchange_submit_adapter_result_repository=(
+            PgRuntimeExecutionExchangeSubmitAdapterResultRepository()
+        ),
+        exchange_submit_action_authorization_repository=(
+            PgRuntimeExecutionExchangeSubmitActionAuthorizationRepository()
+        ),
+        exchange_submit_execution_result_repository=(
+            PgRuntimeExecutionExchangeSubmitExecutionResultRepository()
+        ),
+        submit_outcome_review_repository=(
+            PgRuntimeExecutionSubmitOutcomeReviewRepository()
+        ),
+        exchange_submit_recovery_resolution_repository=(
+            PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository()
+        ),
+        exchange_gateway_readiness_repository=(
+            _build_pg_runtime_exchange_gateway_readiness_repo()
+        ),
+        execution_recovery_repository=_cached_pg_repo(
+            api_module,
+            "_trading_console_pg_execution_recovery_repo",
+            _build_pg_execution_recovery_repo,
+        ),
+        exchange_gateway=exchange_gateway,
         final_gate_preview_service=await _runtime_final_gate_preview_service(),
         runtime_service=await _strategy_runtime_service(),
     )
     setattr(api_module, "_runtime_execution_intent_adapter_service", service)
     return service
+
+
+def _runtime_execution_trusted_submit_facts_assembly_service() -> Any:
+    from src.application.runtime_execution_trusted_submit_fact_readers import (
+        ConfiguredMarketRuleTrustedSubmitFactReader,
+        LocalActivePositionTrustedSubmitFactReader,
+        LocalOpenOrderTrustedSubmitFactReader,
+        RuntimeProtectionPlanTrustedSubmitFactReader,
+        StartupReconciliationTrustedSubmitFactReader,
+        TrialReadinessAccountTrustedSubmitFactReader,
+    )
+    from src.application.runtime_execution_trusted_submit_facts_service import (
+        RuntimeExecutionTrustedSubmitFactsAssemblyService,
+    )
+    from src.infrastructure.pg_runtime_execution_protection_plan_repository import (
+        PgRuntimeExecutionProtectionPlanRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_submit_prerequisite_repositories import (
+        PgRuntimeExecutionTrustedSubmitFactsRepository,
+    )
+    from src.interfaces import api as api_module
+
+    order_source = getattr(api_module, "_order_repo", None)
+    if order_source is None:
+        order_source = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_order_repo",
+            _build_pg_order_repo,
+        )
+    position_source = getattr(api_module, "_position_repo", None)
+    if position_source is None:
+        position_source = _cached_pg_repo(
+            api_module,
+            "_trading_console_pg_position_repo",
+            _build_pg_position_repo,
+        )
+    market_rule_provider = (
+        getattr(api_module, "_trading_console_market_rule_snapshot_provider", None)
+        or getattr(api_module, "_trading_console_market_rules", None)
+    )
+
+    return RuntimeExecutionTrustedSubmitFactsAssemblyService(
+        repository=PgRuntimeExecutionTrustedSubmitFactsRepository(),
+        account_fact_reader=TrialReadinessAccountTrustedSubmitFactReader(
+            _TradingConsoleCachedAccountFactsSource(api_module),
+        ),
+        active_position_reader=LocalActivePositionTrustedSubmitFactReader(
+            position_source,
+        ),
+        open_order_reader=LocalOpenOrderTrustedSubmitFactReader(order_source),
+        protection_state_reader=RuntimeProtectionPlanTrustedSubmitFactReader(
+            PgRuntimeExecutionProtectionPlanRepository(),
+        ),
+        market_rule_reader=ConfiguredMarketRuleTrustedSubmitFactReader(
+            market_rule_provider,
+        ),
+        reconciliation_reader=StartupReconciliationTrustedSubmitFactReader(
+            lambda: getattr(api_module, "_startup_reconciliation_summary", None),
+        ),
+    )
+
+
+def _runtime_exchange_gateway_readiness_service() -> Any:
+    from src.application.runtime_exchange_gateway_readiness_service import (
+        RuntimeExchangeGatewayReadinessService,
+    )
+
+    return RuntimeExchangeGatewayReadinessService(
+        repository=_build_pg_runtime_exchange_gateway_readiness_repo(),
+    )
+
+
+async def _runtime_exchange_submit_gateway_binding(
+    api_module: Any,
+    *,
+    gateway_factory: Any = None,
+) -> dict[str, Any]:
+    """Return the independent runtime-submit gateway only when explicitly enabled.
+
+    This deliberately does not populate the legacy ``_exchange_gateway`` global
+    or the one-shot ``_owner_bounded_exchange_gateway`` cache.
+    """
+    existing = getattr(api_module, "_runtime_exchange_submit_gateway", None)
+    if existing is not None:
+        return _runtime_exchange_submit_gateway_status(existing)
+
+    blockers = _runtime_exchange_submit_gateway_env_blockers()
+    if blockers:
+        return {"status": "blocked_env", "gateway": None, "blockers": blockers}
+
+    api_key = os.environ.get("EXCHANGE_API_KEY", "").strip()
+    api_secret = os.environ.get("EXCHANGE_API_SECRET", "").strip()
+    if not api_key or not api_secret:
+        return {
+            "status": "blocked_credentials_missing",
+            "gateway": None,
+            "blockers": ["exchange_credentials_missing"],
+        }
+
+    exchange_name = os.environ.get("EXCHANGE_NAME", "binance").strip() or "binance"
+    if exchange_name.lower() != "binance":
+        return {
+            "status": "blocked_unsupported_exchange",
+            "gateway": None,
+            "blockers": [f"unsupported_exchange:{exchange_name}"],
+        }
+
+    if gateway_factory is None:
+        from src.infrastructure.exchange_gateway import ExchangeGateway
+
+        gateway_factory = ExchangeGateway
+    gateway = gateway_factory(
+        exchange_name=exchange_name,
+        api_key=api_key,
+        api_secret=api_secret,
+        testnet=False,
+    )
+    try:
+        await gateway.initialize()
+        permission_check = getattr(gateway, "check_api_key_permissions", None)
+        if callable(permission_check):
+            await permission_check()
+    except Exception as exc:
+        close = getattr(gateway, "close", None)
+        if callable(close):
+            try:
+                await close()
+            except Exception:
+                pass
+        error_code = getattr(exc, "error_code", None)
+        blockers = [
+            f"runtime_exchange_gateway_initialization_failed:{type(exc).__name__}"
+        ]
+        if error_code:
+            blockers.append(
+                f"runtime_exchange_gateway_initialization_failed:{error_code}"
+            )
+        return {
+            "status": "blocked_gateway_initialization_failed",
+            "gateway": None,
+            "blockers": blockers,
+            "error_code": error_code,
+            "error_type": type(exc).__name__,
+        }
+
+    setattr(api_module, "_runtime_exchange_submit_gateway", gateway)
+    return _runtime_exchange_submit_gateway_status(gateway)
+
+
+def _runtime_exchange_submit_gateway_env_blockers() -> list[str]:
+    expected = {
+        "TRADING_ENV": "live",
+        "EXCHANGE_TESTNET": "false",
+        "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+        "RUNTIME_CONTROL_API_ENABLED": "false",
+        "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+        GATEWAY_BINDING_ENABLED_ENV: "true",
+    }
+    blockers: list[str] = []
+    for key, expected_value in expected.items():
+        actual = os.environ.get(key, "").strip().lower()
+        if actual != expected_value:
+            blockers.append(f"{key.lower()}_not_{expected_value}")
+    return blockers
+
+
+def _runtime_exchange_submit_gateway_status(gateway: Any) -> dict[str, Any]:
+    required = ["place_order", "fetch_ticker_price", "get_market_info"]
+    missing = [
+        f"runtime_gateway_missing_{name}"
+        for name in required
+        if not callable(getattr(gateway, name, None))
+    ]
+    return {
+        "status": "ready" if not missing else "blocked_methods_missing",
+        "gateway": gateway if not missing else None,
+        "blockers": missing,
+        "gateway_type": type(gateway).__name__,
+    }
 
 
 class _TradingConsoleCachedAccountFactsSource:
@@ -2446,6 +3475,22 @@ def _build_pg_execution_recovery_repo() -> Any:
     return PgExecutionRecoveryRepository()
 
 
+def _build_pg_runtime_exchange_gateway_readiness_repo() -> Any:
+    from src.infrastructure.pg_runtime_execution_exchange_gateway_readiness_repository import (
+        PgRuntimeExecutionExchangeGatewayReadinessRepository,
+    )
+
+    return PgRuntimeExecutionExchangeGatewayReadinessRepository()
+
+
+def _build_pg_runtime_exchange_submit_recovery_resolution_repo() -> Any:
+    from src.infrastructure.pg_runtime_execution_exchange_submit_recovery_resolution_repository import (
+        PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository,
+    )
+
+    return PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository()
+
+
 def _build_pg_live_lifecycle_review_repo() -> Any:
     from src.infrastructure.pg_live_lifecycle_review_repository import PgLiveLifecycleReviewRepository
 
@@ -2494,6 +3539,19 @@ def _multi_carrier_budget_authorization_service() -> Optional[Any]:
         return _multi_carrier_budget_authorization_service_instance()
     except Exception:
         return None
+
+
+async def close_runtime_exchange_submit_gateway(api_module: Any | None = None) -> None:
+    if api_module is None:
+        from src.interfaces import api as api_module
+
+    gateway = getattr(api_module, "_runtime_exchange_submit_gateway", None)
+    setattr(api_module, "_runtime_exchange_submit_gateway", None)
+    service = getattr(api_module, "_runtime_execution_intent_adapter_service", None)
+    if service is not None and hasattr(service, "_exchange_gateway"):
+        service._exchange_gateway = None
+    if gateway is not None and hasattr(gateway, "close"):
+        await gateway.close()
 
 
 async def close_trading_console_read_only_exchange_gateway() -> None:

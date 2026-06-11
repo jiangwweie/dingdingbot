@@ -37,7 +37,6 @@ class RuntimeExecutionControlledSubmitPlanStatus(str, Enum):
 class RuntimeExecutionControlledSubmitResultStatus(str, Enum):
     BLOCKED = "blocked"
     SUBMIT_ADAPTER_NOT_ENABLED = "submit_adapter_not_enabled"
-    ORDER_LIFECYCLE_ADAPTER_DISABLED = "order_lifecycle_adapter_disabled"
     SUBMIT_ADAPTER_NOT_IMPLEMENTED = "submit_adapter_not_implemented"
 
 
@@ -102,7 +101,6 @@ class RuntimeExecutionControlledSubmitResult(RuntimeExecutionControlledSubmitMod
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     submit_enabled: bool = False
-    order_lifecycle_adapter_enabled: bool = False
     submit_executed: Literal[False] = False
     order_created: Literal[False] = False
     exchange_called: Literal[False] = False
@@ -297,7 +295,6 @@ def build_runtime_execution_controlled_submit_result(
     *,
     preflight: RuntimeExecutionControlledSubmitPreflight,
     submit_enabled: bool,
-    order_lifecycle_adapter_enabled: bool = False,
     now_ms: int,
 ) -> RuntimeExecutionControlledSubmitResult:
     blockers = list(preflight.blockers)
@@ -308,11 +305,8 @@ def build_runtime_execution_controlled_submit_result(
     elif not submit_enabled:
         blockers.append("controlled_submit_adapter_disabled")
         status = RuntimeExecutionControlledSubmitResultStatus.SUBMIT_ADAPTER_NOT_ENABLED
-    elif not order_lifecycle_adapter_enabled:
-        blockers.append("order_lifecycle_adapter_disabled")
-        status = RuntimeExecutionControlledSubmitResultStatus.ORDER_LIFECYCLE_ADAPTER_DISABLED
     else:
-        blockers.append("controlled_real_submit_path_not_implemented")
+        blockers.append("controlled_submit_adapter_not_implemented")
         status = RuntimeExecutionControlledSubmitResultStatus.SUBMIT_ADAPTER_NOT_IMPLEMENTED
     return RuntimeExecutionControlledSubmitResult(
         result_id=f"runtime-controlled-submit-result-{preflight.authorization_id}",
@@ -326,15 +320,13 @@ def build_runtime_execution_controlled_submit_result(
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
         submit_enabled=submit_enabled,
-        order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
         created_at_ms=now_ms,
         metadata={
             "scope": "runtime_execution_controlled_submit_result",
             "controlled_submit_preflight_required": True,
             "controlled_submit_preflight_status": preflight.status.value,
             "final_gate_verdict": preflight.final_gate_verdict.value,
-            "dry_run_submit_adapter_ready": True,
-            "order_lifecycle_adapter_enabled": order_lifecycle_adapter_enabled,
+            "future_adapter_boundary": True,
             "default_no_submit": True,
             "does_not_call_owner_bounded_execution": True,
             "does_not_call_order_lifecycle": True,

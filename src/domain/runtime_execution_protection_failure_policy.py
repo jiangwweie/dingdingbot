@@ -68,7 +68,9 @@ class RuntimeExecutionProtectionFailurePolicy(
     exchange_order_submitted: Literal[False] = False
     owner_bounded_execution_called: Literal[False] = False
     execution_intent_status_changed: Literal[False] = False
-    withdrawal_or_transfer_created: Literal[False] = False
+    runtime_state_mutated: Literal[False] = False
+    withdrawal_instruction_created: Literal[False] = False
+    transfer_instruction_created: Literal[False] = False
     created_at_ms: int = Field(ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -81,30 +83,15 @@ class RuntimeExecutionProtectionFailurePolicy(
             "order_id",
             "place_order",
             "submit_order",
+            "transfer_payload",
+            "withdrawal_payload",
         }
         for key in _walk_keys({"metadata": self.metadata}):
             if key.lower() in forbidden:
                 raise ValueError(
-                    f"protection failure policy contains forbidden execution field: {key}"
+                    "protection failure policy contains forbidden execution "
+                    f"field: {key}"
                 )
-        if self.exchange_called or self.exchange_order_submitted:
-            raise ValueError("protection failure policy cannot call exchange")
-        if self.order_created or self.order_lifecycle_called:
-            raise ValueError(
-                "protection failure policy cannot create/register orders"
-            )
-        if self.owner_bounded_execution_called:
-            raise ValueError(
-                "protection failure policy cannot call OwnerBoundedExecution"
-            )
-        if self.execution_intent_status_changed:
-            raise ValueError(
-                "protection failure policy cannot change ExecutionIntent status"
-            )
-        if self.withdrawal_or_transfer_created:
-            raise ValueError(
-                "protection failure policy cannot create withdrawal/transfer"
-            )
         if (
             self.status
             == RuntimeExecutionProtectionFailurePolicyStatus

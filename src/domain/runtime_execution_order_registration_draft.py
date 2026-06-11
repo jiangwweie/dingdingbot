@@ -1,6 +1,6 @@
 """Typed non-registration preview for runtime local order drafts.
 
-This module validates that a runtime OrderLifecycle adapter preview contains
+This validates that a runtime OrderLifecycle adapter preview contains
 Order-compatible local registration facts. It intentionally does not construct
 Order objects, save rows, call OrderLifecycle, or call an exchange.
 """
@@ -30,7 +30,9 @@ class RuntimeExecutionOrderRegistrationDraftPreviewStatus(str, Enum):
     INPUTS_READY_REGISTRATION_DRAFT_ONLY = "inputs_ready_registration_draft_only"
 
 
-class RuntimeExecutionLocalOrderRegistrationDraft(RuntimeExecutionOrderRegistrationDraftModel):
+class RuntimeExecutionLocalOrderRegistrationDraft(
+    RuntimeExecutionOrderRegistrationDraftModel
+):
     """Order-shaped registration input that remains a draft, not an Order."""
 
     local_order_draft_id: str = Field(min_length=1, max_length=260)
@@ -60,7 +62,9 @@ class RuntimeExecutionLocalOrderRegistrationDraft(RuntimeExecutionOrderRegistrat
     not_persisted: Literal[True] = True
 
     @model_validator(mode="after")
-    def _validate_created_draft(self) -> "RuntimeExecutionLocalOrderRegistrationDraft":
+    def _validate_created_draft(
+        self,
+    ) -> "RuntimeExecutionLocalOrderRegistrationDraft":
         if self.status != OrderStatus.CREATED:
             raise ValueError("local order registration draft must remain CREATED")
         if self.order_role == OrderRole.ENTRY:
@@ -98,9 +102,9 @@ class RuntimeExecutionOrderRegistrationDraftPreview(
     status: RuntimeExecutionOrderRegistrationDraftPreviewStatus
     symbol: str = Field(min_length=1, max_length=128)
     side: str = Field(min_length=1, max_length=32)
-    local_order_registration_drafts: list[RuntimeExecutionLocalOrderRegistrationDraft] = (
-        Field(default_factory=list)
-    )
+    local_order_registration_drafts: list[
+        RuntimeExecutionLocalOrderRegistrationDraft
+    ] = Field(default_factory=list)
     registration_draft_count: int = Field(ge=0)
     entry_registration_draft_count: int = Field(ge=0)
     protection_registration_draft_count: int = Field(ge=0)
@@ -122,7 +126,9 @@ class RuntimeExecutionOrderRegistrationDraftPreview(
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _reject_execution_fields(self) -> "RuntimeExecutionOrderRegistrationDraftPreview":
+    def _reject_execution_fields(
+        self,
+    ) -> "RuntimeExecutionOrderRegistrationDraftPreview":
         forbidden = {
             "client_order_id",
             "exchange_order_id",
@@ -138,7 +144,8 @@ class RuntimeExecutionOrderRegistrationDraftPreview(
         for key in _walk_keys(scanned):
             if key.lower() in forbidden:
                 raise ValueError(
-                    f"order registration draft preview contains forbidden execution field: {key}"
+                    "order registration draft preview contains forbidden "
+                    f"execution field: {key}"
                 )
         if (
             self.status
@@ -204,7 +211,8 @@ def build_runtime_execution_order_registration_draft_preview(
     )
     return RuntimeExecutionOrderRegistrationDraftPreview(
         registration_preview_id=(
-            f"runtime-order-registration-draft-preview-{adapter_preview.authorization_id}"
+            "runtime-order-registration-draft-preview-"
+            f"{adapter_preview.authorization_id}"
         ),
         adapter_preview_id=adapter_preview.adapter_preview_id,
         handoff_draft_id=adapter_preview.handoff_draft_id,

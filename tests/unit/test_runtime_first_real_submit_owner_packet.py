@@ -80,6 +80,7 @@ async def test_owner_packet_blocks_when_deploy_and_owner_auth_are_missing():
     assert "Owner live-runtime enablement authorization" in packet["remaining_gates"]["owner_decision_items"]
     assert packet["remaining_gates"]["implementation_blockers"] == [
         "runtime_not_live_execution_enabled",
+        "controlled_submit_adapter_not_implemented",
         "order_lifecycle_adapter_disabled",
     ]
     assert packet["source_pre_live_packet"]["status"] == "blocked_before_first_real_submit"
@@ -111,6 +112,7 @@ async def test_owner_packet_still_blocks_when_owner_and_deploy_gates_are_present
     assert packet["remaining_gates"]["owner_decision_items"] == []
     assert packet["remaining_gates"]["implementation_blockers"] == [
         "runtime_not_live_execution_enabled",
+        "controlled_submit_adapter_not_implemented",
         "order_lifecycle_adapter_disabled",
     ]
     assert packet["checks"]["ready_for_first_real_submit"] is False

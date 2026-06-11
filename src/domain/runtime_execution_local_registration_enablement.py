@@ -43,12 +43,17 @@ class RuntimeExecutionLocalRegistrationEnablementDecision(
     semantic_ids: BrcSemanticIds
     status: RuntimeExecutionLocalRegistrationEnablementStatus
     local_registration_gate: RuntimeExecutionLocalRegistrationGate
-    deployment_evidence_id: Optional[str] = Field(default=None, max_length=220)
-    owner_real_submit_authorization_id: Optional[str] = Field(
+    trusted_submit_fact_snapshot_id: Optional[str] = Field(
         default=None,
-        max_length=220,
+        max_length=240,
     )
-    owner_live_runtime_enablement_authorization_id: Optional[str] = Field(
+    submit_idempotency_policy_id: Optional[str] = Field(default=None, max_length=240)
+    attempt_outcome_policy_id: Optional[str] = Field(default=None, max_length=360)
+    protection_creation_failure_policy_id: Optional[str] = Field(
+        default=None,
+        max_length=300,
+    )
+    owner_real_submit_authorization_id: Optional[str] = Field(
         default=None,
         max_length=220,
     )
@@ -61,6 +66,10 @@ class RuntimeExecutionLocalRegistrationEnablementDecision(
         max_length=220,
     )
     local_registration_action_authorization_id: Optional[str] = Field(
+        default=None,
+        max_length=220,
+    )
+    deployment_readiness_evidence_id: Optional[str] = Field(
         default=None,
         max_length=220,
     )
@@ -78,7 +87,9 @@ class RuntimeExecutionLocalRegistrationEnablementDecision(
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_decision(self) -> "RuntimeExecutionLocalRegistrationEnablementDecision":
+    def _validate_decision(
+        self,
+    ) -> "RuntimeExecutionLocalRegistrationEnablementDecision":
         forbidden = {
             "client_order_id",
             "exchange_order_id",
@@ -90,7 +101,8 @@ class RuntimeExecutionLocalRegistrationEnablementDecision(
         for key in _walk_keys({"metadata": self.metadata}):
             if key.lower() in forbidden:
                 raise ValueError(
-                    f"local registration enablement contains forbidden execution field: {key}"
+                    "local registration enablement contains forbidden "
+                    f"execution field: {key}"
                 )
         if self.exchange_called or self.exchange_order_submitted:
             raise ValueError("local registration enablement cannot call exchange")
@@ -116,68 +128,72 @@ class RuntimeExecutionLocalRegistrationEnablementDecision(
 def build_runtime_execution_local_registration_enablement_decision(
     *,
     registration_preview: RuntimeExecutionOrderRegistrationDraftPreview,
-    current_head_deployed: bool = False,
-    runtime_live_execution_enabled: bool = False,
-    order_lifecycle_adapter_enabled: bool = False,
-    local_order_registration_enabled: bool = False,
-    deployment_evidence_id: str | None = None,
+    trusted_submit_fact_snapshot_id: str | None = None,
+    submit_idempotency_policy_id: str | None = None,
+    attempt_outcome_policy_id: str | None = None,
+    protection_creation_failure_policy_id: str | None = None,
     owner_real_submit_authorization_id: str | None = None,
-    owner_live_runtime_enablement_authorization_id: str | None = None,
     order_lifecycle_adapter_enablement_id: str | None = None,
     local_order_registration_enablement_id: str | None = None,
     local_registration_action_authorization_id: str | None = None,
+    deployment_readiness_evidence_id: str | None = None,
+    evidence_validation_blockers: list[str] | None = None,
+    evidence_validation_warnings: list[str] | None = None,
     now_ms: int,
 ) -> RuntimeExecutionLocalRegistrationEnablementDecision:
-    owner_real_submit_authorized = bool(
-        _present(owner_real_submit_authorization_id)
-    )
-    owner_live_runtime_enablement_authorized = bool(
-        _present(owner_live_runtime_enablement_authorization_id)
-    )
-    local_registration_action_authorized = bool(
-        _present(local_registration_action_authorization_id)
-    )
     gate = build_runtime_execution_local_registration_gate(
         registration_preview=registration_preview,
-        current_head_deployed=current_head_deployed,
-        owner_real_submit_authorized=owner_real_submit_authorized,
-        owner_live_runtime_enablement_authorized=(
-            owner_live_runtime_enablement_authorized
+        owner_real_submit_authorized=_present(owner_real_submit_authorization_id),
+        trusted_submit_facts_ready=_present(trusted_submit_fact_snapshot_id),
+        submit_idempotency_policy_ready=_present(submit_idempotency_policy_id),
+        attempt_outcome_policy_ready=_present(attempt_outcome_policy_id),
+        protection_failure_policy_ready=_present(
+            protection_creation_failure_policy_id
         ),
-        runtime_live_execution_enabled=runtime_live_execution_enabled,
-        order_lifecycle_adapter_enabled=order_lifecycle_adapter_enabled,
-        local_order_registration_enabled=local_order_registration_enabled,
-        local_registration_action_authorized=(
-            local_registration_action_authorized
+        order_lifecycle_adapter_enabled=_present(
+            order_lifecycle_adapter_enablement_id
+        ),
+        local_order_registration_enabled=_present(
+            local_order_registration_enablement_id
+        ),
+        local_registration_action_authorized=_present(
+            local_registration_action_authorization_id
         ),
         now_ms=now_ms,
     )
 
     blockers = list(gate.blockers)
-    if not _present(deployment_evidence_id):
-        blockers.append("deployment_evidence_id_missing")
+    warnings = list(gate.warnings)
+    blockers.extend(evidence_validation_blockers or [])
+    warnings.extend(evidence_validation_warnings or [])
+    if not _present(trusted_submit_fact_snapshot_id):
+        blockers.append("trusted_submit_fact_snapshot_id_missing")
+    if not _present(submit_idempotency_policy_id):
+        blockers.append("submit_idempotency_policy_id_missing")
+    if not _present(attempt_outcome_policy_id):
+        blockers.append("attempt_outcome_policy_id_missing")
+    if not _present(protection_creation_failure_policy_id):
+        blockers.append("protection_creation_failure_policy_id_missing")
     if not _present(owner_real_submit_authorization_id):
         blockers.append("owner_real_submit_authorization_id_missing")
-    if not _present(owner_live_runtime_enablement_authorization_id):
-        blockers.append("owner_live_runtime_enablement_authorization_id_missing")
     if not _present(order_lifecycle_adapter_enablement_id):
         blockers.append("order_lifecycle_adapter_enablement_id_missing")
     if not _present(local_order_registration_enablement_id):
         blockers.append("local_order_registration_enablement_id_missing")
     if not _present(local_registration_action_authorization_id):
         blockers.append("local_registration_action_authorization_id_missing")
+    if not _present(deployment_readiness_evidence_id):
+        warnings.append("deployment_readiness_evidence_id_missing")
     if (
         gate.status
-        != RuntimeExecutionLocalRegistrationGateStatus
-        .READY_FOR_LOCAL_CREATED_ORDER_REGISTRATION
+        != RuntimeExecutionLocalRegistrationGateStatus.READY_FOR_LOCAL_CREATED_ORDER_REGISTRATION
     ):
         blockers.append("local_registration_gate_not_ready")
 
     status = (
         RuntimeExecutionLocalRegistrationEnablementStatus.BLOCKED
         if blockers
-        else RuntimeExecutionLocalRegistrationEnablementStatus
-        .READY_FOR_LOCAL_REGISTRATION_ACTION
+        else RuntimeExecutionLocalRegistrationEnablementStatus.READY_FOR_LOCAL_REGISTRATION_ACTION
     )
     return RuntimeExecutionLocalRegistrationEnablementDecision(
         decision_id=(
@@ -192,12 +208,16 @@ def build_runtime_execution_local_registration_enablement_decision(
         semantic_ids=registration_preview.semantic_ids,
         status=status,
         local_registration_gate=gate,
-        deployment_evidence_id=_optional_str(deployment_evidence_id),
+        trusted_submit_fact_snapshot_id=_optional_str(
+            trusted_submit_fact_snapshot_id
+        ),
+        submit_idempotency_policy_id=_optional_str(submit_idempotency_policy_id),
+        attempt_outcome_policy_id=_optional_str(attempt_outcome_policy_id),
+        protection_creation_failure_policy_id=_optional_str(
+            protection_creation_failure_policy_id
+        ),
         owner_real_submit_authorization_id=_optional_str(
             owner_real_submit_authorization_id
-        ),
-        owner_live_runtime_enablement_authorization_id=_optional_str(
-            owner_live_runtime_enablement_authorization_id
         ),
         order_lifecycle_adapter_enablement_id=_optional_str(
             order_lifecycle_adapter_enablement_id
@@ -208,13 +228,17 @@ def build_runtime_execution_local_registration_enablement_decision(
         local_registration_action_authorization_id=_optional_str(
             local_registration_action_authorization_id
         ),
+        deployment_readiness_evidence_id=_optional_str(
+            deployment_readiness_evidence_id
+        ),
         blockers=_dedupe(blockers),
-        warnings=list(gate.warnings),
+        warnings=_dedupe(warnings),
         created_at_ms=now_ms,
         metadata={
             "scope": "runtime_execution_local_registration_enablement",
             "first_real_submit_local_registration_decision": True,
             "local_created_order_registration_only": True,
+            "deployment_readiness_evidence_is_warning_not_local_gate": True,
             "does_not_register_created_orders": True,
             "does_not_change_execution_intent_status": True,
             "does_not_submit_exchange_order": True,

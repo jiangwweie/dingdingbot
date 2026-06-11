@@ -36,7 +36,7 @@ from scripts.verify_runtime_submit_rehearsal_pre_live_packet import (
 )
 
 
-READY_SUBMIT_ADAPTER_STATUS = "inputs_ready_dry_run_adapter_only"
+READY_SUBMIT_ADAPTER_STATUS = "inputs_ready_adapter_not_implemented"
 READY_HANDOFF_STATUS = "ready_for_order_lifecycle_adapter"
 READY_ADAPTER_PREVIEW_STATUS = "inputs_ready_registration_not_enabled"
 READY_REGISTRATION_DRAFT_STATUS = "inputs_ready_registration_draft_only"
@@ -102,15 +102,11 @@ def build_order_lifecycle_adapter_enablement_packet(
     protection_failure_policy = _as_dict(
         registration_chain.get("protection_failure_policy")
     )
-    live_enablement_preview = _as_dict(
-        pre_live_packet.get("live_enablement_preview")
-    )
 
     technical_blockers = list(checks.get("technical_blockers") or [])
     forbidden_execution_flags = list(checks.get("forbidden_execution_flags") or [])
     implementation_blockers = list(checks.get("implementation_blockers") or [])
     operational_blockers = list(checks.get("operational_blockers") or [])
-    live_enablement_blockers = list(checks.get("live_enablement_blockers") or [])
     protection_failure_policy_blockers = list(
         checks.get("protection_failure_policy_blockers") or []
     )
@@ -189,11 +185,9 @@ def build_order_lifecycle_adapter_enablement_packet(
     runtime_enablement_blockers = _runtime_enablement_blockers(
         implementation_blockers=implementation_blockers,
         operational_blockers=operational_blockers,
-        live_enablement_blockers=live_enablement_blockers,
         implementation_work_items=implementation_work_items,
         owner_real_submit_authorized=owner_real_submit_authorized,
         owner_live_runtime_enablement_authorized=owner_live_runtime_enablement_authorized,
-        live_enablement_status=live_enablement_preview.get("status"),
     )
     ready_for_runtime_adapter_enablement = (
         ready_for_non_executing_implementation_task
@@ -515,22 +509,17 @@ def _runtime_enablement_blockers(
     *,
     implementation_blockers: list[str],
     operational_blockers: list[str],
-    live_enablement_blockers: list[str],
     implementation_work_items: list[str],
     owner_real_submit_authorized: bool,
     owner_live_runtime_enablement_authorized: bool,
-    live_enablement_status: Any,
 ) -> list[str]:
     blockers = list(implementation_blockers)
     blockers.extend(operational_blockers)
-    blockers.extend(live_enablement_blockers)
     blockers.extend(implementation_work_items)
     if not owner_real_submit_authorized:
         blockers.append("owner_real_submit_authorization_missing")
     if not owner_live_runtime_enablement_authorized:
         blockers.append("owner_live_runtime_enablement_authorization_missing")
-    if live_enablement_status != "ready_for_live_runtime_enablement_mutation_design":
-        blockers.append("runtime_live_enablement_not_ready")
     return _dedupe(blockers)
 
 

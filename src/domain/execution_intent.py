@@ -26,7 +26,6 @@ from src.domain.models import SignalResult, Order, OrderStrategy
 class ExecutionIntentStatus(str, Enum):
     """执行意图状态"""
     RECORDED = "recorded"        # 已记录；尚未授权进入提交链路
-    LOCAL_ORDERS_REGISTERED = "local_orders_registered"  # 本地 CREATED orders 已注册；尚未提交交易所
     PENDING = "pending"          # 等待执行
     BLOCKED = "blocked"          # 被 CapitalProtection 拦截
     SUBMITTED = "submitted"      # 已提交到交易所
@@ -164,27 +163,8 @@ class ExecutionIntent(BaseModel):
         if self.signal is None:
             if not self.source_type or not self.source_id:
                 raise ValueError("source-native ExecutionIntent requires source_type and source_id")
-            source_native_statuses = {
-                ExecutionIntentStatus.RECORDED,
-                ExecutionIntentStatus.RECORDED.value,
-                ExecutionIntentStatus.LOCAL_ORDERS_REGISTERED,
-                ExecutionIntentStatus.LOCAL_ORDERS_REGISTERED.value,
-            }
-            if self.status not in source_native_statuses:
-                raise ValueError(
-                    "source-native ExecutionIntent must be recorded or locally registered"
-                )
-            if (
-                self.status
-                in {
-                    ExecutionIntentStatus.LOCAL_ORDERS_REGISTERED,
-                    ExecutionIntentStatus.LOCAL_ORDERS_REGISTERED.value,
-                }
-                and self.exchange_order_id is not None
-            ):
-                raise ValueError(
-                    "local_orders_registered ExecutionIntent cannot have exchange_order_id"
-                )
+            if self.status != ExecutionIntentStatus.RECORDED:
+                raise ValueError("source-native ExecutionIntent must start as recorded")
         return self
 
     model_config = {"use_enum_values": True}

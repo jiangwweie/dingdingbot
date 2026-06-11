@@ -42,6 +42,7 @@ from src.interfaces.api_brc_console import (
 )
 from src.interfaces.api_runtime_safety import router as runtime_safety_router
 from src.interfaces.api_trading_console import (
+    close_runtime_exchange_submit_gateway,
     close_trading_console_read_only_exchange_gateway,
     router as trading_console_router,
 )
@@ -247,6 +248,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await close_runtime_exchange_submit_gateway()
         await close_trading_console_read_only_exchange_gateway()
         await close_owner_bounded_exchange_gateway()
         if get_runtime_context() is None:

@@ -214,8 +214,8 @@ def evaluate_strategy_runtime_safety_readiness(
         RuntimeSafetyRequirementStatus.WARN,
         confirmation_key="protection_creation_failure_policy_confirmed",
         message=(
-            "First real submit needs a fail-closed policy for entry-filled but "
-            "protection-order creation failed incidents."
+            "First real submit needs a fail-closed policy for entry-filled "
+            "but protection-order creation failed incidents."
         ),
         facts={
             "incident_kind": "entry_filled_protection_creation_failed",
@@ -250,6 +250,26 @@ def evaluate_strategy_runtime_safety_readiness(
         confirmation_key="stale_fact_behavior_confirmed",
         message="Unavailable or stale account/position/protection facts must block execution.",
         facts={"missing_or_stale_behavior": "block"},
+    )
+    add(
+        "trusted_submit_fact_snapshot_required",
+        RuntimeSafetyRequirementStatus.WARN,
+        confirmation_key="trusted_submit_fact_snapshot_id",
+        message="First real submit requires a concrete trusted submit fact snapshot, not only checkbox confirmations.",
+        facts={
+            "required_snapshot": "account_position_open_order_protection_market_rule_reconciliation",
+            "missing_or_stale_behavior": "block",
+        },
+    )
+    add(
+        "submit_idempotency_policy_required",
+        RuntimeSafetyRequirementStatus.WARN,
+        confirmation_key="submit_idempotency_policy_id",
+        message="First real submit requires a concrete duplicate-submit/idempotency policy snapshot.",
+        facts={
+            "lock_identity": "authorization_id",
+            "duplicate_behavior": "replay_existing_result_or_block",
+        },
     )
 
     blockers = sorted(
