@@ -120,6 +120,7 @@ from src.infrastructure.pg_runtime_execution_exchange_submit_execution_result_re
 from src.infrastructure.pg_runtime_execution_order_lifecycle_adapter_result_repository import (
     PgRuntimeExecutionOrderLifecycleAdapterResultRepository,
 )
+from src.interfaces import api_trading_console as api_module
 
 
 NOW_MS = 1781090000000
@@ -1149,6 +1150,107 @@ def test_local_registration_action_authorization_blocks_without_owner_confirmati
         in authorization.blockers
     )
     assert authorization.local_order_registration_executed is False
+    assert authorization.exchange_called is False
+
+
+@pytest.mark.asyncio
+async def test_api_records_local_registration_action_authorization(monkeypatch):
+    class FakeService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def record_local_registration_action_authorization_for_authorization(
+            self,
+            authorization_id: str,
+            **kwargs,
+        ):
+            self.calls.append((authorization_id, kwargs))
+            return build_runtime_execution_local_registration_action_authorization(
+                registration_preview=_registration_preview(),
+                trusted_submit_fact_snapshot_id=(
+                    kwargs["trusted_submit_fact_snapshot_id"]
+                ),
+                submit_idempotency_policy_id=(
+                    kwargs["submit_idempotency_policy_id"]
+                ),
+                attempt_outcome_policy_id=kwargs["attempt_outcome_policy_id"],
+                protection_creation_failure_policy_id=(
+                    kwargs["protection_creation_failure_policy_id"]
+                ),
+                owner_real_submit_authorization_id=(
+                    kwargs["owner_real_submit_authorization_id"]
+                ),
+                order_lifecycle_adapter_enablement_id=(
+                    kwargs["order_lifecycle_adapter_enablement_id"]
+                ),
+                local_order_registration_enablement_id=(
+                    kwargs["local_order_registration_enablement_id"]
+                ),
+                owner_confirmed_for_local_registration_action=(
+                    kwargs["owner_confirmed_for_local_registration_action"]
+                ),
+                owner_operator_id=kwargs["owner_operator_id"],
+                reason=kwargs["reason"],
+                deployment_readiness_evidence_id=(
+                    kwargs["deployment_readiness_evidence_id"]
+                ),
+                owner_confirmation_reference=(
+                    kwargs["owner_confirmation_reference"]
+                ),
+                expires_at_ms=kwargs["expires_at_ms"],
+                now_ms=NOW_MS + 1,
+            )
+
+    service = FakeService()
+
+    async def fake_service_factory():
+        return service
+
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_execution_intent_adapter_service",
+        fake_service_factory,
+    )
+
+    authorization = await (
+        api_module
+        .record_runtime_execution_local_registration_action_authorization(
+            "auth-1",
+            trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+            submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+            attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+            protection_creation_failure_policy_id=(
+                "protection-failure-policy-intent-1"
+            ),
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_adapter_enablement_id="adapter-enablement-1",
+            local_order_registration_enablement_id=(
+                "local-registration-enablement-1"
+            ),
+            owner_confirmed_for_local_registration_action=True,
+            owner_operator_id="owner",
+            reason="scoped local registration action api confirmation",
+            deployment_readiness_evidence_id=(
+                "runtime-exchange-gateway-readiness-1"
+            ),
+            owner_confirmation_reference="owner-note-1",
+            expires_at_ms=NOW_MS + 100000,
+        )
+    )
+
+    assert len(service.calls) == 1
+    assert service.calls[0][0] == "auth-1"
+    assert service.calls[0][1]["owner_confirmed_for_local_registration_action"] is True
+    assert service.calls[0][1]["owner_confirmation_reference"] == "owner-note-1"
+    assert (
+        authorization.status
+        == RuntimeExecutionLocalRegistrationActionAuthorizationStatus
+        .APPROVED_FOR_LOCAL_REGISTRATION_ACTION
+    )
+    assert authorization.not_real_submit_authority is True
+    assert authorization.not_exchange_order_authority is True
+    assert authorization.local_order_registration_executed is False
+    assert authorization.order_lifecycle_called is False
     assert authorization.exchange_called is False
 
 
