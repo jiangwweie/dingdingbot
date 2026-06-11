@@ -1288,6 +1288,43 @@ async def test_adapter_result_requires_persistent_repo_before_registration():
 
 
 @pytest.mark.asyncio
+async def test_adapter_result_revalidates_action_authorization_before_registration():
+    preview = _registration_preview()
+    lifecycle = _Lifecycle()
+    adapter_result_repo = _AdapterResultRepo()
+    service = _service_with_preview(
+        preview,
+        lifecycle=lifecycle,
+        adapter_result_repo=adapter_result_repo,
+        local_registration_action_authorization_repo=(
+            _LocalRegistrationActionAuthorizationRepo(
+                authorization_id=preview.authorization_id,
+                execution_intent_id=preview.execution_intent_id,
+                runtime_instance_id=preview.runtime_instance_id,
+                symbol=preview.symbol,
+                missing=True,
+            )
+        ),
+    )
+    decision = _ready_enablement_decision(preview)
+
+    result = await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=decision,
+    )
+
+    assert result.status == RuntimeExecutionOrderLifecycleAdapterResultStatus.BLOCKED
+    assert "local_registration_action_authorization_not_found" in result.blockers
+    assert result.local_order_registration_executed is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+    assert lifecycle.calls == []
+    assert adapter_result_repo.acquire_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_adapter_result_registers_created_local_orders_and_replays():
     preview = _registration_preview()
     lifecycle = _Lifecycle()
@@ -2114,6 +2151,13 @@ async def test_service_blocks_exchange_submit_enablement_with_unsafe_trusted_sub
         adapter_result_repo=adapter_result_repo,
         intent_repo=intent_repo,
     )
+    local_decision = _ready_enablement_decision(preview)
+    await service.order_lifecycle_adapter_result_for_authorization(
+        "auth-1",
+        order_lifecycle_adapter_enabled=True,
+        local_order_registration_enabled=True,
+        local_registration_enablement_decision=local_decision,
+    )
     service._trusted_submit_facts_repository = _TrustedSubmitFactsRepo(
         execution_intent_id=preview.execution_intent_id,
         runtime_instance_id=preview.runtime_instance_id,
@@ -2126,13 +2170,6 @@ async def test_service_blocks_exchange_submit_enablement_with_unsafe_trusted_sub
         order_created=True,
         exchange_called=True,
         order_lifecycle_called=True,
-    )
-    local_decision = _ready_enablement_decision(preview)
-    await service.order_lifecycle_adapter_result_for_authorization(
-        "auth-1",
-        order_lifecycle_adapter_enabled=True,
-        local_order_registration_enabled=True,
-        local_registration_enablement_decision=local_decision,
     )
 
     exchange_decision = (

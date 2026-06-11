@@ -1470,6 +1470,20 @@ class RuntimeExecutionIntentAdapterService:
                     gate_blockers.append(
                         "local_registration_enablement_decision_authorization_mismatch"
                     )
+                if (
+                    local_registration_enablement_decision.execution_intent_id
+                    != registration_preview.execution_intent_id
+                ):
+                    gate_blockers.append(
+                        "local_registration_enablement_decision_intent_mismatch"
+                    )
+                if (
+                    local_registration_enablement_decision.runtime_instance_id
+                    != registration_preview.runtime_instance_id
+                ):
+                    gate_blockers.append(
+                        "local_registration_enablement_decision_runtime_mismatch"
+                    )
                 local_registration_gate = (
                     local_registration_enablement_decision.local_registration_gate
                 )
@@ -1484,6 +1498,57 @@ class RuntimeExecutionIntentAdapterService:
                     gate_blockers.extend(
                         local_registration_enablement_decision.blockers
                     )
+                else:
+                    action_blockers, action_warnings = (
+                        await self._validate_first_real_submit_prerequisite_evidence(
+                            authorization_id=authorization_id,
+                            execution_intent_id=(
+                                registration_preview.execution_intent_id
+                            ),
+                            runtime_instance_id=(
+                                registration_preview.runtime_instance_id
+                            ),
+                            symbol=registration_preview.symbol,
+                            trusted_submit_fact_snapshot_id=(
+                                local_registration_enablement_decision
+                                .trusted_submit_fact_snapshot_id
+                            ),
+                            submit_idempotency_policy_id=(
+                                local_registration_enablement_decision
+                                .submit_idempotency_policy_id
+                            ),
+                            attempt_outcome_policy_id=(
+                                local_registration_enablement_decision
+                                .attempt_outcome_policy_id
+                            ),
+                            protection_creation_failure_policy_id=(
+                                local_registration_enablement_decision
+                                .protection_creation_failure_policy_id
+                            ),
+                            owner_real_submit_authorization_id=(
+                                local_registration_enablement_decision
+                                .owner_real_submit_authorization_id
+                            ),
+                            order_lifecycle_adapter_enablement_id=(
+                                local_registration_enablement_decision
+                                .order_lifecycle_adapter_enablement_id
+                            ),
+                            local_order_registration_enablement_id=(
+                                local_registration_enablement_decision
+                                .local_order_registration_enablement_id
+                            ),
+                            local_registration_action_authorization_id=(
+                                local_registration_enablement_decision
+                                .local_registration_action_authorization_id
+                            ),
+                            deployment_readiness_evidence_id=(
+                                local_registration_enablement_decision
+                                .deployment_readiness_evidence_id
+                            ),
+                        )
+                    )
+                    gate_blockers.extend(action_blockers)
+                    gate_warnings.extend(action_warnings)
                 gate_warnings.extend(local_registration_enablement_decision.warnings)
 
             if local_registration_gate is not None:
