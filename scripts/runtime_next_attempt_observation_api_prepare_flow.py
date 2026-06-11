@@ -17,7 +17,7 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Callable
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -198,6 +198,7 @@ def _build_packet(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
+    prepare_runner: Callable[[argparse.Namespace, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     _load_env_file(args.env_file)
     api_client = client or UrlLibApiClient(api_base=_api_base(args))
@@ -323,7 +324,10 @@ def _build_packet(
             ),
         }
 
-    prepare_packet = _run_prepare_flow(args, signal_input_json=signal_input_json)
+    if prepare_runner is not None:
+        prepare_packet = prepare_runner(args, signal_input_json)
+    else:
+        prepare_packet = _run_prepare_flow(args, signal_input_json=signal_input_json)
     return {
         "scope": "runtime_next_attempt_observation_api_prepare_flow",
         "status": prepare_packet.get("status") or "blocked",
