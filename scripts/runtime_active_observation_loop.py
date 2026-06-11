@@ -133,12 +133,53 @@ def _build_loop_packet(
             packets.append(packet)
 
         final_status = status
-        if status in STOP_STATUSES or status != WAITING_STATUS:
+        should_stop = status in STOP_STATUSES or status != WAITING_STATUS
+        if should_stop:
             stop_reason = f"status_changed:{status}"
+
+        if args.loop_output_json:
+            interim_stop_reason = stop_reason
+            if not should_stop and iteration < max_iterations:
+                interim_stop_reason = "running"
+            _write_json(
+                Path(args.loop_output_json).expanduser(),
+                _loop_packet(
+                    args,
+                    root=root,
+                    summaries=summaries,
+                    packets=packets,
+                    final_status=final_status,
+                    stop_reason=interim_stop_reason,
+                    max_iterations=max_iterations,
+                ),
+            )
+
+        if should_stop:
             break
         if iteration < max_iterations:
             sleeper(float(args.loop_interval_seconds or 0))
 
+    return _loop_packet(
+        args,
+        root=root,
+        summaries=summaries,
+        packets=packets,
+        final_status=final_status,
+        stop_reason=stop_reason,
+        max_iterations=max_iterations,
+    )
+
+
+def _loop_packet(
+    args: argparse.Namespace,
+    *,
+    root: Path,
+    summaries: list[dict[str, Any]],
+    packets: list[dict[str, Any]],
+    final_status: str,
+    stop_reason: str,
+    max_iterations: int,
+) -> dict[str, Any]:
     return {
         "scope": "runtime_active_observation_loop",
         "status": final_status,

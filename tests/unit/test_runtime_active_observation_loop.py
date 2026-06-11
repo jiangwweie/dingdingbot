@@ -5,7 +5,14 @@ import json
 from scripts import runtime_active_observation_loop
 
 
-def _args(tmp_path, *, max_iterations=3, interval=0.0, include_packets=False):
+def _args(
+    tmp_path,
+    *,
+    max_iterations=3,
+    interval=0.0,
+    include_packets=False,
+    loop_output_json=None,
+):
     monitor_args = type(
         "MonitorArgs",
         (),
@@ -20,7 +27,7 @@ def _args(tmp_path, *, max_iterations=3, interval=0.0, include_packets=False):
         {
             "max_iterations": max_iterations,
             "loop_interval_seconds": interval,
-            "loop_output_json": None,
+            "loop_output_json": loop_output_json,
             "include_packets": include_packets,
             "output_dir": str(tmp_path / "loop"),
             "monitor_args": monitor_args,
@@ -90,6 +97,40 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
     assert (tmp_path / "loop" / "latest-status.txt").read_text().strip() == (
         "waiting_for_signal"
     )
+
+
+def test_active_observation_loop_refreshes_aggregate_packet_each_cycle(tmp_path):
+    output_path = tmp_path / "loop-packet.json"
+    snapshots = []
+
+    def builder(args):
+        return _packet()
+
+    def sleeper(seconds):
+        assert seconds == 10.0
+        snapshots.append(json.loads(output_path.read_text()))
+
+    packet = runtime_active_observation_loop._build_loop_packet(
+        _args(
+            tmp_path,
+            max_iterations=2,
+            interval=10.0,
+            loop_output_json=str(output_path),
+        ),
+        packet_builder=builder,
+        sleeper=sleeper,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0]["status"] == "waiting_for_signal"
+    assert snapshots[0]["stop_reason"] == "running"
+    assert snapshots[0]["iterations_completed"] == 1
+
+    latest_file = json.loads(output_path.read_text())
+    assert latest_file["stop_reason"] == "max_iterations_exhausted"
+    assert latest_file["iterations_completed"] == 2
+    assert latest_file == packet
 
 
 def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path):
