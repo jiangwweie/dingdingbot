@@ -307,3 +307,53 @@ def test_followup_blocks_when_disabled_smoke_touches_forbidden_surfaces():
     assert packet["safety_invariants"]["disabled_smoke_forbidden_effects"] == [
         "apply_attempt_mutation:attempt_mutation"
     ]
+
+
+def test_builtin_disabled_smoke_reuses_arm_evidence_ids(monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *, api_base):
+            captured["api_base"] = api_base
+
+    class FakeFlow:
+        def __init__(self, *, client, config):
+            captured["config"] = config
+
+        def run(self):
+            return _disabled_smoke_report()
+
+    monkeypatch.setattr(runtime_active_observation_followup, "_load_env_file", lambda path: None)
+    monkeypatch.setattr(runtime_active_observation_followup, "UrlLibApiClient", FakeClient)
+    monkeypatch.setattr(runtime_active_observation_followup, "FirstRealSubmitApiFlow", FakeFlow)
+
+    runtime_active_observation_followup._run_disabled_smoke(
+        authorization_id="auth-1",
+        args=_args(allow_disabled_smoke=True),
+        evidence_ids={
+            "trusted_submit_fact_snapshot_id": "facts-1",
+            "submit_idempotency_policy_id": "idem-1",
+            "attempt_outcome_policy_id": "attempt-policy-1",
+            "protection_creation_failure_policy_id": "protection-policy-1",
+            "local_registration_enablement_decision_id": "local-enable-1",
+            "owner_real_submit_authorization_id": "owner-auth-1",
+            "order_lifecycle_submit_enablement_id": "ol-submit-1",
+            "exchange_submit_adapter_enablement_id": "exchange-enable-1",
+            "exchange_submit_action_authorization_id": "exchange-action-1",
+            "deployment_readiness_evidence_id": "deploy-1",
+            "exchange_submit_adapter_result_id": "exchange-result-1",
+        },
+    )
+
+    config = captured["config"]
+    assert config.trusted_submit_fact_snapshot_id == "facts-1"
+    assert config.submit_idempotency_policy_id == "idem-1"
+    assert config.attempt_outcome_policy_id == "attempt-policy-1"
+    assert config.protection_creation_failure_policy_id == "protection-policy-1"
+    assert config.local_registration_enablement_decision_id == "local-enable-1"
+    assert config.owner_real_submit_authorization_id == "owner-auth-1"
+    assert config.order_lifecycle_submit_enablement_id == "ol-submit-1"
+    assert config.exchange_submit_adapter_enablement_id == "exchange-enable-1"
+    assert config.exchange_submit_action_authorization_id == "exchange-action-1"
+    assert config.deployment_readiness_evidence_id == "deploy-1"
+    assert config.exchange_submit_adapter_result_id == "exchange-result-1"

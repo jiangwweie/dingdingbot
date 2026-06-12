@@ -14,7 +14,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -114,13 +114,46 @@ def _run_disabled_smoke(
     *,
     authorization_id: str,
     args: argparse.Namespace,
+    evidence_ids: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _load_env_file(args.env_file)
+    ids = evidence_ids or {}
     config = FlowConfig(
         api_base=args.api_base,
         mode="disabled-smoke",
         env_file=args.env_file,
         authorization_id=authorization_id,
+        trusted_submit_fact_snapshot_id=_optional_id(
+            ids, "trusted_submit_fact_snapshot_id"
+        ),
+        submit_idempotency_policy_id=_optional_id(
+            ids, "submit_idempotency_policy_id"
+        ),
+        attempt_outcome_policy_id=_optional_id(ids, "attempt_outcome_policy_id"),
+        protection_creation_failure_policy_id=_optional_id(
+            ids, "protection_creation_failure_policy_id"
+        ),
+        local_registration_enablement_decision_id=_optional_id(
+            ids, "local_registration_enablement_decision_id"
+        ),
+        owner_real_submit_authorization_id=_optional_id(
+            ids, "owner_real_submit_authorization_id"
+        ),
+        order_lifecycle_submit_enablement_id=_optional_id(
+            ids, "order_lifecycle_submit_enablement_id"
+        ),
+        exchange_submit_adapter_enablement_id=_optional_id(
+            ids, "exchange_submit_adapter_enablement_id"
+        ),
+        exchange_submit_action_authorization_id=_optional_id(
+            ids, "exchange_submit_action_authorization_id"
+        ),
+        deployment_readiness_evidence_id=_optional_id(
+            ids, "deployment_readiness_evidence_id"
+        ),
+        exchange_submit_adapter_result_id=_optional_id(
+            ids, "exchange_submit_adapter_result_id"
+        ),
         explain_disabled_smoke_prerequisites=(
             not args.skip_disabled_smoke_prerequisite_probe
         ),
@@ -129,6 +162,12 @@ def _run_disabled_smoke(
         client=UrlLibApiClient(api_base=config.api_base),
         config=config,
     ).run()
+
+
+def _optional_id(ids: Mapping[str, Any], key: str) -> str | None:
+    value = ids.get(key)
+    text = str(value or "").strip()
+    return text or None
 
 
 def _run_arm_preview(
@@ -259,13 +298,14 @@ def build_followup_packet(
             )
             if arm_forbidden:
                 blockers.append("arm_preview_contains_forbidden_effects")
-        runner = disabled_smoke_runner or (
-            lambda auth_id, parsed_args: _run_disabled_smoke(
-                authorization_id=auth_id,
-                args=parsed_args,
+        if disabled_smoke_runner is not None:
+            disabled_report = disabled_smoke_runner(authorization_id, args)
+        else:
+            disabled_report = _run_disabled_smoke(
+                authorization_id=authorization_id,
+                args=args,
+                evidence_ids=_as_dict((arm_report or {}).get("ids")),
             )
-        )
-        disabled_report = runner(authorization_id, args)
         disabled_forbidden = _disabled_smoke_forbidden_effects(disabled_report)
         blockers.extend(
             f"disabled_smoke:{item}"
