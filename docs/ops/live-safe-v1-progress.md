@@ -16,6 +16,45 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-004 Next-attempt Release Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `ae05b1d4`.
+- Added `RuntimeNextAttemptReleasePacket`:
+  - joins `RuntimeActivePositionResolutionPacket` with an optional
+    non-executing next-attempt gate packet;
+  - classifies release into:
+    `waiting_for_position_resolution`, `waiting_for_closed_review`,
+    `waiting_for_next_attempt_gate`, `ready_for_strategy_signal`, or
+    `blocked`;
+  - only allows strategy signal observation / shadow candidate planning when
+    active-position resolution is `ready_for_next_attempt_gate` and the
+    next-attempt gate is clear;
+  - keeps executable submit disabled and still requires fresh strategy signal,
+    fresh authorization, and official FinalGate before any future submit.
+- Added `scripts/runtime_next_attempt_release_from_reports.py`:
+  - reads existing active-position-resolution and next-attempt-gate JSON
+    reports;
+  - tolerates noisy log lines before JSON payloads;
+  - emits a packet-only release decision plus operator command plan.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_next_attempt_release.py tests/unit/test_runtime_next_attempt_release_from_reports.py tests/unit/test_runtime_active_position_resolution.py tests/unit/test_runtime_active_position_resolution_from_reports.py tests/unit/test_runtime_post_close_followup.py tests/unit/test_runtime_post_close_followup_script.py tests/unit/test_runtime_next_attempt_gate_packet_script.py`
+    with `24 passed`;
+  - `python3 -m compileall src/domain/runtime_next_attempt_release.py scripts/runtime_next_attempt_release_from_reports.py tests/unit/test_runtime_next_attempt_release.py tests/unit/test_runtime_next_attempt_release_from_reports.py`;
+  - `git diff --check`.
+- Safety:
+  - no deployment in this stage;
+  - no PG read/write;
+  - no exchange read/write;
+  - no exchange order submit;
+  - no `ExecutionIntent` creation;
+  - no `OrderLifecycle.submit_order`;
+  - no order creation/cancel/close;
+  - no runtime state mutation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-003 Tokyo Deploy + Active Position Resolution Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
