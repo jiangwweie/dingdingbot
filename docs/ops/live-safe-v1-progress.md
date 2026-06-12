@@ -6579,3 +6579,43 @@ Use this file for session progress and handoff notes.
     `ExecutionIntent`, local orders, or exchange orders;
   - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
     transfers.
+
+## 2026-06-13 (RTF-037 Runtime Profile Confirmation Apply Packet)
+
+- Added a local non-mutating runtime profile confirmation apply packet builder:
+  - `scripts/runtime_profile_confirmation_apply_packet.py`;
+  - `tests/unit/test_runtime_profile_confirmation_apply_packet.py`.
+- Purpose:
+  - consume the RTF-036 runtime profile decision packet;
+  - derive the exact Owner confirmation value required for the RBR/ADA short
+    runtime profile;
+  - require a concrete `trial_binding_id` before any runtime-draft API request
+    can be considered ready;
+  - prepare the two official API requests needed after Owner/Codex confirmation:
+    1. `POST /api/brc/strategy-runtime-promotion-confirmations`;
+    2. `POST /api/brc/strategy-runtime-promotion-confirmations/{id}/runtime-drafts`;
+  - avoid manual request assembly for profile confirmation and shadow runtime
+    draft creation.
+- Current local artifact:
+  - input decision packet:
+    `output/rtf036-local/runtime-profile-decision-packet.json`;
+  - output apply packet:
+    `output/rtf037-local/runtime-profile-confirmation-apply-packet.json`;
+  - status: `waiting_for_owner_runtime_profile_confirmation`;
+  - required Owner confirmation value:
+    `runtime-profile-confirm:RBR-001:RBR-001-v0:ADA/USDT:USDT:short:budget=6.00:notional=8.00:attempts=3:owner-authorized`;
+  - API apply plan: `null` until the confirmation value matches and a
+    `trial_binding_id` is supplied.
+- Focused verification:
+  - `pytest -q tests/unit/test_runtime_profile_decision_packet.py
+    tests/unit/test_runtime_profile_confirmation_apply_packet.py
+    tests/unit/test_strategy_runtime_promotion_confirmation_api.py`
+    passed with `16 passed`.
+- Safety:
+  - RTF-037 creates no promotion confirmation record;
+  - it does not write PG;
+  - it does not create, enable, or activate a runtime;
+  - it does not create `SignalEvaluation`, `OrderCandidate`,
+    `ExecutionIntent`, local orders, or exchange orders;
+  - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
+    transfers.
