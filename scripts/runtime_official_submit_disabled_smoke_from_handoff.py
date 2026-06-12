@@ -91,10 +91,11 @@ def _build_report(
             handoff=handoff,
             status="blocked",
             blocked_stage="handoff_precondition",
-            blockers=blockers,
-            warnings=[],
-            response=None,
-        )
+        blockers=blockers,
+        warnings=[],
+        response=None,
+        official_endpoint_called=False,
+    )
 
     query = dict(handoff.official_query)
     query["owner_confirmed_for_first_real_submit_action"] = False
@@ -136,6 +137,7 @@ def _build_report(
         blockers=response_blockers,
         warnings=response_warnings,
         response=response,
+        official_endpoint_called=True,
     )
 
 
@@ -175,6 +177,7 @@ def _report(
     blockers: list[str],
     warnings: list[str],
     response: dict[str, Any] | None,
+    official_endpoint_called: bool,
 ) -> dict[str, Any]:
     body = response.get("body") if response else None
     if not isinstance(body, dict):
@@ -198,7 +201,10 @@ def _report(
         "api_payload": body,
         "blockers": _dedupe(blockers),
         "warnings": _dedupe(list(handoff.warnings) + warnings),
-        "safety_invariants": _safety(response_body=body),
+        "safety_invariants": _safety(
+            response_body=body,
+            official_endpoint_called=official_endpoint_called,
+        ),
     }
     if blocked_stage:
         report["blocked_stage"] = blocked_stage
@@ -210,10 +216,14 @@ def _report(
     return report
 
 
-def _safety(*, response_body: dict[str, Any]) -> dict[str, bool]:
+def _safety(
+    *,
+    response_body: dict[str, Any],
+    official_endpoint_called: bool,
+) -> dict[str, bool]:
     return {
         "uses_existing_official_submit_endpoint": True,
-        "calls_official_submit_endpoint": True,
+        "calls_official_submit_endpoint": official_endpoint_called,
         "requests_real_gateway_action": False,
         "owner_confirmed_for_first_real_submit_action": False,
         "exchange_submit_execution_enabled": (

@@ -97,6 +97,7 @@ def test_disabled_smoke_from_handoff_blocks_unready_handoff_without_call(tmp_pat
     assert report["blocked_stage"] == "handoff_precondition"
     assert "handoff_not_ready_for_official_submit_call" in report["blockers"]
     assert "handoff:handoff-blocked" in report["blockers"]
+    assert report["safety_invariants"]["calls_official_submit_endpoint"] is False
     assert client.calls == []
 
 
