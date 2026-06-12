@@ -7063,3 +7063,51 @@ Use this file for session progress and handoff notes.
   - no order, `OrderLifecycle`, exchange write, position open/close,
     withdrawal, transfer, attempt counter mutation, or runtime budget mutation
     occurred.
+
+## 2026-06-13 (RTF-046 Ready Prepare Rehearsal)
+
+- Reused the existing ready-signal prepare rehearsal verifier:
+  - `scripts/verify_runtime_observation_api_prepare_ready_rehearsal.py`.
+- Purpose:
+  - prove that a ready observation payload stops at `ready_for_prepare` when
+    prepare records are not explicitly allowed;
+  - prove that the same ready observation can reach
+    `ready_for_final_gate_preflight` when prepare records are explicitly
+    allowed;
+  - prove the path still does not submit, call `OrderLifecycle`, call exchange,
+    mutate attempts or budget, or move funds.
+- Local rehearsal artifact:
+  - `output/rtf046-local/ready-prepare-rehearsal.json`;
+  - status: `rehearsal_passed`;
+  - prepared authorization ID: `auth-ready-rehearsal`;
+  - real submit authorized: `false`.
+- Tokyo rehearsal artifact:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf046-ready-prepare-rehearsal/20260613Trtf046/ready-prepare-rehearsal.json`;
+  - local copy:
+    `output/rtf046-tokyo/ready-prepare-rehearsal.json`;
+  - status: `rehearsal_passed`;
+  - prepared authorization ID: `auth-ready-rehearsal`;
+  - real submit authorized: `false`.
+- Checks:
+  - ready signal rehearsed: `true`;
+  - ready without allow stops before prepare: `true`;
+  - explicit prepare permission reaches final gate preflight: `true`;
+  - prepared authorization ID present: `true`;
+  - forbidden execution flags: `[]`.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_observation_api_prepare_ready_rehearsal.py
+    tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py
+    tests/unit/test_runtime_next_attempt_observation_monitor.py`;
+  - result: `13 passed`.
+- Safety:
+  - rehearsal is local / in-memory only;
+  - database connected: `false`;
+  - HTTP network called: `false`;
+  - exchange called: `false`;
+  - order created: `false`;
+  - `OrderLifecycle` called: `false`;
+  - real submit authorized: `false`;
+  - withdrawal or transfer created: `false`;
+  - attempt counter mutation and runtime budget mutation remain forbidden in
+    the prepare rehearsal path.
