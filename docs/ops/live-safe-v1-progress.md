@@ -16,6 +16,90 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-029 Tokyo Post-submit Finalize API + Next-attempt Gate Probe)
+
+- Confirmed current mainline workspace and branch before deployment /
+  integration verification:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed code HEAD: `ed88fbb2`;
+  - local and remote branch both pointed at `ed88fbb2` before the stage commit.
+- Deployed the current program branch to Tokyo using the git-based deploy path:
+  - release:
+    `brc-runtime-governance-ed88fbb2-20260613Trtf029-post-submit-finalize-api`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - deploy report:
+    `output/rtf029-tokyo/git-deploy-applied-ed88fbb2.json`;
+  - deploy effects: database backup created, migrations run, service restarted;
+  - deploy safety flags: no exchange call, no order, no `ExecutionIntent`, no
+    `OrderLifecycle`, no secret values printed by Codex.
+- Verified Tokyo after deployment:
+  - read-only probe:
+    `output/rtf029-tokyo/readonly-probe-after-ed88fbb2.json`;
+  - postdeploy verifier:
+    `output/rtf029-tokyo/postdeploy-verify-ed88fbb2.json`;
+  - both returned no blockers, current release symlink pointed at `ed88fbb2`,
+    and migration count remained `84` with latest migration
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Resolved current runtime submit evidence from Tokyo PG facts:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - latest submit authorization:
+    `runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - latest execution intent:
+    `intent_rt_6ca3cecd63fafbd1d25760df`;
+  - latest reservation:
+    `runtime-attempt-reservation-runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - latest durable execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - latest settlement:
+    `runtime-post-submit-budget-settlement-runtime-first-real-submit-outcome-accounting-runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - symbol / side: `AVAX/USDT:USDT` / `short`;
+  - durable result status: `exchange_submit_orders_submitted`;
+  - settlement status: `recorded_reserved_budget_consumed`.
+- Ran the Tokyo post-submit finalize API probe:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf029-post-submit-finalize-api/20260613Trtf029-ed88fbb2/post-submit-finalize-api-flow.json`;
+  - local copy:
+    `output/rtf029-tokyo/post-submit-finalize-api-flow.json`;
+  - status: `finalized_ready_for_next_attempt`;
+  - next-attempt gate status: `ready_for_fresh_signal`;
+  - blockers: none.
+- Ran the Tokyo next-attempt strategy planning API probe:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf029-post-submit-finalize-api/20260613Trtf029-ed88fbb2/next-attempt-strategy-plan-api-flow.json`;
+  - local copy:
+    `output/rtf029-tokyo/next-attempt-strategy-plan-api-flow.json`;
+  - status: `waiting_for_signal`;
+  - blocker: `strategy_signal_not_would_enter`;
+  - signal evaluation ID:
+    `runtime-signal-input:strategy-runtime-95655873b76c:BTPC-001:1781179200000`;
+  - order candidate ID: none.
+- Interpretation:
+  - the runtime no longer treats the already submitted attempt as a pre-submit
+    rehearsal problem;
+  - durable submit result -> existing submit outcome review / settlement ->
+    post-submit finalize now reaches `ready_for_fresh_signal`;
+  - the chain correctly stops at current strategy semantics because the latest
+    AVAX / BTPC signal is observe-only rather than an executable entry signal;
+  - this is now a strategy-signal wait state, not an execution-chain blocker.
+- Safety:
+  - no pre-submit rehearsal retry was used for the already submitted attempt;
+  - no local registration was armed;
+  - no first-real-submit action was called;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no order was created or submitted by this stage;
+  - no runtime budget was mutated by the probe script;
+  - no position was opened or closed;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `90%` to `92%`;
+  - next target is to turn this wait state into the normal loop:
+    fresh strategy signal -> shadow candidate -> FinalGate / runtime grant ->
+    bounded executable attempt, while preserving post-submit finalize as the
+    recurring close-out path.
+
 ## 2026-06-13 (RTF-028 Runtime Post-submit Finalize API + Latest Result Resolution)
 
 - Confirmed current mainline workspace and branch before implementation:
