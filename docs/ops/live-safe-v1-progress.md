@@ -7310,3 +7310,61 @@ Use this file for session progress and handoff notes.
 - Deployment:
   - not deployed in this stage;
   - this is local submit-preparation proof before Tokyo integration.
+
+## 2026-06-13 (RTF-051 Official Submit Action-time Bridge)
+
+- Added local verifier:
+  - `scripts/verify_runtime_official_submit_action_time_bridge.py`.
+- Purpose:
+  - start from the RTF-050 official-submit handoff packet;
+  - drive the existing disabled-smoke official first-real-submit flow with a
+    fake API client;
+  - prove the action-time `POST` method, official endpoint path, query evidence
+    IDs, and `owner_confirmed_for_first_real_submit_action=false` contract;
+  - prove disabled-smoke refuses a real-gateway-action handoff before any
+    official endpoint call;
+  - prove a disabled-smoke response that unexpectedly reports exchange submit
+    enabled is blocked.
+- Local artifact:
+  - `output/rtf051-local/official-submit-action-time-bridge.json`;
+  - status: `rtf051_official_submit_action_time_bridge_passed`;
+  - scenario count: `3`.
+- Scenarios:
+  - `disabled-smoke-action-time-from-rtf050-handoff`: official endpoint
+    contract exercised once through a fake client, status
+    `disabled_smoke_passed`;
+  - `real-gateway-handoff-refused-by-disabled-smoke`: blocked before endpoint
+    call with `disabled_smoke_refuses_real_gateway_handoff`;
+  - `disabled-smoke-enabled-response-blocked`: endpoint contract exercised
+    once, then blocked by `disabled_smoke_response_enabled_exchange_submit`.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_official_submit_action_time_bridge_verifier.py
+    tests/unit/test_runtime_next_attempt_submit_preparation_bridge_verifier.py
+    tests/unit/test_runtime_official_submit_disabled_smoke_from_handoff.py
+    tests/unit/test_runtime_first_real_submit_api_flow.py -k
+    'official_submit_action_time_bridge or next_attempt_submit_preparation_bridge
+    or disabled_smoke_from_handoff or disabled_smoke'`;
+  - result: `13 passed, 19 deselected`.
+- Safety:
+  - local fake client only: `true`;
+  - database connected: `false`;
+  - HTTP network called: `false`;
+  - official submit endpoint contract exercised: `true`;
+  - real gateway action requested: `false`;
+  - Owner confirmed real submit action: `false`;
+  - exchange write called: `false`;
+  - `OrderLifecycle` called: `false`;
+  - execution intent created: `false`;
+  - order created: `false`;
+  - runtime state mutated: `false`;
+  - withdrawal or transfer created: `false`.
+- Execution semantics:
+  - RTF-051 proves action-time input shape and disabled-smoke behavior only;
+  - it does not execute real gateway submit;
+  - the real submit path remains the official runtime / Operation Layer path
+    with current action-time gates, fresh authorization, protection, idempotency,
+    trusted facts, and deployment evidence.
+- Deployment:
+  - not deployed in this stage;
+  - the next deployment should be a selected Tokyo integration probe, not
+    first-pass node debugging.
