@@ -164,6 +164,10 @@ def build_git_deploy_plan(
     app_current = f"{deploy_root}/app/current"
     remote_release_path = f"{releases_dir}/{final_release_name}"
     remote_tmp_release_path = f"{remote_release_path}.tmp"
+    previous_release_path = _remote_release_path(
+        releases_dir=releases_dir,
+        previous_release=previous_release,
+    )
     backup_path = f"{backups_dir}/{final_release_name}.pgdump"
     release_manifest = f"{remote_release_path}/.brc-release-manifest.json"
     manifest_payload = _release_manifest_payload(
@@ -193,7 +197,7 @@ def build_git_deploy_plan(
         env_path=env_path,
         venv_python=venv_python,
         api_base=api_base,
-        previous_release=previous_release,
+        previous_release_path=previous_release_path,
         expected_deployed_head=expected_deployed_head,
         expected_remote_migration_count=expected_remote_migration_count,
         expected_remote_latest_migration=expected_remote_latest_migration,
@@ -226,6 +230,7 @@ def build_git_deploy_plan(
             "venv_python": venv_python,
             "api_base": api_base,
             "previous_release": previous_release,
+            "previous_release_path": previous_release_path,
             "expected_deployed_head": expected_deployed_head,
             "expected_remote_migration_count": expected_remote_migration_count,
             "expected_remote_latest_migration": expected_remote_latest_migration,
@@ -295,7 +300,7 @@ def _plan_phases(
     env_path: str,
     venv_python: str,
     api_base: str,
-    previous_release: str,
+    previous_release_path: str,
     expected_deployed_head: str,
     expected_remote_migration_count: int,
     expected_remote_latest_migration: str,
@@ -339,7 +344,7 @@ def _plan_phases(
         f"cat > {q(remote_tmp_release_path + '/.brc-release-manifest.json')} <<'JSON'\n"
         f"{manifest_json}\nJSON\n"
         f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}; "
-        f"test $(readlink -f {q(app_current)}) = {q(previous_release)}"
+        f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
 
     return [
@@ -527,6 +532,15 @@ def _ssh(host: str, remote_command: str) -> str:
 def _default_release_name(short_head: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"brc-runtime-governance-{short_head}-{stamp}"
+
+
+def _remote_release_path(*, releases_dir: str, previous_release: str) -> str:
+    normalized = previous_release.strip().rstrip("/")
+    if normalized.startswith("/"):
+        return normalized
+    if "/" in normalized:
+        return normalized
+    return f"{releases_dir.rstrip('/')}/{normalized}"
 
 
 def _migration_files(repo_root: Path) -> list[str]:

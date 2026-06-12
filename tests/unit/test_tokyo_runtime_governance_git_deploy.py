@@ -237,6 +237,51 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "--base-revision 064 --head-revision 070" not in all_commands
 
 
+def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_check():
+    module = _load_plan_module()
+    head = _git("rev-parse", "HEAD")
+    module._tracked_dirty = lambda repo_root: False
+    module._remote_branch_head = lambda *, repo_url, branch: head
+
+    report = module.build_git_deploy_plan(
+        repo_root=REPO_ROOT,
+        repo_url="https://github.com/example/dingdingbot.git",
+        git_ref="release/test",
+        target_commit=head,
+        release_name="brc-runtime-governance-test",
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python=(
+            "/home/ubuntu/brc-deploy/venvs/"
+            "brc-bnb-prelive-20260601/bin/python"
+        ),
+        api_base="http://127.0.0.1:18080",
+        previous_release="current-baseline",
+        expected_deployed_head="baseline-head",
+        expected_remote_migration_count=81,
+        expected_remote_latest_migration=(
+            "2026-06-11-081_create_llm_advisory_plane.py"
+        ),
+    )
+
+    assert report["inputs"]["previous_release"] == "current-baseline"
+    assert report["inputs"]["previous_release_path"] == (
+        "/home/ubuntu/brc-deploy/releases/current-baseline"
+    )
+    export_phase = next(
+        phase
+        for phase in report["plan_phases"]
+        if phase["phase"] == "2_owner_authorized_git_fetch_and_export"
+    )
+    command = export_phase["commands"][0]
+    assert (
+        "test $(readlink -f /home/ubuntu/brc-deploy/app/current) = "
+        "/home/ubuntu/brc-deploy/releases/current-baseline"
+    ) in command
+
+
 def test_git_deploy_executor_dry_run_does_not_execute_commands():
     module = _load_execute_module()
     plan = _ready_git_plan()
