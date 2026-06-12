@@ -6891,3 +6891,73 @@ Use this file for session progress and handoff notes.
   - no `SignalEvaluation`, `OrderCandidate`, `ExecutionIntent`, local order,
     exchange order, `OrderLifecycle`, withdrawal, or transfer path was called;
   - no exchange write occurred.
+
+## 2026-06-13 (RTF-043 Shadow Runtime Activation And Planning Gate Probe)
+
+- Executed the official runtime lifecycle API to activate the RBR/ADA runtime
+  as a shadow runtime.
+- Activation report:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf043-shadow-activation/20260613Trtf043/shadow-activation-probe.json`;
+  - local copy:
+    `output/rtf043-tokyo/shadow-activation-probe.json`;
+  - status: `rtf043_shadow_runtime_activation_passed`;
+  - blockers: `[]`;
+  - before status: `draft`;
+  - after status: `active`;
+  - execution enabled: `false`;
+  - shadow mode: `true`.
+- Runtime activated:
+  - runtime:
+    `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`;
+  - strategy: `RBR-001` / `RBR-001-v0`;
+  - symbol / side: `ADA/USDT:USDT` / `short`.
+- Post-activation readiness:
+  - safety readiness status: `ready_for_owner_codex_confirmation`;
+  - safety readiness blockers: `[]`;
+  - live enablement preview status: `blocked`;
+  - live enablement remains blocked because first-real-submit / final
+    submit-chain evidence has not been supplied for this runtime.
+- Ran the current-market live strategy signal selector:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf043-shadow-activation/20260613Trtf043/live-signal-selector.json`;
+  - local copy:
+    `output/rtf043-tokyo/live-signal-selector.json`;
+  - status: `no_would_enter_signal_available`;
+  - inspected signal count: `8`;
+  - would-enter signal count: `0`;
+  - selected signal: `null`;
+  - expected blocker:
+    `runtime_strategy_signal_not_found_in_strategy_shelf`.
+- Built a current closed-candle signal input for the active runtime:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf043-shadow-activation/20260613Trtf043/current-signal-input-packet.json`;
+  - local copy:
+    `output/rtf043-tokyo/current-signal-input-packet.json`;
+  - status: `observe_only`;
+  - evaluation blocker: `strategy_signal_not_would_enter`;
+  - output signal input:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf043-shadow-activation/20260613Trtf043/current-rbr-ada-signal-input.json`.
+- Called the Trading Console shadow-planning API with the current signal input:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf043-shadow-activation/20260613Trtf043/shadow-planning-gate-probe.json`;
+  - local copy:
+    `output/rtf043-tokyo/shadow-planning-gate-probe.json`;
+  - status: `rtf043_shadow_planning_gate_probe_passed`;
+  - HTTP status: `200`;
+  - planning status: `observe_only`;
+  - planning blocker: `strategy_signal_not_would_enter`;
+  - planner call performed: `false`;
+  - signal evaluation created: `false`;
+  - order candidate created: `false`;
+  - candidate planning result present: `false`.
+- Safety:
+  - RTF-043 mutated only the runtime shadow lifecycle status from `draft` to
+    `active`;
+  - runtime execution remains disabled;
+  - current-market observation and signal-input building were read-only;
+  - the shadow-planning API proved the semantic gate blocks observe-only input
+    before candidate creation;
+  - no `SignalEvaluation`, `OrderCandidate`, `ExecutionIntent`, local order,
+    exchange order, `OrderLifecycle`, withdrawal, or transfer path was called;
+  - no exchange write occurred.
