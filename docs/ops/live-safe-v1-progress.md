@@ -9080,3 +9080,74 @@ Use this file for session progress and handoff notes.
   - the operator can consume supervisor output as a readable no-signal status;
   - the mainline remains ready to continue live signal supervision until a
     genuine runtime-compatible strategy signal appears.
+
+## 2026-06-13 (RTF-073 Live Signal Shadow Planning Bridge)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Added:
+  `scripts/runtime_live_signal_shadow_planning_bridge.py`.
+- Added tests:
+  `tests/unit/test_runtime_live_signal_shadow_planning_bridge.py`.
+- Purpose:
+  bridge an RTF-067 operator cycle or RTF-069 supervisor packet into the
+  existing `next-attempt-strategy-plans` API flow only after the live signal
+  path has reached current-runtime `ready_for_prepare`.
+- Status handling:
+  - `waiting_for_runtime_compatible_signal` /
+    `supervisor_waiting_for_signal`:
+    return `waiting_for_signal` and continue live signal supervision;
+  - `ready_for_owner_runtime_profile_decision` /
+    `supervisor_profile_review_required`:
+    return `profile_review_required` and stop for runtime profile review;
+  - `ready_for_prepare` / `supervisor_prepare_review_required`:
+    call the non-executing next-attempt strategy planning flow;
+  - `ready_for_final_gate_preflight` /
+    `supervisor_final_gate_review_required`:
+    preserve the existing FinalGate-ready path and do not re-plan;
+  - forbidden source effects:
+    block before strategy planning.
+- Local fixture proof:
+  - output:
+    `output/rtf073-local/bridge-report.json`;
+  - status:
+    `ready_for_final_gate_preflight`;
+  - order candidate:
+    `order-candidate-rtf073-fixture`;
+  - creates shadow candidate:
+    `true`;
+  - places order:
+    `false`;
+  - exchange write:
+    `false`.
+- Verification:
+  - `pytest -q tests/unit/test_runtime_live_signal_shadow_planning_bridge.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_runtime_post_submit_next_attempt_cycle.py tests/unit/test_runtime_live_signal_operator_cycle.py tests/unit/test_runtime_live_signal_operator_supervisor.py`;
+  - result:
+    `25 passed`;
+  - `pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py`;
+  - result:
+    `24 passed`;
+  - `python3 -m compileall -q scripts/runtime_live_signal_shadow_planning_bridge.py`;
+  - `git diff --check`.
+- Safety:
+  - no prepare records are created by the bridge;
+  - no recorded `ExecutionIntent`;
+  - no submit authorization;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no order;
+  - no `OrderLifecycle`;
+  - no real submit;
+  - no exchange write;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - the live signal operator path can now re-enter strategy-driven shadow
+    candidate planning without jumping directly into prepare/submit;
+  - no-signal remains a normal waiting state;
+  - the next mainline step is to deploy this bridge and run Tokyo integration
+    in the current no-signal state, then continue observation until a genuine
+    runtime-compatible signal appears.
