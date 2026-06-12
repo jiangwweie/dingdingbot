@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from argparse import Namespace
 
 from scripts import create_runtime_closed_trade_review, recover_runtime_exchange_close_projection
@@ -24,6 +25,34 @@ def test_runtime_monitor_env_loader_fills_empty_existing_env(monkeypatch, tmp_pa
 
     assert os.environ["PG_DATABASE_URL"] == "postgresql+asyncpg://example"
     assert os.environ["EXCHANGE_API_KEY"] == "key-from-file"
+
+
+def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):
+    async def fake_build_packet(args):
+        print("noisy exchange close log")
+        return {
+            "scope": "runtime_live_position_monitor",
+            "status": "active_protection_warning",
+            "packet": {"runtime_instance_id": args.runtime_instance_id},
+        }
+
+    monkeypatch.setattr(runtime_live_position_monitor, "_build_packet", fake_build_packet)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "runtime_live_position_monitor.py",
+            "--runtime-instance-id",
+            "runtime-1",
+        ],
+    )
+
+    assert runtime_live_position_monitor.main() == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("{")
+    assert "noisy exchange close log" not in captured.out
+    assert "noisy exchange close log" in captured.err
 
 
 def test_runtime_exit_plan_env_loader_preserves_non_empty_env(monkeypatch, tmp_path):
