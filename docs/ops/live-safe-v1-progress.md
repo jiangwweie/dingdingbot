@@ -16,6 +16,52 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-012 Fresh Submit Authorization Resolution Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `28d4f902`.
+- Added `RuntimeFreshSubmitAuthorizationResolutionPacket`:
+  - resolves a persisted `RuntimeExecutionSubmitAuthorization` for a ready
+    official-submit handoff;
+  - validates the fresh authorization is not the consumed source
+    authorization;
+  - validates runtime, order candidate, signal evaluation, and submit-state
+    compatibility;
+  - refuses blocked handoffs and `real_gateway_action` handoffs;
+  - emits the official disabled-smoke endpoint path using the resolved
+    persisted authorization ID;
+  - does not create authorizations or call the official submit endpoint.
+- Added `RuntimeFreshSubmitAuthorizationResolutionService`:
+  - can resolve by explicit requested authorization ID;
+  - can resolve by handoff authorization ID;
+  - can fall back to latest persisted authorization by `order_candidate_id`;
+  - reports missing authorization as a structured blocker instead of treating
+    rehearsal IDs as usable.
+- Added API and script surfaces:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-fresh-authorizations/resolve`;
+  - `scripts/runtime_fresh_submit_authorization_resolution_api_flow.py`.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_fresh_submit_authorization_resolution.py tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_trading_console_readmodels.py -k 'fresh_submit_authorization or official_submit_handoff or trading_console_router_keeps_read_models_get_only_and_posts_allowlisted'`
+    with `18 passed, 50 deselected`;
+  - adjacent handoff / disabled-smoke regression:
+    `34 passed, 68 deselected`;
+  - `python3 -m compileall -q` for the new domain, service, API, script, and
+    test files;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this stage.
+- Safety:
+  - no fresh authorization is created by the resolver;
+  - no official submit endpoint is called by the resolver;
+  - no real gateway action is requested;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` call occurred;
+  - no `ExecutionIntent` was created;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-011 Tokyo Deploy + Disabled Smoke Handoff Probe)
 
 - Deployed RTF-011 to Tokyo with the git-based deploy path:

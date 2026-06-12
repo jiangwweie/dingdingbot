@@ -116,6 +116,9 @@ from src.domain.runtime_official_submit_handoff import (
     RuntimeOfficialSubmitHandoffMode,
     RuntimeOfficialSubmitHandoffPacket,
 )
+from src.domain.runtime_fresh_submit_authorization_resolution import (
+    RuntimeFreshSubmitAuthorizationResolutionPacket,
+)
 from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
     RuntimeExecutionFirstRealSubmitEvidencePreparation,
 )
@@ -331,6 +334,19 @@ class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
         RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
     )
     owner_confirmed_for_real_submit_action: bool = False
+    additional_blockers: list[str] = Field(default_factory=list)
+    additional_warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
+
+
+class RuntimeFreshSubmitAuthorizationResolutionRequest(BaseModel):
+    handoff_packet: RuntimeOfficialSubmitHandoffPacket
+    requested_fresh_submit_authorization_id: str | None = Field(
+        default=None,
+        max_length=260,
+    )
+    allow_order_candidate_fallback: bool = True
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -1121,6 +1137,46 @@ async def runtime_official_submit_handoff_preview(
             additional_warnings=[
                 *request.additional_warnings,
                 "trading_console_api_non_executing_handoff_preview",
+            ],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-"
+    "fresh-authorizations/resolve",
+    response_model=RuntimeFreshSubmitAuthorizationResolutionPacket,
+)
+async def runtime_official_submit_handoff_fresh_authorization_resolution(
+    runtime_instance_id: str,
+    request: RuntimeFreshSubmitAuthorizationResolutionRequest,
+) -> RuntimeFreshSubmitAuthorizationResolutionPacket:
+    if request.handoff_packet.runtime_instance_id != runtime_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="handoff_packet_runtime_mismatch",
+        )
+    from src.application.runtime_fresh_submit_authorization_resolution_service import (
+        RuntimeFreshSubmitAuthorizationResolutionService,
+    )
+
+    service = RuntimeFreshSubmitAuthorizationResolutionService(
+        submit_authorization_repository=_build_pg_runtime_submit_authorization_repo(),
+    )
+    try:
+        return await service.resolve_for_handoff(
+            handoff=request.handoff_packet,
+            requested_fresh_submit_authorization_id=(
+                request.requested_fresh_submit_authorization_id
+            ),
+            allow_order_candidate_fallback=request.allow_order_candidate_fallback,
+            additional_blockers=request.additional_blockers,
+            additional_warnings=[
+                *request.additional_warnings,
+                "trading_console_api_non_executing_fresh_authorization_resolution",
             ],
         )
     except RuntimeError as exc:
