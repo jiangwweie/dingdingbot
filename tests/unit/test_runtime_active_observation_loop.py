@@ -41,7 +41,20 @@ def _args(
     )()
 
 
-def _packet(status="waiting_for_signal", *, prepare=False):
+def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=False):
+    prepared_authorization_id = "auth-ready-1" if prepare else None
+    runtime_summary_extra = {}
+    if nested_authorization:
+        runtime_summary_extra = {
+            "prepared_authorization_id": prepared_authorization_id,
+            "latest_packet": {
+                "prepare_packet": {
+                    "ids": {
+                        "authorization_id": prepared_authorization_id,
+                    },
+                },
+            },
+        }
     return {
         "status": status,
         "active_runtime_count": 2,
@@ -71,6 +84,7 @@ def _packet(status="waiting_for_signal", *, prepare=False):
                     "reason_codes": ["cpm_no_action_trend_ambiguous"],
                     "human_summary": "4h trend is ambiguous under CPM v0.",
                 },
+                **runtime_summary_extra,
             }
         ],
         "operator_command_plan": {
@@ -207,6 +221,27 @@ def test_active_observation_loop_stops_when_prepare_records_are_created(tmp_path
     assert latest["shadow_candidate_created"] is True
     assert latest["recorded_execution_intent_created"] is True
     assert latest["executable_execution_intent_created"] is False
+
+
+def test_active_observation_loop_summarizes_nested_prepared_authorization_id(tmp_path):
+    def builder(args):
+        return _packet(
+            "ready_for_final_gate_preflight",
+            prepare=True,
+            nested_authorization=True,
+        )
+
+    packet = runtime_active_observation_loop._build_loop_packet(
+        _args(tmp_path, max_iterations=1, include_packets=True),
+        packet_builder=builder,
+        sleeper=lambda seconds: None,
+        cycle_name_builder=lambda iteration: f"cycle-{iteration}",
+    )
+
+    assert packet["status"] == "ready_for_final_gate_preflight"
+    assert packet["latest_summary"]["prepared_authorization_id"] == "auth-ready-1"
+    latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
+    assert latest["prepared_authorization_id"] == "auth-ready-1"
 
 
 def test_active_observation_loop_blocks_and_writes_audit_packet_on_cycle_timeout(tmp_path):

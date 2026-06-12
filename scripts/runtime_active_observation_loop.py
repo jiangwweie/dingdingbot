@@ -88,9 +88,42 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         ),
         "blockers": list(packet.get("blockers") or []),
         "warnings": list(packet.get("warnings") or []),
-        "prepared_authorization_id": plan.get("prepared_authorization_id"),
+        "prepared_authorization_id": _prepared_authorization_id(packet),
         "runtime_signal_summaries": _runtime_signal_summaries(packet),
     }
+
+
+def _prepared_authorization_id(packet: dict[str, Any]) -> str | None:
+    plan = packet.get("operator_command_plan")
+    if isinstance(plan, dict):
+        text = str(plan.get("prepared_authorization_id") or "").strip()
+        if text:
+            return text
+
+    for item in packet.get("runtime_summaries") or []:
+        if not isinstance(item, dict):
+            continue
+        for candidate in (
+            item.get("prepared_authorization_id"),
+            _nested_get(item, ("operator_command_plan", "prepared_authorization_id")),
+            _nested_get(item, ("latest_packet", "operator_command_plan", "prepared_authorization_id")),
+            _nested_get(item, ("latest_packet", "prepare_packet", "operator_command_plan", "prepared_authorization_id")),
+            _nested_get(item, ("latest_packet", "prepare_packet", "ids", "authorization_id")),
+            _nested_get(item, ("latest_packet", "prepare_packet", "first_real_submit_prepare_report", "ids", "authorization_id")),
+        ):
+            text = str(candidate or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
 
 
 def _runtime_signal_summaries(packet: dict[str, Any]) -> list[dict[str, Any]]:
