@@ -16,6 +16,62 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-012 Tokyo Deploy + Fresh Authorization Resolution Probe)
+
+- Deployed RTF-012 to Tokyo with the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-95d3a365-20260612Trtf012-fresh-auth-resolution-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - manifest head:
+    `95d3a365aaaacd46f870bbb73d3e35b8201fa6b9`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy execution result:
+  - status: `applied`;
+  - commands executed: `16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - exchange called: `false`;
+  - order created: `false`;
+  - `OrderLifecycle` called: `false`;
+  - `ExecutionIntent` created: `false`.
+- Ran RTF-012 fresh authorization resolution probes on Tokyo:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf012-fresh-submit-authorization-resolution/20260612Trtf012-95d3a365`;
+  - local mirror:
+    `output/rtf012-tokyo/remote-report-20260612Trtf012-95d3a365`;
+  - blocked handoff input:
+    `fresh-auth-resolution-from-blocked-handoff.json`;
+  - positive handoff input:
+    `fresh-auth-resolution-from-positive-handoff.json`.
+- Probe results:
+  - blocked handoff path: `status=blocked`, `http_status=200`,
+    blockers include `handoff_not_ready_for_official_submit_call`,
+    release-gate blockers, and `fresh_submit_authorization_not_found`;
+  - positive handoff path: `status=blocked`, `http_status=200`,
+    blockers `["fresh_submit_authorization_not_found"]`,
+    `resolution_source=order_candidate_latest`,
+    `resolved_fresh_submit_authorization_id=null`,
+    `ready_for_disabled_smoke_call=false`;
+  - the RTF-011 official endpoint `404` is now correctly represented one step
+    earlier as a structured fresh-authorization resolution blocker.
+- Follow-up implication:
+  - next runtime-chain step is persisted fresh submit authorization creation /
+    binding for a ready handoff, while preserving consumed authorization
+    replay-only semantics and duplicate-submit protection.
+- Safety:
+  - the resolution API did not create fresh authorization records;
+  - it did not call the official first-real-submit endpoint;
+  - no `real_gateway_action` was requested;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` call occurred;
+  - no `ExecutionIntent` was created;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-012 Fresh Submit Authorization Resolution Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
@@ -51,7 +107,7 @@ Use this file for session progress and handoff notes.
     test files;
   - `git diff --check`.
 - Deployment:
-  - not deployed in this stage.
+  - later deployed and probed in the RTF-012 Tokyo stage above.
 - Safety:
   - no fresh authorization is created by the resolver;
   - no official submit endpoint is called by the resolver;
