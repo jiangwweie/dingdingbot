@@ -8913,3 +8913,73 @@ Use this file for session progress and handoff notes.
     no-signal market;
   - the mainline is now waiting for a genuine strategy signal rather than a
     missing orchestration primitive.
+
+## 2026-06-13 (RTF-071 No-signal Operator Summary)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Purpose:
+  convert the RTF-069/070 live signal operator supervisor packet into an
+  Owner/operator-readable read-only status summary.
+- Added:
+  `scripts/build_runtime_supervisor_operator_summary.py`.
+- Added tests:
+  `tests/unit/test_runtime_supervisor_operator_summary.py`.
+- Summary statuses:
+  - `operator_waiting_for_signal`;
+  - `operator_profile_review_required`;
+  - `operator_prepare_review_required`;
+  - `operator_final_gate_review_required`;
+  - `operator_supervisor_blocked`;
+  - `operator_summary_needs_review`.
+- Local proof against mirrored RTF-070 Tokyo supervisor report:
+  - source:
+    `output/rtf070-tokyo/remote-report-20260613Trtf070-9e15b81f/live-signal-operator-supervisor.json`;
+  - output:
+    `output/rtf071-supervisor-summary/local-summary-from-rtf070.json`;
+  - status:
+    `operator_waiting_for_signal`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - source supervisor status:
+    `supervisor_waiting_for_signal`;
+  - stop reason:
+    `max_cycles_reached`;
+  - cycles completed:
+    `2`;
+  - no-signal window:
+    `true`;
+  - selector status counts:
+    `no_would_enter_signal_available=2`;
+  - blocker counts:
+    `runtime_strategy_signal_not_found_in_strategy_shelf=2`;
+  - next step:
+    `continue_live_signal_operator_supervision`.
+- Right-tail objective context:
+  - no-signal is not failure;
+  - forcing entry without a genuine signal remains forbidden;
+  - small bounded losses are acceptable only after a real signal is ready and
+    runtime boundaries pass;
+  - Owner withdrawal remains manual;
+  - automatic withdrawal and automatic compounding are not assumed.
+- Verification:
+  - `pytest -q tests/unit/test_runtime_supervisor_operator_summary.py tests/unit/test_runtime_live_signal_operator_supervisor.py tests/unit/test_runtime_live_signal_operator_cycle.py tests/unit/test_runtime_live_signal_routing_packet.py`;
+  - result:
+    `21 passed`.
+- Safety:
+  - packet-read only;
+  - no PG write;
+  - no runtime creation;
+  - no runtime profile mutation;
+  - no shadow candidate;
+  - no recorded `ExecutionIntent`;
+  - no submit authorization;
+  - no order;
+  - no `OrderLifecycle`;
+  - no real submit;
+  - no exchange write;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
