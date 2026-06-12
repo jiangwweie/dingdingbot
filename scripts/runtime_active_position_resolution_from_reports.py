@@ -17,6 +17,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -72,7 +73,7 @@ def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             if followup_payload is not None
             else None
         ),
-        now_ms=args.now_ms,
+        now_ms=args.now_ms if args.now_ms is not None else int(time.time() * 1000),
     )
     return {
         "scope": "runtime_active_position_resolution_from_reports",
@@ -105,7 +106,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--live-position-monitor-json", required=True)
     parser.add_argument("--position-exit-plan-json")
     parser.add_argument("--post-close-followup-json")
-    parser.add_argument("--now-ms", type=int, default=1781256000000)
+    parser.add_argument("--now-ms", type=int)
     return parser.parse_args(argv)
 
 
