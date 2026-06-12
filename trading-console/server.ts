@@ -7,6 +7,9 @@ const READ_MODEL_API_BASE = process.env.TRADING_CONSOLE_API_BASE || 'http://127.
 const OPERATOR_SESSION = process.env.TRADING_CONSOLE_OPERATOR_SESSION || '';
 const STRATEGY_SIGNAL_SHADOW_PLAN_PATH =
   /^\/api\/trading-console\/strategy-runtimes\/[^/]+\/strategy-signal-shadow-plans$/;
+// Allows /api/trading-console/strategy-runtimes/*/live-enablement-mutations only.
+const STRATEGY_RUNTIME_LIVE_ENABLEMENT_MUTATION_PATH =
+  /^\/api\/trading-console\/strategy-runtimes\/[^/]+\/live-enablement-mutations$/;
 const BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH =
   /^\/api\/brc\/strategy-runtime-promotion-confirmations\/[^/]+\/runtime-drafts$/;
 const BRC_SHADOW_RUNTIME_LIFECYCLE_PATH =
@@ -80,7 +83,9 @@ async function startServer() {
   app.all('/api/trading-console/*', async (req, res) => {
     const allowedShadowPlanningPost =
       req.method === 'POST' && STRATEGY_SIGNAL_SHADOW_PLAN_PATH.test(req.path);
-    if (allowedShadowPlanningPost) {
+    const allowedLiveEnablementMutationPost =
+      req.method === 'POST' && STRATEGY_RUNTIME_LIVE_ENABLEMENT_MUTATION_PATH.test(req.path);
+    if (allowedShadowPlanningPost || allowedLiveEnablementMutationPost) {
       await proxyJsonRequest(req, res);
       return;
     }
@@ -88,7 +93,7 @@ async function startServer() {
       res.status(405).json({
         error: 'trading_console_frontend_proxy_get_only',
         message:
-          'Trading Console frontend proxy forwards read-model GET requests and the explicit non-executing strategy shadow-plan POST only.',
+          'Trading Console frontend proxy forwards read-model GET requests plus explicit runtime shadow-plan and live-enablement mutation POSTs only.',
       });
       return;
     }

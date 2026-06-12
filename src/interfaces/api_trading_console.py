@@ -152,6 +152,10 @@ from src.domain.runtime_position_exit_plan import RuntimePositionExitPlan
 from src.domain.runtime_post_close_followup import RuntimePostCloseFollowupPacket
 from src.domain.strategy_runtime_safety_readiness import StrategyRuntimeSafetyReadiness
 from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntimeInstanceStatus
+from src.domain.strategy_runtime_live_enablement import (
+    StrategyRuntimeLiveEnablementMutation,
+    StrategyRuntimeLiveEnablementPreview,
+)
 from src.interfaces.operator_auth import require_operator_session
 
 
@@ -282,6 +286,19 @@ class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyRuntimeLiveEnablementMutationRequest(BaseModel):
+    preview: StrategyRuntimeLiveEnablementPreview
+    owner_live_runtime_enablement_authorization_id: str = Field(
+        min_length=1,
+        max_length=180,
+    )
+    owner_real_submit_authorization_id: str = Field(
+        min_length=1,
+        max_length=180,
+    )
+    actor: str = Field(default="owner", min_length=1, max_length=128)
 
 
 class ScheduledReadonlyObservationRunRequest(BaseModel):
@@ -679,6 +696,36 @@ async def runtime_strategy_signal_shadow_plan_for_signal_input(
                 "runtime_instance_id": runtime_instance_id,
                 **request.metadata,
             },
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/live-enablement-mutations",
+    response_model=StrategyRuntimeLiveEnablementMutation,
+)
+async def apply_strategy_runtime_live_enablement_mutation(
+    runtime_instance_id: str,
+    request: StrategyRuntimeLiveEnablementMutationRequest,
+) -> StrategyRuntimeLiveEnablementMutation:
+    service = await _strategy_runtime_service()
+    try:
+        return await service.enable_live_runtime_from_preview(
+            runtime_instance_id,
+            preview=request.preview,
+            owner_live_runtime_enablement_authorization_id=(
+                request.owner_live_runtime_enablement_authorization_id
+            ),
+            owner_real_submit_authorization_id=(
+                request.owner_real_submit_authorization_id
+            ),
+            actor=request.actor,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

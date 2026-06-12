@@ -636,6 +636,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
         "/api/trading-console/strategy-observations/scheduled-runs",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-observation-cycle",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
+        "/api/trading-console/strategy-runtimes/{runtime_instance_id}/live-enablement-mutations",
         "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
         "/api/trading-console/runtime-execution-intents/drafts/{runtime_execution_intent_draft_id}",
         "/api/trading-console/runtime-execution-protection-plans/intents/{execution_intent_id}",
@@ -1169,8 +1170,12 @@ def test_trading_console_scheduled_observation_rejects_shadow_candidate_without_
 def test_trading_console_frontend_proxy_keeps_brc_posts_narrow():
     server_source = Path("trading-console/server.ts").read_text()
 
+    assert "STRATEGY_RUNTIME_LIVE_ENABLEMENT_MUTATION_PATH" in server_source
     assert "BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH" in server_source
     assert "BRC_SHADOW_RUNTIME_LIFECYCLE_PATH" in server_source
+    assert "/api/trading-console/strategy-runtimes/*/live-enablement-mutations" in (
+        server_source
+    )
     assert "/api/brc/strategy-runtime-promotion-confirmations/*/runtime-drafts" in (
         server_source
     )

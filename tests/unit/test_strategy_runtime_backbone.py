@@ -57,6 +57,8 @@ from src.infrastructure.pg_models import (
 from src.infrastructure.pg_strategy_runtime_repository import PgStrategyRuntimeRepository
 from src.interfaces import api as api_module
 from src.interfaces.api_trading_console import (
+    StrategyRuntimeLiveEnablementMutationRequest,
+    apply_strategy_runtime_live_enablement_mutation,
     get_strategy_runtime,
     list_strategy_runtimes,
 )
@@ -762,6 +764,62 @@ async def test_trading_console_runtime_view_reports_live_enabled_execution_mode(
     assert listed[0].shadow_mode is False
     assert listed[0].execution_mode == "runtime_live_enabled"
     assert detail.execution_mode == "runtime_live_enabled"
+
+
+@pytest.mark.asyncio
+async def test_trading_console_applies_live_enablement_mutation_without_orders(monkeypatch):
+    runtime_repo = _FakeRuntimeRepo()
+    service = StrategyRuntimeInstanceService(
+        runtime_repository=runtime_repo,
+        admission_repository=_FakeAdmissionRepo(),
+    )
+    runtime = await service.create_draft_from_trial_binding(
+        "binding-1",
+        side="long",
+        max_attempts=3,
+        max_notional_per_attempt=Decimal("10"),
+        total_budget=Decimal("3"),
+        max_leverage=Decimal("1"),
+    )
+    active = await service.activate_runtime(runtime.runtime_instance_id)
+    active = active.model_copy(
+        update={
+            "boundary": active.boundary.model_copy(
+                update={
+                    "max_margin_per_attempt": Decimal("10"),
+                    "min_liquidation_stop_buffer": Decimal("25"),
+                }
+            )
+        }
+    )
+    runtime_repo.items[active.runtime_instance_id] = active
+    preview = _ready_live_enablement_preview(active)
+    request = StrategyRuntimeLiveEnablementMutationRequest(
+        preview=preview,
+        owner_live_runtime_enablement_authorization_id="owner-live-runtime-auth-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        actor="owner",
+    )
+
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", service, raising=False)
+
+    mutation = await apply_strategy_runtime_live_enablement_mutation(
+        active.runtime_instance_id,
+        request,
+    )
+
+    saved = runtime_repo.items[active.runtime_instance_id]
+    assert mutation.status == "applied"
+    assert mutation.runtime_state_mutated is True
+    assert saved.execution_enabled is True
+    assert saved.shadow_mode is False
+    assert mutation.not_order_authority is True
+    assert mutation.execution_intent_created is False
+    assert mutation.order_created is False
+    assert mutation.exchange_called is False
+    assert mutation.owner_bounded_execution_called is False
+    assert mutation.order_lifecycle_called is False
+    assert runtime_repo.events[-1].event_type == "live_runtime_enabled"
 
 
 def test_existing_bounded_live_trial_authorization_stays_single_use_metadata_only():
