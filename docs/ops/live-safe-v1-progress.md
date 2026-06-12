@@ -8466,3 +8466,64 @@ Use this file for session progress and handoff notes.
   - next mainline progress should focus on producing or discovering a genuine
     runtime-compatible ready signal for the current runtime or an explicitly
     approved new runtime/profile.
+
+## 2026-06-13 (RTF-065 Live Signal Routing Packet / Strategy Signal Planning Proof)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - reduce the current no-signal stall into a clear non-executing routing
+    decision;
+  - avoid manually stitching together live selector output, non-runtime profile
+    proposal, and runtime prepare commands;
+  - preserve the rule that readiness must come from a genuine strategy signal,
+    not from a forced sample or old handoff replay.
+- Added:
+  - `scripts/runtime_live_signal_routing_packet.py`;
+  - `tests/unit/test_runtime_live_signal_routing_packet.py`.
+- Routing behavior:
+  - `runtime_compatible_would_enter_selected` becomes
+    `ready_for_current_runtime_signal_prepare`;
+  - `would_enter_available_but_not_runtime_compatible` creates only a
+    non-executing Owner/Codex runtime-profile proposal packet;
+  - no runtime-compatible signal becomes
+    `waiting_for_runtime_compatible_signal`.
+- Local routing tests:
+  - command:
+    `pytest -q tests/unit/test_runtime_live_signal_routing_packet.py tests/unit/test_runtime_non_runtime_signal_profile_proposal.py tests/unit/test_runtime_live_strategy_signal_selector.py`;
+  - result:
+    `10 passed`.
+- Local strategy planning proof:
+  - command:
+    `pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_reference_price_action_evaluators.py tests/unit/test_runtime_strategy_signal_evaluation_service.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py`;
+  - result:
+    `28 passed`.
+- Compile and diff checks:
+  - command:
+    `python3 -m compileall -q scripts/runtime_live_signal_routing_packet.py`;
+  - result:
+    passed;
+  - command:
+    `git diff --check`;
+  - result:
+    passed.
+- Safety:
+  - no runtime is created;
+  - no runtime profile is mutated;
+  - no shadow candidate is created by the routing packet;
+  - no `ExecutionIntent` is created;
+  - no order is created;
+  - no `OrderLifecycle` call occurs;
+  - no exchange write occurs;
+  - no runtime budget mutation occurs;
+  - no position is opened or closed;
+  - no withdrawal or transfer is created.
+- Interpretation:
+  - RTF-065 provides the missing operator routing surface between live signal
+    discovery and Strategy Signal -> Shadow Candidate Planning v1;
+  - CPM/BRF/reference price-action strategy semantics are locally proven through
+    the existing B0 strategy planning tests;
+  - the next Tokyo step is to deploy this routing packet and run it against the
+    active runtime so the system can report whether to wait, prepare the current
+    runtime, or propose a new bounded runtime profile from a non-runtime signal.
