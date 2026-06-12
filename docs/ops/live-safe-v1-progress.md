@@ -6832,3 +6832,62 @@ Use this file for session progress and handoff notes.
   - no runtime was enabled or activated;
   - no `SignalEvaluation`, `OrderCandidate`, `ExecutionIntent`, local order,
     exchange order, `OrderLifecycle`, withdrawal, or transfer path was called.
+
+## 2026-06-13 (RTF-042 Shadow Runtime Draft Apply And Probe)
+
+- Executed the guarded Tokyo runtime profile apply plan from the RTF-041
+  readiness packet.
+- Apply input:
+  - `output/rtf041-tokyo/runtime-profile-trial-binding-apply-readiness.json`;
+  - selected trial binding:
+    `admission-binding-e1115c1e2c6f`.
+- Apply output:
+  - `output/rtf042-tokyo/runtime-profile-apply-execution.json`;
+  - status: `runtime_profile_apply_plan_applied`;
+  - blockers: `[]`;
+  - mode: `apply`;
+  - execute requested: `true`.
+- Official API requests executed:
+  1. `POST /api/brc/strategy-runtime-promotion-confirmations`;
+  2. `POST /api/brc/strategy-runtime-promotion-confirmations/{id}/runtime-drafts`.
+- Created / confirmed Tokyo PG records:
+  - promotion confirmation:
+    `promotion-confirmation-rbr-001-rbr-001-v0-ada-usdt-usdt-short`;
+  - strategy runtime draft:
+    `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`.
+- Runtime profile recorded:
+  - strategy: `RBR-001` / `RBR-001-v0`;
+  - symbol / side: `ADA/USDT:USDT` / `short`;
+  - total loss budget: `6.00`;
+  - max notional per attempt: `8.00`;
+  - max attempts: `3`;
+  - max active positions: `1`;
+  - max leverage: `1`;
+  - protection required: `true`;
+  - review required: `true`.
+- Ran Tokyo post-creation probe:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf042-post-creation/20260613Trtf042/post-creation-probe.json`;
+  - local copy:
+    `output/rtf042-tokyo/post-creation-probe.json`;
+  - status: `rtf042_post_creation_probe_passed`;
+  - blockers: `[]`;
+  - runtime status: `draft`;
+  - execution enabled: `false`;
+  - shadow mode: `true`;
+  - matching promotion confirmations: `1`;
+  - safety readiness status: `blocked`;
+  - live enablement preview status: `blocked`.
+- Expected blockers while the runtime remains draft:
+  - safety readiness blocks on `runtime_status_active`;
+  - live enablement preview blocks on `runtime_not_active` and missing
+    first-real-submit / final submit-chain evidence;
+  - these blockers confirm the draft cannot silently become executable.
+- Safety:
+  - RTF-042 created only the promotion confirmation and execution-disabled
+    shadow runtime draft through official API surfaces;
+  - the post-creation probe was read-only;
+  - no live runtime enablement mutation was applied;
+  - no `SignalEvaluation`, `OrderCandidate`, `ExecutionIntent`, local order,
+    exchange order, `OrderLifecycle`, withdrawal, or transfer path was called;
+  - no exchange write occurred.
