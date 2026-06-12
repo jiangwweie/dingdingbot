@@ -8527,3 +8527,84 @@ Use this file for session progress and handoff notes.
   - the next Tokyo step is to deploy this routing packet and run it against the
     active runtime so the system can report whether to wait, prepare the current
     runtime, or propose a new bounded runtime profile from a non-runtime signal.
+
+## 2026-06-13 (RTF-066 Tokyo Live Signal Routing Integration)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target commit:
+    `2e6fabd7c0fec38c760b325c63c74057c6d03dc8`.
+- Pre-deploy read-only probe:
+  - current head:
+    `56cf5d19e129fa81c220dbfdf2cf02900d3fc98f`;
+  - current release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-56cf5d19-20260613Trtf064-current-source-continuation`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    none.
+- Deployment:
+  - new release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2e6fabd7-20260613Trtf066-live-signal-routing`;
+  - plan artifact:
+    `output/rtf066-tokyo/git-deploy-plan-2e6fabd7.json`;
+  - owner packet artifact:
+    `output/rtf066-tokyo/owner-git-deploy-packet-2e6fabd7.json`;
+  - dry-run artifact:
+    `output/rtf066-tokyo/git-deploy-dry-run-2e6fabd7.json`;
+  - apply artifact:
+    `output/rtf066-tokyo/git-deploy-applied-2e6fabd7.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-2e6fabd7-20260613Trtf066-live-signal-routing.pgdump`;
+  - migration state:
+    `084`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health after deployment:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`;
+  - manifest head:
+    `2e6fabd7c0fec38c760b325c63c74057c6d03dc8`.
+- RTF-066 live signal routing packet:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf066-live-signal-routing/20260613Trtf066-2e6fabd7/live-signal-routing-packet.json`;
+  - local mirror:
+    `output/rtf066-tokyo/remote-report-20260613Trtf066-2e6fabd7/live-signal-routing-packet.json`;
+  - status:
+    `waiting_for_runtime_compatible_signal`;
+  - source selector status:
+    `no_would_enter_signal_available`;
+  - blocker:
+    `runtime_strategy_signal_not_found_in_strategy_shelf`;
+  - selected signal:
+    `null`;
+  - non-runtime would-enter count:
+    `0`;
+  - signal input json:
+    `null`;
+  - operator next step:
+    `continue_live_signal_observation_without_forcing_entry`.
+- Safety:
+  - no runtime was created;
+  - no runtime profile was mutated;
+  - no shadow candidate was created;
+  - no `ExecutionIntent` was created;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime budget mutation occurred;
+  - no position was opened or closed;
+  - no withdrawal or transfer was created.
+- Interpretation:
+  - RTF-065 code is now deployed and verified on Tokyo;
+  - the system can now distinguish current-runtime ready signal, non-runtime
+    would-enter profile proposal, and no-signal wait in one operator packet;
+  - live market currently has no runtime-compatible or non-runtime would-enter
+    signal in the strategy shelf, so the correct next state is continued
+    observation rather than forced candidate planning.
