@@ -11,6 +11,9 @@ from src.domain.runtime_execution_exchange_submit_execution_result import (
 from src.domain.runtime_execution_post_submit_budget_settlement import (
     RuntimeExecutionPostSubmitBudgetSettlement,
 )
+from src.domain.runtime_execution_attempt_reservation import (
+    RuntimeExecutionAttemptReservation,
+)
 from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitOutcomeReview,
 )
@@ -55,6 +58,14 @@ class PostSubmitBudgetSettlementRepositoryPort(Protocol):
         ...
 
 
+class AttemptReservationRepositoryPort(Protocol):
+    async def get_by_authorization_id(
+        self,
+        authorization_id: str,
+    ) -> RuntimeExecutionAttemptReservation | None:
+        ...
+
+
 class StrategyRuntimeReaderPort(Protocol):
     async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
         ...
@@ -94,6 +105,7 @@ class RuntimePostSubmitFinalizeService:
         post_submit_budget_settlement_repository: (
             PostSubmitBudgetSettlementRepositoryPort | None
         ) = None,
+        attempt_reservation_repository: AttemptReservationRepositoryPort | None = None,
         runtime_service: StrategyRuntimeReaderPort | None = None,
     ) -> None:
         self._adapter_service = adapter_service
@@ -104,13 +116,14 @@ class RuntimePostSubmitFinalizeService:
         self._post_submit_budget_settlement_repository = (
             post_submit_budget_settlement_repository
         )
+        self._attempt_reservation_repository = attempt_reservation_repository
         self._runtime_service = runtime_service
 
     async def finalize_authorization(
         self,
         authorization_id: str,
         *,
-        reservation_id: str,
+        reservation_id: str | None = None,
         active_positions_count: int | None,
         expected_runtime_instance_id: str | None = None,
         closed_review_required: bool = False,
@@ -173,7 +186,7 @@ class RuntimePostSubmitFinalizeService:
         self,
         runtime_instance_id: str,
         *,
-        reservation_id: str,
+        reservation_id: str | None = None,
         active_positions_count: int | None,
         closed_review_required: bool = False,
         protection_blockers: list[str] | None = None,
@@ -271,7 +284,7 @@ class RuntimePostSubmitFinalizeService:
     async def _load_or_record_budget_settlement(
         self,
         authorization_id: str,
-        reservation_id: str,
+        reservation_id: str | None,
         blockers: list[str],
         warnings: list[str],
     ) -> RuntimeExecutionPostSubmitBudgetSettlement | None:
@@ -283,12 +296,21 @@ class RuntimePostSubmitFinalizeService:
             if settlement is not None:
                 warnings.append("post_submit_budget_settlement_existing_reused")
                 return settlement
+        resolved_reservation_id = reservation_id or await (
+            self._resolve_reservation_id_for_authorization(
+                authorization_id,
+                blockers,
+                warnings,
+            )
+        )
+        if not resolved_reservation_id:
+            return None
         try:
             return await (
                 self._adapter_service
                 .settle_first_real_submit_budget_for_authorization(
                     authorization_id,
-                    reservation_id=reservation_id,
+                    reservation_id=resolved_reservation_id,
                 )
             )
         except Exception as exc:  # pragma: no cover - repository-specific.
@@ -297,6 +319,37 @@ class RuntimePostSubmitFinalizeService:
                 f"{type(exc).__name__}"
             )
             return None
+
+    async def _resolve_reservation_id_for_authorization(
+        self,
+        authorization_id: str,
+        blockers: list[str],
+        warnings: list[str],
+    ) -> str | None:
+        if self._attempt_reservation_repository is None:
+            blockers.append("attempt_reservation_repository_unavailable")
+            return None
+        getter = getattr(
+            self._attempt_reservation_repository,
+            "get_by_authorization_id",
+            None,
+        )
+        if not callable(getter):
+            blockers.append("attempt_reservation_by_authorization_lookup_unavailable")
+            return None
+        try:
+            reservation = await getter(authorization_id)
+        except Exception as exc:  # pragma: no cover - repository-specific.
+            blockers.append(
+                "attempt_reservation_lookup_failed:"
+                f"{type(exc).__name__}"
+            )
+            return None
+        if reservation is None:
+            blockers.append("attempt_reservation_not_found_for_authorization")
+            return None
+        warnings.append("reservation_id_resolved_from_attempt_reservation")
+        return reservation.reservation_id
 
     async def _load_runtime(
         self,

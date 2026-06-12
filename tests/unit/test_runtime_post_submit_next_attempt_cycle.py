@@ -93,6 +93,7 @@ def _ready_plan_packet():
 
 
 def test_cycle_waits_when_post_submit_ready_but_signal_observe_only(tmp_path):
+    finalize_calls = []
     planning_calls = []
 
     def planning_builder(args):
@@ -100,8 +101,10 @@ def test_cycle_waits_when_post_submit_ready_but_signal_observe_only(tmp_path):
         return _waiting_plan_packet()
 
     packet = runtime_post_submit_next_attempt_cycle._build_cycle_packet(
-        _args(tmp_path),
-        finalize_builder=lambda args: _ready_finalize_packet(),
+        _args(tmp_path, reservation_id=None),
+        finalize_builder=lambda args: (
+            finalize_calls.append(args) or _ready_finalize_packet()
+        ),
         planning_builder=planning_builder,
     )
 
@@ -112,6 +115,7 @@ def test_cycle_waits_when_post_submit_ready_but_signal_observe_only(tmp_path):
     assert packet["operator_command_plan"]["requires_fresh_authorization_before_submit"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
+    assert finalize_calls[0].reservation_id is None
     assert len(planning_calls) == 1
     post_packet_path = packet["artifact_paths"]["post_submit_finalize_packet"]
     assert json.loads(open(post_packet_path, encoding="utf-8").read())["packet_id"] == "post-submit-1"
@@ -172,8 +176,6 @@ def test_cycle_cli_stdout_is_json_only(monkeypatch, capsys):
             "runtime_post_submit_next_attempt_cycle.py",
             "--runtime-instance-id",
             "runtime-1",
-            "--reservation-id",
-            "reservation-1",
             "--signal-input-json",
             "signal.json",
         ],

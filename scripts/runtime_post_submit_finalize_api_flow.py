@@ -73,7 +73,6 @@ def _metadata(args: argparse.Namespace) -> dict[str, Any]:
 
 def _request_body(args: argparse.Namespace) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "reservation_id": args.reservation_id,
         "closed_review_required": bool(args.closed_review_required),
         "protection_blockers": list(args.protection_blocker or []),
         "metadata": _metadata(args),
@@ -81,6 +80,8 @@ def _request_body(args: argparse.Namespace) -> dict[str, Any]:
     }
     if args.authorization_id:
         body["authorization_id"] = args.authorization_id
+    if args.reservation_id:
+        body["reservation_id"] = args.reservation_id
     return body
 
 
@@ -164,7 +165,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description="Call the runtime post-submit finalize packet API.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--reservation-id", required=True)
+    parser.add_argument("--reservation-id")
     parser.add_argument("--authorization-id")
     parser.add_argument("--closed-review-required", action="store_true")
     parser.add_argument("--protection-blocker", action="append")

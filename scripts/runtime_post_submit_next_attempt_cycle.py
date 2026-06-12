@@ -254,7 +254,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--reservation-id", required=True)
+    parser.add_argument("--reservation-id")
     parser.add_argument("--signal-input-json", required=True)
     parser.add_argument("--authorization-id")
     parser.add_argument("--closed-review-required", action="store_true")

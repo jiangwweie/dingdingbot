@@ -92,15 +92,13 @@ def test_post_submit_finalize_api_flow_can_omit_authorization_for_latest_result(
     client = _Client()
 
     packet = runtime_post_submit_finalize_api_flow._build_packet(
-        _args(authorization_id=None),
+        _args(authorization_id=None, reservation_id=None),
         client=client,
     )
 
     assert packet["authorization_id"] == "auth-1"
     assert "authorization_id" not in client.calls[0]["body"]
-    assert client.calls[0]["body"]["reservation_id"] == (
-        "runtime-attempt-reservation-auth-1"
-    )
+    assert "reservation_id" not in client.calls[0]["body"]
 
 
 def test_post_submit_finalize_api_flow_keeps_blocked_http_errors():
@@ -132,8 +130,6 @@ def test_post_submit_finalize_api_flow_cli_stdout_is_json_only(monkeypatch, caps
             "runtime_post_submit_finalize_api_flow.py",
             "--runtime-instance-id",
             "runtime-1",
-            "--reservation-id",
-            "runtime-attempt-reservation-auth-1",
         ],
     )
 
@@ -194,9 +190,7 @@ async def test_trading_console_endpoint_finalizes_latest_submit_without_manual_a
     response = await (
         api_trading_console.runtime_post_submit_finalize_packet_for_runtime(
             "runtime-1",
-            api_trading_console.RuntimePostSubmitFinalizeRequest(
-                reservation_id="runtime-attempt-reservation-auth-1",
-            ),
+            api_trading_console.RuntimePostSubmitFinalizeRequest(),
         )
     )
 
@@ -204,7 +198,7 @@ async def test_trading_console_endpoint_finalizes_latest_submit_without_manual_a
     assert service.latest_calls == [
         {
             "runtime_instance_id": "runtime-1",
-            "reservation_id": "runtime-attempt-reservation-auth-1",
+            "reservation_id": None,
             "active_positions_count": 0,
         }
     ]

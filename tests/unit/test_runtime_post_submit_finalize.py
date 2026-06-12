@@ -256,6 +256,72 @@ async def test_post_submit_finalize_service_resolves_latest_runtime_submit_resul
     assert packet.next_attempt_gate.requires_fresh_strategy_signal is True
 
 
+async def test_post_submit_finalize_service_resolves_reservation_id_for_latest_runtime_submit():
+    result = _submitted_result()
+    review = _ready_review_no_fill_cancelled()
+    reservation = _reservation()
+    settlement_repo = _PostSubmitBudgetSettlementRepoWithLookup()
+    adapter = _AdapterRecordsSettlement(_settlement())
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=adapter,
+        exchange_submit_execution_result_repository=_LatestExecutionResultRepo(
+            result
+        ),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo([review]),
+        post_submit_budget_settlement_repository=settlement_repo,
+        attempt_reservation_repository=_AttemptReservationByAuthorizationRepo(
+            reservation
+        ),
+        runtime_service=_RuntimeService(
+            _runtime(boundary={"budget_reserved": Decimal("0")})
+        ),
+    )
+
+    packet = await service.finalize_latest_for_runtime(
+        "runtime-1",
+        active_positions_count=0,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
+    )
+    assert adapter.settlement_calls == [
+        {
+            "authorization_id": "auth-1",
+            "reservation_id": "runtime-attempt-reservation-auth-1",
+        }
+    ]
+    assert "reservation_id_resolved_from_attempt_reservation" in packet.warnings
+    assert packet.pre_submit_rehearsal_retry_allowed is False
+
+
+async def test_post_submit_finalize_service_blocks_missing_reservation_resolution():
+    result = _submitted_result()
+    review = _ready_review_no_fill_cancelled()
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=_AdapterRecordsSettlement(_settlement()),
+        exchange_submit_execution_result_repository=_LatestExecutionResultRepo(
+            result
+        ),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo([review]),
+        post_submit_budget_settlement_repository=(
+            _PostSubmitBudgetSettlementRepoWithLookup()
+        ),
+        runtime_service=_RuntimeService(
+            _runtime(boundary={"budget_reserved": Decimal("0")})
+        ),
+    )
+
+    packet = await service.finalize_latest_for_runtime(
+        "runtime-1",
+        active_positions_count=0,
+    )
+
+    assert packet.status == RuntimePostSubmitFinalizeStatus.BLOCKED
+    assert "attempt_reservation_repository_unavailable" in packet.blockers
+    assert packet.pre_submit_rehearsal_retry_allowed is False
+
+
 async def test_post_submit_finalize_service_blocks_expected_runtime_mismatch():
     result = _submitted_result().model_copy(update={"runtime_instance_id": "other"})
     review = _ready_review_no_fill_cancelled()
@@ -383,6 +449,39 @@ class _LatestExecutionResultRepo(_ExecutionResultRepo):
         if self.result.runtime_instance_id == runtime_instance_id:
             return self.result
         return None
+
+
+class _AttemptReservationByAuthorizationRepo:
+    def __init__(self, reservation) -> None:
+        self.reservation = reservation
+
+    async def get_by_authorization_id(self, authorization_id):
+        if self.reservation.authorization_id == authorization_id:
+            return self.reservation
+        return None
+
+
+class _AdapterRecordsSettlement:
+    def __init__(self, settlement) -> None:
+        self.settlement = settlement
+        self.settlement_calls = []
+
+    async def record_submit_outcome_review_for_authorization(self, *args, **kwargs):
+        raise AssertionError("existing review should be reused")
+
+    async def settle_first_real_submit_budget_for_authorization(
+        self,
+        authorization_id,
+        *,
+        reservation_id,
+    ):
+        self.settlement_calls.append(
+            {
+                "authorization_id": authorization_id,
+                "reservation_id": reservation_id,
+            }
+        )
+        return self.settlement
 
 
 class _AdapterShouldNotRecord:

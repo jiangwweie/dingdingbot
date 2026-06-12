@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.domain.brc_audit_ids import BrcSemanticIds
@@ -42,6 +43,23 @@ class PgRuntimeExecutionAttemptReservationRepository:
     ) -> Optional[RuntimeExecutionAttemptReservation]:
         async with self._session_maker() as session:
             row = await session.get(PGRuntimeExecutionAttemptReservationORM, reservation_id)
+            return self._to_domain(row) if row else None
+
+    async def get_by_authorization_id(
+        self,
+        authorization_id: str,
+    ) -> Optional[RuntimeExecutionAttemptReservation]:
+        async with self._session_maker() as session:
+            query = await session.execute(
+                select(PGRuntimeExecutionAttemptReservationORM)
+                .where(
+                    PGRuntimeExecutionAttemptReservationORM.authorization_id
+                    == authorization_id
+                )
+                .order_by(PGRuntimeExecutionAttemptReservationORM.created_at_ms.desc())
+                .limit(1)
+            )
+            row = query.scalar_one_or_none()
             return self._to_domain(row) if row else None
 
     @staticmethod

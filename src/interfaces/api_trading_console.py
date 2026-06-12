@@ -336,7 +336,7 @@ class RuntimeNextAttemptStrategyPlanningRequest(BaseModel):
 
 class RuntimePostSubmitFinalizeRequest(BaseModel):
     authorization_id: str | None = Field(default=None, min_length=1, max_length=220)
-    reservation_id: str = Field(min_length=1, max_length=260)
+    reservation_id: str | None = Field(default=None, min_length=1, max_length=260)
     closed_review_required: bool = False
     protection_blockers: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -4516,6 +4516,9 @@ async def _runtime_post_submit_finalize_service() -> Any:
     from src.infrastructure.pg_runtime_execution_submit_outcome_review_repository import (
         PgRuntimeExecutionSubmitOutcomeReviewRepository,
     )
+    from src.infrastructure.pg_runtime_execution_attempt_reservation_repository import (
+        PgRuntimeExecutionAttemptReservationRepository,
+    )
 
     service = RuntimePostSubmitFinalizeService(
         adapter_service=await _runtime_execution_intent_adapter_service(),
@@ -4527,6 +4530,9 @@ async def _runtime_post_submit_finalize_service() -> Any:
         ),
         post_submit_budget_settlement_repository=(
             PgRuntimeExecutionPostSubmitBudgetSettlementRepository()
+        ),
+        attempt_reservation_repository=(
+            PgRuntimeExecutionAttemptReservationRepository()
         ),
         runtime_service=await _strategy_runtime_service(),
     )

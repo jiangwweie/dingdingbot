@@ -211,8 +211,6 @@ def test_full_cycle_cli_stdout_is_json_only(monkeypatch, capsys):
             "runtime_full_next_attempt_submit_cycle.py",
             "--runtime-instance-id",
             "runtime-1",
-            "--reservation-id",
-            "reservation-1",
             "--signal-input-json",
             "signal.json",
         ],
