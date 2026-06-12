@@ -7923,3 +7923,68 @@ Use this file for session progress and handoff notes.
     `False`;
   - `OrderLifecycle` called:
     `False`.
+
+## 2026-06-13 (RTF-058 Ready Signal Readiness Fixture)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - prove the ready-signal path without waiting for the live market to emit a
+    runtime-compatible signal;
+  - ensure the RTF-056 / RTF-057 mainline can move from a ready fresh-signal
+    loop packet into strategy planning and executable readiness;
+  - keep the proof local and repeatable before Tokyo or live-fact integration.
+- Local code changes:
+  - added `scripts/runtime_fresh_signal_readiness_fixture.py`;
+  - added `tests/unit/test_runtime_fresh_signal_readiness_fixture.py`;
+  - the fixture creates a ready RTF-056-style fresh-signal loop packet, trusted
+    readiness evidence, and signal input;
+  - it calls the real `runtime_fresh_signal_readiness_bridge.py` with fixture
+    strategy-planning and handoff builders;
+  - it proves two boundaries:
+    `ready_for_fresh_submit_authorization` without a fresh authorization and
+    `ready_for_official_submit_call` with a fixture fresh authorization.
+- Local verification:
+  - `python3 -m py_compile scripts/runtime_fresh_signal_readiness_fixture.py tests/unit/test_runtime_fresh_signal_readiness_fixture.py`;
+  - `pytest -q tests/unit/test_runtime_fresh_signal_readiness_fixture.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_real_signal_pipeline_fixture.py tests/unit/test_runtime_cycle_executable_submit_handoff.py`;
+  - result: `22 passed`;
+  - adjacent readiness regression:
+    `pytest -q tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_runtime_executable_submit_readiness_api_flow.py tests/unit/test_runtime_official_submit_handoff_api_flow.py tests/unit/test_runtime_persisted_draft_source_readiness_bridge.py`;
+  - result: `14 passed`.
+- Local fixture artifact:
+  - report:
+    `output/rtf058-ready-signal-fixture/fixture-report.json`;
+  - status:
+    `ready_fresh_signal_readiness_fixture`;
+  - bridge status:
+    `ready_for_fresh_submit_authorization`;
+  - planning calls:
+    `1`;
+  - handoff calls:
+    `1`;
+  - exchange write:
+    `False`;
+  - order created:
+    `False`;
+  - `OrderLifecycle` called:
+    `False`.
+- Safety:
+  - no server is called by the fixture;
+  - no official submit endpoint is called;
+  - no local registration is armed;
+  - no exchange submit is armed;
+  - no exchange write is called;
+  - no order is created;
+  - no `OrderLifecycle` is called;
+  - no runtime budget is mutated;
+  - no position is opened or closed;
+  - no withdrawal or transfer is created.
+- Execution semantics:
+  - RTF-058 closes the local proof gap for the ready-signal branch of the
+    current runtime mainline;
+  - current live AVAX state can still remain `waiting_for_signal`, but the
+    ready path is now reproducible without hand-built packet surgery;
+  - the next live move is to connect a real runtime-compatible signal to the
+    same bridge and then resolve fresh submit authorization / action-time
+    official submit preview.
