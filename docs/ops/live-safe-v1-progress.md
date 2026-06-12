@@ -9485,3 +9485,117 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is the controlled handoff from verified shadow
     candidate planning into prepare / FinalGate preflight without reviving
     one-shot manual evidence handling as the normal runtime loop.
+
+## 2026-06-13 (RTF-077 Ready-signal Prepare Handoff Local Contract)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Added:
+  `scripts/runtime_ready_signal_prepare_handoff_contract.py`.
+- Added tests:
+  `tests/unit/test_runtime_ready_signal_prepare_handoff_contract.py`.
+- Purpose:
+  prove a local contract from ready-signal shadow candidate planning into the
+  official next-attempt prepare wrapper, stopping at FinalGate preflight shape
+  before Tokyo integration or real submit.
+- Contract path:
+  - `runtime_ready_signal_shadow_planning_contract_fixture.py`;
+  - ready operator packet;
+  - `runtime_live_signal_shadow_planning_bridge.py`;
+  - real `RuntimeNextAttemptStrategyPlanningService`;
+  - real `RuntimeStrategySignalPlanningService`;
+  - shadow `SignalEvaluation`;
+  - shadow `OrderCandidate`;
+  - official `runtime_next_attempt_prepare_api_flow.py` wrapper;
+  - fake Console API client;
+  - prepare-shape `RuntimeExecutionIntentDraft`;
+  - prepare-shape `ExecutionIntent`;
+  - prepare-shape protection plan;
+  - prepare-shape submit authorization;
+  - `ready_for_final_gate_preflight`.
+- Artifacts:
+  - stdout:
+    `output/rtf077-ready-signal-prepare-handoff-contract.stdout.json`;
+  - contract report:
+    `output/rtf077-ready-signal-prepare-handoff-contract/contract-report.json`;
+  - shadow contract mirror:
+    `output/rtf077-ready-signal-prepare-handoff-contract/shadow-contract-report.json`;
+  - prepare packet:
+    `output/rtf077-ready-signal-prepare-handoff-contract/prepare-packet.json`;
+  - nested shadow planning artifacts:
+    `output/rtf077-ready-signal-prepare-handoff-contract/shadow-planning/`.
+- Contract result:
+  - status:
+    `ready_signal_prepare_handoff_contract_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `eval-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - runtime execution intent draft:
+    `draft-rtf077-prepare-handoff`;
+  - execution intent:
+    `intent-rtf077-prepare-handoff`;
+  - protection plan:
+    `protection-rtf077-prepare-handoff`;
+  - prepared authorization:
+    `auth-rtf077-prepare-handoff`;
+  - next operator step:
+    `run_official_final_gate_preflight`.
+- Checks:
+  - shadow contract passed:
+    `true`;
+  - shadow candidate created:
+    `true`;
+  - right-tail runner preserved:
+    `true`;
+  - prepare ready for FinalGate preflight:
+    `true`;
+  - next-attempt gate checked:
+    `true`;
+  - order candidate usage checked:
+    `true`;
+  - runtime execution intent draft shape created:
+    `true`;
+  - execution intent shape created:
+    `true`;
+  - protection plan shape created:
+    `true`;
+  - submit authorization shape created:
+    `true`;
+  - prepared authorization ID present:
+    `true`.
+- Verification:
+  - `pytest -q tests/unit/test_runtime_ready_signal_prepare_handoff_contract.py tests/unit/test_runtime_ready_signal_shadow_planning_contract_fixture.py tests/unit/test_runtime_next_attempt_prepare_api_flow.py tests/unit/test_runtime_live_signal_shadow_planning_bridge.py`;
+  - result:
+    `19 passed`;
+  - `python3 -m compileall -q scripts/runtime_ready_signal_prepare_handoff_contract.py tests/unit/test_runtime_ready_signal_prepare_handoff_contract.py`;
+  - local dry-run:
+    `python3 scripts/runtime_ready_signal_prepare_handoff_contract.py --output-dir output/rtf077-ready-signal-prepare-handoff-contract > output/rtf077-ready-signal-prepare-handoff-contract.stdout.json`;
+  - dry-run result:
+    `ready_signal_prepare_handoff_contract_passed`.
+- Safety:
+  - local contract only;
+  - fake Console API client only;
+  - no PG write;
+  - no live exchange;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no attempt counter mutation;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - the verified shadow `OrderCandidate` can now be handed into the official
+    prepare wrapper contract and reach FinalGate preflight shape locally;
+  - this is not Tokyo integration and not a real PG mutation claim;
+  - the next mainline gap is to deploy this RTF-077 contract and verify the same
+    prepare handoff shape on Tokyo before continuing toward executable runtime
+    handoff.
