@@ -9242,3 +9242,106 @@ Use this file for session progress and handoff notes.
   - the current no-signal market state safely bypasses shadow planning;
   - the bridge is ready to route a future runtime-compatible ready signal into
     shadow planning without crossing into prepare/submit.
+
+## 2026-06-13 (RTF-075 Ready-signal Shadow Planning Contract Fixture)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Added:
+  `scripts/runtime_ready_signal_shadow_planning_contract_fixture.py`.
+- Added tests:
+  `tests/unit/test_runtime_ready_signal_shadow_planning_contract_fixture.py`.
+- Purpose:
+  prove a deterministic ready-signal contract from live operator packet into
+  real local shadow planning services, without waiting for live market signals
+  and without entering prepare/submit.
+- Contract path:
+  - ready operator packet;
+  - `runtime_live_signal_shadow_planning_bridge.py`;
+  - real `RuntimeNextAttemptStrategyPlanningService`;
+  - real `RuntimeStrategySignalPlanningService`;
+  - shadow `SignalEvaluation`;
+  - shadow `OrderCandidate`.
+- Fixture:
+  - strategy:
+    `CPM-RO-001 / CPM-RO-001-v0`;
+  - side:
+    `long`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - symbol:
+    `ETH/USDT:USDT`;
+  - facts:
+    trusted local position projection with `0` active positions and trusted
+    cached account facts with clean reconciliation.
+- Artifacts:
+  - contract report:
+    `output/rtf075-ready-signal-contract/contract-report.json`;
+  - bridge report:
+    `output/rtf075-ready-signal-contract/bridge-report.json`;
+  - strategy planning flow:
+    `output/rtf075-ready-signal-contract/bridge-artifacts/rtf075-ready-signal-strategy-planning-flow.json`;
+  - signal input:
+    `output/rtf075-ready-signal-contract/signal-input.json`;
+  - operator packet:
+    `output/rtf075-ready-signal-contract/operator-ready.json`;
+  - post-submit finalize packet:
+    `output/rtf075-ready-signal-contract/post-submit-finalize.json`.
+- Contract result:
+  - status:
+    `ready_signal_shadow_planning_contract_passed`;
+  - bridge status:
+    `ready_for_final_gate_preflight`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - entry:
+    `104.2`;
+  - stop:
+    `99.60`;
+  - stop source:
+    `cpm_pullback_low`;
+  - intended notional:
+    `10`;
+  - leverage:
+    `1`;
+  - take-profit / runner:
+    `tp1_partial` plus `runner`;
+  - right-tail runner:
+    `right_tail_capture=true`.
+- Verification:
+  - `python3 scripts/runtime_ready_signal_shadow_planning_contract_fixture.py --output-dir output/rtf075-ready-signal-contract`;
+  - result:
+    `ready_signal_shadow_planning_contract_passed`;
+  - `pytest -q tests/unit/test_runtime_ready_signal_shadow_planning_contract_fixture.py tests/unit/test_runtime_live_signal_shadow_planning_bridge.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py`;
+  - result:
+    `13 passed`;
+  - `pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py`;
+  - result:
+    `24 passed`;
+  - `python3 -m compileall -q scripts/runtime_ready_signal_shadow_planning_contract_fixture.py scripts/runtime_live_signal_shadow_planning_bridge.py`;
+  - `git diff --check`.
+- Safety:
+  - fixture only;
+  - no live exchange;
+  - no prepare records;
+  - no recorded `ExecutionIntent`;
+  - no submit authorization;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no order;
+  - no `OrderLifecycle`;
+  - no real submit;
+  - no exchange write;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - the local contract now proves that a genuine ready signal can create a
+    strategy-driven shadow candidate with entry/protection/exit/sizing
+    semantics;
+  - the path still stops before prepare/submit authority;
+  - the next mainline step is to deploy this contract fixture to Tokyo and run
+    it there as a deterministic ready-branch proof independent of current
+    market no-signal conditions.
