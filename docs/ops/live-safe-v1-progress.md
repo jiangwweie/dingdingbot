@@ -16,6 +16,46 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-007 Executable Submit Readiness API Dry-run Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `1cfaeec7`.
+- Added `RuntimeExecutableSubmitReadinessService`:
+  - builds non-executing readiness previews from a
+    `RuntimeNextAttemptStrategyPlanningPacket`;
+  - preserves source strategy-planning blockers / warnings;
+  - delegates readiness classification to `RuntimeExecutableSubmitReadinessPacket`.
+- Added Trading Console API:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/executable-submit-readiness-previews`;
+  - request body requires a strategy planning packet and readiness evidence;
+  - optional legacy first-real-submit packet is accepted as compatibility
+    evidence;
+  - runtime mismatch is rejected before preview building.
+- Added `scripts/runtime_executable_submit_readiness_api_flow.py`:
+  - calls the Trading Console readiness preview endpoint;
+  - emits a local/Tokyo-friendly JSON artifact;
+  - carries explicit no-side-effect safety invariants.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_executable_submit_readiness.py tests/unit/test_runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_executable_submit_readiness_service_api.py tests/unit/test_runtime_executable_submit_readiness_api_flow.py tests/unit/test_runtime_release_strategy_planning_rehearsal_from_reports.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_release.py tests/unit/test_runtime_next_attempt_release_from_reports.py tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_trading_console_readmodels.py`
+    with `101 passed`;
+  - `python3 -m compileall -q src/application/runtime_executable_submit_readiness_service.py src/domain/runtime_executable_submit_readiness.py src/interfaces/api_trading_console.py scripts/runtime_executable_submit_readiness_api_flow.py scripts/runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_executable_submit_readiness.py tests/unit/test_runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_executable_submit_readiness_service_api.py tests/unit/test_runtime_executable_submit_readiness_api_flow.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this stage;
+  - current Tokyo deployed release remains
+    `brc-runtime-governance-da84d501-20260612Trtf005-release-strategy-probe`.
+- Safety:
+  - no PG read/write;
+  - no exchange read/write;
+  - no exchange order submit;
+  - no `ExecutionIntent` creation;
+  - no `OrderLifecycle.submit_order`;
+  - no order creation/cancel/close;
+  - no runtime state mutation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-006 Executable Submit Readiness Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:

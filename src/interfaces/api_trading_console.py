@@ -108,6 +108,10 @@ from src.domain.runtime_execution_submit_rehearsal import (
 from src.domain.runtime_execution_first_real_submit_enablement_packet import (
     RuntimeExecutionFirstRealSubmitEnablementPacket,
 )
+from src.domain.runtime_executable_submit_readiness import (
+    RuntimeExecutableSubmitReadinessEvidence,
+    RuntimeExecutableSubmitReadinessPacket,
+)
 from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
     RuntimeExecutionFirstRealSubmitEvidencePreparation,
 )
@@ -299,6 +303,16 @@ class RuntimeNextAttemptStrategyPlanningRequest(BaseModel):
     signal_input: StrategyFamilySignalInput
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
+
+
+class RuntimeExecutableSubmitReadinessPreviewRequest(BaseModel):
+    strategy_planning_packet: RuntimeNextAttemptStrategyPlanningPacket
+    evidence: RuntimeExecutableSubmitReadinessEvidence
+    first_real_submit_packet: RuntimeExecutionFirstRealSubmitEnablementPacket | None = None
+    additional_blockers: list[str] = Field(default_factory=list)
+    additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     non_executing: Literal[True] = True
 
@@ -1020,6 +1034,41 @@ async def runtime_next_attempt_observation_cycle(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/executable-submit-readiness-previews",
+    response_model=RuntimeExecutableSubmitReadinessPacket,
+)
+async def runtime_executable_submit_readiness_preview(
+    runtime_instance_id: str,
+    request: RuntimeExecutableSubmitReadinessPreviewRequest,
+) -> RuntimeExecutableSubmitReadinessPacket:
+    if request.strategy_planning_packet.runtime_instance_id != runtime_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="strategy_planning_packet_runtime_mismatch",
+        )
+    from src.application.runtime_executable_submit_readiness_service import (
+        RuntimeExecutableSubmitReadinessService,
+    )
+
+    service = RuntimeExecutableSubmitReadinessService()
+    try:
+        return await service.preview_from_strategy_planning_packet(
+            strategy_planning_packet=request.strategy_planning_packet,
+            evidence=request.evidence,
+            first_real_submit_packet=request.first_real_submit_packet,
+            additional_blockers=request.additional_blockers,
+            additional_warnings=[
+                *request.additional_warnings,
+                "trading_console_api_non_executing_preview",
+            ],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(
