@@ -9151,3 +9151,94 @@ Use this file for session progress and handoff notes.
   - the next mainline step is to deploy this bridge and run Tokyo integration
     in the current no-signal state, then continue observation until a genuine
     runtime-compatible signal appears.
+
+## 2026-06-13 (RTF-074 Tokyo Shadow Planning Bridge No-signal Integration)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Commit deployed:
+  `bcbd328308aedbaebd73129b634d51b088513ac4`.
+- Previous Tokyo head:
+  `09cadf270d29ecb434beae9a045fd1f131e47897`.
+- New Tokyo release:
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-bcbd3283-20260613Trtf074-shadow-planning-bridge`.
+- Deploy artifacts:
+  - plan:
+    `output/rtf074-tokyo/git-deploy-plan-bcbd3283.json`;
+  - owner packet:
+    `output/rtf074-tokyo/owner-git-deploy-packet-bcbd3283.json`;
+  - dry-run:
+    `output/rtf074-tokyo/git-deploy-dry-run-bcbd3283.json`;
+  - apply:
+    `output/rtf074-tokyo/git-deploy-applied-bcbd3283.json`.
+- Deploy result:
+  - status:
+    `applied`;
+  - blockers:
+    `[]`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-bcbd3283-20260613Trtf074-shadow-planning-bridge.pgdump`;
+  - migrations:
+    alembic command executed, migration count remained `84`;
+  - service:
+    restarted.
+- Postdeploy read-only facts:
+  - artifact:
+    `output/rtf074-tokyo/readonly-probe-after-deploy.json`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    `[]`;
+  - current head:
+    `bcbd328308aedbaebd73129b634d51b088513ac4`;
+  - health:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Postdeploy acceptance:
+  - artifact:
+    `output/rtf074-tokyo/postdeploy-acceptance-bcbd3283.json`;
+  - status:
+    `postdeploy_acceptance_passed`;
+  - blockers:
+    `[]`.
+- Remote bridge verification:
+  - input:
+    `/home/ubuntu/brc-deploy/reports/rtf070-live-signal-supervisor/20260613Trtf070-9e15b81f/live-signal-operator-supervisor.json`;
+  - remote output:
+    `/home/ubuntu/brc-deploy/reports/rtf074-shadow-planning-bridge/20260613Trtf074-bcbd3283/live-signal-shadow-planning-bridge.json`;
+  - local mirror:
+    `output/rtf074-tokyo/remote-report-20260613Trtf074-bcbd3283/live-signal-shadow-planning-bridge.json`;
+  - validation:
+    `remote_bridge_validation=passed`;
+  - status:
+    `waiting_for_signal`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - next step:
+    `continue_live_signal_operator_supervision`;
+  - strategy planning flow:
+    `null`;
+  - uses official strategy planning API:
+    `false`.
+- Safety:
+  - no strategy planning API call in no-signal state;
+  - no prepare records;
+  - no recorded `ExecutionIntent`;
+  - no submit authorization;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no order;
+  - no `OrderLifecycle`;
+  - no real submit;
+  - no exchange write;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-073 is now deployed and verified on Tokyo;
+  - the current no-signal market state safely bypasses shadow planning;
+  - the bridge is ready to route a future runtime-compatible ready signal into
+    shadow planning without crossing into prepare/submit.
