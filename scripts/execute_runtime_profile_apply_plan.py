@@ -138,22 +138,24 @@ def build_execution_report(
         blockers.append("rtf038_apply_readiness_packet_not_ready")
     apply_packet = packet.get("apply_packet") or {}
     plan = apply_packet.get("api_apply_plan") or {}
-    if plan.get("ready_to_apply") is not True:
+    plan_ready = plan.get("ready_to_apply") is True
+    if not plan_ready:
         blockers.append("api_apply_plan_not_ready")
-    if plan.get("places_order_when_applied") is not False:
-        blockers.append("api_apply_plan_order_effect_not_false")
-    if plan.get("calls_exchange_when_applied") is not False:
-        blockers.append("api_apply_plan_exchange_effect_not_false")
     requests = _api_requests(packet)
-    if len(requests) != 2:
-        blockers.append("api_apply_plan_requires_exactly_two_requests")
-    unsafe = [
-        str(request.get("step") or request.get("path") or index)
-        for index, request in enumerate(requests)
-        if not _request_is_safe(request)
-    ]
-    if unsafe:
-        blockers.append("api_apply_plan_contains_unsafe_request")
+    if plan_ready:
+        if plan.get("places_order_when_applied") is not False:
+            blockers.append("api_apply_plan_order_effect_not_false")
+        if plan.get("calls_exchange_when_applied") is not False:
+            blockers.append("api_apply_plan_exchange_effect_not_false")
+        if len(requests) != 2:
+            blockers.append("api_apply_plan_requires_exactly_two_requests")
+        unsafe = [
+            str(request.get("step") or request.get("path") or index)
+            for index, request in enumerate(requests)
+            if not _request_is_safe(request)
+        ]
+        if unsafe:
+            blockers.append("api_apply_plan_contains_unsafe_request")
     if mode not in {"dry-run", "apply"}:
         blockers.append("mode_must_be_dry_run_or_apply")
     if mode == "apply" and not execute:

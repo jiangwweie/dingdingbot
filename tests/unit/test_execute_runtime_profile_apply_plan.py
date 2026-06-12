@@ -208,3 +208,19 @@ def test_blocks_unsafe_apply_request() -> None:
     assert report["status"] == "blocked_runtime_profile_apply_plan"
     assert "api_apply_plan_requires_exactly_two_requests" in report["blockers"]
     assert "api_apply_plan_contains_unsafe_request" in report["blockers"]
+
+
+def test_blocks_not_ready_packet_without_noisy_plan_shape_blockers() -> None:
+    report = executor.build_execution_report(
+        packet={
+            "status": "waiting_for_matching_trial_binding",
+            "apply_packet": None,
+        },
+        mode="dry-run",
+    )
+
+    assert report["status"] == "blocked_runtime_profile_apply_plan"
+    assert report["blockers"] == [
+        "api_apply_plan_not_ready",
+        "rtf038_apply_readiness_packet_not_ready",
+    ]

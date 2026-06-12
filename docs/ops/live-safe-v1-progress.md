@@ -6702,3 +6702,67 @@ Use this file for session progress and handoff notes.
     2. `POST /api/brc/strategy-runtime-promotion-confirmations/{id}/runtime-drafts`;
   - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
     transfers.
+
+## 2026-06-13 (RTF-040 Tokyo Deploy And Real Trial-Binding Probe)
+
+- Pushed `program/live-safe-v1` to origin at commit `9637e861`.
+- Deployed Tokyo git release:
+  - release name:
+    `brc-runtime-governance-9637e861-20260613Trtf040-profile-apply-dryrun`;
+  - remote release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-9637e861-20260613Trtf040-profile-apply-dryrun`;
+  - deployment execution status: `applied`;
+  - remote deploy commands executed: `16`.
+- Postdeploy read-only probe:
+  - output:
+    `output/rtf040-local/postdeploy-readonly-probe.json`;
+  - status: `ready_for_controlled_deploy_preflight`;
+  - current deployed head: `9637e861`;
+  - health HTTP status: `200`;
+  - migration count: `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - blockers: `[]`.
+- Read Tokyo real trial bindings through authenticated read-only API:
+  - output:
+    `output/rtf040-tokyo/trial-bindings.json`;
+  - HTTP status: `200`;
+  - count: `4`.
+- Real trial-binding readiness result:
+  - output:
+    `output/rtf040-tokyo/runtime-profile-trial-binding-apply-readiness.json`;
+  - status: `waiting_for_matching_trial_binding`;
+  - blocker: `matching_trial_binding_not_found`;
+  - observed versions:
+    - `BTPC-001-v0`;
+    - `CPM-001-v0`;
+  - required version for the RBR/ADA profile:
+    `RBR-001-v0`.
+- Tokyo RTF-039 dry-run result:
+  - output:
+    `output/rtf040-tokyo/runtime-profile-apply-plan-dry-run.json`;
+  - status: `blocked_runtime_profile_apply_plan`;
+  - blockers:
+    - `api_apply_plan_not_ready`;
+    - `rtf038_apply_readiness_packet_not_ready`;
+  - API called: `false`;
+  - runtime created: `false`;
+  - exchange write called: `false`.
+- Executor cleanup:
+  - `scripts/execute_runtime_profile_apply_plan.py` now reports missing
+    apply-plan state as `api_apply_plan_not_ready` without noisy side-effect
+    shape blockers.
+- Focused verification:
+  - `pytest -q tests/unit/test_execute_runtime_profile_apply_plan.py
+    tests/unit/test_runtime_profile_trial_binding_apply_readiness.py
+    tests/unit/test_strategy_runtime_promotion_confirmation_api.py`
+    passed with `18 passed`.
+- Safety:
+  - RTF-040 deployment did not create `SignalEvaluation`, `OrderCandidate`,
+    `ExecutionIntent`, orders, or exchange requests;
+  - Tokyo trial-binding read used authenticated read-only API access;
+  - no promotion confirmation was recorded;
+  - no runtime draft was created because the matching `RBR-001-v0` trial
+    binding is absent;
+  - no `OrderLifecycle`, exchange write, withdrawal, or transfer path was
+    called.
