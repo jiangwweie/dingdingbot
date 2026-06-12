@@ -250,6 +250,25 @@ def _arm_preview_forbidden_effects(report: dict[str, Any]) -> list[str]:
     return sorted(set(effects))
 
 
+def _attached_arm_report_forbidden_effects(report: dict[str, Any]) -> list[str]:
+    """Check an existing arm report without counting its prior evidence writes."""
+
+    effects: list[str] = []
+    safety = _as_dict(report.get("safety"))
+    for name in (
+        "exchange_called",
+        "exchange_order_submitted",
+        "order_created",
+        "order_lifecycle_submit_called",
+        "withdrawal_or_transfer_created",
+    ):
+        if safety.get(name) is True:
+            effects.append(f"arm_report.{name}")
+    if report.get("ready_for_real_submit_action") is True:
+        effects.append("arm_report.ready_for_real_submit_action_true")
+    return sorted(set(effects))
+
+
 def build_followup_packet(
     args: argparse.Namespace,
     *,
@@ -295,7 +314,7 @@ def build_followup_packet(
         arm_report = _load_arm_report(args)
         arm_report_json_used = arm_report is not None
         if arm_report is not None:
-            arm_forbidden = _arm_preview_forbidden_effects(arm_report)
+            arm_forbidden = _attached_arm_report_forbidden_effects(arm_report)
             warnings.extend(
                 f"arm_report:{item}"
                 for item in arm_report.get("blockers") or []

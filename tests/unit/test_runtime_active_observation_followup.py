@@ -262,7 +262,11 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
 
 def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
     calls = []
-    arm_report = _arm_preview_report(blockers=[], warnings=["arm-ready"])
+    arm_report = _arm_preview_report(
+        blockers=[],
+        warnings=["arm-ready"],
+        forbidden=True,
+    )
     arm_report["ids"] = {
         "trusted_submit_fact_snapshot_id": "facts-1",
         "submit_idempotency_policy_id": "idem-1",
@@ -300,7 +304,30 @@ def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
     assert packet["operator_command_plan"]["arm_report_json_used"] is True
     assert packet["safety_invariants"]["arm_preview_called"] is False
     assert packet["safety_invariants"]["arm_report_json_used"] is True
+    assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == []
     assert "arm_report:arm-ready" in packet["warnings"]
+
+
+def test_followup_blocks_attached_arm_report_with_real_order_safety_flag(tmp_path):
+    arm_report = _arm_preview_report(blockers=[], warnings=[])
+    arm_report["safety"] = {"exchange_order_submitted": True}
+    arm_path = tmp_path / "arm-report.json"
+    arm_path.write_text(json.dumps(arm_report), encoding="utf-8")
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(
+            allow_disabled_smoke=True,
+            arm_report_json=str(arm_path),
+        ),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
+    )
+
+    assert packet["status"] == "disabled_smoke_blocked"
+    assert "arm_report_contains_forbidden_effects" in packet["blockers"]
+    assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == [
+        "arm_report.exchange_order_submitted"
+    ]
 
 
 def test_followup_blocks_when_arm_preview_touches_forbidden_surfaces():
