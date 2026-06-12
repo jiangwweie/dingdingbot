@@ -54,7 +54,7 @@ finalize, budget / attempt settlement, and next-attempt gating.
 
 | ID | Task | Status | Owner | Notes |
 | --- | --- | --- | --- | --- |
-| RTF-001 | RuntimePostSubmitFinalize + NextAttemptGate v1 | TESTING | Codex | Local proof v1 added: `RuntimePostSubmitFinalizePacket`, `RuntimePostSubmitFinalizeService`, and `scripts/runtime_post_submit_finalize_dry_run.py` join durable submit result -> submit outcome review -> attempt outcome policy -> budget settlement -> next attempt gate. Old consumed authorization is replay-only, pre-submit rehearsal retry is false, and local orders are not required to return to `CREATED`. Focused local tests pass; Tokyo integration remains pending. |
+| RTF-001 | RuntimePostSubmitFinalize + NextAttemptGate v1 | TESTING | Codex | Local proof v1 added: `RuntimePostSubmitFinalizePacket`, `RuntimePostSubmitFinalizeService`, `scripts/runtime_post_submit_finalize_dry_run.py`, and `scripts/runtime_post_submit_finalize_probe.py` join durable submit result -> submit outcome review -> attempt outcome policy -> budget settlement -> trusted active-position facts -> next attempt gate. Old consumed authorization is replay-only, pre-submit rehearsal retry is false, and local orders are not required to return to `CREATED`. Focused local tests pass; Tokyo deployment/integration probe remains pending. |
 | RTF-002 | Strategy-driven next attempt planning reconnection | TODO | Codex | After RTF-001, reconnect next eligible attempt to fresh StrategySignal -> SignalEvaluation -> OrderCandidate -> ExecutionIntent planning. A new attempt must use fresh signal/candidate/authorization evidence and must not reuse first-real-submit proof artifacts. |
 
 ## Personal Leveraged Campaign Local Sandbox

@@ -16,6 +16,40 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-001 Local/Tokyo Probe Entry)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `4de5f19a`.
+- Added `scripts/runtime_post_submit_finalize_probe.py` as the standard local
+  / Tokyo integration probe entry for RTF-001.
+- Probe behavior:
+  - resolves durable exchange-submit execution result by `authorization_id`;
+  - reads trusted local active-position projection from `PgPositionRepository`;
+  - counts all same-symbol active positions conservatively, while reporting
+    runtime-owned / unknown-runtime / other-runtime splits;
+  - runs `RuntimePostSubmitFinalizeService`;
+  - outputs finalize packet, next-attempt gate status, active-position facts,
+    blockers, warnings, and explicit no-exchange/no-order safety invariants.
+- Added `tests/unit/test_runtime_post_submit_finalize_probe.py` covering:
+  - clear next-attempt gate from trusted PG position count `0`;
+  - active same-symbol local position blocks the next-attempt gate;
+  - missing submit result cannot be bypassed by user-supplied active-position
+    facts and blocks with missing trusted facts.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_post_submit_finalize_probe.py tests/unit/test_runtime_post_submit_finalize.py tests/unit/test_runtime_execution_submit_outcome_review.py`
+    with `36 passed`;
+  - `python3 -m compileall -q scripts/runtime_post_submit_finalize_probe.py tests/unit/test_runtime_post_submit_finalize_probe.py`;
+  - `git diff --check`.
+- Safety:
+  - no deployment in this stage;
+  - no exchange write;
+  - no order creation/cancel/close;
+  - no `OrderLifecycle.submit_order`;
+  - no `ExecutionIntent` creation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-001 Local Post-submit Finalize Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
