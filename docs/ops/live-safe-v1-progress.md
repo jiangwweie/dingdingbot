@@ -8158,3 +8158,65 @@ Use this file for session progress and handoff notes.
   - the next mainline step should use a real current runtime-compatible ready
     signal / persisted draft source instead of replaying the old RTF-015 sample
     handoff.
+
+## 2026-06-13 (RTF-061 Current Runtime Persisted Source Disabled-smoke Pipeline)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - stop using historical RTF-015 sample handoff replay as the main disabled-smoke
+    source;
+  - add a current runtime-compatible persisted source pipeline that starts from a
+    real StrategySignal input shape;
+  - keep the path non-executing until the official disabled-smoke endpoint.
+- Added:
+  - `scripts/runtime_current_persisted_source_disabled_smoke_pipeline.py`;
+  - `tests/unit/test_runtime_current_persisted_source_disabled_smoke_pipeline.py`.
+- Pipeline shape:
+  - StrategySignal input;
+  - persisted shadow `SignalEvaluation` / `OrderCandidate` /
+    `RuntimeExecutionIntentDraft` source through the official Trading Console
+    API flow;
+  - executable readiness from the persisted draft source;
+  - initial handoff intentionally blocked without a fresh submit authorization;
+  - fresh submit authorization binding from latest ready draft / existing intent;
+  - final handoff rebuilt with the fresh submit authorization;
+  - official disabled-smoke endpoint call with
+    `owner_confirmed_for_first_real_submit_action=false`.
+- Local tests:
+  - command:
+    `pytest -q tests/unit/test_runtime_current_persisted_source_disabled_smoke_pipeline.py tests/unit/test_runtime_fresh_authorization_official_handoff_fixture.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`;
+  - result:
+    `14 passed`.
+- Compile check:
+  - command:
+    `python3 -m compileall -q scripts/runtime_current_persisted_source_disabled_smoke_pipeline.py`;
+  - result:
+    passed.
+- Direct local CLI observation:
+  - command attempted the new script against `http://fixture` without operator
+    auth env;
+  - result:
+    blocked by `BRC-AUTH-CONFIG-MISSING`;
+  - interpretation:
+    this is an expected operator-auth environment requirement for the real
+    `UrlLibApiClient`, not a fake-client pipeline logic failure.
+- Safety:
+  - uses current runtime persisted source rather than the historical RTF-015
+    sample handoff;
+  - may create non-executing shadow/persisted source records and fresh submit
+    authorization when run against a real service;
+  - does not request real gateway action;
+  - does not enable exchange submit execution;
+  - does not create local orders;
+  - does not call `OrderLifecycle`;
+  - does not mutate runtime budget;
+  - does not open or close positions;
+  - does not create withdrawal or transfer.
+- Mainline impact:
+  - RTF-061 provides the current-source replacement for the RTF-060 blocked
+    actual-service disabled-smoke probe;
+  - next Tokyo integration should run this pipeline with a current
+    runtime-compatible signal input and trusted readiness evidence, instead of
+    replaying old RTF-015 handoff JSON.
