@@ -7872,3 +7872,54 @@ Use this file for session progress and handoff notes.
     submit action-time confirmation;
   - historical pre-attempt / first-real-submit compatibility remains deferred
     to mandatory cleanup after the main runtime-level chain is proven.
+
+### RTF-057 Tokyo Deployment And Non-executing Probe
+
+- Code commit:
+  `88c1d8e0 feat(runtime): bridge fresh signals to readiness`.
+- Git deployment:
+  - target head:
+    `88c1d8e0d7cadb9b6520954a3d65080849548fb8`;
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-88c1d8e0-20260613Trtf057-fresh-readiness-bridge`;
+  - plan artifact:
+    `output/rtf057-tokyo/git-deploy-plan-88c1d8e0.json`;
+  - owner packet artifact:
+    `output/rtf057-tokyo/owner-git-deploy-packet-88c1d8e0.json`;
+  - dry-run artifact:
+    `output/rtf057-tokyo/git-deploy-dry-run-88c1d8e0.json`;
+  - apply artifact:
+    `output/rtf057-tokyo/git-deploy-applied-88c1d8e0.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - postdeploy artifact:
+    `output/rtf057-tokyo/postdeploy-verify-88c1d8e0.json`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`.
+- Tokyo RTF-057 probe:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf057-fresh-signal-readiness-bridge/20260613Trtf057-88c1d8e0/avax-fresh-signal-readiness-bridge.json`;
+  - local mirror:
+    `output/rtf057-tokyo/remote-report-20260613Trtf057-88c1d8e0/avax-fresh-signal-readiness-bridge.json`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - status:
+    `waiting_for_signal`;
+  - blocker:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - strategy planning:
+    `None`;
+  - readiness handoff:
+    `None`;
+  - exchange write:
+    `False`;
+  - order created:
+    `False`;
+  - `OrderLifecycle` called:
+    `False`.
