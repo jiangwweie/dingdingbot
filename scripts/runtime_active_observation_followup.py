@@ -76,6 +76,19 @@ def _latest_summary(loop_packet: dict[str, Any]) -> dict[str, Any]:
     summary = _as_dict(loop_packet.get("latest_summary"))
     if summary:
         return summary
+    runtime_summaries = loop_packet.get("runtime_summaries")
+    if isinstance(runtime_summaries, list):
+        for item in runtime_summaries:
+            if not isinstance(item, dict):
+                continue
+            if (
+                item.get("status") == READY_STATUS
+                or item.get("ready_for_final_gate_preflight") is True
+            ):
+                return item
+        for item in runtime_summaries:
+            if isinstance(item, dict):
+                return item
     summaries = loop_packet.get("cycle_summaries")
     if isinstance(summaries, list) and summaries:
         last = summaries[-1]
@@ -101,6 +114,38 @@ def _prepared_authorization_id(loop_packet: dict[str, Any]) -> str | None:
                     "prepared_authorization_id"
                 )
             )
+    runtime_summaries = loop_packet.get("runtime_summaries")
+    if isinstance(runtime_summaries, list):
+        for item in runtime_summaries:
+            if not isinstance(item, dict):
+                continue
+            if (
+                item.get("status") == READY_STATUS
+                or item.get("ready_for_final_gate_preflight") is True
+            ):
+                candidates.append(item.get("prepared_authorization_id"))
+    runtime_packets = loop_packet.get("runtime_packets")
+    if isinstance(runtime_packets, list):
+        for item in runtime_packets:
+            if not isinstance(item, dict):
+                continue
+            if (
+                item.get("status") == READY_STATUS
+                or item.get("ready_for_final_gate_preflight") is True
+            ):
+                candidates.append(
+                    _as_dict(item.get("operator_command_plan")).get(
+                        "prepared_authorization_id"
+                    )
+                )
+                latest_packet = _as_dict(item.get("latest_packet"))
+                candidates.append(
+                    _as_dict(latest_packet.get("operator_command_plan")).get(
+                        "prepared_authorization_id"
+                    )
+                )
+                prepare_packet = _as_dict(latest_packet.get("prepare_packet"))
+                candidates.append(_as_dict(prepare_packet.get("ids")).get("authorization_id"))
     for value in candidates:
         text = str(value or "").strip()
         if text:

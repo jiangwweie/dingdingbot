@@ -260,6 +260,63 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
     assert packet["safety_invariants"]["real_submit_requested"] is False
 
 
+def test_followup_extracts_ready_authorization_from_multi_runtime_monitor_packet():
+    calls = []
+    loop_packet = {
+        "status": "ready_for_final_gate_preflight",
+        "runtime_summaries": [
+            {
+                "runtime_instance_id": "runtime-blocked",
+                "status": "blocked",
+                "ready_for_final_gate_preflight": False,
+                "prepared_authorization_id": None,
+                "blockers": ["next_attempt_gate_blocked"],
+            },
+            {
+                "runtime_instance_id": "runtime-ready",
+                "status": "ready_for_final_gate_preflight",
+                "ready_for_final_gate_preflight": True,
+                "prepared_authorization_id": "auth-ready",
+                "blockers": [],
+            },
+        ],
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "executable_execution_intent_created": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+        },
+    }
+
+    def arm_runner(auth_id, args):
+        calls.append(("arm", auth_id, args.api_base))
+        return _arm_preview_report(blockers=[], warnings=[])
+
+    def disabled_runner(auth_id, args):
+        calls.append(("disabled", auth_id, args.api_base))
+        return _disabled_smoke_report()
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=loop_packet,
+        arm_preview_runner=arm_runner,
+        disabled_smoke_runner=disabled_runner,
+    )
+
+    assert packet["source_loop_status"] == "ready_for_final_gate_preflight"
+    assert packet["prepared_authorization_id"] == "auth-ready"
+    assert packet["status"] == "disabled_smoke_completed"
+    assert calls == [
+        ("arm", "auth-ready", "http://unit"),
+        ("disabled", "auth-ready", "http://unit"),
+    ]
+
+
 def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
     calls = []
     arm_report = _arm_preview_report(
