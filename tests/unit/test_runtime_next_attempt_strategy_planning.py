@@ -14,6 +14,10 @@ from src.application.runtime_strategy_signal_planning_service import (
     RuntimeStrategySignalCandidatePlanningResult,
     RuntimeStrategySignalCandidatePlanningStatus,
 )
+from src.domain.runtime_next_attempt_release import (
+    RuntimeNextAttemptReleaseStatus,
+    build_runtime_next_attempt_release_packet,
+)
 from src.domain.runtime_execution_post_submit_budget_settlement import (
     RuntimeExecutionPostSubmitBudgetSettlementStatus,
 )
@@ -35,6 +39,13 @@ from tests.unit.test_runtime_execution_submit_outcome_review import (
 )
 from tests.unit.test_runtime_post_submit_finalize import (
     _ready_review_no_fill_cancelled,
+)
+from tests.unit.test_runtime_next_attempt_release import (
+    _clear_gate,
+    _resolution,
+)
+from src.domain.runtime_active_position_resolution import (
+    RuntimeActivePositionResolutionStatus,
 )
 
 
@@ -126,6 +137,26 @@ def _blocked_post_submit_packet():
         post_submit_budget_settlement=_settlement(),
         active_positions_count=1,
         closed_review_required=False,
+        now_ms=NOW_MS,
+    )
+
+
+def _ready_release_packet():
+    return build_runtime_next_attempt_release_packet(
+        active_position_resolution=_resolution(
+            RuntimeActivePositionResolutionStatus.READY_FOR_NEXT_ATTEMPT_GATE,
+        ),
+        next_attempt_gate_packet=_clear_gate(),
+        now_ms=NOW_MS,
+    )
+
+
+def _blocked_release_packet():
+    return build_runtime_next_attempt_release_packet(
+        active_position_resolution=_resolution(
+            RuntimeActivePositionResolutionStatus.HOLD_WITH_HARD_STOP,
+        ),
+        next_attempt_gate_packet=None,
         now_ms=NOW_MS,
     )
 
@@ -334,6 +365,75 @@ async def test_next_attempt_strategy_planning_blocks_runtime_mismatch_before_pla
     )
     assert planner.calls == 0
     assert "post_submit_runtime_mismatch" in packet.blockers
+
+
+async def test_next_attempt_strategy_planning_calls_shadow_planner_after_release_ready():
+    signal_input = _signal_input()
+    planner = _Planner(
+        planning_status=(
+            RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+        ),
+    )
+    service = RuntimeNextAttemptStrategyPlanningService(
+        strategy_signal_planner=planner,
+    )
+    release_packet = _ready_release_packet()
+
+    assert release_packet.status == RuntimeNextAttemptReleaseStatus.READY_FOR_STRATEGY_SIGNAL
+
+    packet = await service.plan_from_release_gate(
+        next_attempt_release_packet=release_packet,
+        signal_input=signal_input,
+        runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
+        context_id="release-context-1",
+    )
+
+    assert packet.status == (
+        RuntimeNextAttemptStrategyPlanningStatus.READY_FOR_FINAL_GATE_PREFLIGHT
+    )
+    assert planner.calls == 1
+    assert packet.source_release_packet_id == release_packet.packet_id
+    assert packet.order_candidate_id == "order-candidate-eval-fresh"
+    assert packet.operator_command_plan["creates_shadow_candidate"] is True
+    assert packet.operator_command_plan["creates_executable_execution_intent"] is False
+    assert packet.operator_command_plan["live_submit_allowed"] is False
+    assert packet.operator_command_plan["requires_official_final_gate"] is True
+    assert planner.last_metadata["source_next_attempt_release_packet_id"] == (
+        release_packet.packet_id
+    )
+    assert planner.last_metadata["release_ready_for_strategy_signal"] is True
+    assert planner.last_metadata["requires_fresh_authorization_before_submit"] is True
+    assert packet.exchange_order_submitted is False
+    assert packet.order_lifecycle_called is False
+
+
+async def test_next_attempt_strategy_planning_does_not_call_planner_when_release_blocks():
+    signal_input = _signal_input()
+    planner = _Planner(
+        planning_status=(
+            RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+        ),
+    )
+    service = RuntimeNextAttemptStrategyPlanningService(
+        strategy_signal_planner=planner,
+    )
+    release_packet = _blocked_release_packet()
+
+    packet = await service.plan_from_release_gate(
+        next_attempt_release_packet=release_packet,
+        signal_input=signal_input,
+        runtime=_runtime(),
+    )
+
+    assert packet.status == (
+        RuntimeNextAttemptStrategyPlanningStatus.BLOCKED_BY_RELEASE_GATE
+    )
+    assert planner.calls == 0
+    assert "next_attempt_release_not_ready_for_strategy_signal" in packet.blockers
+    assert "strategy_signal_observation_not_allowed_by_release" in packet.blockers
+    assert "shadow_candidate_planning_not_allowed_by_release" in packet.blockers
+    assert packet.operator_command_plan["creates_shadow_candidate"] is False
+    assert packet.exchange_order_submitted is False
 
 
 async def test_trading_console_next_attempt_strategy_plan_endpoint_uses_injected_service(

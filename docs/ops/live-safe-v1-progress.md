@@ -16,6 +16,42 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-005 Release-ready Strategy Planning Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `f6297ef6`.
+- Extended `RuntimeNextAttemptStrategyPlanningService` with a release-aware
+  entry:
+  - `plan_from_release_gate(...)`;
+  - accepts `RuntimeNextAttemptReleasePacket`;
+  - blocks before strategy planning unless release status is
+    `ready_for_strategy_signal`;
+  - requires strategy observation and shadow candidate planning to both be
+    explicitly allowed by the release packet;
+  - calls the existing shadow planner only after release readiness is proven.
+- Preserved the existing post-submit path:
+  - `plan_from_post_submit_gate(...)` remains intact;
+  - old consumed authorization remains replay-only;
+  - future submit still requires fresh signal, fresh authorization, and
+    official FinalGate.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_release.py tests/unit/test_runtime_next_attempt_release_from_reports.py tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py`
+    with `29 passed`;
+  - `python3 -m compileall src/application/runtime_next_attempt_strategy_planning_service.py tests/unit/test_runtime_next_attempt_strategy_planning.py`;
+  - `git diff --check`.
+- Safety:
+  - no deployment in this stage;
+  - no PG read/write;
+  - no exchange read/write;
+  - no exchange order submit;
+  - no executable `ExecutionIntent`;
+  - no `OrderLifecycle.submit_order`;
+  - no order creation/cancel/close;
+  - no runtime state mutation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-004 Tokyo Deploy + Release Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
