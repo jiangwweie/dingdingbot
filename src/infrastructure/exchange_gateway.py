@@ -1559,32 +1559,29 @@ class ExchangeGateway:
             # CCXT fetch_order 参数顺序：(id, symbol) - 注意 id 在前
             # 注意：这里的 id 必须是交易所返回的订单 ID（exchange_order_id），而非系统内部 UUID
             order = await self.rest_exchange.fetch_order(exchange_order_id, symbol)
-
-            # 解析订单状态
-            order_status = self._parse_order_status(order.get('status', 'open'))
-
-            # 解析订单数据
-            amount = Decimal(str(order.get('amount', 0))) if order.get('amount') else Decimal('0')
-            filled_qty = Decimal(str(order['filled'])) if order.get('filled') else None
-            price = Decimal(str(order['price'])) if order.get('price') else None
-            average_exec_price = Decimal(str(order['average'])) if order.get('average') else None
-
-            return OrderPlacementResult(
-                order_id=exchange_order_id,
-                exchange_order_id=order.get('id'),
+            return self._order_placement_result_from_raw_order(
+                order,
+                exchange_order_id=exchange_order_id,
                 symbol=symbol,
-                order_type=self._parse_order_type(order.get('type', 'limit')),
-                direction=self._map_side_to_direction(order.get('side', 'buy'), False),
-                side=order.get('side', 'buy'),
-                amount=amount,
-                price=price,
-                filled_qty=filled_qty,
-                average_exec_price=average_exec_price,
-                reduce_only=order.get('reduceOnly', False),
-                status=order_status,
             )
 
         except ccxt.OrderNotFound as e:
+            fallback = await self._fetch_conditional_open_order_by_id(
+                exchange_order_id,
+                symbol,
+            )
+            if fallback is not None:
+                logger.warning(
+                    "fetch_order fallback matched conditional open order: "
+                    "symbol=%s exchange_order_id=%s",
+                    symbol,
+                    exchange_order_id,
+                )
+                return self._order_placement_result_from_raw_order(
+                    fallback,
+                    exchange_order_id=exchange_order_id,
+                    symbol=symbol,
+                )
             logger.warning(f"订单不存在：{e}")
             raise OrderNotFoundError(f"订单不存在：{exchange_order_id}", "F-012")
 
@@ -1599,6 +1596,102 @@ class ExchangeGateway:
         except Exception as e:
             logger.error(f"查询订单失败：{e}")
             raise
+
+    async def _fetch_conditional_open_order_by_id(
+        self,
+        exchange_order_id: str,
+        symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        params_candidates = ({}, {"stop": True}, {"type": "STOP_MARKET"})
+        for params in params_candidates:
+            try:
+                raw_orders = await self.rest_exchange.fetch_open_orders(
+                    symbol,
+                    params=params,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "conditional fetch_order fallback fetch_open_orders miss: "
+                    "symbol=%s params=%s exchange_order_id=%s error=%s",
+                    symbol,
+                    params,
+                    exchange_order_id,
+                    exc,
+                )
+                continue
+            for raw_order in raw_orders:
+                if self._raw_order_matches(
+                    raw_order,
+                    exchange_order_id=exchange_order_id,
+                    client_order_id=None,
+                    expected_symbol=symbol,
+                ):
+                    return raw_order
+        return None
+
+    def _order_placement_result_from_raw_order(
+        self,
+        order: Dict[str, Any],
+        *,
+        exchange_order_id: str,
+        symbol: str,
+    ) -> OrderPlacementResult:
+        info = order.get("info") or {}
+        order_status = self._parse_order_status(str(order.get("status", "open")))
+        amount_raw = (
+            order.get("amount")
+            or info.get("origQty")
+            or info.get("quantity")
+            or info.get("origQuantity")
+            or 0
+        )
+        amount = Decimal(str(amount_raw)) if amount_raw else Decimal("0")
+        filled_raw = order.get("filled") or info.get("executedQty") or info.get("actualQty")
+        filled_qty = Decimal(str(filled_raw)) if filled_raw else None
+        price_raw = order.get("price") or info.get("price")
+        price = Decimal(str(price_raw)) if price_raw else None
+        trigger_raw = (
+            order.get("triggerPrice")
+            or order.get("stopPrice")
+            or info.get("triggerPrice")
+            or info.get("stopPrice")
+        )
+        trigger_price = Decimal(str(trigger_raw)) if trigger_raw else None
+        average_raw = order.get("average") or info.get("avgPrice")
+        average_exec_price = Decimal(str(average_raw)) if average_raw else None
+        reduce_raw = order.get("reduceOnly")
+        if reduce_raw is None:
+            reduce_raw = info.get("reduceOnly")
+        reduce_only = str(reduce_raw).lower() in {"true", "1", "yes"}
+        side = str(order.get("side") or info.get("side") or "buy").lower()
+        order_type = (
+            info.get("orderType")
+            or info.get("type")
+            or info.get("origType")
+            or order.get("type")
+            or "limit"
+        )
+
+        return OrderPlacementResult(
+            order_id=exchange_order_id,
+            exchange_order_id=str(
+                order.get("id")
+                or info.get("orderId")
+                or info.get("algoId")
+                or exchange_order_id
+            ),
+            symbol=symbol,
+            order_type=self._parse_order_type(str(order_type)),
+            direction=self._map_side_to_direction(side, reduce_only),
+            side=side,
+            amount=amount,
+            price=price,
+            trigger_price=trigger_price,
+            filled_qty=filled_qty,
+            average_exec_price=average_exec_price,
+            reduce_only=reduce_only,
+            status=order_status,
+        )
 
     async def fetch_ticker_price(self, symbol: str) -> Decimal:
         """

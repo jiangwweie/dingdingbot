@@ -263,6 +263,65 @@ class _RestExchangeWithConditionalOpenOrders:
         return []
 
 
+class _RestExchangeFetchOrderConditionalFallback:
+    def __init__(self) -> None:
+        self.open_order_params: list[dict] = []
+
+    async def fetch_order(self, exchange_order_id: str, symbol: str):
+        raise ccxt.OrderNotFound("normal order endpoint cannot see conditional order")
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        params = params or {}
+        self.open_order_params.append(params)
+        if params.get("stop") is True:
+            return [
+                {
+                    "id": "4000001555301974",
+                    "clientOrderId": "sl-client-id",
+                    "symbol": symbol,
+                    "side": "sell",
+                    "type": "market",
+                    "status": "open",
+                    "amount": "0.01",
+                    "filled": "0",
+                    "triggerPrice": "591.63",
+                    "stopPrice": "591.63",
+                    "reduceOnly": True,
+                    "info": {
+                        "algoId": "4000001555301974",
+                        "clientAlgoId": "sl-client-id",
+                        "orderType": "STOP_MARKET",
+                        "side": "SELL",
+                        "origQty": "0.01",
+                        "executedQty": "0",
+                        "triggerPrice": "591.63",
+                        "stopPrice": "591.63",
+                        "reduceOnly": True,
+                    },
+                }
+            ]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_fetch_order_falls_back_to_conditional_open_stop_order():
+    gateway = ExchangeGateway("binance", "key", "secret", testnet=True)
+    rest = _RestExchangeFetchOrderConditionalFallback()
+    gateway.rest_exchange = rest
+
+    result = await gateway.fetch_order("4000001555301974", SYMBOL)
+
+    assert result.exchange_order_id == "4000001555301974"
+    assert result.status == OrderStatus.OPEN
+    assert result.order_type == OrderType.STOP_MARKET
+    assert result.side == "sell"
+    assert result.reduce_only is True
+    assert result.amount == Decimal("0.01")
+    assert result.filled_qty == Decimal("0")
+    assert result.trigger_price == Decimal("591.63")
+    assert {"stop": True} in rest.open_order_params
+
+
 @pytest.mark.asyncio
 async def test_exchange_confirmation_matches_conditional_order_by_client_id():
     gateway = ExchangeGateway("binance", "key", "secret", testnet=True)
