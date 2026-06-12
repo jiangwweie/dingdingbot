@@ -66,6 +66,31 @@ Use this file for session progress and handoff notes.
   - no runtime state mutation occurred;
   - no withdrawal or transfer occurred.
 
+## 2026-06-12 (Owner Correction: RTF-CLEANUP-001 Is A Mainline Exit Condition)
+
+- Confirmed correct mainline workspace and branch before the planning update:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `9877fbdc`.
+- Owner clarified that downgraded isolation cleanup for historical pre-attempt
+  / first-real-submit compatibility must not be forgotten after the main
+  runtime chain is proven.
+- Program update:
+  - `RTF-CLEANUP-001` is now recorded as
+    `TODO / MANDATORY_AFTER_MAIN_CHAIN`;
+  - `docs/ops/live-safe-v1-program.md` now defines it as a runtime mainline
+    exit condition;
+  - the cleanup remains deferred until the repeatable strategy-driven runtime
+    chain is proven, so it does not slow the current real-submit convergence.
+- Safety:
+  - docs-only planning update;
+  - no code change;
+  - no deployment;
+  - no exchange write;
+  - no order submit;
+  - no `OrderLifecycle` call;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-013 Tokyo Deploy + Binding Probe)
 
 - Deployed RTF-013 to Tokyo with the git-based deploy path:

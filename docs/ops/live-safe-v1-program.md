@@ -72,6 +72,35 @@ execution requires scoped verification, profile/environment gates, and
 cleanup/exit safety, but not an additional Owner authorization step merely
 because it is testnet/dev/readiness work.
 
+## Runtime Mainline Exit Conditions
+
+The current runtime mainline is not complete merely because a single
+first-real-submit path can be rehearsed or executed. Completion requires a
+repeatable, strategy-driven, auditable runtime chain:
+
+```text
+Strategy signal
+-> semantic gate
+-> shadow SignalEvaluation / OrderCandidate
+-> RuntimeExecutionIntentDraft
+-> ExecutionIntent / submit authorization
+-> official OrderLifecycle / exchange submit
+-> post-submit finalize
+-> budget / attempt settlement
+-> next-attempt gate
+```
+
+After that main chain is proven, `RTF-CLEANUP-001` is mandatory before the
+runtime mainline can be called complete. Historical pre-attempt rehearsal,
+manual evidence-ID transfer, first-real-submit owner packet material, and
+one-shot compatibility helpers must be downgraded into replay / recovery /
+history surfaces or removed where safe.
+
+This cleanup is deliberately not a pre-submit gate for the current convergence
+work. It is a required post-main-chain exit condition so the system does not
+continue to treat one-shot first-real-submit compatibility as the default
+runtime execution model.
+
 The current Owner-facing stage starts from docs/design/sandbox preparation for
 the Personal Leveraged Campaign chain. Live-safe implementation tasks may remain
 in the backlog, and non-real-live runtime/testnet verification may be used when
