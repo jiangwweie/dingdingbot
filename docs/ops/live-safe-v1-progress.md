@@ -16,6 +16,48 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-017 Scoped Local Order Adapter Boundary Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `0f1e9886`.
+- Added `scripts/runtime_scoped_local_order_adapter_boundary_from_evidence.py`:
+  - reads an RTF-016 evidence-chain report;
+  - verifies required machine evidence IDs:
+    `trusted_submit_fact_snapshot_id`, `submit_idempotency_policy_id`, and
+    `protection_creation_failure_policy_id`;
+  - verifies the chain is stopped at the expected
+    `RuntimeExecutionOrderLifecycleAdapterResult` boundary;
+  - blocks `sample_rehearsal` by default with
+    `blocked_sample_rehearsal_local_registration_not_allowed`;
+  - allows an explicitly scoped `scoped_local_registration_proof` to emit
+    `ready_for_scoped_local_registration_proof`;
+  - emits a local-registration-only command preview with required
+    `OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP` but does not run it.
+- Added focused tests:
+  - sample rehearsal cannot proceed to local registration by default;
+  - explicit scoped local-registration proof can become ready;
+  - missing machine evidence blocks the boundary.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_official_evidence_chain_from_binding.py`
+    with `5 passed`;
+  - `python3 -m compileall scripts/runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no API call occurred from the new wrapper;
+  - no local order registration occurred;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime budget mutation occurred;
+  - no withdrawal or transfer occurred.
+- Program cleanup invariant:
+  - `RTF-CLEANUP-001` remains mandatory after the repeatable
+    strategy-driven runtime main chain is proven and before the runtime mainline
+    can be called complete.
+
 ## 2026-06-13 (RTF-016 Official Evidence Chain Wrapper Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
