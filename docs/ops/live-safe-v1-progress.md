@@ -7626,3 +7626,103 @@ Use this file for session progress and handoff notes.
     post-submit finalize / next-attempt runtime loop, while keeping the old
     pre-attempt rehearsal path as compatibility evidence rather than the
     primary runtime loop.
+
+## 2026-06-13 (RTF-055 Post-submit Reservation Evidence Resolution)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - code commit:
+    `099918d2 feat(runtime): resolve post-submit reservation evidence`.
+- Purpose:
+  - remove the normal-path need for Owner / operator to manually supply
+    `reservation_id` during post-submit finalize;
+  - keep the already-submitted authorization in replay-only / reviewable
+    semantics;
+  - let the runtime-level post-submit loop resolve durable evidence from
+    persisted exchange submit result, submit outcome review, budget settlement,
+    and attempt reservation facts.
+- Local code changes:
+  - `RuntimePostSubmitFinalizeService.finalize_authorization(...)` and
+    `finalize_latest_for_runtime(...)` now accept optional `reservation_id`;
+  - when a post-submit budget settlement already exists, it is reused without
+    requiring a reservation id;
+  - when settlement is missing, the service resolves reservation evidence by
+    `authorization_id` through the attempt reservation repository;
+  - `PgRuntimeExecutionAttemptReservationRepository` now supports
+    `get_by_authorization_id(...)` using the existing authorization/time index;
+  - `RuntimePostSubmitFinalizeRequest`, `runtime_post_submit_finalize_api_flow.py`,
+    `runtime_post_submit_next_attempt_cycle.py`, and
+    `runtime_full_next_attempt_submit_cycle.py` no longer require
+    `--reservation-id`.
+- Local verification:
+  - `python3 -m py_compile src/application/runtime_post_submit_finalize_service.py src/infrastructure/pg_runtime_execution_attempt_reservation_repository.py src/interfaces/api_trading_console.py scripts/runtime_post_submit_finalize_api_flow.py scripts/runtime_post_submit_next_attempt_cycle.py scripts/runtime_full_next_attempt_submit_cycle.py`;
+  - `pytest -q tests/unit/test_runtime_post_submit_finalize.py tests/unit/test_runtime_post_submit_finalize_api_flow.py tests/unit/test_runtime_post_submit_next_attempt_cycle.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_post_submit_finalize_loop_verifier.py tests/unit/test_runtime_next_attempt_gate_strategy_planning_verifier.py tests/unit/test_runtime_next_attempt_submit_preparation_bridge_verifier.py tests/unit/test_runtime_executable_submit_readiness_api_flow.py tests/unit/test_runtime_official_submit_handoff_api_flow.py`;
+  - result: `37 passed`.
+- Tokyo deployment:
+  - target head:
+    `099918d22f04219d2a4bd07d0e3111c1902df0d5`;
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-099918d2-20260613Trtf055-post-submit-reservation`;
+  - plan artifact:
+    `output/rtf055-tokyo/git-deploy-plan-099918d2.json`;
+  - owner packet artifact:
+    `output/rtf055-tokyo/owner-git-deploy-packet-099918d2.json`;
+  - apply artifact:
+    `output/rtf055-tokyo/git-deploy-applied-099918d2.json`;
+  - postdeploy verification:
+    `output/rtf055-tokyo/postdeploy-verify-099918d2.json`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo post-submit finalize evidence:
+  - remote report directory:
+    `/home/ubuntu/brc-deploy/reports/rtf055-post-submit-reservation/20260613Trtf055-099918d2`;
+  - local mirror:
+    `output/rtf055-tokyo/remote-report-20260613Trtf055-099918d2`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - report:
+    `avax-post-submit-finalize-auto-reservation.json`;
+  - request mode:
+    omitted `reservation_id`;
+  - status:
+    `finalized_ready_for_next_attempt`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - blockers: `[]`;
+  - next-attempt blockers: `[]`;
+  - server reused existing submit outcome review and post-submit budget
+    settlement.
+- Tokyo post-submit -> next-attempt cycle evidence:
+  - report:
+    `avax-post-submit-next-attempt-auto-reservation-cycle.json`;
+  - request mode:
+    omitted `reservation_id`;
+  - post-submit stage:
+    `finalized_ready_for_next_attempt`;
+  - cycle status:
+    `waiting_for_signal`;
+  - blocker:
+    `strategy_signal_not_would_enter`;
+  - signal evaluation:
+    `runtime-signal-input:strategy-runtime-95655873b76c:BTPC-001:1781290800000`;
+  - order candidate:
+    `None`.
+- Safety:
+  - no pre-submit rehearsal was called;
+  - no local registration was armed;
+  - no exchange submit was armed;
+  - no exchange write was called;
+  - no order was created;
+  - no `OrderLifecycle` was called;
+  - no attempt counter was mutated by the scripts;
+  - no runtime budget was mutated by the scripts;
+  - no withdrawal or transfer was created.
+- Execution semantics:
+  - RTF-055 removes another manual evidence-id step from the runtime loop;
+  - the server can now finalize latest runtime submit evidence without
+    requiring `reservation_id` in the operator command;
+  - the AVAX runtime is ready for a future strategy-driven attempt once a fresh
+    runtime-compatible signal appears;
+  - the current no-trade result is caused by strategy semantics
+    (`strategy_signal_not_would_enter`), not by post-submit evidence plumbing.
