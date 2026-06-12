@@ -152,6 +152,9 @@ from src.application.runtime_next_attempt_strategy_planning_service import (
 from src.application.runtime_strategy_signal_scheduler_planning_service import (
     RuntimeStrategySignalSchedulerPlanningResult,
 )
+from src.application.runtime_strategy_signal_intent_draft_source_service import (
+    RuntimeStrategySignalIntentDraftSourcePacket,
+)
 from src.application.strategy_group_readonly_observation_scheduler import (
     ObservationSourceName,
     ScheduledReadonlyObservationRunResult,
@@ -306,6 +309,20 @@ class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeStrategySignalIntentDraftSourceRequest(BaseModel):
+    signal_input: StrategyFamilySignalInput
+    allow_shadow_candidate_creation: Literal[True] = True
+    allow_intent_draft_creation: Literal[True] = True
+    owner_reviewed: Literal[True] = True
+    owner_confirmed_for_intent: Literal[True] = True
+    candidate_id: str | None = None
+    context_id: str | None = None
+    expires_at_ms: int | None = Field(default=None, ge=0)
+    active_positions_count: int | None = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
 
 
 class RuntimeNextAttemptStrategyPlanningRequest(BaseModel):
@@ -940,6 +957,57 @@ async def runtime_strategy_signal_shadow_plan_for_signal_input(
             metadata={
                 "trading_console_api": True,
                 "runtime_instance_id": runtime_instance_id,
+                **request.metadata,
+            },
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/strategy-signal-intent-draft-sources",
+    response_model=RuntimeStrategySignalIntentDraftSourcePacket,
+)
+async def runtime_strategy_signal_intent_draft_source_for_signal_input(
+    runtime_instance_id: str,
+    request: RuntimeStrategySignalIntentDraftSourceRequest,
+) -> RuntimeStrategySignalIntentDraftSourcePacket:
+    runtime_service = await _strategy_runtime_service()
+    try:
+        runtime = await runtime_service.get_runtime(runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    if runtime.runtime_instance_id != runtime_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="runtime_instance_id_mismatch",
+        )
+
+    service = await _runtime_strategy_signal_intent_draft_source_service()
+    try:
+        return await service.record_ready_intent_draft_source(
+            request.signal_input,
+            runtime=runtime,
+            allow_shadow_candidate_creation=request.allow_shadow_candidate_creation,
+            allow_intent_draft_creation=request.allow_intent_draft_creation,
+            owner_reviewed=request.owner_reviewed,
+            owner_confirmed_for_intent=request.owner_confirmed_for_intent,
+            candidate_id=request.candidate_id,
+            context_id=request.context_id,
+            expires_at_ms=request.expires_at_ms,
+            active_positions_count=request.active_positions_count,
+            metadata={
+                "trading_console_api": True,
+                "runtime_instance_id": runtime_instance_id,
+                "non_executing": True,
                 **request.metadata,
             },
         )
@@ -4378,6 +4446,30 @@ async def _runtime_strategy_signal_scheduler_planning_service() -> Any:
         ),
     )
     setattr(api_module, "_runtime_strategy_signal_scheduler_planning_service", service)
+    return service
+
+
+async def _runtime_strategy_signal_intent_draft_source_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(
+        api_module,
+        "_runtime_strategy_signal_intent_draft_source_service",
+        None,
+    )
+    if injected is not None:
+        return injected
+    from src.application.runtime_strategy_signal_intent_draft_source_service import (
+        RuntimeStrategySignalIntentDraftSourceService,
+    )
+
+    service = RuntimeStrategySignalIntentDraftSourceService(
+        scheduler_planning_service=(
+            await _runtime_strategy_signal_scheduler_planning_service()
+        ),
+        runtime_execution_planning_service=await _runtime_execution_planning_service(),
+    )
+    setattr(api_module, "_runtime_strategy_signal_intent_draft_source_service", service)
     return service
 
 

@@ -16,6 +16,56 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-014 Persisted Strategy Signal Intent Draft Source Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `65c6b407`.
+- Added `RuntimeStrategySignalIntentDraftSourceService`:
+  - routes current `StrategyFamilySignalInput` through the existing scheduler
+    / semantic gate;
+  - requires explicit `allow_shadow_candidate_creation=true`;
+  - requires explicit `allow_intent_draft_creation=true`;
+  - requires `owner_reviewed=true` and `owner_confirmed_for_intent=true`
+    before any ready draft is recorded;
+  - records a persisted `RuntimeExecutionIntentDraft` from the created shadow
+    `OrderCandidate` through the existing `RuntimeExecutionPlanningService`;
+  - reports blocked scheduler, missing Owner review, or missing creation flags
+    before creating draft records.
+- Added API and script surfaces:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-intent-draft-sources`;
+  - `scripts/runtime_strategy_signal_intent_draft_source_api_flow.py`;
+  - the script accepts either a raw `signal_input` JSON object or an
+    observation-cycle report containing `signal_packet.signal_input`.
+- Local proof:
+  - success path creates persisted shadow `SignalEvaluation`, shadow
+    `OrderCandidate`, and ready `RuntimeExecutionIntentDraft`;
+  - blocked paths do not create draft records when Owner review/intent
+    confirmation or explicit creation flags are missing;
+  - blocked scheduler planning does not call the execution planner;
+  - API path rejects runtime mismatch.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_strategy_signal_intent_draft_source.py tests/unit/test_trading_console_readmodels.py -k 'intent_draft_source or trading_console_router_keeps_read_models_get_only_and_posts_allowlisted'`
+    with `8 passed, 50 deselected`;
+  - adjacent strategy/scheduler/RTF-013 regression:
+    `23 passed, 64 deselected`;
+  - `python3 -m compileall -q` for the new service, API, script, and test
+    files;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this stage.
+- Safety:
+  - no recorded `ExecutionIntent` was created;
+  - no official submit endpoint was called;
+  - no `real_gateway_action` was requested;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no local order was created;
+  - no `OrderLifecycle` call occurred;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-013 Tokyo Deploy + Binding Probe)
 
 - Deployed RTF-013 to Tokyo with the git-based deploy path:
