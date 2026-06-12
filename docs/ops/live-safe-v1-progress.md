@@ -16,6 +16,57 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-019 Tokyo Deploy + RTF-018 Dry-run Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target HEAD: `827de81309e5e085674f881dc1606ece8684d381`.
+- Confirmed Tokyo baseline before deployment:
+  - current release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-842de9bd-20260613Trtf016-evidence-wrapper`;
+  - current manifest head:
+    `842de9bd50f87295e5091343c98124168177b354`;
+  - health: `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Built deploy artifacts under:
+  - `output/tokyo-git-deploy-827de813-rtf019-local-registration-proof`;
+  - `git-deploy-plan.json`: `ready_for_owner_authorized_remote_git_deploy_plan`;
+  - `owner-git-deploy-packet.json`: `ready_for_owner_git_deploy_decision`;
+  - `git-deploy-dry-run.json`: `dry_run_ready`.
+- Applied Tokyo deploy through the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-827de813-20260613Trtf019-local-registration-proof`;
+  - apply report:
+    `output/tokyo-git-deploy-827de813-rtf019-local-registration-proof/git-deploy-apply-report.json`;
+  - status: `applied`;
+  - commands: `16/16`;
+  - effects: remote files modified, database backup created, migrations run,
+    service restarted;
+  - no `ExecutionIntent`, no order, no `OrderLifecycle`, no exchange call.
+- Postdeploy checks passed:
+  - health: `status=ok`, `runtime_bound=true`, `live_ready=false`;
+  - read-only probe: `ready_for_controlled_deploy_preflight`;
+  - postdeploy verify: `postdeploy_acceptance_passed`.
+- Tokyo RTF-018 dry-run probe reports:
+  - directory:
+    `/home/ubuntu/brc-deploy/reports/rtf019-scoped-local-registration-proof/20260613Trtf019-827de813`;
+  - sample rehearsal:
+    `sample-rehearsal-dry-run-blocked.json`;
+    status `blocked_scoped_local_registration_proof_dry_run`;
+    blockers `sample_rehearsal_local_registration_not_allowed` and
+    `sample_rehearsal_execute_not_allowed`;
+  - scoped proof dry-run:
+    `scoped-local-registration-proof-dry-run-ready.json`;
+    status `ready_for_scoped_local_registration_proof_dry_run`.
+- Probe safety:
+  - local registration was not attempted;
+  - local registration was not recorded;
+  - first-real-submit action was not called;
+  - exchange arm stayed disabled;
+  - exchange write stayed false;
+  - post-submit accounting was not called;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-13 (RTF-018 Scoped Local Registration Proof Orchestrator Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
