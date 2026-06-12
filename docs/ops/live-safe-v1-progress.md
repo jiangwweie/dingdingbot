@@ -82,6 +82,76 @@ Use this file for session progress and handoff notes.
     to create/confirm an ADA/RBR bounded runtime or keep waiting for an
     AVAX/BTPC-compatible signal.
 
+## 2026-06-13 (RTF-035 Tokyo Deploy / Profile Proposal Probe)
+
+- Deployed RTF-035 proposal bridge to Tokyo:
+  - release:
+    `brc-runtime-governance-1183571b-20260613Trtf035-profile-proposal`;
+  - deployed HEAD:
+    `1183571b7b15913b71ff810254f8f62b563af353`;
+  - previous release:
+    `brc-runtime-governance-97339f58-20260613Trtf034-live-signal-selector`;
+  - deploy apply status: `applied`;
+  - deployment effects recorded:
+    - `database_backup_created=true`;
+    - `migrations_run=true`;
+    - `services_restarted=true`;
+    - `exchange_called=false`;
+    - `execution_intent_created=false`;
+    - `order_created=false`;
+    - `order_lifecycle_called=false`.
+- Tokyo postdeploy verification passed:
+  - read-only probe:
+    `output/rtf035-tokyo-readonly-probe-after-1183571b.json`;
+  - postdeploy verifier:
+    `output/rtf035-tokyo-postdeploy-verify-1183571b.json`;
+  - verifier status: `postdeploy_acceptance_passed`;
+  - migration count: `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Ran the proposal bridge on Tokyo from the server-side RTF-034 selector report:
+  - source selector:
+    `/home/ubuntu/brc-deploy/reports/rtf034-live-signal-selector/20260613Trtf034-97339f58/runtime-live-signal-selector.json`;
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf035-profile-proposal/20260613Trtf035-1183571b/non-runtime-signal-profile-proposal.json`;
+  - copied local report:
+    `output/rtf035-tokyo/non-runtime-signal-profile-proposal.json`;
+  - packet status: `ready_for_owner_runtime_profile_decision`;
+  - proposal status: `ready_for_owner_codex_confirmation`;
+  - blockers: `[]`.
+- Tokyo proposal boundary:
+  - source signal: `RBR-001 / RBR-001-v0 / ADA/USDT:USDT / short`;
+  - profile kind: `small_capital_conservative_short`;
+  - total loss budget: `6.00`;
+  - max loss per attempt: `2.00`;
+  - max notional per attempt: `8.00`;
+  - max attempts: `3`;
+  - max leverage: `1`.
+- Safety:
+  - `selector_replay_only=true`;
+  - `database_write=false`;
+  - `runtime_profile_mutated=false`;
+  - `runtime_created=false`;
+  - `runtime_enabled=false`;
+  - `signal_evaluation_created=false`;
+  - `order_candidate_created=false`;
+  - `execution_intent_created=false`;
+  - `executable_execution_intent_created=false`;
+  - `order_created=false`;
+  - `order_lifecycle_called=false`;
+  - `exchange_write_called=false`;
+  - `runtime_budget_mutated=false`;
+  - `position_opened=false`;
+  - `position_closed=false`;
+  - `withdrawal_or_transfer_created=false`.
+- Progress estimate:
+  - runtime mainline convergence remains approximately `97%`;
+  - the project now has a server-verified bridge from live non-runtime signal
+    evidence to bounded runtime profile proposal. The next mainline step is
+    Owner/Codex confirmation and runtime creation/promotion for ADA/RBR, or
+    continued observation until the active AVAX/BTPC runtime receives a
+    compatible `would_enter`.
+
 ## 2026-06-13 (RTF-034 Runtime-compatible Live Signal Selector Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
