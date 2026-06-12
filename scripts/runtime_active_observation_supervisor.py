@@ -82,6 +82,8 @@ def _loop_command(
     ]
     if args.env_file:
         command.extend(["--env-file", args.env_file])
+    for runtime_instance_id in args.runtime_instance_id or []:
+        command.extend(["--runtime-instance-id", runtime_instance_id])
     if args.allow_prepare_records:
         command.append("--allow-prepare-records")
     if args.include_packets:
@@ -360,6 +362,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--env-file")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
+    parser.add_argument(
+        "--runtime-instance-id",
+        action="append",
+        default=[],
+        help=(
+            "Limit the active observation loop to the given ACTIVE runtime "
+            "instance. May be repeated."
+        ),
+    )
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
     parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)

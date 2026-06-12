@@ -30,6 +30,7 @@ def _args(**overrides):
         "source": "live_market",
         "include_exchange": False,
         "allow_prepare_records": False,
+        "runtime_instance_id": [],
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
         "interval_seconds": 0.0,
@@ -168,6 +169,84 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
     ]
     assert signal_summary["human_summary"].startswith("BTPC v0")
     assert signal_summary["context_tags"]["market_state"] == "TREND_DOWN"
+
+
+def test_active_monitor_can_filter_specific_active_runtimes(tmp_path):
+    client = _FakeClient(
+        [
+            _runtime("runtime-ada", symbol="ADA/USDT:USDT", side="short"),
+            _runtime("runtime-bnb", symbol="BNB/USDT:USDT", side="long"),
+            _runtime("runtime-avax", symbol="AVAX/USDT:USDT", side="short"),
+        ]
+    )
+    seen = []
+
+    def builder(args):
+        seen.append(args.runtime_instance_id)
+        return {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(
+            output_dir=str(tmp_path),
+            runtime_instance_id=["runtime-ada", "runtime-avax"],
+        ),
+        client=client,
+        monitor_builder=builder,
+    )
+
+    assert seen == ["runtime-ada", "runtime-avax"]
+    assert packet["active_runtime_count"] == 3
+    assert packet["monitored_runtime_count"] == 2
+    assert packet["requested_runtime_instance_ids"] == ["runtime-ada", "runtime-avax"]
+    assert packet["selected_runtime_instance_ids"] == ["runtime-ada", "runtime-avax"]
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["warnings"] == []
+
+
+def test_active_monitor_reports_missing_requested_runtime_as_warning(tmp_path):
+    client = _FakeClient([_runtime("runtime-ada", symbol="ADA/USDT:USDT")])
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(
+            output_dir=str(tmp_path),
+            runtime_instance_id=["runtime-ada", "runtime-missing"],
+        ),
+        client=client,
+        monitor_builder=lambda args: {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": [],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["monitored_runtime_count"] == 1
+    assert packet["selected_runtime_instance_ids"] == ["runtime-ada"]
+    assert packet["warnings"] == [
+        "requested_runtime_not_active_or_not_found:runtime-missing"
+    ]
 
 
 def test_active_monitor_allows_prepare_records_only_when_explicit():

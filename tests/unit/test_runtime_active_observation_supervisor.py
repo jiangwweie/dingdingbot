@@ -16,6 +16,7 @@ def _args(tmp_path, **overrides):
         "env_file": "readonly.env",
         "api_base": "http://unit",
         "source": "live_market",
+        "runtime_instance_id": [],
         "max_iterations": 2,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 180.0,
@@ -427,3 +428,70 @@ def test_supervisor_runs_followup_after_ready_preflight_without_submit(tmp_path)
     assert status_packet["prepared_authorization_id"] == "auth-ready-1"
     assert status_packet["safety_invariants"]["places_order"] is False
     assert status_packet["safety_invariants"]["calls_order_lifecycle"] is False
+
+
+def test_supervisor_passes_runtime_instance_filters_to_loop(tmp_path):
+    calls = []
+
+    def runner(command, stdout_path):
+        calls.append(command)
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-packet.json",
+                {
+                    "status": "waiting_for_signal",
+                    "safety_invariants": {
+                        "exchange_write_called": False,
+                        "order_created": False,
+                        "order_lifecycle_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                    },
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-packet.json",
+                {
+                    "status": "waiting_for_ready_final_gate_preflight",
+                    "safety_invariants": {
+                        "exchange_called": False,
+                        "exchange_order_submitted": False,
+                        "order_lifecycle_submit_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                    },
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+        _args(
+            tmp_path,
+            runtime_instance_id=["runtime-ada", "runtime-avax"],
+        ),
+        runner=runner,
+    )
+
+    loop_command = calls[0]
+    assert packet["status"] == "supervisor_completed"
+    assert loop_command.count("--runtime-instance-id") == 2
+    assert _argument_values(loop_command, "--runtime-instance-id") == [
+        "runtime-ada",
+        "runtime-avax",
+    ]
+
+
+def _argument_values(command, option):
+    values = []
+    for index, item in enumerate(command):
+        if item == option:
+            values.append(command[index + 1])
+    return values

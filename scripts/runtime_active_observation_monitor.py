@@ -68,6 +68,35 @@ def _active_runtimes(*, client: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _selected_active_runtimes(
+    active: list[dict[str, Any]],
+    *,
+    runtime_instance_ids: list[str] | None,
+    max_runtimes: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    requested = [
+        str(item).strip()
+        for item in (runtime_instance_ids or [])
+        if str(item or "").strip()
+    ]
+    if not requested:
+        return active[: max(max_runtimes, 0)], []
+
+    requested_set = set(requested)
+    selected = [
+        runtime
+        for runtime in active
+        if str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
+        in requested_set
+    ]
+    found = {
+        str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
+        for runtime in selected
+    }
+    missing = [runtime_id for runtime_id in requested if runtime_id not in found]
+    return selected[: max(max_runtimes, 0)], missing
+
+
 def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         value = runtime.get(key)
@@ -315,7 +344,14 @@ def _build_packet(
     api_client = client or UrlLibApiClient(api_base=_api_base(args))
     builder = monitor_builder or monitor._build_monitor_packet
     active = _active_runtimes(client=api_client)
-    selected = active[: max(int(args.max_runtimes or 100), 0)]
+    requested_runtime_instance_ids = list(
+        getattr(args, "runtime_instance_id", None) or []
+    )
+    selected, missing_runtime_instance_ids = _selected_active_runtimes(
+        active,
+        runtime_instance_ids=requested_runtime_instance_ids,
+        max_runtimes=int(args.max_runtimes or 100),
+    )
 
     packets: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
@@ -336,6 +372,8 @@ def _build_packet(
             if scoped not in blockers:
                 blockers.append(scoped)
     warnings: list[str] = []
+    for runtime_id in missing_runtime_instance_ids:
+        warnings.append(f"requested_runtime_not_active_or_not_found:{runtime_id}")
     effective_timeout = _effective_observation_timeout_seconds(args)
     if float(args.timeout_seconds or 10.0) != effective_timeout:
         warnings.append(
@@ -347,6 +385,11 @@ def _build_packet(
         "status": status,
         "active_runtime_count": len(active),
         "monitored_runtime_count": len(selected),
+        "requested_runtime_instance_ids": requested_runtime_instance_ids,
+        "selected_runtime_instance_ids": [
+            str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
+            for runtime in selected
+        ],
         "allow_prepare_records": args.allow_prepare_records,
         "max_cycles_per_runtime": args.max_cycles_per_runtime,
         "requested_timeout_seconds": args.timeout_seconds,
@@ -396,6 +439,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
     parser.add_argument("--include-exchange", action="store_true", default=False)
     parser.add_argument("--allow-prepare-records", action="store_true", default=False)
+    parser.add_argument(
+        "--runtime-instance-id",
+        action="append",
+        default=[],
+        help=(
+            "Limit monitoring to the given ACTIVE runtime instance. "
+            "May be repeated."
+        ),
+    )
     parser.add_argument("--max-runtimes", type=int, default=100)
     parser.add_argument("--max-cycles-per-runtime", type=int, default=1)
     parser.add_argument("--interval-seconds", type=float, default=0.0)
