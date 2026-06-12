@@ -8755,3 +8755,65 @@ Use this file for session progress and handoff notes.
   - current live market still has no runtime-compatible or non-runtime
     would-enter signal, so the correct result remains waiting rather than
     forced prepare.
+
+## 2026-06-13 (RTF-069 Live Signal Operator Supervisor)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - turn one-off live signal operator cycles into a repeatable supervisor loop;
+  - continue automatically while the result is waiting;
+  - stop for Owner/Codex review on runtime profile proposal;
+  - stop for prepare review on current-runtime ready signal;
+  - stop for FinalGate review after explicit non-executing prepare records.
+- Added:
+  - `scripts/runtime_live_signal_operator_supervisor.py`;
+  - `tests/unit/test_runtime_live_signal_operator_supervisor.py`.
+- Supervisor behavior:
+  - `waiting_for_runtime_compatible_signal` continues until `max_cycles`;
+  - `ready_for_owner_runtime_profile_decision` stops with
+    `supervisor_profile_review_required`;
+  - `ready_for_prepare` stops with `supervisor_prepare_review_required`;
+  - `ready_for_final_gate_preflight` stops with
+    `supervisor_final_gate_review_required`;
+  - any forbidden effect such as order creation, exchange write, budget
+    mutation, or `OrderLifecycle` call blocks the supervisor.
+- Local supervisor tests:
+  - command:
+    `pytest -q tests/unit/test_runtime_live_signal_operator_supervisor.py tests/unit/test_runtime_live_signal_operator_cycle.py tests/unit/test_runtime_live_signal_routing_packet.py`;
+  - result:
+    `15 passed`.
+- Local strategy / prepare regression:
+  - command:
+    `pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_reference_price_action_evaluators.py tests/unit/test_runtime_strategy_signal_evaluation_service.py tests/unit/test_runtime_next_attempt_prepare_api_flow.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py`;
+  - result:
+    `33 passed`.
+- Compile and diff checks:
+  - command:
+    `python3 -m compileall -q scripts/runtime_live_signal_operator_supervisor.py`;
+  - result:
+    passed;
+  - command:
+    `git diff --check`;
+  - result:
+    passed.
+- Safety:
+  - no runtime is created;
+  - no runtime profile is mutated;
+  - no local registration is armed;
+  - no exchange submit adapter is armed;
+  - no real submit is executed;
+  - no order is created;
+  - no `OrderLifecycle` call occurs;
+  - no exchange write occurs;
+  - no runtime budget mutation occurs;
+  - no position is opened or closed;
+  - no withdrawal or transfer is created.
+- Interpretation:
+  - RTF-069 creates the missing repeatable observation loop around the
+    live-signal operator cycle;
+  - it preserves review stops instead of turning readiness into automatic
+    execution;
+  - the next Tokyo step is to deploy the supervisor and run it against the
+    active runtime with a small `max_cycles` window.
