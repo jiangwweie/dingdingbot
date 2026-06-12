@@ -330,7 +330,24 @@ def _proposal(
         boundary=boundary,
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
-        owner_confirmation_keys=[
+        owner_confirmation_keys=_owner_confirmation_keys(binding=binding, side=side),
+        metadata={
+            "objective": "small_capital_bounded_runtime_right_tail_experiment",
+            "capital_base_source": "owner_supplied_or_default_30u",
+            "loss_inside_budget_is_accepted": True,
+            "runaway_behavior_is_forbidden": True,
+            "manual_withdrawal_only": True,
+            "not_proven_alpha": not (binding.proven_alpha if binding else False),
+        },
+    )
+
+
+def _owner_confirmation_keys(
+    *,
+    binding: StrategyImplementationBinding | None,
+    side: str,
+) -> list[str]:
+    keys = [
             "runtime_profile_confirmed",
             "symbol_side_boundary_confirmed",
             "max_loss_budget_confirmed",
@@ -345,16 +362,13 @@ def _proposal(
             "trusted_active_position_source_confirmed",
             "trusted_account_fact_source_confirmed",
             "stale_fact_behavior_confirmed",
-        ],
-        metadata={
-            "objective": "small_capital_bounded_runtime_right_tail_experiment",
-            "capital_base_source": "owner_supplied_or_default_30u",
-            "loss_inside_budget_is_accepted": True,
-            "runaway_behavior_is_forbidden": True,
-            "manual_withdrawal_only": True,
-            "not_proven_alpha": not (binding.proven_alpha if binding else False),
-        },
-    )
+    ]
+    if side == "short" or (
+        binding is not None
+        and binding.metadata.get("short_side_conservative_profile_required")
+    ):
+        keys.append("short_side_conservative_profile_confirmed")
+    return keys
 
 
 def _money(value: Decimal) -> Decimal:

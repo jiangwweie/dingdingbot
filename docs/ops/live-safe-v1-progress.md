@@ -6526,3 +6526,56 @@ Use this file for session progress and handoff notes.
     mutate attempts/budget, withdraw, or transfer;
   - future runtime coverage expansion remains an Owner/Codex review decision,
     not an automatic side effect of a no-signal window.
+
+## 2026-06-13 (RTF-036 Runtime Profile Decision Packet)
+
+- Added a local non-mutating Owner/Codex runtime profile decision packet
+  builder:
+  - `scripts/runtime_profile_decision_packet.py`;
+  - `tests/unit/test_runtime_profile_decision_packet.py`.
+- Purpose:
+  - consume the RTF-035 non-runtime signal profile proposal packet;
+  - freeze the selected `ExperimentalRuntimeProfileProposal` into a
+    promotion-confirmation request template;
+  - preview the existing strategy runtime promotion gate;
+  - emit the follow-up runtime-draft API request template;
+  - avoid manual JSON assembly for the future Owner/Codex confirmation step.
+- Current local artifact:
+  - input proposal:
+    `output/rtf035-tokyo/non-runtime-signal-profile-proposal.json`;
+  - output decision packet:
+    `output/rtf036-local/runtime-profile-decision-packet.json`;
+  - status: `ready_for_owner_codex_runtime_profile_confirmation`;
+  - strategy: `RBR-001` / `RBR-001-v0`;
+  - symbol / side: `ADA/USDT:USDT` / `short`;
+  - promotion gate preview:
+    `ready_for_controlled_runtime_execution_design`;
+  - trial binding supplied: `false`.
+- Profile-boundary preview:
+  - capital base: `30`;
+  - total loss budget: `6.00`;
+  - max loss per attempt: `2.00`;
+  - max notional per attempt: `8.00`;
+  - max attempts: `3`;
+  - max active positions: `1`;
+  - max leverage: `1`;
+  - protection / review required: `true`.
+- Fixed a confirmation-key gap:
+  - short-side profile proposals now expose
+    `short_side_conservative_profile_confirmed`;
+  - RTF-036 also upgrades older RTF-035 JSON artifacts that were produced
+    before that key existed.
+- Focused verification:
+  - `pytest -q tests/unit/test_experimental_runtime_profile_proposal.py
+    tests/unit/test_runtime_non_runtime_signal_profile_proposal.py
+    tests/unit/test_runtime_profile_decision_packet.py
+    tests/unit/test_strategy_runtime_promotion_confirmation_api.py`
+    passed with `20 passed`.
+- Safety:
+  - RTF-036 creates no promotion confirmation record;
+  - it does not write PG;
+  - it does not create or enable a runtime;
+  - it does not create `SignalEvaluation`, `OrderCandidate`,
+    `ExecutionIntent`, local orders, or exchange orders;
+  - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
+    transfers.

@@ -68,6 +68,9 @@ def test_brf_short_profile_proposal_uses_conservative_short_budget():
     assert proposal.max_notional_per_attempt == Decimal("8.00")
     assert proposal.boundary.allowed_sides == ["short"]
     assert "short_side_conservative_profile_required" in proposal.warnings
+    assert "short_side_conservative_profile_confirmed" in (
+        proposal.owner_confirmation_keys
+    )
     assert proposal.not_execution_authority is True
     assert proposal.order_created is False
     assert proposal.exchange_called is False
