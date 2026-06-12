@@ -1,6 +1,6 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-06-10
+Last updated: 2026-06-12
 Current phase: BRC strategy runtime governance convergence
 
 ## Current Document Authority
@@ -27,8 +27,13 @@ Current agent execution baseline starts from:
 `docs/ops/agent-current-brc-baseline.md`
 
 Untracked files must never be described as integrated capabilities.
-Real live trading / real-funds order placement is prohibited unless Owner
-explicitly authorizes that live action.
+Owner authorization as of 2026-06-12 permits real live trading / real-funds
+order placement by default when the action goes through the official auditable
+BRC runtime / Operation Layer path and current action-time gates pass. This is
+not permission to bypass FinalGate, runtime boundaries, idempotency,
+protection, reconciliation, audit logging, or scoped action evidence.
+Withdrawal and transfer remain prohibited unless Owner explicitly authorizes
+that separate fund movement task.
 
 Current target semantics: BRC is strategy runtime governance. Owner
 authorization should ultimately authorize a bounded StrategyRuntimeInstance,
@@ -187,11 +192,16 @@ Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Only c
 6. Claude may implement only from a task card with `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
 7. Do not hard-code fixed return or drawdown targets into system constraints, task cards, runtime rules, or agent instructions.
 8. Claude subtasks must stay small: one primary outcome, small file surface, low architecture coupling, and clear acceptance.
-9. Real live trading / real-funds order placement is the absolute execution
-   red line. Testnet, dev, readiness, controlled rehearsal, PG non-live,
-   console/API, and profile-scoped cleanup/reset/repair work may proceed after
-   scoped verification without an additional Owner authorization step.
-10. Blocker handling must be progress-first: live/real-funds blockers stop;
+9. Real live trading / real-funds order placement is allowed by default only
+   through the official auditable runtime / Operation Layer path when current
+   runtime, account, position, protection, idempotency, deployment, gateway,
+   FinalGate, and scoped action evidence validate. Any unauditable exchange
+   write, Operation Layer bypass, boundary expansion, missing protection,
+   stale facts, duplicate-submit risk, or withdrawal/transfer request remains a
+   hard stop.
+10. Blocker handling must be progress-first: live/real-funds blockers that are
+    caused by missing or stale evidence should be inspected and repaired where
+    bounded; blockers indicating unauditable or uncontrolled execution stop.
     testnet/dev/profile-scoped blockers should be inspected, safely repaired,
     reset, or cleaned up where bounded, then work should continue; unknown
     unsafe blockers stop only after investigation cannot establish safety.
@@ -275,8 +285,9 @@ Codex reviews the result before merge decisions.
 
 - No strategy-return optimization.
 - No multi-asset expansion.
-- No real live trading or real-funds activation without a separate explicit
-  Owner authorization decision.
+- No unauditable real live trading, real-funds activation, Operation Layer
+  bypass, or boundary expansion. Auditable first-real-submit / runtime exchange
+  actions are allowed by default when current action-time gates pass.
 - Testnet/dev/readiness/controlled rehearsal work is not a live authorization
   boundary by itself.
 - No architecture rewrite.

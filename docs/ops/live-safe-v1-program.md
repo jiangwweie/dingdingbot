@@ -38,12 +38,13 @@ Further Strategy Contract/runtime implementation is deferred until playbook
 switching governance, decision logs, cooldown/hard-lock rules, and CPV0_2
 continuity exist as paper-only governance artifacts.
 
-Live-safe v1 work may support future execution safety. Under `ADR-0009` as
-amended on 2026-06-01, real live trading / real-funds order placement remains
-prohibited unless separately and explicitly authorized. Runtime, paper, testnet,
-tiny-live-style rehearsal, read-only exchange sync, and other non-real-live
-steps are governed by scoped verification and hard safety gates, not a blanket
-Owner-authorization stop.
+Live-safe v1 work may support current execution safety. Under the 2026-06-12
+Owner correction, real live trading / real-funds order placement is allowed by
+default when the action goes through the official auditable BRC runtime /
+Operation Layer path and current action-time gates pass. Runtime, paper,
+testnet, tiny-live-style rehearsal, read-only exchange sync, and other
+non-real-live steps remain governed by scoped verification and hard safety
+gates, not a blanket Owner-authorization stop.
 
 ## Role Of This Document
 
@@ -62,11 +63,13 @@ execution may be used when it is the appropriate verification boundary after
 scoped verification and applicable safety gates.
 
 The scope of this program is `Live-safe Foundation`, not the full long-term
-platform roadmap. Current work must not start real live trading, real-funds
-deployment, portfolio/router work, SOL Phase 2, CPM reopening, short-side work,
-or parameter optimization. Runtime, paper, testnet, or tiny-live-style
-non-real-live execution requires scoped verification, profile/environment gates,
-and cleanup/exit safety, but not an additional Owner authorization step merely
+platform roadmap. Current work must not start unaudited real live trading,
+unaudited real-funds deployment, portfolio/router work, SOL Phase 2, or
+parameter optimization. Auditable real-funds order placement through the
+official runtime / Operation Layer path is allowed by default when current
+action-time gates pass. Runtime, paper, testnet, or tiny-live-style non-real-live
+execution requires scoped verification, profile/environment gates, and
+cleanup/exit safety, but not an additional Owner authorization step merely
 because it is testnet/dev/readiness work.
 
 The current Owner-facing stage starts from docs/design/sandbox preparation for
@@ -112,14 +115,16 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Do not tune ETH Pinbar parameters.
 - Do not add multi-asset expansion.
 - Do not add Regime, Data, Strategy Router, or Portfolio capabilities unless the user explicitly promotes them from the capability pool.
-- Do not connect real funds or execute real live trading without a separate
-  explicit Owner authorization decision.
+- Do not connect real funds or execute real live trading through an unaudited
+  path, Operation Layer bypass, stale-fact path, unprotected path, or
+  runtime-boundary expansion.
 - Do not rewrite the architecture.
 - Do not change live profile trading parameters.
 - Do not turn investor preference numbers into hard-coded engineering constraints.
-- Do not start real live or real-funds action without separate explicit Owner
-  authorization. For testnet/dev/profile-scoped work, verify scope and safety
-  gates, then continue without asking for additional testnet authorization.
+- Do not start real live or real-funds action unless the official auditable
+  runtime / Operation Layer path validates current action-time gates. For
+  testnet/dev/profile-scoped work, verify scope and safety gates, then continue
+  without asking for additional testnet authorization.
 - Do not promote SOL Phase 2, CPM, short-side, portfolio/router, or
   multi-strategy work into current mainline without a separate Owner decision.
 
@@ -158,9 +163,12 @@ Use Memory MCP only for durable rules and decisions that should survive across p
 - Default to sim/testnet behavior.
 - Live runtime profile changes require a separate task card and explicit user approval.
 - Exchange credentials, order sizing defaults, and live profile changes must not be mixed with code logic changes.
-- Real live trading remains the hard execution red line. Non-real-live runtime
-  and testnet work is permitted through scoped verification, profile gates, and
-  hard safety checks under the current agent baseline.
+- Unaudited real live trading remains a hard execution red line. Auditable
+  first-real-submit / runtime exchange actions are allowed by default when the
+  official runtime / Operation Layer path validates current action-time gates.
+  Non-real-live runtime and testnet work is permitted through scoped
+  verification, profile gates, and hard safety checks under the current agent
+  baseline.
 
 ## Core Files
 

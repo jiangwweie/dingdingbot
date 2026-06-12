@@ -158,8 +158,10 @@ Only Codex should modify core execution files unless a task card explicitly allo
 
 - Do not optimize strategy returns.
 - Do not tune ETH Pinbar parameters.
-- Do not edit live trading profiles or real-funds permissions without explicit
-  Owner authorization.
+- Do not edit live trading profiles, credentials, order-sizing defaults, or
+  runtime-boundary expansions without explicit Owner authorization. Auditable
+  real-funds order placement through the official runtime / Operation Layer path
+  is allowed by default when current action-time gates pass.
 - Do not mix live runtime profile changes with code logic changes. Bounded
   testnet/dev/profile-scoped cleanup/reset/repair may be included when the task
   explicitly scopes and verifies it.
@@ -171,7 +173,9 @@ Only Codex should modify core execution files unless a task card explicitly allo
 
 Do not stop at the first blocker. Classify the blocker scope:
 
-- live/real-funds: stop unless explicit Owner authorization exists;
+- live/real-funds: proceed through the official auditable runtime / Operation
+  Layer path when current action-time gates pass; stop on unauditable or
+  uncontrolled execution;
 - testnet/dev/profile-scoped: inspect, safely repair/reset/cleanup where
   bounded, and continue;
 - unknown unsafe: investigate, then block only if safety cannot be established.

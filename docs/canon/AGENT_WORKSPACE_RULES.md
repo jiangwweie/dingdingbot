@@ -2,7 +2,7 @@
 title: AGENT_WORKSPACE_RULES
 status: CURRENT_CANON
 authority: owner-instruction + code-verification
-last_verified: 2026-06-09
+last_verified: 2026-06-12
 source_of_truth:
   - CLAUDE.md
   - AGENTS.md
@@ -48,11 +48,49 @@ Then read the specific task card and any referenced ADRs.
 
 **Shared rules**:
 
-- No live trading / order placing without explicit Owner authorization.
+- Real live trading / order placing is allowed by default only through the
+  official auditable BRC runtime / Operation Layer path when current
+  action-time gates pass.
 - Do not infer current state from archive docs.
 - Do not promote readmodel / metadata chain into execution chain.
 - Do not treat one-shot execution as final architecture.
-- Do not treat StrategyRuntimeInstance as currently implemented.
+- Do not treat StrategyRuntimeInstance as execution authority by itself.
+
+---
+
+## 2.1 Current Workspace Discipline
+
+Current mainline development must happen in:
+
+```text
+/Users/jiangwei/Documents/final-sprint6-integration
+```
+
+Current mainline branch:
+
+```text
+program/live-safe-v1
+```
+
+The legacy/default workspace path:
+
+```text
+/Users/jiangwei/Documents/final
+```
+
+may contain an isolated side branch such as `codex/llm-advisory-plane-feishu-design`.
+It must not be used for mainline runtime, execution, deployment, or strategy
+runtime governance changes unless the branch/worktree state is first explicitly
+verified and corrected.
+
+Before each stage commit, Codex must report:
+
+1. current working directory;
+2. current branch;
+3. current HEAD commit;
+4. whether the commit is deployed;
+5. whether the stage touched exchange write, `OrderLifecycle`, or
+   first-real-submit execution paths.
 
 ---
 
@@ -81,8 +119,9 @@ Agent must stop and report if it needs files outside Allowed files.
 - No secret output (API keys, tokens, credentials, private keys, database URLs).
 - No uncontrolled order path outside official ActionSpec -> FinalGate ->
   Operation Layer chain.
-- No direct exchange scripts unless explicitly approved in task card.
-- No treating StrategyRuntimeInstance as currently implemented.
+- No direct or unaudited exchange scripts outside the official runtime /
+  Operation Layer action path.
+- No treating StrategyRuntimeInstance as execution authority by itself.
 - No treating one-shot execution as final architecture.
 - No using docs/archive or docs/ops/ historical docs as current fact source.
 - No running project without explicit instruction.

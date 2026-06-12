@@ -199,11 +199,18 @@ This document defines the runtime safety boundaries for the BRC project.
   scoped action authorization all validate.
 - A first-real-submit final review packet can say that deployment evidence and
   Owner/action evidence are mutually consistent for review; it is not the
-  action point, not exchange enablement, and not real-submit authorization.
+  action point by itself. As of Owner authorization on 2026-06-12, real
+  exchange submit is allowed by default only when the official auditable
+  first-real-submit / runtime exchange action path revalidates current runtime,
+  account, position, protection, idempotency, deployment, gateway, FinalGate,
+  and scoped action evidence at action time.
 - Documentation work must not run the project or call the exchange unless the
   active task explicitly includes bounded read-only verification.
-- Real live trading / real-funds order placement requires separate explicit
-  Owner authorization for each action.
+- Real live trading / real-funds order placement no longer requires a separate
+  per-action chat authorization when the official auditable runtime / Operation
+  Layer action path passes current action-time gates. Any unauditable exchange
+  write, Operation Layer bypass, stale facts, missing protection, duplicate
+  submit risk, boundary expansion, withdrawal, or transfer remains prohibited.
 - Budgeted small losses can be acceptable under Owner-approved experimental
   risk capital. System failure is budget breach, runaway behavior, missing
   auditability, boundary expansion, or unauthorized exchange write.
@@ -245,14 +252,17 @@ This document defines the runtime safety boundaries for the BRC project.
 
 ## 3. Hard Red Lines
 
-The following are prohibited unless Owner explicitly authorizes a specific task:
+The following remain prohibited:
 
-- Order placement (any exchange write)
-- Order cancel / close / replace
-- Exchange connection for live operations
+- Unaudited order placement or any exchange write outside the official runtime
+  / Operation Layer action path
+- Unaudited order cancel / close / replace outside the official runtime /
+  Operation Layer action path
+- Exchange connection for live operations outside the audited action path
 - Database mutation (beyond what task card allows)
 - Runtime server start
-- Script execution against exchange
+- Direct or unscoped script execution against exchange outside the official
+  auditable runtime / Operation Layer action path
 - Secret output (API keys, tokens, credentials, private keys, DB URLs)
 - Withdrawal or transfer
 - Strategy self-elevation

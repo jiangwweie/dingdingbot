@@ -1,6 +1,6 @@
 # Agent Current BRC Baseline
 
-Last updated: 2026-06-08
+Last updated: 2026-06-12
 Status: CURRENT_AGENT_BASELINE
 
 This file is the current agent-facing baseline for Codex, Claude, skills,
@@ -54,8 +54,9 @@ whole product as read-only.
 
 ## Authorization Boundary
 
-Real live trading and real-funds order placement require separate explicit
-Owner authorization.
+Owner authorization as of 2026-06-12 permits real live trading and real-funds
+order placement by default when the action goes through the official auditable
+BRC runtime / Operation Layer path and current action-time gates pass.
 
 The following work does not require additional Owner authorization merely
 because it touches controlled execution-readiness surfaces:
@@ -71,8 +72,9 @@ because it touches controlled execution-readiness surfaces:
 - testnet/dev/profile-scoped cleanup, reset, or repair;
 - architecture governance.
 
-This does not authorize live orders, real-funds orders, withdrawals, transfers,
-credential changes, or bypasses around the Operation Layer.
+This does not authorize withdrawals, transfers, credential changes, Operation
+Layer bypasses, unauditable exchange writes, stale-fact execution, missing
+protection, duplicate-submit risk, or runtime-boundary expansion.
 
 ## Gate Behavior
 
@@ -80,7 +82,7 @@ Classify blockers before stopping:
 
 | Blocker scope | Required behavior |
 | --- | --- |
-| live / real-funds | hard stop unless separate explicit Owner authorization exists |
+| live / real-funds | proceed through auditable runtime / Operation Layer path when current action-time gates pass; stop on unauditable or uncontrolled execution |
 | testnet / dev / profile-scoped | inspect scope, safely repair/reset/cleanup where bounded, then continue |
 | unknown unsafe | investigate; block only if safety cannot be established |
 | strategy evidence weakness | disclose as warning/evidence; do not hard-block after Owner acknowledgement |
@@ -91,7 +93,7 @@ Classify blockers before stopping:
 
 These remain hard blockers:
 
-- missing explicit live authorization for real live trading or real-funds order;
+- missing auditable action evidence for real live trading or real-funds order;
 - symbol / side / cap mismatch;
 - profile / environment mismatch;
 - protection impossible;
@@ -106,8 +108,8 @@ These remain hard blockers:
 
 ## Strategy Warnings
 
-These are warnings that require disclosure and Owner acknowledgement, but do
-not hard-block after acknowledgement:
+These are warnings that require disclosure, but do not hard-block when the
+auditable runtime boundary and action-time gates pass:
 
 - evidence weak;
 - forward review incomplete;
