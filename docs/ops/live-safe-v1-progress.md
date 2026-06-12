@@ -8220,3 +8220,108 @@ Use this file for session progress and handoff notes.
   - next Tokyo integration should run this pipeline with a current
     runtime-compatible signal input and trusted readiness evidence, instead of
     replaying old RTF-015 handoff JSON.
+
+## 2026-06-13 (RTF-062 Tokyo Deploy / Current-source Actual-service Blocked Probe)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target commit:
+    `9d96ed916ad802739cb8abff99bca76b68e605ef`.
+- Deployment:
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-3d62ed7a-20260613Trtf060-fresh-auth-handoff`;
+  - new release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-9d96ed91-20260613Trtf062-current-source-smoke`;
+  - plan artifact:
+    `output/rtf062-tokyo/git-deploy-plan-9d96ed91.json`;
+  - owner packet artifact:
+    `output/rtf062-tokyo/owner-git-deploy-packet-9d96ed91.json`;
+  - dry-run artifact:
+    `output/rtf062-tokyo/git-deploy-dry-run-9d96ed91.json`;
+  - apply artifact:
+    `output/rtf062-tokyo/git-deploy-applied-9d96ed91.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-9d96ed91-20260613Trtf062-current-source-smoke.pgdump`;
+  - migration state:
+    `084`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health after deployment:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`;
+  - manifest head:
+    `9d96ed916ad802739cb8abff99bca76b68e605ef`.
+- RTF-062 live signal selector:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf062-current-source-disabled-smoke/20260613Trtf062-9d96ed91/live-signal-selector.json`;
+  - local mirror:
+    `output/rtf062-tokyo/remote-report-20260613Trtf062-9d96ed91/live-signal-selector.json`;
+  - status:
+    `no_would_enter_signal_available`;
+  - blocker:
+    `runtime_strategy_signal_not_found_in_strategy_shelf`;
+  - inspected signals:
+    `8`;
+  - `would_enter` count:
+    `0`.
+- RTF-062 fresh-signal prepare loop:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf062-current-source-disabled-smoke/20260613Trtf062-9d96ed91/fresh-signal-prepare-loop.json`;
+  - local mirror:
+    `output/rtf062-tokyo/remote-report-20260613Trtf062-9d96ed91/fresh-signal-prepare-loop.json`;
+  - status:
+    `waiting_for_signal`;
+  - blocker:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - post-submit finalize:
+    `finalized_ready_for_next_attempt`;
+  - next attempt gate:
+    `ready_for_fresh_signal`;
+  - attempts remaining:
+    `1`;
+  - budget remaining:
+    `5.833135780000000000`;
+  - active positions count:
+    `0`.
+- RTF-061 current-source pipeline on Tokyo:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf062-current-source-disabled-smoke/20260613Trtf062-9d96ed91/current-source-pipeline-report.json`;
+  - local mirror:
+    `output/rtf062-tokyo/remote-report-20260613Trtf062-9d96ed91/current-source-pipeline-report.json`;
+  - status:
+    `blocked_at_strategy_signal_intent_draft_source`;
+  - blocked stage:
+    `strategy_signal_intent_draft_source`;
+  - blockers:
+    `intent_draft_source:strategy_signal_not_would_enter`,
+    `intent_draft_source:scheduler_shadow_candidate_not_created`;
+  - fresh submit authorization:
+    `null`;
+  - official submit endpoint called:
+    `False`.
+- Safety:
+  - no historical RTF-015 sample handoff was used;
+  - no fresh submit authorization was created;
+  - no official submit endpoint call was made by the current-source pipeline;
+  - no real gateway action was requested;
+  - no exchange write occurred;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no runtime budget mutation occurred;
+  - no position was opened or closed;
+  - no withdrawal or transfer was created.
+- Interpretation:
+  - deployment is current and healthy;
+  - the current runtime is post-submit finalized and ready for a fresh signal;
+  - current market did not produce a runtime-compatible `would_enter`;
+  - the actual-service current-source pipeline correctly blocked before
+    persisted candidate / readiness / handoff instead of replaying old sample
+    handoff or faking readiness;
+  - next runtime progress requires a genuine runtime-compatible `would_enter`
+    or an Owner-approved new runtime/profile for a different strategy signal.
