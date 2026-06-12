@@ -16,6 +16,60 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-013 Tokyo Deploy + Binding Probe)
+
+- Deployed RTF-013 to Tokyo with the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-0afbcbf2-20260612Trtf013-binding-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - manifest head:
+    `0afbcbf229037caedac01f4bd17428f90ef176b4`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy execution result:
+  - status: `applied`;
+  - commands executed: `16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`.
+- Ran RTF-013 fresh authorization binding probe on Tokyo:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf013-fresh-submit-authorization-binding/20260612Trtf013-0afbcbf2/fresh-auth-binding-from-positive-handoff.json`;
+  - local mirror:
+    `output/rtf013-tokyo/remote-report-20260612Trtf013-0afbcbf2/fresh-auth-binding-from-positive-handoff.json`;
+  - input handoff:
+    `/home/ubuntu/brc-deploy/reports/rtf010-official-submit-handoff/20260612Trtf010-be9f91fa/handoff-api-positive-disabled-smoke.json`.
+- Probe result:
+  - `status=blocked`;
+  - `http_status=200`;
+  - blockers:
+    `ready_runtime_execution_intent_draft_not_found`,
+    `resolution:fresh_submit_authorization_not_found`;
+  - `binding_source=unresolved`;
+  - `fresh_submit_authorization_id=null`;
+  - `execution_intent_id=null`;
+  - `runtime_execution_intent_draft_id=null`;
+  - `ready_for_disabled_smoke_call=false`.
+- Interpretation:
+  - RTF-013 deployed correctly and refused to convert the old RTF-010
+    rehearsal handoff into a fake authorization;
+  - the RTF-010 positive handoff is still useful compatibility evidence, but
+    it is not a persisted mainline candidate/draft source;
+  - the next runtime-chain step is not another manual evidence retry. It is a
+    persisted strategy-signal / order-candidate / intent-draft source that can
+    feed RTF-013 binding.
+- Safety:
+  - no official submit endpoint was called;
+  - no `real_gateway_action` was requested;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no local order was created;
+  - no `OrderLifecycle` call occurred;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-013 Persisted Fresh Authorization Binding Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
@@ -56,7 +110,7 @@ Use this file for session progress and handoff notes.
     test files;
   - `git diff --check`.
 - Deployment:
-  - not deployed in this stage.
+  - later deployed and probed in the RTF-013 Tokyo stage above.
 - Safety:
   - no official submit endpoint was called;
   - no `real_gateway_action` was requested;
