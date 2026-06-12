@@ -16,6 +16,54 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-003 Tokyo Deploy + Active Position Resolution Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed HEAD: `3f9dd1b0`.
+- Deployed the current program branch to Tokyo using the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-3f9dd1b0-20260612Trtf003-resolution-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET /api/health` returned `status=ok`,
+    `runtime_bound=true`, `live_ready=false`;
+  - deployment execution report:
+    `output/rtf003-tokyo/git-deploy-execution-3f9dd1b0.json`.
+- Ran the RTF-003 Tokyo active-position resolution probe:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf003-active-position/20260612Trtf003-173137`;
+  - generated reports:
+    `live-position-monitor.json`, `position-exit-plan.json`,
+    `post-close-followup.json`, and `active-position-resolution.json`;
+  - status: `hold_with_hard_stop`;
+  - active position present: `true`;
+  - can continue holding: `true`;
+  - next attempt blocked by active position: `true`;
+  - full reduce-only close feasible: `true`;
+  - Owner close approval value:
+    `runtime-reduce-only-close:strategy-runtime-e6138ad7c88f:BNB/USDT:USDT:long:qty=0.01:owner-authorized`;
+  - warnings:
+    `missing_tp_protection_right_tail_exit_not_mounted`,
+    `reconciliation_warning_present`,
+    `tp1_partial_quantity_below_min_qty_or_step`;
+  - blockers: `[]`.
+- Focused verification before deploy:
+  - `pytest -q tests/unit/test_runtime_active_position_resolution.py tests/unit/test_runtime_active_position_resolution_from_reports.py tests/unit/test_runtime_live_position_monitor.py tests/unit/test_runtime_post_close_followup.py`
+    with `15 passed`;
+  - `python3 -m compileall scripts/runtime_active_position_resolution_from_reports.py src/domain/runtime_active_position_resolution.py`;
+  - `git diff --check`.
+- Safety:
+  - no exchange write;
+  - no exchange order submit;
+  - no `OrderLifecycle.submit_order`;
+  - no local order creation/cancel/close;
+  - no runtime state mutation;
+  - no closed-review record creation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-003 Active Position Resolution Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
