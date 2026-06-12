@@ -62,6 +62,64 @@ def test_pipeline_reaches_scoped_local_registration_dry_run_from_real_signal(tmp
     assert not any("runtime-execution-exchange-submit" in path for path in paths)
 
 
+def test_pipeline_auto_readiness_blocks_with_missing_trusted_facts(tmp_path):
+    client = _Client()
+
+    report = script._build_report(
+        _args(tmp_path, auto_readiness_evidence=True),
+        client=client,
+    )
+
+    assert report["status"] == "blocked_at_readiness_evidence_resolution"
+    assert report["blocked_stage"] == "readiness_evidence_resolution"
+    assert report["stage_statuses"] == {
+        "intent_draft_source": "persisted_ready_intent_draft",
+        "readiness_evidence_resolution": "blocked_readiness_evidence_unresolved",
+    }
+    assert "readiness_evidence_resolution:final_gate_preview_id_missing" in (
+        report["blockers"]
+    )
+    assert (
+        "readiness_evidence_resolution:"
+        "runtime_grant_or_owner_real_submit_authorization_id_missing"
+    ) in report["blockers"]
+    assert report["safety_invariants"]["sample_rehearsal_used"] is False
+    assert report["safety_invariants"]["exchange_write_called"] is False
+    paths = [call["path"] for call in client.calls]
+    assert any("strategy-signal-intent-draft-sources" in path for path in paths)
+    assert not any("persisted-draft-source-readiness-previews" in path for path in paths)
+
+
+def test_pipeline_auto_readiness_reaches_scoped_local_registration(tmp_path):
+    client = _Client()
+
+    report = script._build_report(
+        _args(tmp_path, auto_readiness_evidence=True, **_complete_auto_evidence()),
+        client=client,
+    )
+
+    assert report["status"] == "ready_for_real_signal_scoped_local_registration_proof"
+    assert report["blocked_stage"] is None
+    assert report["stage_statuses"] == {
+        "intent_draft_source": "persisted_ready_intent_draft",
+        "readiness_evidence_resolution": "ready_for_readiness_evidence",
+        "readiness": "ready_for_executable_submit",
+        "handoff": "ready_for_official_submit_call",
+        "binding": "created_intent_and_authorization",
+        "evidence_chain": "prepared_machine_evidence_blocked_before_local_order_adapter",
+        "scoped_local_registration_proof": (
+            "ready_for_scoped_local_registration_proof_dry_run"
+        ),
+    }
+    evidence_path = tmp_path / "artifacts" / "02-auto-readiness-evidence.json"
+    assert evidence_path.exists()
+    written = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert written["final_gate_preview_id"] == "final-gate-auto-rtf020"
+    assert written["trusted_submit_fact_snapshot_id"] == "facts-auto-rtf020"
+    assert report["safety_invariants"]["first_real_submit_action_called"] is False
+    assert report["safety_invariants"]["exchange_write_called"] is False
+
+
 class _Client:
     def __init__(self, *, source_status: str = "persisted_ready_intent_draft") -> None:
         self.source_status = source_status
@@ -232,11 +290,54 @@ def _write_evidence(tmp_path):
     return path
 
 
+def _complete_auto_evidence():
+    return {
+        "final_gate_preview_id": "final-gate-auto-rtf020",
+        "final_gate_passed": True,
+        "runtime_grant_authorization_id": "runtime-grant-auto-rtf020",
+        "trusted_submit_fact_snapshot_id": "facts-auto-rtf020",
+        "submit_idempotency_policy_id": "idem-auto-rtf020",
+        "attempt_outcome_policy_id": "attempt-auto-rtf020",
+        "protection_creation_failure_policy_id": "protect-auto-rtf020",
+        "local_registration_enablement_decision_id": "local-auto-rtf020",
+        "exchange_submit_enablement_decision_id": "exchange-auto-rtf020",
+        "exchange_submit_action_authorization_id": "exchange-action-auto-rtf020",
+        "order_lifecycle_submit_enablement_id": "ol-auto-rtf020",
+        "exchange_submit_adapter_enablement_id": "adapter-auto-rtf020",
+        "deployment_readiness_evidence_id": "deploy-auto-rtf020",
+        "protection_required_and_ready": True,
+        "active_position_source_trusted": True,
+        "account_facts_fresh": True,
+        "duplicate_submit_guard_ready": True,
+    }
+
+
 def _args(tmp_path, **overrides):
     values = {
         "runtime_instance_id": "runtime-rtf020",
         "signal_input_json": str(_write_signal(tmp_path)),
         "readiness_evidence_json": None,
+        "auto_readiness_evidence": False,
+        "final_gate_preview_id": None,
+        "final_gate_passed": False,
+        "runtime_grant_authorization_id": None,
+        "owner_real_submit_authorization_id": None,
+        "trusted_submit_fact_snapshot_id": None,
+        "submit_idempotency_policy_id": None,
+        "attempt_outcome_policy_id": None,
+        "protection_creation_failure_policy_id": None,
+        "local_registration_enablement_decision_id": None,
+        "exchange_submit_enablement_decision_id": None,
+        "exchange_submit_action_authorization_id": None,
+        "order_lifecycle_submit_enablement_id": None,
+        "exchange_submit_adapter_enablement_id": None,
+        "deployment_readiness_evidence_id": None,
+        "protection_required_and_ready": False,
+        "active_position_source_trusted": False,
+        "account_facts_fresh": False,
+        "duplicate_submit_guard_ready": False,
+        "legacy_runtime_submit_rehearsal_id": None,
+        "durable_exchange_submit_execution_result_id": None,
         "candidate_id": "BTPC-001",
         "context_id": "context-rtf020",
         "expires_at_ms": None,

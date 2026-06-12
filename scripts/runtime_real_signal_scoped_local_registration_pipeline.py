@@ -25,6 +25,7 @@ from scripts import runtime_fresh_submit_authorization_binding_api_flow  # noqa:
 from scripts import runtime_official_evidence_chain_from_binding  # noqa: E402
 from scripts import runtime_official_submit_handoff_api_flow  # noqa: E402
 from scripts import runtime_persisted_draft_source_readiness_api_flow  # noqa: E402
+from scripts import runtime_real_signal_readiness_evidence_resolver  # noqa: E402
 from scripts import runtime_scoped_local_registration_proof_from_evidence  # noqa: E402
 from scripts import runtime_strategy_signal_intent_draft_source_api_flow  # noqa: E402
 
@@ -97,11 +98,12 @@ def _readiness_args(
     args: argparse.Namespace,
     *,
     source_path: Path,
+    evidence_json: str,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         runtime_instance_id=args.runtime_instance_id,
         intent_draft_source_json=str(source_path),
-        evidence_json=args.readiness_evidence_json,
+        evidence_json=evidence_json,
         first_real_submit_packet_json=None,
         additional_warning=["rtf020_real_signal_pipeline"],
         additional_blocker=None,
@@ -185,6 +187,54 @@ def _scoped_proof_args(
     )
 
 
+def _readiness_evidence_resolution_args(
+    args: argparse.Namespace,
+    *,
+    source_path: Path,
+    artifact_root: Path,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        runtime_instance_id=args.runtime_instance_id,
+        intent_draft_source_json=str(source_path),
+        artifact_dir=str(artifact_root),
+        output=None,
+        final_gate_preview_id=args.final_gate_preview_id,
+        final_gate_passed=args.final_gate_passed,
+        runtime_grant_authorization_id=args.runtime_grant_authorization_id,
+        owner_real_submit_authorization_id=args.owner_real_submit_authorization_id,
+        trusted_submit_fact_snapshot_id=args.trusted_submit_fact_snapshot_id,
+        submit_idempotency_policy_id=args.submit_idempotency_policy_id,
+        attempt_outcome_policy_id=args.attempt_outcome_policy_id,
+        protection_creation_failure_policy_id=(
+            args.protection_creation_failure_policy_id
+        ),
+        local_registration_enablement_decision_id=(
+            args.local_registration_enablement_decision_id
+        ),
+        exchange_submit_enablement_decision_id=(
+            args.exchange_submit_enablement_decision_id
+        ),
+        exchange_submit_action_authorization_id=(
+            args.exchange_submit_action_authorization_id
+        ),
+        order_lifecycle_submit_enablement_id=(
+            args.order_lifecycle_submit_enablement_id
+        ),
+        exchange_submit_adapter_enablement_id=(
+            args.exchange_submit_adapter_enablement_id
+        ),
+        deployment_readiness_evidence_id=args.deployment_readiness_evidence_id,
+        protection_required_and_ready=args.protection_required_and_ready,
+        active_position_source_trusted=args.active_position_source_trusted,
+        account_facts_fresh=args.account_facts_fresh,
+        duplicate_submit_guard_ready=args.duplicate_submit_guard_ready,
+        legacy_runtime_submit_rehearsal_id=args.legacy_runtime_submit_rehearsal_id,
+        durable_exchange_submit_execution_result_id=(
+            args.durable_exchange_submit_execution_result_id
+        ),
+    )
+
+
 def _build_report(
     args: argparse.Namespace,
     *,
@@ -201,6 +251,7 @@ def _build_report(
     artifact_root.mkdir(parents=True, exist_ok=True)
     reports: dict[str, dict[str, Any] | None] = {
         "intent_draft_source": None,
+        "readiness_evidence_resolution": None,
         "readiness": None,
         "handoff": None,
         "binding": None,
@@ -224,7 +275,33 @@ def _build_report(
                 reports=reports,
             )
 
-        if not args.readiness_evidence_json:
+        readiness_evidence_json = args.readiness_evidence_json
+        if not readiness_evidence_json and args.auto_readiness_evidence:
+            resolution = runtime_real_signal_readiness_evidence_resolver._build_report(
+                _readiness_evidence_resolution_args(
+                    args,
+                    source_path=source_path,
+                    artifact_root=artifact_root,
+                )
+            )
+            reports["readiness_evidence_resolution"] = resolution
+            _write_json(
+                artifact_root / "02-readiness-evidence-resolution.json",
+                resolution,
+            )
+            readiness_evidence_json = resolution.get("evidence_json_path")
+            if _status(resolution) != (
+                runtime_real_signal_readiness_evidence_resolver.READY_STATUS
+            ) or not readiness_evidence_json:
+                return _final_report(
+                    args,
+                    artifact_root=artifact_root,
+                    status="blocked_at_readiness_evidence_resolution",
+                    blocked_stage="readiness_evidence_resolution",
+                    reports=reports,
+                )
+
+        if not readiness_evidence_json:
             return _final_report(
                 args,
                 artifact_root=artifact_root,
@@ -235,11 +312,15 @@ def _build_report(
             )
 
         readiness = runtime_persisted_draft_source_readiness_api_flow._build_packet(
-            _readiness_args(args, source_path=source_path),
+            _readiness_args(
+                args,
+                source_path=source_path,
+                evidence_json=str(readiness_evidence_json),
+            ),
             client=api_client,
         )
         reports["readiness"] = readiness
-        readiness_path = artifact_root / "02-readiness.json"
+        readiness_path = artifact_root / "03-readiness.json"
         _write_json(readiness_path, readiness)
         if _status(readiness) != "ready_for_executable_submit":
             return _final_report(
@@ -259,7 +340,7 @@ def _build_report(
             client=api_client,
         )
         reports["handoff"] = handoff
-        handoff_path = artifact_root / "03-handoff.json"
+        handoff_path = artifact_root / "04-handoff.json"
         _write_json(handoff_path, handoff)
         if _status(handoff) != "ready_for_official_submit_call":
             return _final_report(
@@ -275,7 +356,7 @@ def _build_report(
             client=api_client,
         )
         reports["binding"] = binding
-        binding_path = artifact_root / "04-binding.json"
+        binding_path = artifact_root / "05-binding.json"
         _write_json(binding_path, binding)
         if _status(binding) not in {
             "bound_existing_authorization",
@@ -295,7 +376,7 @@ def _build_report(
             client=api_client,
         )
         reports["evidence_chain"] = evidence
-        evidence_path = artifact_root / "05-evidence-chain.json"
+        evidence_path = artifact_root / "06-evidence-chain.json"
         _write_json(evidence_path, evidence)
         if _status(evidence) not in {
             "prepared_machine_evidence_blocked_before_local_order_adapter",
@@ -314,7 +395,7 @@ def _build_report(
             client=api_client,
         )
         reports["scoped_local_registration_proof"] = scoped
-        _write_json(artifact_root / "06-scoped-local-registration-proof.json", scoped)
+        _write_json(artifact_root / "07-scoped-local-registration-proof.json", scoped)
         scoped_status = _status(scoped)
         final_status = (
             "ready_for_real_signal_scoped_local_registration_proof"
@@ -352,6 +433,7 @@ def _final_report(
     warnings: list[str] = []
     for name in (
         "intent_draft_source",
+        "readiness_evidence_resolution",
         "readiness",
         "handoff",
         "binding",
@@ -436,6 +518,27 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--runtime-instance-id", required=True)
     parser.add_argument("--signal-input-json", required=True)
     parser.add_argument("--readiness-evidence-json")
+    parser.add_argument("--auto-readiness-evidence", action="store_true")
+    parser.add_argument("--final-gate-preview-id")
+    parser.add_argument("--final-gate-passed", action="store_true")
+    parser.add_argument("--runtime-grant-authorization-id")
+    parser.add_argument("--owner-real-submit-authorization-id")
+    parser.add_argument("--trusted-submit-fact-snapshot-id")
+    parser.add_argument("--submit-idempotency-policy-id")
+    parser.add_argument("--attempt-outcome-policy-id")
+    parser.add_argument("--protection-creation-failure-policy-id")
+    parser.add_argument("--local-registration-enablement-decision-id")
+    parser.add_argument("--exchange-submit-enablement-decision-id")
+    parser.add_argument("--exchange-submit-action-authorization-id")
+    parser.add_argument("--order-lifecycle-submit-enablement-id")
+    parser.add_argument("--exchange-submit-adapter-enablement-id")
+    parser.add_argument("--deployment-readiness-evidence-id")
+    parser.add_argument("--protection-required-and-ready", action="store_true")
+    parser.add_argument("--active-position-source-trusted", action="store_true")
+    parser.add_argument("--account-facts-fresh", action="store_true")
+    parser.add_argument("--duplicate-submit-guard-ready", action="store_true")
+    parser.add_argument("--legacy-runtime-submit-rehearsal-id")
+    parser.add_argument("--durable-exchange-submit-execution-result-id")
     parser.add_argument("--candidate-id")
     parser.add_argument("--context-id")
     parser.add_argument("--expires-at-ms", type=int)

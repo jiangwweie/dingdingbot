@@ -16,6 +16,65 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-022 Real Signal Readiness Evidence Resolver Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `117b3d3b`.
+- Added `scripts/runtime_real_signal_readiness_evidence_resolver.py`:
+  - reads a real strategy-signal `intent_draft_source` packet;
+  - refuses sources that are not `persisted_ready_intent_draft`;
+  - requires explicit trusted readiness evidence for FinalGate, runtime grant
+    or Owner submit authorization, trusted submit facts, idempotency, attempt
+    outcome policy, protection-failure policy, local-registration enablement,
+    exchange-submit enablement, exchange-submit action authorization,
+    OrderLifecycle enablement, exchange-adapter enablement, protection
+    readiness, active-position trust, fresh account facts, and duplicate-submit
+    guard readiness;
+  - writes `02-auto-readiness-evidence.json` only when all required trusted
+    fields are present;
+  - otherwise returns `blocked_readiness_evidence_unresolved` with exact missing
+    fields.
+- Updated `scripts/runtime_real_signal_scoped_local_registration_pipeline.py`:
+  - added `--auto-readiness-evidence`;
+  - inserted a `readiness_evidence_resolution` stage between
+    `intent_draft_source` and `persisted_draft_source_readiness`;
+  - preserved the existing `--readiness-evidence-json` manual path;
+  - blocks at `blocked_at_readiness_evidence_resolution` when trusted evidence
+    is missing instead of silently continuing or using sample rehearsal.
+- Added focused tests:
+  - resolver blocks missing trusted evidence;
+  - resolver writes evidence only when explicit trusted facts are complete;
+  - resolver blocks non-ready intent-draft sources;
+  - pipeline auto-readiness blocks before readiness API when facts are missing;
+  - pipeline auto-readiness can continue to scoped local-registration dry-run
+    when facts are complete.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_real_signal_readiness_evidence_resolver.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`
+    with `7 passed`;
+  - `pytest -q tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py tests/unit/test_runtime_real_signal_readiness_evidence_resolver.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`
+    with `15 passed`;
+  - `python3 -m compileall scripts/runtime_real_signal_readiness_evidence_resolver.py scripts/runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_real_signal_readiness_evidence_resolver.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no Tokyo action occurred;
+  - no sample rehearsal fallback was added;
+  - resolver does not call API;
+  - no local registration occurred;
+  - no first-real-submit action occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no runtime mutation occurred;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moved from approximately `84%` to `85%`;
+  - remaining primary work is current-fact backed readiness evidence collection,
+    controlled local registration proof on the real-signal path, then audited
+    OrderLifecycle / exchange submit integration.
+
 ## 2026-06-13 (RTF-021 Tokyo Deploy + Real Signal Pipeline Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
