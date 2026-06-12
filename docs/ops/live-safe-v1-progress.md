@@ -16,6 +16,63 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-011 Tokyo Deploy + Disabled Smoke Handoff Probe)
+
+- Deployed RTF-011 to Tokyo with the git-based deploy path:
+  - initial release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-36c0f569-20260612Trtf011-disabled-smoke-probe`;
+  - report-safety fix release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-b3e68cff-20260612Trtf011-disabled-smoke-probe-fix`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - manifest head:
+    `b3e68cff561dd428c2632731fd2704c3238f785d`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy execution result for the final fix release:
+  - status: `applied`;
+  - commands executed: `16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - exchange called: `false`;
+  - order created: `false`;
+  - `OrderLifecycle` called: `false`;
+  - `ExecutionIntent` created: `false`.
+- Ran RTF-011 disabled-smoke handoff probes on Tokyo:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf011-official-disabled-smoke/20260612Trtf011-b3e68cff`;
+  - local mirror:
+    `output/rtf011-tokyo/remote-report-20260612Trtf011-b3e68cff`;
+  - blocked handoff input:
+    `disabled-smoke-from-blocked-handoff.json`;
+  - positive handoff input:
+    `disabled-smoke-from-positive-handoff.json`.
+- Probe results:
+  - blocked handoff path: `status=blocked`,
+    `blocked_stage=handoff_precondition`, `http_status=0`,
+    `calls_official_submit_endpoint=false`;
+  - positive handoff path: `status=blocked`,
+    `blocked_stage=official_first_real_submit_action`, `http_status=404`,
+    blockers `["official_first_real_submit_action_http_404"]`,
+    `calls_official_submit_endpoint=true`;
+  - positive handoff used a rehearsal fresh authorization ID from RTF-010, so
+    the official endpoint was reachable but could not resolve a persisted fresh
+    submit authorization.
+- Follow-up implication:
+  - next runtime-chain step is fresh submit authorization resolution / runtime
+    grant binding before a disabled-smoke call can reach
+    `exchange_submit_execution_disabled` on Tokyo.
+- Safety:
+  - no `real_gateway_action` was requested;
+  - `owner_confirmed_for_first_real_submit_action=false`;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` call occurred;
+  - no `ExecutionIntent` was created;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-011 Official Submit Disabled Smoke From Handoff Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
@@ -43,9 +100,7 @@ Use this file for session progress and handoff notes.
     with `14 passed`;
   - `python3 -m compileall -q scripts/runtime_official_submit_disabled_smoke_from_handoff.py tests/unit/test_runtime_official_submit_disabled_smoke_from_handoff.py`.
 - Deployment:
-  - not deployed in this stage;
-  - current Tokyo deployed release remains
-    `brc-runtime-governance-be9f91fa-20260612Trtf010-handoff-api-probe`.
+  - later deployed and probed in the RTF-011 Tokyo stage above.
 - Safety:
   - the script can call the official first-real-submit endpoint only in
     disabled-smoke mode;
