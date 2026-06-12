@@ -9345,3 +9345,143 @@ Use this file for session progress and handoff notes.
   - the next mainline step is to deploy this contract fixture to Tokyo and run
     it there as a deterministic ready-branch proof independent of current
     market no-signal conditions.
+
+## 2026-06-13 (RTF-076 Tokyo Ready-signal Shadow Planning Contract Integration)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Deployed commit:
+  `c09ac0b87a8a14895b999e3cd625cbf83f983c08`
+  (`c09ac0b8`).
+- Previous Tokyo head:
+  `bcbd328308aedbaebd73129b634d51b088513ac4`
+  (`bcbd3283`).
+- Tokyo release:
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c09ac0b8-20260613Trtf076-ready-signal-contract`.
+- Deploy artifacts:
+  - predeploy readonly probe:
+    `output/rtf076-tokyo/readonly-probe-before-deploy.json`;
+  - plan:
+    `output/rtf076-tokyo/git-deploy-plan-c09ac0b8.json`;
+  - owner packet:
+    `output/rtf076-tokyo/owner-git-deploy-packet-c09ac0b8.json`;
+  - dry-run:
+    `output/rtf076-tokyo/git-deploy-dry-run-c09ac0b8.json`;
+  - apply:
+    `output/rtf076-tokyo/git-deploy-applied-c09ac0b8.json`.
+- Deploy result:
+  - status:
+    `applied`;
+  - blockers:
+    `[]`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-c09ac0b8-20260613Trtf076-ready-signal-contract.pgdump`;
+  - migrations:
+    alembic command executed, migration count remained `84`;
+  - service:
+    restarted.
+- Postdeploy readonly facts:
+  - artifact:
+    `output/rtf076-tokyo/readonly-probe-after-deploy.json`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    `[]`;
+  - warnings:
+    `remote_release_identity_from_manifest_without_git_status`;
+  - current head:
+    `c09ac0b87a8a14895b999e3cd625cbf83f983c08`;
+  - current realpath:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c09ac0b8-20260613Trtf076-ready-signal-contract`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Postdeploy acceptance:
+  - artifact:
+    `output/rtf076-tokyo/postdeploy-acceptance-c09ac0b8.json`;
+  - status:
+    `postdeploy_acceptance_passed`;
+  - blockers:
+    `[]`;
+  - warning:
+    `release_identity_from_manifest_without_git_status`;
+  - release identity:
+    `c09ac0b87a8a14895b999e3cd625cbf83f983c08`
+    from release manifest.
+- Remote ready-signal contract fixture:
+  - remote path:
+    `/home/ubuntu/brc-deploy/reports/rtf076-ready-signal-contract/20260613Trtf076-c09ac0b8`;
+  - local mirror:
+    `output/rtf076-tokyo/remote-report-20260613Trtf076-c09ac0b8/`;
+  - contract report:
+    `output/rtf076-tokyo/remote-report-20260613Trtf076-c09ac0b8/contract-report.json`;
+  - bridge report:
+    `output/rtf076-tokyo/remote-report-20260613Trtf076-c09ac0b8/bridge-report.json`;
+  - planning flow:
+    `output/rtf076-tokyo/remote-report-20260613Trtf076-c09ac0b8/rtf075-ready-signal-strategy-planning-flow.json`;
+  - stdout mirror:
+    `output/rtf076-tokyo/remote-report-20260613Trtf076-c09ac0b8/contract-fixture.stdout.json`.
+- Contract result:
+  - status:
+    `ready_signal_shadow_planning_contract_passed`;
+  - bridge status:
+    `ready_for_final_gate_preflight`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - strategy:
+    `CPM-RO-001 / CPM-RO-001-v0`;
+  - side:
+    `long`;
+  - entry:
+    `104.2`;
+  - stop:
+    `99.60`;
+  - stop source:
+    `cpm_pullback_low`;
+  - intended notional:
+    `10`;
+  - leverage:
+    `1`;
+  - take-profit / runner:
+    `tp1_partial` plus `runner`;
+  - right-tail runner:
+    `right_tail_capture=true`.
+- Verification:
+  - remote fixture command:
+    `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_ready_signal_shadow_planning_contract_fixture.py --output-dir ...`;
+  - remote validation:
+    `remote_ready_contract_validation=passed`;
+  - remote status:
+    `ready_signal_shadow_planning_contract_passed`;
+  - remote bridge status:
+    `ready_for_final_gate_preflight`.
+- Safety:
+  - fixture-only ready branch proof;
+  - trusted fixture facts;
+  - no prepare records;
+  - no recorded `ExecutionIntent`;
+  - no submit authorization;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no order;
+  - no `OrderLifecycle`;
+  - no real submit;
+  - no exchange write;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-075 is now deployed and verified on Tokyo;
+  - Tokyo can execute the deterministic ready-signal shadow planning contract
+    and produce a strategy-driven shadow `OrderCandidate`;
+  - the verified path reaches `ready_for_final_gate_preflight` and still stops
+    before prepare, submit authorization, `ExecutionIntent`, order lifecycle,
+    or exchange writes;
+  - the next mainline gap is the controlled handoff from verified shadow
+    candidate planning into prepare / FinalGate preflight without reviving
+    one-shot manual evidence handling as the normal runtime loop.
