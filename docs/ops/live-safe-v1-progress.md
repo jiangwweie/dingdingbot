@@ -8608,3 +8608,67 @@ Use this file for session progress and handoff notes.
   - live market currently has no runtime-compatible or non-runtime would-enter
     signal in the strategy shelf, so the correct next state is continued
     observation rather than forced candidate planning.
+
+## 2026-06-13 (RTF-067 Live Signal Operator Cycle)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - make the live-signal route repeatable as a single operator cycle;
+  - combine RTF-065 live routing with the official next-attempt prepare entry;
+  - keep default mode record-free while allowing explicit non-executing prepare
+    records only after a genuine current-runtime ready signal.
+- Added:
+  - `scripts/runtime_live_signal_operator_cycle.py`;
+  - `tests/unit/test_runtime_live_signal_operator_cycle.py`.
+- Cycle behavior:
+  - `waiting_for_runtime_compatible_signal` returns a wait packet and does not
+    call prepare;
+  - `ready_for_owner_runtime_profile_decision` returns the profile proposal
+    packet and does not create a runtime;
+  - `ready_for_current_runtime_signal_prepare` returns `ready_for_prepare`
+    unless `--allow-prepare-records` is supplied;
+  - with `--allow-prepare-records`, the cycle calls the official
+    `runtime_next_attempt_prepare_api_flow` and may produce only non-executing
+    prepare records.
+- Local operator-cycle tests:
+  - command:
+    `pytest -q tests/unit/test_runtime_live_signal_operator_cycle.py tests/unit/test_runtime_live_signal_routing_packet.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py tests/unit/test_runtime_next_attempt_prepare_api_flow.py`;
+  - result:
+    `19 passed`.
+- Local strategy semantics regression:
+  - command:
+    `pytest -q tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_reference_price_action_evaluators.py tests/unit/test_runtime_strategy_signal_evaluation_service.py tests/unit/test_runtime_live_strategy_signal_selector.py`;
+  - result:
+    `26 passed`.
+- Compile and diff checks:
+  - command:
+    `python3 -m compileall -q scripts/runtime_live_signal_operator_cycle.py`;
+  - result:
+    passed;
+  - command:
+    `git diff --check`;
+  - result:
+    passed.
+- Safety:
+  - default mode creates no prepare records;
+  - prepare flow runs only with explicit `--allow-prepare-records`;
+  - no runtime is created;
+  - no runtime profile is mutated;
+  - no local registration is armed;
+  - no exchange submit adapter is armed;
+  - no real submit is executed;
+  - no order is created;
+  - no `OrderLifecycle` call occurs;
+  - no exchange write occurs;
+  - no runtime budget mutation occurs;
+  - no position is opened or closed;
+  - no withdrawal or transfer is created.
+- Interpretation:
+  - RTF-067 converts the previous one-off route checks into a repeatable
+    operator cycle;
+  - this stage still does not solve market no-signal state by itself;
+  - the next Tokyo step is to deploy the cycle and run it against the active
+    runtime, expecting the current live state to remain waiting unless a
+    genuine runtime-compatible ready signal appears.
