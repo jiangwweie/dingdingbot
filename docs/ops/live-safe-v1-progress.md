@@ -10345,3 +10345,162 @@ Use this file for session progress and handoff notes.
   - the current deployed server version is now `afd8b214`;
   - the next mainline gap is non-executing submit adapter preview / local
     registration boundary convergence.
+
+## 2026-06-13 (RTF-083 Official Submit Adapter Preview / Local Registration Boundary Proof)
+
+- Scope:
+  - extend the official FinalGate preflight proof through official submit
+    adapter preview;
+  - prove attempt reservation / attempt mutation budget semantics with the
+    right-tail max-loss budget model;
+  - prove OrderLifecycle handoff and local order registration draft readiness;
+  - keep local registration, OrderLifecycle, exchange submit, withdrawal, and
+    transfer disabled.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_submit_adapter_preview_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_submit_adapter_preview_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf083-official-submit-adapter-preview/`;
+  - contract report:
+    `output/rtf083-official-submit-adapter-preview/contract-report.json`;
+  - boundary packet:
+    `output/rtf083-official-submit-adapter-preview/submit-adapter-boundary-packet.json`;
+  - submit adapter preview:
+    `output/rtf083-official-submit-adapter-preview/submit-adapter-preview.json`;
+  - attempt reservation preview:
+    `output/rtf083-official-submit-adapter-preview/attempt-reservation-preview.json`;
+  - attempt reservation:
+    `output/rtf083-official-submit-adapter-preview/attempt-reservation.json`;
+  - attempt mutation:
+    `output/rtf083-official-submit-adapter-preview/attempt-mutation.json`;
+  - OrderLifecycle handoff:
+    `output/rtf083-official-submit-adapter-preview/order-lifecycle-handoff.json`;
+  - OrderLifecycle adapter preview:
+    `output/rtf083-official-submit-adapter-preview/order-lifecycle-adapter-preview.json`;
+  - order registration draft preview:
+    `output/rtf083-official-submit-adapter-preview/order-registration-draft-preview.json`.
+- Contract result:
+  - status:
+    `official_submit_adapter_preview_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `signal-eval-rtf075-contract`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - submit adapter preview:
+    `runtime-submit-adapter-preview-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - attempt reservation:
+    `runtime-attempt-reservation-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - attempt mutation:
+    `runtime-attempt-mutation-runtime-attempt-reservation-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - OrderLifecycle handoff:
+    `runtime-order-lifecycle-handoff-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - order registration draft preview:
+    `runtime-order-registration-draft-preview-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - submit adapter preview route called through:
+    `/api/trading-console/runtime-execution-submit-adapter-previews/authorizations/{authorization_id}`;
+  - attempt reservation preview route called through:
+    `/api/trading-console/runtime-execution-attempt-reservation-previews/authorizations/{authorization_id}`;
+  - attempt reservation route called through:
+    `/api/trading-console/runtime-execution-attempt-reservations/authorizations/{authorization_id}`;
+  - attempt mutation route called through:
+    `/api/trading-console/runtime-execution-attempt-mutations/reservations/{reservation_id}`;
+  - OrderLifecycle handoff route called through:
+    `/api/trading-console/runtime-execution-order-lifecycle-handoff-drafts/authorizations/{authorization_id}`;
+  - OrderLifecycle adapter preview route called through:
+    `/api/trading-console/runtime-execution-order-lifecycle-adapter-previews/authorizations/{authorization_id}`;
+  - order registration draft preview route called through:
+    `/api/trading-console/runtime-execution-order-registration-draft-previews/authorizations/{authorization_id}`.
+- Status chain:
+  - FinalGate:
+    `PASS`;
+  - controlled submit preflight:
+    `ready_for_controlled_submit_adapter`;
+  - submit adapter preview:
+    `inputs_ready_adapter_not_implemented`;
+  - attempt reservation preview:
+    `ready_to_reserve_attempt`;
+  - attempt reservation:
+    `pending_runtime_mutation`;
+  - attempt mutation:
+    `applied`;
+  - OrderLifecycle handoff:
+    `ready_for_order_lifecycle_adapter`;
+  - OrderLifecycle adapter preview:
+    `inputs_ready_registration_not_enabled`;
+  - order registration draft preview:
+    `inputs_ready_registration_draft_only`.
+- Runtime budget semantics:
+  - intended notional:
+    `10`;
+  - budget reservation basis:
+    `max_loss_reference`;
+  - budget reservation amount:
+    `0.44145873`;
+  - attempts used before / after:
+    `0 -> 1`;
+  - budget reserved before / after:
+    `0 -> 0.44145873`;
+  - this preserves the right-tail risk-capital objective: small bounded
+    attempt loss budget is reserved without treating the whole notional as
+    realized loss budget.
+- Local registration boundary:
+  - registration draft count:
+    `2`;
+  - entry registration draft count:
+    `1`;
+  - protection registration draft count:
+    `1`;
+  - local order registration enabled:
+    `false`;
+  - OrderLifecycle adapter implemented:
+    `false`;
+  - preview only:
+    `true`.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `6 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_submit_adapter_preview_proof.py --output-dir output/rtf083-official-submit-adapter-preview`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no PG write by proof;
+  - no live exchange;
+  - no local registration execution;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-083 proves the runtime chain can advance from FinalGate preflight into
+    submit adapter preview and local registration draft readiness without using
+    the old server-side first-real-submit rehearsal as the main proof surface;
+  - attempt consumption is explicit and budgeted by max-loss reference, not
+    hidden inside a manual evidence step;
+  - the next mainline gap is a scoped local-registration enablement / real
+    adapter boundary that can move from draft-only to actual local CREATED
+    order registration without calling exchange.
