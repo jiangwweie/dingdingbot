@@ -16,6 +16,51 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-018 Scoped Local Registration Proof Orchestrator Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `77e124c4`.
+- Added `scripts/runtime_scoped_local_registration_proof_from_evidence.py`:
+  - runs the RTF-017 boundary classifier first;
+  - keeps default mode as dry-run with no API calls;
+  - refuses sample rehearsal execution unless explicitly allowed;
+  - can run a deliberate `--execute-scoped-local-registration-proof` mode
+    that calls the existing official `runtime_first_real_submit_api_flow.py`
+    arm path with `--skip-exchange-arm` semantics;
+  - still requires the existing
+    `OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP` confirmation value before
+    local registration can occur.
+- Execution scope:
+  - local-registration-only proof can record the official
+    `RuntimeExecutionOrderLifecycleAdapterResult`;
+  - exchange arm is disabled;
+  - first-real-submit action is not called;
+  - post-submit accounting and reconciliation are not called;
+  - withdrawal and transfer remain impossible through this wrapper.
+- Added focused tests:
+  - sample rehearsal dry-run remains blocked without API calls;
+  - execute mode blocks when the local registration env confirmation is
+    missing;
+  - execute mode records scoped local registration when the env confirmation is
+    present, without exchange-arm or first-real-submit action calls.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py`
+    with `6 passed`;
+  - `pytest -q tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py`
+    with `8 passed`;
+  - `python3 -m compileall scripts/runtime_scoped_local_registration_proof_from_evidence.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no Tokyo action occurred;
+  - no live exchange write occurred;
+  - no first-real-submit action occurred;
+  - no real exchange order was submitted;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-13 (RTF-017 Scoped Local Order Adapter Boundary Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
