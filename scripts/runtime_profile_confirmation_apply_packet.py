@@ -173,6 +173,7 @@ def build_packet(
                 "provided": provided,
                 "matches": matches,
             },
+            "source_decision_packet": decision_packet,
             "api_apply_plan": None,
             "checks": {
                 "ready_for_owner_authorized_runtime_profile_apply": False,
@@ -201,6 +202,7 @@ def build_packet(
                 "provided": True,
                 "matches": True,
             },
+            "source_decision_packet": decision_packet,
             "api_apply_plan": None,
             "checks": {
                 "ready_for_owner_authorized_runtime_profile_apply": False,
@@ -281,6 +283,7 @@ def build_packet(
             "provided": True,
             "matches": True,
         },
+        "source_decision_packet": decision_packet,
         "api_apply_plan": {
             "ready_to_apply": True,
             "requests": api_requests,

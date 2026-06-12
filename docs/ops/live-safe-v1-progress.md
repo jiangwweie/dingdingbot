@@ -6619,3 +6619,50 @@ Use this file for session progress and handoff notes.
     `ExecutionIntent`, local orders, or exchange orders;
   - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
     transfers.
+
+## 2026-06-13 (RTF-038 Trial Binding Apply Readiness)
+
+- Added a local read-only trial-binding resolver and apply-readiness packet
+  builder:
+  - `scripts/runtime_profile_trial_binding_apply_readiness.py`;
+  - `tests/unit/test_runtime_profile_trial_binding_apply_readiness.py`.
+- Purpose:
+  - consume the RTF-037 profile-confirmation packet;
+  - resolve a compatible `AdmissionTrialBinding` from a read-only trial-binding
+    list;
+  - carry the existing Owner confirmation value into the RTF-037 apply packet;
+  - produce an apply-ready two-step API plan only when both the binding and
+    confirmation are present;
+  - avoid manual binding/request assembly before promotion confirmation and
+    shadow runtime draft creation.
+- RTF-037 continuity fix:
+  - RTF-037 now carries `source_decision_packet` so downstream tools can
+    recover the original promotion-confirmation and runtime-draft templates;
+  - RTF-038 accepts either the original RTF-036 decision packet or an RTF-037
+    apply packet with embedded source decision.
+- Current local artifact:
+  - input apply packet:
+    `output/rtf037-local/runtime-profile-confirmation-apply-packet.json`;
+  - input local proof binding fixture:
+    `output/rtf038-local/trial-bindings-fixture.json`;
+  - output readiness packet:
+    `output/rtf038-local/runtime-profile-trial-binding-apply-readiness.json`;
+  - status: `ready_for_runtime_profile_apply_with_trial_binding`;
+  - selected proof binding:
+    `trial-binding-rbr-ada-short-local-proof`;
+  - nested apply packet status:
+    `ready_for_owner_authorized_runtime_profile_apply`.
+- Focused verification:
+  - `pytest -q tests/unit/test_runtime_profile_confirmation_apply_packet.py
+    tests/unit/test_runtime_profile_trial_binding_apply_readiness.py
+    tests/unit/test_strategy_runtime_promotion_confirmation_api.py`
+    passed with `17 passed`.
+- Safety:
+  - RTF-038 reads binding JSON only;
+  - it does not call APIs or write PG;
+  - it does not create a promotion confirmation record;
+  - it does not create, enable, or activate a runtime;
+  - it does not create `SignalEvaluation`, `OrderCandidate`,
+    `ExecutionIntent`, local orders, or exchange orders;
+  - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
+    transfers.

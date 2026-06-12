@@ -59,6 +59,9 @@ def test_apply_packet_waits_for_exact_owner_confirmation() -> None:
     )
     assert packet["owner_confirmation"]["provided"] is False
     assert packet["checks"]["ready_for_owner_authorized_runtime_profile_apply"] is False
+    assert packet["source_decision_packet"]["status"] == (
+        "ready_for_owner_codex_runtime_profile_confirmation"
+    )
     assert packet["api_apply_plan"] is None
     assert packet["safety_invariants"]["runtime_created"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -111,6 +114,9 @@ def test_apply_packet_builds_two_step_api_plan_when_confirmed_and_bound() -> Non
     assert packet["status"] == "ready_for_owner_authorized_runtime_profile_apply"
     assert packet["checks"]["ready_for_owner_authorized_runtime_profile_apply"] is True
     assert packet["trial_binding_id"] == "trial-binding-rbr-ada-short-1"
+    assert packet["source_decision_packet"]["proposal_id"] == (
+        "experimental-runtime-profile:RBR-001:RBR-001-v0:ADA/USDT:USDT:short"
+    )
     plan = packet["api_apply_plan"]
     assert plan["ready_to_apply"] is True
     assert plan["creates_promotion_confirmation_record_when_applied"] is True
