@@ -16,6 +16,61 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-034 Runtime-compatible Live Signal Selector Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `b08bdda5`.
+- Added a read-only runtime-compatible strategy signal selector:
+  - `scripts/runtime_live_strategy_signal_selector.py`;
+  - consumes the existing strategy-group read-only preview;
+  - loads the target `StrategyRuntimeInstance`;
+  - selects only a `would_enter` signal whose strategy family, version, symbol,
+    and side exactly match the runtime profile;
+  - writes a `StrategyFamilySignalInput` JSON only when the signal is runtime
+    compatible;
+  - reports non-runtime `would_enter` signals as profile-mismatch evidence
+    instead of using them for the current runtime.
+- Live-market observation during this stage found:
+  - source: `binance_usdm_public_klines_read_only`;
+  - current strategy shelf signals: `8`;
+  - `would_enter` count: `1`;
+  - current `would_enter`: `RBR-001 / ADA/USDT:USDT / short`;
+  - this is not compatible with the current `AVAX/USDT:USDT` BTPC runtime, so
+    it requires a separate Owner-confirmed new runtime or runtime-profile
+    change before it can be used.
+- Selector behavior:
+  - runtime-compatible `would_enter`: returns
+    `runtime_compatible_would_enter_selected` and writes the signal input JSON;
+  - non-runtime `would_enter`: returns
+    `would_enter_available_but_not_runtime_compatible`;
+  - matching runtime signal with `no_action`: returns
+    `runtime_signal_observe_only`.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_live_strategy_signal_selector.py`
+    with `3 passed`;
+  - `python3 -m compileall -q scripts/runtime_live_strategy_signal_selector.py tests/unit/test_runtime_live_strategy_signal_selector.py`;
+  - `python3 scripts/runtime_live_strategy_signal_selector.py --help`;
+  - `git diff --check -- scripts/runtime_live_strategy_signal_selector.py tests/unit/test_runtime_live_strategy_signal_selector.py`.
+- Safety:
+  - no PG write;
+  - no runtime profile mutation;
+  - no shadow candidate was created;
+  - no `ExecutionIntent` was created;
+  - no local order was created;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime budget was mutated;
+  - no position was opened or closed;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence remains approximately `96%`;
+  - the immediate blocker is now more precise: current market has a
+    non-runtime-compatible `would_enter`, while the active runtime still needs
+    a compatible `would_enter` signal or an Owner-confirmed new runtime/profile
+    decision.
+
 ## 2026-06-13 (RTF-033 Tokyo Full-cycle Deploy / Non-executing Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
