@@ -9755,3 +9755,131 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is to replace the fake Console API contract boundary
     with an official server-side prepare integration proof while preserving the
     same no-submit safety invariants.
+
+## 2026-06-13 (RTF-079 Official Server-side Prepare Integration Proof)
+
+- Scope:
+  - replace the fake Console API contract boundary from RTF-077 / RTF-078 with
+    an in-process official server-side proof;
+  - call the real Trading Console `FastAPI` routes through `TestClient`;
+  - use real application services with in-memory repositories;
+  - preserve the non-executing prepare boundary.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_server_prepare_integration_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_server_prepare_integration_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf079-official-server-prepare-integration/`;
+  - contract report:
+    `output/rtf079-official-server-prepare-integration/contract-report.json`;
+  - prepare packet:
+    `output/rtf079-official-server-prepare-integration/prepare-packet.json`;
+  - prepare report:
+    `output/rtf079-official-server-prepare-integration/prepare-report.json`;
+  - shadow contract report:
+    `output/rtf079-official-server-prepare-integration/shadow-contract-report.json`;
+  - stdout mirror:
+    `output/rtf079-official-server-prepare-integration.stdout.json`.
+- Contract result:
+  - status:
+    `official_server_prepare_integration_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `signal-eval-rtf075-contract`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - runtime execution intent draft:
+    `runtime-intent-draft-order-candidate-rtf075-contract`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - protection plan:
+    `runtime-protection-plan-intent_rt_e23ebb969e9d27f79df197dc`;
+  - prepared authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - next operator step:
+    `run_official_final_gate_preflight`.
+- Official-route proof:
+  - next-attempt gate checked through `/api/trading-console/owner-action-flow`;
+  - order candidate usage checked through the official order-candidate route;
+  - intent draft recorded through the official runtime execution intent draft
+    route;
+  - execution intent recorded through the official draft-to-intent route;
+  - protection plan recorded through the official protection-plan route;
+  - submit authorization recorded through the official submit-authorization
+    route;
+  - evidence preparation called through the official first-real-submit evidence
+    preparation route.
+- Evidence preparation:
+  - status:
+    `prepared_packet_blocked`;
+  - packet created:
+    `true`;
+  - dependency blocked:
+    `false`;
+  - interpretation:
+    the official first-real-submit packet can now be built in the in-process
+    service proof, and remains blocked by live-action prerequisites rather than
+    missing local service / repository dependencies.
+- Checks:
+  - shadow contract passed:
+    `true`;
+  - right-tail runner preserved:
+    `true`;
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - official prepare wrapper used:
+    `true`;
+  - next-attempt gate checked:
+    `true`;
+  - evidence preparation packet created:
+    `true`;
+  - evidence preparation dependency blocked:
+    `false`;
+  - prepare ready for FinalGate preflight:
+    `true`;
+  - trusted submit facts prepared:
+    `true`;
+  - submit idempotency prepared:
+    `true`;
+  - protection failure policy prepared:
+    `true`.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_server_prepare_integration_proof.py tests/unit/test_runtime_ready_signal_shadow_planning_contract_fixture.py tests/unit/test_runtime_first_real_submit_api_flow.py`;
+  - result:
+    `29 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_server_prepare_integration_proof.py tests/unit/test_runtime_official_server_prepare_integration_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_server_prepare_integration_proof.py --output-dir output/rtf079-official-server-prepare-integration`.
+- Safety:
+  - no PG write;
+  - no live exchange;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no attempt counter mutation;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-079 removes the fake Console API boundary for the prepare proof;
+  - the prepare path now exercises official server routes and real application
+    services under in-memory isolation;
+  - this is still a local official-route integration proof, not Tokyo
+    deployment and not real submit authorization;
+  - the next mainline gap is Tokyo execution of the same official server-side
+    prepare proof.
