@@ -8059,3 +8059,102 @@ Use this file for session progress and handoff notes.
     action-time real-submit confirmation;
   - this proof moves the mainline closer to runtime-level bounded attempts
     while preserving one-shot compatibility as historical/recovery surface.
+
+## 2026-06-13 (RTF-060 Tokyo Fresh Authorization / Disabled-smoke Integration)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deploy target commit:
+    `3d62ed7a2075e3e6f953fd2c44a054da3393bf9a`.
+- Purpose:
+  - deploy the RTF-058 / RTF-059 fixture tooling to Tokyo;
+  - prove the deployed release can run the fresh-authorization official-handoff
+    fixture;
+  - probe the current official disabled-smoke endpoint against an existing
+    persisted sample handoff without enabling real gateway action.
+- Tokyo deployment:
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-88c1d8e0-20260613Trtf057-fresh-readiness-bridge`;
+  - new release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-3d62ed7a-20260613Trtf060-fresh-auth-handoff`;
+  - plan artifact:
+    `output/rtf060-tokyo/git-deploy-plan-3d62ed7a.json`;
+  - owner packet artifact:
+    `output/rtf060-tokyo/owner-git-deploy-packet-3d62ed7a.json`;
+  - dry-run artifact:
+    `output/rtf060-tokyo/git-deploy-dry-run-3d62ed7a.json`;
+  - apply artifact:
+    `output/rtf060-tokyo/git-deploy-applied-3d62ed7a.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - postdeploy artifact:
+    `output/rtf060-tokyo/postdeploy-verify-3d62ed7a.json`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`.
+- Tokyo RTF-060 fixture probe:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf060-fresh-authorization-official-handoff/20260613Trtf060-3d62ed7a/fresh-authorization-official-handoff-fixture.json`;
+  - local mirror:
+    `output/rtf060-tokyo/remote-report-20260613Trtf060-3d62ed7a/fresh-authorization-official-handoff-fixture.json`;
+  - status:
+    `ready_fresh_authorization_official_handoff_fixture`;
+  - stage statuses:
+    - initial handoff:
+      `blocked`;
+    - binding:
+      `created_intent_and_authorization`;
+    - final handoff:
+      `ready_for_official_submit_call`;
+    - disabled smoke:
+      `disabled_smoke_passed`;
+  - fresh submit authorization:
+    `fresh-submit-auth-rtf060`;
+  - exchange submit execution enabled:
+    `False`;
+  - exchange write:
+    `False`;
+  - order created:
+    `False`;
+  - `OrderLifecycle` called:
+    `False`.
+- Tokyo actual-service disabled-smoke probe:
+  - source handoff:
+    `/home/ubuntu/brc-deploy/reports/rtf015-persisted-draft-source/20260612Trtf015-c419e1de/avax-btpc-sample-official-handoff-bound-auth.json`;
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf060-fresh-authorization-official-handoff/20260613Trtf060-3d62ed7a/actual-service-disabled-smoke-from-rtf015-bound-handoff.json`;
+  - local mirror:
+    `output/rtf060-tokyo/remote-report-20260613Trtf060-3d62ed7a/actual-service-disabled-smoke-from-rtf015-bound-handoff.json`;
+  - status:
+    `blocked`;
+  - blocked stage:
+    `official_first_real_submit_action`;
+  - blocker:
+    `official_first_real_submit_action_http_404`;
+  - official endpoint called:
+    `True`;
+  - real gateway requested:
+    `False`;
+  - exchange submit execution enabled:
+    `False`;
+  - exchange write:
+    `False`;
+  - order created:
+    `False`;
+  - `OrderLifecycle` called:
+    `False`.
+- Interpretation:
+  - the deployed RTF-060 fixture path is ready;
+  - the actual-service disabled-smoke probe reached the official endpoint but
+    hit an expected historical sample-path prerequisite gap;
+  - the gap is not a real order/exchange failure and does not authorize or
+    attempt live submit;
+  - the next mainline step should use a real current runtime-compatible ready
+    signal / persisted draft source instead of replaying the old RTF-015 sample
+    handoff.
