@@ -7111,3 +7111,46 @@ Use this file for session progress and handoff notes.
   - withdrawal or transfer created: `false`;
   - attempt counter mutation and runtime budget mutation remain forbidden in
     the prepare rehearsal path.
+
+## 2026-06-13 (RTF-047 Ready Shadow Candidate Boundary)
+
+- Added local verifier:
+  - `scripts/verify_runtime_ready_shadow_candidate_boundary.py`.
+- Purpose:
+  - prove the strategy signal planning node locally before Tokyo integration;
+  - prove `READY_FOR_SEMANTIC_BINDING` strategy output can create only shadow
+    `SignalEvaluation` / `OrderCandidate` records;
+  - prove candidate planning includes entry, structure stop, TP1 partial,
+    runner / trailing metadata, notional, quantity, leverage, margin, max-loss,
+    liquidation reference, and liquidation-stop buffer previews;
+  - prove non-trading strategy modes do not silently create candidates.
+- Local artifact:
+  - `output/rtf047-local/ready-shadow-candidate-boundary.json`;
+  - status: `rtf047_ready_shadow_candidate_boundary_passed`;
+  - scenario count: `5`.
+- Scenarios:
+  - `cpm-long-eth`: `CPM-RO-001` / `CPM-RO-001-v0`,
+    `ETH/USDT:USDT`, `long`, `shadow_candidate_created`;
+  - `brf-short-btc`: `BRF-001` / `BRF-001-v0`,
+    `BTC/USDT:USDT`, `short`, `shadow_candidate_created`;
+  - `cpm-short-mismatch`: blocked before candidate creation;
+  - `rmr-classifier-no-trade`: observe-only, no candidate;
+  - `fco-data-backlog-no-trade`: blocked, no candidate.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_ready_shadow_candidate_boundary.py
+    tests/unit/test_b0_runtime_strategy_signal_planning.py
+    tests/unit/test_runtime_strategy_signal_evaluation_service.py`;
+  - result: `21 passed`.
+- Safety:
+  - local in-memory only: `true`;
+  - database connected: `false`;
+  - HTTP network called: `false`;
+  - exchange write called: `false`;
+  - `OrderLifecycle` called: `false`;
+  - execution intent created: `false`;
+  - order created: `false`;
+  - withdrawal or transfer created: `false`.
+- Deployment:
+  - not deployed in this stage;
+  - Tokyo remains for later integration probe / live-fact validation, not
+    first-pass node debugging.
