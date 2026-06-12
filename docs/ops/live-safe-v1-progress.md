@@ -16,6 +16,70 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-027 Tokyo Real Signal Fixture Deploy + Non-executing Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed HEAD: `fcbbb327`;
+  - remote branch: `origin/program/live-safe-v1` matched local HEAD before
+    deploy.
+- Release readiness:
+  - `prepare_tokyo_runtime_governance_release.py` returned
+    `ready_for_local_packaging`;
+  - Tokyo baseline was deployed at
+    `1707ad58fccacf8fa98e751fd630cf0ef41504dd`;
+  - local commit was 6 commits ahead of deployed baseline;
+  - migrations matched count `84` and latest
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - tracked tree was clean; untracked files remained outside the git archive.
+- Deploy artifacts:
+  - `output/rtf027-tokyo/git-deploy-plan-fcbbb327.json`;
+  - `output/rtf027-tokyo/owner-git-deploy-packet-fcbbb327.json`;
+  - `output/rtf027-tokyo/git-deploy-dry-run-fcbbb327.json`;
+  - `output/rtf027-tokyo/git-deploy-applied-fcbbb327.json`;
+  - `output/rtf027-tokyo/readonly-probe-after-fcbbb327.json`;
+  - `output/rtf027-tokyo/postdeploy-verify-fcbbb327.json`.
+- Tokyo deployment:
+  - release:
+    `brc-runtime-governance-fcbbb327-20260613Trtf027-real-signal-fixture`;
+  - apply status: `applied`;
+  - remote commands executed: `16`;
+  - remote current symlink:
+    `/home/ubuntu/brc-deploy/app/current -> /home/ubuntu/brc-deploy/releases/brc-runtime-governance-fcbbb327-20260613Trtf027-real-signal-fixture`;
+  - expected deployment effects occurred: remote files modified, database
+    backup created, migrations run, services restarted;
+  - trading effects stayed false: no exchange call, no order creation, no
+    `ExecutionIntent`, and no `OrderLifecycle`.
+- Postdeploy verification:
+  - read-only probe returned `ready_for_controlled_deploy_preflight`;
+  - postdeploy verifier returned `postdeploy_acceptance_passed`;
+  - both had no blockers.
+- Tokyo non-executing fixture:
+  - report path:
+    `/home/ubuntu/brc-deploy/reports/rtf027-real-signal-fixture/20260613Trtf027-fcbbb327/fixture-report.json`;
+  - status: `ready_real_signal_pipeline_fixture`;
+  - pipeline status:
+    `ready_for_real_signal_scoped_local_registration_proof`;
+  - artifact directory:
+    `/home/ubuntu/brc-deploy/reports/rtf027-real-signal-fixture/20260613Trtf027-fcbbb327/fixture-artifacts`.
+- Safety:
+  - fixture used a fake Trading Console API client;
+  - no real server call occurred;
+  - no runtime mutation occurred;
+  - no local registration was attempted;
+  - no first-real-submit action occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no order was submitted or created;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `88%` to `89%`;
+  - the next useful target is converting the deployed non-executing proof into
+    the next runtime mainline step: post-submit finalize / next-attempt gate
+    integration without returning consumed authorizations to pre-submit
+    rehearsal.
+
 ## 2026-06-13 (RTF-026 Local Real Signal Pipeline Report Fixture)
 
 - Confirmed current mainline workspace and branch before implementation:
