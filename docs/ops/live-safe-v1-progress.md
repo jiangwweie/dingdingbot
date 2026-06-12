@@ -8325,3 +8325,59 @@ Use this file for session progress and handoff notes.
     handoff or faking readiness;
   - next runtime progress requires a genuine runtime-compatible `would_enter`
     or an Owner-approved new runtime/profile for a different strategy signal.
+
+## 2026-06-13 (RTF-063 Current-source Observation Continuation)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - compose the post-submit / fresh-signal prepare loop with the current
+    persisted-source disabled-smoke pipeline;
+  - stop manually pushing no-action signals through the current-source pipeline;
+  - wait for a genuine runtime-compatible ready signal before creating
+    persisted source records or fresh submit authorization;
+  - keep the flow non-executing unless a later explicit real-submit gate is
+    opened.
+- Added:
+  - `scripts/runtime_current_source_observation_continuation.py`;
+  - `tests/unit/test_runtime_current_source_observation_continuation.py`.
+- Continuation behavior:
+  - runs the fresh-signal prepare loop first;
+  - returns `waiting_for_signal` without invoking the current-source pipeline
+    when the runtime has no genuine ready signal;
+  - returns `ready_for_current_source_pipeline_evidence` when the prepare loop
+    reaches `ready_for_final_gate_preflight` but readiness evidence is absent;
+  - runs the current persisted-source disabled-smoke pipeline only after the
+    ready signal and readiness evidence are both available;
+  - propagates current-source blockers such as
+    `strategy_signal_not_would_enter` without faking readiness.
+- Local tests:
+  - command:
+    `pytest -q tests/unit/test_runtime_current_source_observation_continuation.py tests/unit/test_runtime_current_persisted_source_disabled_smoke_pipeline.py tests/unit/test_runtime_next_attempt_observation_monitor.py`;
+  - result:
+    `16 passed`.
+- Compile and diff checks:
+  - command:
+    `python3 -m compileall -q scripts/runtime_current_source_observation_continuation.py`;
+  - result:
+    passed;
+  - command:
+    `git diff --check`;
+  - result:
+    passed.
+- Safety:
+  - no historical RTF-015 sample handoff is introduced;
+  - no real gateway action is requested;
+  - no exchange write occurs;
+  - no order is created;
+  - no `OrderLifecycle` call occurs;
+  - no runtime budget mutation occurs;
+  - no position is opened or closed;
+  - no withdrawal or transfer is created.
+- Mainline impact:
+  - RTF-063 turns the current-source path into a repeatable observation
+    continuation rather than a manual no-action signal probe;
+  - the next Tokyo integration can run one script against the active runtime:
+    it should either keep waiting for a real signal or progress into the
+    current-source disabled-smoke pipeline when the signal is ready.
