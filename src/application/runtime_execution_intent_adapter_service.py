@@ -2495,6 +2495,16 @@ class RuntimeExecutionIntentAdapterService:
         )
         blockers.extend(readiness_blockers)
         warnings.extend(readiness_warnings)
+        market_rule_blockers, market_rule_warnings = (
+            await self._validate_exchange_submit_packet_market_rules_for_execution(
+                packet_preview=packet_preview,
+                trusted_submit_fact_snapshot_id=(
+                    decision.trusted_submit_fact_snapshot_id
+                ),
+            )
+        )
+        blockers.extend(market_rule_blockers)
+        warnings.extend(market_rule_warnings)
         if blockers:
             return build_runtime_exchange_submit_execution_blocked_result(
                 enablement_decision=decision,
@@ -2942,6 +2952,69 @@ class RuntimeExecutionIntentAdapterService:
             f"runtime_exchange_gateway_readiness:{warning}"
             for warning in readiness.warnings
         )
+        return _dedupe(blockers), _dedupe(warnings)
+
+    async def _validate_exchange_submit_packet_market_rules_for_execution(
+        self,
+        *,
+        packet_preview: RuntimeExecutionExchangeSubmitPacketPreview,
+        trusted_submit_fact_snapshot_id: str | None,
+    ) -> tuple[list[str], list[str]]:
+        blockers: list[str] = []
+        warnings: list[str] = []
+        if not str(trusted_submit_fact_snapshot_id or "").strip():
+            return blockers, warnings
+        if self._trusted_submit_facts_repository is None:
+            return blockers, warnings
+        trusted = await self._trusted_submit_facts_repository.get(
+            str(trusted_submit_fact_snapshot_id)
+        )
+        if trusted is None:
+            return blockers, warnings
+        market_rule_source = getattr(trusted, "market_rule_source", None)
+        metadata = getattr(market_rule_source, "metadata", None)
+        if not isinstance(metadata, dict):
+            return blockers, warnings
+        step_size = _market_step_from_metadata(
+            metadata.get("step_size"), metadata.get("quantity_precision")
+        )
+        min_qty = _decimal_or_none(metadata.get("min_qty"))
+        tick_size = _market_step_from_metadata(
+            metadata.get("tick_size"), metadata.get("price_precision")
+        )
+        for request in packet_preview.submit_request_previews:
+            amount = request.amount
+            if min_qty is not None and amount < min_qty:
+                blockers.append(
+                    "exchange_submit_amount_below_min_qty:"
+                    f"{request.local_order_id}"
+                )
+            if step_size is not None and not _is_decimal_multiple(amount, step_size):
+                blockers.append(
+                    "exchange_submit_amount_step_mismatch:"
+                    f"{request.local_order_id}"
+                )
+                warnings.append(
+                    "exchange_submit_amount_step_rule:"
+                    f"{request.local_order_id}:amount={amount}:step={step_size}"
+                )
+            for price_name, price_value in (
+                ("price", request.price),
+                ("trigger_price", request.trigger_price),
+            ):
+                if (
+                    tick_size is not None
+                    and price_value is not None
+                    and not _is_decimal_multiple(price_value, tick_size)
+                ):
+                    blockers.append(
+                        f"exchange_submit_{price_name}_tick_mismatch:"
+                        f"{request.local_order_id}"
+                    )
+                    warnings.append(
+                        f"exchange_submit_{price_name}_tick_rule:"
+                        f"{request.local_order_id}:value={price_value}:tick={tick_size}"
+                    )
         return _dedupe(blockers), _dedupe(warnings)
 
     async def _validate_no_blocking_recovery_tasks_for_exchange_submit(
@@ -3739,6 +3812,41 @@ class RuntimeExecutionIntentAdapterService:
 
 def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        decimal_value = Decimal(str(value))
+    except Exception:
+        return None
+    if decimal_value <= Decimal("0"):
+        return None
+    return decimal_value
+
+
+def _market_step_from_metadata(
+    step_value: Any,
+    precision_value: Any,
+) -> Decimal | None:
+    step = _decimal_or_none(step_value)
+    if step is not None:
+        return step
+    precision = _decimal_or_none(precision_value)
+    if precision is None:
+        return None
+    if precision < Decimal("1"):
+        return precision
+    if precision == precision.to_integral_value():
+        return Decimal("1").scaleb(-int(precision))
+    return None
+
+
+def _is_decimal_multiple(value: Decimal, step: Decimal) -> bool:
+    if step <= Decimal("0"):
+        return True
+    return value % step == Decimal("0")
 
 
 def _intent_id_for_draft(draft_id: str) -> str:

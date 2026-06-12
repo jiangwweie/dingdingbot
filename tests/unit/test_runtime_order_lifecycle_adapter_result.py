@@ -402,6 +402,7 @@ class _TrustedSubmitFactsRepo:
         order_created: bool = False,
         exchange_called: bool = False,
         order_lifecycle_called: bool = False,
+        market_rule_metadata: dict | None = None,
     ) -> None:
         self.execution_intent_id = execution_intent_id
         self.runtime_instance_id = runtime_instance_id
@@ -416,6 +417,7 @@ class _TrustedSubmitFactsRepo:
         self.order_created = order_created
         self.exchange_called = exchange_called
         self.order_lifecycle_called = order_lifecycle_called
+        self.market_rule_metadata = market_rule_metadata
 
     async def get(self, _snapshot_id):
         return SimpleNamespace(
@@ -441,6 +443,11 @@ class _TrustedSubmitFactsRepo:
             owner_bounded_execution_called=False,
             withdrawal_instruction_created=False,
             transfer_instruction_created=False,
+            market_rule_source=(
+                SimpleNamespace(metadata=dict(self.market_rule_metadata))
+                if self.market_rule_metadata is not None
+                else None
+            ),
             warnings=[],
         )
 
@@ -3430,6 +3437,108 @@ async def test_first_real_submit_action_confirmed_uses_real_gateway_mode():
     assert context.exchange_submit_execution_result_repo.acquire_calls == 1
     assert context.exchange_submit_execution_result_repo.complete_calls == 1
     assert context.intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_first_real_submit_blocks_amount_that_violates_market_step_size():
+    preview = _registration_preview()
+    trusted_repo = _TrustedSubmitFactsRepo(
+        execution_intent_id=preview.execution_intent_id,
+        runtime_instance_id=preview.runtime_instance_id,
+        symbol=preview.symbol,
+        market_rule_metadata={
+            "min_qty": "0.01",
+            "step_size": "0.01",
+            "price_precision": "0.01",
+        },
+    )
+    context = await _ready_exchange_submit_execution_context()
+    context.service._trusted_submit_facts_repository = trusted_repo
+
+    result = await context.service.first_real_submit_action_for_authorization(
+        "auth-1",
+        owner_confirmed_for_first_real_submit_action=True,
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id=(
+            "protection-failure-policy-intent-1"
+        ),
+        local_registration_enablement_decision_id=(
+            "runtime-local-registration-enablement-auth-1"
+        ),
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+        exchange_submit_adapter_enablement_id="exchange-submit-adapter-enable-1",
+        exchange_submit_action_authorization_id="exchange-submit-action-1",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    )
+
+    assert result.status == RuntimeExecutionExchangeSubmitExecutionStatus.BLOCKED
+    assert (
+        "exchange_submit_amount_step_mismatch:runtime-order-draft-auth-1-entry"
+        in result.blockers
+    )
+    assert (
+        "exchange_submit_amount_step_mismatch:runtime-order-draft-auth-1-sl"
+        in result.blockers
+    )
+    assert context.gateway.calls == []
+    assert result.exchange_called is False
+    assert result.order_lifecycle_submit_called is False
+    assert context.exchange_submit_execution_result_repo.acquire_calls == 0
+    assert context.intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_first_real_submit_treats_integer_precision_as_decimal_step():
+    preview = _registration_preview()
+    trusted_repo = _TrustedSubmitFactsRepo(
+        execution_intent_id=preview.execution_intent_id,
+        runtime_instance_id=preview.runtime_instance_id,
+        symbol=preview.symbol,
+        market_rule_metadata={
+            "min_qty": "0.01",
+            "quantity_precision": "2",
+            "price_precision": "2",
+        },
+    )
+    context = await _ready_exchange_submit_execution_context()
+    context.service._trusted_submit_facts_repository = trusted_repo
+
+    result = await context.service.first_real_submit_action_for_authorization(
+        "auth-1",
+        owner_confirmed_for_first_real_submit_action=True,
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-intent-1",
+        submit_idempotency_policy_id="runtime-submit-idempotency-auth-1",
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-auth-1",
+        protection_creation_failure_policy_id=(
+            "protection-failure-policy-intent-1"
+        ),
+        local_registration_enablement_decision_id=(
+            "runtime-local-registration-enablement-auth-1"
+        ),
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+        order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+        exchange_submit_adapter_enablement_id="exchange-submit-adapter-enable-1",
+        exchange_submit_action_authorization_id="exchange-submit-action-1",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-1",
+    )
+
+    assert result.status == RuntimeExecutionExchangeSubmitExecutionStatus.BLOCKED
+    assert (
+        "exchange_submit_amount_step_mismatch:runtime-order-draft-auth-1-entry"
+        in result.blockers
+    )
+    assert any(
+        warning.startswith(
+            "exchange_submit_amount_step_rule:"
+            "runtime-order-draft-auth-1-entry:amount="
+        )
+        and warning.endswith(":step=0.01")
+        for warning in result.warnings
+    )
+    assert context.gateway.calls == []
 
 
 @pytest.mark.asyncio
