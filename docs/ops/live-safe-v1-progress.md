@@ -7251,3 +7251,62 @@ Use this file for session progress and handoff notes.
 - Deployment:
   - not deployed in this stage;
   - Tokyo should validate this only after local proof and selected deploy.
+
+## 2026-06-13 (RTF-050 Next-attempt Submit-preparation Bridge)
+
+- Added local verifier:
+  - `scripts/verify_runtime_next_attempt_submit_preparation_bridge.py`.
+- Purpose:
+  - compose the RTF-049 next-attempt strategy-planning packet with the
+    existing executable-submit readiness and official-submit handoff domain
+    services;
+  - prove a ready CPM next-attempt planning packet can reach
+    `ready_for_executable_submit`;
+  - prove a fresh submit authorization is still required before official
+    submit handoff can become ready;
+  - prove the handoff can prepare both disabled-smoke and real-gateway-action
+    previews without calling the official submit endpoint;
+  - prove active-position blocked and observe-only planning scenarios stop
+    before readiness / handoff.
+- Local artifact:
+  - `output/rtf050-local/next-attempt-submit-preparation-bridge.json`;
+  - status: `rtf050_next_attempt_submit_preparation_bridge_passed`;
+  - scenario count: `3`.
+- Scenarios:
+  - `ready-cpm-long-submit-preparation`: strategy planning
+    `ready_for_final_gate_preflight`, readiness
+    `ready_for_executable_submit`, disabled handoff
+    `ready_for_official_submit_call`;
+  - `blocked-active-position-submit-preparation-blocked`: readiness not run,
+    handoff not run, blocker `runtime_active_position_slot_in_use`;
+  - `waiting-rmr-observe-only-submit-preparation-blocked`: readiness not run,
+    handoff not run, observe-only strategy does not create a candidate.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_next_attempt_submit_preparation_bridge_verifier.py
+    tests/unit/test_runtime_next_attempt_gate_strategy_planning_verifier.py
+    tests/unit/test_runtime_executable_submit_readiness.py
+    tests/unit/test_runtime_official_submit_handoff.py`;
+  - result: `19 passed`.
+- Safety:
+  - local in-memory only: `true`;
+  - database connected: `false`;
+  - HTTP network called: `false`;
+  - official submit endpoint called: `false`;
+  - exchange write called: `false`;
+  - pre-submit rehearsal called: `false`;
+  - `OrderLifecycle` called: `false`;
+  - execution intent created: `false`;
+  - executable execution intent created: `false`;
+  - order created: `false`;
+  - runtime state mutated: `false`;
+  - withdrawal or transfer created: `false`.
+- Execution semantics:
+  - old authorization remains consumed / replay-only;
+  - historical pre-attempt rehearsal is compatibility evidence, not a current
+    requirement;
+  - durable execution result is treated as post-submit evidence only;
+  - the next real submit still requires fresh authorization, current
+    FinalGate/readiness evidence, and the official auditable submit path.
+- Deployment:
+  - not deployed in this stage;
+  - this is local submit-preparation proof before Tokyo integration.
