@@ -7822,3 +7822,53 @@ Use this file for session progress and handoff notes.
     for review or create shadow prepare records when explicitly allowed;
   - real submit still remains downstream of official FinalGate, readiness,
     action-time evidence, protection, and official submit path.
+
+## 2026-06-13 (RTF-057 Fresh Signal Readiness Bridge)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - connect an RTF-056 `runtime_fresh_signal_prepare_loop` packet to the
+    existing non-executing readiness path;
+  - preserve strategy-driven planning as the source of readiness evidence;
+  - avoid forcing old pre-submit rehearsal or manual evidence-ID movement back
+    into the mainline.
+- Local code changes:
+  - added `scripts/runtime_fresh_signal_readiness_bridge.py`;
+  - added `tests/unit/test_runtime_fresh_signal_readiness_bridge.py`;
+  - the bridge consumes a fresh-signal loop packet and, only when the loop is
+    `ready_for_prepare` or `ready_for_final_gate_preflight`, runs:
+    `runtime_next_attempt_strategy_plan_api_flow.py`
+    -> `runtime_cycle_executable_submit_handoff.py`;
+  - when the loop is `waiting_for_signal`, the bridge returns
+    `waiting_for_signal` and does not call strategy planning or readiness;
+  - when readiness evidence is missing, the bridge returns
+    `ready_for_readiness_evidence` before planning, so it does not create
+    partial planning side effects that cannot be completed.
+- Local verification:
+  - `python3 -m py_compile scripts/runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py`;
+  - `pytest -q tests/unit/test_runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_fresh_signal_prepare_loop.py tests/unit/test_runtime_cycle_executable_submit_handoff.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py`;
+  - result: `23 passed`;
+  - adjacent readiness regression:
+    `pytest -q tests/unit/test_runtime_executable_submit_readiness_api_flow.py tests/unit/test_runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_persisted_draft_source_readiness_bridge.py`;
+  - result: `11 passed`.
+- Safety:
+  - no official submit endpoint is called;
+  - no pre-submit rehearsal is called;
+  - no local registration is armed;
+  - no exchange submit is armed;
+  - no exchange write is called;
+  - no order is created;
+  - no `OrderLifecycle` is called;
+  - no attempt counter or runtime budget is mutated by the script;
+  - no position is opened or closed;
+  - no withdrawal or transfer is created.
+- Execution semantics:
+  - RTF-057 makes the fresh-signal loop actionable once a real runtime-compatible
+    signal appears;
+  - the next submit path still requires strategy planning readiness, FinalGate
+    / executable readiness evidence, fresh submit authorization, and official
+    submit action-time confirmation;
+  - historical pre-attempt / first-real-submit compatibility remains deferred
+    to mandatory cleanup after the main runtime-level chain is proven.
