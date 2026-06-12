@@ -18,6 +18,33 @@ Use this file for program-local findings that matter during Live-safe v1.
 
 Long-lived architecture decisions and durable collaboration rules belong in Memory MCP and `docs/adr/`.
 
+## 2026-06-12
+
+- A real submitted runtime attempt must not be sent back through pre-submit
+  rehearsal. If the attempt has a durable exchange submit execution result,
+  local orders being `FILLED` / `CANCELED` / `OPEN`, or carrying an
+  `exchange_order_id`, is post-submit evidence rather than a rehearsal
+  failure.
+- The consumed authorization should be frozen as `consumed` / `replay-only` /
+  `reviewable`. It may be used for audit, duplicate-submit proof, budget
+  settlement, attempt settlement, and review, but not for another submit or
+  local order re-creation.
+- The correct mainline after first-real-submit proof is
+  `RuntimePostSubmitFinalize`: durable submit result -> reconciliation refresh
+  -> submit outcome review -> attempt outcome policy -> budget settlement ->
+  position/protection status -> next attempt gate.
+- True risks are duplicate submit through old authorization, inaccurate
+  budget/attempt accounting, unrecognized canceled/missing protection, and
+  active-position mismatch between local PG and exchange facts.
+- False blockers are missing manual evidence IDs, old local orders not being
+  `CREATED`, the presence of exchange artifacts after a real submit, and
+  unproven strategy alpha after the Owner accepted small bounded-loss
+  right-tail experimentation.
+- Execution-chain development should use local node tests and local dry-run
+  packets before Tokyo integration. Tokyo should validate deployment,
+  migrations, real account/order/position facts, and gated exchange actions,
+  not serve as the first debugging surface for new domain/application nodes.
+
 ## 2026-04-29
 
 - Current system is treated as Sim-ready, not live-ready.

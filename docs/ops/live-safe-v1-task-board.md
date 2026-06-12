@@ -44,6 +44,19 @@ is docs-only and does not itself satisfy SRR-002 standards for any module.
 - `LS-001` completed: main runtime order-watch enabled with isolated WS state; `api.py` out of scope; duplicate `watch_orders` definition remains as later cleanup.
 - `LS-002` completed: runtime daily risk limits now update from projected exit deltas and full position closes; UTC reset and replay-safe accounting are active; v0 remains process-local in-memory state.
 
+## 2026-06-12 Runtime Mainline Correction
+
+The current mainline must stop treating an already submitted runtime attempt as
+a pre-submit rehearsal problem. After a real submit has a durable
+`RuntimeExecutionExchangeSubmitExecutionResult`, the consumed authorization is
+review/replay evidence only. The next implementation focus is post-submit
+finalize, budget / attempt settlement, and next-attempt gating.
+
+| ID | Task | Status | Owner | Notes |
+| --- | --- | --- | --- | --- |
+| RTF-001 | RuntimePostSubmitFinalize + NextAttemptGate v1 | SPEC | Codex | Build the post-submit finalize loop from durable submit result -> submit outcome review -> attempt outcome policy -> budget settlement -> reconciliation/protection status -> next attempt gate. Old consumed authorization must remain replay-only and must not be rerun through pre-submit rehearsal. Local node tests and local dry-run flow must pass before Tokyo integration. |
+| RTF-002 | Strategy-driven next attempt planning reconnection | TODO | Codex | After RTF-001, reconnect next eligible attempt to fresh StrategySignal -> SignalEvaluation -> OrderCandidate -> ExecutionIntent planning. A new attempt must use fresh signal/candidate/authorization evidence and must not reuse first-real-submit proof artifacts. |
+
 ## Personal Leveraged Campaign Local Sandbox
 
 These tasks are currently docs/design/sandbox/test only. They do not by

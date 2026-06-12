@@ -92,6 +92,30 @@ Before each stage commit, Codex must report:
 5. whether the stage touched exchange write, `OrderLifecycle`, or
    first-real-submit execution paths.
 
+## 2.2 Execution-Chain Stage Discipline
+
+Runtime and execution-chain work must use a local-first verification cadence:
+
+| Stage | Required proof |
+| ----- | -------------- |
+| Local domain | model / policy / packet unit test |
+| Local application | service result test with fake repositories or fake gateway |
+| Local API / script | dry-run JSON response or report file |
+| Tokyo integration | deployment, migration, live-fact, or gated exchange-action proof |
+| Stage commit | commit hash plus path, branch, deployment status, and touched-authority summary |
+
+Tokyo is for integration and live-fact validation, not first-pass debugging of
+new execution-chain nodes. Direct Tokyo debugging is allowed only when the
+thing being verified is inherently remote: deployment state, real exchange
+account/order/position facts, Tokyo PG state, service process state, or an
+explicitly gated real exchange action.
+
+After a real submit has produced a durable execution result, agents must not
+retry the consumed authorization through pre-submit rehearsal or require local
+orders to return to `CREATED`. The correct mainline is post-submit finalize,
+budget / attempt settlement, protection and reconciliation review, then next
+attempt gating from a fresh strategy signal and fresh authorization evidence.
+
 ---
 
 ## 3. Task Card Required Fields

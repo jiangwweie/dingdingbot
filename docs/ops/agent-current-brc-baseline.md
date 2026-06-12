@@ -142,6 +142,83 @@ use. Imperfect evidence, incomplete fee/funding/slippage accounting, or
 unsophisticated Review analytics are warnings unless they directly affect live
 safety.
 
+## Runtime Loop Correction
+
+After a runtime authorization has a persisted
+`RuntimeExecutionExchangeSubmitExecutionResult`, that authorization is
+`consumed` / `replay-only` / `reviewable`. It must not be pushed back through
+pre-submit rehearsal, local `CREATED` order checks, local order re-creation, or
+another submit attempt.
+
+Post-submit facts must move through a runtime-level finalize loop:
+
+```text
+ExchangeSubmitExecutionResult
+-> SubmitOutcomeReview
+-> AttemptOutcomePolicy
+-> PostSubmitBudgetSettlement
+-> reconciliation refresh
+-> current position / protection status
+-> closed-review requirement, if any
+-> NextAttemptGate
+```
+
+New attempts must start from a new strategy signal chain:
+
+```text
+StrategySignal
+-> SignalEvaluation
+-> OrderCandidate
+-> ExecutionIntent
+-> fresh authorization / runtime grant evidence
+```
+
+Do not manually move evidence IDs as the default path. Services should resolve
+durable evidence from runtime, authorization, order, and execution-result facts
+where possible. Manual evidence input is an exception for audit/recovery, not
+the normal runtime loop.
+
+True live-safety risks in this stage are:
+
+- reusing a consumed authorization and creating duplicate submit risk;
+- failing to finalize post-submit state, causing inaccurate attempt or budget
+  accounting;
+- treating canceled/missing protection as safe without current exchange and
+  local reconciliation evidence;
+- allowing active-position facts to diverge from exchange/order facts.
+
+The following are not live-safety blockers by themselves after a real submit
+has already happened:
+
+- missing manually supplied `runtime_submit_rehearsal_id`;
+- local orders no longer being `CREATED`;
+- existing `exchange_order_id` on local orders;
+- strategy alpha being unproven after Owner acknowledged the experimental
+  right-tail risk-capital objective.
+
+## Execution-Chain Engineering Cadence
+
+Execution-chain work must pass local node-level tests and a local dry-run flow
+before Tokyo integration. Tokyo is for deployment, integration, live account /
+order / position fact validation, and explicitly gated real exchange actions.
+Tokyo must not be used as the first-pass debugging environment for a new
+domain or application node.
+
+Each execution-chain stage should produce artifacts in this order:
+
+| Stage | Required artifact |
+| --- | --- |
+| Domain | model / policy / packet unit test |
+| Application | service result test with fake repositories or fake gateway |
+| API / script | local dry-run JSON response or report |
+| Tokyo | integration probe or live-fact report path |
+| Git | stage commit hash with path, branch, and deployment status |
+
+This cadence is not a new readiness gate for its own sake. It is the default
+way to keep small live-capital progress fast, auditable, and recoverable
+without mixing code bugs, stale PG facts, consumed authorizations, and real
+exchange state in one server-side debugging loop.
+
 ## Worker Output Rule
 
 Codex and Claude worker outputs should report facts and final state. They

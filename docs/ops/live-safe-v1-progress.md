@@ -16,6 +16,37 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (Runtime Loop Correction Prep)
+
+- Confirmed current mainline workspace and branch before editing:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `dc631552`.
+- Adopted the runtime direction correction in planning and agent-facing
+  constraints:
+  - consumed first-real-submit authorizations are review/replay evidence, not
+    candidates for another pre-submit rehearsal;
+  - durable `RuntimeExecutionExchangeSubmitExecutionResult` is the primary
+    post-submit proof;
+  - the mainline should move through post-submit finalize, budget / attempt
+    settlement, protection/reconciliation review, and next-attempt gate;
+  - fresh attempts must start from fresh strategy signal, candidate, intent,
+    and authorization evidence.
+- Adopted the engineering cadence correction:
+  - local domain test;
+  - local application service test;
+  - local API / script dry-run artifact;
+  - Tokyo deployment / live-fact integration probe;
+  - stage commit with path, branch, deployment status, and touched-authority
+    summary.
+- Updated planning artifacts for the next mainline task:
+  - `RTF-001 RuntimePostSubmitFinalize + NextAttemptGate v1`;
+  - `RTF-002 Strategy-driven next attempt planning reconnection`.
+- Safety:
+  - this prep stage changed documentation only;
+  - no runtime code, migration, API behavior, exchange order, `OrderLifecycle`
+    submit, withdrawal, transfer, or deployment was performed.
+
 ## 2026-06-11 (Runtime Exchange Close Projection Recovery)
 
 - Added `RuntimeExchangeCloseProjectionRecoveryService` and
