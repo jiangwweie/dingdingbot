@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 
 from scripts import runtime_active_observation_followup
 
 
-def _args(*, allow_arm_preview=False, allow_disabled_smoke=False):
+def _args(
+    *,
+    allow_arm_preview=False,
+    allow_disabled_smoke=False,
+    arm_report_json=None,
+):
     return Namespace(
         loop_packet_json="unused.json",
         output_json=None,
         api_base="http://unit",
         env_file=None,
         allow_arm_preview=allow_arm_preview,
+        arm_report_json=arm_report_json,
         allow_disabled_smoke=allow_disabled_smoke,
         skip_disabled_smoke_prerequisite_probe=False,
     )
@@ -251,6 +258,49 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
         in packet["warnings"]
     )
     assert packet["safety_invariants"]["real_submit_requested"] is False
+
+
+def test_followup_reuses_arm_report_json_for_disabled_smoke(tmp_path):
+    calls = []
+    arm_report = _arm_preview_report(blockers=[], warnings=["arm-ready"])
+    arm_report["ids"] = {
+        "trusted_submit_fact_snapshot_id": "facts-1",
+        "submit_idempotency_policy_id": "idem-1",
+        "local_registration_enablement_decision_id": "local-enable-1",
+    }
+    arm_path = tmp_path / "arm-report.json"
+    arm_path.write_text(json.dumps(arm_report), encoding="utf-8")
+
+    def arm_runner(auth_id, args):
+        calls.append(("arm", auth_id))
+        return _arm_preview_report()
+
+    def disabled_runner(auth_id, args):
+        calls.append(("disabled", auth_id))
+        return _disabled_smoke_report()
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(
+            allow_arm_preview=True,
+            allow_disabled_smoke=True,
+            arm_report_json=str(arm_path),
+        ),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        arm_preview_runner=arm_runner,
+        disabled_smoke_runner=disabled_runner,
+    )
+
+    assert packet["status"] == "disabled_smoke_completed"
+    assert calls == [("disabled", "auth-1")]
+    assert packet["arm_preview_report"]["ids"]["trusted_submit_fact_snapshot_id"] == (
+        "facts-1"
+    )
+    assert packet["operator_command_plan"]["arm_preview_called"] is False
+    assert packet["operator_command_plan"]["arm_report_attached"] is True
+    assert packet["operator_command_plan"]["arm_report_json_used"] is True
+    assert packet["safety_invariants"]["arm_preview_called"] is False
+    assert packet["safety_invariants"]["arm_report_json_used"] is True
+    assert "arm_report:arm-ready" in packet["warnings"]
 
 
 def test_followup_blocks_when_arm_preview_touches_forbidden_surfaces():

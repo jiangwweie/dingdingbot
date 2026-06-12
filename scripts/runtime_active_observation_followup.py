@@ -56,6 +56,18 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_arm_report(args: argparse.Namespace) -> dict[str, Any] | None:
+    path_value = getattr(args, "arm_report_json", None)
+    if not path_value:
+        return None
+    report = _load_json_object(Path(path_value).expanduser())
+    if report.get("script") != "runtime_first_real_submit_api_flow":
+        raise RuntimeError("arm report must come from runtime_first_real_submit_api_flow")
+    if report.get("mode") != "arm":
+        raise RuntimeError("arm report must have mode=arm")
+    return report
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -255,6 +267,7 @@ def build_followup_packet(
     blockers: list[str] = []
     warnings: list[str] = []
     arm_report: dict[str, Any] | None = None
+    arm_report_json_used = False
     arm_forbidden: list[str] = []
     disabled_report: dict[str, Any] | None = None
     disabled_forbidden: list[str] = []
@@ -279,7 +292,21 @@ def build_followup_packet(
     elif blockers:
         followup_status = "blocked"
     else:
-        if args.allow_arm_preview:
+        arm_report = _load_arm_report(args)
+        arm_report_json_used = arm_report is not None
+        if arm_report is not None:
+            arm_forbidden = _arm_preview_forbidden_effects(arm_report)
+            warnings.extend(
+                f"arm_report:{item}"
+                for item in arm_report.get("blockers") or []
+            )
+            warnings.extend(
+                f"arm_report:{item}"
+                for item in arm_report.get("warnings") or []
+            )
+            if arm_forbidden:
+                blockers.append("arm_report_contains_forbidden_effects")
+        elif args.allow_arm_preview:
             arm_runner = arm_preview_runner or (
                 lambda auth_id, parsed_args: _run_arm_preview(
                     authorization_id=auth_id,
@@ -336,14 +363,18 @@ def build_followup_packet(
         "operator_command_plan": {
             "not_executed": followup_status
             not in {"disabled_smoke_completed", "disabled_smoke_blocked"},
-            "arm_preview_called": arm_report is not None,
+            "arm_preview_called": arm_report is not None and not arm_report_json_used,
+            "arm_report_attached": arm_report is not None,
+            "arm_report_json_used": arm_report_json_used,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
             "next_step": _next_step(followup_status),
         },
         "safety_invariants": {
             "loop_packet_read_only": True,
-            "arm_preview_called": arm_report is not None,
+            "arm_preview_called": arm_report is not None and not arm_report_json_used,
+            "arm_report_attached": arm_report is not None,
+            "arm_report_json_used": arm_report_json_used,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
             "real_submit_requested": False,
@@ -389,6 +420,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--env-file")
     parser.add_argument("--allow-arm-preview", action="store_true")
+    parser.add_argument(
+        "--arm-report-json",
+        help=(
+            "Reuse an existing successful arm report as the evidence source for "
+            "disabled smoke instead of running a new arm preview."
+        ),
+    )
     parser.add_argument("--allow-disabled-smoke", action="store_true")
     parser.add_argument(
         "--skip-disabled-smoke-prerequisite-probe",
