@@ -16,6 +16,42 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-002 Local Next-attempt Strategy Planning Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `49017bd6`.
+- Added `RuntimeNextAttemptStrategyPlanningService` as the application-level
+  bridge from post-submit finalize to fresh strategy signal planning:
+  - requires a `RuntimePostSubmitFinalizePacket`;
+  - requires `FINALIZED_READY_FOR_NEXT_ATTEMPT`;
+  - requires `READY_FOR_FRESH_SIGNAL` next-attempt gate;
+  - refuses runtime mismatches before calling the strategy planner;
+  - calls the existing shadow strategy planner only after the post-submit gate
+    is ready;
+  - records the consumed authorization as replay-only and requires a fresh
+    authorization before any future submit path.
+- Added `tests/unit/test_runtime_next_attempt_strategy_planning.py` covering:
+  - ready post-submit gate calls the shadow planner and returns
+    `ready_for_final_gate_preflight`;
+  - blocked post-submit gate does not call the planner;
+  - observe-only fresh signal waits without creating a candidate;
+  - runtime mismatch blocks before planning.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_post_submit_finalize.py tests/unit/test_b0_runtime_strategy_signal_planning.py`
+    with `22 passed`;
+  - `python3 -m compileall -q src/application/runtime_next_attempt_strategy_planning_service.py tests/unit/test_runtime_next_attempt_strategy_planning.py`;
+  - `git diff --check`.
+- Safety:
+  - no deployment in this stage;
+  - no exchange write;
+  - no exchange order submit;
+  - no `OrderLifecycle.submit_order`;
+  - no executable `ExecutionIntent`;
+  - no local order creation/cancel/close;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-001 Tokyo Deploy + Live-fact Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
