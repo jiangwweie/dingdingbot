@@ -34,6 +34,9 @@ from scripts import runtime_next_attempt_observation_api_prepare_flow as observa
 from scripts import runtime_next_attempt_observation_monitor as monitor  # noqa: E402
 
 
+MAX_OBSERVATION_API_TIMEOUT_SECONDS = 60.0
+
+
 def _api_base(args: argparse.Namespace) -> str:
     import os
 
@@ -43,6 +46,11 @@ def _api_base(args: argparse.Namespace) -> str:
         or os.environ.get(FIRST_REAL_SUBMIT_API_BASE_ENV)
         or DEFAULT_API_BASE
     )
+
+
+def _effective_observation_timeout_seconds(args: argparse.Namespace) -> float:
+    timeout = float(args.timeout_seconds or 10.0)
+    return min(timeout, MAX_OBSERVATION_API_TIMEOUT_SECONDS)
 
 
 def _active_runtimes(*, client: Any) -> list[dict[str, Any]]:
@@ -101,7 +109,7 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
         playbook_id=args.playbook_id,
         one_hour_limit=args.one_hour_limit,
         four_hour_limit=args.four_hour_limit,
-        timeout_seconds=args.timeout_seconds,
+        timeout_seconds=_effective_observation_timeout_seconds(args),
         signal_output_json=None,
         output_dir=str(Path(args.output_dir).expanduser() / runtime_instance_id),
         allow_prepare_records=args.allow_prepare_records,
@@ -327,6 +335,12 @@ def _build_packet(
             scoped = f"{item['runtime_instance_id']}:{blocker}"
             if scoped not in blockers:
                 blockers.append(scoped)
+    warnings: list[str] = []
+    effective_timeout = _effective_observation_timeout_seconds(args)
+    if float(args.timeout_seconds or 10.0) != effective_timeout:
+        warnings.append(
+            "observation_timeout_seconds_clamped_to_api_max_60"
+        )
 
     return {
         "scope": "runtime_active_observation_monitor",
@@ -335,10 +349,12 @@ def _build_packet(
         "monitored_runtime_count": len(selected),
         "allow_prepare_records": args.allow_prepare_records,
         "max_cycles_per_runtime": args.max_cycles_per_runtime,
+        "requested_timeout_seconds": args.timeout_seconds,
+        "effective_observation_timeout_seconds": effective_timeout,
         "runtime_summaries": summaries,
         "runtime_packets": packets if args.include_runtime_packets else [],
         "blockers": blockers,
-        "warnings": [],
+        "warnings": warnings,
         "operator_command_plan": {
             "next_step": _next_step(status),
             "not_executed": True,

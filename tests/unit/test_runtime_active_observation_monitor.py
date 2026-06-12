@@ -226,6 +226,41 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
     assert summary["forbidden_effects"]["order_lifecycle_called"] is False
 
 
+def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
+    client = _FakeClient([_runtime("runtime-active-1")])
+    seen = []
+
+    def builder(args):
+        seen.append(args.timeout_seconds)
+        return {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(output_dir=str(tmp_path), timeout_seconds=120.0),
+        client=client,
+        monitor_builder=builder,
+    )
+
+    assert seen == [60.0]
+    assert packet["requested_timeout_seconds"] == 120.0
+    assert packet["effective_observation_timeout_seconds"] == 60.0
+    assert packet["warnings"] == [
+        "observation_timeout_seconds_clamped_to_api_max_60"
+    ]
+
+
 def test_active_monitor_handles_no_active_runtimes():
     packet = runtime_active_observation_monitor._build_packet(
         _args(),
