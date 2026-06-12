@@ -16,6 +16,50 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-020 Real Strategy Signal Scoped Local Registration Pipeline Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `17a93db9`.
+- Added `scripts/runtime_real_signal_scoped_local_registration_pipeline.py`:
+  - accepts a real `StrategyFamilySignalInput` JSON;
+  - calls the existing RTF-014 intent-draft-source API flow;
+  - calls the existing RTF-015 persisted-draft-source readiness API flow;
+  - calls the existing official submit handoff API flow;
+  - calls the existing fresh submit authorization binding API flow;
+  - calls the existing official evidence chain probe;
+  - calls the existing scoped local-registration proof wrapper.
+- Pipeline behavior:
+  - does not use sample rehearsal fallback;
+  - stops at `blocked_at_strategy_signal_intent_draft_source` when the signal
+    is not ready;
+  - requires explicit readiness evidence only after the signal source is ready;
+  - reaches `ready_for_real_signal_scoped_local_registration_proof` in dry-run
+    when all upstream official stages are ready;
+  - keeps exchange arm disabled and first-real-submit action uncalled.
+- Added focused tests:
+  - blocked strategy signal stops at the source stage and performs no downstream
+    API calls;
+  - ready real-signal path reaches scoped local-registration dry-run through
+    source, readiness, handoff, binding, evidence chain, and scoped proof.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`
+    with `2 passed`;
+  - `pytest -q tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`
+    with `10 passed`;
+  - `python3 -m compileall scripts/runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no Tokyo action occurred;
+  - no sample rehearsal artifact was used;
+  - no exchange write occurred;
+  - no first-real-submit action occurred;
+  - no real exchange order was submitted;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-13 (RTF-019 Tokyo Deploy + RTF-018 Dry-run Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
