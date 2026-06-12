@@ -16,6 +16,60 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-003 Active Position Resolution Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `0870f904`.
+- Added `RuntimeActivePositionResolutionPacket`:
+  - consolidates `RuntimeLivePositionMonitorPacket`,
+    `RuntimePositionExitPlan`, and `RuntimePostCloseFollowupPacket`;
+  - classifies active-position resolution into:
+    `hold_with_hard_stop`, `waiting_for_owner_close_authorization`,
+    `ready_for_closed_review`, `ready_for_next_attempt_gate`, or `blocked`;
+  - treats protected active positions as holdable under the right-tail
+    risk-capital objective while still blocking new attempts when the active
+    position slot is in use;
+  - exposes optional reduce-only close authorization facts without executing
+    the close.
+- Added `scripts/runtime_active_position_resolution_from_reports.py`:
+  - reads existing monitor / exit-plan / post-close-followup JSON reports;
+  - tolerates noisy log lines before JSON payloads;
+  - emits one packet-only active-position resolution JSON.
+- Tokyo fact evidence used for this stage:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf003-active-position/20260612T171853`;
+  - local resolution output:
+    `output/rtf003-active-position/20260612T171853/active-position-resolution.json`.
+- Current BNB runtime resolution:
+  - runtime: `strategy-runtime-e6138ad7c88f`;
+  - status: `hold_with_hard_stop`;
+  - active position present: `true`;
+  - can continue holding: `true`;
+  - next attempt blocked by active position: `true`;
+  - full reduce-only close feasible: `true`;
+  - Owner close approval value:
+    `runtime-reduce-only-close:strategy-runtime-e6138ad7c88f:BNB/USDT:USDT:long:qty=0.01:owner-authorized`;
+  - warnings:
+    `missing_tp_protection_right_tail_exit_not_mounted`,
+    `reconciliation_warning_present`,
+    `tp1_partial_quantity_below_min_qty_or_step`.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_active_position_resolution.py tests/unit/test_runtime_active_position_resolution_from_reports.py tests/unit/test_runtime_live_position_monitor.py tests/unit/test_runtime_post_close_followup.py`
+    with `15 passed`;
+  - `python3 -m compileall -q src/domain/runtime_active_position_resolution.py scripts/runtime_active_position_resolution_from_reports.py tests/unit/test_runtime_active_position_resolution.py tests/unit/test_runtime_active_position_resolution_from_reports.py`;
+  - `git diff --check`.
+- Safety:
+  - no deployment in this stage;
+  - no exchange write;
+  - no exchange order submit;
+  - no `OrderLifecycle.submit_order`;
+  - no local order creation/cancel/close;
+  - no runtime state mutation;
+  - no closed-review record creation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-002 Tokyo Deploy + Strategy-plan Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
