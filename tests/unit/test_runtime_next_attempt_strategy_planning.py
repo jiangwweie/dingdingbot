@@ -334,3 +334,60 @@ async def test_next_attempt_strategy_planning_blocks_runtime_mismatch_before_pla
     )
     assert planner.calls == 0
     assert "post_submit_runtime_mismatch" in packet.blockers
+
+
+async def test_trading_console_next_attempt_strategy_plan_endpoint_uses_injected_service(
+    monkeypatch,
+):
+    from src.interfaces import api as api_module
+    from src.interfaces.api_trading_console import (
+        RuntimeNextAttemptStrategyPlanningRequest,
+        runtime_next_attempt_strategy_plan_from_post_submit_packet,
+    )
+
+    runtime = _runtime(boundary={"budget_reserved": Decimal("0")})
+    signal_input = _signal_input()
+    post_submit_packet = _ready_post_submit_packet()
+    planner = _Planner(
+        planning_status=(
+            RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+        ),
+    )
+    service = RuntimeNextAttemptStrategyPlanningService(
+        strategy_signal_planner=planner,
+    )
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id):
+            assert runtime_instance_id == runtime.runtime_instance_id
+            return runtime
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_service",
+        _RuntimeService(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_runtime_next_attempt_strategy_planning_service",
+        service,
+        raising=False,
+    )
+
+    response = await runtime_next_attempt_strategy_plan_from_post_submit_packet(
+        runtime.runtime_instance_id,
+        RuntimeNextAttemptStrategyPlanningRequest(
+            post_submit_finalize_packet=post_submit_packet,
+            signal_input=signal_input,
+            metadata={"unit_endpoint": True},
+        ),
+    )
+
+    assert response.status == (
+        RuntimeNextAttemptStrategyPlanningStatus.READY_FOR_FINAL_GATE_PREFLIGHT
+    )
+    assert planner.calls == 1
+    assert response.order_candidate_id == "order-candidate-eval-fresh"
+    assert response.metadata["unit_endpoint"] is True
+    assert response.exchange_order_submitted is False

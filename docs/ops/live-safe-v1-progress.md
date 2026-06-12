@@ -16,6 +16,46 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-002 API / Script Dry-run Entry)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `d0887ec1`.
+- Added Trading Console API endpoint:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-strategy-plans`;
+  - request body includes a `RuntimePostSubmitFinalizePacket` and a fresh
+    `StrategyFamilySignalInput`;
+  - response is a `RuntimeNextAttemptStrategyPlanningPacket`;
+  - the endpoint uses the existing runtime service and the RTF-002
+    `RuntimeNextAttemptStrategyPlanningService`.
+- Added CLI probe:
+  - `scripts/runtime_next_attempt_strategy_plan_api_flow.py`;
+  - reads post-submit finalize packet JSON plus signal input JSON;
+  - calls the official Trading Console API;
+  - preserves JSON-only stdout for automation and Tokyo reports.
+- Added verification coverage:
+  - API route allowlist updated so the new POST remains an explicit Console
+    control-surface exception;
+  - endpoint test uses injected runtime/planning services and does not touch PG
+    or exchange;
+  - CLI tests cover request body, non-executing metadata, HTTP error handling,
+    and JSON-only stdout.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_trading_console_readmodels.py::test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted`
+    with `9 passed`;
+  - `python3 -m compileall -q src/application/runtime_next_attempt_strategy_planning_service.py src/interfaces/api_trading_console.py scripts/runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py`;
+  - `git diff --check`.
+- Safety:
+  - no deployment in this stage;
+  - no exchange write;
+  - no exchange order submit;
+  - no `OrderLifecycle.submit_order`;
+  - no executable `ExecutionIntent`;
+  - no local order creation/cancel/close;
+  - no runtime budget / attempt mutation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-002 Local Next-attempt Strategy Planning Proof)
 
 - Confirmed current mainline workspace and branch before implementation:

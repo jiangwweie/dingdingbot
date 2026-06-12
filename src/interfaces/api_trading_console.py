@@ -131,6 +131,10 @@ from src.domain.runtime_execution_attempt_outcome_policy import (
 )
 from src.domain.runtime_execution_plan import RuntimeExecutionIntentDraft, RuntimeExecutionPlan
 from src.domain.runtime_final_gate_preview import RuntimeFinalGatePreview
+from src.domain.runtime_post_submit_finalize import RuntimePostSubmitFinalizePacket
+from src.application.runtime_next_attempt_strategy_planning_service import (
+    RuntimeNextAttemptStrategyPlanningPacket,
+)
 from src.application.runtime_strategy_signal_scheduler_planning_service import (
     RuntimeStrategySignalSchedulerPlanningResult,
 )
@@ -288,6 +292,15 @@ class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeNextAttemptStrategyPlanningRequest(BaseModel):
+    post_submit_finalize_packet: RuntimePostSubmitFinalizePacket
+    signal_input: StrategyFamilySignalInput
+    context_id: str | None = None
+    expires_at_ms: int | None = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
 
 
 class StrategyRuntimeLiveEnablementMutationRequest(BaseModel):
@@ -892,6 +905,47 @@ async def apply_strategy_runtime_live_enablement_mutation(
                 request.owner_real_submit_authorization_id
             ),
             actor=request.actor,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/next-attempt-strategy-plans",
+    response_model=RuntimeNextAttemptStrategyPlanningPacket,
+)
+async def runtime_next_attempt_strategy_plan_from_post_submit_packet(
+    runtime_instance_id: str,
+    request: RuntimeNextAttemptStrategyPlanningRequest,
+) -> RuntimeNextAttemptStrategyPlanningPacket:
+    runtime_service = await _strategy_runtime_service()
+    try:
+        runtime = await runtime_service.get_runtime(runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    service = await _runtime_next_attempt_strategy_planning_service()
+    try:
+        return await service.plan_from_post_submit_gate(
+            post_submit_finalize_packet=request.post_submit_finalize_packet,
+            signal_input=request.signal_input,
+            runtime=runtime,
+            context_id=request.context_id,
+            expires_at_ms=request.expires_at_ms,
+            metadata={
+                "trading_console_api": True,
+                "runtime_instance_id": runtime_instance_id,
+                "non_executing": True,
+                **request.metadata,
+            },
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -4017,6 +4071,27 @@ async def _runtime_strategy_signal_planning_service() -> Any:
         ),
     )
     setattr(api_module, "_runtime_strategy_signal_planning_service", service)
+    return service
+
+
+async def _runtime_next_attempt_strategy_planning_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(
+        api_module,
+        "_runtime_next_attempt_strategy_planning_service",
+        None,
+    )
+    if injected is not None:
+        return injected
+    from src.application.runtime_next_attempt_strategy_planning_service import (
+        RuntimeNextAttemptStrategyPlanningService,
+    )
+
+    service = RuntimeNextAttemptStrategyPlanningService(
+        strategy_signal_planner=await _runtime_strategy_signal_planning_service(),
+    )
+    setattr(api_module, "_runtime_next_attempt_strategy_planning_service", service)
     return service
 
 

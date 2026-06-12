@@ -635,6 +635,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
     allowed_post_paths = {
         "/api/trading-console/strategy-observations/scheduled-runs",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-observation-cycle",
+        "/api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-strategy-plans",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/live-enablement-mutations",
         "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
