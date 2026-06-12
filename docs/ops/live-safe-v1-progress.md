@@ -7154,3 +7154,50 @@ Use this file for session progress and handoff notes.
   - not deployed in this stage;
   - Tokyo remains for later integration probe / live-fact validation, not
     first-pass node debugging.
+
+## 2026-06-13 (RTF-048 Runtime Post-submit Finalize Loop)
+
+- Added local verifier:
+  - `scripts/verify_runtime_post_submit_finalize_loop.py`.
+- Purpose:
+  - prove the runtime-level post-submit correction path locally;
+  - resolve latest durable `RuntimeExecutionExchangeSubmitExecutionResult`
+    by runtime without manually supplying the old authorization ID;
+  - freeze the consumed authorization as replay-only evidence;
+  - prevent the old attempt from going back through pre-submit rehearsal,
+    local `CREATED` order checks, local order re-creation, or submit retry;
+  - produce the next-attempt gate from post-submit facts.
+- Local artifact:
+  - `output/rtf048-local/post-submit-finalize-loop.json`;
+  - status: `rtf048_runtime_post_submit_finalize_loop_passed`;
+  - scenario count: `3`.
+- Scenarios:
+  - `latest-result-ready-for-fresh-signal`:
+    `finalized_ready_for_next_attempt`,
+    next gate `ready_for_fresh_signal`;
+  - `latest-result-active-position-blocks-next-attempt`:
+    `finalized_next_attempt_blocked`,
+    next gate blocker `runtime_active_position_slot_in_use`;
+  - `latest-result-missing-blocks-finalize`:
+    `blocked`,
+    blocker `latest_exchange_submit_execution_result_not_found`.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_post_submit_finalize_loop_verifier.py
+    tests/unit/test_runtime_post_submit_finalize.py
+    tests/unit/test_runtime_post_submit_finalize_probe.py
+    tests/unit/test_runtime_post_submit_finalize_api_flow.py`;
+  - result: `18 passed`.
+- Safety:
+  - local in-memory only: `true`;
+  - database connected: `false`;
+  - HTTP network called: `false`;
+  - exchange write called: `false`;
+  - pre-submit rehearsal called: `false`;
+  - `OrderLifecycle` called: `false`;
+  - execution intent created: `false`;
+  - order created: `false`;
+  - withdrawal or transfer created: `false`.
+- Deployment:
+  - not deployed in this stage;
+  - Tokyo integration should only validate deployed code, PG facts, active
+    position facts, and live-account facts after local node proof.
