@@ -16,6 +16,66 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-021 Tokyo Deploy + Real Signal Pipeline Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target HEAD: `1707ad58fccacf8fa98e751fd630cf0ef41504dd`.
+- Confirmed Tokyo baseline before deployment:
+  - current release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-827de813-20260613Trtf019-local-registration-proof`;
+  - current manifest head:
+    `827de81309e5e085674f881dc1606ece8684d381`;
+  - health: `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Built deploy artifacts under:
+  - `output/tokyo-git-deploy-1707ad58-rtf021-real-signal-pipeline`;
+  - `git-deploy-plan.json`: `ready_for_owner_authorized_remote_git_deploy_plan`;
+  - `owner-git-deploy-packet.json`: `ready_for_owner_git_deploy_decision`;
+  - `git-deploy-dry-run.json`: `dry_run_ready`.
+- Applied Tokyo deploy through the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-1707ad58-20260613Trtf021-real-signal-pipeline`;
+  - apply report:
+    `output/tokyo-git-deploy-1707ad58-rtf021-real-signal-pipeline/git-deploy-apply-report.json`;
+  - status: `applied`;
+  - commands: `16/16`;
+  - effects: remote files modified, database backup created, migrations run,
+    service restarted;
+  - no `ExecutionIntent`, no order, no `OrderLifecycle`, no exchange call.
+- Postdeploy checks passed:
+  - health: `status=ok`, `runtime_bound=true`, `live_ready=false`;
+  - read-only probe: `ready_for_controlled_deploy_preflight`;
+  - postdeploy verify: `postdeploy_acceptance_passed`.
+- Generated current AVAX/BTPC signal input on Tokyo:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - strategy: `BTPC-001` / `BTPC-001-v0`;
+  - symbol: `AVAX/USDT:USDT`;
+  - side: `short`;
+  - packet:
+    `/home/ubuntu/brc-deploy/reports/rtf021-real-signal-pipeline/20260613Trtf021-1707ad58/avax-btpc-current-signal-packet.json`;
+  - signal input:
+    `/home/ubuntu/brc-deploy/reports/rtf021-real-signal-pipeline/20260613Trtf021-1707ad58/avax-btpc-current-signal-input.json`;
+  - status: `observe_only`;
+  - evaluation blocker: `strategy_signal_not_would_enter`.
+- Ran RTF-020 real-signal pipeline probe:
+  - report:
+    `/home/ubuntu/brc-deploy/reports/rtf021-real-signal-pipeline/20260613Trtf021-1707ad58/avax-btpc-real-signal-pipeline.json`;
+  - status: `blocked_at_strategy_signal_intent_draft_source`;
+  - blocked stage: `strategy_signal_intent_draft_source`;
+  - blockers:
+    `intent_draft_source:strategy_signal_not_would_enter` and
+    `intent_draft_source:scheduler_shadow_candidate_not_created`;
+  - stage statuses: `intent_draft_source=blocked`.
+- Probe safety:
+  - sample rehearsal was not used;
+  - local registration was not attempted;
+  - local registration was not recorded;
+  - first-real-submit action was not called;
+  - exchange arm stayed disabled;
+  - exchange write stayed false;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-13 (RTF-020 Real Strategy Signal Scoped Local Registration Pipeline Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
