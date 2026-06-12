@@ -16,6 +16,59 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-010 Tokyo Deploy + Official Submit Handoff API Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target HEAD: `be9f91fa`.
+- Pushed `program/live-safe-v1` from `5f7952f9` to `be9f91fa`.
+- Deployed Tokyo with the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-be9f91fa-20260612Trtf010-handoff-api-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - manifest head:
+    `be9f91fa0997364908810ba1b704d1ffe8632ff5`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy execution result:
+  - status: `applied`;
+  - commands executed: `16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - exchange called: `false`;
+  - order created: `false`;
+  - `OrderLifecycle` called: `false`;
+  - `ExecutionIntent` created: `false`.
+- Ran RTF-010 official submit handoff API probes on Tokyo:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf010-official-submit-handoff/20260612Trtf010-be9f91fa`;
+  - local mirror:
+    `output/rtf010-tokyo/remote-report-20260612Trtf010-be9f91fa`;
+  - current BNB blocked path:
+    `handoff-api-blocked.json`;
+  - positive flat/review/gate-clear rehearsal:
+    `handoff-api-positive-disabled-smoke.json`.
+- Probe results:
+  - blocked path: `status=blocked`, `http_status=200`,
+    `ready_for_call=false`, blockers include
+    `readiness_not_ready_for_executable_submit`,
+    `readiness:strategy_planning_not_ready_for_final_gate_preflight`,
+    `readiness:order_candidate_id_missing`, and release-gate blockers;
+  - positive path: `status=ready_for_official_submit_call`,
+    `http_status=200`, `ready_for_call=true`, blockers `[]`.
+- Safety:
+  - the RTF-010 API only previews the official submit handoff;
+  - it did not call the official first-real-submit endpoint;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` call occurred;
+  - no `ExecutionIntent` was created;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-009 Official Submit Handoff Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
