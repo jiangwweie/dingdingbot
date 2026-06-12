@@ -124,6 +124,8 @@ class RuntimeLiveBootstrapApiFlow:
         self._reserve_binding()
         if self.state.blockers:
             return self._report()
+        if self._config.mode == "binding-only":
+            return self._report()
 
         self._create_and_activate_runtime()
         return self._report()
@@ -540,6 +542,9 @@ class RuntimeLiveBootstrapApiFlow:
             "script": "runtime_live_bootstrap_api_flow",
             "mode": self._config.mode,
             "api_base": self._config.api_base,
+            "ready_for_trial_binding": (
+                bool(self.state.ids.get("trial_binding_id")) and not self.state.blockers
+            ),
             "ready_for_shadow_candidate_planning": (
                 self.state.ids.get("runtime_status") == "active" and not self.state.blockers
             ),
@@ -549,7 +554,10 @@ class RuntimeLiveBootstrapApiFlow:
             "warnings": self.state.warnings,
             "safety": {
                 "uses_official_api_surfaces": True,
-                "creates_runtime_only": True,
+                "creates_trial_binding": bool(self.state.ids.get("trial_binding_id")),
+                "creates_runtime_only": self._config.mode == "bootstrap",
+                "creates_runtime": bool(self.state.ids.get("runtime_instance_id")),
+                "activates_shadow_runtime": self.state.ids.get("runtime_status") == "active",
                 "creates_order_candidate": False,
                 "creates_execution_intent": False,
                 "creates_order": False,
@@ -736,7 +744,11 @@ def _parse_bool_env(value: str | None) -> bool:
 def _parse_args(argv: list[str]) -> BootstrapConfig:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-base", default=os.environ.get(API_BASE_ENV, DEFAULT_API_BASE))
-    parser.add_argument("--mode", choices=["inspect", "bootstrap"], default="inspect")
+    parser.add_argument(
+        "--mode",
+        choices=["inspect", "binding-only", "bootstrap"],
+        default="inspect",
+    )
     parser.add_argument("--strategy-family-id", default="CPM-001")
     parser.add_argument("--strategy-family-version-id", default="CPM-001-v0")
     parser.add_argument("--family-key", default="cpm-price-action")

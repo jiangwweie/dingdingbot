@@ -142,6 +142,40 @@ def test_bootstrap_creates_shadow_runtime_without_submit_endpoints():
     assert not any("order-candidates" in path for path in paths)
 
 
+def test_binding_only_stops_after_trial_binding_without_runtime_creation():
+    client = _FakeClient()
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="binding-only",
+            strategy_family_id="RBR-001",
+            strategy_family_version_id="RBR-001-v0",
+            family_key="rbr-price-action-reference",
+            family_name="RBR Price Action Reference",
+            symbol="ADA/USDT:USDT",
+            side="short",
+            account_facts_source="static",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ready_for_trial_binding"] is True
+    assert report["ready_for_shadow_candidate_planning"] is False
+    assert report["ids"]["trial_binding_id"] == "binding-1"
+    assert "runtime_instance_id" not in report["ids"]
+    paths = [call["path"] for call in client.calls]
+    assert not any(path.endswith("/strategy-runtime-profile-proposals") for path in paths)
+    assert not any(path.endswith("/runtime-drafts") for path in paths)
+    assert not any(path.endswith("/lifecycle") for path in paths)
+    assert report["safety"]["creates_trial_binding"] is True
+    assert report["safety"]["creates_runtime"] is False
+    assert report["safety"]["activates_shadow_runtime"] is False
+    assert report["safety"]["creates_order"] is False
+
+
 def test_bootstrap_stops_when_profile_proposal_is_blocked():
     client = _FakeClient(profile_status="blocked")
     flow = RuntimeLiveBootstrapApiFlow(
