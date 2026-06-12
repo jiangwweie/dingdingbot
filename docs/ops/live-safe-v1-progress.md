@@ -16,6 +16,48 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-004 Tokyo Deploy + Release Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed HEAD: `3be681e1`.
+- Deployed the current program branch to Tokyo using the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-3be681e1-20260612Trtf004-release-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET /api/health` returned `status=ok`,
+    `runtime_bound=true`, `live_ready=false`;
+  - deployment execution report:
+    `output/rtf004-tokyo/git-deploy-execution-3be681e1.json`.
+- Ran the RTF-004 Tokyo next-attempt release probe:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf004-next-attempt-release/20260612Trtf004-174304`;
+  - generated reports:
+    `live-position-monitor.json`, `position-exit-plan.json`,
+    `post-close-followup.json`, `active-position-resolution.json`, and
+    `next-attempt-release.json`;
+  - active-position resolution status: `hold_with_hard_stop`;
+  - next-attempt release status: `waiting_for_position_resolution`;
+  - active position present: `true`;
+  - next attempt blocked by active position: `true`;
+  - strategy signal observation allowed: `false`;
+  - shadow candidate planning allowed: `false`;
+  - executable submit allowed: `false`;
+  - blockers: `[]`;
+  - warnings:
+    `missing_tp_protection_right_tail_exit_not_mounted`,
+    `reconciliation_warning_present`,
+    `tp1_partial_quantity_below_min_qty_or_step`.
+- Safety:
+  - deploy effects reported no exchange call, no `ExecutionIntent`, no order,
+    and no `OrderLifecycle`;
+  - probe packet reported no PG read, no exchange write, no order creation,
+    no `OrderLifecycle`, no position close, no runtime mutation, and no
+    withdrawal or transfer.
+
 ## 2026-06-12 (RTF-004 Next-attempt Release Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
