@@ -16,6 +16,64 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-028 Runtime Post-submit Finalize API + Latest Result Resolution)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `f6763785`.
+- Added runtime-level post-submit finalize API support:
+  - `RuntimePostSubmitFinalizeService.finalize_authorization(...)` now accepts
+    an optional `expected_runtime_instance_id` and blocks mismatched durable
+    submit-result / review / settlement facts;
+  - `RuntimePostSubmitFinalizeService.finalize_latest_for_runtime(...)` resolves
+    the latest durable `RuntimeExecutionExchangeSubmitExecutionResult` for a
+    runtime and finalizes from that result's authorization ID;
+  - missing latest submit-result evidence returns a blocked
+    `RuntimePostSubmitFinalizePacket` instead of falling back to pre-submit
+    rehearsal.
+- Added PG evidence lookup:
+  - `PgRuntimeExecutionExchangeSubmitExecutionResultRepository`
+    now supports `get_latest_by_runtime_instance_id(...)`;
+  - ordering uses `created_at_ms desc` and returns the stored payload as the
+    authoritative domain model.
+- Added Trading Console endpoint:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-packets`;
+  - request can provide an explicit `authorization_id` or omit it to use the
+    latest durable submit result for the runtime;
+  - request requires `reservation_id` because budget settlement still depends
+    on the recorded attempt reservation;
+  - endpoint reads local position projection for the submit-result symbol and
+    supplies trusted `active_positions_count` to the next-attempt gate;
+  - endpoint blocks runtime mismatches and does not call exchange,
+    `OrderLifecycle`, local registration, close, withdrawal, or transfer.
+- Added probe script:
+  - `scripts/runtime_post_submit_finalize_api_flow.py`;
+  - posts to the new endpoint and returns an audit packet containing the
+    `post_submit_finalize_packet`, blockers, next-attempt blockers, warnings,
+    and non-executing safety invariants;
+  - supports explicit authorization ID or latest-result resolution.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_post_submit_finalize.py tests/unit/test_runtime_post_submit_finalize_probe.py tests/unit/test_runtime_post_submit_finalize_api_flow.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_runtime_real_signal_pipeline_fixture.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py`
+    with `39 passed`;
+  - `python3 -m compileall src/application/runtime_post_submit_finalize_service.py src/infrastructure/pg_runtime_execution_exchange_submit_execution_result_repository.py src/interfaces/api_trading_console.py scripts/runtime_post_submit_finalize_api_flow.py tests/unit/test_runtime_post_submit_finalize.py tests/unit/test_runtime_post_submit_finalize_api_flow.py`;
+  - `git diff --check`.
+- Safety:
+  - no pre-submit rehearsal was called;
+  - no local registration occurred;
+  - no first-real-submit action occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no order was submitted or created;
+  - no position close occurred;
+  - no runtime-boundary expansion occurred;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `89%` to `90%`;
+  - the next useful target is deploying this API to Tokyo and running the
+    post-submit finalize API flow against the current runtime evidence, then
+    feeding the returned packet into next-attempt strategy planning.
+
 ## 2026-06-13 (RTF-027 Tokyo Real Signal Fixture Deploy + Non-executing Probe)
 
 - Confirmed current mainline workspace and branch before deployment:

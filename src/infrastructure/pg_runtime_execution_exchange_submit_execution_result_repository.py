@@ -90,6 +90,28 @@ class PgRuntimeExecutionExchangeSubmitExecutionResultRepository:
                 authorization_id,
             )
 
+    async def get_latest_by_runtime_instance_id(
+        self,
+        runtime_instance_id: str,
+    ) -> Optional[RuntimeExecutionExchangeSubmitExecutionResult]:
+        async with self._session_maker() as session:
+            query = await session.execute(
+                select(PGRuntimeExecutionExchangeSubmitExecutionResultORM)
+                .where(
+                    PGRuntimeExecutionExchangeSubmitExecutionResultORM
+                    .runtime_instance_id
+                    == runtime_instance_id
+                )
+                .order_by(
+                    PGRuntimeExecutionExchangeSubmitExecutionResultORM
+                    .created_at_ms
+                    .desc()
+                )
+                .limit(1)
+            )
+            row = query.scalar_one_or_none()
+            return self._to_domain(row) if row else None
+
     async def _get_by_authorization_id_in_session(
         self,
         session: AsyncSession,

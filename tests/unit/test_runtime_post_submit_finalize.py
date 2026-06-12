@@ -223,6 +223,65 @@ async def test_post_submit_finalize_service_records_missing_post_submit_facts_on
     assert packet.order_created is False
 
 
+async def test_post_submit_finalize_service_resolves_latest_runtime_submit_result():
+    result = _submitted_result()
+    review = _ready_review_no_fill_cancelled()
+    settlement = _settlement()
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=_AdapterShouldNotRecord(),
+        exchange_submit_execution_result_repository=_LatestExecutionResultRepo(
+            result
+        ),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo([review]),
+        post_submit_budget_settlement_repository=_ExistingSettlementRepo(
+            settlement
+        ),
+        runtime_service=_RuntimeService(
+            _runtime(boundary={"budget_reserved": Decimal("0")})
+        ),
+    )
+
+    packet = await service.finalize_latest_for_runtime(
+        "runtime-1",
+        reservation_id="runtime-attempt-reservation-auth-1",
+        active_positions_count=0,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
+    )
+    assert packet.authorization_id == "auth-1"
+    assert packet.exchange_submit_execution_result_id == "exchange-submit-result-1"
+    assert packet.pre_submit_rehearsal_retry_allowed is False
+    assert packet.next_attempt_gate.requires_fresh_strategy_signal is True
+
+
+async def test_post_submit_finalize_service_blocks_expected_runtime_mismatch():
+    result = _submitted_result().model_copy(update={"runtime_instance_id": "other"})
+    review = _ready_review_no_fill_cancelled()
+    settlement = _settlement()
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=_AdapterShouldNotRecord(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo([review]),
+        post_submit_budget_settlement_repository=_ExistingSettlementRepo(
+            settlement
+        ),
+        runtime_service=_RuntimeService(_runtime()),
+    )
+
+    packet = await service.finalize_authorization(
+        "auth-1",
+        reservation_id="runtime-attempt-reservation-auth-1",
+        active_positions_count=0,
+        expected_runtime_instance_id="runtime-1",
+    )
+
+    assert packet.status == RuntimePostSubmitFinalizeStatus.BLOCKED
+    assert "exchange_submit_execution_result_runtime_mismatch" in packet.blockers
+    assert packet.pre_submit_rehearsal_retry_allowed is False
+
+
 def test_post_submit_finalize_dry_run_fixture_outputs_json(tmp_path):
     payload = {
         "authorization_id": "auth-1",
@@ -317,6 +376,13 @@ class _PostSubmitBudgetSettlementRepoWithLookup(_PostSubmitBudgetSettlementRepo)
             ),
             None,
         )
+
+
+class _LatestExecutionResultRepo(_ExecutionResultRepo):
+    async def get_latest_by_runtime_instance_id(self, runtime_instance_id):
+        if self.result.runtime_instance_id == runtime_instance_id:
+            return self.result
+        return None
 
 
 class _AdapterShouldNotRecord:

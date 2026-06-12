@@ -334,6 +334,15 @@ class RuntimeNextAttemptStrategyPlanningRequest(BaseModel):
     non_executing: Literal[True] = True
 
 
+class RuntimePostSubmitFinalizeRequest(BaseModel):
+    authorization_id: str | None = Field(default=None, min_length=1, max_length=220)
+    reservation_id: str = Field(min_length=1, max_length=260)
+    closed_review_required: bool = False
+    protection_blockers: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
+
+
 class RuntimeExecutableSubmitReadinessPreviewRequest(BaseModel):
     strategy_planning_packet: RuntimeNextAttemptStrategyPlanningPacket
     evidence: RuntimeExecutableSubmitReadinessEvidence
@@ -1050,6 +1059,49 @@ async def apply_strategy_runtime_live_enablement_mutation(
                 request.owner_real_submit_authorization_id
             ),
             actor=request.actor,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-packets",
+    response_model=RuntimePostSubmitFinalizePacket,
+)
+async def runtime_post_submit_finalize_packet_for_runtime(
+    runtime_instance_id: str,
+    request: RuntimePostSubmitFinalizeRequest,
+) -> RuntimePostSubmitFinalizePacket:
+    service = await _runtime_post_submit_finalize_service()
+    result = await _runtime_exchange_submit_execution_result_for_finalize(
+        runtime_instance_id=runtime_instance_id,
+        authorization_id=request.authorization_id,
+    )
+    active_positions_count = await _runtime_active_positions_count_for_submit_result(
+        result,
+        expected_runtime_instance_id=runtime_instance_id,
+    )
+    try:
+        if request.authorization_id:
+            return await service.finalize_authorization(
+                request.authorization_id,
+                reservation_id=request.reservation_id,
+                active_positions_count=active_positions_count,
+                expected_runtime_instance_id=runtime_instance_id,
+                closed_review_required=request.closed_review_required,
+                protection_blockers=request.protection_blockers,
+            )
+        return await service.finalize_latest_for_runtime(
+            runtime_instance_id,
+            reservation_id=request.reservation_id,
+            active_positions_count=active_positions_count,
+            closed_review_required=request.closed_review_required,
+            protection_blockers=request.protection_blockers,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -4447,6 +4499,101 @@ async def _runtime_next_attempt_strategy_planning_service() -> Any:
     )
     setattr(api_module, "_runtime_next_attempt_strategy_planning_service", service)
     return service
+
+
+async def _runtime_post_submit_finalize_service() -> Any:
+    from src.interfaces import api as api_module
+
+    injected = getattr(api_module, "_runtime_post_submit_finalize_service", None)
+    if injected is not None:
+        return injected
+    from src.application.runtime_post_submit_finalize_service import (
+        RuntimePostSubmitFinalizeService,
+    )
+    from src.infrastructure.pg_runtime_execution_post_submit_budget_settlement_repository import (
+        PgRuntimeExecutionPostSubmitBudgetSettlementRepository,
+    )
+    from src.infrastructure.pg_runtime_execution_submit_outcome_review_repository import (
+        PgRuntimeExecutionSubmitOutcomeReviewRepository,
+    )
+
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=await _runtime_execution_intent_adapter_service(),
+        exchange_submit_execution_result_repository=(
+            _runtime_exchange_submit_execution_result_repository()
+        ),
+        submit_outcome_review_repository=(
+            PgRuntimeExecutionSubmitOutcomeReviewRepository()
+        ),
+        post_submit_budget_settlement_repository=(
+            PgRuntimeExecutionPostSubmitBudgetSettlementRepository()
+        ),
+        runtime_service=await _strategy_runtime_service(),
+    )
+    setattr(api_module, "_runtime_post_submit_finalize_service", service)
+    return service
+
+
+def _runtime_exchange_submit_execution_result_repository() -> Any:
+    from src.interfaces import api as api_module
+
+    repo = getattr(
+        api_module,
+        "_runtime_exchange_submit_execution_result_repository",
+        None,
+    )
+    if repo is not None:
+        return repo
+    from src.infrastructure.pg_runtime_execution_exchange_submit_execution_result_repository import (
+        PgRuntimeExecutionExchangeSubmitExecutionResultRepository,
+    )
+
+    repo = PgRuntimeExecutionExchangeSubmitExecutionResultRepository()
+    setattr(
+        api_module,
+        "_runtime_exchange_submit_execution_result_repository",
+        repo,
+    )
+    return repo
+
+
+async def _runtime_exchange_submit_execution_result_for_finalize(
+    *,
+    runtime_instance_id: str,
+    authorization_id: str | None,
+) -> RuntimeExecutionExchangeSubmitExecutionResult | None:
+    repo = _runtime_exchange_submit_execution_result_repository()
+    if authorization_id:
+        return await repo.get_by_authorization_id(authorization_id)
+    getter = getattr(repo, "get_latest_by_runtime_instance_id", None)
+    if not callable(getter):
+        return None
+    return await getter(runtime_instance_id)
+
+
+async def _runtime_active_positions_count_for_submit_result(
+    result: RuntimeExecutionExchangeSubmitExecutionResult | None,
+    *,
+    expected_runtime_instance_id: str,
+) -> int | None:
+    if result is None:
+        return None
+    if result.runtime_instance_id != expected_runtime_instance_id:
+        return None
+    from src.interfaces import api as api_module
+
+    position_repository = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_position_repo",
+        _build_pg_position_repo,
+    )
+    if position_repository is None:
+        return None
+    positions = await position_repository.list_active(
+        symbol=result.symbol,
+        limit=200,
+    )
+    return len(positions)
 
 
 async def _runtime_strategy_signal_scheduler_planning_service() -> Any:

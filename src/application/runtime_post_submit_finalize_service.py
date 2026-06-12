@@ -32,6 +32,12 @@ class ExchangeSubmitExecutionResultRepositoryPort(Protocol):
     ) -> RuntimeExecutionExchangeSubmitExecutionResult | None:
         ...
 
+    async def get_latest_by_runtime_instance_id(
+        self,
+        runtime_instance_id: str,
+    ) -> RuntimeExecutionExchangeSubmitExecutionResult | None:
+        ...
+
 
 class SubmitOutcomeReviewRepositoryPort(Protocol):
     async def get_by_authorization_id(
@@ -106,6 +112,7 @@ class RuntimePostSubmitFinalizeService:
         *,
         reservation_id: str,
         active_positions_count: int | None,
+        expected_runtime_instance_id: str | None = None,
         closed_review_required: bool = False,
         protection_blockers: list[str] | None = None,
     ) -> RuntimePostSubmitFinalizePacket:
@@ -115,17 +122,32 @@ class RuntimePostSubmitFinalizeService:
             authorization_id,
             blockers,
         )
+        self._validate_expected_runtime(
+            expected_runtime_instance_id=expected_runtime_instance_id,
+            result=result,
+            blockers=blockers,
+        )
         review = await self._load_or_record_submit_outcome_review(
             authorization_id,
             result,
             blockers,
             warnings,
         )
+        self._validate_expected_runtime(
+            expected_runtime_instance_id=expected_runtime_instance_id,
+            review=review,
+            blockers=blockers,
+        )
         settlement = await self._load_or_record_budget_settlement(
             authorization_id,
             reservation_id,
             blockers,
             warnings,
+        )
+        self._validate_expected_runtime(
+            expected_runtime_instance_id=expected_runtime_instance_id,
+            settlement=settlement,
+            blockers=blockers,
         )
         runtime = await self._load_runtime(
             result=result,
@@ -147,6 +169,42 @@ class RuntimePostSubmitFinalizeService:
             now_ms=_now_ms(),
         )
 
+    async def finalize_latest_for_runtime(
+        self,
+        runtime_instance_id: str,
+        *,
+        reservation_id: str,
+        active_positions_count: int | None,
+        closed_review_required: bool = False,
+        protection_blockers: list[str] | None = None,
+    ) -> RuntimePostSubmitFinalizePacket:
+        result = await self._load_latest_exchange_submit_execution_result(
+            runtime_instance_id,
+        )
+        if result is None:
+            return build_runtime_post_submit_finalize_packet(
+                authorization_id=f"unresolved-latest-submit-{runtime_instance_id}",
+                runtime=None,
+                exchange_submit_execution_result=None,
+                submit_outcome_review=None,
+                post_submit_budget_settlement=None,
+                active_positions_count=active_positions_count,
+                closed_review_required=closed_review_required,
+                protection_blockers=protection_blockers or [],
+                additional_blockers=[
+                    "latest_exchange_submit_execution_result_not_found"
+                ],
+                now_ms=_now_ms(),
+            )
+        return await self.finalize_authorization(
+            result.authorization_id,
+            reservation_id=reservation_id,
+            active_positions_count=active_positions_count,
+            expected_runtime_instance_id=runtime_instance_id,
+            closed_review_required=closed_review_required,
+            protection_blockers=protection_blockers,
+        )
+
     async def _load_exchange_submit_execution_result(
         self,
         authorization_id: str,
@@ -162,6 +220,21 @@ class RuntimePostSubmitFinalizeService:
         if result is None:
             blockers.append("exchange_submit_execution_result_not_found")
         return result
+
+    async def _load_latest_exchange_submit_execution_result(
+        self,
+        runtime_instance_id: str,
+    ) -> RuntimeExecutionExchangeSubmitExecutionResult | None:
+        if self._exchange_submit_execution_result_repository is None:
+            return None
+        getter = getattr(
+            self._exchange_submit_execution_result_repository,
+            "get_latest_by_runtime_instance_id",
+            None,
+        )
+        if not callable(getter):
+            return None
+        return await getter(runtime_instance_id)
 
     async def _load_or_record_submit_outcome_review(
         self,
@@ -249,6 +322,27 @@ class RuntimePostSubmitFinalizeService:
         except Exception as exc:  # pragma: no cover - repository-specific.
             blockers.append(f"runtime_load_failed:{type(exc).__name__}")
             return None
+
+    @staticmethod
+    def _validate_expected_runtime(
+        *,
+        expected_runtime_instance_id: str | None,
+        result: RuntimeExecutionExchangeSubmitExecutionResult | None = None,
+        review: RuntimeExecutionSubmitOutcomeReview | None = None,
+        settlement: RuntimeExecutionPostSubmitBudgetSettlement | None = None,
+        blockers: list[str],
+    ) -> None:
+        if not expected_runtime_instance_id:
+            return
+        facts = {
+            "exchange_submit_execution_result": result,
+            "submit_outcome_review": review,
+            "post_submit_budget_settlement": settlement,
+        }
+        for label, fact in facts.items():
+            runtime_id = getattr(fact, "runtime_instance_id", None)
+            if runtime_id and runtime_id != expected_runtime_instance_id:
+                blockers.append(f"{label}_runtime_mismatch")
 
 
 def _first_present(*values: Optional[str]) -> str | None:
