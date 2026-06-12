@@ -16,6 +16,43 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-001 Local Post-submit Finalize Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `75428a8f`.
+- Added the RTF-001 local finalize artifact:
+  - `src/domain/runtime_post_submit_finalize.py`;
+  - `src/application/runtime_post_submit_finalize_service.py`;
+  - `scripts/runtime_post_submit_finalize_dry_run.py`;
+  - `tests/unit/test_runtime_post_submit_finalize.py`.
+- RTF-001 semantics now have a local packet/service proof:
+  - consumed authorization is `replay-only`;
+  - old authorization submit retry is forbidden;
+  - pre-submit rehearsal retry is forbidden;
+  - local orders are not required to return to `CREATED`;
+  - next attempt requires fresh strategy signal and fresh authorization;
+  - missing trusted active-position facts block next-attempt readiness;
+  - active-position slot usage blocks the next attempt without treating the
+    prior submit as a rehearsal failure.
+- Tightened existing post-submit accounting idempotency:
+  - `RuntimeExecutionIntentAdapterService.record_first_real_submit_outcome_accounting_for_authorization`
+    now reuses an existing `RuntimeExecutionSubmitOutcomeReview` for the same
+    authorization before creating a new one.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_post_submit_finalize.py tests/unit/test_runtime_execution_submit_outcome_review.py`
+    with `33 passed`;
+  - `python3 -m compileall -q src/domain/runtime_post_submit_finalize.py src/application/runtime_post_submit_finalize_service.py scripts/runtime_post_submit_finalize_dry_run.py tests/unit/test_runtime_post_submit_finalize.py src/application/runtime_execution_intent_adapter_service.py`;
+  - `git diff --check`.
+- Safety:
+  - no exchange call;
+  - no order creation/cancel/close;
+  - no `OrderLifecycle.submit_order`;
+  - no `ExecutionIntent` creation;
+  - no withdrawal or transfer;
+  - no Tokyo deployment in this stage.
+
 ## 2026-06-12 (Runtime Loop Correction Prep)
 
 - Confirmed current mainline workspace and branch before editing:

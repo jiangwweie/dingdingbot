@@ -2875,9 +2875,16 @@ class RuntimeExecutionIntentAdapterService:
         *,
         reservation_id: str,
     ) -> RuntimeExecutionFirstRealSubmitOutcomeAccounting:
-        review = await self.record_submit_outcome_review_for_authorization(
-            authorization_id
-        )
+        review = None
+        if self._submit_outcome_review_repository is not None:
+            review = await (
+                self._submit_outcome_review_repository
+                .get_by_authorization_id(authorization_id)
+            )
+        if review is None:
+            review = await self.record_submit_outcome_review_for_authorization(
+                authorization_id
+            )
         if review.status != (
             RuntimeExecutionSubmitOutcomeReviewStatus
             .CLASSIFIED_READY_FOR_ATTEMPT_OUTCOME_POLICY

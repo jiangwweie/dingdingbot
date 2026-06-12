@@ -20,6 +20,16 @@ Long-lived architecture decisions and durable collaboration rules belong in Memo
 
 ## 2026-06-12
 
+- RTF-001 local implementation confirms the useful split: existing
+  `RuntimeExecutionIntentAdapterService` remains the owner of submit review,
+  attempt outcome policy, and budget settlement creation, while
+  `RuntimePostSubmitFinalizeService` is the idempotent packet owner that joins
+  those facts and decides the next-attempt gate. This avoids creating another
+  execution path.
+- Post-submit accounting should be idempotent by default. If a
+  `RuntimeExecutionSubmitOutcomeReview` already exists for an authorization,
+  the accounting path should reuse it instead of creating another review before
+  settlement.
 - A real submitted runtime attempt must not be sent back through pre-submit
   rehearsal. If the attempt has a durable exchange submit execution result,
   local orders being `FILLED` / `CANCELED` / `OPEN`, or carrying an

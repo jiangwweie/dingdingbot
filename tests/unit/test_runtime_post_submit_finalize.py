@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+from decimal import Decimal
+import json
+import subprocess
+import sys
+
+import pytest
+
+from scripts.runtime_post_submit_finalize_dry_run import build_packet_from_fixture
+from src.application.runtime_post_submit_finalize_service import (
+    RuntimePostSubmitFinalizeService,
+)
+from src.domain.runtime_execution_post_submit_budget_settlement import (
+    RuntimeExecutionPostSubmitBudgetSettlementStatus,
+)
+from src.domain.runtime_post_submit_finalize import (
+    RuntimeNextAttemptGateStatus,
+    RuntimePostSubmitFinalizeStatus,
+    build_runtime_post_submit_finalize_packet,
+)
+from tests.unit.test_runtime_execution_submit_outcome_review import (
+    NOW_MS,
+    _AttemptMutationRepo,
+    _AttemptOutcomePolicyRepo,
+    _AttemptReservationRepo,
+    _ExecutionResultRepo,
+    _Lifecycle,
+    _PostSubmitBudgetSettlementRepo,
+    _ReconciliationReadModelRepo,
+    _RuntimeService,
+    _SubmitOutcomeReviewRepo,
+    _DraftRepo,
+    _clean_reconciliation_report,
+    _order,
+    _reservation,
+    _runtime,
+    _settlement,
+    _submitted_result,
+    _mutation,
+)
+from src.application.runtime_execution_intent_adapter_service import (
+    RuntimeExecutionIntentAdapterService,
+)
+from src.domain.models import OrderRole, OrderStatus
+
+
+def test_post_submit_finalize_ready_after_no_fill_settlement():
+    runtime = _runtime(boundary={"budget_reserved": Decimal("0")})
+    result = _submitted_result()
+    review = _ready_review_no_fill_cancelled()
+    settlement = _settlement(
+        status=RuntimeExecutionPostSubmitBudgetSettlementStatus
+        .RELEASED_RESERVED_BUDGET,
+        budget_reserved_after=Decimal("0"),
+        budget_remaining_after=Decimal("30"),
+        budget_released=True,
+        reserved_budget_remains_held=False,
+        requires_reconciliation_before_retry=True,
+        blocks_new_entries_until_resolved=False,
+    )
+
+    packet = build_runtime_post_submit_finalize_packet(
+        authorization_id="auth-1",
+        runtime=runtime,
+        exchange_submit_execution_result=result,
+        submit_outcome_review=review,
+        post_submit_budget_settlement=settlement,
+        active_positions_count=0,
+        closed_review_required=False,
+        now_ms=NOW_MS,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
+    )
+    assert packet.consumed_authorization_replay_only is True
+    assert packet.pre_submit_rehearsal_retry_allowed is False
+    assert packet.local_created_order_requirement_retired is True
+    assert packet.next_attempt_gate.status == (
+        RuntimeNextAttemptGateStatus.READY_FOR_FRESH_SIGNAL
+    )
+    assert packet.next_attempt_gate.requires_fresh_strategy_signal is True
+    assert packet.next_attempt_gate.requires_fresh_authorization is True
+    assert packet.exchange_called is False
+    assert packet.order_lifecycle_called is False
+
+
+def test_post_submit_finalize_blocks_next_attempt_when_active_position_slot_used():
+    runtime = _runtime()
+    result = _submitted_result()
+    review = _ready_review_full_fill()
+    settlement = _settlement(
+        status=RuntimeExecutionPostSubmitBudgetSettlementStatus
+        .RECORDED_RESERVED_BUDGET_CONSUMED,
+        budget_action="confirm_reserved_budget_consumed",
+        outcome_kind="submitted_full_fill",
+        budget_release_amount=Decimal("0"),
+        budget_released=False,
+        budget_consumption_recorded=True,
+        reserved_budget_remains_held=False,
+        runtime_budget_mutated=False,
+        blocks_new_entries_until_resolved=False,
+    )
+
+    packet = build_runtime_post_submit_finalize_packet(
+        authorization_id="auth-1",
+        runtime=runtime,
+        exchange_submit_execution_result=result,
+        submit_outcome_review=review,
+        post_submit_budget_settlement=settlement,
+        active_positions_count=1,
+        closed_review_required=False,
+        now_ms=NOW_MS,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_NEXT_ATTEMPT_BLOCKED
+    )
+    assert packet.blockers == []
+    assert "runtime_active_position_slot_in_use" in (
+        packet.next_attempt_gate.blockers
+    )
+    assert packet.old_authorization_submit_retry_allowed is False
+
+
+def test_post_submit_finalize_blocks_missing_trusted_active_position_fact():
+    packet = build_runtime_post_submit_finalize_packet(
+        authorization_id="auth-1",
+        runtime=_runtime(),
+        exchange_submit_execution_result=_submitted_result(),
+        submit_outcome_review=_ready_review_no_fill_cancelled(),
+        post_submit_budget_settlement=_settlement(),
+        active_positions_count=None,
+        closed_review_required=False,
+        now_ms=NOW_MS,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_NEXT_ATTEMPT_BLOCKED
+    )
+    assert "trusted_active_positions_count_missing" in (
+        packet.next_attempt_gate.blockers
+    )
+
+
+async def test_post_submit_finalize_service_reuses_existing_review_and_settlement():
+    result = _submitted_result()
+    review = _ready_review_no_fill_cancelled()
+    settlement = _settlement()
+    adapter = _AdapterShouldNotRecord()
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=adapter,
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        submit_outcome_review_repository=_SubmitOutcomeReviewRepo([review]),
+        post_submit_budget_settlement_repository=_ExistingSettlementRepo(
+            settlement
+        ),
+        runtime_service=_RuntimeService(
+            _runtime(boundary={"budget_reserved": Decimal("0")})
+        ),
+    )
+
+    packet = await service.finalize_authorization(
+        "auth-1",
+        reservation_id="runtime-attempt-reservation-auth-1",
+        active_positions_count=0,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
+    )
+    assert adapter.review_record_calls == 0
+    assert adapter.settlement_record_calls == 0
+    assert "submit_outcome_review_existing_reused" in packet.warnings
+    assert "post_submit_budget_settlement_existing_reused" in packet.warnings
+
+
+async def test_post_submit_finalize_service_records_missing_post_submit_facts_once():
+    result = _submitted_result()
+    entry = _order("entry-1", OrderRole.ENTRY, OrderStatus.CANCELED, Decimal("0"))
+    sl = _order("sl-1", OrderRole.SL, OrderStatus.CANCELED, Decimal("0"))
+    reservation = _reservation()
+    mutation = _mutation(reservation)
+    review_repo = _SubmitOutcomeReviewRepo()
+    settlement_repo = _PostSubmitBudgetSettlementRepoWithLookup()
+    runtime_service = _RuntimeService(_runtime())
+    adapter = RuntimeExecutionIntentAdapterService(
+        draft_repository=_DraftRepo(),
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        order_lifecycle_service=_Lifecycle([entry, sl]),
+        submit_outcome_review_repository=review_repo,
+        attempt_reservation_repository=_AttemptReservationRepo(reservation),
+        attempt_mutation_repository=_AttemptMutationRepo(mutation),
+        attempt_outcome_policy_repository=_AttemptOutcomePolicyRepo(),
+        post_submit_budget_settlement_repository=settlement_repo,
+        runtime_service=runtime_service,
+        reconciliation_read_model_repository=_ReconciliationReadModelRepo(
+            [_clean_reconciliation_report()]
+        ),
+    )
+    service = RuntimePostSubmitFinalizeService(
+        adapter_service=adapter,
+        exchange_submit_execution_result_repository=_ExecutionResultRepo(result),
+        submit_outcome_review_repository=review_repo,
+        post_submit_budget_settlement_repository=settlement_repo,
+        runtime_service=runtime_service,
+    )
+
+    packet = await service.finalize_authorization(
+        "auth-1",
+        reservation_id=reservation.reservation_id,
+        active_positions_count=0,
+    )
+
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
+    )
+    assert len(review_repo.created) == 1
+    assert len(settlement_repo.created) == 1
+    assert runtime_service.runtime.boundary.budget_reserved == Decimal("0")
+    assert packet.exchange_order_submitted is False
+    assert packet.order_created is False
+
+
+def test_post_submit_finalize_dry_run_fixture_outputs_json(tmp_path):
+    payload = {
+        "authorization_id": "auth-1",
+        "runtime": _runtime(boundary={"budget_reserved": Decimal("0")}).model_dump(
+            mode="json"
+        ),
+        "exchange_submit_execution_result": _submitted_result().model_dump(
+            mode="json"
+        ),
+        "submit_outcome_review": _ready_review_no_fill_cancelled().model_dump(
+            mode="json"
+        ),
+        "post_submit_budget_settlement": _settlement().model_dump(mode="json"),
+        "active_positions_count": 0,
+        "closed_review_required": False,
+        "now_ms": NOW_MS,
+    }
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps(payload))
+
+    packet = build_packet_from_fixture(payload)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/runtime_post_submit_finalize_dry_run.py",
+            "--fixture",
+            str(fixture),
+        ],
+        cwd=".",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    stdout = json.loads(completed.stdout)
+
+    assert packet["status"] == "finalized_ready_for_next_attempt"
+    assert stdout["status"] == "finalized_ready_for_next_attempt"
+    assert stdout["next_attempt_gate"]["requires_fresh_authorization"] is True
+
+
+def _ready_review_no_fill_cancelled():
+    result = _submitted_result()
+    from src.domain.runtime_execution_submit_outcome_review import (
+        build_runtime_execution_submit_outcome_review,
+    )
+
+    return build_runtime_execution_submit_outcome_review(
+        exchange_submit_execution_result=result,
+        local_orders=[
+            _order("entry-1", OrderRole.ENTRY, OrderStatus.CANCELED, Decimal("0")),
+            _order("sl-1", OrderRole.SL, OrderStatus.CANCELED, Decimal("0")),
+        ],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
+        now_ms=NOW_MS,
+    )
+
+
+def _ready_review_full_fill():
+    result = _submitted_result()
+    from src.domain.runtime_execution_submit_outcome_review import (
+        build_runtime_execution_submit_outcome_review,
+    )
+
+    return build_runtime_execution_submit_outcome_review(
+        exchange_submit_execution_result=result,
+        local_orders=[
+            _order("entry-1", OrderRole.ENTRY, OrderStatus.FILLED, Decimal("1")),
+            _order("sl-1", OrderRole.SL, OrderStatus.OPEN, Decimal("0")),
+        ],
+        post_submit_reconciliation_report=_clean_reconciliation_report(),
+        now_ms=NOW_MS,
+    )
+
+
+class _ExistingSettlementRepo:
+    def __init__(self, settlement) -> None:
+        self.settlement = settlement
+
+    async def get_by_authorization_id(self, authorization_id):
+        if self.settlement.authorization_id == authorization_id:
+            return self.settlement
+        return None
+
+
+class _PostSubmitBudgetSettlementRepoWithLookup(_PostSubmitBudgetSettlementRepo):
+    async def get_by_authorization_id(self, authorization_id):
+        return next(
+            (
+                settlement
+                for settlement in self.created
+                if settlement.authorization_id == authorization_id
+            ),
+            None,
+        )
+
+
+class _AdapterShouldNotRecord:
+    def __init__(self) -> None:
+        self.review_record_calls = 0
+        self.settlement_record_calls = 0
+
+    async def record_submit_outcome_review_for_authorization(self, *args, **kwargs):
+        self.review_record_calls += 1
+        raise AssertionError("existing review should be reused")
+
+    async def settle_first_real_submit_budget_for_authorization(self, *args, **kwargs):
+        self.settlement_record_calls += 1
+        raise AssertionError("existing settlement should be reused")
