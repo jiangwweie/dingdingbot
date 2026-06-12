@@ -155,6 +155,7 @@ from src.domain.strategy_runtime import StrategyRuntimeInstance, StrategyRuntime
 from src.domain.strategy_runtime_live_enablement import (
     StrategyRuntimeLiveEnablementMutation,
     StrategyRuntimeLiveEnablementPreview,
+    build_strategy_runtime_live_enablement_preview,
 )
 from src.interfaces.operator_auth import require_operator_session
 
@@ -581,6 +582,154 @@ async def runtime_strategy_safety_readiness_preview(
         if "not found" in message:
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/strategy-runtimes/{runtime_instance_id}/live-enablement-preview",
+    response_model=StrategyRuntimeLiveEnablementPreview,
+)
+async def runtime_strategy_live_enablement_preview(
+    runtime_instance_id: str,
+    strategy_family_confirmed: bool = False,
+    implementation_source_confirmed: bool = False,
+    required_facts_confirmed: bool = False,
+    entry_policy_confirmed: bool = False,
+    exit_policy_confirmed: bool = False,
+    protection_policy_confirmed: bool = False,
+    eligible_for_runtime_execution_confirmed: bool = False,
+    right_tail_review_metrics_confirmed: bool = False,
+    runtime_profile_confirmed: bool = False,
+    owner_confirmation_mode_confirmed: bool = False,
+    symbol_side_boundary_confirmed: bool = False,
+    max_loss_budget_confirmed: bool = False,
+    max_notional_boundary_confirmed: bool = False,
+    max_active_positions_boundary_confirmed: bool = False,
+    max_leverage_boundary_confirmed: bool = False,
+    margin_usage_boundary_confirmed: bool = False,
+    liquidation_buffer_boundary_confirmed: bool = False,
+    protection_readiness_source_confirmed: bool = False,
+    stale_fact_behavior_confirmed: bool = False,
+    attempt_consumption_rule_confirmed: bool = False,
+    budget_reservation_rule_confirmed: bool = False,
+    trusted_active_position_source_confirmed: bool = False,
+    trusted_account_fact_source_confirmed: bool = False,
+    short_side_conservative_profile_confirmed: bool = False,
+    budget_release_or_consume_rule_confirmed: bool = False,
+    post_submit_budget_settlement_persistence_evidence_id: Optional[str] = None,
+    attempt_outcome_policy_id: Optional[str] = None,
+    protection_creation_failure_policy_confirmed: bool = False,
+    protection_creation_failure_policy_id: Optional[str] = None,
+    duplicate_submit_policy_confirmed: bool = False,
+    submit_idempotency_policy_id: Optional[str] = None,
+    trusted_submit_fact_snapshot_id: Optional[str] = None,
+    local_registration_enablement_decision_id: Optional[str] = None,
+    exchange_submit_enablement_decision_id: Optional[str] = None,
+    runtime_submit_rehearsal_id: Optional[str] = None,
+    deployment_readiness_evidence_id: Optional[str] = None,
+    owner_real_submit_authorization_id: Optional[str] = None,
+    deployment_readiness_confirmed: bool = False,
+    explicit_owner_real_submit_authorization: bool = False,
+    current_head_deployed: bool = False,
+    owner_live_runtime_enablement_authorized: bool = False,
+    owner_real_submit_authorization_present: bool = False,
+    submit_technical_rehearsal_passed: bool = False,
+    submit_adapter_implemented: bool = False,
+    staged_submit_chain_available: bool = False,
+    forbidden_execution_flags: Optional[list[str]] = None,
+) -> StrategyRuntimeLiveEnablementPreview:
+    runtime_service = await _strategy_runtime_service()
+    try:
+        runtime = await runtime_service.get_runtime(runtime_instance_id)
+    except Exception as exc:
+        message = str(exc)
+        if "not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    safety_readiness = await runtime_strategy_safety_readiness_preview(
+        runtime_instance_id=runtime_instance_id,
+    )
+    promotion_gate_result = await runtime_strategy_promotion_gate_preview_for_runtime(
+        runtime_instance_id=runtime_instance_id,
+        scope=StrategyRuntimePromotionScope.FIRST_REAL_SUBMIT_GATE_REVIEW,
+        strategy_family_confirmed=strategy_family_confirmed,
+        implementation_source_confirmed=implementation_source_confirmed,
+        required_facts_confirmed=required_facts_confirmed,
+        entry_policy_confirmed=entry_policy_confirmed,
+        exit_policy_confirmed=exit_policy_confirmed,
+        protection_policy_confirmed=protection_policy_confirmed,
+        eligible_for_runtime_execution_confirmed=(
+            eligible_for_runtime_execution_confirmed
+        ),
+        right_tail_review_metrics_confirmed=right_tail_review_metrics_confirmed,
+        runtime_profile_confirmed=runtime_profile_confirmed,
+        owner_confirmation_mode_confirmed=owner_confirmation_mode_confirmed,
+        symbol_side_boundary_confirmed=symbol_side_boundary_confirmed,
+        max_loss_budget_confirmed=max_loss_budget_confirmed,
+        max_notional_boundary_confirmed=max_notional_boundary_confirmed,
+        max_active_positions_boundary_confirmed=(
+            max_active_positions_boundary_confirmed
+        ),
+        max_leverage_boundary_confirmed=max_leverage_boundary_confirmed,
+        margin_usage_boundary_confirmed=margin_usage_boundary_confirmed,
+        liquidation_buffer_boundary_confirmed=liquidation_buffer_boundary_confirmed,
+        protection_readiness_source_confirmed=(
+            protection_readiness_source_confirmed
+        ),
+        stale_fact_behavior_confirmed=stale_fact_behavior_confirmed,
+        attempt_consumption_rule_confirmed=attempt_consumption_rule_confirmed,
+        budget_reservation_rule_confirmed=budget_reservation_rule_confirmed,
+        trusted_active_position_source_confirmed=(
+            trusted_active_position_source_confirmed
+        ),
+        trusted_account_fact_source_confirmed=trusted_account_fact_source_confirmed,
+        short_side_conservative_profile_confirmed=(
+            short_side_conservative_profile_confirmed
+        ),
+        budget_release_or_consume_rule_confirmed=(
+            budget_release_or_consume_rule_confirmed
+        ),
+        post_submit_budget_settlement_persistence_evidence_id=(
+            post_submit_budget_settlement_persistence_evidence_id
+        ),
+        attempt_outcome_policy_id=attempt_outcome_policy_id,
+        protection_creation_failure_policy_confirmed=(
+            protection_creation_failure_policy_confirmed
+        ),
+        protection_creation_failure_policy_id=protection_creation_failure_policy_id,
+        duplicate_submit_policy_confirmed=duplicate_submit_policy_confirmed,
+        submit_idempotency_policy_id=submit_idempotency_policy_id,
+        trusted_submit_fact_snapshot_id=trusted_submit_fact_snapshot_id,
+        local_registration_enablement_decision_id=(
+            local_registration_enablement_decision_id
+        ),
+        exchange_submit_enablement_decision_id=(
+            exchange_submit_enablement_decision_id
+        ),
+        runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
+        deployment_readiness_evidence_id=deployment_readiness_evidence_id,
+        owner_real_submit_authorization_id=owner_real_submit_authorization_id,
+        deployment_readiness_confirmed=deployment_readiness_confirmed,
+        explicit_owner_real_submit_authorization=(
+            explicit_owner_real_submit_authorization
+        ),
+    )
+    return build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=safety_readiness,
+        promotion_gate_result=promotion_gate_result,
+        current_head_deployed=current_head_deployed,
+        owner_live_runtime_enablement_authorized=(
+            owner_live_runtime_enablement_authorized
+        ),
+        owner_real_submit_authorization_present=(
+            owner_real_submit_authorization_present
+        ),
+        submit_technical_rehearsal_passed=submit_technical_rehearsal_passed,
+        submit_adapter_implemented=submit_adapter_implemented,
+        staged_submit_chain_available=staged_submit_chain_available,
+        forbidden_execution_flags=forbidden_execution_flags or [],
+    )
 
 
 @router.get(

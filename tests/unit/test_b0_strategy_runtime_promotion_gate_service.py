@@ -19,6 +19,9 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstance,
     StrategyRuntimeInstanceStatus,
 )
+from src.domain.strategy_runtime_live_enablement import (
+    StrategyRuntimeLiveEnablementPreviewStatus,
+)
 
 
 NOW_MS = 1781000000000
@@ -107,6 +110,135 @@ def test_promotion_gate_service_previews_cpm_by_strategy_version():
     assert result.execution_intent_created is False
     assert result.order_created is False
     assert result.exchange_called is False
+
+
+async def test_trading_console_live_enablement_preview_defaults_to_blocked(
+    monkeypatch,
+):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == "runtime-cpm-promotion-gate"
+            return _runtime()
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_promotion_gate_service",
+        StrategyRuntimePromotionGateService(),
+        raising=False,
+    )
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", _RuntimeService(), raising=False)
+
+    result = await api_trading_console.runtime_strategy_live_enablement_preview(
+        runtime_instance_id="runtime-cpm-promotion-gate",
+    )
+
+    assert result.status == StrategyRuntimeLiveEnablementPreviewStatus.BLOCKED
+    assert "current_head_not_deployed_to_tokyo" in result.blockers
+    assert "owner_live_runtime_enablement_authorization_missing" in result.blockers
+    assert "owner_real_submit_authorization_missing" in result.blockers
+    assert result.not_execution_authority is True
+    assert result.runtime_state_mutated is False
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+    assert result.order_lifecycle_called is False
+
+
+async def test_trading_console_live_enablement_preview_can_be_ready(
+    monkeypatch,
+):
+    from src.interfaces import api as api_module
+    from src.interfaces import api_trading_console
+
+    base_runtime = _runtime()
+    ready_runtime = base_runtime.model_copy(
+        update={
+            "boundary": base_runtime.boundary.model_copy(
+                update={
+                    "max_margin_per_attempt": Decimal("10"),
+                    "min_liquidation_stop_buffer": Decimal("25"),
+                }
+            )
+        }
+    )
+
+    class _RuntimeService:
+        async def get_runtime(self, runtime_instance_id: str) -> StrategyRuntimeInstance:
+            assert runtime_instance_id == "runtime-cpm-promotion-gate"
+            return ready_runtime
+
+    monkeypatch.setattr(
+        api_module,
+        "_strategy_runtime_promotion_gate_service",
+        StrategyRuntimePromotionGateService(),
+        raising=False,
+    )
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", _RuntimeService(), raising=False)
+
+    result = await api_trading_console.runtime_strategy_live_enablement_preview(
+        runtime_instance_id="runtime-cpm-promotion-gate",
+        strategy_family_confirmed=True,
+        implementation_source_confirmed=True,
+        required_facts_confirmed=True,
+        entry_policy_confirmed=True,
+        exit_policy_confirmed=True,
+        protection_policy_confirmed=True,
+        eligible_for_runtime_execution_confirmed=True,
+        right_tail_review_metrics_confirmed=True,
+        runtime_profile_confirmed=True,
+        owner_confirmation_mode_confirmed=True,
+        symbol_side_boundary_confirmed=True,
+        max_loss_budget_confirmed=True,
+        max_notional_boundary_confirmed=True,
+        max_active_positions_boundary_confirmed=True,
+        max_leverage_boundary_confirmed=True,
+        margin_usage_boundary_confirmed=True,
+        liquidation_buffer_boundary_confirmed=True,
+        protection_readiness_source_confirmed=True,
+        stale_fact_behavior_confirmed=True,
+        attempt_consumption_rule_confirmed=True,
+        budget_reservation_rule_confirmed=True,
+        trusted_active_position_source_confirmed=True,
+        trusted_account_fact_source_confirmed=True,
+        budget_release_or_consume_rule_confirmed=True,
+        post_submit_budget_settlement_persistence_evidence_id=(
+            "runtime-post-submit-budget-settlement-persistence-084"
+        ),
+        attempt_outcome_policy_id="runtime-attempt-outcome-policy-test",
+        protection_creation_failure_policy_confirmed=True,
+        protection_creation_failure_policy_id="runtime-protection-failure-policy-test",
+        duplicate_submit_policy_confirmed=True,
+        submit_idempotency_policy_id="runtime-submit-idempotency-policy-test",
+        trusted_submit_fact_snapshot_id="trusted-submit-facts-snapshot-test",
+        local_registration_enablement_decision_id="runtime-local-registration-enable-test",
+        exchange_submit_enablement_decision_id="runtime-exchange-submit-enable-test",
+        runtime_submit_rehearsal_id="runtime-submit-rehearsal-test",
+        deployment_readiness_evidence_id="runtime-exchange-gateway-readiness-test",
+        owner_real_submit_authorization_id="owner-real-submit-authorization-test",
+        deployment_readiness_confirmed=True,
+        explicit_owner_real_submit_authorization=True,
+        current_head_deployed=True,
+        owner_live_runtime_enablement_authorized=True,
+        owner_real_submit_authorization_present=True,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=True,
+    )
+
+    assert (
+        result.status
+        == StrategyRuntimeLiveEnablementPreviewStatus.READY_FOR_LIVE_RUNTIME_ENABLEMENT_MUTATION_DESIGN
+    )
+    assert result.blockers == []
+    assert result.not_execution_authority is True
+    assert result.runtime_state_mutated is False
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+    assert result.owner_bounded_execution_called is False
+    assert result.order_lifecycle_called is False
 
 
 def test_promotion_gate_service_keeps_brf_blocked_without_short_profile():
