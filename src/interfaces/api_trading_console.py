@@ -112,6 +112,10 @@ from src.domain.runtime_executable_submit_readiness import (
     RuntimeExecutableSubmitReadinessEvidence,
     RuntimeExecutableSubmitReadinessPacket,
 )
+from src.domain.runtime_official_submit_handoff import (
+    RuntimeOfficialSubmitHandoffMode,
+    RuntimeOfficialSubmitHandoffPacket,
+)
 from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
     RuntimeExecutionFirstRealSubmitEvidencePreparation,
 )
@@ -311,6 +315,22 @@ class RuntimeExecutableSubmitReadinessPreviewRequest(BaseModel):
     strategy_planning_packet: RuntimeNextAttemptStrategyPlanningPacket
     evidence: RuntimeExecutableSubmitReadinessEvidence
     first_real_submit_packet: RuntimeExecutionFirstRealSubmitEnablementPacket | None = None
+    additional_blockers: list[str] = Field(default_factory=list)
+    additional_warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
+
+
+class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
+    readiness_packet: RuntimeExecutableSubmitReadinessPacket
+    fresh_submit_authorization_id: str | None = Field(
+        default=None,
+        max_length=260,
+    )
+    mode: RuntimeOfficialSubmitHandoffMode = (
+        RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
+    )
+    owner_confirmed_for_real_submit_action: bool = False
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -1063,6 +1083,44 @@ async def runtime_executable_submit_readiness_preview(
             additional_warnings=[
                 *request.additional_warnings,
                 "trading_console_api_non_executing_preview",
+            ],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-previews",
+    response_model=RuntimeOfficialSubmitHandoffPacket,
+)
+async def runtime_official_submit_handoff_preview(
+    runtime_instance_id: str,
+    request: RuntimeOfficialSubmitHandoffPreviewRequest,
+) -> RuntimeOfficialSubmitHandoffPacket:
+    if request.readiness_packet.runtime_instance_id != runtime_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="readiness_packet_runtime_mismatch",
+        )
+    from src.application.runtime_official_submit_handoff_service import (
+        RuntimeOfficialSubmitHandoffService,
+    )
+
+    service = RuntimeOfficialSubmitHandoffService()
+    try:
+        return await service.preview_from_readiness_packet(
+            readiness_packet=request.readiness_packet,
+            fresh_submit_authorization_id=request.fresh_submit_authorization_id,
+            mode=request.mode,
+            owner_confirmed_for_real_submit_action=(
+                request.owner_confirmed_for_real_submit_action
+            ),
+            additional_blockers=request.additional_blockers,
+            additional_warnings=[
+                *request.additional_warnings,
+                "trading_console_api_non_executing_handoff_preview",
             ],
         )
     except RuntimeError as exc:
