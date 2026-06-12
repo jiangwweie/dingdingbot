@@ -16,6 +16,67 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-008 Tokyo Deploy + Executable Readiness API Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target HEAD: `bb232a32`;
+  - pushed `program/live-safe-v1` from `75d16acc` to `bb232a32`.
+- Generated deploy artifacts:
+  - git deploy plan:
+    `output/rtf008-tokyo/git-deploy-plan-bb232a32.json`;
+  - owner git deploy packet:
+    `output/rtf008-tokyo/owner-git-deploy-packet-bb232a32.json`;
+  - deploy dry-run:
+    `output/rtf008-tokyo/git-deploy-dry-run-bb232a32.json`;
+  - deploy apply report:
+    `output/rtf008-tokyo/git-deploy-applied-bb232a32.json`.
+- Deployed Tokyo with the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-bb232a32-20260612Trtf008-readiness-api-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - manifest head:
+    `bb232a324eb5f3f86aad8e6083051fe9107e7794`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy execution result:
+  - status: `applied`;
+  - commands executed: `16`;
+  - database backup created: `true`;
+  - migrations run: `true`;
+  - services restarted: `true`;
+  - exchange called: `false`;
+  - order created: `false`;
+  - `OrderLifecycle` called: `false`;
+  - `ExecutionIntent` created: `false`.
+- Ran RTF-008 executable readiness API probes on Tokyo:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf008-executable-submit-readiness/20260612Trtf008-bb232a32`;
+  - local mirror:
+    `output/rtf008-tokyo/remote-report-20260612Trtf008-bb232a32`;
+  - current BNB blocked path:
+    `readiness-api-blocked.json`;
+  - positive flat/review/gate-clear rehearsal:
+    `readiness-api-positive.json`.
+- Probe results:
+  - blocked path: `status=blocked`, `http_status=200`,
+    blockers include `strategy_planning_not_ready_for_final_gate_preflight`,
+    `order_candidate_id_missing`, and release-gate blockers;
+  - positive path: `status=ready_for_executable_submit`, `http_status=200`,
+    `executable_submit_ready=true`, blockers `[]`;
+  - both reports kept `exchange_write_called=false` and
+    `order_lifecycle_called=false`.
+- Safety:
+  - no exchange order submit;
+  - no `ExecutionIntent` creation;
+  - no `OrderLifecycle.submit_order`;
+  - no order creation/cancel/close;
+  - no runtime state mutation by readiness probe;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-007 Executable Submit Readiness API Dry-run Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
