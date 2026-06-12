@@ -7465,3 +7465,78 @@ Use this file for session progress and handoff notes.
     warning must be treated as a current action-time blocker for that runtime,
     while flat runtimes can proceed only through fresh signal, fresh
     authorization, FinalGate, protection, and official submit gates.
+
+## 2026-06-13 (RTF-053 Real Strategy-driven Attempt Readiness)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - latest tracked head before this stage:
+    `f6c9967f docs(runtime): record tokyo action-time bridge deployment`.
+- Purpose:
+  - select a real deployed runtime candidate from current Tokyo facts;
+  - avoid forcing a trade when no runtime-compatible fresh signal exists;
+  - distinguish action-time blockers from normal observe-only strategy state;
+  - preserve the right-tail small-capital objective without inventing alpha or
+    bypassing strategy semantics.
+- Remote report directory:
+  - `/home/ubuntu/brc-deploy/reports/rtf053-real-attempt-readiness/20260613Trtf053-f6c9967f`.
+- Local mirror:
+  - `output/rtf053-tokyo/remote-report-20260613Trtf053-f6c9967f`.
+- Summary artifact:
+  - `rtf053-summary.json`;
+  - status: `waiting_for_fresh_runtime_signal`;
+  - real submit candidate ready: `false`;
+  - prepare records created: `false`;
+  - official submit called: `false`.
+- Signal selector results for flat runtimes:
+  - `live-signal-selector-strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short.json`:
+    `no_would_enter_signal_available`;
+  - `live-signal-selector-strategy-runtime-95655873b76c.json`:
+    `no_would_enter_signal_available`;
+  - inspected strategy-shelf signal count: `8`;
+  - non-runtime-compatible `would_enter` count: `0`.
+- Observation cycle results:
+  - `ADA/USDT:USDT` `RBR-001` short:
+    - runtime:
+      `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`;
+    - next-attempt gate: `clear_for_next_attempt_preflight`;
+    - strategy signal: `observe_only`;
+    - status: `waiting_for_signal`;
+    - no shadow candidate / prepare records created.
+  - `AVAX/USDT:USDT` `BTPC-001` short:
+    - runtime: `strategy-runtime-95655873b76c`;
+    - next-attempt gate: `clear_for_next_attempt_preflight`;
+    - strategy signal: `observe_only`;
+    - status: `waiting_for_signal`;
+    - no shadow candidate / prepare records created.
+  - `BNB/USDT:USDT` `CPM-001` long:
+    - runtime: `strategy-runtime-e6138ad7c88f`;
+    - status: `blocked`;
+    - blocked stage: `next_attempt_gate`;
+    - lifecycle classification: `still_open_protected`;
+    - current lifecycle status: `protected_open_from_pg_orders`;
+    - exchange position count: `1`;
+    - exchange open protection count: `1`;
+    - required next step:
+      `wait_for_current_tp_or_sl_then_reconcile_and_review`;
+    - no strategy signal evaluation was attempted.
+- Safety:
+  - signal selection was read-only;
+  - no prepare records were created;
+  - no `ExecutionIntent` was created;
+  - no order was created;
+  - no `OrderLifecycle` was called;
+  - no exchange write was called;
+  - no withdrawal or transfer was created.
+- Execution semantics:
+  - `ADA` and `AVAX` are structurally eligible for future attempts because
+    their next-attempt gates are clear, but they currently have no
+    `would_enter` signal;
+  - `BNB` is not eligible for a new attempt while the current protected
+    lifecycle remains open;
+  - current state is not a blocker to the architecture, but it is a valid
+    no-trade decision under the strategy semantics gate;
+  - next runtime progression should be observation until a fresh
+    runtime-compatible `would_enter` signal appears, then prepare records may
+    be created through the official API path.
