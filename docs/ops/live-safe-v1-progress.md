@@ -16,6 +16,53 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-001 Tokyo Deploy + Live-fact Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed HEAD: `f30eee99`.
+- Deployed the current program branch to Tokyo using the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-f30eee99-20260612Tpost-submit-finalize-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET /api/health` returned `status=ok`,
+    `runtime_bound=true`, `live_ready=false`.
+- Ran the Tokyo live-fact post-submit finalize probe for the latest durable
+  runtime submit result:
+  - authorization:
+    `runtime-submit-authorization-intent_rt_f9ccb55add229b9fdbd62636`;
+  - reservation:
+    `runtime-attempt-reservation-runtime-submit-authorization-intent_rt_f9ccb55add229b9fdbd62636`;
+  - runtime: `strategy-runtime-e6138ad7c88f`;
+  - symbol: `BNB/USDT:USDT`;
+  - report:
+    `/home/ubuntu/brc-deploy/reports/runtime-post-submit-finalize-probe/20260612Tpost-submit-finalize-f30eee99/post-submit-finalize-packet.json`.
+- Probe result:
+  - status: `finalized_next_attempt_blocked`;
+  - next-attempt gate: `blocked`;
+  - blocker: `runtime_active_position_slot_in_use`;
+  - trusted active-position source: `pg_position_projection`;
+  - active positions for the symbol: `1`;
+  - runtime-owned active positions: `1`;
+  - unknown-runtime active positions: `0`;
+  - other-runtime active positions: `0`.
+- Interpretation:
+  - the already submitted attempt is accepted as post-submit evidence;
+  - the old authorization is not retried through pre-submit rehearsal;
+  - the runtime loop correctly refuses a new attempt while the current BNB
+    runtime-owned active position occupies the active-position slot.
+- Safety invariants reported by the probe:
+  - no exchange write;
+  - no exchange order submit;
+  - no `ExecutionIntent` creation;
+  - no local order creation/cancel;
+  - no `OrderLifecycle.submit_order`;
+  - no position close;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-001 Local/Tokyo Probe Entry)
 
 - Confirmed current mainline workspace and branch before implementation:
