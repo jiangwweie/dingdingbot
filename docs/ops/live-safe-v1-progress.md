@@ -16,6 +16,58 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-009 Official Submit Handoff Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `71b2cf51`.
+- Added `RuntimeOfficialSubmitHandoffPacket`:
+  - bridges a ready `RuntimeExecutableSubmitReadinessPacket` to the existing
+    Trading Console official submit endpoint;
+  - emits `POST /api/trading-console/runtime-execution-first-real-submit-actions/authorizations/{fresh_submit_authorization_id}`;
+  - freezes the official query evidence IDs required by the existing
+    `first_real_submit_action_for_authorization(...)` path;
+  - blocks when `fresh_submit_authorization_id` is missing;
+  - blocks when the fresh submit authorization reuses the consumed/source
+    authorization;
+  - keeps real gateway mode blocked unless
+    `owner_confirmed_for_real_submit_action=true`;
+  - does not call the official endpoint.
+- Added `scripts/runtime_official_submit_handoff_from_readiness.py`:
+  - reads RTF-008 readiness API artifacts;
+  - emits a non-executing handoff report and operator action preview;
+  - supports `disabled_smoke` and `real_gateway_action` modes.
+- Local handoff dry-run artifacts:
+  - `output/rtf009-handoff/handoff-blocked.json`:
+    current BNB path remained `blocked` because readiness is blocked by
+    active-position release / strategy-planning blockers;
+  - `output/rtf009-handoff/handoff-positive-disabled-smoke.json`:
+    positive flat/review/gate-clear rehearsal returned
+    `ready_for_official_submit_call` with
+    `owner_confirmed_for_first_real_submit_action=false`.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_from_readiness.py`
+    with `9 passed`;
+  - `pytest -q tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_from_readiness.py tests/unit/test_runtime_executable_submit_readiness.py tests/unit/test_runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_executable_submit_readiness_service_api.py tests/unit/test_runtime_executable_submit_readiness_api_flow.py tests/unit/test_runtime_order_lifecycle_adapter_result.py -k 'first_real_submit_action_defaults_to_disabled_without_owner_final_action or first_real_submit_action_confirmed_uses_real_gateway_mode or runtime_official_submit_handoff or executable_submit_readiness'`
+    with `30 passed, 80 deselected`;
+  - `python3 -m compileall -q src/domain/runtime_official_submit_handoff.py scripts/runtime_official_submit_handoff_from_readiness.py tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_from_readiness.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this stage;
+  - current Tokyo deployed release remains
+    `brc-runtime-governance-bb232a32-20260612Trtf008-readiness-api-probe`.
+- Safety:
+  - no official endpoint call;
+  - no PG read/write;
+  - no exchange read/write;
+  - no exchange order submit;
+  - no `ExecutionIntent` creation;
+  - no `OrderLifecycle.submit_order`;
+  - no order creation/cancel/close;
+  - no runtime state mutation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-008 Tokyo Deploy + Executable Readiness API Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
