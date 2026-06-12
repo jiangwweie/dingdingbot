@@ -16,6 +16,56 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-030 Post-submit Next-attempt Cycle Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `dcbab230`.
+- Added the repeatable non-executing cycle entry:
+  - `scripts/runtime_post_submit_next_attempt_cycle.py`;
+  - composes `runtime_post_submit_finalize_api_flow` with
+    `runtime_next_attempt_strategy_plan_api_flow`;
+  - writes three local artifacts per cycle:
+    - post-submit finalize flow report;
+    - extracted post-submit finalize packet;
+    - next-attempt strategy planning flow report;
+  - preserves the post-submit mainline:
+    durable submit result -> post-submit finalize ->
+    `ready_for_fresh_signal` -> fresh strategy signal planning.
+- Cycle behavior:
+  - post-submit not ready: returns `blocked` before calling strategy planning;
+  - post-submit ready + observe-only signal: returns `waiting_for_signal`;
+  - post-submit ready + executable strategy signal: returns
+    `ready_for_final_gate_preflight` with `order_candidate_id`;
+  - final-gate / submit remains a later official path and is not called by the
+    cycle.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_post_submit_next_attempt_cycle.py tests/unit/test_runtime_post_submit_finalize_api_flow.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py tests/unit/test_runtime_next_attempt_strategy_planning.py`
+    with `19 passed`;
+  - `python3 -m compileall -q scripts/runtime_post_submit_next_attempt_cycle.py tests/unit/test_runtime_post_submit_next_attempt_cycle.py`;
+  - `git diff --check`;
+  - `python3 scripts/runtime_post_submit_next_attempt_cycle.py --help`.
+- Deployment:
+  - not deployed in this stage;
+  - current Tokyo code remains `ed88fbb2`;
+  - this stage is local proof plus tracked mainline code.
+- Safety:
+  - no pre-submit rehearsal retry was added;
+  - no local registration was armed;
+  - no first-real-submit action was called;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no order was created or submitted;
+  - no runtime budget was mutated by the script;
+  - no position was opened or closed;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `92%` to `93%`;
+  - next target is to deploy or run the cycle against Tokyo when useful, then
+    connect its `ready_for_final_gate_preflight` output to the existing
+    executable readiness / official submit handoff path.
+
 ## 2026-06-13 (RTF-029 Tokyo Post-submit Finalize API + Next-attempt Gate Probe)
 
 - Confirmed current mainline workspace and branch before deployment /
