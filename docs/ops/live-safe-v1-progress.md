@@ -68,6 +68,59 @@ Use this file for session progress and handoff notes.
   - no runtime state mutation occurred;
   - no withdrawal or transfer occurred.
 
+## 2026-06-13 (RTF-016 Tokyo Deploy + Official Evidence Chain Probe)
+
+- Pushed `program/live-safe-v1` to origin:
+  - target commit: `842de9bd50f87295e5091343c98124168177b354`.
+- Deployed RTF-016 wrapper to Tokyo with the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-842de9bd-20260613Trtf016-evidence-wrapper`;
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c419e1de-20260612Trtf015-readiness-bridge`;
+  - manifest head:
+    `842de9bd50f87295e5091343c98124168177b354`;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy proof:
+  - local report directory:
+    `output/tokyo-git-deploy-842de9bd-rtf016-wrapper`;
+  - plan: `git-deploy-plan.json`;
+  - owner packet: `owner-git-deploy-packet.json`;
+  - dry-run: `git-deploy-dry-run.json`;
+  - apply report: `git-deploy-apply-report.json`;
+  - apply status: `applied`.
+- Tokyo RTF-016 wrapper proof:
+  - report:
+    `/home/ubuntu/brc-deploy/reports/rtf016-official-evidence-chain/20260613Trtf016-842de9bd/avax-btpc-sample-official-evidence-chain-from-binding.json`;
+  - status:
+    `prepared_machine_evidence_blocked_before_local_order_adapter`;
+  - fresh submit authorization:
+    `runtime-submit-authorization-intent_rt_8db0b144cf1b7c4085e5c804`;
+  - prepared / available evidence IDs:
+    `trusted_submit_fact_snapshot_id`,
+    `submit_idempotency_policy_id`,
+    `protection_creation_failure_policy_id`,
+    `post_submit_budget_settlement_persistence_evidence_id`;
+  - remaining blocker:
+    `preview_disabled_first_real_submit_action_http_404`;
+  - warning:
+    `RuntimeExecutionOrderLifecycleAdapterResult not found`;
+  - interpretation:
+    the chain is no longer blocked by manual evidence-ID movement. It is
+    blocked at the expected official local-order adapter boundary.
+- Follow-up:
+  - added `RTF-017` for scoped local order adapter evidence boundary;
+  - do not use sample rehearsal artifacts as if they were a real attempt;
+  - proceed through official local registration only for a real ready strategy
+    signal or a deliberately scoped non-exchange local-registration proof.
+- Safety:
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no local order was created by the wrapper;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-015 Persisted Draft Source Readiness Bridge Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
