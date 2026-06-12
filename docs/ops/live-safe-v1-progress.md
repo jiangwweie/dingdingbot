@@ -16,6 +16,53 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-023 Readiness Evidence Source Map / Circular Dependency Guard)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `b9a9a286`.
+- Added `scripts/runtime_readiness_evidence_source_map.py`:
+  - classifies each readiness evidence field into source classes:
+    `early_current_final_gate_preview`,
+    `explicit_runtime_grant_or_owner_authorization`,
+    `trusted_current_submit_fact_snapshot`,
+    `late_machine_preparable_after_fresh_authorization`,
+    `late_machine_preparable_after_execution_intent`,
+    scoped local/exchange/OrderLifecycle boundary decisions,
+    exchange adapter boundary enablement, deployment readiness, trusted
+    protection / position / account facts, and duplicate-submit guard;
+  - reads optional RTF-022 resolver reports and optional RTF-016 evidence-chain
+    reports;
+  - marks evidence found only in post-binding evidence-chain reports as
+    `available_only_after_binding`, not as early readiness input;
+  - reports `missing_before_readiness` fields explicitly.
+- Why this matters:
+  - existing first-real-submit evidence preparation can machine-prepare some
+    evidence only after fresh authorization / ExecutionIntent context exists;
+  - treating those late artifacts as pre-readiness facts would recreate a
+    circular dependency;
+  - RTF-023 preserves fast progression while preventing fake readiness.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_readiness_evidence_source_map.py`
+    with `3 passed`;
+  - `python3 -m compileall scripts/runtime_readiness_evidence_source_map.py tests/unit/test_runtime_readiness_evidence_source_map.py`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no API call occurred;
+  - no `ExecutionIntent` was created;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime mutation occurred;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence remains approximately `85%`;
+  - RTF-023 clarifies the next implementation target: collect or persist early
+    readiness facts before the readiness preview, while keeping late
+    post-binding evidence on the official evidence-chain side.
+
 ## 2026-06-13 (RTF-022 Real Signal Readiness Evidence Resolver Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
