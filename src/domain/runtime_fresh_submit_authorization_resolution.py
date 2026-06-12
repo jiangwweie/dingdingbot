@@ -257,6 +257,14 @@ def _authorization_snapshot(
     return {
         "authorization_id": authorization.authorization_id,
         "execution_intent_id": authorization.execution_intent_id,
+        "runtime_execution_intent_draft_id": (
+            authorization.runtime_execution_intent_draft_id
+        ),
+        "trial_binding_id": authorization.semantic_ids.trial_binding_id,
+        "strategy_family_id": authorization.semantic_ids.strategy_family_id,
+        "strategy_family_version_id": (
+            authorization.semantic_ids.strategy_family_version_id
+        ),
         "runtime_instance_id": authorization.semantic_ids.runtime_instance_id,
         "signal_evaluation_id": authorization.semantic_ids.signal_evaluation_id,
         "order_candidate_id": authorization.semantic_ids.order_candidate_id,

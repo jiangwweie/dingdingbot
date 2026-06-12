@@ -16,6 +16,57 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-013 Persisted Fresh Authorization Binding Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `3956d308`.
+- Added `RuntimeFreshSubmitAuthorizationBindingPacket`:
+  - binds a ready official-submit handoff to a persisted, non-consumed
+    `RuntimeExecutionSubmitAuthorization`;
+  - can reuse a resolved existing fresh authorization;
+  - can create a fresh submit authorization from an existing recorded
+    `ExecutionIntent`;
+  - can create a recorded `ExecutionIntent` from the latest ready
+    `RuntimeExecutionIntentDraft`, then create the submit authorization;
+  - reports missing fresh authorization / intent / ready draft as structured
+    blockers instead of asking the Owner to hand-copy evidence IDs.
+- Added `RuntimeFreshSubmitAuthorizationBindingService`:
+  - resolves fresh authorization first through RTF-012;
+  - preserves consumed-source authorization replay-only semantics;
+  - keeps the created authorization in the existing submit-authorization
+    domain model;
+  - does not call the official first-real-submit endpoint.
+- Added API and script surfaces:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-fresh-authorizations/bind`;
+  - `scripts/runtime_fresh_submit_authorization_binding_api_flow.py`.
+- Corrected ready-draft status handling:
+  - the binding service now checks
+    `RuntimeExecutionIntentDraftStatus.READY_FOR_INTENT_CREATION`;
+  - the fresh authorization resolution snapshot now carries
+    `runtime_execution_intent_draft_id`, `trial_binding_id`,
+    `strategy_family_id`, and `strategy_family_version_id`.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_fresh_submit_authorization_binding.py tests/unit/test_runtime_fresh_submit_authorization_resolution.py tests/unit/test_trading_console_readmodels.py -k 'fresh_submit_authorization or trading_console_router_keeps_read_models_get_only_and_posts_allowlisted'`
+    with `19 passed, 50 deselected`;
+  - adjacent handoff / disabled-smoke regression:
+    `30 passed, 50 deselected`;
+  - `python3 -m compileall -q` for the new domain, service, API, script, and
+    test files;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this stage.
+- Safety:
+  - no official submit endpoint was called;
+  - no `real_gateway_action` was requested;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no local order was created;
+  - no `OrderLifecycle` call occurred;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-012 Tokyo Deploy + Fresh Authorization Resolution Probe)
 
 - Deployed RTF-012 to Tokyo with the git-based deploy path:

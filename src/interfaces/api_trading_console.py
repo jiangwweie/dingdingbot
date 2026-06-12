@@ -119,6 +119,9 @@ from src.domain.runtime_official_submit_handoff import (
 from src.domain.runtime_fresh_submit_authorization_resolution import (
     RuntimeFreshSubmitAuthorizationResolutionPacket,
 )
+from src.domain.runtime_fresh_submit_authorization_binding import (
+    RuntimeFreshSubmitAuthorizationBindingPacket,
+)
 from src.domain.runtime_execution_first_real_submit_evidence_preparation import (
     RuntimeExecutionFirstRealSubmitEvidencePreparation,
 )
@@ -351,6 +354,20 @@ class RuntimeFreshSubmitAuthorizationResolutionRequest(BaseModel):
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     non_executing: Literal[True] = True
+
+
+class RuntimeFreshSubmitAuthorizationBindingRequest(BaseModel):
+    handoff_packet: RuntimeOfficialSubmitHandoffPacket
+    requested_fresh_submit_authorization_id: str | None = Field(
+        default=None,
+        max_length=260,
+    )
+    allow_create_from_existing_intent: bool = True
+    allow_create_intent_from_latest_draft: bool = True
+    additional_blockers: list[str] = Field(default_factory=list)
+    additional_warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    no_exchange_side_effects: Literal[True] = True
 
 
 class StrategyRuntimeLiveEnablementMutationRequest(BaseModel):
@@ -1177,6 +1194,67 @@ async def runtime_official_submit_handoff_fresh_authorization_resolution(
             additional_warnings=[
                 *request.additional_warnings,
                 "trading_console_api_non_executing_fresh_authorization_resolution",
+            ],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-"
+    "fresh-authorizations/bind",
+    response_model=RuntimeFreshSubmitAuthorizationBindingPacket,
+)
+async def runtime_official_submit_handoff_fresh_authorization_binding(
+    runtime_instance_id: str,
+    request: RuntimeFreshSubmitAuthorizationBindingRequest,
+) -> RuntimeFreshSubmitAuthorizationBindingPacket:
+    if request.handoff_packet.runtime_instance_id != runtime_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="handoff_packet_runtime_mismatch",
+        )
+    from src.application.runtime_fresh_submit_authorization_binding_service import (
+        RuntimeFreshSubmitAuthorizationBindingService,
+    )
+    from src.application.runtime_fresh_submit_authorization_resolution_service import (
+        RuntimeFreshSubmitAuthorizationResolutionService,
+    )
+    from src.infrastructure.pg_runtime_execution_intent_draft_repository import (
+        PgRuntimeExecutionIntentDraftRepository,
+    )
+
+    submit_authorization_repo = _build_pg_runtime_submit_authorization_repo()
+    intent_repo = _build_pg_execution_intent_repo()
+    draft_repo = PgRuntimeExecutionIntentDraftRepository()
+    adapter_service = await _runtime_execution_intent_adapter_service()
+    resolution_service = RuntimeFreshSubmitAuthorizationResolutionService(
+        submit_authorization_repository=submit_authorization_repo,
+    )
+    service = RuntimeFreshSubmitAuthorizationBindingService(
+        adapter_service=adapter_service,
+        resolution_service=resolution_service,
+        intent_repository=intent_repo,
+        draft_repository=draft_repo,
+    )
+    try:
+        return await service.bind_for_handoff(
+            handoff=request.handoff_packet,
+            requested_fresh_submit_authorization_id=(
+                request.requested_fresh_submit_authorization_id
+            ),
+            allow_create_from_existing_intent=(
+                request.allow_create_from_existing_intent
+            ),
+            allow_create_intent_from_latest_draft=(
+                request.allow_create_intent_from_latest_draft
+            ),
+            additional_blockers=request.additional_blockers,
+            additional_warnings=[
+                *request.additional_warnings,
+                "trading_console_api_fresh_authorization_binding_no_exchange_side_effects",
             ],
         )
     except RuntimeError as exc:

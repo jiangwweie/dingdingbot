@@ -639,6 +639,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/executable-submit-readiness-previews",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-previews",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-fresh-authorizations/resolve",
+        "/api/trading-console/strategy-runtimes/{runtime_instance_id}/official-submit-handoff-fresh-authorizations/bind",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/strategy-signal-shadow-plans",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/live-enablement-mutations",
         "/api/trading-console/runtime-execution-intent-drafts/order-candidates/{order_candidate_id}",
