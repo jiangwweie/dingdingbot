@@ -7540,3 +7540,89 @@ Use this file for session progress and handoff notes.
   - next runtime progression should be observation until a fresh
     runtime-compatible `would_enter` signal appears, then prepare records may
     be created through the official API path.
+
+## 2026-06-13 (RTF-054 Filtered Runtime Observation Loop)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - code commit:
+    `f58651a5 feat(runtime): filter active observation runtimes`.
+- Purpose:
+  - keep the active observation loop focused on flat runtimes that can wait
+    for a fresh strategy signal;
+  - prevent the still-open protected `BNB/USDT:USDT` runtime from making the
+    aggregate ADA / AVAX observation window look blocked;
+  - preserve non-executing prepare semantics while allowing the operator loop
+    to create shadow prepare records only when a fresh signal is ready.
+- Local code changes:
+  - `scripts/runtime_active_observation_monitor.py` now accepts repeatable
+    `--runtime-instance-id` filters;
+  - the aggregate packet records `requested_runtime_instance_ids` and
+    `selected_runtime_instance_ids`;
+  - requested runtimes that are not active or not found are reported as
+    warnings, not submit blockers;
+  - `scripts/runtime_active_observation_supervisor.py` passes the same
+    filters to the loop / monitor chain.
+- Local verification:
+  - `python3 -m py_compile scripts/runtime_active_observation_monitor.py scripts/runtime_active_observation_supervisor.py scripts/runtime_active_observation_loop.py`;
+  - `pytest -q tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_active_observation_supervisor.py tests/unit/test_runtime_active_observation_loop.py`;
+  - result: `22 passed`.
+- Tokyo deployment:
+  - target head:
+    `f58651a53aad4509fb16323e86cfdcea7d9ce7a1`;
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-f58651a5-20260613Trtf054-runtime-filter`;
+  - plan artifact:
+    `output/rtf054-tokyo/git-deploy-plan-f58651a5.json`;
+  - owner packet artifact:
+    `output/rtf054-tokyo/owner-git-deploy-packet-f58651a5.json`;
+  - apply artifact:
+    `output/rtf054-tokyo/git-deploy-applied-f58651a5.json`;
+  - postdeploy verification:
+    `output/rtf054-tokyo/postdeploy-verify-f58651a5.json`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`;
+  - deployed head:
+    `f58651a53aad4509fb16323e86cfdcea7d9ce7a1`.
+- Filtered Tokyo observation:
+  - remote report directory:
+    `/home/ubuntu/brc-deploy/reports/rtf054-observation-loop/20260613Trtf054-f58651a5-filtered`;
+  - local mirror:
+    `output/rtf054-tokyo/remote-report-20260613Trtf054-f58651a5-filtered`;
+  - selected runtimes:
+    `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`,
+    `strategy-runtime-95655873b76c`;
+  - active runtime count: `3`;
+  - monitored runtime count: `2`;
+  - supervisor status: `supervisor_completed`;
+  - loop status: `waiting_for_signal`;
+  - loop stop reason: `max_iterations_exhausted`;
+  - follow-up status: `observation_window_complete_no_signal`.
+- Current strategy signal state:
+  - `ADA/USDT:USDT` `RBR-001` short:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - `AVAX/USDT:USDT` `BTPC-001` short:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - no shadow `SignalEvaluation`, shadow `OrderCandidate`, prepare
+    authorization, executable `ExecutionIntent`, order, or exchange submit was
+    created.
+- Safety:
+  - no exchange write was called;
+  - no order was created;
+  - no `OrderLifecycle` was called;
+  - no attempt counter was mutated;
+  - no runtime budget was mutated;
+  - no withdrawal or transfer was created;
+  - `BNB/USDT:USDT` active protected lifecycle was deliberately excluded from
+    this filtered flat-runtime observation, not marked safe for a new attempt.
+- Execution semantics:
+  - RTF-054 fixes the observation loop granularity issue discovered after
+    RTF-053;
+  - flat runtimes can now be watched independently for fresh strategy signals;
+  - the system remains in a valid no-trade waiting state until a runtime-
+    compatible `would_enter` signal appears;
+  - next mainline progress should move from observation-only waiting into the
+    post-submit finalize / next-attempt runtime loop, while keeping the old
+    pre-attempt rehearsal path as compatibility evidence rather than the
+    primary runtime loop.
