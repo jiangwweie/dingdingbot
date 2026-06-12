@@ -59,6 +59,84 @@ Use this file for session progress and handoff notes.
   - no runtime state mutation occurred;
   - no withdrawal or transfer occurred.
 
+## 2026-06-12 (RTF-015 Tokyo Deploy + Persisted Draft Source Handoff Probe)
+
+- Pushed `program/live-safe-v1` to origin:
+  - target commit: `c419e1de51fff3d7b09a3dc1b33329508fc82a11`;
+  - included prior docs commit `2f0d170c`.
+- Deployed RTF-015 bridge to Tokyo with the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c419e1de-20260612Trtf015-readiness-bridge`;
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-9877fbdc-20260612Trtf015-draft-source-probe`;
+  - manifest head:
+    `c419e1de51fff3d7b09a3dc1b33329508fc82a11`;
+  - health: `GET http://127.0.0.1:18080/api/health` returned
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy proof:
+  - local report directory:
+    `output/tokyo-git-deploy-c419e1de-rtf015-bridge`;
+  - plan: `git-deploy-plan.json`;
+  - owner packet: `owner-git-deploy-packet.json`;
+  - dry-run: `git-deploy-dry-run.json`;
+  - apply report: `git-deploy-apply-report.json`;
+  - apply status: `applied`.
+- Tokyo RTF-015 sample rehearsal proof:
+  - report directory:
+    `/home/ubuntu/brc-deploy/reports/rtf015-persisted-draft-source/20260612Trtf015-c419e1de`;
+  - source:
+    `avax-btpc-sample-intent-draft-source.json` from the prior RTF-014 sample
+    rehearsal, explicitly marked as not current live alpha;
+  - readiness report:
+    `avax-btpc-sample-persisted-source-readiness.json`;
+  - readiness status: `ready_for_executable_submit`;
+  - official handoff report:
+    `avax-btpc-sample-official-handoff.json`;
+  - handoff status: `ready_for_official_submit_call`;
+  - fresh authorization binding report:
+    `avax-btpc-sample-fresh-auth-binding.json`;
+  - binding status: `created_intent_and_authorization`;
+  - created execution intent:
+    `intent_rt_8db0b144cf1b7c4085e5c804`;
+  - created fresh submit authorization:
+    `runtime-submit-authorization-intent_rt_8db0b144cf1b7c4085e5c804`;
+  - created from ready draft:
+    `runtime-intent-draft-order-candidate-083a16378429`.
+- Disabled smoke result:
+  - bound-auth handoff report:
+    `avax-btpc-sample-official-handoff-bound-auth.json`;
+  - disabled smoke report:
+    `avax-btpc-sample-disabled-smoke-from-bound-auth.json`;
+  - the official endpoint was reached with
+    `owner_confirmed_for_first_real_submit_action=false`;
+  - result: `blocked`, `http_status=404`;
+  - blocker: `RuntimeExecutionOrderLifecycleAdapterResult not found`;
+  - interpretation: the sample path stopped at the official local-order
+    prerequisite because the readiness evidence used synthetic IDs and no local
+    order-lifecycle adapter result was recorded.
+- Current live AVAX/BTPC check:
+  - report:
+    `avax-btpc-current-live-intent-draft-source.json`;
+  - status: `blocked`;
+  - blockers:
+    `strategy_signal_not_would_enter`,
+    `scheduler_shadow_candidate_not_created`;
+  - no signal evaluation, order candidate, or intent draft was created.
+- Follow-up:
+  - added `RTF-016` for official evidence-chain generation from the bound
+    authorization;
+  - do not force local order registration for sample rehearsal artifacts;
+  - proceed to official evidence records only when using a real ready strategy
+    signal or a deliberately scoped non-exchange local-registration proof.
+- Safety:
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred;
+  - sample RTF-013 binding did create a persisted `ExecutionIntent` and fresh
+    submit authorization, but did not create orders or call exchange.
+
 ## 2026-06-12 (RTF-014 Persisted Strategy Signal Intent Draft Source Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
