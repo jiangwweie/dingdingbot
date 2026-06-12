@@ -71,6 +71,74 @@ Use this file for session progress and handoff notes.
     a compatible `would_enter` signal or an Owner-confirmed new runtime/profile
     decision.
 
+## 2026-06-13 (RTF-034 Tokyo Deploy / Live Selector Probe)
+
+- Deployed RTF-034 selector code to Tokyo:
+  - release:
+    `brc-runtime-governance-97339f58-20260613Trtf034-live-signal-selector`;
+  - deployed HEAD:
+    `97339f58a1fd06bf99ab0b495e38ccf39a6d5d2e`;
+  - previous release:
+    `brc-runtime-governance-a8d7808d-20260613Trtf033-full-cycle`;
+  - deploy apply status: `applied`;
+  - deployment effects recorded:
+    - `database_backup_created=true`;
+    - `migrations_run=true`;
+    - `services_restarted=true`;
+    - `exchange_called=false`;
+    - `execution_intent_created=false`;
+    - `order_created=false`;
+    - `order_lifecycle_called=false`.
+- Tokyo postdeploy verification passed:
+  - read-only probe:
+    `output/rtf034-tokyo-readonly-probe-after-97339f58.json`;
+  - postdeploy verifier:
+    `output/rtf034-tokyo-postdeploy-verify-97339f58.json`;
+  - verifier status: `postdeploy_acceptance_passed`;
+  - migration count: `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Ran the selector on Tokyo for the active AVAX runtime:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf034-live-signal-selector/20260613Trtf034-97339f58/runtime-live-signal-selector.json`;
+  - copied local report:
+    `output/rtf034-tokyo/runtime-live-signal-selector.json`;
+  - status: `would_enter_available_but_not_runtime_compatible`;
+  - blocker: `would_enter_signals_not_runtime_compatible`;
+  - selected runtime-compatible signal: `null`;
+  - output signal input JSON: `null`.
+- Live selector evidence:
+  - one live-market `would_enter` exists:
+    `RBR-001 / RBR-001-v0 / ADA/USDT:USDT / short`;
+  - runtime compatibility blockers:
+    - `runtime_strategy_family_mismatch`;
+    - `runtime_strategy_family_version_mismatch`;
+    - `runtime_symbol_mismatch`;
+  - current active runtime is still the AVAX/BTPC runtime, so the selector
+    correctly refuses to feed the ADA/RBR signal into the AVAX runtime.
+- Safety:
+  - `read_only_market_scan=true`;
+  - `database_write=false`;
+  - `runtime_profile_mutated=false`;
+  - `signal_evaluation_created=false`;
+  - `order_candidate_created=false`;
+  - `execution_intent_created=false`;
+  - `executable_execution_intent_created=false`;
+  - `order_created=false`;
+  - `order_lifecycle_called=false`;
+  - `exchange_write_called=false`;
+  - `runtime_budget_mutated=false`;
+  - `position_opened=false`;
+  - `position_closed=false`;
+  - `withdrawal_or_transfer_created=false`.
+- Progress estimate:
+  - runtime mainline convergence remains approximately `96%`;
+  - the active blocker is now a product/runtime decision, not a hidden code
+    blocker: either wait for an AVAX/BTPC-compatible signal, or explicitly
+    create/confirm a bounded ADA/RBR runtime before using the current live
+    `would_enter`.
+
 ## 2026-06-13 (RTF-033 Tokyo Full-cycle Deploy / Non-executing Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
