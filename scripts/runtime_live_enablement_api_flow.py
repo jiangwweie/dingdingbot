@@ -238,7 +238,8 @@ def _dedupe(values: list[str]) -> list[str]:
 
 
 def _query_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    return {
+    return _clean_query(
+        {
         "strategy_family_confirmed": args.strategy_family_confirmed,
         "implementation_source_confirmed": args.implementation_source_confirmed,
         "required_facts_confirmed": args.required_facts_confirmed,
@@ -323,7 +324,21 @@ def _query_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "submit_adapter_implemented": args.submit_adapter_implemented,
         "staged_submit_chain_available": args.staged_submit_chain_available,
         "forbidden_execution_flags": args.forbidden_execution_flags,
-    }
+        }
+    )
+
+
+def _clean_query(query: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in query.items():
+        if isinstance(value, str):
+            text = value.strip()
+            cleaned[key] = text or None
+        elif isinstance(value, list):
+            cleaned[key] = [item for item in value if str(item).strip()]
+        else:
+            cleaned[key] = value
+    return cleaned
 
 
 def _add_confirmation_flags(parser: argparse.ArgumentParser) -> None:

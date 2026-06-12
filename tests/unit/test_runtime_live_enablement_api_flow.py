@@ -3,6 +3,7 @@ from __future__ import annotations
 from scripts.runtime_live_enablement_api_flow import (
     APPLY_CONFIRMATION_PHRASE,
     build_runtime_live_enablement_api_packet,
+    _clean_query,
 )
 
 
@@ -154,3 +155,17 @@ def test_live_enablement_api_flow_keeps_blocked_preview_non_mutating():
     )
     assert "preview_not_ready_for_apply" in packet["checks"]["blockers"]
     assert [call["method"] for call in client.calls] == ["GET", "GET"]
+
+
+def test_live_enablement_api_flow_normalizes_empty_query_ids_to_missing():
+    query = _clean_query(
+        {
+            "runtime_submit_rehearsal_id": "",
+            "owner_real_submit_authorization_id": " owner-real-1 ",
+            "forbidden_execution_flags": ["", "unsafe_flag"],
+        }
+    )
+
+    assert query["runtime_submit_rehearsal_id"] is None
+    assert query["owner_real_submit_authorization_id"] == "owner-real-1"
+    assert query["forbidden_execution_flags"] == ["unsafe_flag"]
