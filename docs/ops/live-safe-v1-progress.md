@@ -7201,3 +7201,53 @@ Use this file for session progress and handoff notes.
   - not deployed in this stage;
   - Tokyo integration should only validate deployed code, PG facts, active
     position facts, and live-account facts after local node proof.
+
+## 2026-06-13 (RTF-049 Next-attempt Gate Strategy Planning)
+
+- Added local verifier:
+  - `scripts/verify_runtime_next_attempt_gate_strategy_planning.py`.
+- Purpose:
+  - prove `RuntimePostSubmitFinalizePacket(next gate ready)` can enter fresh
+    strategy-signal planning;
+  - prove a ready post-submit gate plus fresh CPM signal reaches
+    `ready_for_final_gate_preflight` with a shadow `OrderCandidate`;
+  - prove a blocked post-submit next-attempt gate stops before strategy
+    planning and does not call the planner;
+  - prove observe-only strategy modes return `waiting_for_signal` instead of
+    creating candidates.
+- Local artifact:
+  - `output/rtf049-local/next-attempt-gate-strategy-planning.json`;
+  - status: `rtf049_next_attempt_gate_strategy_planning_passed`;
+  - scenario count: `3`.
+- Scenarios:
+  - `ready-cpm-long`: post-submit gate `ready_for_fresh_signal`,
+    strategy planning `ready_for_final_gate_preflight`,
+    shadow candidate created;
+  - `blocked-active-position`: post-submit gate blocked by
+    `runtime_active_position_slot_in_use`, planner calls `0`;
+  - `waiting-rmr-observe-only`: post-submit gate ready, planner called,
+    strategy planning `waiting_for_signal`, no candidate.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_next_attempt_gate_strategy_planning_verifier.py
+    tests/unit/test_runtime_next_attempt_strategy_planning.py
+    tests/unit/test_runtime_post_submit_next_attempt_cycle.py
+    tests/unit/test_runtime_ready_shadow_candidate_boundary.py`;
+  - result: `15 passed`.
+- Safety:
+  - local in-memory only: `true`;
+  - database connected: `false`;
+  - HTTP network called: `false`;
+  - exchange write called: `false`;
+  - pre-submit rehearsal called: `false`;
+  - `OrderLifecycle` called: `false`;
+  - executable execution intent created: `false`;
+  - order created: `false`;
+  - withdrawal or transfer created: `false`.
+- Execution semantics:
+  - consumed authorization remains replay-only;
+  - next submit still requires fresh strategy signal, fresh authorization,
+    official FinalGate, and official submit path;
+  - no one-shot first-real-submit retry is used in this stage.
+- Deployment:
+  - not deployed in this stage;
+  - Tokyo should validate this only after local proof and selected deploy.
