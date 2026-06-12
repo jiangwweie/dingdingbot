@@ -10209,3 +10209,139 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is Tokyo verification of the same FinalGate preflight
     proof, then non-executing submit adapter preview / local registration
     boundary convergence.
+
+## 2026-06-13 (RTF-082 Tokyo Official FinalGate Preflight Integration)
+
+- Scope:
+  - deploy the RTF-081 official FinalGate preflight proof to Tokyo;
+  - run the same proof on the deployed release;
+  - verify FinalGate `PASS` and controlled submit preflight readiness on Tokyo;
+  - preserve non-executing boundaries.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Predeploy evidence:
+  - readonly probe:
+    `output/rtf082-predeploy-readonly.json`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    `[]`;
+  - migration count:
+    `84`.
+- Deploy artifacts:
+  - plan:
+    `output/rtf082-tokyo/git-deploy-plan-afd8b214.json`;
+  - Owner packet:
+    `output/rtf082-tokyo/owner-git-deploy-packet-afd8b214.json`;
+  - dry-run:
+    `output/rtf082-tokyo/git-deploy-dry-run-afd8b214.json`;
+  - apply:
+    `output/rtf082-tokyo/git-deploy-applied-afd8b214.json`.
+- Deploy result:
+  - status:
+    `applied`;
+  - blockers:
+    `[]`;
+  - commands executed:
+    `16/16`;
+  - release:
+    `brc-runtime-governance-afd8b214-20260613Trtf082-final-gate-preflight-proof`;
+  - release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-afd8b214-20260613Trtf082-final-gate-preflight-proof`;
+  - migrations:
+    alembic command executed and migration count remained `84`;
+  - service:
+    restarted.
+- Postdeploy evidence:
+  - verifier:
+    `output/rtf082-tokyo/postdeploy-verify-afd8b214.json`;
+  - readonly probe:
+    `output/rtf082-tokyo/readonly-probe-after-deploy.json`;
+  - acceptance packet:
+    `output/rtf082-tokyo/postdeploy-acceptance-afd8b214.json`;
+  - acceptance:
+    `postdeploy_acceptance_ready`;
+  - blockers:
+    `[]`;
+  - warning:
+    `release_identity_from_manifest_without_git_status`;
+  - current head:
+    `afd8b214c3e57e42e0d3397c9b957291bcb424d1`;
+  - health:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Remote official FinalGate preflight proof:
+  - remote path:
+    `/home/ubuntu/brc-deploy/reports/rtf082-official-final-gate-preflight/20260613Trtf082-afd8b214`;
+  - local mirror:
+    `output/rtf082-tokyo/remote-report-20260613Trtf082-afd8b214/`;
+  - contract report:
+    `output/rtf082-tokyo/remote-report-20260613Trtf082-afd8b214/contract-report.json`;
+  - preflight packet:
+    `output/rtf082-tokyo/remote-report-20260613Trtf082-afd8b214/preflight-packet.json`;
+  - FinalGate preview:
+    `output/rtf082-tokyo/remote-report-20260613Trtf082-afd8b214/final-gate-preview.json`;
+  - controlled submit plan:
+    `output/rtf082-tokyo/remote-report-20260613Trtf082-afd8b214/controlled-submit-plan.json`;
+  - controlled submit preflight:
+    `output/rtf082-tokyo/remote-report-20260613Trtf082-afd8b214/controlled-submit-preflight.json`.
+- Contract result:
+  - status:
+    `official_final_gate_preflight_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `signal-eval-rtf075-contract`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled submit plan:
+    `runtime-controlled-submit-plan-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled submit preflight:
+    `runtime-controlled-submit-preflight-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - next operator step:
+    `build_non_executing_submit_adapter_preview`.
+- FinalGate / preflight result:
+  - FinalGate verdict:
+    `PASS`;
+  - FinalGate blockers:
+    `[]`;
+  - controlled submit plan status:
+    `ready_for_controlled_submit_adapter`;
+  - controlled submit preflight status:
+    `ready_for_controlled_submit_adapter`;
+  - preflight preview only:
+    `true`;
+  - preflight blockers:
+    `[]`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no PG write by proof;
+  - no live exchange;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no attempt counter mutation;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-082 deploys and verifies official FinalGate preflight on Tokyo;
+  - the current deployed server version is now `afd8b214`;
+  - the next mainline gap is non-executing submit adapter preview / local
+    registration boundary convergence.
