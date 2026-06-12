@@ -16,6 +16,54 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-025 Real Signal Pipeline Collector Integration Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `88361a2e`.
+- Updated `scripts/runtime_real_signal_scoped_local_registration_pipeline.py`:
+  - under `--auto-readiness-evidence`, the pipeline can now accept report JSON
+    inputs for FinalGate preview, trusted submit facts, idempotency, attempt
+    outcome policy, protection failure policy, local-registration enablement,
+    exchange-submit enablement, exchange action authorization, OrderLifecycle
+    submit enablement, exchange adapter enablement, and deployment readiness;
+  - if any report inputs are supplied, it runs
+    `runtime_early_readiness_fact_collector` first;
+  - complete report facts write `02-collected-readiness-evidence.json` and feed
+    the existing persisted-draft-source readiness preview;
+  - incomplete report facts block at
+    `blocked_at_early_readiness_fact_collection` before any readiness API call;
+  - existing `--readiness-evidence-json` and explicit-field resolver paths
+    remain supported.
+- Added focused pipeline tests:
+  - collector input missing trusted facts blocks before
+    `persisted-draft-source-readiness-previews`;
+  - complete collector report facts flow through readiness, handoff, binding,
+    evidence chain, and scoped local-registration dry-run.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_early_readiness_fact_collector.py`
+    with `9 passed`;
+  - `pytest -q tests/unit/test_runtime_real_signal_readiness_evidence_resolver.py tests/unit/test_runtime_readiness_evidence_source_map.py tests/unit/test_runtime_early_readiness_fact_collector.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py`
+    with `23 passed`;
+  - `python3 -m compileall scripts/runtime_real_signal_scoped_local_registration_pipeline.py scripts/runtime_early_readiness_fact_collector.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_early_readiness_fact_collector.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no sample rehearsal fallback was added;
+  - no local registration occurred;
+  - no first-real-submit action occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no runtime mutation occurred;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `86%` to `87%`;
+  - the next useful target is a local end-to-end report fixture that proves
+    `real signal source -> collector -> readiness -> handoff -> binding ->
+    evidence chain -> scoped proof` without hand-transcribed readiness fields.
+
 ## 2026-06-13 (RTF-024 Early Readiness Fact Collector Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:

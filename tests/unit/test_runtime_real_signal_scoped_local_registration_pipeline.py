@@ -120,6 +120,122 @@ def test_pipeline_auto_readiness_reaches_scoped_local_registration(tmp_path):
     assert report["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_pipeline_collector_blocks_before_readiness_when_report_facts_missing(tmp_path):
+    client = _Client()
+
+    report = script._build_report(
+        _args(
+            tmp_path,
+            auto_readiness_evidence=True,
+            final_gate_preview_json=str(_write_pipeline_final_gate(tmp_path)),
+        ),
+        client=client,
+    )
+
+    assert report["status"] == "blocked_at_early_readiness_fact_collection"
+    assert report["blocked_stage"] == "early_readiness_fact_collection"
+    assert report["stage_statuses"] == {
+        "intent_draft_source": "persisted_ready_intent_draft",
+        "early_readiness_fact_collection": (
+            "blocked_early_readiness_facts_incomplete"
+        ),
+    }
+    assert "early_readiness_fact_collection:trusted_submit_fact_snapshot_id_missing" in (
+        report["blockers"]
+    )
+    paths = [call["path"] for call in client.calls]
+    assert not any("persisted-draft-source-readiness-previews" in path for path in paths)
+
+
+def test_pipeline_collector_can_feed_auto_readiness_path(tmp_path):
+    client = _Client()
+
+    report = script._build_report(
+        _args(
+            tmp_path,
+            auto_readiness_evidence=True,
+            runtime_grant_authorization_id="grant-collector-rtf025",
+            final_gate_preview_json=str(_write_pipeline_final_gate(tmp_path)),
+            trusted_submit_facts_json=str(_write_pipeline_trusted_facts(tmp_path)),
+            submit_idempotency_json=str(_write_pipeline_idempotency(tmp_path)),
+            attempt_outcome_policy_json=str(
+                _write_json(tmp_path, "attempt-policy.json", {"policy_id": "attempt-collector-rtf025"})
+            ),
+            protection_failure_policy_json=str(
+                _write_json(tmp_path, "protection-policy.json", {"policy_id": "protect-collector-rtf025"})
+            ),
+            local_registration_enablement_json=str(
+                _write_json(
+                    tmp_path,
+                    "local-enable.json",
+                    {
+                        "status": "ready_for_local_registration_action",
+                        "decision_id": "local-collector-rtf025",
+                    },
+                )
+            ),
+            exchange_submit_enablement_json=str(
+                _write_json(
+                    tmp_path,
+                    "exchange-enable.json",
+                    {
+                        "status": "ready_for_exchange_submit_action",
+                        "decision_id": "exchange-collector-rtf025",
+                    },
+                )
+            ),
+            exchange_action_authorization_json=str(
+                _write_json(
+                    tmp_path,
+                    "exchange-action.json",
+                    {"authorization_id": "exchange-action-collector-rtf025"},
+                )
+            ),
+            order_lifecycle_submit_enablement_json=str(
+                _write_json(
+                    tmp_path,
+                    "ol-enable.json",
+                    {"enablement_id": "ol-collector-rtf025"},
+                )
+            ),
+            exchange_adapter_enablement_json=str(
+                _write_json(
+                    tmp_path,
+                    "adapter-enable.json",
+                    {"enablement_id": "adapter-collector-rtf025"},
+                )
+            ),
+            deployment_readiness_json=str(
+                _write_json(
+                    tmp_path,
+                    "deployment.json",
+                    {
+                        "status": "ready_for_manual_gateway_binding",
+                        "readiness_id": "deploy-collector-rtf025",
+                    },
+                )
+            ),
+        ),
+        client=client,
+    )
+
+    assert report["status"] == "ready_for_real_signal_scoped_local_registration_proof"
+    assert report["stage_statuses"] == {
+        "intent_draft_source": "persisted_ready_intent_draft",
+        "early_readiness_fact_collection": "ready_for_readiness_evidence_resolution",
+        "readiness": "ready_for_executable_submit",
+        "handoff": "ready_for_official_submit_call",
+        "binding": "created_intent_and_authorization",
+        "evidence_chain": "prepared_machine_evidence_blocked_before_local_order_adapter",
+        "scoped_local_registration_proof": (
+            "ready_for_scoped_local_registration_proof_dry_run"
+        ),
+    }
+    evidence_path = tmp_path / "artifacts" / "02-collected-readiness-evidence.json"
+    assert evidence_path.exists()
+    assert report["safety_invariants"]["exchange_write_called"] is False
+
+
 class _Client:
     def __init__(self, *, source_status: str = "persisted_ready_intent_draft") -> None:
         self.source_status = source_status
@@ -290,6 +406,53 @@ def _write_evidence(tmp_path):
     return path
 
 
+def _write_pipeline_final_gate(tmp_path):
+    return _write_json(
+        tmp_path,
+        "pipeline-final-gate.json",
+        {
+            "final_gate_preview_id": "fg-collector-rtf025",
+            "verdict": "PASS",
+            "candidate_snapshot": {"protection_reference_present": True},
+        },
+    )
+
+
+def _write_pipeline_trusted_facts(tmp_path):
+    source = {"trusted": True, "freshness": "fresh"}
+    return _write_json(
+        tmp_path,
+        "pipeline-trusted-facts.json",
+        {
+            "status": "ready_for_first_real_submit_confirmation",
+            "trusted_submit_fact_snapshot_id": "facts-collector-rtf025",
+            "facts_fresh_enough": True,
+            "account_fact_source": source,
+            "active_position_source": source,
+            "protection_state_source": source,
+        },
+    )
+
+
+def _write_pipeline_idempotency(tmp_path):
+    return _write_json(
+        tmp_path,
+        "pipeline-idempotency.json",
+        {
+            "status": "ready_for_non_executing_policy_confirmation",
+            "submit_idempotency_policy_id": "idem-collector-rtf025",
+            "blocks_concurrent_submit_without_lock": True,
+            "replay_existing_result_on_duplicate": True,
+        },
+    )
+
+
+def _write_json(tmp_path, name, payload):
+    path = tmp_path / name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def _complete_auto_evidence():
     return {
         "final_gate_preview_id": "final-gate-auto-rtf020",
@@ -338,6 +501,17 @@ def _args(tmp_path, **overrides):
         "duplicate_submit_guard_ready": False,
         "legacy_runtime_submit_rehearsal_id": None,
         "durable_exchange_submit_execution_result_id": None,
+        "final_gate_preview_json": None,
+        "trusted_submit_facts_json": None,
+        "submit_idempotency_json": None,
+        "attempt_outcome_policy_json": None,
+        "protection_failure_policy_json": None,
+        "local_registration_enablement_json": None,
+        "exchange_submit_enablement_json": None,
+        "exchange_action_authorization_json": None,
+        "order_lifecycle_submit_enablement_json": None,
+        "exchange_adapter_enablement_json": None,
+        "deployment_readiness_json": None,
         "candidate_id": "BTPC-001",
         "context_id": "context-rtf020",
         "expires_at_ms": None,

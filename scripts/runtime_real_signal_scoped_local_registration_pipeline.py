@@ -25,6 +25,7 @@ from scripts import runtime_fresh_submit_authorization_binding_api_flow  # noqa:
 from scripts import runtime_official_evidence_chain_from_binding  # noqa: E402
 from scripts import runtime_official_submit_handoff_api_flow  # noqa: E402
 from scripts import runtime_persisted_draft_source_readiness_api_flow  # noqa: E402
+from scripts import runtime_early_readiness_fact_collector  # noqa: E402
 from scripts import runtime_real_signal_readiness_evidence_resolver  # noqa: E402
 from scripts import runtime_scoped_local_registration_proof_from_evidence  # noqa: E402
 from scripts import runtime_strategy_signal_intent_draft_source_api_flow  # noqa: E402
@@ -235,6 +236,56 @@ def _readiness_evidence_resolution_args(
     )
 
 
+def _early_readiness_fact_collection_args(
+    args: argparse.Namespace,
+    *,
+    artifact_root: Path,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        runtime_instance_id=args.runtime_instance_id,
+        runtime_grant_authorization_id=args.runtime_grant_authorization_id,
+        owner_real_submit_authorization_id=args.owner_real_submit_authorization_id,
+        final_gate_preview_json=args.final_gate_preview_json,
+        trusted_submit_facts_json=args.trusted_submit_facts_json,
+        submit_idempotency_json=args.submit_idempotency_json,
+        attempt_outcome_policy_json=args.attempt_outcome_policy_json,
+        protection_failure_policy_json=args.protection_failure_policy_json,
+        local_registration_enablement_json=args.local_registration_enablement_json,
+        exchange_submit_enablement_json=args.exchange_submit_enablement_json,
+        exchange_action_authorization_json=args.exchange_action_authorization_json,
+        order_lifecycle_submit_enablement_json=(
+            args.order_lifecycle_submit_enablement_json
+        ),
+        exchange_adapter_enablement_json=args.exchange_adapter_enablement_json,
+        deployment_readiness_json=args.deployment_readiness_json,
+        legacy_runtime_submit_rehearsal_id=args.legacy_runtime_submit_rehearsal_id,
+        durable_exchange_submit_execution_result_id=(
+            args.durable_exchange_submit_execution_result_id
+        ),
+        artifact_dir=str(artifact_root),
+        output=None,
+    )
+
+
+def _has_early_readiness_fact_inputs(args: argparse.Namespace) -> bool:
+    return any(
+        bool(getattr(args, name, None))
+        for name in (
+            "final_gate_preview_json",
+            "trusted_submit_facts_json",
+            "submit_idempotency_json",
+            "attempt_outcome_policy_json",
+            "protection_failure_policy_json",
+            "local_registration_enablement_json",
+            "exchange_submit_enablement_json",
+            "exchange_action_authorization_json",
+            "order_lifecycle_submit_enablement_json",
+            "exchange_adapter_enablement_json",
+            "deployment_readiness_json",
+        )
+    )
+
+
 def _build_report(
     args: argparse.Namespace,
     *,
@@ -251,6 +302,7 @@ def _build_report(
     artifact_root.mkdir(parents=True, exist_ok=True)
     reports: dict[str, dict[str, Any] | None] = {
         "intent_draft_source": None,
+        "early_readiness_fact_collection": None,
         "readiness_evidence_resolution": None,
         "readiness": None,
         "handoff": None,
@@ -276,6 +328,34 @@ def _build_report(
             )
 
         readiness_evidence_json = args.readiness_evidence_json
+        if (
+            not readiness_evidence_json
+            and args.auto_readiness_evidence
+            and _has_early_readiness_fact_inputs(args)
+        ):
+            collection = runtime_early_readiness_fact_collector._build_report(
+                _early_readiness_fact_collection_args(
+                    args,
+                    artifact_root=artifact_root,
+                )
+            )
+            reports["early_readiness_fact_collection"] = collection
+            _write_json(
+                artifact_root / "02-early-readiness-fact-collection.json",
+                collection,
+            )
+            readiness_evidence_json = collection.get("evidence_json_path")
+            if _status(collection) != (
+                runtime_early_readiness_fact_collector.READY_STATUS
+            ) or not readiness_evidence_json:
+                return _final_report(
+                    args,
+                    artifact_root=artifact_root,
+                    status="blocked_at_early_readiness_fact_collection",
+                    blocked_stage="early_readiness_fact_collection",
+                    reports=reports,
+                )
+
         if not readiness_evidence_json and args.auto_readiness_evidence:
             resolution = runtime_real_signal_readiness_evidence_resolver._build_report(
                 _readiness_evidence_resolution_args(
@@ -433,6 +513,7 @@ def _final_report(
     warnings: list[str] = []
     for name in (
         "intent_draft_source",
+        "early_readiness_fact_collection",
         "readiness_evidence_resolution",
         "readiness",
         "handoff",
@@ -539,6 +620,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--duplicate-submit-guard-ready", action="store_true")
     parser.add_argument("--legacy-runtime-submit-rehearsal-id")
     parser.add_argument("--durable-exchange-submit-execution-result-id")
+    parser.add_argument("--final-gate-preview-json")
+    parser.add_argument("--trusted-submit-facts-json")
+    parser.add_argument("--submit-idempotency-json")
+    parser.add_argument("--attempt-outcome-policy-json")
+    parser.add_argument("--protection-failure-policy-json")
+    parser.add_argument("--local-registration-enablement-json")
+    parser.add_argument("--exchange-submit-enablement-json")
+    parser.add_argument("--exchange-action-authorization-json")
+    parser.add_argument("--order-lifecycle-submit-enablement-json")
+    parser.add_argument("--exchange-adapter-enablement-json")
+    parser.add_argument("--deployment-readiness-json")
     parser.add_argument("--candidate-id")
     parser.add_argument("--context-id")
     parser.add_argument("--expires-at-ms", type=int)
