@@ -9883,3 +9883,202 @@ Use this file for session progress and handoff notes.
     deployment and not real submit authorization;
   - the next mainline gap is Tokyo execution of the same official server-side
     prepare proof.
+
+## 2026-06-13 (RTF-080 Tokyo Official Server-side Prepare Integration)
+
+- Scope:
+  - deploy the official server-side prepare proof to Tokyo;
+  - run the same official `FastAPI` / `TestClient` prepare proof on the
+    deployed release;
+  - verify the server release, health, migration state, and non-executing proof
+    invariants.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Deployment correction:
+  - first apply attempt for `4a232a3d` failed during
+    `2_owner_authorized_git_fetch_and_export`;
+  - root cause:
+    the git deploy plan compared `readlink -f app/current` absolute output to
+    the short `previous_release` name;
+  - fix:
+    `scripts/plan_tokyo_runtime_governance_git_deploy.py` now expands a short
+    previous release name to
+    `/home/ubuntu/brc-deploy/releases/<release>`;
+  - regression test:
+    `test_git_deploy_plan_expands_short_previous_release_for_current_symlink_check`;
+  - failed partial release cleanup:
+    removed
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-4a232a3d-20260613Trtf080-official-server-prepare-proof`
+    after confirming `app/current` still pointed to the RTF-078 release.
+- Stage commit:
+  - commit:
+    `d0bfc271506e2418b23038f0128a146c345e4e61`;
+  - message:
+    `fix(deploy): normalize previous release symlink check`;
+  - pushed:
+    `origin/program/live-safe-v1`.
+- Predeploy evidence:
+  - readonly probe:
+    `output/rtf080-predeploy-readonly.json`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    `[]`;
+  - migration count:
+    `84`.
+- Deploy artifacts:
+  - plan:
+    `output/rtf080-tokyo/git-deploy-plan-d0bfc271.json`;
+  - owner packet:
+    `output/rtf080-tokyo/owner-git-deploy-packet-d0bfc271.json`;
+  - dry-run:
+    `output/rtf080-tokyo/git-deploy-dry-run-d0bfc271.json`;
+  - apply:
+    `output/rtf080-tokyo/git-deploy-applied-d0bfc271.json`.
+- Deploy result:
+  - status:
+    `applied`;
+  - blockers:
+    `[]`;
+  - commands:
+    `16/16`;
+  - release:
+    `brc-runtime-governance-d0bfc271-20260613Trtf080-official-server-prepare-proof`;
+  - release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-d0bfc271-20260613Trtf080-official-server-prepare-proof`;
+  - migrations:
+    alembic command executed, migration count remained `84`;
+  - service:
+    restarted.
+- Postdeploy evidence:
+  - verifier:
+    `output/rtf080-tokyo/postdeploy-verify-d0bfc271.json`;
+  - readonly probe:
+    `output/rtf080-tokyo/readonly-probe-after-deploy.json`;
+  - acceptance packet:
+    `output/rtf080-tokyo/postdeploy-acceptance-d0bfc271.json`;
+  - acceptance status:
+    `postdeploy_acceptance_ready`;
+  - blockers:
+    `[]`;
+  - warning:
+    `release_identity_from_manifest_without_git_status`;
+  - current head:
+    `d0bfc271506e2418b23038f0128a146c345e4e61`;
+  - health:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Remote official server-side prepare proof:
+  - remote path:
+    `/home/ubuntu/brc-deploy/reports/rtf080-official-server-prepare-proof/20260613Trtf080-d0bfc271`;
+  - local mirror:
+    `output/rtf080-tokyo/remote-report-20260613Trtf080-d0bfc271/`;
+  - contract report:
+    `output/rtf080-tokyo/remote-report-20260613Trtf080-d0bfc271/contract-report.json`;
+  - prepare packet:
+    `output/rtf080-tokyo/remote-report-20260613Trtf080-d0bfc271/prepare-packet.json`;
+  - prepare report:
+    `output/rtf080-tokyo/remote-report-20260613Trtf080-d0bfc271/prepare-report.json`;
+  - shadow contract report:
+    `output/rtf080-tokyo/remote-report-20260613Trtf080-d0bfc271/shadow-contract-report.json`;
+  - stdout mirror:
+    `output/rtf080-tokyo/remote-report-20260613Trtf080-d0bfc271/contract.stdout.json`.
+- Contract result:
+  - status:
+    `official_server_prepare_integration_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `signal-eval-rtf075-contract`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - runtime execution intent draft:
+    `runtime-intent-draft-order-candidate-rtf075-contract`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - protection plan:
+    `runtime-protection-plan-intent_rt_e23ebb969e9d27f79df197dc`;
+  - prepared authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - next operator step:
+    `run_official_final_gate_preflight`.
+- Evidence preparation:
+  - status:
+    `prepared_packet_blocked`;
+  - packet created:
+    `true`;
+  - packet status:
+    `blocked`;
+  - dependency blocked:
+    `false`;
+  - blockers:
+    `[]`.
+- Checks:
+  - shadow contract passed:
+    `true`;
+  - right-tail runner preserved:
+    `true`;
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - official prepare wrapper used:
+    `true`;
+  - next-attempt gate checked:
+    `true`;
+  - order candidate usage checked:
+    `true`;
+  - evidence preparation route called:
+    `true`;
+  - evidence preparation packet created:
+    `true`;
+  - evidence preparation dependency blocked:
+    `false`;
+  - prepare ready for FinalGate preflight:
+    `true`;
+  - trusted submit facts prepared:
+    `true`;
+  - submit idempotency prepared:
+    `true`;
+  - protection failure policy prepared:
+    `true`.
+- Safety:
+  - proof uses official FastAPI routes;
+  - proof does not use fake Console API;
+  - proof uses in-memory repositories;
+  - no PG write by proof;
+  - no live exchange;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no attempt counter mutation;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Verification:
+  - local focused tests:
+    `pytest -q tests/unit/test_tokyo_runtime_governance_git_deploy.py tests/unit/test_runtime_official_server_prepare_integration_proof.py`;
+  - result:
+    `13 passed`;
+  - remote proof command:
+    `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_official_server_prepare_integration_proof.py --output-dir ...`;
+  - remote status:
+    `official_server_prepare_integration_passed`;
+  - remote evidence status:
+    `prepared_packet_blocked`.
+- Interpretation:
+  - RTF-080 deploys and verifies the official server-side prepare proof on
+    Tokyo;
+  - the fake Console API boundary from RTF-078 is no longer the server-side
+    prepare proof boundary;
+  - the next mainline gap is to move from prepare proof to official FinalGate
+    preflight and then post-submit finalize / next-attempt gate convergence.
