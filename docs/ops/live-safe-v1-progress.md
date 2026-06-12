@@ -8381,3 +8381,88 @@ Use this file for session progress and handoff notes.
   - the next Tokyo integration can run one script against the active runtime:
     it should either keep waiting for a real signal or progress into the
     current-source disabled-smoke pipeline when the signal is ready.
+
+## 2026-06-13 (RTF-064 Tokyo Current-source Observation Continuation Integration)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target commit:
+    `56cf5d19e129fa81c220dbfdf2cf02900d3fc98f`.
+- Pre-deploy read-only probe:
+  - current head:
+    `9d96ed916ad802739cb8abff99bca76b68e605ef`;
+  - current release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-9d96ed91-20260613Trtf062-current-source-smoke`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    none.
+- Deployment:
+  - new release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-56cf5d19-20260613Trtf064-current-source-continuation`;
+  - plan artifact:
+    `output/rtf064-tokyo/git-deploy-plan-56cf5d19.json`;
+  - owner packet artifact:
+    `output/rtf064-tokyo/owner-git-deploy-packet-56cf5d19.json`;
+  - dry-run artifact:
+    `output/rtf064-tokyo/git-deploy-dry-run-56cf5d19.json`;
+  - apply artifact:
+    `output/rtf064-tokyo/git-deploy-applied-56cf5d19.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-56cf5d19-20260613Trtf064-current-source-continuation.pgdump`;
+  - migration state:
+    `084`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health after deployment:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`;
+  - manifest head:
+    `56cf5d19e129fa81c220dbfdf2cf02900d3fc98f`.
+- RTF-064 current-source observation continuation:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf064-current-source-observation-continuation/20260613Trtf064-56cf5d19/current-source-observation-continuation.json`;
+  - local mirror:
+    `output/rtf064-tokyo/remote-report-20260613Trtf064-56cf5d19/current-source-observation-continuation.json`;
+  - status:
+    `waiting_for_signal`;
+  - blocker:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - operator next step:
+    `continue_observation_until_genuine_would_enter`;
+  - current-source pipeline invoked:
+    `false`;
+  - readiness evidence required:
+    `false`;
+  - real-submit gate required:
+    `false`.
+- Safety:
+  - no historical RTF-015 sample handoff was used;
+  - no prepare records were created;
+  - no shadow candidate was created;
+  - no runtime execution intent draft was created;
+  - no submit authorization was created;
+  - no official submit endpoint was called;
+  - no real gateway action was requested;
+  - no exchange write occurred;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no runtime budget mutation occurred;
+  - no position was opened or closed;
+  - no withdrawal or transfer was created.
+- Interpretation:
+  - RTF-063 code is now deployed and verified on Tokyo;
+  - the current runtime remains post-submit finalized and ready to observe a
+    fresh signal;
+  - because the live strategy signal is not ready, the continuation correctly
+    waits instead of forcing candidate planning or replaying historical handoff
+    data;
+  - next mainline progress should focus on producing or discovering a genuine
+    runtime-compatible ready signal for the current runtime or an explicitly
+    approved new runtime/profile.
