@@ -6961,3 +6961,51 @@ Use this file for session progress and handoff notes.
   - no `SignalEvaluation`, `OrderCandidate`, `ExecutionIntent`, local order,
     exchange order, `OrderLifecycle`, withdrawal, or transfer path was called;
   - no exchange write occurred.
+
+## 2026-06-13 (RTF-044 Runtime Observation API Prepare Waiting State)
+
+- Ran the official Trading Console runtime next-attempt observation API wrapper
+  for the active RBR/ADA shadow runtime.
+- Runtime:
+  - `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`;
+  - strategy: `RBR-001` / `RBR-001-v0`;
+  - symbol / side: `ADA/USDT:USDT` / `short`;
+  - runtime status before the probe: `active`;
+  - execution enabled: `false`;
+  - shadow mode: `true`.
+- Tokyo observation API prepare flow:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf044-shadow-candidate-planning/20260613Trtf044/observation-api-prepare-flow.json`;
+  - local copy:
+    `output/rtf044-tokyo/observation-api-prepare-flow.json`;
+  - status: `waiting_for_signal`;
+  - blocked stage: `strategy_signal`;
+  - blocker:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - signal input JSON:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf044-shadow-candidate-planning/20260613Trtf044/rbr-ada-observation-signal-input.json`.
+- Meaning:
+  - the active shadow runtime is reachable through the official observation API;
+  - the strategy signal path is connected;
+  - current market data does not produce a runtime-compatible `would_enter`
+    signal;
+  - the system correctly waits instead of creating a shadow candidate.
+- Safety:
+  - `allow_prepare_records`: `false`;
+  - prepare records created: `false`;
+  - shadow candidate created: `false`;
+  - runtime execution intent draft created: `false`;
+  - recorded execution intent created: `false`;
+  - submit authorization created: `false`;
+  - protection plan created: `false`;
+  - local registration armed: `false`;
+  - exchange submit armed: `false`;
+  - execute real submit: `false`;
+  - no order, `OrderLifecycle`, exchange write, position open/close,
+    withdrawal, transfer, attempt counter mutation, or runtime budget mutation
+    occurred.
+- Focused local verification:
+  - `pytest -q tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py
+    tests/unit/test_runtime_next_attempt_observation_cycle_api.py
+    tests/unit/test_runtime_next_attempt_observation_cycle.py`;
+  - result: `15 passed`.
