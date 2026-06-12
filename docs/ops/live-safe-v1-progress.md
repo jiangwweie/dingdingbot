@@ -16,6 +16,80 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-033 Tokyo Full-cycle Deploy / Non-executing Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed HEAD: `a8d7808d`.
+- Deployed RTF-032 full-cycle code to Tokyo:
+  - release:
+    `brc-runtime-governance-a8d7808d-20260613Trtf033-full-cycle`;
+  - previous release:
+    `brc-runtime-governance-ed88fbb2-20260613Trtf029-post-submit-finalize-api`;
+  - deploy apply status: `applied`;
+  - deployment backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-a8d7808d-20260613Trtf033-full-cycle.pgdump`;
+  - deployment effects recorded:
+    - `database_backup_created=true`;
+    - `migrations_run=true`;
+    - `services_restarted=true`;
+    - `exchange_called=false`;
+    - `execution_intent_created=false`;
+    - `order_created=false`;
+    - `order_lifecycle_called=false`.
+- Tokyo postdeploy verification passed:
+  - read-only probe:
+    `output/rtf033-tokyo-readonly-probe-after-a8d7808d.json`;
+  - postdeploy verifier:
+    `output/rtf033-tokyo-postdeploy-verify-a8d7808d.json`;
+  - verifier status: `postdeploy_acceptance_passed`;
+  - current deployed head:
+    `a8d7808d90d9f3dec618f6f280390e7f4519972f`;
+  - migration count: `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Ran the full-cycle non-executing Tokyo probe for the active AVAX runtime:
+  - runtime: `strategy-runtime-95655873b76c`;
+  - reservation:
+    `runtime-attempt-reservation-runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf033-full-cycle/20260613Trtf033-a8d7808d/full-next-attempt-submit-cycle.json`;
+  - copied local report:
+    `output/rtf033-tokyo/full-next-attempt-submit-cycle.json`;
+  - result status: `waiting_for_signal`;
+  - blocker: `strategy_signal_not_would_enter`.
+- Probe interpretation:
+  - the post-submit / next-attempt cycle can run on Tokyo from current durable
+    runtime facts;
+  - current supplied AVAX/BTPC signal is observe-only, so the full-cycle script
+    stops before executable readiness;
+  - no fresh shadow candidate was planned from this signal;
+  - no readiness, official handoff, local registration, or submit action was
+    executed.
+- Safety invariants from the Tokyo report:
+  - `non_executing=true`;
+  - `runs_executable_readiness=false`;
+  - `calls_official_submit_endpoint=false`;
+  - `pre_submit_rehearsal_called=false`;
+  - `local_registration_armed=false`;
+  - `exchange_submit_armed=false`;
+  - `exchange_write_called=false`;
+  - `execution_intent_created=false`;
+  - `executable_execution_intent_created=false`;
+  - `order_created=false`;
+  - `order_lifecycle_called=false`;
+  - `runtime_budget_mutated=false`;
+  - `position_opened=false`;
+  - `position_closed=false`;
+  - `withdrawal_or_transfer_created=false`.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `95%` to `96%`;
+  - remaining mainline work is to wait for or produce a real
+    `would_enter`-class strategy signal, then let the same full-cycle path
+    proceed into executable readiness / controlled submit handoff with fresh
+    runtime authorization.
+
 ## 2026-06-13 (RTF-032 Full Next-attempt Submit-preparation Cycle)
 
 - Confirmed current mainline workspace and branch before implementation:
