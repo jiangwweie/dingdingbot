@@ -8983,3 +8983,100 @@ Use this file for session progress and handoff notes.
   - no runtime budget mutation;
   - no position open/close;
   - no withdrawal or transfer.
+
+## 2026-06-13 (RTF-072 Tokyo Supervisor Summary Integration)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Commit deployed:
+  `09cadf270d29ecb434beae9a045fd1f131e47897`.
+- Previous Tokyo head:
+  `9e15b81fa5aeed5f47f9e22ee8c3b65e964b01f1`.
+- New Tokyo release:
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-09cadf27-20260613Trtf072-supervisor-summary`.
+- Deploy artifacts:
+  - plan:
+    `output/rtf072-tokyo/git-deploy-plan-09cadf27.json`;
+  - owner packet:
+    `output/rtf072-tokyo/owner-git-deploy-packet-09cadf27.json`;
+  - dry-run:
+    `output/rtf072-tokyo/git-deploy-dry-run-09cadf27.json`;
+  - apply:
+    `output/rtf072-tokyo/git-deploy-applied-09cadf27.json`.
+- Deploy result:
+  - status:
+    `applied`;
+  - blockers:
+    `[]`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-09cadf27-20260613Trtf072-supervisor-summary.pgdump`;
+  - migrations:
+    alembic command executed, migration count remained `84`;
+  - service:
+    restarted.
+- Postdeploy read-only facts:
+  - artifact:
+    `output/rtf072-tokyo/readonly-probe-after-deploy.json`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    `[]`;
+  - current head:
+    `09cadf270d29ecb434beae9a045fd1f131e47897`;
+  - health:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Postdeploy acceptance:
+  - artifact:
+    `output/rtf072-tokyo/postdeploy-acceptance-09cadf27.json`;
+  - status:
+    `postdeploy_acceptance_passed`;
+  - blockers:
+    `[]`.
+- Remote summary verification:
+  - input:
+    `/home/ubuntu/brc-deploy/reports/rtf070-live-signal-supervisor/20260613Trtf070-9e15b81f/live-signal-operator-supervisor.json`;
+  - remote output:
+    `/home/ubuntu/brc-deploy/reports/rtf072-supervisor-summary/20260613Trtf072-09cadf27/supervisor-operator-summary.json`;
+  - local mirror:
+    `output/rtf072-tokyo/remote-report-20260613Trtf072-09cadf27/supervisor-operator-summary.json`;
+  - validation artifact:
+    `output/rtf072-tokyo/remote-summary-validation.txt`;
+  - validation:
+    `remote_summary_validation=passed`;
+  - status:
+    `operator_waiting_for_signal`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - no-signal window:
+    `true`;
+  - next step:
+    `continue_live_signal_operator_supervision`;
+  - selector status:
+    `no_would_enter_signal_available=2`;
+  - blocker count:
+    `runtime_strategy_signal_not_found_in_strategy_shelf=2`.
+- Safety:
+  - deployment did not authorize real runtime submit;
+  - summary verification read an existing packet and wrote a report artifact
+    only;
+  - no runtime creation;
+  - no runtime profile mutation;
+  - no shadow candidate;
+  - no recorded `ExecutionIntent`;
+  - no submit authorization;
+  - no order;
+  - no `OrderLifecycle`;
+  - no real submit;
+  - no exchange write;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-071 is now deployed and verified on Tokyo;
+  - the operator can consume supervisor output as a readable no-signal status;
+  - the mainline remains ready to continue live signal supervision until a
+    genuine runtime-compatible strategy signal appears.
