@@ -16,6 +16,52 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-024 Early Readiness Fact Collector Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `18ff7327`.
+- Added `scripts/runtime_early_readiness_fact_collector.py`:
+  - reads existing local JSON reports / snapshots;
+  - extracts FinalGate preview pass evidence, runtime grant / Owner submit
+    authorization IDs, trusted submit facts, idempotency policy, attempt
+    outcome policy, protection failure policy, local-registration enablement,
+    exchange-submit enablement, exchange action authorization, OrderLifecycle
+    submit enablement, exchange adapter enablement, and deployment readiness;
+  - writes `02-collected-readiness-evidence.json` only when all required
+    evidence for `RuntimeExecutableSubmitReadinessEvidence` is complete;
+  - otherwise returns `blocked_early_readiness_facts_incomplete` with exact
+    missing fields.
+- Added focused tests:
+  - empty input blocks with missing FinalGate, authorization, and trusted fact
+    evidence;
+  - partial FinalGate / trusted-fact reports extract available facts but do not
+    claim readiness;
+  - complete report set writes resolver-compatible readiness evidence.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_early_readiness_fact_collector.py`
+    with `3 passed`;
+  - `pytest -q tests/unit/test_runtime_real_signal_readiness_evidence_resolver.py tests/unit/test_runtime_readiness_evidence_source_map.py tests/unit/test_runtime_early_readiness_fact_collector.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py`
+    with `13 passed`;
+  - `python3 -m compileall scripts/runtime_early_readiness_fact_collector.py tests/unit/test_runtime_early_readiness_fact_collector.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no API call occurred;
+  - no `ExecutionIntent` was created;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime mutation occurred;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `85%` to `86%`;
+  - next useful target is wiring this collector into the real-signal pipeline
+    so current report artifacts can feed auto-readiness without manual field
+    transcription.
+
 ## 2026-06-13 (RTF-023 Readiness Evidence Source Map / Circular Dependency Guard)
 
 - Confirmed current mainline workspace and branch before implementation:
