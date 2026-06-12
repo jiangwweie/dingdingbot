@@ -16,6 +16,50 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-002 Tokyo Deploy + Strategy-plan Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - deployed HEAD: `10248504`.
+- Deployed the current program branch to Tokyo using the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-10248504-20260612Trtf002-strategy-plan-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET /api/health` returned `status=ok`,
+    `runtime_bound=true`, `live_ready=false`;
+  - deployment execution report:
+    `output/rtf002-tokyo/git-deploy-execution-10248504.json`.
+- Ran the RTF-002 Tokyo API probe:
+  - API script: `scripts/runtime_next_attempt_strategy_plan_api_flow.py`;
+  - runtime: `strategy-runtime-e6138ad7c88f`;
+  - post-submit packet input:
+    `/home/ubuntu/brc-deploy/reports/runtime-next-attempt-strategy-plan/20260612Trtf002-10248504/post-submit-finalize-packet.json`;
+  - fresh signal input:
+    `/home/ubuntu/brc-deploy/reports/runtime-next-attempt-strategy-plan/20260612Trtf002-10248504/fresh-signal-input.json`;
+  - API probe report:
+    `/home/ubuntu/brc-deploy/reports/runtime-next-attempt-strategy-plan/20260612Trtf002-10248504/next-attempt-strategy-plan-api-packet.json`.
+- Probe result:
+  - HTTP status: `200`;
+  - status: `blocked_by_post_submit_gate`;
+  - blockers:
+    `post_submit_finalize_not_ready_for_next_attempt`,
+    `post_submit_next_attempt_gate_not_ready`,
+    `runtime_active_position_slot_in_use`;
+  - `order_candidate_id`: `None`;
+  - operator plan: `creates_shadow_candidate=false`,
+    `creates_executable_execution_intent=false`, `places_order=false`,
+    `calls_order_lifecycle=false`, `live_submit_allowed=false`.
+- Interpretation:
+  - the deployed RTF-002 API is reachable and uses the new post-submit-gated
+    strategy planning path;
+  - the API correctly refuses fresh strategy planning while the current BNB
+    runtime-owned active position still occupies the active-position slot;
+  - no shadow candidate, intent, order, submit, close, withdrawal, or transfer
+    was created.
+
 ## 2026-06-12 (RTF-002 API / Script Dry-run Entry)
 
 - Confirmed current mainline workspace and branch before implementation:
