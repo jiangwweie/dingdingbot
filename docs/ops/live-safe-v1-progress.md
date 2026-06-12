@@ -7988,3 +7988,74 @@ Use this file for session progress and handoff notes.
   - the next live move is to connect a real runtime-compatible signal to the
     same bridge and then resolve fresh submit authorization / action-time
     official submit preview.
+
+## 2026-06-13 (RTF-059 Fresh Authorization / Official Handoff Fixture)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`.
+- Purpose:
+  - prove the downstream path after executable readiness is ready;
+  - ensure the consumed submit authorization is not reused;
+  - bind or create a fresh submit authorization, generate a valid official
+    handoff, and touch the existing official submit endpoint only in
+    disabled-smoke mode.
+- Local code changes:
+  - added `scripts/runtime_fresh_authorization_official_handoff_fixture.py`;
+  - added
+    `tests/unit/test_runtime_fresh_authorization_official_handoff_fixture.py`;
+  - the fixture composes existing helpers:
+    `runtime_official_submit_handoff_from_readiness.py`
+    -> `runtime_fresh_submit_authorization_binding_api_flow.py`
+    -> `runtime_official_submit_handoff_from_readiness.py`
+    -> `runtime_official_submit_disabled_smoke_from_handoff.py`;
+  - the binding and disabled-smoke API clients are local fakes, so the fixture
+    is repeatable without server state.
+- Local verification:
+  - `python3 -m py_compile scripts/runtime_fresh_authorization_official_handoff_fixture.py tests/unit/test_runtime_fresh_authorization_official_handoff_fixture.py`;
+  - `pytest -q tests/unit/test_runtime_fresh_authorization_official_handoff_fixture.py tests/unit/test_runtime_fresh_submit_authorization_binding.py tests/unit/test_runtime_fresh_submit_authorization_resolution.py tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_api_flow.py tests/unit/test_runtime_official_submit_disabled_smoke_from_handoff.py`;
+  - result: `36 passed`;
+  - adjacent ready-signal bridge regression:
+    `pytest -q tests/unit/test_runtime_fresh_signal_readiness_fixture.py tests/unit/test_runtime_fresh_authorization_official_handoff_fixture.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py`;
+  - result: `13 passed`.
+- Local fixture artifact:
+  - report:
+    `output/rtf059-fresh-authorization-official-handoff/fixture-report.json`;
+  - status:
+    `ready_fresh_authorization_official_handoff_fixture`;
+  - stage statuses:
+    - initial handoff:
+      `blocked`;
+    - binding:
+      `created_intent_and_authorization`;
+    - final handoff:
+      `ready_for_official_submit_call`;
+    - disabled smoke:
+      `disabled_smoke_passed`;
+  - fresh submit authorization:
+    `fresh-submit-auth-rtf059`;
+  - exchange submit execution enabled:
+    `False`;
+  - exchange write:
+    `False`;
+  - `OrderLifecycle` called:
+    `False`.
+- Safety:
+  - official endpoint is called only by the disabled-smoke stage;
+  - `owner_confirmed_for_first_real_submit_action=false`;
+  - no real gateway action is requested;
+  - no exchange submit is enabled;
+  - no exchange write is called;
+  - no order is created;
+  - no `OrderLifecycle` is called;
+  - no runtime budget is mutated;
+  - no withdrawal or transfer is created.
+- Execution semantics:
+  - RTF-059 proves the ready branch can advance from executable readiness to
+    fresh authorization and official handoff preview without replaying the
+    consumed authorization;
+  - the next real live step still requires a real runtime-compatible signal,
+    real persisted records, official FinalGate/readiness evidence, and
+    action-time real-submit confirmation;
+  - this proof moves the mainline closer to runtime-level bounded attempts
+    while preserving one-shot compatibility as historical/recovery surface.
