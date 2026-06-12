@@ -7009,3 +7009,57 @@ Use this file for session progress and handoff notes.
     tests/unit/test_runtime_next_attempt_observation_cycle_api.py
     tests/unit/test_runtime_next_attempt_observation_cycle.py`;
   - result: `15 passed`.
+
+## 2026-06-13 (RTF-045 Ready Signal Monitor)
+
+- Reused the existing runtime next-attempt observation monitor as the
+  repeatable ready-signal capture loop for the active RBR/ADA shadow runtime.
+- Runtime:
+  - `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`;
+  - strategy: `RBR-001` / `RBR-001-v0`;
+  - symbol / side: `ADA/USDT:USDT` / `short`;
+  - runtime status: `active`;
+  - execution enabled: `false`;
+  - shadow mode: `true`.
+- Local proof:
+  - `pytest -q tests/unit/test_runtime_next_attempt_observation_monitor.py
+    tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py
+    tests/unit/test_runtime_next_attempt_observation_cycle_api.py`;
+  - result: `15 passed`.
+- Tokyo monitor probe:
+  - remote report:
+    `/home/ubuntu/brc-deploy/app/current/reports/rtf045-ready-signal-monitor/20260613Trtf045/ready-signal-monitor.json`;
+  - local copy:
+    `output/rtf045-tokyo/ready-signal-monitor.json`;
+  - status: `waiting_for_signal`;
+  - cycles requested: `3`;
+  - cycles completed: `3`;
+  - ready for prepare: `false`;
+  - ready for final gate preflight: `false`;
+  - latest blocker:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`.
+- Cycle summaries:
+  - cycle `1`: `waiting_for_signal`;
+  - cycle `2`: `waiting_for_signal`;
+  - cycle `3`: `waiting_for_signal`.
+- Meaning:
+  - the active shadow runtime can be monitored repeatedly through the official
+    observation API path;
+  - the monitor will stop when a runtime-compatible ready signal appears;
+  - current market data still does not produce a ready RBR/ADA short signal;
+  - the system correctly waits instead of creating candidate or submit records.
+- Safety:
+  - `allow_prepare_records`: `false`;
+  - monitor only: `true`;
+  - prepare records created: `false`;
+  - shadow candidate created: `false`;
+  - runtime execution intent draft created: `false`;
+  - recorded execution intent created: `false`;
+  - submit authorization created: `false`;
+  - protection plan created: `false`;
+  - local registration armed: `false`;
+  - exchange submit armed: `false`;
+  - execute real submit: `false`;
+  - no order, `OrderLifecycle`, exchange write, position open/close,
+    withdrawal, transfer, attempt counter mutation, or runtime budget mutation
+    occurred.
