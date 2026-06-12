@@ -7726,3 +7726,99 @@ Use this file for session progress and handoff notes.
     runtime-compatible signal appears;
   - the current no-trade result is caused by strategy semantics
     (`strategy_signal_not_would_enter`), not by post-submit evidence plumbing.
+
+## 2026-06-13 (RTF-056 Fresh Signal Prepare Loop)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - code commit:
+    `651c2d83 feat(runtime): add fresh signal prepare loop`.
+- Purpose:
+  - provide one non-executing operator entry for the runtime mainline after a
+    submitted attempt;
+  - require post-submit finalize before fresh-signal observation / prepare;
+  - allow shadow prepare records only when a fresh runtime-compatible signal is
+    ready and `--allow-prepare-records` is explicitly supplied;
+  - avoid manually running separate finalize, observation, and prepare commands
+    in the normal loop.
+- Local code changes:
+  - added `scripts/runtime_fresh_signal_prepare_loop.py`;
+  - added `tests/unit/test_runtime_fresh_signal_prepare_loop.py`;
+  - the loop composes:
+    `runtime_post_submit_finalize_api_flow.py`
+    -> `runtime_next_attempt_observation_api_prepare_flow.py`;
+  - the loop writes separate post-submit, observation/prepare, and signal-input
+    artifacts under one output directory.
+- Local verification:
+  - `python3 -m py_compile scripts/runtime_fresh_signal_prepare_loop.py tests/unit/test_runtime_fresh_signal_prepare_loop.py`;
+  - `pytest -q tests/unit/test_runtime_fresh_signal_prepare_loop.py tests/unit/test_runtime_next_attempt_observation_api_prepare_flow.py tests/unit/test_runtime_next_attempt_observation_monitor.py tests/unit/test_runtime_post_submit_finalize_api_flow.py`;
+  - result: `21 passed`;
+  - adjacent regression:
+    `pytest -q tests/unit/test_runtime_post_submit_next_attempt_cycle.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_active_observation_loop.py tests/unit/test_runtime_active_observation_supervisor.py tests/unit/test_runtime_active_observation_followup.py tests/unit/test_runtime_active_observation_status.py`;
+  - result: `52 passed`.
+- Tokyo deployment:
+  - target head:
+    `651c2d83056e375067b916a9086453745d5a45bb`;
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-651c2d83-20260613Trtf056-fresh-signal-loop`;
+  - plan artifact:
+    `output/rtf056-tokyo/git-deploy-plan-651c2d83.json`;
+  - owner packet artifact:
+    `output/rtf056-tokyo/owner-git-deploy-packet-651c2d83.json`;
+  - apply artifact:
+    `output/rtf056-tokyo/git-deploy-applied-651c2d83.json`;
+  - postdeploy verification:
+    `output/rtf056-tokyo/postdeploy-verify-651c2d83.json`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo fresh-signal loop evidence:
+  - remote report directory:
+    `/home/ubuntu/brc-deploy/reports/rtf056-fresh-signal-prepare-loop/20260613Trtf056-651c2d83`;
+  - local mirror:
+    `output/rtf056-tokyo/remote-report-20260613Trtf056-651c2d83`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - report:
+    `avax-fresh-signal-prepare-loop.json`;
+  - command mode:
+    `--allow-prepare-records` supplied, but prepare records are conditional on
+    a ready strategy signal;
+  - loop status:
+    `waiting_for_signal`;
+  - post-submit status:
+    `finalized_ready_for_next_attempt`;
+  - post-submit authorization:
+    `runtime-submit-authorization-intent_rt_6ca3cecd63fafbd1d25760df`;
+  - observation status:
+    `waiting_for_signal`;
+  - signal evaluation status:
+    `observe_only`;
+  - signal evaluation:
+    `runtime-signal-input:strategy-runtime-95655873b76c:BTPC-001:1781290800000`;
+  - blocker:
+    `strategy_signal_not_ready_for_shadow_candidate_prepare`;
+  - prepared authorization:
+    `None`.
+- Safety:
+  - no pre-submit rehearsal was called;
+  - no local registration was armed;
+  - no exchange submit was armed;
+  - no exchange write was called;
+  - no order was created;
+  - no `OrderLifecycle` was called;
+  - no attempt counter was mutated by the script;
+  - no runtime budget was mutated by the script;
+  - no shadow candidate, runtime intent draft, recorded execution intent,
+    submit authorization, or protection plan was created because the signal was
+    not ready;
+  - no withdrawal or transfer was created.
+- Execution semantics:
+  - RTF-056 turns post-submit finalize plus fresh signal observation into a
+    single repeatable runtime loop entry;
+  - current AVAX state remains a valid no-trade decision under strategy
+    semantics;
+  - once the signal becomes `ready_for_prepare`, the same loop can either stop
+    for review or create shadow prepare records when explicitly allowed;
+  - real submit still remains downstream of official FinalGate, readiness,
+    action-time evidence, protection, and official submit path.
