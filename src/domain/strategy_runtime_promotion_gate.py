@@ -113,6 +113,11 @@ class FirstRealSubmitConfirmationFacts(StrategyRuntimePromotionGateModel):
         min_length=1,
         max_length=300,
     )
+    exchange_submit_execution_result_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=540,
+    )
     runtime_submit_rehearsal_id: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -437,9 +442,17 @@ def _check_first_real_submit_confirmations(
             "first_real_submit_exchange_submit_enablement_decision_id_missing"
         )
         missing_owner_decisions.append("exchange_submit_enablement_decision_id")
-    if not facts.runtime_submit_rehearsal_id:
-        blockers.append("first_real_submit_runtime_submit_rehearsal_id_missing")
-        missing_owner_decisions.append("runtime_submit_rehearsal_id")
+    if (
+        not facts.runtime_submit_rehearsal_id
+        and not facts.exchange_submit_execution_result_id
+    ):
+        blockers.append(
+            "first_real_submit_runtime_submit_rehearsal_or_execution_result_"
+            "id_missing"
+        )
+        missing_owner_decisions.append(
+            "runtime_submit_rehearsal_or_execution_result_id"
+        )
     if not facts.deployment_readiness_evidence_id:
         blockers.append("first_real_submit_deployment_readiness_evidence_id_missing")
         missing_owner_decisions.append("deployment_readiness_evidence_id")

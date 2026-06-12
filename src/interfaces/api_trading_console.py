@@ -91,6 +91,7 @@ from src.domain.runtime_execution_exchange_submit_action_authorization import (
 )
 from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionResult,
+    RuntimeExecutionExchangeSubmitExecutionStatus,
 )
 from src.domain.runtime_execution_submit_outcome_review import (
     RuntimeExecutionSubmitOutcomeReview,
@@ -479,6 +480,7 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
     trusted_submit_fact_snapshot_id: Optional[str] = None,
     local_registration_enablement_decision_id: Optional[str] = None,
     exchange_submit_enablement_decision_id: Optional[str] = None,
+    exchange_submit_execution_result_id: Optional[str] = None,
     runtime_submit_rehearsal_id: Optional[str] = None,
     deployment_readiness_evidence_id: Optional[str] = None,
     owner_real_submit_authorization_id: Optional[str] = None,
@@ -551,6 +553,7 @@ async def runtime_strategy_promotion_gate_preview_for_runtime(
         exchange_submit_enablement_decision_id=(
             exchange_submit_enablement_decision_id
         ),
+        exchange_submit_execution_result_id=exchange_submit_execution_result_id,
         runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
         deployment_readiness_evidence_id=deployment_readiness_evidence_id,
         owner_real_submit_authorization_id=owner_real_submit_authorization_id,
@@ -624,6 +627,7 @@ async def runtime_strategy_live_enablement_preview(
     trusted_submit_fact_snapshot_id: Optional[str] = None,
     local_registration_enablement_decision_id: Optional[str] = None,
     exchange_submit_enablement_decision_id: Optional[str] = None,
+    exchange_submit_execution_result_id: Optional[str] = None,
     runtime_submit_rehearsal_id: Optional[str] = None,
     deployment_readiness_evidence_id: Optional[str] = None,
     owner_real_submit_authorization_id: Optional[str] = None,
@@ -706,6 +710,7 @@ async def runtime_strategy_live_enablement_preview(
         exchange_submit_enablement_decision_id=(
             exchange_submit_enablement_decision_id
         ),
+        exchange_submit_execution_result_id=exchange_submit_execution_result_id,
         runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
         deployment_readiness_evidence_id=deployment_readiness_evidence_id,
         owner_real_submit_authorization_id=owner_real_submit_authorization_id,
@@ -713,6 +718,14 @@ async def runtime_strategy_live_enablement_preview(
         explicit_owner_real_submit_authorization=(
             explicit_owner_real_submit_authorization
         ),
+    )
+    (
+        execution_result_proves_submit,
+        execution_result_blockers,
+        execution_result_warnings,
+    ) = await _validate_exchange_submit_execution_result_proof(
+        runtime_instance_id=runtime_instance_id,
+        exchange_submit_execution_result_id=exchange_submit_execution_result_id,
     )
     return build_strategy_runtime_live_enablement_preview(
         runtime=runtime,
@@ -725,10 +738,14 @@ async def runtime_strategy_live_enablement_preview(
         owner_real_submit_authorization_present=(
             owner_real_submit_authorization_present
         ),
-        submit_technical_rehearsal_passed=submit_technical_rehearsal_passed,
+        submit_technical_rehearsal_passed=(
+            submit_technical_rehearsal_passed or execution_result_proves_submit
+        ),
         submit_adapter_implemented=submit_adapter_implemented,
         staged_submit_chain_available=staged_submit_chain_available,
         forbidden_execution_flags=forbidden_execution_flags or [],
+        additional_blockers=execution_result_blockers,
+        additional_warnings=execution_result_warnings,
     )
 
 
@@ -995,6 +1012,7 @@ async def runtime_strategy_promotion_gate_preview(
     trusted_submit_fact_snapshot_id: Optional[str] = None,
     local_registration_enablement_decision_id: Optional[str] = None,
     exchange_submit_enablement_decision_id: Optional[str] = None,
+    exchange_submit_execution_result_id: Optional[str] = None,
     runtime_submit_rehearsal_id: Optional[str] = None,
     deployment_readiness_evidence_id: Optional[str] = None,
     owner_real_submit_authorization_id: Optional[str] = None,
@@ -1076,6 +1094,9 @@ async def runtime_strategy_promotion_gate_preview(
                 ),
                 exchange_submit_enablement_decision_id=(
                     exchange_submit_enablement_decision_id
+                ),
+                exchange_submit_execution_result_id=(
+                    exchange_submit_execution_result_id
                 ),
                 runtime_submit_rehearsal_id=runtime_submit_rehearsal_id,
                 deployment_readiness_evidence_id=deployment_readiness_evidence_id,
@@ -4075,6 +4096,95 @@ async def _strategy_runtime_promotion_gate_service() -> Any:
     service = StrategyRuntimePromotionGateService()
     setattr(api_module, "_strategy_runtime_promotion_gate_service", service)
     return service
+
+
+async def _validate_exchange_submit_execution_result_proof(
+    *,
+    runtime_instance_id: str,
+    exchange_submit_execution_result_id: str | None,
+) -> tuple[bool, list[str], list[str]]:
+    """Validate a durable first-real-submit result as submit technical proof.
+
+    This is deliberately stricter than checking an id string. A consumed
+    authorization cannot be rehearsed again because its local orders may now be
+    FILLED/CANCELED with exchange artifacts. The durable execution-result row
+    is the replay-safe proof for that path.
+    """
+
+    result_id = str(exchange_submit_execution_result_id or "").strip()
+    if not result_id:
+        return False, [], []
+
+    from src.interfaces import api as api_module
+
+    repo = getattr(
+        api_module,
+        "_runtime_exchange_submit_execution_result_repository",
+        None,
+    )
+    if repo is None:
+        from src.infrastructure.pg_runtime_execution_exchange_submit_execution_result_repository import (
+            PgRuntimeExecutionExchangeSubmitExecutionResultRepository,
+        )
+
+        repo = PgRuntimeExecutionExchangeSubmitExecutionResultRepository()
+        setattr(
+            api_module,
+            "_runtime_exchange_submit_execution_result_repository",
+            repo,
+        )
+
+    result = await repo.get(result_id)
+    if result is None:
+        return False, ["exchange_submit_execution_result_not_found"], []
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if result.runtime_instance_id != runtime_instance_id:
+        blockers.append("exchange_submit_execution_result_runtime_mismatch")
+    if result.status != (
+        RuntimeExecutionExchangeSubmitExecutionStatus
+        .EXCHANGE_SUBMIT_ORDERS_SUBMITTED
+    ):
+        blockers.append("exchange_submit_execution_result_not_submitted")
+    if result.blockers:
+        blockers.append("exchange_submit_execution_result_has_blockers")
+    if not result.exchange_submit_execution_enabled:
+        blockers.append("exchange_submit_execution_result_execution_not_enabled")
+    if not result.real_exchange_submit_adapter_executed:
+        blockers.append("exchange_submit_execution_result_adapter_not_executed")
+    if not result.exchange_called or not result.exchange_order_submitted:
+        blockers.append("exchange_submit_execution_result_exchange_not_called")
+    if not result.order_lifecycle_submit_called:
+        blockers.append("exchange_submit_execution_result_lifecycle_not_called")
+    if result.execution_intent_status_changed:
+        blockers.append("exchange_submit_execution_result_changed_intent_status")
+    if result.owner_bounded_execution_called:
+        blockers.append("exchange_submit_execution_result_called_owner_bounded_execution")
+    if result.withdrawal_or_transfer_created:
+        blockers.append("exchange_submit_execution_result_created_withdrawal_or_transfer")
+    if not result.entry_exchange_order_id:
+        blockers.append("exchange_submit_execution_result_entry_exchange_id_missing")
+    if not result.protection_exchange_order_ids:
+        blockers.append(
+            "exchange_submit_execution_result_protection_exchange_ids_missing"
+        )
+    if blockers:
+        return False, _dedupe_text(blockers), warnings
+
+    warnings.append("exchange_submit_execution_result_used_as_submit_proof")
+    return True, [], warnings
+
+
+def _dedupe_text(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value)
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
 
 
 async def _runtime_execution_intent_adapter_service(

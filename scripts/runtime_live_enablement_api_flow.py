@@ -306,6 +306,9 @@ def _query_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "exchange_submit_enablement_decision_id": (
             args.exchange_submit_enablement_decision_id
         ),
+        "exchange_submit_execution_result_id": (
+            args.exchange_submit_execution_result_id
+        ),
         "runtime_submit_rehearsal_id": args.runtime_submit_rehearsal_id,
         "deployment_readiness_evidence_id": args.deployment_readiness_evidence_id,
         "owner_real_submit_authorization_id": args.owner_real_submit_authorization_id,
@@ -397,6 +400,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--trusted-submit-fact-snapshot-id")
     parser.add_argument("--local-registration-enablement-decision-id")
     parser.add_argument("--exchange-submit-enablement-decision-id")
+    parser.add_argument("--exchange-submit-execution-result-id")
     parser.add_argument("--runtime-submit-rehearsal-id")
     parser.add_argument("--deployment-readiness-evidence-id")
     parser.add_argument("--owner-real-submit-authorization-id")

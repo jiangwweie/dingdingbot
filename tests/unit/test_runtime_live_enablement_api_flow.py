@@ -160,12 +160,14 @@ def test_live_enablement_api_flow_keeps_blocked_preview_non_mutating():
 def test_live_enablement_api_flow_normalizes_empty_query_ids_to_missing():
     query = _clean_query(
         {
+            "exchange_submit_execution_result_id": "",
             "runtime_submit_rehearsal_id": "",
             "owner_real_submit_authorization_id": " owner-real-1 ",
             "forbidden_execution_flags": ["", "unsafe_flag"],
         }
     )
 
+    assert query["exchange_submit_execution_result_id"] is None
     assert query["runtime_submit_rehearsal_id"] is None
     assert query["owner_real_submit_authorization_id"] == "owner-real-1"
     assert query["forbidden_execution_flags"] == ["unsafe_flag"]

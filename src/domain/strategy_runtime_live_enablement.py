@@ -119,6 +119,8 @@ def build_strategy_runtime_live_enablement_preview(
     submit_adapter_implemented: bool,
     staged_submit_chain_available: bool = False,
     forbidden_execution_flags: list[str] | None = None,
+    additional_blockers: list[str] | None = None,
+    additional_warnings: list[str] | None = None,
 ) -> StrategyRuntimeLiveEnablementPreview:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -166,6 +168,8 @@ def build_strategy_runtime_live_enablement_preview(
     if forbidden_flags:
         blockers.append("forbidden_execution_flags_present")
         blockers.extend(f"forbidden_{flag}" for flag in forbidden_flags)
+    blockers.extend(additional_blockers or [])
+    warnings.extend(additional_warnings or [])
 
     status = (
         StrategyRuntimeLiveEnablementPreviewStatus.BLOCKED
