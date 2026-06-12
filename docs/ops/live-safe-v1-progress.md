@@ -16,6 +16,61 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-032 Full Next-attempt Submit-preparation Cycle)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `df7e1ed2`.
+- Added the full non-executing next-attempt submit-preparation cycle:
+  - `scripts/runtime_full_next_attempt_submit_cycle.py`;
+  - composes RTF-030 post-submit next-attempt cycle with RTF-031
+    cycle-to-readiness / handoff bridge;
+  - supports `--cycle-packet-json` so existing RTF-030 artifacts can be reused
+    without rerunning the post-submit / strategy planning half.
+- Full-cycle behavior:
+  - fresh strategy signal observe-only: returns `waiting_for_signal` and does
+    not run executable readiness;
+  - strategy planning ready but readiness evidence missing: returns
+    `ready_for_final_gate_preflight`;
+  - readiness ready but no fresh submit authorization: returns
+    `ready_for_fresh_submit_authorization`;
+  - readiness ready plus fresh submit authorization: returns
+    `ready_for_official_submit_call`;
+  - official submit endpoint is never called by this script.
+- This stage gives the mainline one repeatable operator/automation entry:
+  - `post-submit finalize`;
+  - `fresh strategy signal planning`;
+  - `executable-submit readiness`;
+  - `official-submit handoff preview`;
+  - no order/exchange/OrderLifecycle side effect.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_post_submit_next_attempt_cycle.py tests/unit/test_runtime_cycle_executable_submit_handoff.py tests/unit/test_runtime_executable_submit_readiness_api_flow.py tests/unit/test_runtime_official_submit_handoff_api_flow.py`
+    with `21 passed`;
+  - `python3 -m compileall -q scripts/runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py`;
+  - `git diff --check`;
+  - `python3 scripts/runtime_full_next_attempt_submit_cycle.py --help`.
+- Deployment:
+  - not deployed in this stage;
+  - current Tokyo code remains `ed88fbb2`;
+  - this stage is local proof plus tracked mainline code.
+- Safety:
+  - no official submit endpoint was called;
+  - no pre-submit rehearsal retry was added;
+  - no local registration was armed;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no order was created or submitted;
+  - no runtime budget was mutated by the script;
+  - no position was opened or closed;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `94%` to `95%`;
+  - next target is Tokyo deployment / integration verification for the
+    full-cycle scripts, then live observation can wait for a real
+    `ready_for_final_gate_preflight` signal and continue through the same
+    readiness / handoff path.
+
 ## 2026-06-13 (RTF-031 Cycle to Executable Readiness / Official Handoff Bridge)
 
 - Confirmed current mainline workspace and branch before implementation:
