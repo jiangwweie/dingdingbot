@@ -861,6 +861,53 @@ def test_execute_blocks_without_prearmed_exchange_submit_evidence(monkeypatch):
 def test_execute_calls_real_submit_only_with_prearmed_evidence(monkeypatch):
     monkeypatch.setenv(APPROVAL_ENV, _approval_value("auth-1"))
     client = _FakeClient()
+    reconciliation_calls = []
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="execute",
+            authorization_id="auth-1",
+            execute_real_submit=True,
+            next_attempt_symbol="AVAX/USDT:USDT",
+            trusted_submit_fact_snapshot_id="facts-1",
+            submit_idempotency_policy_id="idem-1",
+            attempt_outcome_policy_id="policy-1",
+            protection_creation_failure_policy_id="protect-fail-1",
+            local_registration_enablement_decision_id="local-enable-1",
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+            exchange_submit_adapter_enablement_id="exchange-adapter-enable-1",
+            exchange_submit_action_authorization_id="exchange-action-1",
+            deployment_readiness_evidence_id="gateway-ready-1",
+            exchange_submit_adapter_result_id="exchange-adapter-1",
+        ),
+        post_submit_reconciliation_runner=lambda symbol: reconciliation_calls.append(symbol)
+        or {
+            "exit_code": 0,
+            "body": {"status": "recorded", "results": [{"is_consistent": True}]},
+            "blockers": [],
+            "warnings": [],
+        },
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["execution_result_id"] == "exec-1"
+    assert os.environ[APPROVAL_ENV] == "auth-1:first-real-submit:real_gateway_action"
+    assert reconciliation_calls == ["AVAX/USDT:USDT"]
+    assert report["ids"]["post_submit_reconciliation_report_status"] == "recorded"
+    paths = [call["path"] for call in client.calls]
+    assert any("first-real-submit-actions" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
+
+
+def test_execute_blocks_when_post_submit_reconciliation_symbol_missing(monkeypatch):
+    monkeypatch.setenv(APPROVAL_ENV, _approval_value("auth-1"))
+    client = _FakeClient()
     flow = FirstRealSubmitApiFlow(
         client=client,
         config=FlowConfig(
@@ -880,18 +927,19 @@ def test_execute_calls_real_submit_only_with_prearmed_evidence(monkeypatch):
             deployment_readiness_evidence_id="gateway-ready-1",
             exchange_submit_adapter_result_id="exchange-adapter-1",
         ),
+        post_submit_reconciliation_runner=lambda symbol: {
+            "exit_code": 0,
+            "body": {"status": "recorded"},
+            "blockers": [],
+            "warnings": [],
+        },
     )
 
     report = flow.run()
 
-    assert report["blockers"] == []
-    assert report["ids"]["execution_result_id"] == "exec-1"
-    assert os.environ[APPROVAL_ENV] == "auth-1:first-real-submit:real_gateway_action"
+    assert "post_submit_reconciliation_symbol_missing" in report["blockers"]
     paths = [call["path"] for call in client.calls]
     assert any("first-real-submit-actions" in path for path in paths)
-    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert not any("runtime-execution-local-registration-action-authorizations" in path for path in paths)
-    assert not any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
 
 
 def test_env_loader_fills_operator_auth_from_file(monkeypatch, tmp_path):

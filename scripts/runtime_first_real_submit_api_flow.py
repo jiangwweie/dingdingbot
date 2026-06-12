@@ -13,13 +13,14 @@ import argparse
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -81,6 +82,8 @@ class FlowConfig:
     execute_real_submit: bool = False
     record_attempt_consumption: bool = False
     record_post_submit_accounting: bool = True
+    record_post_submit_reconciliation: bool = True
+    post_submit_reconciliation_symbol: str | None = None
     adapter_result_store_implemented: bool = True
     real_adapter_boundary_implemented: bool = True
     explain_disabled_smoke_prerequisites: bool = True
@@ -176,9 +179,18 @@ class UrlLibApiClient:
 
 
 class FirstRealSubmitApiFlow:
-    def __init__(self, *, client: ApiClient, config: FlowConfig) -> None:
+    def __init__(
+        self,
+        *,
+        client: ApiClient,
+        config: FlowConfig,
+        post_submit_reconciliation_runner: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
         self._client = client
         self._config = config
+        self._post_submit_reconciliation_runner = (
+            post_submit_reconciliation_runner or _run_post_submit_reconciliation
+        )
         self.state = FlowState()
         self._seed_explicit_evidence_ids()
 
@@ -227,6 +239,8 @@ class FirstRealSubmitApiFlow:
                 self._execute_first_real_submit()
                 if self._config.record_post_submit_accounting:
                     self._record_post_submit_accounting()
+                    if self._config.record_post_submit_reconciliation:
+                        self._record_post_submit_reconciliation()
         return self._report()
 
     def _inspect(self) -> None:
@@ -958,6 +972,39 @@ class FirstRealSubmitApiFlow:
             _body(settlement).get("settlement_id"),
         )
 
+    def _record_post_submit_reconciliation(self) -> None:
+        symbol = (
+            self._config.post_submit_reconciliation_symbol
+            or self._config.next_attempt_symbol
+            or self.state.ids.get("symbol")
+        )
+        if not symbol:
+            self.state.add_blockers(["post_submit_reconciliation_symbol_missing"])
+            return
+        result = self._post_submit_reconciliation_runner(symbol)
+        body = result.get("body") if isinstance(result.get("body"), dict) else {}
+        record = {
+            "name": "refresh_post_submit_reconciliation_read_model",
+            "method": "SCRIPT",
+            "path": "scripts/runtime_refresh_reconciliation_read_model.py",
+            "query_keys": ["persist", "symbol"],
+            "http_status": result.get("exit_code"),
+            "status": body.get("status") if isinstance(body, dict) else None,
+            "detail": result.get("error"),
+            "id_summary": {},
+            "blockers": list(result.get("blockers") or []),
+            "warnings": list(result.get("warnings") or []),
+        }
+        self.state.steps.append(record)
+        if result.get("exit_code") != 0:
+            self.state.add_blockers(["post_submit_reconciliation_refresh_failed"])
+        self.state.add_blockers(result.get("blockers"))
+        self.state.add_warnings(result.get("warnings"))
+        self.state.remember(
+            "post_submit_reconciliation_report_status",
+            body.get("status") if isinstance(body, dict) else None,
+        )
+
     def _preview_enablement_packet(self) -> None:
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
@@ -1283,6 +1330,79 @@ def _query_values(query: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _run_post_submit_reconciliation(symbol: str) -> dict[str, Any]:
+    command = [
+        sys.executable,
+        str(ROOT_DIR / "scripts" / "runtime_refresh_reconciliation_read_model.py"),
+        "--symbol",
+        symbol,
+        "--persist",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=str(ROOT_DIR),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    body = _parse_json_from_text(completed.stdout)
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if completed.returncode != 0:
+        blockers.append("post_submit_reconciliation_script_nonzero_exit")
+    if not body:
+        blockers.append("post_submit_reconciliation_output_unparseable")
+    elif body.get("status") != "recorded":
+        blockers.append("post_submit_reconciliation_not_recorded")
+    for result in body.get("results") or []:
+        if not isinstance(result, dict):
+            continue
+        if result.get("severe_count", 0):
+            blockers.append("post_submit_reconciliation_severe_mismatch")
+        if result.get("warning_count", 0):
+            warnings.append("post_submit_reconciliation_warning_mismatch")
+        if result.get("is_consistent") is not True:
+            blockers.append("post_submit_reconciliation_not_consistent")
+    return {
+        "exit_code": completed.returncode,
+        "body": body,
+        "blockers": _dedupe_text(blockers),
+        "warnings": _dedupe_text(warnings),
+        "error": _truncate_text(completed.stderr),
+    }
+
+
+def _parse_json_from_text(text: str) -> dict[str, Any]:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end < start:
+        return {}
+    try:
+        value = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _dedupe_text(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value)
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+def _truncate_text(value: str | None, *, limit: int = 500) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    return text if len(text) <= limit else text[:limit] + "...[truncated]"
+
+
 def _load_env_file(path: str | None) -> None:
     if not path:
         return
@@ -1389,6 +1509,21 @@ def _parse_args(argv: list[str]) -> FlowConfig:
     )
     parser.add_argument("--execute-real-submit", action="store_true")
     parser.add_argument("--skip-post-submit-accounting", action="store_true")
+    parser.add_argument(
+        "--skip-post-submit-reconciliation",
+        action="store_true",
+        help=(
+            "Skip the post-submit reconciliation refresh. Use only when an "
+            "operator will run reconciliation manually in the same incident window."
+        ),
+    )
+    parser.add_argument(
+        "--post-submit-reconciliation-symbol",
+        help=(
+            "Symbol for post-submit reconciliation refresh. Defaults to "
+            "--next-attempt-symbol when omitted."
+        ),
+    )
     parser.add_argument("--adapter-result-store-implemented", action="store_true", default=True)
     parser.add_argument("--real-adapter-boundary-implemented", action="store_true", default=True)
     parser.add_argument(
@@ -1433,6 +1568,10 @@ def _parse_args(argv: list[str]) -> FlowConfig:
             args.record_attempt_consumption or args.mode == "execute"
         ),
         record_post_submit_accounting=not args.skip_post_submit_accounting,
+        record_post_submit_reconciliation=(
+            not args.skip_post_submit_reconciliation
+        ),
+        post_submit_reconciliation_symbol=args.post_submit_reconciliation_symbol,
         adapter_result_store_implemented=args.adapter_result_store_implemented,
         real_adapter_boundary_implemented=args.real_adapter_boundary_implemented,
         explain_disabled_smoke_prerequisites=(
