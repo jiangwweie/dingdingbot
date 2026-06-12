@@ -10082,3 +10082,130 @@ Use this file for session progress and handoff notes.
     prepare proof boundary;
   - the next mainline gap is to move from prepare proof to official FinalGate
     preflight and then post-submit finalize / next-attempt gate convergence.
+
+## 2026-06-13 (RTF-081 Official FinalGate Preflight Proof)
+
+- Scope:
+  - extend the RTF-079 official server-side prepare proof into official
+    FinalGate preflight;
+  - call official Trading Console `FastAPI` routes through `TestClient`;
+  - prove the prepared authorization can reach `ready_for_controlled_submit_adapter`;
+  - preserve non-executing boundaries.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_final_gate_preflight_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_final_gate_preflight_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf081-official-final-gate-preflight/`;
+  - contract report:
+    `output/rtf081-official-final-gate-preflight/contract-report.json`;
+  - preflight packet:
+    `output/rtf081-official-final-gate-preflight/preflight-packet.json`;
+  - FinalGate preview:
+    `output/rtf081-official-final-gate-preflight/final-gate-preview.json`;
+  - controlled submit plan:
+    `output/rtf081-official-final-gate-preflight/controlled-submit-plan.json`;
+  - controlled submit preflight:
+    `output/rtf081-official-final-gate-preflight/controlled-submit-preflight.json`;
+  - stdout mirror:
+    `output/rtf081-official-final-gate-preflight.stdout.json`.
+- Contract result:
+  - status:
+    `official_final_gate_preflight_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `signal-eval-rtf075-contract`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled submit plan:
+    `runtime-controlled-submit-plan-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled submit preflight:
+    `runtime-controlled-submit-preflight-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - Runtime FinalGate preview called through the official
+    `/runtime-final-gate-preview/order-candidates/{order_candidate_id}` route;
+  - controlled submit plan called through the official
+    `/runtime-execution-controlled-submit-plans/authorizations/{authorization_id}`
+    route;
+  - controlled submit preflight called through the official
+    `/runtime-execution-controlled-submit-preflights/authorizations/{authorization_id}`
+    route.
+- FinalGate / preflight result:
+  - FinalGate verdict:
+    `PASS`;
+  - FinalGate blockers:
+    `[]`;
+  - controlled submit plan status:
+    `ready_for_controlled_submit_adapter`;
+  - controlled submit preflight status:
+    `ready_for_controlled_submit_adapter`;
+  - preflight final gate verdict:
+    `PASS`;
+  - preflight preview only:
+    `true`;
+  - preflight blockers:
+    `[]`.
+- Checks:
+  - shadow contract passed:
+    `true`;
+  - right-tail runner preserved:
+    `true`;
+  - prepare authorization created:
+    `true`;
+  - FinalGate preview route called:
+    `true`;
+  - FinalGate verdict pass:
+    `true`;
+  - controlled submit plan route called:
+    `true`;
+  - controlled submit plan ready:
+    `true`;
+  - controlled submit preflight route called:
+    `true`;
+  - controlled submit preflight ready:
+    `true`;
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_final_gate_preflight_proof.py tests/unit/test_runtime_official_server_prepare_integration_proof.py`;
+  - result:
+    `6 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_final_gate_preflight_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_final_gate_preflight_proof.py --output-dir output/rtf081-official-final-gate-preflight`.
+- Safety:
+  - no PG write;
+  - no live exchange;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no attempt counter mutation;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-081 proves the official server-side prepare output can pass Runtime
+    FinalGate and controlled submit preflight locally;
+  - this is still an in-memory official-route proof, not Tokyo deployment;
+  - the next mainline gap is Tokyo verification of the same FinalGate preflight
+    proof, then non-executing submit adapter preview / local registration
+    boundary convergence.
