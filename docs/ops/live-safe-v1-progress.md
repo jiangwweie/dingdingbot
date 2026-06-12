@@ -16,6 +16,58 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-016 Official Evidence Chain Wrapper Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `04e09e0d`.
+- Added `scripts/runtime_official_evidence_chain_from_binding.py`:
+  - reads an RTF-013 fresh authorization binding report;
+  - extracts `fresh_submit_authorization_id` automatically;
+  - runs the existing official `runtime_first_real_submit_api_flow.py` in
+    `disabled-smoke` mode;
+  - keeps `owner_confirmed_for_first_real_submit_action=false`;
+  - runs evidence-preparation after the expected official prerequisite block;
+  - classifies the result as
+    `prepared_machine_evidence_blocked_before_local_order_adapter` when
+    machine evidence is prepared and the remaining blocker is
+    `RuntimeExecutionOrderLifecycleAdapterResult`.
+- Local proof:
+  - wrapper prepares/collects `trusted_submit_fact_snapshot_id`,
+    `submit_idempotency_policy_id`, and
+    `protection_creation_failure_policy_id`;
+  - wrapper refuses binding reports that do not contain a fresh submit
+    authorization ID;
+  - wrapper does not create orders, call OrderLifecycle, call exchange, mutate
+    runtime budget, or create withdrawal/transfer.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_first_real_submit_api_flow.py -k 'official_evidence_chain_from_binding or disabled_smoke_reports_missing_prerequisite_detail or disabled_smoke_prerequisite_probe_can_be_skipped'`
+    with `4 passed, 21 deselected`;
+  - `python3 -m compileall -q scripts/runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_official_evidence_chain_from_binding.py`;
+  - `git diff --check`.
+- Tokyo fact already observed before this wrapper existed:
+  - report:
+    `/home/ubuntu/brc-deploy/reports/rtf016-official-evidence-chain/20260613Trtf016-c419e1de/avax-btpc-sample-disabled-smoke-with-evidence-prep.json`;
+  - blocker:
+    `preview_disabled_first_real_submit_action_http_404`;
+  - warning:
+    `RuntimeExecutionOrderLifecycleAdapterResult not found`;
+  - prepared IDs:
+    `trusted_submit_fact_snapshot_id`,
+    `submit_idempotency_policy_id`,
+    `protection_creation_failure_policy_id`,
+    `post_submit_budget_settlement_persistence_evidence_id`.
+- Deployment:
+  - the wrapper is not yet deployed to Tokyo in this stage.
+- Safety:
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no local order was created by the wrapper;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-015 Persisted Draft Source Readiness Bridge Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
