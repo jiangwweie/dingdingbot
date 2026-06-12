@@ -16,6 +16,57 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-011 Official Submit Disabled Smoke From Handoff Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `cc890a92`.
+- Added `scripts/runtime_official_submit_disabled_smoke_from_handoff.py`:
+  - consumes a ready `RuntimeOfficialSubmitHandoffPacket`;
+  - refuses blocked handoff packets before calling the official endpoint;
+  - refuses `real_gateway_action` handoff packets;
+  - calls the existing official first-real-submit action endpoint only with
+    `owner_confirmed_for_first_real_submit_action=false`;
+  - expects the official response status
+    `exchange_submit_execution_disabled`;
+  - reports unexpected official endpoint status as a blocker.
+- Added focused tests:
+  - ready disabled-smoke handoff calls the official endpoint with frozen query
+    evidence IDs and `owner_confirmed_for_first_real_submit_action=false`;
+  - blocked handoff does not call the official endpoint;
+  - real-gateway handoff is refused by this disabled-smoke flow;
+  - unexpected official endpoint response is reported as blocked;
+  - CLI stdout remains JSON-only.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_official_submit_disabled_smoke_from_handoff.py tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_api_flow.py`
+    with `14 passed`;
+  - `python3 -m compileall -q scripts/runtime_official_submit_disabled_smoke_from_handoff.py tests/unit/test_runtime_official_submit_disabled_smoke_from_handoff.py`.
+- Deployment:
+  - not deployed in this stage;
+  - current Tokyo deployed release remains
+    `brc-runtime-governance-be9f91fa-20260612Trtf010-handoff-api-probe`.
+- Safety:
+  - the script can call the official first-real-submit endpoint only in
+    disabled-smoke mode;
+  - it does not request `real_gateway_action`;
+  - no exchange order submit is enabled;
+  - no `OrderLifecycle` call is expected;
+  - no `ExecutionIntent` is created;
+  - no withdrawal or transfer is created.
+
+## 2026-06-12 (Owner Correction: Legacy Pre-attempt Cleanup Must Not Be Forgotten)
+
+- Owner reiterated that historical pre-attempt / first-real-submit
+  compatibility material must be downgraded and isolated after the main runtime
+  chain is complete.
+- Program interpretation:
+  - do not remove these compatibility surfaces in the middle of current
+    runtime-chain convergence;
+  - do not let them remain as the default mental model after the runtime-level
+    bounded-auto-attempt path is proven;
+  - track the cleanup as a required follow-up item, not an optional nice-to-have.
+
 ## 2026-06-12 (RTF-010 Tokyo Deploy + Official Submit Handoff API Probe)
 
 - Confirmed current mainline workspace and branch before deployment:
