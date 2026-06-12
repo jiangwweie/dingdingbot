@@ -16,6 +16,49 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-015 Persisted Draft Source Readiness Bridge Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `2f0d170c`.
+- Added `RuntimePersistedDraftSourceReadinessBridgeService`:
+  - accepts `RuntimeStrategySignalIntentDraftSourcePacket` from RTF-014;
+  - refuses blocked or incomplete draft sources as strategy-planning blockers;
+  - materializes an explicit `RuntimeNextAttemptStrategyPlanningPacket`
+    compatibility evidence packet only for readiness consumption;
+  - marks `source_authorization_id` as `persisted-draft-source:*`, so it is
+    not confused with a consumable submit authorization;
+  - preserves the existing RTF-013 fresh submit authorization binding boundary.
+- Added API and script surfaces:
+  - `POST /api/trading-console/strategy-runtimes/{runtime_instance_id}/persisted-draft-source-readiness-previews`;
+  - `scripts/runtime_persisted_draft_source_readiness_api_flow.py`.
+- Local proof:
+  - a persisted ready draft source can produce
+    `ready_for_executable_submit` when current readiness evidence is complete;
+  - a blocked source remains blocked and carries source blockers through the
+    readiness packet;
+  - the API rejects runtime mismatches;
+  - the script posts a non-executing readiness request and reports safety
+    invariants.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_persisted_draft_source_readiness_bridge.py tests/unit/test_runtime_strategy_signal_intent_draft_source.py tests/unit/test_runtime_executable_submit_readiness_service_api.py tests/unit/test_trading_console_readmodels.py -k 'persisted_draft_source or intent_draft_source or executable_submit_readiness or trading_console_router_keeps_read_models_get_only_and_posts_allowlisted'`
+    with `17 passed, 50 deselected`;
+  - `python3 -m compileall -q` for the new bridge service, API, script, and
+    test file.
+- Deployment:
+  - not deployed in this stage.
+- Safety:
+  - no recorded `ExecutionIntent` was created;
+  - no official submit endpoint was called;
+  - no `real_gateway_action` was requested;
+  - no exchange write occurred;
+  - no exchange order submit occurred;
+  - no local order was created;
+  - no `OrderLifecycle` call occurred;
+  - no runtime state mutation occurred;
+  - no withdrawal or transfer occurred.
+
 ## 2026-06-12 (RTF-014 Persisted Strategy Signal Intent Draft Source Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:

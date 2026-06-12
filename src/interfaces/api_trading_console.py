@@ -344,6 +344,16 @@ class RuntimeExecutableSubmitReadinessPreviewRequest(BaseModel):
     non_executing: Literal[True] = True
 
 
+class RuntimePersistedDraftSourceReadinessPreviewRequest(BaseModel):
+    intent_draft_source_packet: RuntimeStrategySignalIntentDraftSourcePacket
+    evidence: RuntimeExecutableSubmitReadinessEvidence
+    first_real_submit_packet: RuntimeExecutionFirstRealSubmitEnablementPacket | None = None
+    additional_blockers: list[str] = Field(default_factory=list)
+    additional_warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    non_executing: Literal[True] = True
+
+
 class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
     readiness_packet: RuntimeExecutableSubmitReadinessPacket
     fresh_submit_authorization_id: str | None = Field(
@@ -1184,6 +1194,41 @@ async def runtime_executable_submit_readiness_preview(
             additional_warnings=[
                 *request.additional_warnings,
                 "trading_console_api_non_executing_preview",
+            ],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/strategy-runtimes/{runtime_instance_id}/persisted-draft-source-readiness-previews",
+    response_model=RuntimeExecutableSubmitReadinessPacket,
+)
+async def runtime_persisted_draft_source_readiness_preview(
+    runtime_instance_id: str,
+    request: RuntimePersistedDraftSourceReadinessPreviewRequest,
+) -> RuntimeExecutableSubmitReadinessPacket:
+    if request.intent_draft_source_packet.runtime_instance_id != runtime_instance_id:
+        raise HTTPException(
+            status_code=400,
+            detail="intent_draft_source_packet_runtime_mismatch",
+        )
+    from src.application.runtime_persisted_draft_source_readiness_bridge_service import (
+        RuntimePersistedDraftSourceReadinessBridgeService,
+    )
+
+    service = RuntimePersistedDraftSourceReadinessBridgeService()
+    try:
+        return await service.preview_from_intent_draft_source(
+            intent_draft_source_packet=request.intent_draft_source_packet,
+            evidence=request.evidence,
+            first_real_submit_packet=request.first_real_submit_packet,
+            additional_blockers=request.additional_blockers,
+            additional_warnings=[
+                *request.additional_warnings,
+                "trading_console_api_non_executing_persisted_draft_source_readiness_preview",
             ],
         )
     except RuntimeError as exc:
