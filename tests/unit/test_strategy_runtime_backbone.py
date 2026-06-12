@@ -736,6 +736,34 @@ async def test_trading_console_runtime_endpoints_are_read_only_shadow_views(monk
     assert detail.boundary.attempts_remaining == 2
 
 
+@pytest.mark.asyncio
+async def test_trading_console_runtime_view_reports_live_enabled_execution_mode(monkeypatch):
+    runtime = _runtime(status=StrategyRuntimeInstanceStatus.ACTIVE).enable_live_execution(
+        now_ms=123,
+        mutation_id="strategy-runtime-live-enable-unit",
+        owner_live_runtime_enablement_authorization_id="owner-live-runtime-auth-1",
+        owner_real_submit_authorization_id="owner-real-submit-auth-1",
+    )
+
+    class _FakeService:
+        async def list_runtimes(self, *, status=None, limit=100):
+            return [runtime]
+
+        async def get_runtime(self, runtime_instance_id: str):
+            assert runtime_instance_id == runtime.runtime_instance_id
+            return runtime
+
+    monkeypatch.setattr(api_module, "_strategy_runtime_service", _FakeService(), raising=False)
+
+    listed = await list_strategy_runtimes(status=None, limit=100)
+    detail = await get_strategy_runtime(runtime.runtime_instance_id)
+
+    assert listed[0].execution_enabled is True
+    assert listed[0].shadow_mode is False
+    assert listed[0].execution_mode == "runtime_live_enabled"
+    assert detail.execution_mode == "runtime_live_enabled"
+
+
 def test_existing_bounded_live_trial_authorization_stays_single_use_metadata_only():
     authorization = BoundedLiveTrialAuthorization(
         authorization_id="auth-1",

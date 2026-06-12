@@ -4511,7 +4511,11 @@ def _runtime_view(runtime: StrategyRuntimeInstance) -> StrategyRuntimeInspection
         policy_snapshot=runtime.policy_snapshot.model_dump(mode="json"),
         review_requirement=runtime.review_requirement.value,
         execution_enabled=runtime.execution_enabled,
-        execution_mode="shadow_disabled",
+        execution_mode=(
+            "runtime_live_enabled"
+            if runtime.execution_enabled and not runtime.shadow_mode
+            else "shadow_disabled"
+        ),
         shadow_mode=runtime.shadow_mode,
         created_at_ms=runtime.created_at_ms,
         updated_at_ms=runtime.updated_at_ms,
