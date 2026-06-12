@@ -16,6 +16,52 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-005 Tokyo Deploy + Release-aware Strategy Planning Probe)
+
+- Added the non-executing Tokyo rehearsal entry:
+  - `scripts/runtime_release_strategy_planning_rehearsal_from_reports.py`;
+  - tests:
+    `tests/unit/test_runtime_release_strategy_planning_rehearsal_from_reports.py`;
+  - focused local verification:
+    `pytest -q tests/unit/test_runtime_release_strategy_planning_rehearsal_from_reports.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_release.py tests/unit/test_runtime_next_attempt_release_from_reports.py tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py`
+    with `31 passed`;
+  - `python3 -m compileall scripts/runtime_release_strategy_planning_rehearsal_from_reports.py tests/unit/test_runtime_release_strategy_planning_rehearsal_from_reports.py src/application/runtime_next_attempt_strategy_planning_service.py`;
+  - `git diff --check`.
+- Deployed the current program branch to Tokyo using the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-da84d501-20260612Trtf005-release-strategy-probe`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/app/current`;
+  - service: `brc-owner-console-backend.service` active;
+  - health: `GET /api/health` returned `status=ok`,
+    `runtime_bound=true`, `live_ready=false`;
+  - deployment execution report:
+    `output/rtf005-tokyo/git-deploy-execution-da84d501.json`.
+- Ran the RTF-005 Tokyo release-aware strategy planning probe:
+  - remote report dir:
+    `/home/ubuntu/brc-deploy/reports/rtf005-release-strategy-planning/20260612Trtf005-175720`.
+- Current BNB blocked path:
+  - source release report: `next-attempt-release-blocked.json`;
+  - strategy planning report: `release-strategy-planning-blocked.json`;
+  - status: `blocked_by_release_gate`;
+  - planner called: `false`;
+  - order candidate ID: `null`.
+- Positive flat/review/gate-clear rehearsal:
+  - source release fixture: `next-attempt-release-ready-fixture.json`;
+  - strategy planning report: `release-strategy-planning-positive.json`;
+  - status: `ready_for_final_gate_preflight`;
+  - planner called: `true`;
+  - order candidate ID:
+    `rehearsal-order-candidate-eval-rtf005-release-rehearsal`;
+  - live submit allowed: `false`;
+  - execution intent created: `false`.
+- Safety:
+  - deploy effects reported no exchange call, no `ExecutionIntent`, no order,
+    and no `OrderLifecycle`;
+  - both rehearsal packets reported no PG read/write, no exchange write, no
+    executable `ExecutionIntent`, no order creation, no `OrderLifecycle`, no
+    position open/close, no runtime mutation, and no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-005 Release-ready Strategy Planning Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
