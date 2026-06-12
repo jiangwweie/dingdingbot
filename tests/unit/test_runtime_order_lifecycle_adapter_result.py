@@ -156,6 +156,55 @@ class _Lifecycle:
         order.status = OrderStatus.SUBMITTED
         return order
 
+    async def confirm_order(self, order_id: str, exchange_order_id=None):
+        order = self.orders.get(order_id)
+        if order is None:
+            raise ValueError(f"missing order {order_id}")
+        if exchange_order_id:
+            order.exchange_order_id = exchange_order_id
+        order.status = OrderStatus.OPEN
+        return order
+
+    async def update_order_filled(
+        self,
+        order_id: str,
+        filled_qty: Decimal,
+        average_exec_price: Decimal,
+    ):
+        order = self.orders.get(order_id)
+        if order is None:
+            raise ValueError(f"missing order {order_id}")
+        order.filled_qty = filled_qty
+        order.average_exec_price = average_exec_price
+        order.status = OrderStatus.FILLED
+        return order
+
+    async def update_order_partially_filled(
+        self,
+        order_id: str,
+        filled_qty: Decimal,
+        average_exec_price: Decimal,
+    ):
+        order = self.orders.get(order_id)
+        if order is None:
+            raise ValueError(f"missing order {order_id}")
+        order.filled_qty = filled_qty
+        order.average_exec_price = average_exec_price
+        order.status = OrderStatus.PARTIALLY_FILLED
+        return order
+
+
+class _PositionProjection:
+    def __init__(self) -> None:
+        self.entry_fill_orders = []
+
+    async def project_entry_fill(self, entry_order):
+        self.entry_fill_orders.append(entry_order)
+        return SimpleNamespace(
+            id=f"pos_{entry_order.signal_id}",
+            current_qty=entry_order.filled_qty,
+        )
+
 
 class _ExchangeGateway:
     def __init__(self, *, fail_on_client_order_id: str | None = None) -> None:
@@ -205,6 +254,13 @@ class _ExchangeGateway:
                 error_code="TEST_REJECT",
                 error_message=f"rejected {client_order_id}",
             )
+        status = (
+            OrderStatus.FILLED
+            if str(order_type).lower() == "market" and not reduce_only
+            else OrderStatus.OPEN
+        )
+        average_exec_price = Decimal("600") if status == OrderStatus.FILLED else None
+        filled_qty = amount if status == OrderStatus.FILLED else None
         return OrderPlacementResult(
             order_id=f"exchange-placement-{client_order_id}",
             exchange_order_id=f"ex-{client_order_id}",
@@ -217,7 +273,9 @@ class _ExchangeGateway:
             trigger_price=trigger_price,
             reduce_only=reduce_only,
             client_order_id=client_order_id,
-            status=OrderStatus.OPEN,
+            status=status,
+            filled_qty=filled_qty,
+            average_exec_price=average_exec_price,
         )
 
 
@@ -892,6 +950,7 @@ def _ready_exchange_submit_enablement_decision(preview):
 def _service_with_preview(
     preview,
     lifecycle=None,
+    position_projection_service=None,
     adapter_result_repo=None,
     exchange_submit_adapter_result_repo=None,
     local_registration_action_authorization_repo=None,
@@ -972,6 +1031,7 @@ def _service_with_preview(
         exchange_gateway_readiness_repository=exchange_gateway_readiness_repo,
         execution_recovery_repository=execution_recovery_repo,
         exchange_gateway=exchange_gateway,
+        position_projection_service=position_projection_service,
     )
 
     async def _preview_for_authorization(authorization_id: str):
@@ -998,6 +1058,7 @@ async def _ready_exchange_submit_execution_context(
 ):
     preview = _registration_preview()
     lifecycle = _Lifecycle()
+    position_projection = _PositionProjection()
     adapter_result_repo = _AdapterResultRepo()
     execution_result_repo = _ExchangeSubmitExecutionResultRepo()
     recovery_repo = _ExecutionRecoveryRepo()
@@ -1008,6 +1069,7 @@ async def _ready_exchange_submit_execution_context(
     service = _service_with_preview(
         preview,
         lifecycle=lifecycle,
+        position_projection_service=position_projection,
         adapter_result_repo=adapter_result_repo,
         exchange_submit_execution_result_repo=execution_result_repo,
         execution_recovery_repo=recovery_repo,
@@ -1056,6 +1118,8 @@ async def _ready_exchange_submit_execution_context(
         recovery_repo=recovery_repo,
         symbol=preview.symbol,
         exchange_decision=exchange_decision,
+        lifecycle=lifecycle,
+        position_projection=position_projection,
     )
 
 
@@ -3811,9 +3875,11 @@ async def test_service_exchange_submit_execution_submits_entry_and_protection():
     recovery_repo = _ExecutionRecoveryRepo()
     gateway = _ExchangeGateway()
     intent_repo = _IntentRepo(_runtime_intent(preview))
+    position_projection = _PositionProjection()
     service = _service_with_preview(
         preview,
         lifecycle=lifecycle,
+        position_projection_service=position_projection,
         adapter_result_repo=adapter_result_repo,
         exchange_submit_execution_result_repo=execution_result_repo,
         execution_recovery_repo=recovery_repo,
@@ -3879,17 +3945,51 @@ async def test_service_exchange_submit_execution_submits_entry_and_protection():
     assert result.protection_exchange_order_ids == [
         "ex-runtime-order-draft-auth-1-sl"
     ]
-    assert lifecycle.orders[
+    entry = lifecycle.orders["runtime-order-draft-auth-1-entry"]
+    protection = lifecycle.orders["runtime-order-draft-auth-1-sl"]
+    assert entry.status == OrderStatus.FILLED
+    assert entry.filled_qty == Decimal("0.016")
+    assert entry.average_exec_price == Decimal("600")
+    assert protection.status == OrderStatus.OPEN
+    assert protection.exchange_order_id == "ex-runtime-order-draft-auth-1-sl"
+    assert [order.id for order in position_projection.entry_fill_orders] == [
         "runtime-order-draft-auth-1-entry"
-    ].status == OrderStatus.SUBMITTED
-    assert lifecycle.orders[
-        "runtime-order-draft-auth-1-sl"
-    ].status == OrderStatus.SUBMITTED
+    ]
+    assert position_projection.entry_fill_orders[0].filled_qty == Decimal("0.016")
     assert result.execution_intent_status_changed is False
     assert result.owner_bounded_execution_called is False
     assert result.withdrawal_or_transfer_created is False
     assert recovery_repo.create_calls == []
     assert intent_repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_exchange_submit_execution_projects_entry_position_after_fill():
+    context = await _ready_exchange_submit_execution_context()
+
+    result = await context.service.exchange_submit_execution_result_for_authorization(
+        "auth-1",
+        exchange_submit_execution_enabled=True,
+        exchange_submit_execution_mode="real_gateway_action",
+        exchange_submit_enablement_decision=context.exchange_decision,
+    )
+
+    assert result.status == (
+        RuntimeExecutionExchangeSubmitExecutionStatus
+        .EXCHANGE_SUBMIT_ORDERS_SUBMITTED
+    )
+    assert context.lifecycle.orders[
+        "runtime-order-draft-auth-1-entry"
+    ].status == OrderStatus.FILLED
+    assert context.lifecycle.orders[
+        "runtime-order-draft-auth-1-sl"
+    ].status == OrderStatus.OPEN
+    assert [order.id for order in context.position_projection.entry_fill_orders] == [
+        "runtime-order-draft-auth-1-entry"
+    ]
+    projected_order = context.position_projection.entry_fill_orders[0]
+    assert projected_order.filled_qty == Decimal("0.016")
+    assert projected_order.average_exec_price == Decimal("600")
 
 
 @pytest.mark.asyncio

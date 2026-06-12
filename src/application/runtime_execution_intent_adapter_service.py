@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 
 from src.domain.execution_intent import ExecutionIntent, ExecutionIntentStatus
-from src.domain.models import Order
+from src.domain.models import Order, OrderRole, OrderStatus
 from src.domain.runtime_execution_intent_adapter import (
     RuntimeExecutionIntentCreationPreviewStatus,
     RuntimeExecutionIntentSourceType,
@@ -322,6 +322,34 @@ class RuntimeExecutionOrderLifecycleServicePort(Protocol):
         order_id: str,
         exchange_order_id: str | None = None,
     ) -> Order:
+        ...
+
+    async def confirm_order(
+        self,
+        order_id: str,
+        exchange_order_id: str | None = None,
+    ) -> Order:
+        ...
+
+    async def update_order_filled(
+        self,
+        order_id: str,
+        filled_qty: Decimal,
+        average_exec_price: Decimal,
+    ) -> Order:
+        ...
+
+    async def update_order_partially_filled(
+        self,
+        order_id: str,
+        filled_qty: Decimal,
+        average_exec_price: Decimal,
+    ) -> Order:
+        ...
+
+
+class RuntimeExecutionPositionProjectionServicePort(Protocol):
+    async def project_entry_fill(self, entry_order: Order) -> Any:
         ...
 
 
@@ -666,6 +694,9 @@ class RuntimeExecutionIntentAdapterService:
         exchange_gateway: RuntimeExecutionExchangeGatewayPort | None = None,
         final_gate_preview_service: RuntimeFinalGatePreviewPort | None = None,
         runtime_service: RuntimeExecutionRuntimeServicePort | None = None,
+        position_projection_service: (
+            RuntimeExecutionPositionProjectionServicePort | None
+        ) = None,
     ) -> None:
         self._draft_repository = draft_repository
         self._intent_repository = intent_repository
@@ -714,6 +745,7 @@ class RuntimeExecutionIntentAdapterService:
         self._exchange_gateway = exchange_gateway
         self._final_gate_preview_service = final_gate_preview_service
         self._runtime_service = runtime_service
+        self._position_projection_service = position_projection_service
 
     async def preview_from_draft(
         self,
@@ -2595,9 +2627,12 @@ class RuntimeExecutionIntentAdapterService:
                     )
                 return completed_failed_result
             exchange_order_id = getattr(placement_result, "exchange_order_id", None)
-            await self._order_lifecycle_service.submit_order(
-                request.local_order_id,
+            await self._apply_exchange_placement_to_local_projection(
+                local_order_id=request.local_order_id,
+                order_role=request.order_role,
                 exchange_order_id=exchange_order_id,
+                placement_result=placement_result,
+                warnings=warnings,
             )
             submitted_orders.append(
                 submitted_exchange_order_from_placement(
@@ -2627,6 +2662,94 @@ class RuntimeExecutionIntentAdapterService:
             self._exchange_submit_execution_result_repository
             .complete_exchange_submit_execution_result(result)
         )
+
+    async def _apply_exchange_placement_to_local_projection(
+        self,
+        *,
+        local_order_id: str,
+        order_role: OrderRole,
+        exchange_order_id: str | None,
+        placement_result: Any,
+        warnings: list[str],
+    ) -> Order | None:
+        if self._order_lifecycle_service is None:
+            warnings.append("order_lifecycle_service_unavailable_after_exchange_submit")
+            return None
+
+        updated_order = await self._order_lifecycle_service.submit_order(
+            local_order_id,
+            exchange_order_id=exchange_order_id,
+        )
+        placement_status = getattr(placement_result, "status", None)
+        if not isinstance(placement_status, OrderStatus):
+            try:
+                placement_status = OrderStatus(str(placement_status))
+            except Exception:
+                placement_status = None
+
+        if placement_status in {
+            OrderStatus.OPEN,
+            OrderStatus.FILLED,
+            OrderStatus.PARTIALLY_FILLED,
+        }:
+            updated_order = await self._order_lifecycle_service.confirm_order(
+                local_order_id,
+                exchange_order_id=exchange_order_id,
+            )
+
+        filled_qty = _placement_filled_qty(placement_result)
+        average_exec_price = _placement_average_exec_price(placement_result)
+        if (
+            placement_status == OrderStatus.FILLED
+            and filled_qty is not None
+            and filled_qty > Decimal("0")
+            and average_exec_price is not None
+        ):
+            updated_order = await self._order_lifecycle_service.update_order_filled(
+                local_order_id,
+                filled_qty=filled_qty,
+                average_exec_price=average_exec_price,
+            )
+        elif (
+            placement_status == OrderStatus.PARTIALLY_FILLED
+            and filled_qty is not None
+            and filled_qty > Decimal("0")
+            and average_exec_price is not None
+        ):
+            updated_order = await (
+                self._order_lifecycle_service.update_order_partially_filled(
+                    local_order_id,
+                    filled_qty=filled_qty,
+                    average_exec_price=average_exec_price,
+                )
+            )
+        elif placement_status in {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}:
+            warnings.append(
+                "exchange_submit_fill_without_complete_price_or_qty:"
+                f"{local_order_id}"
+            )
+
+        if (
+            order_role == OrderRole.ENTRY
+            and updated_order is not None
+            and updated_order.filled_qty > Decimal("0")
+        ):
+            if self._position_projection_service is None:
+                warnings.append(
+                    "position_projection_service_unavailable_after_entry_fill:"
+                    f"{local_order_id}"
+                )
+            else:
+                try:
+                    await self._position_projection_service.project_entry_fill(
+                        updated_order
+                    )
+                except Exception as exc:  # pragma: no cover - repository specific.
+                    warnings.append(
+                        "position_projection_failed_after_entry_fill:"
+                        f"{local_order_id}:{type(exc).__name__}"
+                    )
+        return updated_order
 
     async def submit_outcome_review_for_authorization(
         self,
@@ -3824,6 +3947,22 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     if decimal_value <= Decimal("0"):
         return None
     return decimal_value
+
+
+def _placement_filled_qty(placement_result: Any) -> Decimal | None:
+    filled_qty = _decimal_or_none(getattr(placement_result, "filled_qty", None))
+    if filled_qty is not None:
+        return filled_qty
+    return _decimal_or_none(getattr(placement_result, "amount", None))
+
+
+def _placement_average_exec_price(placement_result: Any) -> Decimal | None:
+    average_exec_price = _decimal_or_none(
+        getattr(placement_result, "average_exec_price", None)
+    )
+    if average_exec_price is not None:
+        return average_exec_price
+    return _decimal_or_none(getattr(placement_result, "price", None))
 
 
 def _market_step_from_metadata(

@@ -3962,11 +3962,17 @@ async def _runtime_execution_intent_adapter_service(
         PgRuntimeExecutionExchangeSubmitRecoveryResolutionRepository,
     )
     from src.application.order_lifecycle_service import OrderLifecycleService
+    from src.application.position_projection_service import PositionProjectionService
 
     order_repository = _cached_pg_repo(
         api_module,
         "_trading_console_pg_order_repo",
         _build_pg_order_repo,
+    )
+    position_repository = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_position_repo",
+        _build_pg_position_repo,
     )
     exchange_gateway = None
     if include_runtime_exchange_gateway:
@@ -4032,6 +4038,11 @@ async def _runtime_execution_intent_adapter_service(
         exchange_gateway=exchange_gateway,
         final_gate_preview_service=await _runtime_final_gate_preview_service(),
         runtime_service=await _strategy_runtime_service(),
+        position_projection_service=(
+            PositionProjectionService(position_repository)
+            if position_repository is not None
+            else None
+        ),
     )
     setattr(api_module, "_runtime_execution_intent_adapter_service", service)
     return service
