@@ -7368,3 +7368,100 @@ Use this file for session progress and handoff notes.
   - not deployed in this stage;
   - the next deployment should be a selected Tokyo integration probe, not
     first-pass node debugging.
+
+## 2026-06-13 (RTF-052 Tokyo Integration Probe)
+
+- Confirmed current mainline workspace and branch before deployment:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - local / remote head: `ef89f43d1dea518f4851d352f1f6634fa25ac846`.
+- Confirmed Tokyo baseline before deployment:
+  - deployed head:
+    `7fa42bbb776902e7494785a77d8e7b431743998f`;
+  - deployed release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-7fa42bbb-20260613Trtf041-binding-only`;
+  - migration count: `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - health: `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Built deploy artifacts under `output/rtf052-tokyo`:
+  - `git-deploy-plan-ef89f43d.json`:
+    `ready_for_owner_authorized_remote_git_deploy_plan`;
+  - `owner-git-deploy-packet-ef89f43d.json`:
+    `ready_for_owner_git_deploy_decision`;
+  - `git-deploy-dry-run-ef89f43d.json`: `dry_run_ready`.
+- Applied Tokyo deployment through the git-based deploy path:
+  - release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ef89f43d-20260613Trtf052-action-time-bridge`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-ef89f43d-20260613Trtf052-action-time-bridge.pgdump`;
+  - deploy report:
+    `output/rtf052-tokyo/git-deploy-applied-ef89f43d.json`;
+  - apply status: `applied`;
+  - commands executed: `16/16`;
+  - deployment effects: remote files modified, PG backup created, migrations
+    run, backend service restarted;
+  - forbidden effects: no exchange call, no order, no `ExecutionIntent`, no
+    `OrderLifecycle`, no secret values printed.
+- Postdeploy verification:
+  - read-only probe:
+    `output/rtf052-tokyo/readonly-probe-after-ef89f43d.json`;
+  - postdeploy verifier:
+    `output/rtf052-tokyo/postdeploy-verify-ef89f43d.json`;
+  - read-only probe status: `ready_for_controlled_deploy_preflight`;
+  - postdeploy verifier status: `postdeploy_acceptance_passed`;
+  - current deployed head:
+    `ef89f43d1dea518f4851d352f1f6634fa25ac846`;
+  - migration count / latest migration remained `84` /
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Ran deployed non-executing RTF-049 / RTF-050 / RTF-051 probes on Tokyo:
+  - remote directory:
+    `/home/ubuntu/brc-deploy/reports/rtf052-action-time-bridge/20260613Trtf052-ef89f43d`;
+  - local mirror:
+    `output/rtf052-tokyo/remote-report-20260613Trtf052-ef89f43d`;
+  - `rtf049-next-attempt-gate-strategy-planning.json`:
+    `rtf049_next_attempt_gate_strategy_planning_passed`;
+  - `rtf050-next-attempt-submit-preparation-bridge.json`:
+    `rtf050_next_attempt_submit_preparation_bridge_passed`;
+  - `rtf051-official-submit-action-time-bridge.json`:
+    `rtf051_official_submit_action_time_bridge_passed`.
+- Read live runtime / account / position facts:
+  - active runtimes report:
+    `active-runtimes-readonly.json`;
+  - active runtime count: `3`;
+  - all active runtimes remained `execution_enabled=false` and
+    `shadow_mode=true`;
+  - account facts report:
+    `account-facts-readonly.json`;
+  - Binance USDT futures read-only account equity:
+    `30.45108810`;
+  - available margin: `29.24480471`;
+  - account facts source:
+    `binance_usdt_futures_read_only`;
+  - live-position monitor reports:
+    `live-position-monitor-strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short.json`,
+    `live-position-monitor-strategy-runtime-e6138ad7c88f.json`,
+    `live-position-monitor-strategy-runtime-95655873b76c.json`;
+  - `ADA/USDT:USDT` `RBR-001` short runtime:
+    `flat_no_review_required`;
+  - `AVAX/USDT:USDT` `BTPC-001` short runtime:
+    `flat_review_required`;
+  - `BNB/USDT:USDT` `CPM-001` long runtime:
+    `active_protection_warning`, blocker `runtime_max_active_positions_in_use`,
+    warning `missing_tp_protection_right_tail_exit_not_mounted`.
+- Safety:
+  - no real submit was requested;
+  - no exchange write was called;
+  - no order was created;
+  - no `OrderLifecycle` submit was called;
+  - no `ExecutionIntent` was created by the probes;
+  - no withdrawal or transfer was created;
+  - exchange access was limited to read-only account / position facts.
+- Execution semantics:
+  - RTF-052 proves the deployed server can run the RTF-049/050/051
+    strategy-driven next-attempt chain and action-time disabled-smoke contract;
+  - the deployed active runtimes are still shadow / execution-disabled;
+  - before a real strategy-driven attempt, the BNB active-position/protection
+    warning must be treated as a current action-time blocker for that runtime,
+    while flat runtimes can proceed only through fresh signal, fresh
+    authorization, FinalGate, protection, and official submit gates.
