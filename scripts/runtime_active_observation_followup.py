@@ -32,6 +32,20 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
 READY_STATUS = "ready_for_final_gate_preflight"
 READY_FOR_PREPARE_STATUS = "ready_for_prepare"
 MAX_ITERATIONS_EXHAUSTED = "max_iterations_exhausted"
+EXPECTED_LOCAL_REGISTRATION_ARM_BLOCKER = (
+    "attempt_consumption_required_before_order_lifecycle_handoff"
+)
+EXPECTED_DISABLED_SMOKE_ADAPTER_BLOCKER = (
+    "preview_disabled_first_real_submit_action_http_404"
+)
+EXPECTED_DISABLED_SMOKE_ADAPTER_DETAIL = (
+    "RuntimeExecutionOrderLifecycleAdapterResult not found"
+)
+LOCAL_REGISTRATION_REQUIRED_EVIDENCE_IDS = (
+    "trusted_submit_fact_snapshot_id",
+    "submit_idempotency_policy_id",
+    "protection_creation_failure_policy_id",
+)
 FORBIDDEN_LOOP_FLAGS = (
     "exchange_write_called",
     "order_created",
@@ -314,6 +328,101 @@ def _attached_arm_report_forbidden_effects(report: dict[str, Any]) -> list[str]:
     return sorted(set(effects))
 
 
+def _local_registration_readiness(
+    *,
+    authorization_id: str | None,
+    arm_report: dict[str, Any] | None,
+    disabled_report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Classify the normal pre-mutation stop after arm + disabled smoke."""
+
+    if not arm_report and not disabled_report:
+        return {
+            "classification": "not_evaluated",
+            "expected_non_mutating_preview_stop": False,
+            "ready_for_local_registration_authorization_packet": False,
+        }
+
+    arm_blockers = [str(item) for item in (arm_report or {}).get("blockers") or []]
+    arm_warnings = [str(item) for item in (arm_report or {}).get("warnings") or []]
+    disabled_blockers = [
+        str(item) for item in (disabled_report or {}).get("blockers") or []
+    ]
+    disabled_warnings = [
+        str(item) for item in (disabled_report or {}).get("warnings") or []
+    ]
+    ids = {
+        **_as_dict((arm_report or {}).get("ids")),
+        **_as_dict((disabled_report or {}).get("ids")),
+    }
+    missing_evidence_ids = [
+        key for key in LOCAL_REGISTRATION_REQUIRED_EVIDENCE_IDS if not _optional_id(ids, key)
+    ]
+    arm_stopped_before_attempt = (
+        EXPECTED_LOCAL_REGISTRATION_ARM_BLOCKER in arm_blockers
+        or EXPECTED_LOCAL_REGISTRATION_ARM_BLOCKER in arm_warnings
+    )
+    disabled_stopped_before_action = (
+        EXPECTED_DISABLED_SMOKE_ADAPTER_BLOCKER in disabled_blockers
+    )
+    adapter_result_missing = _contains_text(
+        disabled_warnings,
+        EXPECTED_DISABLED_SMOKE_ADAPTER_DETAIL,
+    ) or _contains_text(
+        (disabled_report or {}).get("steps"),
+        "runtimeexecutionorderlifecycleadapterresult_not_found",
+    )
+    expected_stop = (
+        arm_stopped_before_attempt
+        and disabled_stopped_before_action
+        and adapter_result_missing
+    )
+    ready_for_packet = (
+        bool(authorization_id)
+        and expected_stop
+        and not missing_evidence_ids
+    )
+    if ready_for_packet:
+        classification = "ready_for_owner_local_registration_authorization_packet"
+    elif expected_stop:
+        classification = "expected_non_mutating_preview_stop_missing_evidence"
+    else:
+        classification = "not_ready_for_local_registration_authorization_packet"
+
+    return {
+        "classification": classification,
+        "expected_non_mutating_preview_stop": expected_stop,
+        "ready_for_local_registration_authorization_packet": ready_for_packet,
+        "authorization_id_present": bool(authorization_id),
+        "arm_stopped_before_attempt_consumption": arm_stopped_before_attempt,
+        "disabled_smoke_stopped_before_first_real_submit_action": (
+            disabled_stopped_before_action
+        ),
+        "missing_order_lifecycle_adapter_result_proven": adapter_result_missing,
+        "required_evidence_ids_present": not missing_evidence_ids,
+        "missing_evidence_ids": missing_evidence_ids,
+        "next_mutating_stage": "attempt_consumption_and_local_order_registration",
+        "requires_fresh_real_signal_revalidation": True,
+        "must_not_consume_attempt_for_sample_or_stale_signal": True,
+        "does_not_authorize": [
+            "exchange order placement",
+            "OrderLifecycle submit",
+            "withdrawal or transfer",
+        ],
+    }
+
+
+def _contains_text(values: Any, expected: str) -> bool:
+    needle = expected.lower()
+    if isinstance(values, str):
+        return needle in values.lower()
+    if isinstance(values, Mapping):
+        return any(_contains_text(value, expected) for value in values.values())
+    if isinstance(values, list):
+        return any(_contains_text(value, expected) for value in values)
+    return needle in str(values or "").lower()
+
+
 def build_followup_packet(
     args: argparse.Namespace,
     *,
@@ -335,6 +444,11 @@ def build_followup_packet(
     arm_forbidden: list[str] = []
     disabled_report: dict[str, Any] | None = None
     disabled_forbidden: list[str] = []
+    local_registration_readiness: dict[str, Any] = {
+        "classification": "not_evaluated",
+        "expected_non_mutating_preview_stop": False,
+        "ready_for_local_registration_authorization_packet": False,
+    }
 
     if loop_forbidden:
         blockers.append("loop_packet_contains_forbidden_effects")
@@ -413,6 +527,11 @@ def build_followup_packet(
             if not blockers
             else "disabled_smoke_blocked"
         )
+        local_registration_readiness = _local_registration_readiness(
+            authorization_id=authorization_id,
+            arm_report=arm_report,
+            disabled_report=disabled_report,
+        )
 
     return {
         "scope": "runtime_active_observation_followup",
@@ -422,6 +541,7 @@ def build_followup_packet(
         "prepared_authorization_id": authorization_id,
         "arm_preview_report": arm_report,
         "disabled_smoke_report": disabled_report,
+        "local_registration_readiness": local_registration_readiness,
         "blockers": blockers,
         "warnings": warnings,
         "operator_command_plan": {
@@ -432,7 +552,25 @@ def build_followup_packet(
             "arm_report_json_used": arm_report_json_used,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
-            "next_step": _next_step(followup_status),
+            "next_step": _next_step(
+                followup_status,
+                local_registration_readiness=local_registration_readiness,
+            ),
+            "local_registration_authorization_packet_script": (
+                "scripts/build_runtime_first_real_submit_"
+                "local_registration_authorization_packet.py"
+                if local_registration_readiness.get(
+                    "expected_non_mutating_preview_stop"
+                )
+                else None
+            ),
+            "mutating_attempt_consumption_allowed_by_this_packet": False,
+            "requires_fresh_real_signal_revalidation_before_mutation": (
+                local_registration_readiness.get(
+                    "requires_fresh_real_signal_revalidation"
+                )
+                is True
+            ),
         },
         "safety_invariants": {
             "loop_packet_read_only": True,
@@ -456,7 +594,12 @@ def build_followup_packet(
     }
 
 
-def _next_step(status: str) -> str:
+def _next_step(
+    status: str,
+    *,
+    local_registration_readiness: Mapping[str, Any] | None = None,
+) -> str:
+    readiness = local_registration_readiness or {}
     if status == "ready_for_prepare_records":
         return "review_ready_signal_then_continue_prepare_record_path"
     if status == "observation_window_complete_no_signal":
@@ -468,6 +611,15 @@ def _next_step(status: str) -> str:
     if status == "disabled_smoke_completed":
         return "review_disabled_smoke_report_then_wait_for_explicit_real_submit_authorization"
     if status == "disabled_smoke_blocked":
+        if readiness.get("ready_for_local_registration_authorization_packet") is True:
+            return (
+                "for_fresh_real_signal_build_local_registration_authorization_packet_"
+                "then_owner_confirm_attempt_consumption"
+            )
+        if readiness.get("expected_non_mutating_preview_stop") is True:
+            return (
+                "resolve_missing_evidence_before_local_registration_authorization_packet"
+            )
         return "review_disabled_smoke_blockers"
     return "resolve_followup_blockers"
 

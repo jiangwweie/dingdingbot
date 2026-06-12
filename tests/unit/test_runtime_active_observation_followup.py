@@ -63,7 +63,10 @@ def _disabled_smoke_report(*, blockers=None, warnings=None):
         "script": "runtime_first_real_submit_api_flow",
         "mode": "disabled-smoke",
         "ready_for_real_submit_action": False,
-        "ids": {"disabled_first_real_submit_execution_result_id": "exec-disabled-1"},
+        "ids": {
+            "authorization_id": "auth-1",
+            "disabled_first_real_submit_execution_result_id": "exec-disabled-1",
+        },
         "steps": [
             {
                 "name": "preview_disabled_first_real_submit_action",
@@ -257,7 +260,98 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
         "arm_preview:attempt_consumption_required_before_order_lifecycle_handoff"
         in packet["warnings"]
     )
+    assert packet["local_registration_readiness"]["classification"] == (
+        "not_ready_for_local_registration_authorization_packet"
+    )
     assert packet["safety_invariants"]["real_submit_requested"] is False
+
+
+def test_followup_classifies_expected_local_registration_boundary():
+    disabled_report = _disabled_smoke_report(
+        blockers=["preview_disabled_first_real_submit_action_http_404"],
+        warnings=["RuntimeExecutionOrderLifecycleAdapterResult not found"],
+    )
+    disabled_report["ids"].update(
+        {
+            "trusted_submit_fact_snapshot_id": "facts-1",
+            "submit_idempotency_policy_id": "idem-1",
+            "protection_creation_failure_policy_id": "protection-policy-1",
+        }
+    )
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        arm_preview_runner=lambda auth_id, args: _arm_preview_report(),
+        disabled_smoke_runner=lambda auth_id, args: disabled_report,
+    )
+
+    assert packet["status"] == "disabled_smoke_blocked"
+    assert packet["local_registration_readiness"]["classification"] == (
+        "ready_for_owner_local_registration_authorization_packet"
+    )
+    assert packet["local_registration_readiness"][
+        "expected_non_mutating_preview_stop"
+    ] is True
+    assert packet["local_registration_readiness"][
+        "ready_for_local_registration_authorization_packet"
+    ] is True
+    assert packet["local_registration_readiness"][
+        "requires_fresh_real_signal_revalidation"
+    ] is True
+    assert packet["local_registration_readiness"][
+        "must_not_consume_attempt_for_sample_or_stale_signal"
+    ] is True
+    assert packet["local_registration_readiness"]["missing_evidence_ids"] == []
+    assert packet["operator_command_plan"]["next_step"] == (
+        "for_fresh_real_signal_build_local_registration_authorization_packet_"
+        "then_owner_confirm_attempt_consumption"
+    )
+    assert packet["operator_command_plan"][
+        "local_registration_authorization_packet_script"
+    ] == (
+        "scripts/build_runtime_first_real_submit_"
+        "local_registration_authorization_packet.py"
+    )
+    assert packet["operator_command_plan"][
+        "mutating_attempt_consumption_allowed_by_this_packet"
+    ] is False
+    assert packet["operator_command_plan"][
+        "requires_fresh_real_signal_revalidation_before_mutation"
+    ] is True
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is False
+    assert packet["safety_invariants"]["exchange_order_submitted"] is False
+
+
+def test_followup_marks_expected_local_registration_boundary_missing_evidence():
+    disabled_report = _disabled_smoke_report(
+        blockers=["preview_disabled_first_real_submit_action_http_404"],
+        warnings=["RuntimeExecutionOrderLifecycleAdapterResult not found"],
+    )
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(allow_arm_preview=True, allow_disabled_smoke=True),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        arm_preview_runner=lambda auth_id, args: _arm_preview_report(),
+        disabled_smoke_runner=lambda auth_id, args: disabled_report,
+    )
+
+    assert packet["status"] == "disabled_smoke_blocked"
+    assert packet["local_registration_readiness"]["classification"] == (
+        "expected_non_mutating_preview_stop_missing_evidence"
+    )
+    assert packet["local_registration_readiness"][
+        "ready_for_local_registration_authorization_packet"
+    ] is False
+    assert packet["local_registration_readiness"]["missing_evidence_ids"] == [
+        "trusted_submit_fact_snapshot_id",
+        "submit_idempotency_policy_id",
+        "protection_creation_failure_policy_id",
+    ]
+    assert packet["operator_command_plan"]["next_step"] == (
+        "resolve_missing_evidence_before_local_registration_authorization_packet"
+    )
 
 
 def test_followup_extracts_ready_authorization_from_multi_runtime_monitor_packet():
