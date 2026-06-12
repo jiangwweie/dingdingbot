@@ -8672,3 +8672,86 @@ Use this file for session progress and handoff notes.
   - the next Tokyo step is to deploy the cycle and run it against the active
     runtime, expecting the current live state to remain waiting unless a
     genuine runtime-compatible ready signal appears.
+
+## 2026-06-13 (RTF-068 Tokyo Live Signal Operator Cycle Integration)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target commit:
+    `f834100bc1a7422b0b935c059cd210d8637cc8d2`.
+- Pre-deploy read-only probe:
+  - current head:
+    `2e6fabd7c0fec38c760b325c63c74057c6d03dc8`;
+  - current release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2e6fabd7-20260613Trtf066-live-signal-routing`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    none.
+- Deployment:
+  - new release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-f834100b-20260613Trtf068-live-signal-operator-cycle`;
+  - plan artifact:
+    `output/rtf068-tokyo/git-deploy-plan-f834100b.json`;
+  - owner packet artifact:
+    `output/rtf068-tokyo/owner-git-deploy-packet-f834100b.json`;
+  - dry-run artifact:
+    `output/rtf068-tokyo/git-deploy-dry-run-f834100b.json`;
+  - apply artifact:
+    `output/rtf068-tokyo/git-deploy-applied-f834100b.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-f834100b-20260613Trtf068-live-signal-operator-cycle.pgdump`;
+  - migration state:
+    `084`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health after deployment:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`;
+  - manifest head:
+    `f834100bc1a7422b0b935c059cd210d8637cc8d2`.
+- RTF-068 default live signal operator cycle:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf068-live-signal-operator-cycle/20260613Trtf068-f834100b/live-signal-operator-cycle.json`;
+  - local mirror:
+    `output/rtf068-tokyo/remote-report-20260613Trtf068-f834100b/live-signal-operator-cycle.json`;
+  - status:
+    `waiting_for_runtime_compatible_signal`;
+  - blocker:
+    `runtime_strategy_signal_not_found_in_strategy_shelf`;
+  - routing status:
+    `waiting_for_runtime_compatible_signal`;
+  - routing source selector status:
+    `no_would_enter_signal_available`;
+  - signal input json:
+    `null`;
+  - prepare packet:
+    `null`;
+  - operator next step:
+    `continue_live_signal_observation_without_forcing_entry`.
+- Safety:
+  - prepare flow was not called;
+  - no prepare records were created;
+  - no runtime was created;
+  - no runtime profile was mutated;
+  - no shadow candidate was created;
+  - no recorded `ExecutionIntent` was created;
+  - no submit authorization was created;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime budget mutation occurred;
+  - no position was opened or closed;
+  - no withdrawal or transfer was created.
+- Interpretation:
+  - RTF-067 code is now deployed and verified on Tokyo;
+  - the default operator cycle is usable as the repeatable no-submit loop;
+  - current live market still has no runtime-compatible or non-runtime
+    would-enter signal, so the correct result remains waiting rather than
+    forced prepare.
