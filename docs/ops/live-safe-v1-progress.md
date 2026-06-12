@@ -6666,3 +6666,39 @@ Use this file for session progress and handoff notes.
     `ExecutionIntent`, local orders, or exchange orders;
   - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
     transfers.
+
+## 2026-06-13 (RTF-039 Runtime Profile Apply Plan Dry-run)
+
+- Added a guarded runtime profile apply plan executor:
+  - `scripts/execute_runtime_profile_apply_plan.py`;
+  - `tests/unit/test_execute_runtime_profile_apply_plan.py`.
+- Purpose:
+  - consume an RTF-038 apply-readiness packet;
+  - dry-run the two official API requests required to record a promotion
+    confirmation and create an execution-disabled shadow runtime draft;
+  - require `--mode apply --execute` before any API call can occur;
+  - reject apply plans with extra requests, non-POST methods, exchange paths,
+    missing ready status, or order/exchange side effects.
+- Current local artifact:
+  - input readiness packet:
+    `output/rtf038-local/runtime-profile-trial-binding-apply-readiness.json`;
+  - output dry-run report:
+    `output/rtf039-local/runtime-profile-apply-plan-dry-run.json`;
+  - status: `dry_run_runtime_profile_apply_plan_ready`;
+  - planned request count: `2`;
+  - API called: `false`;
+  - runtime created: `false`;
+  - exchange write called: `false`.
+- Focused verification:
+  - `pytest -q tests/unit/test_execute_runtime_profile_apply_plan.py
+    tests/unit/test_runtime_profile_trial_binding_apply_readiness.py
+    tests/unit/test_strategy_runtime_promotion_confirmation_api.py`
+    passed with `17 passed`.
+- Safety:
+  - default mode is dry-run and performs no API call;
+  - apply mode requires `--execute`;
+  - allowed apply requests are limited to:
+    1. `POST /api/brc/strategy-runtime-promotion-confirmations`;
+    2. `POST /api/brc/strategy-runtime-promotion-confirmations/{id}/runtime-drafts`;
+  - it does not call `OrderLifecycle`, exchange write APIs, withdrawals, or
+    transfers.
