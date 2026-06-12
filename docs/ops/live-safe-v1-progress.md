@@ -10504,3 +10504,158 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is a scoped local-registration enablement / real
     adapter boundary that can move from draft-only to actual local CREATED
     order registration without calling exchange.
+
+## 2026-06-13 (RTF-084 Official Scoped Local CREATED-order Registration Proof)
+
+- Scope:
+  - extend RTF-083 from local registration draft readiness into scoped local
+    CREATED-order registration;
+  - generate local registration action authorization and local registration
+    enablement;
+  - call OrderLifecycle `register_created_order` through an in-memory service;
+  - keep exchange submit, exchange gateway, position open/close, withdrawal,
+    and transfer disabled.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_scoped_local_registration_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_scoped_local_registration_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf084-official-scoped-local-registration/`;
+  - prepare report:
+    `output/rtf084-official-scoped-local-registration/prepare-report.json`;
+  - controlled submit preflight:
+    `output/rtf084-official-scoped-local-registration/controlled-submit-preflight.json`;
+  - submit adapter preview:
+    `output/rtf084-official-scoped-local-registration/submit-adapter-preview.json`;
+  - attempt reservation:
+    `output/rtf084-official-scoped-local-registration/attempt-reservation.json`;
+  - attempt mutation:
+    `output/rtf084-official-scoped-local-registration/attempt-mutation.json`;
+  - attempt outcome policy:
+    `output/rtf084-official-scoped-local-registration/attempt-outcome-policy.json`;
+  - OrderLifecycle handoff:
+    `output/rtf084-official-scoped-local-registration/order-lifecycle-handoff.json`;
+  - order registration draft preview:
+    `output/rtf084-official-scoped-local-registration/order-registration-draft-preview.json`;
+  - local registration action authorization:
+    `output/rtf084-official-scoped-local-registration/local-registration-action-authorization.json`;
+  - local registration enablement:
+    `output/rtf084-official-scoped-local-registration/local-registration-enablement.json`;
+  - local registration adapter result:
+    `output/rtf084-official-scoped-local-registration/local-registration-adapter-result.json`;
+  - local registration packet:
+    `output/rtf084-official-scoped-local-registration/local-registration-packet.json`;
+  - contract report:
+    `output/rtf084-official-scoped-local-registration/contract-report.json`.
+- Contract result:
+  - status:
+    `official_scoped_local_registration_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `signal-eval-rtf075-contract`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - local registration enablement decision:
+    `runtime-local-registration-enablement-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - adapter result:
+    `runtime-order-lifecycle-adapter-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - local registration action authorization route called through:
+    `/api/trading-console/runtime-execution-local-registration-action-authorizations/authorizations/{authorization_id}`;
+  - local registration enablement route called through:
+    `/api/trading-console/runtime-execution-local-registration-enablements/authorizations/{authorization_id}`;
+  - order lifecycle adapter result route called through:
+    `/api/trading-console/runtime-execution-order-lifecycle-adapter-results/authorizations/{authorization_id}`.
+- Status chain:
+  - FinalGate:
+    `PASS`;
+  - controlled submit preflight:
+    `ready_for_controlled_submit_adapter`;
+  - submit adapter preview:
+    `inputs_ready_adapter_not_implemented`;
+  - attempt reservation:
+    `pending_runtime_mutation`;
+  - attempt mutation:
+    `applied`;
+  - attempt outcome policy:
+    `ready_for_attempt_budget_outcome_accounting`;
+  - OrderLifecycle handoff:
+    `ready_for_order_lifecycle_adapter`;
+  - order registration draft preview:
+    `inputs_ready_registration_draft_only`;
+  - local registration action authorization:
+    `approved_for_local_registration_action`;
+  - local registration enablement:
+    `ready_for_local_registration_action`;
+  - adapter result:
+    `registered_created_local_orders`.
+- Runtime budget semantics:
+  - intended notional:
+    `10`;
+  - budget reservation basis:
+    `max_loss_reference`;
+  - budget reservation amount:
+    `0.44145873`;
+  - attempts used before / after:
+    `0 -> 1`;
+  - budget reserved before / after:
+    `0 -> 0.44145873`.
+- Local registration result:
+  - registered order count:
+    `2`;
+  - entry order ID:
+    `rtod-5af61e9d8463403eb6-entry`;
+  - protection order ID:
+    `rtod-5af61e9d8463403eb6-sl`;
+  - duplicate submit lock acquired:
+    `true`;
+  - both orders remained:
+    `CREATED`;
+  - exchange order IDs:
+    absent.
+- Compatibility finding:
+  - the RTF-079 in-memory evidence repo can cache a disabled adapter preview
+    result during evidence preparation;
+  - RTF-084 clears that proof-only disabled preview cache before the scoped
+    local registration action;
+  - mainline cleanup should isolate or downgrade disabled preview results from
+    action results so preview replay cannot block a later authorized local
+    registration action.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `9 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_scoped_local_registration_proof.py --output-dir output/rtf084-official-scoped-local-registration`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no PG write by proof;
+  - local CREATED order registration only in memory;
+  - no exchange call or write;
+  - no position open/close;
+  - no withdrawal or transfer;
+  - no ExecutionIntent status change.
+- Interpretation:
+  - RTF-084 proves the local registration boundary can move from draft-only
+    into scoped local CREATED-order registration;
+  - the next mainline gap is exchange submit packet preview / exchange submit
+    action authorization / exchange adapter result boundary, still before or
+    as a tightly controlled real exchange write.
