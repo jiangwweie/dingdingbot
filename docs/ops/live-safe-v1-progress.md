@@ -16,6 +16,49 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-12 (RTF-006 Executable Submit Readiness Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `75d16acc`.
+- Added `RuntimeExecutableSubmitReadinessPacket`:
+  - consolidates a fresh release-aware strategy planning packet,
+    current FinalGate preview evidence, runtime grant / Owner submit
+    authorization evidence, trusted submit facts, idempotency evidence,
+    local registration enablement, exchange submit enablement, exchange submit
+    action authorization, OrderLifecycle submit enablement, exchange adapter
+    enablement, protection readiness, active-position trust, account-fact
+    freshness, and duplicate-submit guard readiness;
+  - classifies readiness into `blocked` or `ready_for_executable_submit`;
+  - makes historical `runtime_submit_rehearsal_id` compatibility evidence,
+    not a required runtime-level bounded-auto-attempt gate;
+  - surfaces blocked legacy first-real-submit packets as warnings when the
+    current runtime grant path has complete evidence.
+- Added `scripts/runtime_executable_submit_readiness_from_reports.py`:
+  - reads prior strategy-planning JSON plus a readiness evidence JSON;
+  - optionally reads a legacy first-real-submit packet;
+  - emits a non-executing readiness report with explicit no-side-effect
+    invariants.
+- Focused verification passed:
+  - `pytest -q tests/unit/test_runtime_executable_submit_readiness.py tests/unit/test_runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_release_strategy_planning_rehearsal_from_reports.py tests/unit/test_runtime_next_attempt_strategy_planning.py tests/unit/test_runtime_next_attempt_release.py tests/unit/test_runtime_next_attempt_release_from_reports.py tests/unit/test_b0_runtime_strategy_signal_planning.py tests/unit/test_runtime_next_attempt_strategy_plan_api_flow.py`
+    with `43 passed`;
+  - `python3 -m compileall -q src/domain/runtime_executable_submit_readiness.py scripts/runtime_executable_submit_readiness_from_reports.py tests/unit/test_runtime_executable_submit_readiness.py tests/unit/test_runtime_executable_submit_readiness_from_reports.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this stage;
+  - current Tokyo deployed release remains
+    `brc-runtime-governance-da84d501-20260612Trtf005-release-strategy-probe`.
+- Safety:
+  - no PG read/write;
+  - no exchange read/write;
+  - no exchange order submit;
+  - no `ExecutionIntent` creation;
+  - no `OrderLifecycle.submit_order`;
+  - no order creation/cancel/close;
+  - no runtime state mutation;
+  - no withdrawal or transfer.
+
 ## 2026-06-12 (RTF-005 Tokyo Deploy + Release-aware Strategy Planning Probe)
 
 - Added the non-executing Tokyo rehearsal entry:
