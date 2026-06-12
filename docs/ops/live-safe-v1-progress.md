@@ -16,6 +16,60 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-026 Local Real Signal Pipeline Report Fixture)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `cc422bbb`.
+- Added `scripts/runtime_real_signal_pipeline_fixture.py`:
+  - writes local fixture input reports for signal input, FinalGate preview,
+    trusted submit facts, submit idempotency, attempt outcome policy,
+    protection failure policy, local-registration enablement, exchange-submit
+    enablement, exchange action authorization, OrderLifecycle submit enablement,
+    exchange adapter enablement, and deployment readiness;
+  - runs the real `runtime_real_signal_scoped_local_registration_pipeline`
+    with `--auto-readiness-evidence`;
+  - uses a fake Trading Console API client, so no server, PG, OrderLifecycle, or
+    exchange side effect is possible;
+  - proves the local report chain:
+    `real signal source -> collector -> readiness -> handoff -> binding ->
+    evidence chain -> scoped local-registration dry-run`.
+- Fixture artifacts:
+  - `fixture-inputs/00-*.json`;
+  - `pipeline/02-collected-readiness-evidence.json`;
+  - `pipeline/07-scoped-local-registration-proof.json`;
+  - optional fixture report via `--output`.
+- Expected boundary:
+  - the disabled-smoke official evidence chain still records the expected
+    local-order-adapter boundary blocker;
+  - final pipeline status can still reach
+    `ready_for_real_signal_scoped_local_registration_proof` because scoped
+    local-registration proof is a dry-run readiness classification.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_real_signal_pipeline_fixture.py`
+    with `2 passed`;
+  - `pytest -q tests/unit/test_runtime_real_signal_readiness_evidence_resolver.py tests/unit/test_runtime_readiness_evidence_source_map.py tests/unit/test_runtime_early_readiness_fact_collector.py tests/unit/test_runtime_real_signal_scoped_local_registration_pipeline.py tests/unit/test_runtime_real_signal_pipeline_fixture.py tests/unit/test_runtime_official_evidence_chain_from_binding.py tests/unit/test_runtime_scoped_local_order_adapter_boundary_from_evidence.py tests/unit/test_runtime_scoped_local_registration_proof_from_evidence.py`
+    with `25 passed`;
+  - `python3 -m compileall scripts/runtime_real_signal_pipeline_fixture.py tests/unit/test_runtime_real_signal_pipeline_fixture.py`;
+  - `git diff --check`.
+- Deployment:
+  - not deployed in this local proof stage.
+- Safety:
+  - no Tokyo action occurred;
+  - no real server call occurred;
+  - no local registration occurred;
+  - no first-real-submit action occurred;
+  - no `OrderLifecycle` submit occurred;
+  - no exchange write occurred;
+  - no runtime mutation occurred;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `87%` to `88%`;
+  - next useful target is Tokyo deployment of the RTF-022 through RTF-026 tool
+    chain, followed by a non-executing Tokyo fixture/probe before any real
+    exchange action.
+
 ## 2026-06-13 (RTF-025 Real Signal Pipeline Collector Integration Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
