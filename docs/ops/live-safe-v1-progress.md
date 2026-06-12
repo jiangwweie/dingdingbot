@@ -8817,3 +8817,99 @@ Use this file for session progress and handoff notes.
     execution;
   - the next Tokyo step is to deploy the supervisor and run it against the
     active runtime with a small `max_cycles` window.
+
+## 2026-06-13 (RTF-070 Tokyo Live Signal Operator Supervisor Integration)
+
+- Confirmed current mainline workspace and branch:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - target commit:
+    `9e15b81fa5aeed5f47f9e22ee8c3b65e964b01f1`.
+- Pre-deploy read-only probe:
+  - current head:
+    `f834100bc1a7422b0b935c059cd210d8637cc8d2`;
+  - current release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-f834100b-20260613Trtf068-live-signal-operator-cycle`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    none.
+- Deployment:
+  - new release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-9e15b81f-20260613Trtf070-live-signal-supervisor`;
+  - plan artifact:
+    `output/rtf070-tokyo/git-deploy-plan-9e15b81f.json`;
+  - owner packet artifact:
+    `output/rtf070-tokyo/owner-git-deploy-packet-9e15b81f.json`;
+  - dry-run artifact:
+    `output/rtf070-tokyo/git-deploy-dry-run-9e15b81f.json`;
+  - apply artifact:
+    `output/rtf070-tokyo/git-deploy-applied-9e15b81f.json`;
+  - apply status:
+    `applied`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-9e15b81f-20260613Trtf070-live-signal-supervisor.pgdump`;
+  - migration state:
+    `084`;
+  - postdeploy status:
+    `postdeploy_acceptance_passed`.
+- Tokyo health after deployment:
+  - `status=ok`;
+  - `runtime_bound=true`;
+  - `live_ready=false`;
+  - manifest head:
+    `9e15b81fa5aeed5f47f9e22ee8c3b65e964b01f1`.
+- RTF-070 live signal operator supervisor:
+  - remote report:
+    `/home/ubuntu/brc-deploy/reports/rtf070-live-signal-supervisor/20260613Trtf070-9e15b81f/live-signal-operator-supervisor.json`;
+  - local mirror:
+    `output/rtf070-tokyo/remote-report-20260613Trtf070-9e15b81f/live-signal-operator-supervisor.json`;
+  - runtime:
+    `strategy-runtime-95655873b76c`;
+  - max cycles:
+    `2`;
+  - status:
+    `supervisor_waiting_for_signal`;
+  - stop reason:
+    `max_cycles_reached`;
+  - cycles completed:
+    `2`;
+  - latest cycle status:
+    `waiting_for_runtime_compatible_signal`;
+  - operator next step:
+    `continue_live_signal_operator_supervision`.
+- Cycle facts:
+  - cycle 1 status:
+    `waiting_for_runtime_compatible_signal`;
+  - cycle 1 selector:
+    `no_would_enter_signal_available`;
+  - cycle 1 blocker:
+    `runtime_strategy_signal_not_found_in_strategy_shelf`;
+  - cycle 2 status:
+    `waiting_for_runtime_compatible_signal`;
+  - cycle 2 selector:
+    `no_would_enter_signal_available`;
+  - cycle 2 blocker:
+    `runtime_strategy_signal_not_found_in_strategy_shelf`.
+- Safety:
+  - no forbidden effect was detected;
+  - prepare flow was not called;
+  - no prepare records were created;
+  - no shadow candidate was created;
+  - no recorded `ExecutionIntent` was created;
+  - no submit authorization was created;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no real submit was executed;
+  - no exchange write occurred;
+  - no runtime budget mutation occurred;
+  - no position was opened or closed;
+  - no withdrawal or transfer was created.
+- Interpretation:
+  - RTF-069 code is now deployed and verified on Tokyo;
+  - the supervisor can repeatedly run the operator cycle and remain safe in a
+    no-signal market;
+  - the mainline is now waiting for a genuine strategy signal rather than a
+    missing orchestration primitive.
