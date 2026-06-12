@@ -6766,3 +6766,69 @@ Use this file for session progress and handoff notes.
     binding is absent;
   - no `OrderLifecycle`, exchange write, withdrawal, or transfer path was
     called.
+
+## 2026-06-13 (RTF-041 RBR Trial Binding Reservation)
+
+- Added `binding-only` mode to `scripts/runtime_live_bootstrap_api_flow.py`.
+- Purpose:
+  - create / confirm BRC admission facts and reserve an
+    `AdmissionTrialBinding`;
+  - stop immediately after binding reservation;
+  - avoid runtime profile proposal preview, promotion confirmation creation,
+    runtime draft creation, runtime activation, order candidates,
+    ExecutionIntents, orders, OrderLifecycle, exchange writes, withdrawals,
+    or transfers.
+- Local verification:
+  - `pytest -q tests/unit/test_runtime_live_bootstrap_api_flow.py`
+    passed with `7 passed`;
+  - `python3 -m py_compile scripts/runtime_live_bootstrap_api_flow.py`
+    passed.
+- Deployed Tokyo git release:
+  - release name:
+    `brc-runtime-governance-7fa42bbb-20260613Trtf041-binding-only`;
+  - deployment execution status: `applied`;
+  - remote deploy commands executed: `16`;
+  - postdeploy probe status: `ready_for_controlled_deploy_preflight`;
+  - deployed head: `7fa42bbb`;
+  - health HTTP status: `200`.
+- Ran Tokyo binding-only flow for the RBR/ADA profile:
+  - output:
+    `output/rtf041-tokyo/rbr-binding-only-flow.json`;
+  - strategy: `RBR-001` / `RBR-001-v0`;
+  - symbol / side: `ADA/USDT:USDT` / `short`;
+  - blockers: `[]`;
+  - ready for trial binding: `true`;
+  - created trial binding:
+    `admission-binding-e1115c1e2c6f`;
+  - runtime instance ID: `null`;
+  - creates runtime: `false`;
+  - creates order: `false`.
+- Re-read Tokyo real trial bindings:
+  - output:
+    `output/rtf041-tokyo/trial-bindings.json`;
+  - HTTP status: `200`;
+  - count: `5`;
+  - `RBR-001-v0` now exists.
+- Re-ran RTF-038 / RTF-039 against Tokyo facts:
+  - readiness output:
+    `output/rtf041-tokyo/runtime-profile-trial-binding-apply-readiness.json`;
+  - readiness status:
+    `ready_for_runtime_profile_apply_with_trial_binding`;
+  - selected binding:
+    `admission-binding-e1115c1e2c6f`;
+  - dry-run output:
+    `output/rtf041-tokyo/runtime-profile-apply-plan-dry-run.json`;
+  - dry-run status:
+    `dry_run_runtime_profile_apply_plan_ready`;
+  - planned request count: `2`;
+  - API called: `false`;
+  - runtime created: `false`;
+  - exchange write called: `false`.
+- Safety:
+  - RTF-041 created admission / trial-binding records through official API
+    surfaces only;
+  - no promotion confirmation was recorded;
+  - no runtime draft was created;
+  - no runtime was enabled or activated;
+  - no `SignalEvaluation`, `OrderCandidate`, `ExecutionIntent`, local order,
+    exchange order, `OrderLifecycle`, withdrawal, or transfer path was called.
