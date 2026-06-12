@@ -16,6 +16,72 @@
 
 Use this file for session progress and handoff notes.
 
+## 2026-06-13 (RTF-035 Non-runtime Signal Runtime Profile Proposal Local Proof)
+
+- Confirmed current mainline workspace and branch before implementation:
+  - workspace: `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch: `program/live-safe-v1`;
+  - starting HEAD: `46d79ee4`.
+- Added a non-executing profile proposal bridge:
+  - `scripts/runtime_non_runtime_signal_profile_proposal.py`;
+  - consumes an RTF-034 selector report;
+  - selects one `non_runtime_would_enter_signal`;
+  - builds the existing `ExperimentalRuntimeProfileProposal`;
+  - emits a review packet for Owner/Codex profile decision.
+- Local proof used the RTF-034 Tokyo selector report:
+  - input report: `output/rtf034-tokyo/runtime-live-signal-selector.json`;
+  - output report: `output/rtf035-non-runtime-signal-profile-proposal.json`;
+  - source signal: `RBR-001 / RBR-001-v0 / ADA/USDT:USDT / short`;
+  - packet status: `ready_for_owner_runtime_profile_decision`;
+  - proposal status: `ready_for_owner_codex_confirmation`.
+- Proposed runtime boundary preview:
+  - profile kind: `small_capital_conservative_short`;
+  - capital base: `30`;
+  - total loss budget: `6.00`;
+  - max loss per attempt: `2.00`;
+  - max notional per attempt: `8.00`;
+  - max attempts: `3`;
+  - max active positions: `1`;
+  - max leverage: `1`;
+  - allowed symbols: `ADA/USDT:USDT`;
+  - allowed sides: `short`;
+  - protection required: `true`;
+  - review required: `true`;
+  - min liquidation stop buffer: `25`.
+- Warnings carried by the proposal:
+  - `reference_implementation_not_proven_production_strategy`;
+  - `strategy_not_proven_alpha_limits_budget_and_autonomy`;
+  - `mean_reversion_profile_needs_tighter_attempt_review`;
+  - `proposal_is_not_runtime_creation`;
+  - `proposal_is_not_execution_authority`;
+  - `owner_must_confirm_runtime_profile_before_use`.
+- Verification passed:
+  - `pytest -q tests/unit/test_runtime_non_runtime_signal_profile_proposal.py tests/unit/test_experimental_runtime_profile_proposal.py`
+    with `9 passed`;
+  - `python3 -m compileall -q scripts/runtime_non_runtime_signal_profile_proposal.py tests/unit/test_runtime_non_runtime_signal_profile_proposal.py`;
+  - `python3 scripts/runtime_non_runtime_signal_profile_proposal.py --help`;
+  - `git diff --check -- scripts/runtime_non_runtime_signal_profile_proposal.py tests/unit/test_runtime_non_runtime_signal_profile_proposal.py`.
+- Safety:
+  - no PG write;
+  - no runtime profile mutation;
+  - no runtime was created;
+  - no runtime was enabled;
+  - no SignalEvaluation was created;
+  - no OrderCandidate was created;
+  - no `ExecutionIntent` was created;
+  - no order was created;
+  - no `OrderLifecycle` call occurred;
+  - no exchange write occurred;
+  - no runtime budget was mutated;
+  - no position was opened or closed;
+  - no withdrawal or transfer occurred.
+- Progress estimate:
+  - runtime mainline convergence moves from approximately `96%` to `97%`;
+  - the next step is to deploy this bridge to Tokyo and run the same proposal
+    generation on the server-side RTF-034 selector report, then decide whether
+    to create/confirm an ADA/RBR bounded runtime or keep waiting for an
+    AVAX/BTPC-compatible signal.
+
 ## 2026-06-13 (RTF-034 Runtime-compatible Live Signal Selector Local Proof)
 
 - Confirmed current mainline workspace and branch before implementation:
