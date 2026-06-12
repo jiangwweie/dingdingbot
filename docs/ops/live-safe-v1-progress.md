@@ -9599,3 +9599,159 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is to deploy this RTF-077 contract and verify the same
     prepare handoff shape on Tokyo before continuing toward executable runtime
     handoff.
+
+## 2026-06-13 (RTF-078 Tokyo Ready-signal Prepare Handoff Integration)
+
+- Worktree:
+  `/Users/jiangwei/Documents/final-sprint6-integration`.
+- Branch:
+  `program/live-safe-v1`.
+- Deployed commit:
+  `026b690a2a53517272c0bca731260c47b5e9b2f8`
+  (`026b690a`).
+- Previous Tokyo head:
+  `c09ac0b87a8a14895b999e3cd625cbf83f983c08`
+  (`c09ac0b8`).
+- Tokyo release:
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-026b690a-20260613Trtf078-prepare-handoff-contract`.
+- Deploy artifacts:
+  - predeploy readonly probe:
+    `output/rtf078-tokyo-precheck-readonly.json`;
+  - plan:
+    `output/rtf078-tokyo/git-deploy-plan-026b690a.json`;
+  - owner packet:
+    `output/rtf078-tokyo/owner-git-deploy-packet-026b690a.json`;
+  - dry-run:
+    `output/rtf078-tokyo/git-deploy-dry-run-026b690a.json`;
+  - apply:
+    `output/rtf078-tokyo/git-deploy-applied-026b690a.json`.
+- Deploy result:
+  - status:
+    `applied`;
+  - blockers:
+    `[]`;
+  - commands:
+    `16/16`;
+  - backup:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-026b690a-20260613Trtf078-prepare-handoff-contract.pgdump`;
+  - migrations:
+    alembic command executed, migration count remained `84`;
+  - service:
+    restarted.
+- Postdeploy readonly facts:
+  - artifact:
+    `output/rtf078-tokyo/readonly-probe-after-deploy.json`;
+  - status:
+    `ready_for_controlled_deploy_preflight`;
+  - blockers:
+    `[]`;
+  - warning:
+    `remote_release_identity_from_manifest_without_git_status`;
+  - current head:
+    `026b690a2a53517272c0bca731260c47b5e9b2f8`;
+  - current realpath:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-026b690a-20260613Trtf078-prepare-handoff-contract`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Postdeploy acceptance:
+  - artifact:
+    `output/rtf078-tokyo/postdeploy-acceptance-026b690a.json`;
+  - status:
+    `postdeploy_acceptance_passed`;
+  - blockers:
+    `[]`;
+  - warning:
+    `release_identity_from_manifest_without_git_status`;
+  - release identity:
+    `026b690a2a53517272c0bca731260c47b5e9b2f8`
+    from release manifest.
+- Remote ready-signal prepare handoff contract:
+  - remote path:
+    `/home/ubuntu/brc-deploy/reports/rtf078-ready-signal-prepare-handoff/20260613Trtf078-026b690a`;
+  - local mirror:
+    `output/rtf078-tokyo/remote-report-20260613Trtf078-026b690a/`;
+  - contract report:
+    `output/rtf078-tokyo/remote-report-20260613Trtf078-026b690a/contract-report.json`;
+  - prepare packet:
+    `output/rtf078-tokyo/remote-report-20260613Trtf078-026b690a/prepare-packet.json`;
+  - shadow contract report:
+    `output/rtf078-tokyo/remote-report-20260613Trtf078-026b690a/shadow-contract-report.json`;
+  - shadow planning contract report:
+    `output/rtf078-tokyo/remote-report-20260613Trtf078-026b690a/shadow-planning-contract-report.json`;
+  - stdout mirror:
+    `output/rtf078-tokyo/remote-report-20260613Trtf078-026b690a/contract.stdout.json`.
+- Contract result:
+  - status:
+    `ready_signal_prepare_handoff_contract_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `eval-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - runtime execution intent draft:
+    `draft-rtf077-prepare-handoff`;
+  - execution intent:
+    `intent-rtf077-prepare-handoff`;
+  - protection plan:
+    `protection-rtf077-prepare-handoff`;
+  - prepared authorization:
+    `auth-rtf077-prepare-handoff`;
+  - next operator step:
+    `run_official_final_gate_preflight`.
+- Checks:
+  - shadow contract passed:
+    `true`;
+  - shadow candidate created:
+    `true`;
+  - right-tail runner preserved:
+    `true`;
+  - prepare ready for FinalGate preflight:
+    `true`;
+  - next-attempt gate checked:
+    `true`;
+  - order candidate usage checked:
+    `true`;
+  - runtime execution intent draft shape created:
+    `true`;
+  - execution intent shape created:
+    `true`;
+  - protection plan shape created:
+    `true`;
+  - submit authorization shape created:
+    `true`;
+  - prepared authorization ID present:
+    `true`.
+- Verification:
+  - remote command:
+    `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_ready_signal_prepare_handoff_contract.py --output-dir ...`;
+  - remote validation:
+    `remote_prepare_handoff_validation=passed`;
+  - remote status:
+    `ready_signal_prepare_handoff_contract_passed`;
+  - remote next step:
+    `run_official_final_gate_preflight`.
+- Safety:
+  - remote contract uses fake Console API client;
+  - no PG write by contract;
+  - no live exchange;
+  - no local registration arm;
+  - no exchange submit arm;
+  - no real submit;
+  - no exchange write;
+  - no order;
+  - no `OrderLifecycle`;
+  - no attempt counter mutation;
+  - no runtime budget mutation;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-077 is now deployed and verified on Tokyo;
+  - Tokyo can execute the deterministic ready-signal prepare handoff contract
+    and reach FinalGate preflight shape;
+  - this still proves a contract shape, not a real PG prepare mutation;
+  - the next mainline gap is to replace the fake Console API contract boundary
+    with an official server-side prepare integration proof while preserving the
+    same no-submit safety invariants.
