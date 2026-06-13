@@ -3614,6 +3614,15 @@ async def signal_marker_feed(
     return await _service(include_exchange=False).signal_marker_feed(symbol=symbol, limit=limit)
 
 
+@router.get("/runtime-signal-watcher-status", response_model=TradingConsoleReadModelResponse)
+async def runtime_signal_watcher_status(
+    stale_after_seconds: int = Query(default=180, ge=30, le=3600),
+) -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).runtime_signal_watcher_status(
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
 @router.get("/api-classification", response_model=TradingConsoleReadModelResponse)
 async def api_classification() -> TradingConsoleReadModelResponse:
     return _service(include_exchange=False).api_classification()
