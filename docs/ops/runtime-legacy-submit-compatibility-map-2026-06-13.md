@@ -4,7 +4,8 @@ Last updated: 2026-06-13
 
 ## Purpose
 
-This document records the post-RTF-103 legacy cleanup boundary.
+This document records the post-RTF-103 legacy cleanup boundary and the P2
+archive-hygiene migration completed on 2026-06-13.
 
 The runtime-level mainline is now:
 
@@ -15,9 +16,10 @@ RTF-100 bridge readiness
 -> RTF-103 Tokyo integration proof
 ```
 
-Historical pre-attempt rehearsal and first-real-submit packet scripts remain
-available only for replay, recovery investigation, history reproduction, and
-compatibility tests.
+Historical pre-attempt rehearsal and first-real-submit packet implementations
+now live under `scripts/replay_recovery_history/first_real_submit/`.
+The old `scripts/*.py` paths remain thin compatibility wrappers for existing
+tests, commands, and audit evidence.
 
 ## Current Mainline Entry
 
@@ -30,15 +32,15 @@ compatibility tests.
 
 ## Legacy Compatibility Surfaces
 
-| Legacy Surface | Classification | Allowed Uses | Forbidden Uses |
-|---|---|---|---|
-| `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` | replay-only pre-attempt rehearsal | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, new-attempt authority |
-| `scripts/build_runtime_first_real_submit_owner_packet.py` | legacy Owner review packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, new-attempt authority |
-| `scripts/build_runtime_first_real_submit_final_review_packet.py` | legacy final review packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, new-attempt authority |
-| `scripts/build_runtime_first_real_submit_action_authorization_packet.py` | legacy action packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, automatic live submit authority |
-| `scripts/build_runtime_first_real_submit_local_registration_authorization_packet.py` | legacy local-registration packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, automatic live submit authority |
-| `scripts/build_runtime_first_real_submit_exchange_arm_authorization_packet.py` | legacy exchange-arm packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, automatic live submit authority |
-| `scripts/runtime_first_real_submit_api_flow.py` | historically named implementation | Backward-compatible implementation behind `runtime_official_prepare_api_flow.py` | Direct runtime mainline import |
+| Legacy wrapper path | Archived implementation path | Classification | Allowed Uses | Forbidden Uses |
+|---|---|---|---|---|
+| `scripts/verify_runtime_submit_rehearsal_pre_live_packet.py` | `scripts/replay_recovery_history/first_real_submit/verify_runtime_submit_rehearsal_pre_live_packet.py` | replay-only pre-attempt rehearsal | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, new-attempt authority |
+| `scripts/build_runtime_first_real_submit_owner_packet.py` | `scripts/replay_recovery_history/first_real_submit/build_runtime_first_real_submit_owner_packet.py` | legacy Owner review packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, new-attempt authority |
+| `scripts/build_runtime_first_real_submit_final_review_packet.py` | `scripts/replay_recovery_history/first_real_submit/build_runtime_first_real_submit_final_review_packet.py` | legacy final review packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, new-attempt authority |
+| `scripts/build_runtime_first_real_submit_action_authorization_packet.py` | `scripts/replay_recovery_history/first_real_submit/build_runtime_first_real_submit_action_authorization_packet.py` | legacy action packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, automatic live submit authority |
+| `scripts/build_runtime_first_real_submit_local_registration_authorization_packet.py` | `scripts/replay_recovery_history/first_real_submit/build_runtime_first_real_submit_local_registration_authorization_packet.py` | legacy local-registration packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, automatic live submit authority |
+| `scripts/build_runtime_first_real_submit_exchange_arm_authorization_packet.py` | `scripts/replay_recovery_history/first_real_submit/build_runtime_first_real_submit_exchange_arm_authorization_packet.py` | legacy exchange-arm packet | Audit replay, recovery investigation, historical report reproduction, compatibility tests | Runtime grant, bounded auto-attempt primary gate, automatic live submit authority |
+| `scripts/runtime_first_real_submit_api_flow.py` | `scripts/replay_recovery_history/first_real_submit/runtime_first_real_submit_api_flow.py` | historically named implementation | Backward-compatible implementation behind `runtime_official_prepare_api_flow.py` | Direct runtime mainline import |
 
 ## Required Guard
 
@@ -53,8 +55,11 @@ blockers=[]
 mainline_has_no_legacy_primary_gate_terms=true
 historically_named_prepare_helper_wrapped=true
 legacy_artifacts_classified=true
+legacy_artifacts_archived_to_replay_recovery_history=true
+legacy_wrapper_paths_preserved=true
 mainline_exit_cleanup_complete=true
 future_cleanup_required=false
+archive_hygiene_completed=true
 ```
 
 ## Notes
@@ -65,5 +70,6 @@ future_cleanup_required=false
 - Do not use pre-attempt rehearsal as the primary gate after an execution result
   exists.
 - Owner manual withdrawals remain outside this execution chain.
-- Further file moves into an explicit replay / recovery / history namespace are
-  archive hygiene, not a mainline completion blocker.
+- The legacy wrappers are compatibility entry points only. New references should
+  prefer the archived implementation namespace when replay/recovery/history
+  behavior is intentional.

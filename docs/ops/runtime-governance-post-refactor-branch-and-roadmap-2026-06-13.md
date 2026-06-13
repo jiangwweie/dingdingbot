@@ -147,11 +147,20 @@ Goal: reduce future confusion without deleting valuable audit/recovery assets.
 
 Work items:
 
-1. Optionally move legacy first-real-submit packet scripts into a replay /
-   recovery / history namespace.
+1. Move legacy first-real-submit packet scripts into a replay / recovery /
+   history namespace while preserving compatibility wrappers.
 2. Keep compatibility tests for historical packet reproduction.
 3. Keep `OwnerBoundedExecutionService` available as a one-shot manual path, not
    as the final runtime architecture.
+
+Current 2026-06-13 implementation progress:
+
+| Item | Status | Evidence |
+|---|---|---|
+| P2 first-real-submit archive namespace | integrated | `scripts/replay_recovery_history/first_real_submit/` |
+| P2 legacy wrapper compatibility | integrated | old `scripts/*first_real_submit*` and rehearsal paths remain as wrappers |
+| P2 compatibility map | integrated | `docs/ops/runtime-legacy-submit-compatibility-map-2026-06-13.md` |
+| P2 focused verification | integrated | `tests/unit/test_runtime_legacy_compatibility_isolation_packet.py`, `tests/unit/test_runtime_first_real_submit_archive_namespace.py` |
 
 ## Development Cadence
 
