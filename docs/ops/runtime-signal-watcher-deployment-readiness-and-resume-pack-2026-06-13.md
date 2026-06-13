@@ -44,6 +44,9 @@ deployment-readiness-packet.json
 post-signal-resume-pack.json
 ```
 
+`brc-runtime-signal-watcher.service` refreshes both packets after each successful
+watcher tick via `ExecStartPost`.
+
 ## Current Runtime Observation State
 
 Latest verified state before this handoff:
