@@ -26,6 +26,7 @@ MAINLINE_ARTIFACTS = (
     "scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py",
     "scripts/runtime_live_continuation_refresh_flow.py",
     "scripts/runtime_live_continuation_selector_packet.py",
+    "scripts/runtime_official_prepare_api_flow.py",
     "scripts/runtime_official_flat_next_attempt_end_to_end_proof.py",
     "scripts/runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py",
     "scripts/runtime_official_post_submit_finalize_proof.py",
@@ -65,7 +66,7 @@ LEGACY_COMPATIBILITY_ARTIFACTS = (
     {
         "path": "scripts/runtime_first_real_submit_api_flow.py",
         "classification": "historically_named_official_prepare_helper",
-        "target_state": "rename_or_wrap_after_mainline_acceptance",
+        "target_state": "wrapped_by_runtime_official_prepare_api_flow",
     },
 )
 
@@ -83,9 +84,9 @@ FORBIDDEN_PRIMARY_GATE_TERMS = (
 )
 
 ALLOWED_HISTORICAL_HELPER_TERMS = (
-    "runtime_first_real_submit_api_flow",
-    "FirstRealSubmitApiFlow",
-    "FlowConfig",
+    "scripts/runtime_official_prepare_api_flow.py:runtime_first_real_submit_api_flow",
+    "scripts/runtime_official_prepare_api_flow.py:FirstRealSubmitApiFlow",
+    "scripts/runtime_official_prepare_api_flow.py:FlowConfig",
 )
 
 
@@ -103,6 +104,11 @@ def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
         ),
         "historically_named_prepare_helper_is_explicit_debt": any(
             item["allowed_historical_helper_terms"] for item in mainline
+        ),
+        "historically_named_prepare_helper_wrapped": any(
+            item["path"] == "scripts/runtime_official_prepare_api_flow.py"
+            and item["allowed_historical_helper_terms"]
+            for item in mainline
         ),
         "cleanup_isolation_not_deletion": True,
         "runtime_level_chain_remains_primary": True,
@@ -134,7 +140,7 @@ def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
             "do_not_use_owner_first_real_submit_packet_as_runtime_grant": True,
             "future_cleanup_required": True,
             "future_cleanup_action": (
-                "rename_or_wrap_historically_named_prepare_helper_and_move_legacy_packets"
+                "move_or_document_legacy_packets_as_replay_recovery_history"
             ),
         },
         "safety_invariants": {
@@ -154,8 +160,17 @@ def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
 def _scan_mainline_artifact(repo_root: Path, rel_path: str) -> dict[str, Any]:
     path = repo_root / rel_path
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    forbidden = [term for term in FORBIDDEN_PRIMARY_GATE_TERMS if term in text]
-    allowed = [term for term in ALLOWED_HISTORICAL_HELPER_TERMS if term in text]
+    allowed = [
+        term
+        for term in ALLOWED_HISTORICAL_HELPER_TERMS
+        if term.startswith(f"{rel_path}:") and term.split(":", 1)[1] in text
+    ]
+    allowed_plain_terms = {term.split(":", 1)[1] for term in allowed}
+    forbidden = [
+        term
+        for term in FORBIDDEN_PRIMARY_GATE_TERMS
+        if term in text and term not in allowed_plain_terms
+    ]
     return {
         "path": rel_path,
         "exists": path.exists(),
@@ -214,7 +229,7 @@ def _warnings(
 ) -> list[str]:
     warnings: list[str] = []
     helper_refs = [
-        f"{item['path']}:{','.join(item['allowed_historical_helper_terms'])}"
+        f"{item['path']}:{','.join(term.split(':', 1)[1] for term in item['allowed_historical_helper_terms'])}"
         for item in mainline
         if item["allowed_historical_helper_terms"]
     ]
@@ -222,8 +237,12 @@ def _warnings(
         warnings.append(
             "historically_named_prepare_helper_still_referenced:" + "|".join(helper_refs)
         )
-    if any(item["classification"] == "historically_named_official_prepare_helper" for item in legacy):
-        warnings.append("runtime_first_real_submit_api_flow_should_be_renamed_or_wrapped_later")
+    if not any(
+        item["path"] == "scripts/runtime_official_prepare_api_flow.py"
+        and item["allowed_historical_helper_terms"]
+        for item in mainline
+    ):
+        warnings.append("runtime_first_real_submit_api_flow_wrapper_missing")
     return warnings
 
 

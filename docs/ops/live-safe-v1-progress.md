@@ -13250,3 +13250,107 @@ Use this file for session progress and handoff notes.
   - task board now carries `RTF-CLEANUP-002` as the remaining required cleanup:
     rename or wrap the historically named helper and move / document legacy
     packet scripts as replay, recovery, and history compatibility surfaces.
+
+## 2026-06-13 (RTF-105 Legacy Helper Wrapper / Compatibility Map)
+
+- Scope:
+  - complete `RTF-CLEANUP-002` by removing direct first-real-submit helper
+    naming from the runtime-level mainline proof;
+  - preserve the historical helper for replay / recovery compatibility behind a
+    neutral official prepare wrapper;
+  - document legacy submit packet surfaces as compatibility assets, not runtime
+    grants.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit:
+    `dd15f6d9 feat(runtime): isolate legacy submit compatibility`.
+- Files added:
+  - `scripts/runtime_official_prepare_api_flow.py`;
+  - `docs/ops/runtime-legacy-submit-compatibility-map-2026-06-13.md`.
+- Files updated:
+  - `scripts/runtime_official_flat_next_attempt_end_to_end_proof.py`;
+  - `scripts/runtime_legacy_compatibility_isolation_packet.py`;
+  - `tests/unit/test_runtime_legacy_compatibility_isolation_packet.py`;
+  - `docs/ops/live-safe-v1-task-board.md`;
+  - `docs/ops/live-safe-v1-progress.md`.
+- Mainline import change:
+  - before:
+    `runtime_official_flat_next_attempt_end_to_end_proof.py` imported
+    `FirstRealSubmitApiFlow` / `FlowConfig` directly from
+    `runtime_first_real_submit_api_flow`;
+  - after:
+    it imports `RuntimeOfficialPrepareApiFlow` /
+    `RuntimeOfficialPrepareFlowConfig` from
+    `runtime_official_prepare_api_flow`.
+- Compatibility map:
+  - document:
+    `docs/ops/runtime-legacy-submit-compatibility-map-2026-06-13.md`;
+  - legacy pre-attempt rehearsal, Owner first-real-submit packet, final review
+    packet, action authorization packet, local-registration packet,
+    exchange-arm packet, and the historically named implementation are
+    documented as replay, recovery, history, or compatibility surfaces;
+  - forbidden uses explicitly include runtime grant, bounded auto-attempt
+    primary gate, new-attempt authority, and automatic live submit authority.
+- Current isolation result:
+  - status:
+    `legacy_compatibility_isolated_from_runtime_mainline`;
+  - blockers:
+    `[]`;
+  - warnings:
+    `historically_named_prepare_helper_still_referenced:scripts/runtime_official_prepare_api_flow.py:runtime_first_real_submit_api_flow,FirstRealSubmitApiFlow,FlowConfig`;
+  - mainline artifacts checked:
+    `9`;
+  - legacy compatibility artifacts classified:
+    `7`;
+  - mainline has no legacy primary gate terms:
+    `true`;
+  - historically named prepare helper wrapped:
+    `true`;
+  - future cleanup action:
+    `move_or_document_legacy_packets_as_replay_recovery_history`.
+- Local RTF-105 artifacts:
+  - output directory:
+    `output/rtf105-legacy-helper-rename-wrap`;
+  - isolation packet:
+    `output/rtf105-legacy-helper-rename-wrap/legacy-compatibility-isolation-packet.json`;
+  - stdout packet:
+    `output/rtf105-legacy-helper-rename-wrap/legacy-compatibility-isolation-packet.stdout.json`.
+- Verification:
+  - focused RTF-104/092/101/102 tests:
+    `pytest -q tests/unit/test_runtime_legacy_compatibility_isolation_packet.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py`;
+  - result:
+    `16 passed`;
+  - adjacent RTF-104/092/101/102/legacy-helper regression:
+    `pytest -q tests/unit/test_runtime_legacy_compatibility_isolation_packet.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py tests/unit/test_runtime_first_real_submit_api_flow.py`;
+  - result:
+    `39 passed`;
+  - syntax check:
+    `python3 -m py_compile scripts/runtime_official_prepare_api_flow.py scripts/runtime_legacy_compatibility_isolation_packet.py tests/unit/test_runtime_legacy_compatibility_isolation_packet.py`;
+  - whitespace check:
+    `git diff --check`.
+- Safety:
+  - API call:
+    `false`;
+  - PG read/write:
+    `false`;
+  - exchange call:
+    `false`;
+  - order creation:
+    `false`;
+  - OrderLifecycle call:
+    `false`;
+  - runtime mutation:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - RTF-CLEANUP-002 is now completed at the code/docs boundary: runtime mainline
+    proofs no longer directly import the historically named
+    first-real-submit helper;
+  - old one-shot / first-real-submit packet surfaces remain available for
+    replay, recovery, history reproduction, and compatibility tests only;
+  - the remaining work is a final completion audit against the full objective,
+    not another execution-chain gate.

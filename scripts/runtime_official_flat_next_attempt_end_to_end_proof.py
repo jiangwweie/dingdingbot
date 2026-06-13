@@ -30,9 +30,9 @@ if str(ROOT_DIR) not in sys.path:
 from fastapi.testclient import TestClient  # noqa: E402
 
 from scripts import runtime_ready_signal_shadow_planning_contract_fixture as ready_fixture  # noqa: E402
-from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
-    FirstRealSubmitApiFlow,
-    FlowConfig,
+from scripts.runtime_official_prepare_api_flow import (  # noqa: E402
+    RuntimeOfficialPrepareApiFlow,
+    RuntimeOfficialPrepareFlowConfig,
 )
 from scripts.runtime_official_next_attempt_strategy_continuation_proof import (  # noqa: E402
     _post_next_attempt_strategy_plan,
@@ -112,9 +112,9 @@ def build_proof_report(output_dir: Path) -> dict[str, Any]:
                 ),
                 query={"owner_reviewed": True},
             )
-            prepare_flow = FirstRealSubmitApiFlow(
+            prepare_flow = RuntimeOfficialPrepareApiFlow(
                 client=api_client,
-                config=FlowConfig(
+                config=RuntimeOfficialPrepareFlowConfig(
                     api_base="testclient://rtf092-flat-next-attempt-e2e",
                     mode="prepare",
                     order_candidate_id=store.candidate.order_candidate_id,

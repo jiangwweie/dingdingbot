@@ -14,7 +14,7 @@ def _write(root: Path, rel_path: str, text: str = "# test\n") -> None:
 def _write_all_required(root: Path) -> None:
     for rel_path in script.MAINLINE_ARTIFACTS:
         text = "# mainline\n"
-        if rel_path.endswith("runtime_official_flat_next_attempt_end_to_end_proof.py"):
+        if rel_path.endswith("runtime_official_prepare_api_flow.py"):
             text += "from scripts.runtime_first_real_submit_api_flow import FlowConfig\n"
         _write(root, rel_path, text)
     for item in script.LEGACY_COMPATIBILITY_ARTIFACTS:
@@ -42,7 +42,7 @@ def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
     assert packet["safety_invariants"]["exchange_called"] is False
 
 
-def test_isolation_warns_for_historically_named_prepare_helper(tmp_path):
+def test_isolation_allows_historical_helper_only_in_neutral_wrapper(tmp_path):
     _write_all_required(tmp_path)
 
     packet = script.build_isolation_packet(repo_root=tmp_path)
@@ -52,13 +52,18 @@ def test_isolation_warns_for_historically_named_prepare_helper(tmp_path):
         warning.startswith("historically_named_prepare_helper_still_referenced:")
         for warning in packet["warnings"]
     )
+    assert packet["checks"]["historically_named_prepare_helper_wrapped"] is True
     matching = [
         item
         for item in packet["mainline_artifacts"]
         if item["allowed_historical_helper_terms"]
     ]
     assert matching
-    assert "FlowConfig" in matching[0]["allowed_historical_helper_terms"]
+    assert matching[0]["path"] == "scripts/runtime_official_prepare_api_flow.py"
+    assert any(
+        term.endswith(":FlowConfig")
+        for term in matching[0]["allowed_historical_helper_terms"]
+    )
 
 
 def test_isolation_blocks_when_mainline_uses_legacy_primary_gate(tmp_path):
