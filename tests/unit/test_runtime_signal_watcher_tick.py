@@ -277,6 +277,29 @@ def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch)
     assert "env-file-secret" not in json.dumps(packet)
 
 
+def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
+    first = runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(
+            tmp_path,
+            feishu_webhook_url="https://example.test/hook",
+            notification_dry_run=True,
+        ),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+    )
+    assert first["notification"]["skipped_reason"] == "notification_dry_run"
+
+    calls = []
+    second = runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
+    )
+
+    assert second["notification"]["duplicate_suppressed"] is False
+    assert second["notification"]["sent"] is True
+    assert calls
+
+
 def test_feishu_text_body_supports_signed_custom_bot_payload():
     body = runtime_signal_watcher_tick._feishu_text_body("hello", secret="top-secret")
 

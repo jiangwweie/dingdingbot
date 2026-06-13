@@ -380,7 +380,7 @@ def build_watcher_tick_packet(
         "last_status_packet_status": status_packet.get("status"),
         "last_observed_at_ms": int(time.time() * 1000),
         "last_notified_event_key": (
-            event_key if notification.get("sent") or args.notification_dry_run else previous_state.get("last_notified_event_key")
+            event_key if notification.get("sent") else previous_state.get("last_notified_event_key")
         ),
     }
     _write_json(state_file, state)
