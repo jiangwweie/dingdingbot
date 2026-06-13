@@ -12446,3 +12446,171 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is deployment / Tokyo refresh execution for this
     flow, then bridging only a ready selector state into controlled
     tiny-live attempt.
+
+## 2026-06-13 (RTF-099 Tokyo Refresh Flow Deployment / Live Probe)
+
+- Scope:
+  - deploy the current `program/live-safe-v1` head containing RTF-098 to Tokyo
+    using the git-based deploy executor;
+  - run the deployed RTF-098 live continuation refresh flow against current
+    Tokyo live facts;
+  - keep deployment and refresh probing non-executing: no live submit, no
+    reduce-only close, no OrderLifecycle submit, no exchange write, no
+    withdrawal, and no transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - deployed commit:
+    `b1009096c86118e1e7427b7adfe66f9bc696e8c4`.
+- Previous Tokyo baseline:
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - previous deployed head:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`;
+  - remote migration count:
+    `84`;
+  - remote latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Deploy target:
+  - release name:
+    `brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow`;
+  - release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow`;
+  - report path:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow/rtf099-live-refresh-probe`.
+- Local deploy artifacts:
+  - owner deploy decision packet:
+    `output/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow/owner-git-deploy-decision-packet.json`;
+  - deploy dry-run:
+    `output/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow/git-deploy-dry-run.json`;
+  - deploy apply:
+    `output/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow/git-deploy-apply.json`.
+- Owner deploy packet:
+  - status:
+    `ready_for_owner_git_deploy_decision`;
+  - ready:
+    `true`;
+  - blockers:
+    `[]`;
+  - warnings:
+    `untracked_files_exist_and_are_not_in_git_archive`,
+    `remote_release_identity_from_manifest_without_git_status`,
+    `pre_live_packet_skipped_for_deploy_only`;
+  - commits ahead of previous deployed head:
+    `6`.
+- Deploy dry-run:
+  - status:
+    `dry_run_ready`;
+  - apply requested:
+    `false`;
+  - commands planned:
+    `16`;
+  - commands executed:
+    `0`;
+  - blockers:
+    `[]`.
+- Deploy apply:
+  - status:
+    `applied`;
+  - apply requested:
+    `true`;
+  - commands planned:
+    `16`;
+  - commands executed:
+    `16`;
+  - blockers:
+    `[]`;
+  - service active after deploy:
+    `true`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow`;
+  - release manifest head:
+    `b1009096c86118e1e7427b7adfe66f9bc696e8c4`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - readonly probe:
+    `ready_for_controlled_deploy_preflight`;
+  - postdeploy readonly verification:
+    `postdeploy_acceptance_passed`.
+- Remote RTF-099 refresh probe:
+  - release cwd:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow`;
+  - Python:
+    `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python`;
+  - report directory:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow/rtf099-live-refresh-probe`;
+  - active monitor return code:
+    `2` because observed runtime set is blocked / waiting, not ready;
+  - readiness return code:
+    `2` because live attempt is not ready;
+  - refresh return code:
+    `0` because refresh classification itself succeeded.
+- Remote refresh result:
+  - refresh status:
+    `continuation_refresh_monitor_position_or_owner_close`;
+  - readiness status:
+    `live_attempt_blocked_by_runtime_or_signal_gate`;
+  - selector status:
+    `continuation_monitor_position_or_owner_close`;
+  - active runtime count:
+    `3`;
+  - selected runtime:
+    `strategy-runtime-e6138ad7c88f`;
+  - selected symbol / side:
+    `BNB/USDT:USDT long`;
+  - selected action:
+    `monitor_position_or_owner_authorize_reduce_only_close`;
+  - selected lifecycle status:
+    `position_lifecycle_hold_or_owner_close_ready`;
+  - reduce-only close ready for Owner authorization:
+    `true`;
+  - ready for controlled tiny-live path:
+    `false`;
+  - execute tiny-live attempt now:
+    `false`;
+  - execute reduce-only close now:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Remote probe artifacts:
+  - `active-monitor.json`;
+  - `bnb-live-position-monitor.json`;
+  - `bnb-position-exit-plan.json`;
+  - `bnb-post-close-followup.json`;
+  - `live-attempt-readiness-packet.json`;
+  - `bnb-gate-blocker-classification.json`;
+  - `bnb-position-lifecycle-exit-readiness.json`;
+  - `live-continuation-selector.json`;
+  - `live-continuation-refresh-flow.json`.
+- Safety:
+  - deployment apply occurred:
+    `true`;
+  - service restart occurred:
+    `true`;
+  - migrations ran:
+    no new migration beyond existing head `084`;
+  - live exchange order:
+    `false`;
+  - reduce-only close:
+    `false`;
+  - OrderLifecycle submit:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - RTF-099 proves the selector-driven refresh flow is deployed and repeatable
+    on Tokyo live facts;
+  - current live facts still do not authorize a tiny-live attempt: BNB owns the
+    active position slot, and ADA/RBR plus AVAX/BTPC are waiting for real
+    strategy signals;
+  - the mainline can now run refresh repeatedly and only bridge into
+    controlled tiny-live attempt when the selector reports
+    `continuation_refresh_ready_for_prepare` or
+    `continuation_refresh_ready_for_final_gate_review`;
+  - legacy pre-attempt / first-real-submit compatibility isolation remains
+    mandatory after the main runtime-level bounded-auto-attempt chain is
+    accepted.
