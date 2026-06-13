@@ -11316,3 +11316,108 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is official FinalGate / readiness preflight for the
     fresh next-attempt shadow candidate, followed by controlled submit
     continuation under fresh authorization.
+
+## 2026-06-13 (RTF-090 Official Fresh Candidate FinalGate Preflight Proof)
+
+- Scope:
+  - bridge the RTF-089 fresh next-attempt shadow candidate into the official
+    RTF-081 FinalGate / controlled-submit preflight route;
+  - prove the fresh strategy candidate created after a ready next-attempt gate
+    is the same candidate used by official prepare / FinalGate / preflight;
+  - stop at `ready_for_controlled_submit_adapter`;
+  - do not create local orders, call OrderLifecycle, call exchange, mutate
+    runtime state, create withdrawals, or create transfers.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_fresh_candidate_final_gate_preflight_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf090-official-fresh-candidate-final-gate-preflight/`;
+  - RTF-089 prerequisite report:
+    `output/rtf090-official-fresh-candidate-final-gate-preflight/rtf089-prerequisite-report.json`;
+  - RTF-081 FinalGate preflight report:
+    `output/rtf090-official-fresh-candidate-final-gate-preflight/rtf081-final-gate-preflight-report.json`;
+  - bridge proof packet:
+    `output/rtf090-official-fresh-candidate-final-gate-preflight/fresh-candidate-final-gate-preflight-packet.json`;
+  - contract report:
+    `output/rtf090-official-fresh-candidate-final-gate-preflight/contract-report.json`.
+- Contract result:
+  - status:
+    `official_fresh_candidate_final_gate_preflight_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - fresh signal evaluation ID:
+    `eval-rtf075-cpm-long`;
+  - shadow order candidate:
+    `order-candidate-rtf075-contract`;
+  - official prepare authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled-submit preflight:
+    `runtime-controlled-submit-preflight-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Handoff proof:
+  - RTF-089 prerequisite:
+    `official_next_attempt_strategy_continuation_passed`;
+  - RTF-081 preflight:
+    `official_final_gate_preflight_passed`;
+  - candidate IDs match:
+    `true`;
+  - fresh ready status:
+    `ready_for_final_gate_preflight`;
+  - old authorization submit retry allowed:
+    `false`;
+  - pre-submit rehearsal retry allowed:
+    `false`;
+  - fresh authorization required before submit:
+    `true`.
+- FinalGate / preflight result:
+  - FinalGate verdict:
+    `PASS`;
+  - FinalGate blockers:
+    `[]`;
+  - controlled-submit preflight:
+    `ready_for_controlled_submit_adapter`;
+  - preflight final gate verdict:
+    `PASS`;
+  - preview only:
+    `true`;
+  - blockers:
+    `[]`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no executable ExecutionIntent created in the continuation path;
+  - no local order created;
+  - no OrderLifecycle call;
+  - no exchange call;
+  - no exchange order submitted;
+  - no runtime state mutation;
+  - no PG write by proof;
+  - no withdrawal or transfer.
+- Verification:
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_fresh_candidate_final_gate_preflight_proof.py tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_fresh_candidate_final_gate_preflight_proof.py --output-dir output/rtf090-official-fresh-candidate-final-gate-preflight`;
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py tests/unit/test_runtime_official_next_attempt_strategy_continuation_proof.py tests/unit/test_runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `27 passed`.
+- Interpretation:
+  - RTF-090 closes the gap between strategy-driven next-attempt planning and
+    official FinalGate / preflight readiness;
+  - the runtime loop can now move from post-submit finalize to a fresh strategy
+    candidate and then to official controlled-submit preflight without reviving
+    old authorization retry or pre-submit rehearsal semantics;
+  - the next mainline gap is continuing the fresh candidate through submit
+    adapter preview / local registration / exchange-submit boundary, then
+    reusing the existing post-submit finalize path to prove one complete
+    repeatable runtime cycle.
