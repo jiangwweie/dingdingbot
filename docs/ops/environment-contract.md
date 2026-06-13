@@ -55,7 +55,7 @@ Production and Tokyo pre-live should expose only these groups:
 | `BRC_LLM_BASE_URL` | `brc_operator_workflow.py`, `llm_advisory_plane.py` | no | optional LLM endpoint | unset | optional | optional |
 | `BRC_LLM_API_KEY` | `brc_operator_workflow.py`, `llm_advisory_plane.py` | yes | optional LLM credential | unset | optional | server secret only |
 | `BRC_LLM_MODEL` | `brc_operator_workflow.py`, `llm_advisory_plane.py` | no | optional LLM model | unset | optional | optional |
-| `FEISHU_WEBHOOK_URL` | `runtime_config.py`, seed tests | yes | notification only | unset | optional | server secret only |
+| `FEISHU_WEBHOOK_URL` | `runtime_config.py`, `runtime_signal_watcher_tick.py`, seed tests | yes | notification only | unset | optional | server secret only |
 
 ## Guardrails Implemented
 

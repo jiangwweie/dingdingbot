@@ -16,6 +16,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 import time
 from typing import Any, Callable
@@ -47,6 +48,14 @@ STATUS_PACKET_ATTENTION_STATUSES = {"attention", "blocked", "blocked_forbidden_e
 
 Notifier = Callable[[str, str | None, dict[str, Any], float], dict[str, Any]]
 SupervisorBuilder = Callable[[argparse.Namespace], dict[str, Any]]
+FEISHU_WEBHOOK_URL_ENV_NAMES = (
+    "BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_URL",
+    "FEISHU_WEBHOOK_URL",
+)
+FEISHU_WEBHOOK_SECRET_ENV_NAMES = (
+    "BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_SECRET",
+    "FEISHU_WEBHOOK_SECRET",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -69,11 +78,52 @@ def _state_path(output_dir: Path, value: str | None) -> Path:
     return Path(value).expanduser() if value else output_dir / "notification-state.json"
 
 
+def _env_file_values(path_value: str | None, names: tuple[str, ...]) -> dict[str, str]:
+    if not path_value:
+        return {}
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if key not in names or key in values:
+            continue
+        try:
+            parsed = shlex.split(raw_value, comments=False, posix=True)
+        except ValueError:
+            parsed = []
+        value = parsed[0] if len(parsed) == 1 else raw_value.strip().strip("\"'")
+        if value:
+            values[key] = value
+    return values
+
+
+def _first_env_value(
+    names: tuple[str, ...],
+    *,
+    env_file: str | None = None,
+) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    env_values = _env_file_values(env_file, names)
+    for name in names:
+        value = env_values.get(name)
+        if value:
+            return value
+    return None
+
+
 def _webhook_url(args: argparse.Namespace) -> str | None:
     return (
         args.feishu_webhook_url
-        or os.environ.get("BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_URL")
-        or os.environ.get("FEISHU_WEBHOOK_URL")
+        or _first_env_value(FEISHU_WEBHOOK_URL_ENV_NAMES, env_file=args.env_file)
         or None
     )
 
@@ -81,8 +131,7 @@ def _webhook_url(args: argparse.Namespace) -> str | None:
 def _webhook_secret(args: argparse.Namespace) -> str | None:
     return (
         args.feishu_webhook_secret
-        or os.environ.get("BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_SECRET")
-        or os.environ.get("FEISHU_WEBHOOK_SECRET")
+        or _first_env_value(FEISHU_WEBHOOK_SECRET_ENV_NAMES, env_file=args.env_file)
         or None
     )
 

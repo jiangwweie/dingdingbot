@@ -5,7 +5,7 @@ After=network-online.target brc-owner-console-backend.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/ubuntu/brc-deploy/current
+WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
 ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_signal_watcher_tick.py \
@@ -21,4 +21,3 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
 
 NoNewPrivileges=true
 PrivateTmp=true
-
