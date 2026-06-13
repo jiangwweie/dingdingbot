@@ -34,6 +34,7 @@ function statusLabel(status?: string): string {
     operator_packet_needs_review: '需要审阅',
     evidence_missing: '证据缺失',
     evidence_stale: '证据过期',
+    notification_not_configured: '通知未配置',
     unsafe_watcher_effect_detected: '安全异常',
   };
   return labels[String(status || '')] || displayValue(status, '状态未知');
