@@ -11421,3 +11421,129 @@ Use this file for session progress and handoff notes.
     adapter preview / local registration / exchange-submit boundary, then
     reusing the existing post-submit finalize path to prove one complete
     repeatable runtime cycle.
+
+## 2026-06-13 (RTF-091 Official Fresh Candidate Runtime Cycle Handoff Proof)
+
+- Scope:
+  - combine RTF-090 fresh-candidate FinalGate preflight with RTF-088
+    controlled gateway action / post-submit finalize;
+  - prove the fresh strategy-driven candidate can move from official preflight
+    into the controlled in-memory submit path and then back into post-submit
+    finalize / next-attempt gate semantics;
+  - keep this as a local official-route proof only;
+  - do not call live exchange, write PG, create withdrawals, or create
+    transfers.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf091-official-fresh-candidate-runtime-cycle-handoff/`;
+  - RTF-090 prerequisite report:
+    `output/rtf091-official-fresh-candidate-runtime-cycle-handoff/rtf090-prerequisite-report.json`;
+  - RTF-088 post-submit finalize report:
+    `output/rtf091-official-fresh-candidate-runtime-cycle-handoff/rtf088-post-submit-finalize-report.json`;
+  - cycle handoff packet:
+    `output/rtf091-official-fresh-candidate-runtime-cycle-handoff/fresh-candidate-runtime-cycle-packet.json`;
+  - contract report:
+    `output/rtf091-official-fresh-candidate-runtime-cycle-handoff/contract-report.json`.
+- Contract result:
+  - status:
+    `official_fresh_candidate_runtime_cycle_handoff_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - fresh signal evaluation ID:
+    `eval-rtf075-cpm-long`;
+  - shadow order candidate:
+    `order-candidate-rtf075-contract`;
+  - preflight authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange-submit execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - submit outcome review:
+    `runtime-submit-outcome-review-runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit budget settlement:
+    `runtime-post-submit-budget-settlement-runtime-first-real-submit-outcome-accounting-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Pre-submit side:
+  - fresh preflight:
+    `fresh_candidate_ready_for_controlled_submit_adapter`;
+  - FinalGate verdict:
+    `PASS`;
+  - controlled-submit preflight:
+    `ready_for_controlled_submit_adapter`;
+  - fresh authorization required before submit:
+    `true`.
+- Controlled action side:
+  - execution mode:
+    `in_memory_simulation`;
+  - exchange-submit execution result status:
+    `exchange_submit_orders_submitted`;
+  - controlled gateway / OrderLifecycle submit:
+    expected inside local in-memory proof;
+  - live exchange call:
+    `false`.
+- Post-submit side:
+  - finalize status:
+    `finalized_next_attempt_blocked`;
+  - next-attempt gate:
+    `blocked`;
+  - next-attempt blocker:
+    `runtime_active_position_slot_in_use`;
+  - next attempt requires fresh strategy signal:
+    `true`;
+  - next attempt requires fresh authorization:
+    `true`;
+  - old authorization submit retry allowed:
+    `false`;
+  - pre-submit rehearsal retry allowed:
+    `false`;
+  - local CREATED-order requirement retired:
+    `true`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - controlled fake gateway called:
+    `true`;
+  - controlled OrderLifecycle submit called:
+    `true`;
+  - live exchange called:
+    `false`;
+  - PG written by proof:
+    `false`;
+  - post-submit created order:
+    `false`;
+  - post-submit OrderLifecycle called:
+    `false`;
+  - ExecutionIntent status changed:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Verification:
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py --output-dir output/rtf091-official-fresh-candidate-runtime-cycle-handoff`;
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py tests/unit/test_runtime_official_next_attempt_strategy_continuation_proof.py tests/unit/test_runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `30 passed`.
+- Interpretation:
+  - RTF-091 proves the post-submit correction is now connected to the
+    strategy-driven fresh candidate path and to the controlled action/finalize
+    path;
+  - the main chain is no longer just isolated preflight or isolated
+    post-submit evidence; it has a local official-route cycle handoff;
+  - the next mainline gap is proving the ready/flat next-attempt side of the
+    cycle end-to-end, then deciding when to deploy this chain to Tokyo for
+    integration validation.
