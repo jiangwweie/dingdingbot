@@ -12725,3 +12725,119 @@ Use this file for session progress and handoff notes.
   - historical pre-attempt / first-real-submit compatibility isolation remains
     mandatory after the main runtime-level bounded-auto-attempt chain is
     accepted.
+
+## 2026-06-13 (RTF-101 Bridge-ready to Official Preflight Proof)
+
+- Scope:
+  - prove the RTF-100 bridge can hand a ready selector state into the existing
+    official prepare / FinalGate / controlled-submit preflight route;
+  - prove the current waiting selector state stays non-executing and does not
+    enter the official route;
+  - keep the proof local-first and non-executing: no live exchange order, no
+    local order registration, no OrderLifecycle submit, no runtime mutation,
+    no reduce-only close, no withdrawal, and no transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit:
+    `d4eefca2 feat(runtime): add controlled tiny-live bridge readiness packet`.
+- Files added:
+  - `scripts/runtime_controlled_tiny_live_bridge_to_preflight_proof.py`;
+  - `tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py`.
+- Local RTF-101 artifacts:
+  - output directory:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight`;
+  - contract report:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight/contract-report.json`;
+  - waiting bridge:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight/waiting-bridge-readiness.json`;
+  - ready bridge:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight/ready-bridge-readiness.json`;
+  - official preflight report:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight/rtf092-official-preflight-report.json`;
+  - bridge packet:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight/bridge-to-official-preflight-packet.json`;
+  - stdout packet:
+    `output/rtf101-controlled-tiny-live-bridge-to-preflight.stdout.json`.
+- Current proof result:
+  - status:
+    `controlled_tiny_live_bridge_to_official_preflight_passed`;
+  - waiting bridge:
+    `controlled_tiny_live_bridge_waiting_for_ready_selector`;
+  - ready bridge:
+    `controlled_tiny_live_bridge_ready_for_official_prepare`;
+  - official preflight:
+    `official_flat_next_attempt_end_to_end_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `eval-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled-submit preflight:
+    `runtime-controlled-submit-preflight-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - FinalGate:
+    `PASS`;
+  - controlled-submit preflight status:
+    `ready_for_controlled_submit_adapter`;
+  - preflight mode:
+    `preview_only=true`.
+- Behavior covered by tests:
+  - waiting bridge blocks official route and keeps tiny-live / reduce-only close
+    execution flags false;
+  - ready bridge enters official prepare with fresh FinalGate and controlled
+    submit preflight requirements;
+  - ready bridge does not use legacy pre-attempt rehearsal as the primary gate;
+  - official RTF-092 route creates shadow SignalEvaluation / OrderCandidate,
+    creates prepare audit artifacts, passes FinalGate, and reaches
+    controlled-submit preflight;
+  - official route remains preview-only and does not execute submit;
+  - failed official preflight blocks the RTF-101 contract.
+- Verification:
+  - RTF-101 + RTF-100 + RTF-092 focused tests:
+    `pytest -q tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py`;
+  - result:
+    `14 passed`;
+  - local proof generation:
+    `python3 scripts/runtime_controlled_tiny_live_bridge_to_preflight_proof.py --output-dir output/rtf101-controlled-tiny-live-bridge-to-preflight`;
+  - result:
+    `controlled_tiny_live_bridge_to_official_preflight_passed`;
+  - adjacent RTF-101/100/098/097/092/090 regression:
+    `pytest -q tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py tests/unit/test_runtime_live_continuation_refresh_flow.py tests/unit/test_runtime_live_continuation_selector_packet.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py`;
+  - result:
+    `27 passed`;
+  - syntax check:
+    `python3 -m py_compile scripts/runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py`;
+  - whitespace check:
+    `git diff --check`.
+- Safety:
+  - executable submit:
+    `false`;
+  - local order created:
+    `false`;
+  - OrderLifecycle submit:
+    `false`;
+  - exchange call/order:
+    `false`;
+  - runtime mutation:
+    `false`;
+  - reduce-only close:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - non-executable ExecutionIntent audit artifact:
+    `true`.
+- Interpretation:
+  - RTF-101 closes the local design gap between selector readiness and the
+    official prepare / FinalGate route;
+  - the mainline no longer needs to fall back to historical pre-attempt
+    rehearsal when the selector becomes ready;
+  - current live Tokyo state still remains waiting / position-monitoring, but
+    the ready path is locally proven and can be deployed for integration once
+    this stage is accepted;
+  - the next main-chain step is the local fake submit -> post-submit finalize
+    cycle, followed by Tokyo integration only after local proof passes.
