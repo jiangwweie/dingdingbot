@@ -12841,3 +12841,125 @@ Use this file for session progress and handoff notes.
     this stage is accepted;
   - the next main-chain step is the local fake submit -> post-submit finalize
     cycle, followed by Tokyo integration only after local proof passes.
+
+## 2026-06-13 (RTF-102 Bridge-ready Local Runtime Cycle Proof)
+
+- Scope:
+  - compose the RTF-101 bridge-ready official preflight proof with the RTF-091
+    official fresh-candidate runtime cycle proof;
+  - prove the ready bridge can be followed by the local official route through
+    controlled in-memory submit, durable exchange-submit execution result,
+    post-submit finalize, submit outcome review, post-submit budget settlement,
+    and next-attempt gate;
+  - keep the proof local-first: no live exchange order, no PG write, no real
+    funds movement, no withdrawal, and no transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit:
+    `436be7f8 feat(runtime): prove tiny-live bridge to official preflight`.
+- Files added:
+  - `scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py`;
+  - `tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py`.
+- Local RTF-102 artifacts:
+  - output directory:
+    `output/rtf102-controlled-tiny-live-bridge-to-local-cycle`;
+  - contract report:
+    `output/rtf102-controlled-tiny-live-bridge-to-local-cycle/contract-report.json`;
+  - bridge preflight report:
+    `output/rtf102-controlled-tiny-live-bridge-to-local-cycle/rtf101-bridge-preflight-report.json`;
+  - runtime cycle report:
+    `output/rtf102-controlled-tiny-live-bridge-to-local-cycle/rtf091-runtime-cycle-report.json`;
+  - bridge-to-local-cycle packet:
+    `output/rtf102-controlled-tiny-live-bridge-to-local-cycle/bridge-to-local-runtime-cycle-packet.json`;
+  - stdout packet:
+    `output/rtf102-controlled-tiny-live-bridge-to-local-cycle.stdout.json`.
+- Current proof result:
+  - status:
+    `controlled_tiny_live_bridge_to_local_cycle_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `eval-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - bridge status:
+    `controlled_tiny_live_bridge_to_official_preflight_passed`;
+  - runtime cycle status:
+    `official_fresh_candidate_runtime_cycle_handoff_passed`;
+  - exchange-submit execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange-submit execution result status:
+    `exchange_submit_orders_submitted`;
+  - submit outcome review:
+    `runtime-submit-outcome-review-runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit budget settlement:
+    `runtime-post-submit-budget-settlement-runtime-first-real-submit-outcome-accounting-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit finalize status:
+    `finalized_next_attempt_blocked`;
+  - next-attempt gate:
+    `blocked`;
+  - next-attempt gate blocker:
+    `runtime_active_position_slot_in_use`.
+- Behavior covered by tests:
+  - RTF-101 bridge preflight must pass before the local runtime cycle can be
+    accepted;
+  - waiting bridge blocks official route;
+  - ready bridge enters official prepare and does not use legacy pre-attempt
+    rehearsal as the primary gate;
+  - RTF-091 local runtime cycle must pass;
+  - controlled in-memory execution result must be recorded as
+    `exchange_submit_orders_submitted`;
+  - durable execution result must be reused by post-submit finalize;
+  - old authorization retry and pre-submit rehearsal retry must stay
+    disallowed;
+  - local CREATED-order requirement is retired for post-submit facts;
+  - submit outcome review and post-submit budget settlement must be created;
+  - next-attempt gate must require fresh strategy signal and fresh
+    authorization.
+- Verification:
+  - RTF-102 + RTF-101 + RTF-091 focused tests:
+    `pytest -q tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py`;
+  - result:
+    `11 passed`;
+  - local proof generation:
+    `python3 scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py --output-dir output/rtf102-controlled-tiny-live-bridge-to-local-cycle`;
+  - result:
+    `controlled_tiny_live_bridge_to_local_cycle_passed`;
+  - adjacent RTF-102/101/100/091/088/092 regression:
+    `pytest -q tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_preflight_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py tests/unit/test_runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py`;
+  - result:
+    `24 passed`;
+  - syntax check:
+    `python3 -m py_compile scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py`;
+  - whitespace check:
+    `git diff --check`.
+- Safety:
+  - controlled fake gateway called:
+    `true`;
+  - controlled OrderLifecycle submit called:
+    `true`;
+  - live exchange call/order:
+    `false`;
+  - PG write:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - real order placed:
+    `false`;
+  - real funds transfer:
+    `false`.
+- Interpretation:
+  - RTF-102 completes the local small-cycle proof requested by the engineering
+    discipline correction: bridge-ready state now has a local proof through
+    preflight, controlled fake submit, durable execution result, post-submit
+    finalize, and next-attempt gate;
+  - the `runtime_active_position_slot_in_use` blocker is expected in the local
+    proof because the simulated submit leaves an active position and proves the
+    next-attempt gate does not run away;
+  - this stage does not deploy and does not touch live exchange;
+  - the next main-chain step is a Tokyo integration probe for this RTF-102
+    chain, using deployed code and remote reports only after this local proof
+    has passed.
