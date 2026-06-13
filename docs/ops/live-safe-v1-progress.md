@@ -11906,3 +11906,145 @@ Use this file for session progress and handoff notes.
     candidate / prepare / FinalGate / controlled tiny-live attempt;
   - RTF-CLEANUP-001 remains mandatory after the main bounded-auto-attempt chain
     is accepted.
+
+## 2026-06-13 (RTF-095 Next-attempt Gate Blocker Classification)
+
+- Scope:
+  - classify the BNB runtime `next_attempt_gate_blocked` state using the
+    RTF-094 readiness packet and a fresh read-only live-position monitor packet;
+  - distinguish real active-position slot occupancy from stale projection,
+    missing facts, forbidden side effects, and legacy pre-attempt rehearsal
+    residue;
+  - do not close the position, do not submit an order, do not call
+    OrderLifecycle, do not call exchange from the classifier, and do not move
+    funds.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit before this stage:
+    `729f3ef8`.
+- New artifacts:
+  - script:
+    `scripts/runtime_next_attempt_gate_blocker_classification.py`;
+  - tests:
+    `tests/unit/test_runtime_next_attempt_gate_blocker_classification.py`;
+  - local generated evidence:
+    `output/rtf095-bnb-gate-classification/bnb-gate-blocker-classification.json`
+    (untracked output artifact, not committed).
+- Tokyo source evidence:
+  - deployed release:
+    `brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - deployed commit:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`;
+  - fresh BNB live-position monitor:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/rtf095-bnb-gate-classification/bnb-live-position-monitor.json`;
+  - source readiness packet:
+    `output/rtf095-bnb-gate-classification/live-attempt-readiness-packet.json`.
+- Current BNB blocker classification:
+  - runtime:
+    `strategy-runtime-e6138ad7c88f`;
+  - status:
+    `gate_blocked_by_active_position_slot`;
+  - blockers:
+    `next_attempt_gate_blocked`,
+    `runtime_max_active_positions_in_use`;
+  - warnings:
+    `current_position_or_protection_open_no_next_attempt`,
+    `missing_tp_protection_right_tail_exit_not_mounted`,
+    `reconciliation_warning_present`.
+- Position facts:
+  - symbol:
+    `BNB/USDT:USDT`;
+  - side:
+    `long`;
+  - active position present:
+    `true`;
+  - current qty:
+    `0.01`;
+  - entry price:
+    `603.86`;
+  - mark price:
+    `605.03`;
+  - unrealized PnL:
+    `0.0117`;
+  - local active position count:
+    `1`;
+  - exchange active position count:
+    `1`;
+  - max active positions:
+    `1`;
+  - local open order count:
+    `1`;
+  - exchange open stop order count:
+    `1`;
+  - protection status:
+    `hard_stop_only`;
+  - SL protection present:
+    `true`;
+  - TP protection present:
+    `false`;
+  - hard stop boundary present:
+    `true`;
+  - can continue holding:
+    `true`;
+  - attempts used:
+    `1`;
+  - attempts remaining:
+    `2`;
+  - budget reserved:
+    `0.23841734`;
+  - budget remaining:
+    `8.76158266`;
+  - reconciliation mismatch types:
+    `missing_tp_protection`;
+  - reconciliation warning count:
+    `1`;
+  - reconciliation severe count:
+    `0`.
+- Safety invariants:
+  - classifier PG call:
+    `false`;
+  - classifier exchange call:
+    `false`;
+  - classifier exchange write:
+    `false`;
+  - order created:
+    `false`;
+  - OrderLifecycle called:
+    `false`;
+  - runtime state mutated:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Verification:
+  - RTF-095 + RTF-094 focused tests:
+    `pytest -q tests/unit/test_runtime_next_attempt_gate_blocker_classification.py tests/unit/test_runtime_live_attempt_readiness_packet.py`;
+  - result:
+    `11 passed`;
+  - adjacent live observation regression:
+    `pytest -q tests/unit/test_runtime_next_attempt_gate_blocker_classification.py tests/unit/test_runtime_live_attempt_readiness_packet.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_live_position_monitor.py`;
+  - result:
+    `25 passed`;
+  - compile check:
+    `python3 -m py_compile scripts/runtime_next_attempt_gate_blocker_classification.py tests/unit/test_runtime_next_attempt_gate_blocker_classification.py`;
+  - result:
+    passed;
+  - diff check:
+    `git diff --check`;
+  - result:
+    passed.
+- Interpretation:
+  - the BNB `next_attempt_gate_blocked` state is now classified as a real active
+    position slot, not a historical pre-attempt artifact or missing evidence;
+  - the current position has a hard-stop boundary, so the missing TP is an
+    exit-policy warning rather than a runaway-loss blocker under the
+    right-tail risk-capital objective;
+  - while this active slot remains occupied, the runtime should not start a new
+    BNB attempt; it should continue read-only position monitoring until the
+    position is flat or a legitimate exit / close path occurs;
+  - this narrows the next mainline task to position lifecycle observation /
+    exit-path readiness or waiting for another runtime's real strategy signal.
