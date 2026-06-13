@@ -13354,3 +13354,112 @@ Use this file for session progress and handoff notes.
     replay, recovery, history reproduction, and compatibility tests only;
   - the remaining work is a final completion audit against the full objective,
     not another execution-chain gate.
+
+## 2026-06-13 (RTF-106 Tokyo Cleanup-wrapper Deployment / Final Remote Proof)
+
+- Scope:
+  - deploy the RTF-105 cleanup-wrapper head to Tokyo;
+  - verify postdeploy acceptance for the cleanup wrapper release;
+  - run remote RTF-102 bridge-cycle proof and RTF-104 legacy isolation proof
+    from the deployed release.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - deployed commit:
+    `fd5314010a06031aa72663d32fd13f968ee3d142`.
+- Previous Tokyo baseline:
+  - previous release:
+    `brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle`;
+  - expected deployed head:
+    `15a342940412268f1d53d00e2eb0f560abb19f63`.
+- Deploy target:
+  - release name:
+    `brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap`;
+  - report path:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap/rtf106-cleanup-wrap-probe`.
+- Local deploy artifacts:
+  - owner deploy decision packet:
+    `output/brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap/owner-git-deploy-decision-packet.json`;
+  - deploy dry-run:
+    `output/brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap/git-deploy-dry-run.json`;
+  - deploy apply:
+    `output/brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap/git-deploy-apply.json`;
+  - readonly probe:
+    `output/brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap/readonly-probe.json`;
+  - postdeploy verifier:
+    `output/brc-runtime-governance-fd531401-20260613Trtf106-cleanup-wrap/postdeploy-verify.json`.
+- Deploy result:
+  - owner deploy packet:
+    `ready_for_owner_git_deploy_decision`;
+  - dry-run:
+    `dry_run_ready`;
+  - apply:
+    `applied`;
+  - commands planned / executed:
+    `16 / 16`;
+  - blockers:
+    `[]`;
+  - deployed head:
+    `fd5314010a06031aa72663d32fd13f968ee3d142`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Postdeploy verification:
+  - readonly probe:
+    `ready_for_controlled_deploy_preflight`;
+  - postdeploy verifier:
+    `postdeploy_acceptance_passed`;
+  - postdeploy head:
+    `fd5314010a06031aa72663d32fd13f968ee3d142`.
+- Remote RTF-102 proof:
+  - status:
+    `controlled_tiny_live_bridge_to_local_cycle_passed`;
+  - post-submit finalize:
+    `finalized_next_attempt_blocked`;
+  - next-attempt gate:
+    `blocked`;
+  - live exchange called:
+    `false`;
+  - PG written:
+    `false`.
+- Remote RTF-104 proof:
+  - status:
+    `legacy_compatibility_isolated_from_runtime_mainline`;
+  - blockers:
+    `[]`;
+  - mainline artifacts:
+    `9`;
+  - legacy compatibility artifacts:
+    `7`;
+  - historically named prepare helper wrapped:
+    `true`;
+  - mainline has no legacy primary gate terms:
+    `true`.
+- Remote artifacts:
+  - `rtf102.stdout.json`;
+  - `rtf102/contract-report.json`;
+  - `rtf102/bridge-to-local-runtime-cycle-packet.json`;
+  - `rtf104.stdout.json`;
+  - `rtf104/legacy-compatibility-isolation-packet.json`.
+- Safety:
+  - deployment apply occurred:
+    `true`;
+  - service restart occurred:
+    `true`;
+  - live exchange order:
+    `false`;
+  - PG write by proof:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - the latest cleanup-wrapper code is now deployed and verified on Tokyo;
+  - the bridge-ready runtime cycle still passes remotely after replacing direct
+    first-real-submit helper imports with neutral official prepare aliases;
+  - the legacy compatibility isolation guard passes remotely and proves the
+    runtime mainline no longer uses legacy first-real-submit / pre-attempt
+    packets as primary gates;
+  - the remaining step is the final completion audit against the full objective.
