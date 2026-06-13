@@ -11675,3 +11675,132 @@ Use this file for session progress and handoff notes.
     deployed and exercised on Tokyo;
   - legacy pre-attempt / first-real-submit compatibility cleanup remains a
     mandatory post-main-chain cleanup item.
+
+## 2026-06-13 (RTF-093 Tokyo Fresh Candidate / Flat Next-attempt Integration Validation)
+
+- Scope:
+  - deploy the current `program/live-safe-v1` head to Tokyo with the git-based
+    deployment executor;
+  - validate the deployed release can run RTF-090, RTF-091, and RTF-092 from
+    the server release tree;
+  - keep the deployed service in non-live mode;
+  - do not authorize or perform a live exchange order, withdrawal, or transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - deployed commit:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`.
+- Previous Tokyo baseline:
+  - previous release:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-afd8b214-20260613Trtf082-final-gate-preflight-proof`;
+  - previous deployed head:
+    `afd8b214c3e57e42e0d3397c9b957291bcb424d1`;
+  - remote migration count:
+    `84`;
+  - remote latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`;
+  - predeploy health:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Deploy target:
+  - release name:
+    `brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - report path:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/`.
+- Local deploy artifacts:
+  - owner deploy decision packet:
+    `output/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/owner-git-deploy-decision-packet.json`;
+  - deploy dry-run:
+    `output/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/git-deploy-dry-run.json`;
+  - deploy apply:
+    `output/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/git-deploy-apply.json`.
+- Owner deploy packet:
+  - status:
+    `ready_for_owner_git_deploy_decision`;
+  - ready:
+    `true`;
+  - blockers:
+    `[]`;
+  - warnings:
+    `untracked_files_exist_and_are_not_in_git_archive`,
+    `remote_release_identity_from_manifest_without_git_status`,
+    `pre_live_packet_skipped_for_deploy_only`.
+- Deploy dry-run:
+  - status:
+    `dry_run_ready`;
+  - apply requested:
+    `false`;
+  - commands planned:
+    `16`;
+  - commands executed:
+    `0`;
+  - blockers:
+    `[]`;
+  - remote branch head matched target commit:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`.
+- Deploy apply:
+  - status:
+    `applied`;
+  - apply requested:
+    `true`;
+  - commands planned:
+    `16`;
+  - commands executed:
+    `16`;
+  - blockers:
+    `[]`;
+  - health after restart:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`;
+  - readonly probe:
+    `ready_for_controlled_deploy_preflight`;
+  - postdeploy readonly verification:
+    `postdeploy_acceptance_passed`.
+- Remote deployed-release proof commands:
+  - release cwd:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - Python:
+    `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python`;
+  - remote RTF-090:
+    `scripts/runtime_official_fresh_candidate_final_gate_preflight_proof.py --output-dir /home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/rtf090`;
+  - remote RTF-091:
+    `scripts/runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py --output-dir /home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/rtf091`;
+  - remote RTF-092:
+    `scripts/runtime_official_flat_next_attempt_end_to_end_proof.py --output-dir /home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/rtf092`.
+- Remote validation results:
+  - RTF-090:
+    `official_fresh_candidate_final_gate_preflight_passed`;
+  - RTF-091:
+    `official_fresh_candidate_runtime_cycle_handoff_passed`;
+  - RTF-092:
+    `official_flat_next_attempt_end_to_end_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - post-validation health:
+    `status=ok`, `runtime_bound=true`, `live_ready=false`.
+- Safety:
+  - deployment apply occurred:
+    `true`;
+  - service restart occurred:
+    `true`;
+  - migrations ran:
+    no new migration beyond existing head `084`;
+  - live exchange order:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - runtime health live-ready:
+    `false`.
+- Interpretation:
+  - RTF-093 proves the current strategy-runtime loop proof chain is not only a
+    local development artifact; it runs inside the deployed Tokyo release;
+  - the next mainline gap is converting the proven in-memory/local official
+    chain into a controlled tiny-live attempt path with real exchange effects
+    only after a fresh runtime/candidate/action decision;
+  - after the main chain is accepted, RTF-CLEANUP-001 remains mandatory to
+    downgrade or isolate legacy pre-attempt / first-real-submit compatibility
+    surfaces.
