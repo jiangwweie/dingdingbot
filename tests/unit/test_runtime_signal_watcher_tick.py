@@ -246,6 +246,37 @@ def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
     assert calls == []
 
 
+def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("FEISHU_WEBHOOK_URL", raising=False)
+    env_file = tmp_path / "deploy.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TRADING_ENV=live",
+                "FEISHU_WEBHOOK_URL='https://example.test/from-env-file'",
+                "FEISHU_WEBHOOK_SECRET='env-file-secret'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(tmp_path, env_file=str(env_file)),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
+    )
+
+    assert packet["status"] == "owner_notified"
+    assert packet["notification"]["configured"] is True
+    assert packet["notification"]["secret_configured"] is True
+    assert calls[0][0] == "https://example.test/from-env-file"
+    assert calls[0][1] == "env-file-secret"
+    assert "env-file-secret" not in json.dumps(packet)
+
+
 def test_feishu_text_body_supports_signed_custom_bot_payload():
     body = runtime_signal_watcher_tick._feishu_text_body("hello", secret="top-secret")
 

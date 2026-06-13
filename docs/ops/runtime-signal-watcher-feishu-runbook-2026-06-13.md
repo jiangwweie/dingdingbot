@@ -66,7 +66,16 @@ Duplicate event keys are suppressed by `notification-state.json`.
 
 Do not commit webhook values.
 
-Create this file on Tokyo:
+The watcher reuses the project-level notification variable:
+
+```bash
+FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/...'
+FEISHU_WEBHOOK_SECRET='optional-signing-secret'
+```
+
+It can read those keys from the process environment or from `--env-file`.
+
+For watcher-only overrides, create this optional file on Tokyo:
 
 ```text
 /home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
@@ -89,7 +98,7 @@ FEISHU_WEBHOOK_SECRET='...'
 ## Manual Dry Run
 
 ```bash
-cd /home/ubuntu/brc-deploy/current
+cd /home/ubuntu/brc-deploy/app/current
 /home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python \
   scripts/runtime_signal_watcher_tick.py \
   --env-file /home/ubuntu/brc-deploy/env/live-readonly.env \
@@ -136,4 +145,3 @@ When Feishu reports a ready signal:
 4. Run action-time FinalGate.
 5. Execute a real gateway action only through official Operation Layer when
    FinalGate passes.
-
