@@ -10923,3 +10923,133 @@ Use this file for session progress and handoff notes.
     with explicit mode, readiness/recovery checks, duplicate execution lock,
     OrderLifecycle.submit_order transition, exchange placement result, durable
     execution result, then post-submit finalize.
+
+## 2026-06-13 (RTF-087 Official Controlled Gateway Action Proof)
+
+- Scope:
+  - extend RTF-086 from disabled execution-result boundary into a controlled
+    in-memory gateway action;
+  - run the official exchange-submit execution-result route with
+    `exchange_submit_execution_enabled=true`;
+  - run with `exchange_submit_execution_mode=in_memory_simulation`;
+  - prove the official route can call the runtime gateway port, transition
+    local orders through `OrderLifecycle.submit_order`, and record a durable
+    execution result;
+  - keep live exchange, PG, ExecutionIntent status mutation, withdrawal, and
+    transfer out of scope.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_controlled_gateway_action_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_controlled_gateway_action_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf087-official-controlled-gateway-action/`;
+  - exchange submit boundary packet:
+    `output/rtf087-official-controlled-gateway-action/exchange-submit-boundary-packet.json`;
+  - exchange submit execution result:
+    `output/rtf087-official-controlled-gateway-action/exchange-submit-execution-result.json`;
+  - controlled gateway action packet:
+    `output/rtf087-official-controlled-gateway-action/controlled-gateway-action-packet.json`;
+  - contract report:
+    `output/rtf087-official-controlled-gateway-action/contract-report.json`.
+- Contract result:
+  - status:
+    `official_controlled_gateway_action_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - exchange submit execution result route called through:
+    `/api/trading-console/runtime-execution-exchange-submit-execution-results/authorizations/{authorization_id}`;
+  - route query used:
+    `exchange_submit_execution_enabled=true`;
+  - route query used:
+    `exchange_submit_execution_mode=in_memory_simulation`.
+- Status chain:
+  - local registration adapter result:
+    `registered_created_local_orders`;
+  - exchange submit packet preview:
+    `ready_for_exchange_submit_adapter_design`;
+  - exchange submit action authorization:
+    `approved_for_exchange_submit_action`;
+  - exchange submit enablement:
+    `ready_for_exchange_submit_action`;
+  - exchange submit adapter result:
+    `exchange_submit_adapter_armed`;
+  - exchange submit execution result:
+    `exchange_submit_orders_submitted`.
+- Controlled gateway action:
+  - fake gateway call count:
+    `2`;
+  - exchange call count in execution result:
+    `2`;
+  - `OrderLifecycle.submit_order` call count:
+    `2`;
+  - submitted local order IDs:
+    `rtod-5af61e9d8463403eb6-entry`,
+    `rtod-5af61e9d8463403eb6-sl`;
+  - submitted exchange order IDs:
+    `controlled-ex-rtod-5af61e9d8463403eb6-entry`,
+    `controlled-ex-rtod-5af61e9d8463403eb6-sl`;
+  - entry exchange order ID:
+    `controlled-ex-rtod-5af61e9d8463403eb6-entry`;
+  - protection exchange order IDs:
+    `controlled-ex-rtod-5af61e9d8463403eb6-sl`;
+  - local order statuses after in-memory projection:
+    entry `FILLED`, protection `OPEN`;
+  - entry fill projected:
+    `true`;
+  - durable execution result lock acquired / completed:
+    `1 / 1`;
+  - recovery task created:
+    `0`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - in-memory repositories used:
+    `true`;
+  - no PG write by proof;
+  - live exchange called:
+    `false`;
+  - fake gateway port called:
+    `true`;
+  - exchange order submitted:
+    `true` in the controlled in-memory gateway result only;
+  - no ExecutionIntent status change;
+  - no position close;
+  - no withdrawal or transfer.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `18 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_controlled_gateway_action_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_controlled_gateway_action_proof.py --output-dir output/rtf087-official-controlled-gateway-action`.
+- Interpretation:
+  - RTF-087 proves the runtime mainline can move from official exchange-submit
+    enablement into a controlled gateway action and durable submitted
+    execution result;
+  - the proof deliberately snapshots the RTF-085 exchange boundary before the
+    controlled gateway action so the pre-submit boundary is not polluted by
+    post-submit facts;
+  - the next mainline gap is post-submit finalize: accept durable execution
+    result as the submit evidence, generate outcome review / budget settlement,
+    and compute the next attempt gate without replaying old pre-submit
+    rehearsal rules.
