@@ -11547,3 +11547,131 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is proving the ready/flat next-attempt side of the
     cycle end-to-end, then deciding when to deploy this chain to Tokyo for
     integration validation.
+
+## 2026-06-13 (RTF-092 Official Flat Next-attempt End-to-end Proof)
+
+- Scope:
+  - prove the ready/flat side of the runtime loop directly;
+  - start from a `finalized_ready_for_next_attempt` packet with
+    `active_positions_count=0`;
+  - call the official `next-attempt-strategy-plans` API;
+  - create fresh shadow `SignalEvaluation` / `OrderCandidate`;
+  - pass the same candidate through official prepare, FinalGate,
+    controlled-submit plan, and controlled-submit preflight;
+  - stop before executable submit, local order creation, OrderLifecycle,
+    exchange, runtime mutation, withdrawal, or transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_flat_next_attempt_end_to_end_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf092-official-flat-next-attempt-end-to-end/`;
+  - ready post-submit finalize packet:
+    `output/rtf092-official-flat-next-attempt-end-to-end/ready-post-submit-finalize.json`;
+  - next-attempt strategy plan:
+    `output/rtf092-official-flat-next-attempt-end-to-end/next-attempt-strategy-plan.json`;
+  - shadow signal evaluation:
+    `output/rtf092-official-flat-next-attempt-end-to-end/shadow-signal-evaluation.json`;
+  - shadow order candidate:
+    `output/rtf092-official-flat-next-attempt-end-to-end/shadow-order-candidate.json`;
+  - prepare report:
+    `output/rtf092-official-flat-next-attempt-end-to-end/prepare-report.json`;
+  - FinalGate preview:
+    `output/rtf092-official-flat-next-attempt-end-to-end/final-gate-preview.json`;
+  - controlled-submit preflight:
+    `output/rtf092-official-flat-next-attempt-end-to-end/controlled-submit-preflight.json`;
+  - end-to-end packet:
+    `output/rtf092-official-flat-next-attempt-end-to-end/flat-next-attempt-end-to-end-packet.json`;
+  - contract report:
+    `output/rtf092-official-flat-next-attempt-end-to-end/contract-report.json`.
+- Contract result:
+  - status:
+    `official_flat_next_attempt_end_to_end_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - strategy-plan signal evaluation ID:
+    `eval-rtf075-cpm-long`;
+  - shadow order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - runtime execution intent draft:
+    `runtime-intent-draft-order-candidate-rtf075-contract`;
+  - non-executable ExecutionIntent audit artifact:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - controlled-submit preflight:
+    `runtime-controlled-submit-preflight-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Ready gate:
+  - post-submit status:
+    `finalized_ready_for_next_attempt`;
+  - next-attempt gate:
+    `ready_for_fresh_signal`;
+  - active positions count:
+    `0`;
+  - old authorization submit retry allowed:
+    `false`;
+  - pre-submit rehearsal retry allowed:
+    `false`.
+- Strategy plan:
+  - status:
+    `ready_for_final_gate_preflight`;
+  - candidate planning status:
+    `shadow_candidate_created`;
+  - requires fresh authorization before submit:
+    `true`;
+  - TP1 / runner / right-tail runner metadata:
+    present in shadow candidate `planning_proposal`.
+- FinalGate / preflight:
+  - FinalGate verdict:
+    `PASS`;
+  - FinalGate blockers:
+    `[]`;
+  - controlled-submit preflight:
+    `ready_for_controlled_submit_adapter`;
+  - preview only:
+    `true`;
+  - submit executed:
+    `false`;
+  - local order created:
+    `false`;
+  - exchange called:
+    `false`;
+  - OrderLifecycle called:
+    `false`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - prepare audit artifacts created:
+    `true`;
+  - executable submit executed:
+    `false`;
+  - runtime state mutated:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Verification:
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_flat_next_attempt_end_to_end_proof.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_flat_next_attempt_end_to_end_proof.py --output-dir output/rtf092-official-flat-next-attempt-end-to-end`;
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py tests/unit/test_runtime_official_next_attempt_strategy_continuation_proof.py tests/unit/test_runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `33 passed`.
+- Interpretation:
+  - RTF-092 proves the repeat side of the runtime loop when active-position
+    facts are flat and trusted;
+  - the main remaining gap is not strategy-to-preflight anymore, but integration
+    validation and deciding how much of the controlled action/finalize path is
+    deployed and exercised on Tokyo;
+  - legacy pre-attempt / first-real-submit compatibility cleanup remains a
+    mandatory post-main-chain cleanup item.
