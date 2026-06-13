@@ -12048,3 +12048,173 @@ Use this file for session progress and handoff notes.
     position is flat or a legitimate exit / close path occurs;
   - this narrows the next mainline task to position lifecycle observation /
     exit-path readiness or waiting for another runtime's real strategy signal.
+
+## 2026-06-13 (RTF-096 Position Lifecycle / Exit-path Readiness Packet)
+
+- Scope:
+  - summarize the BNB active position lifecycle after RTF-095 using existing
+    read-only packets:
+    gate classification, live-position monitor, position exit plan, and
+    post-close follow-up;
+  - express whether the runtime should continue monitoring, is ready for
+    explicit Owner reduce-only close authorization, is ready for closed review,
+    or is ready for next-attempt gate verification;
+  - do not close the position, do not submit an order, do not call
+    OrderLifecycle, do not call exchange from the lifecycle packet, and do not
+    move funds.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit before this stage:
+    `f8871634`.
+- New artifacts:
+  - script:
+    `scripts/runtime_position_lifecycle_exit_readiness_packet.py`;
+  - tests:
+    `tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py`;
+  - local generated evidence:
+    `output/rtf096-position-lifecycle-readiness/bnb-position-lifecycle-exit-readiness.json`
+    (untracked output artifact, not committed).
+- Tokyo source evidence:
+  - deployed release:
+    `brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - deployed commit:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`;
+  - remote report directory:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/rtf096-position-lifecycle-readiness`;
+  - fresh exit plan:
+    `bnb-position-exit-plan.json`;
+  - fresh post-close follow-up:
+    `bnb-post-close-followup.json`.
+- Current BNB lifecycle result:
+  - runtime:
+    `strategy-runtime-e6138ad7c88f`;
+  - status:
+    `position_lifecycle_hold_or_owner_close_ready`;
+  - source statuses:
+    - gate classification:
+      `gate_blocked_by_active_position_slot`;
+    - live-position monitor:
+      `active_protection_warning`;
+    - position exit plan:
+      `ready_for_owner_review`;
+    - post-close follow-up:
+      `waiting_for_owner_close_authorization`.
+- Position facts:
+  - symbol:
+    `BNB/USDT:USDT`;
+  - side:
+    `long`;
+  - active position present:
+    `true`;
+  - current qty:
+    `0.01`;
+  - entry price:
+    `603.86`;
+  - mark price:
+    `605.03`;
+  - unrealized PnL:
+    `0.0117`;
+  - hard stop boundary present:
+    `true`;
+  - protection status:
+    `hard_stop_only`;
+  - SL protection present:
+    `true`;
+  - TP protection present:
+    `false`;
+  - can continue holding:
+    `true`;
+  - attempts used:
+    `1`;
+  - attempts remaining:
+    `2`;
+  - budget reserved:
+    `0.23841734`;
+  - budget remaining:
+    `8.76158266`;
+  - reconciliation severe count:
+    `0`;
+  - reconciliation warning count:
+    `1`.
+- Exit-path facts:
+  - exit plan status:
+    `ready_for_owner_review`;
+  - recommended owner decision:
+    `keep_hard_stop_only_or_owner_authorize_full_reduce_only_close`;
+  - TP1 quantity feasible:
+    `false`;
+  - TP1 quantity requested:
+    `0.005`;
+  - TP1 quantity step-aligned:
+    `0.00`;
+  - runner preserved:
+    `true`;
+  - runner quantity reference:
+    `0.01`;
+  - full reduce-only close feasible:
+    `true`;
+  - full reduce-only close quantity:
+    `0.01`;
+  - full reduce-only close notional reference:
+    `6.0431`;
+  - full reduce-only close requires Owner authorization:
+    `true`;
+  - post-close follow-up status:
+    `waiting_for_owner_close_authorization`.
+- Operator conclusion:
+  - next step:
+    `continue_monitoring_or_explicitly_authorize_reduce_only_close`;
+  - allows new attempt now:
+    `false`;
+  - reduce-only close ready for Owner authorization:
+    `true`;
+  - execute reduce-only close now:
+    `false`.
+- Safety invariants:
+  - lifecycle packet PG call:
+    `false`;
+  - lifecycle packet exchange call:
+    `false`;
+  - lifecycle packet exchange write:
+    `false`;
+  - order created:
+    `false`;
+  - OrderLifecycle called:
+    `false`;
+  - runtime state mutated:
+    `false`;
+  - position closed:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Verification:
+  - RTF-096 + RTF-095 focused tests:
+    `pytest -q tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_next_attempt_gate_blocker_classification.py`;
+  - result:
+    `11 passed`;
+  - adjacent position lifecycle regression:
+    `pytest -q tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_next_attempt_gate_blocker_classification.py tests/unit/test_runtime_live_attempt_readiness_packet.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_live_position_monitor.py tests/unit/test_runtime_active_position_resolution.py tests/unit/test_runtime_post_close_followup.py`;
+  - result:
+    `37 passed`;
+  - compile check:
+    `python3 -m py_compile scripts/runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py`;
+  - result:
+    passed;
+  - diff check:
+    `git diff --check`;
+  - result:
+    passed.
+- Interpretation:
+  - BNB is no longer an ambiguous runtime blocker: it is an active protected
+    position occupying the runtime active-position slot;
+  - under the right-tail objective, continuing to hold is allowed because hard
+    stop protection exists and no severe reconciliation mismatch is present;
+  - a full reduce-only close path is also prepared, but it remains an explicit
+    Owner-authorized action and was not executed in this stage;
+  - the mainline can now either keep BNB under read-only lifecycle monitoring
+    or proceed when another runtime produces a real strategy signal.
