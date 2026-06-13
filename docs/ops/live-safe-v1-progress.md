@@ -11053,3 +11053,138 @@ Use this file for session progress and handoff notes.
     result as the submit evidence, generate outcome review / budget settlement,
     and compute the next attempt gate without replaying old pre-submit
     rehearsal rules.
+
+## 2026-06-13 (RTF-088 Official Post-submit Finalize Proof)
+
+- Scope:
+  - extend RTF-087 controlled gateway action into official post-submit finalize;
+  - accept durable exchange-submit execution result as post-submit evidence;
+  - record submit outcome review;
+  - record first-real-submit outcome accounting and post-submit budget
+    settlement;
+  - generate runtime-level next-attempt gate without returning to pre-submit
+    rehearsal or requiring local orders to still be `CREATED`.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_post_submit_finalize_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_post_submit_finalize_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf088-official-post-submit-finalize/`;
+  - exchange submit execution result:
+    `output/rtf088-official-post-submit-finalize/exchange-submit-execution-result.json`;
+  - controlled gateway action packet:
+    `output/rtf088-official-post-submit-finalize/controlled-gateway-action-packet.json`;
+  - post-submit finalize packet:
+    `output/rtf088-official-post-submit-finalize/post-submit-finalize.json`;
+  - post-submit finalize proof packet:
+    `output/rtf088-official-post-submit-finalize/post-submit-finalize-proof-packet.json`;
+  - contract report:
+    `output/rtf088-official-post-submit-finalize/contract-report.json`.
+- Contract result:
+  - status:
+    `official_post_submit_finalize_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - submit outcome review:
+    `runtime-submit-outcome-review-runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit budget settlement:
+    `runtime-post-submit-budget-settlement-runtime-first-real-submit-outcome-accounting-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - post-submit finalize route called through:
+    `/api/trading-console/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-packets`;
+  - request runtime:
+    `runtime-rtf075-cpm-long`;
+  - request authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - request reservation:
+    `runtime-attempt-reservation-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Post-submit status chain:
+  - exchange submit execution result:
+    `exchange_submit_orders_submitted`;
+  - submit outcome review:
+    `classified_ready_for_attempt_outcome_policy`;
+  - observed outcome:
+    `submitted_full_fill`;
+  - recommended attempt outcome kind:
+    `submitted_full_fill`;
+  - post-submit budget settlement:
+    `recorded_reserved_budget_consumed`;
+  - budget action:
+    `confirm_reserved_budget_consumed`;
+  - post-submit finalize:
+    `finalized_next_attempt_blocked`;
+  - next-attempt gate:
+    `blocked`.
+- Next-attempt gate:
+  - active positions count:
+    `1`;
+  - max active positions:
+    `1`;
+  - blocker:
+    `runtime_active_position_slot_in_use`;
+  - attempts remaining:
+    `2`;
+  - budget remaining:
+    `8.55854127`;
+  - requires fresh strategy signal:
+    `true`;
+  - requires fresh authorization:
+    `true`.
+- Architecture correction:
+  - consumed authorization replay-only:
+    `true`;
+  - old authorization submit retry allowed:
+    `false`;
+  - pre-submit rehearsal retry allowed:
+    `false`;
+  - local CREATED-order requirement retired:
+    `true`;
+  - interpretation:
+    post-submit facts are no longer checked by pre-submit rehearsal rules.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - in-memory repositories used:
+    `true`;
+  - no PG write by proof;
+  - no live exchange call;
+  - no post-submit order creation;
+  - no post-submit `OrderLifecycle` call;
+  - no ExecutionIntent status change;
+  - no withdrawal or transfer.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `21 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_post_submit_finalize_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_post_submit_finalize_proof.py --output-dir output/rtf088-official-post-submit-finalize`.
+- Interpretation:
+  - RTF-088 closes the architectural correction after a submitted attempt:
+    submitted attempts flow forward into post-submit finalize instead of being
+    retried through pre-submit rehearsal;
+  - the next mainline gap is strategy-driven next-attempt continuation after
+    the runtime is flat or after a close/review packet clears the active
+    position gate;
+  - the historical pre-attempt / rehearsal artifacts remain useful for
+    pre-submit evidence and audit, but should be downgraded away from
+    post-submit decision authority after the main chain is complete.
