@@ -13530,3 +13530,87 @@ Use this file for session progress and handoff notes.
     later, but it is archive hygiene rather than a mainline completion blocker;
   - the next step is the final completion audit against the full runtime
     governance objective.
+
+## 2026-06-13 (RTF-108 Tokyo Cleanup-policy Deployment / Completion Remote Proof)
+
+- Scope:
+  - deploy the RTF-107 cleanup-policy closure commit to Tokyo;
+  - verify the deployed release with postdeploy acceptance, read-only preflight,
+    remote RTF-102 bridge-cycle proof, and remote RTF-104 legacy isolation proof.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - deployed commit:
+    `80da4d670a31ca313ef667d97460d7b6c806c085`.
+- Deploy target:
+  - release name:
+    `brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy`;
+  - remote report path:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy/rtf107-cleanup-policy-probe`.
+- Local deploy artifacts:
+  - owner deploy decision packet:
+    `output/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy/owner-git-deploy-decision-packet.json`;
+  - deploy dry-run:
+    `output/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy/git-deploy-dry-run.json`;
+  - deploy apply:
+    `output/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy/git-deploy-apply.json`;
+  - readonly probe:
+    `output/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy/readonly-probe.json`;
+  - postdeploy verifier:
+    `output/brc-runtime-governance-80da4d67-20260613Trtf107-cleanup-policy/postdeploy-verify.json`.
+- Deploy result:
+  - owner deploy packet:
+    `ready_for_owner_git_deploy_decision`;
+  - dry-run:
+    `dry_run_ready`;
+  - apply:
+    `applied`;
+  - commands planned / executed:
+    `16 / 16`;
+  - blockers:
+    `[]`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Postdeploy / readonly verification:
+  - postdeploy verifier:
+    `postdeploy_acceptance_passed`;
+  - readonly probe:
+    `ready_for_controlled_deploy_preflight`;
+  - deployed head:
+    `80da4d670a31ca313ef667d97460d7b6c806c085`.
+- Remote RTF-102 proof:
+  - status:
+    `controlled_tiny_live_bridge_to_local_cycle_passed`.
+- Remote RTF-104 proof:
+  - status:
+    `legacy_compatibility_isolated_from_runtime_mainline`;
+  - blockers:
+    `[]`;
+  - mainline exit cleanup complete:
+    `true`;
+  - future cleanup required:
+    `false`.
+- Safety:
+  - deployment apply occurred:
+    `true`;
+  - service restart occurred:
+    `true`;
+  - live exchange order:
+    `false`;
+  - PG write by proof:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - the latest completion-audit cleanup policy is now deployed and verified on
+    Tokyo;
+  - the remote runtime bridge-cycle proof still passes after the cleanup-policy
+    closure;
+  - the remote legacy isolation packet now proves mandatory cleanup is complete
+    while preserving one-shot compatibility surfaces.
