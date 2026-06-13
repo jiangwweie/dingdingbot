@@ -53,6 +53,8 @@ blockers=[]
 mainline_has_no_legacy_primary_gate_terms=true
 historically_named_prepare_helper_wrapped=true
 legacy_artifacts_classified=true
+mainline_exit_cleanup_complete=true
+future_cleanup_required=false
 ```
 
 ## Notes
@@ -63,3 +65,5 @@ legacy_artifacts_classified=true
 - Do not use pre-attempt rehearsal as the primary gate after an execution result
   exists.
 - Owner manual withdrawals remain outside this execution chain.
+- Further file moves into an explicit replay / recovery / history namespace are
+  archive hygiene, not a mainline completion blocker.

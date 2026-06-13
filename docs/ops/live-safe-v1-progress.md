@@ -13463,3 +13463,70 @@ Use this file for session progress and handoff notes.
     runtime mainline no longer uses legacy first-real-submit / pre-attempt
     packets as primary gates;
   - the remaining step is the final completion audit against the full objective.
+
+## 2026-06-13 (RTF-107 Completion-audit Cleanup Policy Closure)
+
+- Scope:
+  - remove the final completion-audit ambiguity in the legacy compatibility
+    isolation packet;
+  - keep the historical one-shot / first-real-submit packet family available
+    for replay, recovery, history reproduction, and compatibility tests;
+  - make the machine-readable cleanup policy distinguish mandatory mainline
+    exit cleanup from later archive hygiene.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Files updated:
+  - `scripts/runtime_legacy_compatibility_isolation_packet.py`;
+  - `tests/unit/test_runtime_legacy_compatibility_isolation_packet.py`;
+  - `docs/ops/runtime-legacy-submit-compatibility-map-2026-06-13.md`;
+  - `docs/ops/live-safe-v1-task-board.md`;
+  - `docs/ops/live-safe-v1-progress.md`.
+- Current local proof:
+  - artifact:
+    `output/rtf107-completion-audit/legacy-compatibility-isolation-packet.json`;
+  - status:
+    `legacy_compatibility_isolated_from_runtime_mainline`;
+  - blockers:
+    `[]`;
+  - mainline exit cleanup complete:
+    `true`;
+  - future cleanup required:
+    `false`;
+  - future archive hygiene recommended:
+    `true`;
+  - mainline has no legacy primary gate terms:
+    `true`.
+- Verification:
+  - focused RTF-107 regression:
+    `pytest -q tests/unit/test_runtime_legacy_compatibility_isolation_packet.py tests/unit/test_runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py`;
+  - result:
+    `9 passed`;
+  - packet generation:
+    `python3 scripts/runtime_legacy_compatibility_isolation_packet.py --output-json output/rtf107-completion-audit/legacy-compatibility-isolation-packet.json`;
+  - result:
+    `legacy_compatibility_isolated_from_runtime_mainline`.
+- Safety:
+  - API call:
+    `false`;
+  - PG read/write:
+    `false`;
+  - exchange call:
+    `false`;
+  - order creation:
+    `false`;
+  - OrderLifecycle call:
+    `false`;
+  - runtime mutation:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - the mandatory downgrade/isolation cleanup is now represented as complete
+    by both docs and machine-readable packet evidence;
+  - moving historical packet scripts into a separate namespace remains allowed
+    later, but it is archive hygiene rather than a mainline completion blocker;
+  - the next step is the final completion audit against the full runtime
+    governance objective.

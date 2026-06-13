@@ -38,7 +38,9 @@ def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
         item["classification"] == "legacy_pre_attempt_rehearsal_replay_only"
         for item in packet["legacy_compatibility_artifacts"]
     )
-    assert packet["cleanup_policy"]["future_cleanup_required"] is True
+    assert packet["cleanup_policy"]["mainline_exit_cleanup_complete"] is True
+    assert packet["cleanup_policy"]["future_cleanup_required"] is False
+    assert packet["cleanup_policy"]["future_archive_hygiene_recommended"] is True
     assert packet["safety_invariants"]["exchange_called"] is False
 
 

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Classify legacy first-real-submit compatibility surfaces.
 
-RTF-104 is a cleanup/isolation packet.  It does not delete code yet; it proves
-the new runtime-level bridge/cycle mainline is not using the historical
-pre-attempt rehearsal or Owner first-real-submit review packets as its primary
-gate, then records which legacy artifacts should remain replay / recovery /
-history compatibility surfaces.
+RTF-104/105 is a cleanup/isolation packet. It proves the runtime-level
+bridge/cycle mainline is not using the historical pre-attempt rehearsal or Owner
+first-real-submit review packets as its primary gate, then records which legacy
+artifacts remain replay / recovery / history compatibility surfaces.
 """
 
 from __future__ import annotations
@@ -138,9 +137,13 @@ def build_isolation_packet(*, repo_root: Path = ROOT_DIR) -> dict[str, Any]:
             "do_not_delete_owner_bounded_execution_service": True,
             "do_not_use_pre_attempt_rehearsal_as_runtime_mainline_gate": True,
             "do_not_use_owner_first_real_submit_packet_as_runtime_grant": True,
-            "future_cleanup_required": True,
-            "future_cleanup_action": (
-                "move_or_document_legacy_packets_as_replay_recovery_history"
+            "mainline_exit_cleanup_complete": True,
+            "future_cleanup_required": False,
+            "future_archive_hygiene_recommended": True,
+            "future_archive_hygiene_action": (
+                "optionally move legacy packet scripts under an explicit "
+                "replay/recovery/history namespace after the runtime mainline "
+                "has stable operational mileage"
             ),
         },
         "safety_invariants": {
