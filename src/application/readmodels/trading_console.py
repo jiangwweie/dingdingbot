@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from enum import Enum
 from typing import Any, Optional
 
@@ -66,10 +68,23 @@ from src.application.production_strategy_family_admission import (
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
+DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
 TERMINAL_INTENT_STATUSES = {"blocked", "failed", "completed"}
+SIGNAL_WATCHER_RESUME_READY_STATUSES = {
+    "runtime_signal_ready_for_non_executing_prepare",
+    "prepared_shadow_evidence_ready_for_owner_review",
+}
+SIGNAL_WATCHER_UNSAFE_FLAGS = {
+    "exchange_write_called",
+    "order_created",
+    "order_lifecycle_called",
+    "execution_intent_created",
+    "runtime_budget_mutated",
+    "withdrawal_or_transfer_created",
+}
 
 
 class TradingConsoleReadModelResponse(BaseModel):
@@ -1256,6 +1271,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/action-entry-readiness",
                     "GET /api/trading-console/budget-recommendation",
                     "GET /api/trading-console/signal-marker-feed",
+                    "GET /api/trading-console/runtime-signal-watcher-status",
                     "GET /api/trading-console/api-classification",
                 ],
                 "internal_or_legacy": [
@@ -1266,6 +1282,171 @@ class TradingConsoleReadModelService:
                 "action_api_policy": "official_brc_operation_layer_required_for_submit",
                 "sample_data_policy": "not_allowed_as_trading_console_truth_source",
             },
+        )
+
+    def runtime_signal_watcher_status(
+        self,
+        *,
+        stale_after_seconds: int = 180,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        report_dir = Path(
+            os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR", DEFAULT_SIGNAL_WATCHER_REPORT_DIR)
+        ).expanduser()
+        files = {
+            "watcher_tick": report_dir / "watcher-tick.json",
+            "wakeup_packet": report_dir / "wakeup-packet.json",
+            "operator_packet": report_dir / "operator-packet.json",
+            "status_packet": report_dir / "status-packet.json",
+            "notification_state": report_dir / "notification-state.json",
+        }
+        payloads = {name: _read_json_file(path) for name, path in files.items()}
+        watcher_tick = payloads["watcher_tick"]
+        wakeup_packet = payloads["wakeup_packet"]
+        operator_packet = payloads["operator_packet"]
+        status_packet = payloads["status_packet"]
+        notification_state = payloads["notification_state"]
+        file_status = {
+            name: {
+                "path": str(path),
+                "present": path.exists(),
+                "mtime_ms": _file_mtime_ms(path),
+            }
+            for name, path in files.items()
+        }
+        missing = [name for name, status in file_status.items() if not status["present"]]
+        latest_mtime_ms = max(
+            [int(status["mtime_ms"] or 0) for status in file_status.values()],
+            default=0,
+        )
+        age_seconds = (
+            max(0, int((generated_at_ms - latest_mtime_ms) / 1000))
+            if latest_mtime_ms
+            else None
+        )
+        stale = bool(age_seconds is not None and age_seconds > stale_after_seconds)
+        safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
+        safety = safety if isinstance(safety, dict) else {}
+        unsafe_flags = [
+            name for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)
+            if safety.get(name) not in {False, None}
+        ]
+        notification = watcher_tick.get("notification") if isinstance(watcher_tick, dict) else {}
+        notification = notification if isinstance(notification, dict) else {}
+        wakeup_status = str(watcher_tick.get("wakeup_status") or wakeup_packet.get("status") or "unknown")
+        operator_status = str(watcher_tick.get("operator_status") or operator_packet.get("status") or "unknown")
+        status_packet_status = str(
+            watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown"
+        )
+        can_resume_steps_5_8 = wakeup_status in SIGNAL_WATCHER_RESUME_READY_STATUSES and not unsafe_flags
+        if missing:
+            readiness_status = "evidence_missing"
+        elif stale:
+            readiness_status = "evidence_stale"
+        elif unsafe_flags:
+            readiness_status = "unsafe_watcher_effect_detected"
+        elif can_resume_steps_5_8:
+            readiness_status = "post_signal_resume_ready"
+        elif notification.get("required"):
+            readiness_status = "owner_attention_pending"
+        else:
+            readiness_status = "watching_no_signal"
+
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if missing:
+            blockers.append(
+                {
+                    "code": "runtime_signal_watcher_evidence_missing",
+                    "message": "Runtime Signal Watcher evidence files are missing.",
+                    "affected_area": ",".join(missing),
+                }
+            )
+        if unsafe_flags:
+            blockers.append(
+                {
+                    "code": "runtime_signal_watcher_unsafe_effect",
+                    "message": "Watcher evidence contains forbidden effect flags.",
+                    "affected_area": ",".join(unsafe_flags),
+                }
+            )
+        if stale:
+            warnings.append(
+                {
+                    "code": "runtime_signal_watcher_evidence_stale",
+                    "severity": "warning",
+                    "message": "Runtime Signal Watcher evidence is older than the configured freshness window.",
+                    "count": 1,
+                }
+            )
+        freshness_status = "fresh"
+        if blockers:
+            freshness_status = "not_live_connected"
+        elif warnings:
+            freshness_status = "warning"
+
+        return TradingConsoleReadModelResponse(
+            read_model="runtime_signal_watcher_status",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=warnings,
+            blockers=blockers,
+            unavailable=[],
+            data={
+                "deployment_readiness": {
+                    "status": readiness_status,
+                    "report_dir": str(report_dir),
+                    "file_status": file_status,
+                    "latest_evidence_age_seconds": age_seconds,
+                    "stale_after_seconds": stale_after_seconds,
+                    "systemd_timer": "verified_by_deployment_readiness_packet",
+                    "feishu_configured": bool(notification.get("configured")),
+                    "duplicate_suppression": "active"
+                    if notification_state.get("last_notified_event_key")
+                    else "not_yet_observed",
+                },
+                "watcher": {
+                    "status": watcher_tick.get("status") or "unknown",
+                    "wakeup_status": wakeup_status,
+                    "operator_status": operator_status,
+                    "status_packet_status": status_packet_status,
+                    "blockers": watcher_tick.get("blockers") or status_packet.get("blockers") or [],
+                    "warnings": watcher_tick.get("warnings") or status_packet.get("warnings") or [],
+                },
+                "notification": {
+                    "required": bool(notification.get("required")),
+                    "configured": bool(notification.get("configured")),
+                    "attempted": bool(notification.get("attempted")),
+                    "sent": bool(notification.get("sent")),
+                    "duplicate_suppressed": bool(notification.get("duplicate_suppressed")),
+                    "skipped_reason": notification.get("skipped_reason"),
+                },
+                "post_signal_resume": {
+                    "can_continue_steps_5_8": can_resume_steps_5_8,
+                    "current_gate": (
+                        "fresh_signal_or_prepared_shadow_ready"
+                        if can_resume_steps_5_8
+                        else "waiting_for_fresh_strategy_signal"
+                    ),
+                    "resume_pack_path": str(report_dir / "post-signal-resume-pack.json"),
+                    "next_chain": [
+                        "fresh candidate",
+                        "runtime grant",
+                        "fresh authorization evidence",
+                        "action-time FinalGate",
+                        "official Operation Layer gateway action",
+                        "post-submit finalize / reconciliation / budget settlement",
+                    ],
+                },
+                "safety_invariants": {
+                    **{name: bool(safety.get(name)) for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)},
+                    "forbidden_effect_flags": unsafe_flags,
+                    "watcher_status_read_model_only": True,
+                    "places_order": False,
+                    "mutates_pg": False,
+                },
+            },
+            live_ready=False,
         )
 
     def _response(
@@ -2485,6 +2666,25 @@ class TradingConsoleReadModelService:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _file_mtime_ms(path: Path) -> Optional[int]:
+    if not path.exists():
+        return None
+    try:
+        return int(path.stat().st_mtime * 1000)
+    except OSError:
+        return None
 
 
 def _iso_ms(value: Optional[int]) -> Optional[str]:

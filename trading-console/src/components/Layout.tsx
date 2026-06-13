@@ -14,6 +14,7 @@ import {
   ListChecks,
   LogOut,
   Menu,
+  RadioTower,
   ShieldCheck,
 } from 'lucide-react';
 import { DataStatusLine, FreshnessBadge, ReadModelErrorPanel } from './ui';
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { name: '控制总览', path: '/', icon: Home },
   { name: '策略库', path: '/strategy', icon: Layers3 },
   { name: '运行治理', path: '/runtime', icon: ShieldCheck },
+  { name: '信号监测', path: '/watcher', icon: RadioTower },
   { name: '交易与仓位', path: '/trades', icon: ListChecks },
   { name: '分析', path: '/analysis', icon: BarChart3 },
   { name: '异常介入', path: '/incident', icon: AlertTriangle },

@@ -14,6 +14,7 @@ import AuthorizationState from './pages/AuthorizationState';
 import RecoveryState from './pages/RecoveryState';
 import ReviewState from './pages/ReviewState';
 import AuditChain from './pages/AuditChain';
+import WatcherStatus from './pages/WatcherStatus';
 import Login from './pages/Login';
 
 function ProtectedShell() {
@@ -46,6 +47,7 @@ export default function App() {
               <Route index element={<Dashboard />} />
               <Route path="strategy" element={<CarrierShelf />} />
               <Route path="runtime" element={<AuthorizationState />} />
+              <Route path="watcher" element={<WatcherStatus />} />
               <Route path="trades" element={<OrderLedger />} />
               <Route path="analysis" element={<ReviewState />} />
               <Route path="incident" element={<RecoveryState />} />

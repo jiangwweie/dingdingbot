@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -5202,6 +5203,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/owner-action-flow",
         "/api/trading-console/budget-recommendation",
         "/api/trading-console/signal-marker-feed",
+        "/api/trading-console/runtime-signal-watcher-status",
         "/api/trading-console/api-classification",
     ]
 
@@ -5221,3 +5223,64 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
             assert payload["no_action_guarantee"]["starts_runtime"] is False
             assert payload["no_action_guarantee"]["grants_auto_execution"] is False
             assert payload["no_action_guarantee"]["mutates_pg"] is False
+
+
+def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch, tmp_path):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "owner_notified",
+        "wakeup_status": "prepared_shadow_evidence_ready_for_owner_review",
+        "operator_status": "strategy_group_signal_review_available",
+        "status_packet_status": "ok",
+        "blockers": [],
+        "warnings": [],
+        "notification": {
+            "required": True,
+            "configured": True,
+            "attempted": True,
+            "sent": True,
+            "duplicate_suppressed": False,
+            "skipped_reason": None,
+        },
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+    files = {
+        "watcher-tick.json": tick,
+        "wakeup-packet.json": {"status": "prepared_shadow_evidence_ready_for_owner_review"},
+        "operator-packet.json": {"status": "strategy_group_signal_review_available"},
+        "status-packet.json": {"status": "ok", "blockers": [], "warnings": []},
+        "notification-state.json": {"last_notified_event_key": "ready-event"},
+    }
+    for name, payload in files.items():
+        (report_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/runtime-signal-watcher-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["read_model"] == "runtime_signal_watcher_status"
+    assert payload["source"] == "trading_console_read_model_v1"
+    assert payload["freshness_status"] == "fresh"
+    assert payload["live_ready"] is False
+    assert payload["data"]["deployment_readiness"]["status"] == "post_signal_resume_ready"
+    assert payload["data"]["deployment_readiness"]["feishu_configured"] is True
+    assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
+    assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True
+    assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
+    assert payload["data"]["safety_invariants"]["mutates_pg"] is False
