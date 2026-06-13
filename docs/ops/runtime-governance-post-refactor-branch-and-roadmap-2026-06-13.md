@@ -20,11 +20,16 @@ Execution boundary authority remains:
 
 | Anchor | Ref | Meaning |
 |---|---|---|
-| Program branch | `program/live-safe-v1` at `28a8ba03` | Current controller integration branch after completion/deploy docs |
-| Dev branch | `dev` at `28a8ba03` | Reviewed integration snapshot, not a scratch branch |
-| Release branch | `release/brc-runtime-governance-20260613-r0` at `28a8ba03` | Frozen post-refactor source/documentation snapshot |
+| Program branch | `program/live-safe-v1` | Current controller integration branch after completion/deploy docs |
+| Dev branch | `dev` | Reviewed integration snapshot, not a scratch branch |
+| Release branch | `release/brc-runtime-governance-20260613-r0` | Frozen post-refactor source/documentation snapshot |
 | Completion tag | `brc-runtime-governance-refactor-complete-20260613-r0` at `28a8ba03` | Refactor completion milestone |
 | Tokyo deploy tag | `deploy/tokyo-runtime-governance-20260613-80da4d67` at `80da4d67` | Deployed code release on Tokyo |
+
+Branches are movable refs. Tags are immutable evidence anchors. The completion
+tag intentionally points to the commit that closed the refactor/deploy evidence;
+later branch-management documentation commits may advance the program, dev, and
+release branches without changing the deployed code tag.
 
 Tokyo current release:
 
@@ -137,4 +142,3 @@ local node test
 Tokyo is for deployment, integration, live account facts, and explicitly gated
 real exchange actions. It is not the first-pass debugging environment for new
 domain or application nodes.
-
