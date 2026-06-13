@@ -10812,3 +10812,114 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is exchange-submit execution-result boundary:
     disabled proof first, then controlled gateway action with explicit
     live-action authority and post-submit finalize.
+
+## 2026-06-13 (RTF-086 Official Exchange Submit Execution-result Disabled Boundary Proof)
+
+- Scope:
+  - extend RTF-085 exchange-submit adapter armed boundary into the official
+    exchange-submit execution-result route;
+  - run the execution-result route with `exchange_submit_execution_enabled=false`
+    and `exchange_submit_execution_mode=disabled`;
+  - prove disabled execution-result evidence without ExchangeGateway,
+    OrderLifecycle.submit_order, exchange order submission, position
+    open/close, withdrawal, or transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_exchange_submit_execution_result_boundary_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf086-official-exchange-submit-execution-result-boundary/`;
+  - exchange submit boundary packet:
+    `output/rtf086-official-exchange-submit-execution-result-boundary/exchange-submit-boundary-packet.json`;
+  - exchange submit execution result:
+    `output/rtf086-official-exchange-submit-execution-result-boundary/exchange-submit-execution-result.json`;
+  - execution-result boundary packet:
+    `output/rtf086-official-exchange-submit-execution-result-boundary/exchange-submit-execution-result-boundary-packet.json`;
+  - contract report:
+    `output/rtf086-official-exchange-submit-execution-result-boundary/contract-report.json`.
+- Contract result:
+  - status:
+    `official_exchange_submit_execution_result_boundary_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - exchange submit execution result route called through:
+    `/api/trading-console/runtime-execution-exchange-submit-execution-results/authorizations/{authorization_id}`;
+  - route query used:
+    `exchange_submit_execution_enabled=false`;
+  - route query used:
+    `exchange_submit_execution_mode=disabled`.
+- Status chain:
+  - local registration adapter result:
+    `registered_created_local_orders`;
+  - exchange submit packet preview:
+    `ready_for_exchange_submit_adapter_design`;
+  - exchange submit action authorization:
+    `approved_for_exchange_submit_action`;
+  - exchange submit enablement:
+    `ready_for_exchange_submit_action`;
+  - exchange submit adapter result:
+    `exchange_submit_adapter_armed`;
+  - exchange submit execution result:
+    `exchange_submit_execution_disabled`.
+- Execution-result boundary:
+  - exchange submit execution enabled:
+    `false`;
+  - execution mode:
+    `disabled`;
+  - exchange call count:
+    `0`;
+  - OrderLifecycle.submit_order call count:
+    `0`;
+  - submitted local order IDs:
+    `[]`;
+  - submitted exchange order IDs:
+    `[]`;
+  - blockers:
+    `[]`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no PG write by proof;
+  - no ExchangeGateway call or write;
+  - no exchange order submitted;
+  - no OrderLifecycle.submit_order call;
+  - no ExecutionIntent status change;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `15 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_exchange_submit_execution_result_boundary_proof.py --output-dir output/rtf086-official-exchange-submit-execution-result-boundary`;
+  - diff check:
+    `git diff --check`.
+- Interpretation:
+  - RTF-086 proves the official execution-result route can consume the ready
+    exchange-submit evidence and return disabled execution-result evidence
+    without real exchange action;
+  - the next mainline gap is controlled gateway action proof: execution enabled
+    with explicit mode, readiness/recovery checks, duplicate execution lock,
+    OrderLifecycle.submit_order transition, exchange placement result, durable
+    execution result, then post-submit finalize.
