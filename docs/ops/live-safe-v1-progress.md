@@ -12331,3 +12331,118 @@ Use this file for session progress and handoff notes.
   - the next mainline work is to either keep the selector refreshed as live
     facts change or bridge a `ready_for_final_gate_review` / `ready_for_prepare`
     selector output into the controlled tiny-live attempt path.
+
+## 2026-06-13 (RTF-098 Selector-driven Live Continuation Refresh Flow)
+
+- Scope:
+  - create a repeatable packet-only refresh flow that takes active runtime
+    observation monitor evidence and produces:
+    - RTF-094 live-attempt readiness;
+    - RTF-097 live continuation selector;
+    - one top-level refresh decision packet;
+  - support optional per-runtime lifecycle packets such as the BNB RTF-096
+    packet;
+  - do not call APIs, PG, exchange, OrderLifecycle, close flow, order
+    registration, withdrawal, or transfer services.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit before this stage:
+    `6b671626`.
+- New artifacts:
+  - script:
+    `scripts/runtime_live_continuation_refresh_flow.py`;
+  - tests:
+    `tests/unit/test_runtime_live_continuation_refresh_flow.py`;
+  - local generated evidence:
+    `output/rtf098-live-continuation-refresh/live-continuation-refresh-flow.json`
+    (untracked output artifact, not committed);
+  - generated child packets:
+    `output/rtf098-live-continuation-refresh/live-attempt-readiness-packet.json`,
+    `output/rtf098-live-continuation-refresh/live-continuation-selector.json`.
+- Source evidence:
+  - active monitor:
+    `output/rtf098-live-continuation-refresh/active-monitor.json`;
+  - BNB lifecycle:
+    `output/rtf098-live-continuation-refresh/bnb-position-lifecycle-exit-readiness.json`;
+  - deployed release context:
+    `brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - deployed commit context:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`.
+- Refresh result:
+  - refresh status:
+    `continuation_refresh_monitor_position_or_owner_close`;
+  - readiness status:
+    `live_attempt_blocked_by_runtime_or_signal_gate`;
+  - selector status:
+    `continuation_monitor_position_or_owner_close`;
+  - active runtime count:
+    `3`;
+  - selected runtime:
+    `strategy-runtime-e6138ad7c88f`;
+  - selected symbol / side:
+    `BNB/USDT:USDT long`;
+  - selected action:
+    `monitor_position_or_owner_authorize_reduce_only_close`;
+  - next step:
+    `continue_position_monitoring_or_owner_authorize_reduce_only_close`;
+  - ready for controlled tiny-live path:
+    `false`;
+  - execute tiny-live attempt now:
+    `false`;
+  - execute reduce-only close now:
+    `false`.
+- Safety invariants:
+  - refresh flow packet only:
+    `true`;
+  - refresh flow API call:
+    `false`;
+  - refresh flow PG call:
+    `false`;
+  - refresh flow exchange call:
+    `false`;
+  - refresh flow exchange write:
+    `false`;
+  - order created:
+    `false`;
+  - OrderLifecycle called:
+    `false`;
+  - runtime state mutated:
+    `false`;
+  - close executed:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Verification:
+  - RTF-098 + RTF-097 + RTF-096 + RTF-094 focused tests:
+    `pytest -q tests/unit/test_runtime_live_continuation_refresh_flow.py tests/unit/test_runtime_live_continuation_selector_packet.py tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_live_attempt_readiness_packet.py`;
+  - result:
+    `20 passed`;
+  - adjacent continuation regression:
+    `pytest -q tests/unit/test_runtime_live_continuation_refresh_flow.py tests/unit/test_runtime_live_continuation_selector_packet.py tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_next_attempt_gate_blocker_classification.py tests/unit/test_runtime_live_attempt_readiness_packet.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_live_position_monitor.py`;
+  - result:
+    `40 passed`;
+  - compile check:
+    `python3 -m py_compile scripts/runtime_live_continuation_refresh_flow.py tests/unit/test_runtime_live_continuation_refresh_flow.py`;
+  - result:
+    passed;
+  - diff check:
+    `git diff --check`;
+  - result:
+    passed.
+- Interpretation:
+  - the mainline now has a repeatable refresh entry that converts live
+    observation evidence into a single continuation selector without hand
+    stitching RTF-094 and RTF-097 outputs;
+  - current live state is still not ready for controlled tiny-live submit:
+    BNB is protected but active, ADA/RBR and AVAX/BTPC still need real strategy
+    signal;
+  - the refresh flow is intentionally non-executing and does not replace the
+    later controlled tiny-live submit path;
+  - the next mainline gap is deployment / Tokyo refresh execution for this
+    flow, then bridging only a ready selector state into controlled
+    tiny-live attempt.
