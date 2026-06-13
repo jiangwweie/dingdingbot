@@ -12218,3 +12218,116 @@ Use this file for session progress and handoff notes.
     Owner-authorized action and was not executed in this stage;
   - the mainline can now either keep BNB under read-only lifecycle monitoring
     or proceed when another runtime produces a real strategy signal.
+
+## 2026-06-13 (RTF-097 Live Runtime Continuation Selector Packet)
+
+- Scope:
+  - combine the RTF-094 live-attempt readiness packet with per-runtime lifecycle
+    packets into one operator continuation selector;
+  - choose the current highest-priority continuation across active runtimes;
+  - keep the selector packet-only: no API call, no PG call, no exchange call,
+    no order creation, no OrderLifecycle call, no runtime mutation, no close,
+    no withdrawal, and no transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit before this stage:
+    `182c4b71`.
+- New artifacts:
+  - script:
+    `scripts/runtime_live_continuation_selector_packet.py`;
+  - tests:
+    `tests/unit/test_runtime_live_continuation_selector_packet.py`;
+  - local generated evidence:
+    `output/rtf097-live-continuation-selector/live-continuation-selector.json`
+    (untracked output artifact, not committed).
+- Source evidence:
+  - readiness:
+    `output/rtf097-live-continuation-selector/live-attempt-readiness-packet.json`;
+  - BNB lifecycle:
+    `output/rtf097-live-continuation-selector/bnb-position-lifecycle-exit-readiness.json`;
+  - deployed release context:
+    `brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - deployed commit context:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`.
+- Selector result:
+  - status:
+    `continuation_monitor_position_or_owner_close`;
+  - active runtime count:
+    `3`;
+  - selected runtime:
+    `strategy-runtime-e6138ad7c88f`;
+  - selected symbol / side:
+    `BNB/USDT:USDT long`;
+  - selected action:
+    `monitor_position_or_owner_authorize_reduce_only_close`;
+  - selected lifecycle status:
+    `position_lifecycle_hold_or_owner_close_ready`;
+  - next step:
+    `continue_position_monitoring_or_owner_authorize_reduce_only_close`;
+  - execute tiny-live attempt now:
+    `false`;
+  - execute reduce-only close now:
+    `false`;
+  - reduce-only close ready for Owner authorization:
+    `true`.
+- Runtime action ranking:
+  - `strategy-runtime-e6138ad7c88f`:
+    `monitor_position_or_owner_authorize_reduce_only_close`,
+    priority `70`;
+  - `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`:
+    `wait_for_strategy_signal`,
+    priority `40`;
+  - `strategy-runtime-95655873b76c`:
+    `wait_for_strategy_signal`,
+    priority `40`.
+- Safety invariants:
+  - selector packet only:
+    `true`;
+  - selector PG call:
+    `false`;
+  - selector exchange call:
+    `false`;
+  - selector exchange write:
+    `false`;
+  - order created:
+    `false`;
+  - OrderLifecycle called:
+    `false`;
+  - runtime state mutated:
+    `false`;
+  - close executed:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Verification:
+  - RTF-097 + RTF-096 + RTF-094 focused tests:
+    `pytest -q tests/unit/test_runtime_live_continuation_selector_packet.py tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_live_attempt_readiness_packet.py`;
+  - result:
+    `16 passed`;
+  - adjacent continuation regression:
+    `pytest -q tests/unit/test_runtime_live_continuation_selector_packet.py tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_next_attempt_gate_blocker_classification.py tests/unit/test_runtime_live_attempt_readiness_packet.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_live_position_monitor.py`;
+  - result:
+    `36 passed`;
+  - compile check:
+    `python3 -m py_compile scripts/runtime_live_continuation_selector_packet.py tests/unit/test_runtime_live_continuation_selector_packet.py`;
+  - result:
+    passed;
+  - diff check:
+    `git diff --check`;
+  - result:
+    passed.
+- Interpretation:
+  - the current active runtime set now has a single continuation selector:
+    BNB is the current highest-priority item because it owns the active
+    position slot and has an optional Owner-authorized reduce-only close path;
+  - ADA/RBR and AVAX/BTPC remain in read-only signal observation and must not
+    be converted into fake candidates until a real strategy signal is ready;
+  - the selector does not start a new attempt or execute close by itself;
+  - the next mainline work is to either keep the selector refreshed as live
+    facts change or bridge a `ready_for_final_gate_review` / `ready_for_prepare`
+    selector output into the controlled tiny-live attempt path.
