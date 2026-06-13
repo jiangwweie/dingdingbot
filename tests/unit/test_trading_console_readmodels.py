@@ -1325,6 +1325,19 @@ def test_operations_cockpit_prioritizes_recovery_and_owner_controls(monkeypatch)
     assert data["recovery"]["detectable_states"]["runtime_server_version_drift"] == "not_detectable"
     assert data["budget"]["action_allowed"] is False
     assert data["budget"]["grants_trading_permission"] is False
+    governance = data["runtime_governance"]
+    assert governance["status"] == "blocked_by_runtime_governance"
+    assert governance["current_gate"]["status"] == "recovery_required"
+    assert governance["next_attempt_gate"]["requires_fresh_strategy_signal"] is True
+    assert (
+        governance["next_attempt_gate"]["requires_fresh_authorization_before_submit"]
+        is True
+    )
+    assert governance["next_attempt_gate"]["legacy_authorization_replay_allowed"] is False
+    assert governance["next_attempt_gate"]["executable_submit_allowed_by_cockpit"] is False
+    assert governance["runtime_grant"]["grants_trading_permission"] is False
+    assert governance["safety_invariants"]["places_order"] is False
+    assert governance["safety_invariants"]["calls_exchange_write"] is False
     assert "autonomy_effective_state" in data
     assert "budget_effective_state" in data
     assert "budget_authorization_status" in data

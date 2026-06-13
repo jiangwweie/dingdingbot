@@ -839,6 +839,18 @@ class TradingConsoleReadModelService:
             active_position=active_position,
             autonomy=autonomy,
         )
+        runtime_governance = _cockpit_runtime_governance_summary(
+            overall=overall,
+            autonomy=autonomy,
+            budget=budget,
+            active_position=active_position,
+            protection=_cockpit_protection_summary(protection),
+            review=review,
+            blockers=blockers,
+            post_action=post_action,
+            runtime_control=snap.runtime_control_state,
+            budget_authorization=snap.budget_authorization_state,
+        )
         return self._response(
             "operations_cockpit",
             snap,
@@ -869,6 +881,7 @@ class TradingConsoleReadModelService:
                 "budget": budget,
                 "active_position": active_position,
                 "protection": _cockpit_protection_summary(protection),
+                "runtime_governance": runtime_governance,
                 "candidate": _cockpit_candidate_summary(
                     selected_proposal=selected_proposal,
                     owner_flow=owner_flow,
@@ -887,6 +900,7 @@ class TradingConsoleReadModelService:
                     "authorization": snap.authorization_state,
                     "runtime_control_state": snap.runtime_control_state,
                     "budget_authorization_state": snap.budget_authorization_state,
+                    "runtime_governance": runtime_governance,
                     "budgeted_autonomy_loop": owner_flow.get("budgeted_autonomy_loop") or {},
                     "budgeted_autonomy_v01": owner_flow.get("budgeted_autonomy_v01") or {},
                     "post_action_state": post_action,
@@ -5189,6 +5203,143 @@ def _cockpit_protection_summary(protection: dict[str, Any]) -> dict[str, Any]:
         "actions_exposed": protection.get("actions_exposed") or [],
         "deferred_actions": protection.get("deferred_actions") or [],
     }
+
+
+def _cockpit_runtime_governance_summary(
+    *,
+    overall: dict[str, Any],
+    autonomy: dict[str, Any],
+    budget: dict[str, Any],
+    active_position: dict[str, Any],
+    protection: dict[str, Any],
+    review: dict[str, Any],
+    blockers: list[dict[str, Any]],
+    post_action: dict[str, Any],
+    runtime_control: dict[str, Any],
+    budget_authorization: dict[str, Any],
+) -> dict[str, Any]:
+    hard_blockers = [
+        item for item in blockers
+        if item.get("severity") in {"hard_blocker", "recovery_required"}
+    ]
+    if active_position.get("exists"):
+        status = "blocked_by_active_position"
+        next_gate_status = "waiting_for_position_resolution"
+        next_gate_blocker = "active_position_open"
+        next_step = "monitor_position_or_follow_owner_authorized_close_path"
+    elif review.get("review_required_before_next_action"):
+        status = "blocked_by_review_gate"
+        next_gate_status = "waiting_for_closed_review"
+        next_gate_blocker = "review_required_before_next_action"
+        next_step = "complete_review_ledger_before_fresh_attempt"
+    elif hard_blockers:
+        status = "blocked_by_runtime_governance"
+        next_gate_status = "blocked"
+        next_gate_blocker = str(hard_blockers[0].get("code") or "runtime_blocker")
+        next_step = "resolve_runtime_governance_blocker"
+    elif budget.get("another_action_allowed") is True:
+        status = "ready_for_fresh_strategy_signal"
+        next_gate_status = "ready_for_strategy_signal"
+        next_gate_blocker = None
+        next_step = "start_fresh_strategy_signal_observation"
+    else:
+        status = "waiting_for_budget_or_runtime_gate"
+        next_gate_status = "blocked"
+        next_gate_blocker = "budget_not_actionable"
+        next_step = "refresh_or_reauthorize_budget_before_fresh_attempt"
+
+    latest_settlement = dict(post_action.get("latest_budget_settlement") or {})
+    post_submit_finalize = dict(post_action.get("post_submit_finalize") or {})
+    if not latest_settlement:
+        latest_settlement = {
+            "status": post_action.get("budget_settlement_status") or "not_available",
+            "settlement_id": post_action.get("post_submit_budget_settlement_id"),
+        }
+    if not post_submit_finalize:
+        post_submit_finalize = {
+            "status": post_action.get("post_submit_finalize_status") or "not_available",
+            "packet_id": post_action.get("post_submit_finalize_packet_id"),
+        }
+
+    budget_auth_id = budget.get("budget_authorization_id") or budget_authorization.get(
+        "budget_authorization_id"
+    )
+    runtime_control_status = runtime_control.get("status") or autonomy.get(
+        "runtime_control_state",
+        {},
+    ).get("status")
+
+    return {
+        "status": status,
+        "label": _runtime_governance_label(status),
+        "current_gate": {
+            "status": overall.get("status"),
+            "label": overall.get("label"),
+            "message": overall.get("message"),
+            "source": overall.get("source"),
+        },
+        "runtime_grant": {
+            "status": runtime_control_status or "not_available",
+            "budget_authorization_id": budget_auth_id,
+            "budget_authorization_status": budget.get("budget_authorization_status"),
+            "autonomy_effective_state": autonomy.get("autonomy_effective_state"),
+            "grants_trading_permission": False,
+        },
+        "active_position": {
+            "present": bool(active_position.get("exists")),
+            "symbol": active_position.get("symbol"),
+            "side": active_position.get("side"),
+            "quantity": active_position.get("quantity"),
+            "notional": active_position.get("notional"),
+            "source": active_position.get("source"),
+        },
+        "protection": {
+            "status": protection.get("status"),
+            "tp_count": protection.get("tp_count"),
+            "sl_count": protection.get("sl_count"),
+            "completeness": protection.get("completeness"),
+        },
+        "budget": {
+            "status": budget.get("status"),
+            "remaining_budget": budget.get("remaining_budget"),
+            "daily_attempts_used": budget.get("daily_attempts_used"),
+            "daily_attempts_remaining": budget.get("daily_attempts_remaining"),
+            "can_attempt_next_budgeted_action": budget.get(
+                "can_attempt_next_budgeted_action"
+            ),
+        },
+        "post_submit_finalize": post_submit_finalize,
+        "budget_settlement": latest_settlement,
+        "next_attempt_gate": {
+            "status": next_gate_status,
+            "blocker": next_gate_blocker,
+            "next_step": next_step,
+            "requires_fresh_strategy_signal": True,
+            "requires_fresh_authorization_before_submit": True,
+            "legacy_authorization_replay_allowed": False,
+            "executable_submit_allowed_by_cockpit": False,
+        },
+        "hard_blockers": hard_blockers,
+        "safety_invariants": {
+            "read_model_only": True,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "calls_exchange_write": False,
+            "mutates_runtime_budget": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _runtime_governance_label(status: str) -> str:
+    labels = {
+        "blocked_by_active_position": "Active position gate",
+        "blocked_by_review_gate": "Review gate",
+        "blocked_by_runtime_governance": "Runtime blocker",
+        "ready_for_fresh_strategy_signal": "Ready for fresh signal",
+        "waiting_for_budget_or_runtime_gate": "Budget or runtime gate",
+    }
+    return labels.get(status, "Runtime governance")
 
 
 def _cockpit_candidate_summary(

@@ -131,6 +131,25 @@ function resultTone(status?: string): ConsoleTone {
   return 'unavailable';
 }
 
+function governanceTone(status?: string): ConsoleTone {
+  const value = String(status || '').toLowerCase();
+  if (value.includes('ready_for_fresh')) return 'normal';
+  if (value.includes('active_position') || value.includes('review')) return 'attention';
+  if (value.includes('blocked')) return 'blocked';
+  return 'unavailable';
+}
+
+function governanceStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    blocked_by_active_position: '等待仓位解决',
+    blocked_by_review_gate: '等待复盘',
+    blocked_by_runtime_governance: '运行治理阻断',
+    ready_for_fresh_strategy_signal: '等待新信号',
+    waiting_for_budget_or_runtime_gate: '等待预算或运行门禁',
+  };
+  return labels[String(status || '')] || '运行治理待确认';
+}
+
 function SoftButton({
   children,
   to,
@@ -281,6 +300,11 @@ export default function Dashboard() {
   const budget = data.budget || {};
   const position = data.active_position || {};
   const protection = data.protection || {};
+  const runtimeGovernance = data.runtime_governance || {};
+  const nextAttemptGate = runtimeGovernance.next_attempt_gate || {};
+  const runtimeGrant = runtimeGovernance.runtime_grant || {};
+  const governancePosition = runtimeGovernance.active_position || {};
+  const governanceBudget = runtimeGovernance.budget || {};
   const candidate = data.candidate || {};
   const review = data.review || {};
   const recovery = data.recovery || {};
@@ -361,6 +385,65 @@ export default function Dashboard() {
           <MetricRailItem label="Attention" value={attentionCount} tone={attentionCount > 0 ? 'attention' : 'normal'} sub="待关注" />
           <MetricRailItem label="Intervention" value={interventionCount} tone={interventionCount > 0 ? 'intervention' : 'normal'} sub="需介入" />
           <MetricRailItem label="Recent Trades" value={recentTradeCount} tone="unavailable" sub="最近交易事实" />
+        </div>
+      </ConsolePanel>
+
+      <ConsolePanel
+        title="运行治理"
+        caption="当前门禁、仓位、保护、预算与下一次 attempt"
+        action={<StatusChip tone={governanceTone(runtimeGovernance.status)}>{governanceStatusLabel(runtimeGovernance.status)}</StatusChip>}
+      >
+        <div className="grid grid-cols-1 gap-px bg-slate-800/80 lg:grid-cols-5">
+          <GovernanceCell
+            label="当前门禁"
+            value={displayValue(runtimeGovernance.current_gate?.label || runtimeGovernance.current_gate?.status, '未知')}
+            sub={displayValue(runtimeGovernance.current_gate?.message, '等待 readmodel')}
+            tone={governanceTone(runtimeGovernance.status)}
+          />
+          <GovernanceCell
+            label="下一门禁"
+            value={displayValue(nextAttemptGate.status, '未知')}
+            sub={displayValue(nextAttemptGate.blocker || nextAttemptGate.next_step, '无阻断')}
+            tone={nextAttemptGate.blocker ? 'attention' : 'normal'}
+          />
+          <GovernanceCell
+            label="仓位"
+            value={governancePosition.present ? displayValue(governancePosition.symbol, '持仓存在') : 'Flat'}
+            sub={governancePosition.present ? sideLabel(governancePosition.side) : '无活跃仓位'}
+            tone={governancePosition.present ? 'attention' : 'normal'}
+          />
+          <GovernanceCell
+            label="保护"
+            value={protectionStatusLabel(runtimeGovernance.protection?.status)}
+            sub={`${displayValue(runtimeGovernance.protection?.tp_count, '0')} TP / ${displayValue(runtimeGovernance.protection?.sl_count, '0')} SL`}
+            tone={resultTone(runtimeGovernance.protection?.status)}
+          />
+          <GovernanceCell
+            label="预算"
+            value={formatMoney(governanceBudget.remaining_budget)}
+            sub={`剩余 ${displayValue(governanceBudget.daily_attempts_remaining, '暂无')} 次尝试`}
+            tone={governanceBudget.can_attempt_next_budgeted_action ? 'normal' : 'attention'}
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-px border-t border-slate-800 bg-slate-800/80 md:grid-cols-3">
+          <GovernanceCell
+            label="运行授权"
+            value={displayValue(runtimeGrant.status, 'not_available')}
+            sub={displayValue(runtimeGrant.budget_authorization_status || runtimeGrant.budget_authorization_id, '无当前授权')}
+            tone={runtimeGrant.grants_trading_permission ? 'attention' : 'unavailable'}
+          />
+          <GovernanceCell
+            label="Fresh attempt"
+            value={nextAttemptGate.requires_fresh_strategy_signal ? '需要新信号' : '策略缺失'}
+            sub={nextAttemptGate.legacy_authorization_replay_allowed ? '旧授权可复用' : '旧授权不可复用'}
+            tone={nextAttemptGate.requires_fresh_strategy_signal ? 'normal' : 'blocked'}
+          />
+          <GovernanceCell
+            label="Submit"
+            value={nextAttemptGate.executable_submit_allowed_by_cockpit ? '可执行' : '禁用'}
+            sub={nextAttemptGate.requires_fresh_authorization_before_submit ? '需要新授权' : '授权策略缺失'}
+            tone={nextAttemptGate.executable_submit_allowed_by_cockpit ? 'attention' : 'unavailable'}
+          />
         </div>
       </ConsolePanel>
 
@@ -541,6 +624,29 @@ function TradeFactRow({
       <div className="truncate text-slate-200">{strategy}</div>
       <div className="truncate text-xs text-slate-400">{result}</div>
       <div className="truncate text-right font-mono text-slate-300">{pnl}</div>
+    </div>
+  );
+}
+
+function GovernanceCell({
+  label,
+  value,
+  sub,
+  tone = 'unavailable',
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  tone?: ConsoleTone;
+}) {
+  return (
+    <div className="min-h-24 bg-slate-900 px-4 py-3">
+      <div className="flex items-center gap-2 text-[11px] font-medium uppercase text-slate-500">
+        <span className={cn('h-2 w-2 rounded-sm', tone === 'blocked' ? 'bg-red-400' : tone === 'attention' ? 'bg-amber-400' : tone === 'normal' ? 'bg-emerald-400' : 'bg-slate-400')} />
+        <span>{label}</span>
+      </div>
+      <div className="mt-2 truncate text-sm font-semibold text-slate-100">{value}</div>
+      <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{sub}</div>
     </div>
   );
 }
