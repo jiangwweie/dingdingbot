@@ -95,7 +95,7 @@ Current 2026-06-13 implementation progress:
 | P0-A operator runbook | integrated | `docs/ops/runtime-governance-p0-operator-runbook-2026-06-13.md` |
 | P0-A live fact validation | integrated | `docs/ops/runtime-governance-p0-live-fact-validation-2026-06-13.md` |
 | P0-A operator live fact packet builder | integrated | `scripts/build_runtime_operator_live_fact_packet.py` |
-| P0-B fresh attempt readiness guard | in progress | `scripts/build_runtime_fresh_attempt_readiness_packet.py` |
+| P0-B fresh attempt readiness guard | integrated | `scripts/build_runtime_fresh_attempt_readiness_packet.py` |
 | Current Tokyo next attempt | blocked | active BNB runtime is `waiting_for_position_resolution` |
 
 ### P1 - Console Productization
@@ -109,6 +109,14 @@ Work items:
 2. Show post-submit finalize, budget settlement, and attempt outcome facts.
 3. Avoid frontend-only ready states that are not backed by runtime evidence.
 4. Keep light/dark mode support intact.
+
+Current 2026-06-13 implementation progress:
+
+| Item | Status | Evidence |
+|---|---|---|
+| P1-A operations cockpit runtime governance read model | integrated | `src/application/readmodels/trading_console.py` |
+| P1-A Trading Console runtime governance panel | integrated | `trading-console/src/pages/Dashboard.tsx` |
+| P1-A backend/frontend focused verification | integrated | `tests/unit/test_trading_console_readmodels.py`, `npm run lint`, `npm run build` |
 
 ### P1 - Strategy Runtime Integration
 
@@ -124,6 +132,14 @@ Work items:
    metadata, and no automatic compounding or withdrawal assumption.
 4. Route RMR/FCO as classifier or backlog inputs until their data model and
    missing-fact behavior are explicit.
+
+Current 2026-06-13 implementation progress:
+
+| Item | Status | Evidence |
+|---|---|---|
+| P1-B strategy RequiredFacts readiness guard | integrated | `scripts/build_runtime_strategy_required_facts_readiness_packet.py` |
+| P1-B operator contract document | integrated | `docs/ops/runtime-governance-p1-strategy-required-facts-readiness-2026-06-13.md` |
+| P1-B focused verification | integrated | `tests/unit/test_runtime_strategy_required_facts_readiness_packet.py` |
 
 ### P2 - Archive Hygiene
 
