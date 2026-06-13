@@ -11804,3 +11804,105 @@ Use this file for session progress and handoff notes.
   - after the main chain is accepted, RTF-CLEANUP-001 remains mandatory to
     downgrade or isolate legacy pre-attempt / first-real-submit compatibility
     surfaces.
+
+## 2026-06-13 (RTF-094 Live Attempt Readiness Packet)
+
+- Scope:
+  - convert the already generated Tokyo active-runtime observation monitor
+    packet into a compact live-attempt readiness packet;
+  - classify whether current ACTIVE runtimes are waiting for real strategy
+    signal, blocked by runtime gate, ready for prepare review, or ready for
+    FinalGate review;
+  - preserve the bounded right-tail objective while avoiding fake strategy
+    readiness and avoiding legacy pre-attempt rehearsal as the primary gate;
+  - do not submit a live order, do not call OrderLifecycle, do not call
+    exchange, do not create prepare records, and do not move funds.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit before this stage:
+    `26f870f6`.
+- New artifacts:
+  - script:
+    `scripts/runtime_live_attempt_readiness_packet.py`;
+  - tests:
+    `tests/unit/test_runtime_live_attempt_readiness_packet.py`;
+  - local generated evidence:
+    `output/rtf094-live-attempt-readiness/live-attempt-readiness-packet.json`
+    (untracked output artifact, not committed).
+- Tokyo source evidence:
+  - deployed release:
+    `brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof`;
+  - deployed commit:
+    `20843e895b63cb00f6212108cf7bdd9ed06b55e4`;
+  - source monitor:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-20843e89-20260613Trtf092-flat-next-attempt-proof/rtf094-readiness-probe/active-monitor.json`;
+  - source monitor status:
+    `blocked`;
+  - active runtime count:
+    `3`;
+  - monitored runtime count:
+    `3`.
+- Current live-attempt readiness result:
+  - status:
+    `live_attempt_blocked_by_runtime_or_signal_gate`;
+  - waiting strategy signal count:
+    `2`;
+  - runtime gate blocked count:
+    `1`;
+  - ready for prepare count:
+    `0`;
+  - ready for FinalGate preflight count:
+    `0`.
+- Runtime classification:
+  - `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short`:
+    `waiting_for_signal`,
+    blocker `strategy_signal_not_ready_for_shadow_candidate_prepare`,
+    signal summary `RBR v0 did not confirm range-boundary rejection`;
+  - `strategy-runtime-e6138ad7c88f`:
+    `blocked`,
+    blocker `next_attempt_gate_blocked`,
+    warning `current_position_or_protection_open_no_next_attempt`;
+  - `strategy-runtime-95655873b76c`:
+    `waiting_for_signal`,
+    blocker `strategy_signal_not_ready_for_shadow_candidate_prepare`,
+    signal summary `BTPC v0 did not confirm bear-trend pullback continuation`.
+- Safety invariants:
+  - exchange write:
+    `false`;
+  - order created:
+    `false`;
+  - OrderLifecycle called:
+    `false`;
+  - executable ExecutionIntent created:
+    `false`;
+  - submit authorization created:
+    `false`;
+  - runtime budget mutated:
+    `false`;
+  - withdrawal or transfer:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Verification:
+  - focused RTF-094 and active-monitor tests:
+    `pytest -q tests/unit/test_runtime_live_attempt_readiness_packet.py tests/unit/test_runtime_active_observation_monitor.py`;
+  - result:
+    `12 passed`;
+  - adjacent runtime proof regression:
+    `pytest -q tests/unit/test_runtime_live_attempt_readiness_packet.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_official_fresh_candidate_final_gate_preflight_proof.py tests/unit/test_runtime_official_fresh_candidate_runtime_cycle_handoff_proof.py tests/unit/test_runtime_official_flat_next_attempt_end_to_end_proof.py`;
+  - result:
+    `21 passed`.
+- Interpretation:
+  - the current real Tokyo runtime state is not ready for a tiny-live attempt
+    right now because no monitored runtime has a ready strategy signal or
+    FinalGate-preflight-ready candidate;
+  - this is not a system failure and not a reason to return to hand-copied
+    pre-attempt evidence IDs;
+  - the next runtime action is either to wait for fresh strategy signal or
+    resolve the single next-attempt gate blocker, then proceed through fresh
+    candidate / prepare / FinalGate / controlled tiny-live attempt;
+  - RTF-CLEANUP-001 remains mandatory after the main bounded-auto-attempt chain
+    is accepted.
