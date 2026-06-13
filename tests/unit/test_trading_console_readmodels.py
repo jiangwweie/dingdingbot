@@ -5278,7 +5278,7 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["source"] == "trading_console_read_model_v1"
     assert payload["freshness_status"] == "fresh"
     assert payload["live_ready"] is False
-    assert payload["data"]["deployment_readiness"]["status"] == "post_signal_resume_ready"
+    assert payload["data"]["deployment_readiness"]["status"] == "ready"
     assert payload["data"]["deployment_readiness"]["feishu_configured"] is True
     assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
     assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True

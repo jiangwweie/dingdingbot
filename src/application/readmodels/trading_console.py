@@ -1345,12 +1345,10 @@ class TradingConsoleReadModelService:
             readiness_status = "evidence_stale"
         elif unsafe_flags:
             readiness_status = "unsafe_watcher_effect_detected"
-        elif can_resume_steps_5_8:
-            readiness_status = "post_signal_resume_ready"
-        elif notification.get("required"):
-            readiness_status = "owner_attention_pending"
+        elif not notification.get("configured"):
+            readiness_status = "notification_not_configured"
         else:
-            readiness_status = "watching_no_signal"
+            readiness_status = "ready"
 
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
