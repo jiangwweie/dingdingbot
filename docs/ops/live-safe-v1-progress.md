@@ -11188,3 +11188,131 @@ Use this file for session progress and handoff notes.
   - the historical pre-attempt / rehearsal artifacts remain useful for
     pre-submit evidence and audit, but should be downgraded away from
     post-submit decision authority after the main chain is complete.
+
+## 2026-06-13 (RTF-089 Official Next-attempt Strategy Continuation Proof)
+
+- Scope:
+  - reconnect post-submit finalize to strategy-driven next-attempt planning;
+  - prove blocked post-submit gate does not create shadow candidates;
+  - prove ready post-submit gate plus fresh CPM signal can create a shadow
+    `OrderCandidate`;
+  - stop at `ready_for_final_gate_preflight`;
+  - do not create executable `ExecutionIntent`, local orders, OrderLifecycle
+    handoffs, exchange requests, withdrawals, or transfers.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_next_attempt_strategy_continuation_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_next_attempt_strategy_continuation_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf089-official-next-attempt-strategy-continuation/`;
+  - RTF-088 prerequisite report:
+    `output/rtf089-official-next-attempt-strategy-continuation/rtf088-prerequisite-report.json`;
+  - blocked next-attempt strategy plan:
+    `output/rtf089-official-next-attempt-strategy-continuation/blocked-next-attempt-strategy-plan.json`;
+  - ready next-attempt strategy plan:
+    `output/rtf089-official-next-attempt-strategy-continuation/ready-next-attempt-strategy-plan.json`;
+  - continuation proof packet:
+    `output/rtf089-official-next-attempt-strategy-continuation/next-attempt-strategy-continuation-packet.json`;
+  - contract report:
+    `output/rtf089-official-next-attempt-strategy-continuation/contract-report.json`.
+- Contract result:
+  - status:
+    `official_next_attempt_strategy_continuation_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - fresh signal evaluation ID:
+    `eval-rtf075-cpm-long`;
+  - shadow order candidate:
+    `order-candidate-rtf075-contract`.
+- Official-route proof:
+  - route called through:
+    `/api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-strategy-plans`;
+  - blocked path input:
+    RTF-088 `finalized_next_attempt_blocked` packet with active position count
+    `1`;
+  - ready path input:
+    `finalized_ready_for_next_attempt` packet with active position count `0`;
+  - fresh signal:
+    CPM long signal for `ETH/USDT:USDT`.
+- Blocked path:
+  - status:
+    `blocked_by_post_submit_gate`;
+  - blocker:
+    `runtime_active_position_slot_in_use`;
+  - shadow candidate created:
+    `false`;
+  - operator next step:
+    `resolve_post_submit_next_attempt_gate`.
+- Ready path:
+  - status:
+    `ready_for_final_gate_preflight`;
+  - next-attempt gate:
+    `ready_for_fresh_signal`;
+  - candidate planning status:
+    `shadow_candidate_created`;
+  - shadow candidate:
+    `order-candidate-rtf075-contract`;
+  - operator next step:
+    `run_runtime_final_gate_preflight_for_shadow_candidate`;
+  - requires fresh authorization before submit:
+    `true`;
+  - old authorization submit retry allowed:
+    `false`;
+  - pre-submit rehearsal retry allowed:
+    `false`.
+- Strategy proposal:
+  - entry price reference:
+    `104.2`;
+  - stop price reference:
+    `99.60`;
+  - stop source:
+    `cpm_pullback_low`;
+  - intended notional:
+    `10`;
+  - leverage:
+    `1`;
+  - max loss reference:
+    `0.44145873`;
+  - TP1:
+    `tp1_partial`, `1R`, position ratio `0.5`;
+  - runner:
+    `trailing_atr_or_structure_invalidation`;
+  - right-tail runner preserved:
+    `true`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no executable ExecutionIntent created;
+  - no local order created;
+  - no OrderLifecycle call;
+  - no exchange call;
+  - no exchange order submitted;
+  - no runtime state mutation;
+  - no withdrawal or transfer.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_next_attempt_strategy_continuation_proof.py tests/unit/test_runtime_official_post_submit_finalize_proof.py tests/unit/test_runtime_official_controlled_gateway_action_proof.py tests/unit/test_runtime_official_exchange_submit_execution_result_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `24 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_next_attempt_strategy_continuation_proof.py tests/unit/test_runtime_official_next_attempt_strategy_continuation_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_next_attempt_strategy_continuation_proof.py --output-dir output/rtf089-official-next-attempt-strategy-continuation`.
+- Interpretation:
+  - RTF-089 proves the runtime can resume the main loop after post-submit
+    finalize by requiring a fresh strategy signal and creating only a shadow
+    candidate;
+  - active-position facts still block next-attempt planning until the runtime
+    is flat or the appropriate close/review path clears the gate;
+  - the next mainline gap is official FinalGate / readiness preflight for the
+    fresh next-attempt shadow candidate, followed by controlled submit
+    continuation under fresh authorization.
