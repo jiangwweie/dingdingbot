@@ -88,6 +88,16 @@ Work items:
 3. When strategy facts become ready, allow a new attempt to start from a fresh
    strategy signal chain, not from old authorization replay.
 
+Current 2026-06-13 implementation progress:
+
+| Item | Status | Evidence |
+|---|---|---|
+| P0-A operator runbook | integrated | `docs/ops/runtime-governance-p0-operator-runbook-2026-06-13.md` |
+| P0-A live fact validation | integrated | `docs/ops/runtime-governance-p0-live-fact-validation-2026-06-13.md` |
+| P0-A operator live fact packet builder | integrated | `scripts/build_runtime_operator_live_fact_packet.py` |
+| P0-B fresh attempt readiness guard | in progress | `scripts/build_runtime_fresh_attempt_readiness_packet.py` |
+| Current Tokyo next attempt | blocked | active BNB runtime is `waiting_for_position_resolution` |
+
 ### P1 - Console Productization
 
 Goal: make the Owner surface match the real runtime state machine.
