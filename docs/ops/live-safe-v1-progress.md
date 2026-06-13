@@ -12963,3 +12963,180 @@ Use this file for session progress and handoff notes.
   - the next main-chain step is a Tokyo integration probe for this RTF-102
     chain, using deployed code and remote reports only after this local proof
     has passed.
+
+## 2026-06-13 (RTF-103 Tokyo Bridge-cycle Deployment / Integration Probe)
+
+- Scope:
+  - deploy the current `program/live-safe-v1` head containing RTF-100 through
+    RTF-102 to Tokyo using the git-based deploy executor;
+  - run RTF-102 from the deployed release on Tokyo to validate the bridge-ready
+    local runtime cycle proof in the server environment;
+  - keep the remote probe non-live: no live exchange order, no PG write by the
+    proof, no withdrawal, and no transfer.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - deployed commit:
+    `15a342940412268f1d53d00e2eb0f560abb19f63`.
+- Previous Tokyo baseline:
+  - previous release:
+    `brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow`;
+  - previous deployed head:
+    `b1009096c86118e1e7427b7adfe66f9bc696e8c4`;
+  - expected migration count:
+    `84`;
+  - expected latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Deploy target:
+  - release name:
+    `brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle`;
+  - release path:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle`;
+  - report path:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/rtf103-bridge-cycle-probe`;
+  - backup path:
+    `/home/ubuntu/brc-deploy/backups/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle.pgdump`.
+- Local deploy artifacts:
+  - owner deploy decision packet:
+    `output/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/owner-git-deploy-decision-packet.json`;
+  - deploy dry-run:
+    `output/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/git-deploy-dry-run.json`;
+  - deploy apply:
+    `output/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/git-deploy-apply.json`;
+  - readonly probe:
+    `output/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/readonly-probe.json`;
+  - postdeploy verifier:
+    `output/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/postdeploy-verify.json`.
+- Owner deploy packet:
+  - status:
+    `ready_for_owner_git_deploy_decision`;
+  - ready:
+    `true`;
+  - blockers:
+    `[]`;
+  - pre-live packet:
+    skipped for deploy-only / remote integration probe.
+- Deploy dry-run:
+  - status:
+    `dry_run_ready`;
+  - apply requested:
+    `false`;
+  - commands planned:
+    `16`;
+  - commands executed:
+    `0`;
+  - blockers:
+    `[]`.
+- Deploy apply:
+  - status:
+    `applied`;
+  - apply requested:
+    `true`;
+  - commands planned:
+    `16`;
+  - commands executed:
+    `16`;
+  - blockers:
+    `[]`;
+  - service active after deploy:
+    `active`;
+  - health:
+    `{"status":"ok","service":"brc_operator_console","runtime_bound":true,"live_ready":false}`;
+  - current symlink:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle`;
+  - release manifest head:
+    `15a342940412268f1d53d00e2eb0f560abb19f63`;
+  - migration count:
+    `84`;
+  - latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Readonly / postdeploy verification:
+  - readonly probe:
+    `ready_for_controlled_deploy_preflight`;
+  - postdeploy verification:
+    `postdeploy_acceptance_passed`;
+  - postdeploy current head:
+    `15a342940412268f1d53d00e2eb0f560abb19f63`;
+  - postdeploy migration count:
+    `84`;
+  - postdeploy latest migration:
+    `2026-06-11-084_create_runtime_post_submit_budget_settlements.py`.
+- Remote RTF-103 bridge-cycle probe:
+  - release cwd:
+    `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle`;
+  - Python:
+    `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python`;
+  - report directory:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-15a34294-20260613Trtf103-bridge-cycle/rtf103-bridge-cycle-probe`;
+  - command:
+    `python scripts/runtime_controlled_tiny_live_bridge_to_local_cycle_proof.py --output-dir <remote report dir>`;
+  - status:
+    `controlled_tiny_live_bridge_to_local_cycle_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - signal evaluation:
+    `eval-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - bridge status:
+    `controlled_tiny_live_bridge_to_official_preflight_passed`;
+  - runtime cycle status:
+    `official_fresh_candidate_runtime_cycle_handoff_passed`;
+  - execution result:
+    `runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution result status:
+    `exchange_submit_orders_submitted`;
+  - submit outcome review:
+    `runtime-submit-outcome-review-runtime-exchange-submit-execution-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit budget settlement:
+    `runtime-post-submit-budget-settlement-runtime-first-real-submit-outcome-accounting-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - post-submit finalize:
+    `finalized_next_attempt_blocked`;
+  - next-attempt gate:
+    `blocked`;
+  - blocker:
+    `runtime_active_position_slot_in_use`.
+- Remote probe artifacts:
+  - `rtf102-bridge-cycle.stdout.json`;
+  - `contract-report.json`;
+  - `bridge-to-local-runtime-cycle-packet.json`;
+  - `rtf101-bridge-preflight-report.json`;
+  - `rtf091-runtime-cycle-report.json`;
+  - `bridge-to-official-preflight-packet.json`;
+  - `rtf092-official-preflight-report.json`;
+  - `fresh-candidate-runtime-cycle-packet.json`;
+  - `rtf090-prerequisite-report.json`;
+  - `rtf088-post-submit-finalize-report.json`;
+  - `ready-bridge-readiness.json`;
+  - `waiting-bridge-readiness.json`;
+  - `ready-refresh.json`;
+  - `waiting-refresh.json`.
+- Safety:
+  - deployment apply occurred:
+    `true`;
+  - service restart occurred:
+    `true`;
+  - migrations ran:
+    no new migration beyond existing head `084`;
+  - controlled fake gateway:
+    `true`;
+  - controlled OrderLifecycle submit:
+    `true`;
+  - live exchange order:
+    `false`;
+  - PG write by proof:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - RTF-103 proves the RTF-102 bridge-ready local runtime cycle is deployable
+    and repeatable in the Tokyo server environment;
+  - the observed `runtime_active_position_slot_in_use` next-attempt blocker is
+    expected and proves bounded runtime behavior after a simulated submit;
+  - current deployed code is now `15a34294`, and the main runtime cycle proof
+    has remote evidence;
+  - the remaining mainline item is `RTF-CLEANUP-001`: downgrade or isolate the
+    legacy pre-attempt / first-real-submit compatibility path after the
+    runtime-level chain is accepted.
