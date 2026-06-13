@@ -1,14 +1,15 @@
 ---
 title: AGENT_WORKSPACE_RULES
 status: CURRENT_CANON
-authority: owner-instruction + code-verification
-last_verified: 2026-06-12
+authority: owner-instruction + code-verification + owner-workspace-correction-2026-06-13
+last_verified: 2026-06-13
 source_of_truth:
   - CLAUDE.md
   - AGENTS.md
   - docs/ops/agent-working-rules.md
   - docs/ops/codex-claude-handoff-template.md
   - owner semantic audit 2026-06-09
+  - owner workspace / long-goal authorization 2026-06-13
 ---
 
 # Agent Workspace Rules
@@ -63,7 +64,7 @@ Then read the specific task card and any referenced ADRs.
 Current mainline development must happen in:
 
 ```text
-/Users/jiangwei/Documents/final-sprint6-integration
+/Users/jiangwei/Documents/final
 ```
 
 Current mainline branch:
@@ -72,16 +73,16 @@ Current mainline branch:
 program/live-safe-v1
 ```
 
-The legacy/default workspace path:
+The older integration worktree path:
 
 ```text
-/Users/jiangwei/Documents/final
+/Users/jiangwei/Documents/final-sprint6-integration
 ```
 
-may contain an isolated side branch such as `codex/llm-advisory-plane-feishu-design`.
-It must not be used for mainline runtime, execution, deployment, or strategy
-runtime governance changes unless the branch/worktree state is first explicitly
-verified and corrected.
+has been retired after the 2026-06-13 workspace consolidation. It must not be
+used for new mainline runtime, execution, deployment, or strategy runtime
+governance changes unless a future Owner decision explicitly recreates and
+verifies that worktree.
 
 Before each stage commit, Codex must report:
 
@@ -91,6 +92,30 @@ Before each stage commit, Codex must report:
 4. whether the commit is deployed;
 5. whether the stage touched exchange write, `OrderLifecycle`, or
    first-real-submit execution paths.
+
+## 2.1.1 Long-running Goal Authorization Baseline
+
+Owner confirmed the following long-running goal baseline on 2026-06-13 for
+P0/P1/P2 runtime-governance continuation:
+
+1. Codex may correct stale canon / agent workspace instructions that still
+   point to retired worktrees.
+2. Codex may create `codex/*` focused branches from `program/live-safe-v1`.
+3. Codex may make local commits for completed and verified stages. Push and
+   deploy remain separate actions unless the active stage explicitly requires
+   them and the boundary is reported.
+4. Codex may run focused tests, local dry-runs, read-only runtime / Tokyo /
+   account / position / protection / budget probes, and browser UI validation.
+5. Real order placement is excluded from the default goal scope. It may enter
+   only through the official auditable BRC runtime / Operation Layer action
+   path when current action-time gates pass.
+6. Codex may use bounded Claude / side workers for non-core tasks such as
+   runbooks, UI panels, focused tests, and archive hygiene.
+7. Core execution / risk files remain Codex-controlled by default and must not
+   be modified concurrently by side workers.
+8. P2 archive hygiene means migration, namespace consolidation, and evidence /
+   compatibility preservation. It does not mean broad deletion or evidence
+   disposal.
 
 ## 2.2 Execution-Chain Stage Discipline
 
