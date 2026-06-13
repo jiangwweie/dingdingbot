@@ -10659,3 +10659,156 @@ Use this file for session progress and handoff notes.
   - the next mainline gap is exchange submit packet preview / exchange submit
     action authorization / exchange adapter result boundary, still before or
     as a tightly controlled real exchange write.
+
+## 2026-06-13 (RTF-085 Official Exchange Submit Packet / Action Boundary Proof)
+
+- Scope:
+  - extend RTF-084 local CREATED-order registration into exchange-submit
+    packet preview;
+  - record scoped exchange-submit action authorization;
+  - verify exchange-submit enablement;
+  - acquire the exchange-submit adapter duplicate-submit lock;
+  - keep ExchangeGateway, OrderLifecycle.submit_order, exchange execution,
+    position open/close, withdrawal, and transfer disabled.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`.
+- Added:
+  - script:
+    `scripts/runtime_official_exchange_submit_boundary_proof.py`;
+  - tests:
+    `tests/unit/test_runtime_official_exchange_submit_boundary_proof.py`.
+- Local proof:
+  - output dir:
+    `output/rtf085-official-exchange-submit-boundary/`;
+  - prepare report:
+    `output/rtf085-official-exchange-submit-boundary/prepare-report.json`;
+  - local registration adapter result:
+    `output/rtf085-official-exchange-submit-boundary/local-registration-adapter-result.json`;
+  - exchange submit packet preview:
+    `output/rtf085-official-exchange-submit-boundary/exchange-submit-packet-preview.json`;
+  - exchange submit action authorization:
+    `output/rtf085-official-exchange-submit-boundary/exchange-submit-action-authorization.json`;
+  - exchange submit enablement:
+    `output/rtf085-official-exchange-submit-boundary/exchange-submit-enablement.json`;
+  - exchange submit adapter result:
+    `output/rtf085-official-exchange-submit-boundary/exchange-submit-adapter-result.json`;
+  - boundary packet:
+    `output/rtf085-official-exchange-submit-boundary/exchange-submit-boundary-packet.json`;
+  - contract report:
+    `output/rtf085-official-exchange-submit-boundary/contract-report.json`.
+- Contract result:
+  - status:
+    `official_exchange_submit_boundary_passed`;
+  - runtime:
+    `runtime-rtf075-cpm-long`;
+  - order candidate:
+    `order-candidate-rtf075-contract`;
+  - authorization:
+    `runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - execution intent:
+    `intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit packet preview:
+    `runtime-exchange-submit-packet-preview-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit action authorization:
+    `runtime-exchange-submit-action-authorization-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit enablement:
+    `runtime-exchange-submit-enablement-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`;
+  - exchange submit adapter result:
+    `runtime-exchange-submit-adapter-result-runtime-submit-authorization-intent_rt_e23ebb969e9d27f79df197dc`.
+- Official-route proof:
+  - exchange submit packet preview route called through:
+    `/api/trading-console/runtime-execution-exchange-submit-packet-previews/authorizations/{authorization_id}`;
+  - exchange submit action authorization route called through:
+    `/api/trading-console/runtime-execution-exchange-submit-action-authorizations/authorizations/{authorization_id}`;
+  - exchange submit enablement route called through:
+    `/api/trading-console/runtime-execution-exchange-submit-enablements/authorizations/{authorization_id}`;
+  - exchange submit adapter result route called through:
+    `/api/trading-console/runtime-execution-exchange-submit-adapter-results/authorizations/{authorization_id}`.
+- Status chain:
+  - local registration adapter result:
+    `registered_created_local_orders`;
+  - exchange submit packet preview:
+    `ready_for_exchange_submit_adapter_design`;
+  - exchange submit action authorization:
+    `approved_for_exchange_submit_action`;
+  - exchange submit enablement:
+    `ready_for_exchange_submit_action`;
+  - exchange submit adapter result:
+    `exchange_submit_adapter_armed`.
+- Exchange submit packet:
+  - local order count:
+    `2`;
+  - submit request preview count:
+    `2`;
+  - entry submit request preview count:
+    `1`;
+  - protection submit request preview count:
+    `1`;
+  - entry local order:
+    `rtod-5af61e9d8463403eb6-entry`;
+  - protection local order:
+    `rtod-5af61e9d8463403eb6-sl`;
+  - exchange payload created:
+    `false`;
+  - exchange order ID assigned:
+    `false`.
+- Exchange submit boundary:
+  - duplicate-submit lock acquired:
+    `true`;
+  - exchange submit action authorized:
+    `true`;
+  - exchange submit adapter enabled:
+    `true`;
+  - exchange submit adapter implemented:
+    `false`;
+  - exchange called:
+    `false`;
+  - exchange order submitted:
+    `false`;
+  - OrderLifecycle.submit_order called:
+    `false`.
+- Runtime budget semantics:
+  - intended notional:
+    `10`;
+  - budget reservation basis:
+    `max_loss_reference`;
+  - budget reservation amount:
+    `0.44145873`;
+  - attempts used before / after:
+    `0 -> 1`;
+  - budget reserved before / after:
+    `0 -> 0.44145873`.
+- Verification:
+  - focused tests:
+    `pytest -q tests/unit/test_runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_scoped_local_registration_proof.py tests/unit/test_runtime_official_submit_adapter_preview_proof.py tests/unit/test_runtime_official_final_gate_preflight_proof.py`;
+  - result:
+    `12 passed`;
+  - compile check:
+    `python3 -m compileall -q scripts/runtime_official_exchange_submit_boundary_proof.py tests/unit/test_runtime_official_exchange_submit_boundary_proof.py`;
+  - local dry-run:
+    `python3 scripts/runtime_official_exchange_submit_boundary_proof.py --output-dir output/rtf085-official-exchange-submit-boundary`;
+  - diff check:
+    `git diff --check`.
+- Safety:
+  - official FastAPI routes used:
+    `true`;
+  - fake Console API used:
+    `false`;
+  - no PG write by proof;
+  - no ExchangeGateway call or write;
+  - no exchange order submitted;
+  - no OrderLifecycle.submit_order call;
+  - no ExecutionIntent status change;
+  - no position open/close;
+  - no withdrawal or transfer.
+- Interpretation:
+  - RTF-085 proves the runtime mainline can move from local CREATED orders into
+    exchange-submit packet preview, Owner-scoped exchange action
+    authorization, exchange-submit enablement, and adapter lock acquisition;
+  - this is not yet an exchange execution-result or gateway action proof;
+  - the next mainline gap is exchange-submit execution-result boundary:
+    disabled proof first, then controlled gateway action with explicit
+    live-action authority and post-submit finalize.
