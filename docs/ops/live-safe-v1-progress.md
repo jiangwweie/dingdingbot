@@ -12614,3 +12614,114 @@ Use this file for session progress and handoff notes.
   - legacy pre-attempt / first-real-submit compatibility isolation remains
     mandatory after the main runtime-level bounded-auto-attempt chain is
     accepted.
+
+## 2026-06-13 (RTF-100 Controlled Tiny-live Bridge Readiness Packet)
+
+- Scope:
+  - add a packet-only bridge from selector-driven live continuation refresh
+    output into the next official prepare / FinalGate review decision;
+  - classify whether the current runtime state should keep refreshing, enter
+    official prepare, or enter official FinalGate review before any controlled
+    tiny-live submit;
+  - keep this bridge non-executing: it must not create candidates,
+    authorizations, ExecutionIntent records, orders, exchange calls,
+    OrderLifecycle calls, closes, withdrawals, or transfers.
+- Branch / worktree:
+  - worktree:
+    `/Users/jiangwei/Documents/final-sprint6-integration`;
+  - branch:
+    `program/live-safe-v1`;
+  - base commit:
+    `7069ac16 docs(runtime): record tokyo refresh flow validation`.
+- Files added:
+  - `scripts/runtime_controlled_tiny_live_bridge_readiness_packet.py`;
+  - `tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py`.
+- Local RTF-100 artifacts:
+  - source refresh copy:
+    `output/rtf100-controlled-tiny-live-bridge-readiness/live-continuation-refresh-flow.json`;
+  - bridge packet:
+    `output/rtf100-controlled-tiny-live-bridge-readiness/controlled-tiny-live-bridge-readiness.json`;
+  - stdout packet:
+    `output/rtf100-controlled-tiny-live-bridge-readiness/controlled-tiny-live-bridge-readiness.stdout.json`.
+- Source evidence:
+  - deployed head:
+    `b1009096c86118e1e7427b7adfe66f9bc696e8c4`;
+  - release name:
+    `brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow`;
+  - remote report path:
+    `/home/ubuntu/brc-deploy/reports/brc-runtime-governance-b1009096-20260613Trtf099-refresh-flow/rtf099-live-refresh-probe`.
+- Current bridge result:
+  - status:
+    `controlled_tiny_live_bridge_waiting_for_ready_selector`;
+  - source refresh status:
+    `continuation_refresh_monitor_position_or_owner_close`;
+  - source readiness status:
+    `live_attempt_blocked_by_runtime_or_signal_gate`;
+  - source selector status:
+    `continuation_monitor_position_or_owner_close`;
+  - selected runtime:
+    `strategy-runtime-e6138ad7c88f`;
+  - selected action:
+    `monitor_position_or_owner_authorize_reduce_only_close`;
+  - next step:
+    `continue_selector_refresh_until_ready`;
+  - execute tiny-live attempt now:
+    `false`;
+  - execute reduce-only close now:
+    `false`;
+  - no forbidden live side effects:
+    `true`.
+- Behavior covered by tests:
+  - monitor-position refresh output remains waiting and does not create
+    execution authority;
+  - `continuation_refresh_ready_for_prepare` plus matching selected flag maps
+    to `controlled_tiny_live_bridge_ready_for_official_prepare`;
+  - `continuation_refresh_ready_for_final_gate_review` plus matching selected
+    flag maps to
+    `controlled_tiny_live_bridge_ready_for_final_gate_review`;
+  - forbidden effects block the bridge;
+  - mismatched refresh ready status and selected readiness flags block as
+    inconsistent;
+  - CLI writes JSON and returns success for the normal waiting state.
+- Verification:
+  - RTF-100 + RTF-098 + RTF-097 focused tests:
+    `pytest -q tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py tests/unit/test_runtime_live_continuation_refresh_flow.py tests/unit/test_runtime_live_continuation_selector_packet.py`;
+  - result:
+    `17 passed`;
+  - adjacent RTF-100/098/097/096/094 regression:
+    `pytest -q tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py tests/unit/test_runtime_live_continuation_refresh_flow.py tests/unit/test_runtime_live_continuation_selector_packet.py tests/unit/test_runtime_position_lifecycle_exit_readiness_packet.py tests/unit/test_runtime_live_attempt_readiness_packet.py`;
+  - result:
+    `27 passed`;
+  - syntax check:
+    `python3 -m py_compile scripts/runtime_controlled_tiny_live_bridge_readiness_packet.py tests/unit/test_runtime_controlled_tiny_live_bridge_readiness_packet.py`;
+  - whitespace check:
+    `git diff --check`.
+- Safety:
+  - API call by bridge:
+    `false`;
+  - PG call by bridge:
+    `false`;
+  - exchange call/write:
+    `false`;
+  - order creation:
+    `false`;
+  - OrderLifecycle call:
+    `false`;
+  - runtime mutation:
+    `false`;
+  - reduce-only close:
+    `false`;
+  - withdrawal or transfer:
+    `false`.
+- Interpretation:
+  - RTF-100 makes the transition from read-only refresh into official prepare /
+    FinalGate review explicit without adding a permanent strategy gate;
+  - current live facts still do not support starting a new tiny-live attempt:
+    the selected continuation is BNB position monitoring / optional Owner
+    close, not a fresh strategy-driven prepare path;
+  - once refresh reports `continuation_refresh_ready_for_prepare` or
+    `continuation_refresh_ready_for_final_gate_review`, the bridge can point
+    the operator path to the existing official prepare / FinalGate proof chain;
+  - historical pre-attempt / first-real-submit compatibility isolation remains
+    mandatory after the main runtime-level bounded-auto-attempt chain is
+    accepted.
