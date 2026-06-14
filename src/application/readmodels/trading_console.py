@@ -82,6 +82,7 @@ DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
 DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
+DEFAULT_STRATEGY_GROUP_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/strategygroup-runtime-pilot"
 DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategy-group-handoff-intake-packet.json"
@@ -90,6 +91,8 @@ DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategy-group-live-facts-input.json"
 )
+DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
+DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
@@ -1480,6 +1483,22 @@ class TradingConsoleReadModelService:
         source_commit: Optional[str] = None,
     ) -> TradingConsoleReadModelResponse:
         generated_at_ms = _now_ms()
+        configured_packet_path = os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_PACKET_PATH")
+        default_packet_path = Path(DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH).expanduser()
+        resolved_packet_path = (
+            Path(configured_packet_path).expanduser()
+            if configured_packet_path
+            else default_packet_path
+        )
+        latest_packet_path = _latest_existing_path(
+            Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
+            DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB,
+        )
+        packet_path = (
+            resolved_packet_path
+            if resolved_packet_path.exists()
+            else latest_packet_path
+        )
         resolved_handoff_dir = Path(
             handoff_dir
             or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_DIR")
@@ -1500,14 +1519,55 @@ class TradingConsoleReadModelService:
             or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT")
             or DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT
         )
-        try:
-            packet = build_strategy_group_handoff_intake_packet(
-                handoff_dir=resolved_handoff_dir,
-                source_repo=resolved_source_repo,
-                source_branch=resolved_source_branch,
-                source_commit=resolved_source_commit,
-            )
-        except Exception as exc:
+        if packet_path is not None and handoff_dir is None:
+            packet = _read_json_file(packet_path)
+            if packet:
+                packet["handoff_packet_source"] = {
+                    "path": str(packet_path),
+                    "present": True,
+                    "source": "prebuilt_strategy_group_handoff_intake_packet",
+                }
+        else:
+            packet = {}
+        if not packet:
+            try:
+                packet = build_strategy_group_handoff_intake_packet(
+                    handoff_dir=resolved_handoff_dir,
+                    source_repo=resolved_source_repo,
+                    source_branch=resolved_source_branch,
+                    source_commit=resolved_source_commit,
+                )
+            except Exception as exc:
+                packet = {
+                    "scope": "strategy_group_handoff_main_control_intake",
+                    "status": "blocked_handoff_intake",
+                    "generated_at_ms": generated_at_ms,
+                    "source_anchor": {
+                        "repo": resolved_source_repo,
+                        "branch": resolved_source_branch,
+                        "commit": resolved_source_commit,
+                        "handoff_dir": str(resolved_handoff_dir),
+                    },
+                    "counts": {
+                        "strategy_groups": 0,
+                        "armed_observation_intake_ready": 0,
+                        "observe_only_intake_ready": 0,
+                        "required_fact_rows": 0,
+                    },
+                    "strategy_picker": [],
+                    "required_facts_matrix": [],
+                    "watcher_scope": [],
+                    "blockers": [f"handoff_intake_build_failed:{type(exc).__name__}"],
+                    "safety_invariants": {
+                        "reads_research_handoff_only": True,
+                        "registers_runtime": False,
+                        "creates_candidate": False,
+                        "authorizes_execution": False,
+                        "places_order": False,
+                        "mutates_pg": False,
+                    },
+                }
+        if not packet:
             packet = {
                 "scope": "strategy_group_handoff_main_control_intake",
                 "status": "blocked_handoff_intake",
@@ -1564,11 +1624,19 @@ class TradingConsoleReadModelService:
     ) -> TradingConsoleReadModelResponse:
         generated_at_ms = _now_ms()
         intake = self.strategy_group_handoff_intake().data
+        configured_live_facts_path = (
+            live_facts_path or os.environ.get("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH")
+        )
         resolved_live_facts_path = Path(
-            live_facts_path
-            or os.environ.get("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH")
-            or DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH
+            configured_live_facts_path or DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH
         ).expanduser()
+        if configured_live_facts_path is None and not resolved_live_facts_path.exists():
+            latest_live_facts_path = _latest_existing_path(
+                Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
+                DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB,
+            )
+            if latest_live_facts_path is not None:
+                resolved_live_facts_path = latest_live_facts_path
         live_facts = _read_json_file(resolved_live_facts_path)
         packet = build_strategy_group_live_facts_readiness_packet(
             intake_packet=intake,
@@ -2887,6 +2955,16 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _latest_existing_path(directory: Path, pattern: str) -> Optional[Path]:
+    try:
+        paths = [path for path in directory.expanduser().glob(pattern) if path.is_file()]
+    except OSError:
+        return None
+    if not paths:
+        return None
+    return max(paths, key=lambda path: path.stat().st_mtime)
 
 
 def _file_mtime_ms(path: Path) -> Optional[int]:
