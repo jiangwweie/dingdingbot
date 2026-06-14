@@ -114,6 +114,69 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
     }
 
 
+def _finalgate_ready_dispatch_packet() -> dict:
+    return {
+        **_resume_pack("ready_for_action_time_final_gate"),
+        "status": "finalgate_ready",
+        "dispatch_status": "official_finalgate_preflight_passed",
+        "dispatch_action": "prepare_official_operation_layer_submit",
+        "command_plan": {
+            "prepared_authorization_id": "auth-ready-1",
+        },
+        "finalgate_preflight_result": {
+            "called": True,
+            "http_status": 200,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "PASS",
+                "blockers": [],
+            },
+        },
+        "operation_layer_command_plan": {
+            "kind": "official_operation_layer_submit_next_checkpoint",
+            "authorization_id": "auth-ready-1",
+            "requires_evidence_ids": list(
+                dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
+            ),
+            "places_order": False,
+            "exchange_write_called": False,
+            "order_lifecycle_called": False,
+        },
+    }
+
+
+def _operation_layer_ready_report() -> dict:
+    return {
+        "ids": {
+            key: f"{key}-value"
+            for key in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
+        },
+        "blockers": [],
+        "warnings": [],
+        "steps": [],
+    }
+
+
+def _operation_layer_blocked_report() -> dict:
+    report = _operation_layer_ready_report()
+    report["ids"].pop("exchange_submit_action_authorization_id")
+    report["ids"].pop("deployment_readiness_evidence_id")
+    report["blockers"] = [
+        "trusted_submit_fact_snapshot_not_fresh_enough",
+        "persistent_duplicate_submit_lock_required",
+    ]
+    report["warnings"] = ["deployment_readiness_evidence_id_missing"]
+    report["steps"] = [
+        {
+            "name": "preview_local_registration_enablement",
+            "id_summary": {},
+            "blockers": ["local_registration_enablement_decision_not_ready"],
+            "warnings": [],
+        }
+    ]
+    return report
+
+
 def test_dispatcher_waiting_for_market_is_no_action():
     packet = build_dispatch_packet(
         resume_pack=_resume_pack(),
@@ -412,6 +475,62 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
         packet["operation_layer_command_plan"]["requires_evidence_ids"]
     )
     assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_translates_operation_layer_evidence_blocker():
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_blocked_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+    )
+
+    assert packet["status"] == "operation_layer_blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == "blocked_by_operation_layer_evidence"
+    assert packet["dispatch_action"] is None
+    assert packet["owner_state"]["blocked_at"] == "OperationLayerEvidence"
+    assert packet["owner_state"]["downgrade_mode"] == (
+        "continue_watcher_observation_no_submit"
+    )
+    readiness = packet["operation_layer_readiness"]
+    assert readiness["status"] == "blocked"
+    assert readiness["ready_for_official_operation_layer_submit"] is False
+    assert "exchange_submit_action_authorization_id" in (
+        readiness["missing_evidence_ids"]
+    )
+    assert "deployment_readiness_evidence_id" in readiness["missing_evidence_ids"]
+    assert "persistent_duplicate_submit_lock_required" in packet["blockers"]
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_translates_operation_layer_evidence_ready():
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+    )
+
+    assert packet["status"] == "operation_layer_ready"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_status"] == "official_operation_layer_evidence_ready"
+    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert packet["blockers"] == []
+    assert packet["owner_state"]["status"] == "operation_layer_ready"
+    assert packet["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert packet["operation_layer_readiness"][
+        "ready_for_official_operation_layer_submit"
+    ] is True
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False

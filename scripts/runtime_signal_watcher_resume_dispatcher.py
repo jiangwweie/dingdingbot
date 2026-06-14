@@ -37,8 +37,13 @@ DEFAULT_OUTPUT_JSON = Path(
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "resume-dispatch-packet.json"
 )
+DEFAULT_OPERATION_LAYER_EVIDENCE_JSON = Path(
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "operation-layer-arm-evidence.json"
+)
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 READY_STATUS = "ready_for_action_time_final_gate"
+FINALGATE_READY_STATUS = "finalgate_ready"
 WAITING_STATUS = "waiting_for_market"
 FRESH_AUTHORIZATION_STATUSES = {
     "ready_for_fresh_submit_authorization",
@@ -70,6 +75,18 @@ READY_REQUIRED_FIELDS = (
     "signal_input_json",
     "prepared_authorization_id",
 )
+OPERATION_LAYER_REQUIRED_EVIDENCE_IDS = (
+    "trusted_submit_fact_snapshot_id",
+    "submit_idempotency_policy_id",
+    "attempt_outcome_policy_id",
+    "protection_creation_failure_policy_id",
+    "local_registration_enablement_decision_id",
+    "owner_real_submit_authorization_id",
+    "order_lifecycle_submit_enablement_id",
+    "exchange_submit_adapter_enablement_id",
+    "exchange_submit_action_authorization_id",
+    "deployment_readiness_evidence_id",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -88,12 +105,39 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _read_optional_json(path_value: str | None) -> tuple[dict[str, Any] | None, str | None]:
+    if not path_value:
+        return None, None
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return None, None
+    try:
+        return _read_json(path), str(path)
+    except Exception as exc:
+        return {
+            "blockers": [
+                f"operation_layer_evidence_report_unreadable:{type(exc).__name__}"
+            ],
+            "warnings": [],
+            "ids": {},
+        }, str(path)
+
+
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _dedupe_text(values: Any) -> list[str]:
+    items: list[str] = []
+    for value in values or []:
+        text = str(value or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
 
 
 def _nonempty(value: Any) -> bool:
@@ -360,6 +404,168 @@ def _load_handoff_packet(path_value: str) -> tuple[dict[str, Any], str | None]:
     return handoff, None
 
 
+def _operation_layer_command_plan(*, authorization_id: str) -> dict[str, Any]:
+    return {
+        "kind": "official_operation_layer_submit_next_checkpoint",
+        "status": "pending_required_submit_evidence",
+        "next_action": OPERATION_LAYER_ACTION,
+        "authorization_id": authorization_id,
+        "official_endpoint_method": "POST",
+        "official_endpoint_path": (
+            "/api/trading-console/"
+            "runtime-execution-first-real-submit-actions/authorizations/"
+            f"{authorization_id}"
+        ),
+        "official_query_mode": "real_gateway_action_after_required_evidence",
+        "owner_confirmed_for_first_real_submit_action": True,
+        "requires_official_operation_layer": True,
+        "requires_standing_authorization": True,
+        "requires_evidence_ids": list(OPERATION_LAYER_REQUIRED_EVIDENCE_IDS),
+        "places_order": False,
+        "exchange_write_called": False,
+        "order_lifecycle_called": False,
+        "automatic_recovery_action": (
+            "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
+        ),
+    }
+
+
+def _operation_layer_readiness(
+    *,
+    evidence_report: dict[str, Any] | None,
+    evidence_report_path: str | None,
+    command_plan: dict[str, Any],
+) -> dict[str, Any] | None:
+    if evidence_report is None:
+        return None
+    ids = _operation_layer_ids(evidence_report)
+    required_ids = [
+        str(item)
+        for item in _list(command_plan.get("requires_evidence_ids"))
+        if str(item).strip()
+    ] or list(OPERATION_LAYER_REQUIRED_EVIDENCE_IDS)
+    missing_ids = [name for name in required_ids if not _nonempty(ids.get(name))]
+    blockers = _operation_layer_blockers(evidence_report)
+    warnings = _operation_layer_warnings(evidence_report)
+    ready = not missing_ids and not blockers
+    return {
+        "status": "ready" if ready else "blocked",
+        "blocker_class": "none" if ready else _operation_layer_blocker_class(blockers, missing_ids),
+        "source_report": evidence_report_path,
+        "required_evidence_ids": required_ids,
+        "available_evidence_ids": {
+            key: value
+            for key, value in ids.items()
+            if key in required_ids and _nonempty(value)
+        },
+        "missing_evidence_ids": missing_ids,
+        "blockers": blockers,
+        "warnings": warnings,
+        "ready_for_official_operation_layer_submit": ready,
+        "places_order": False,
+        "exchange_write_called": False,
+        "order_lifecycle_called": False,
+        "owner_state": (
+            _owner_state_for_operation_layer_ready()
+            if ready
+            else _owner_state_for_operation_layer_blocked(
+                blocker_class=_operation_layer_blocker_class(blockers, missing_ids),
+                blockers=blockers,
+                missing_ids=missing_ids,
+            )
+        ),
+    }
+
+
+def _operation_layer_ids(evidence_report: dict[str, Any]) -> dict[str, str]:
+    ids: dict[str, str] = {}
+    for source in (
+        evidence_report.get("ids"),
+        evidence_report.get("available_evidence_ids"),
+        evidence_report.get("prepared_evidence_ids"),
+    ):
+        if isinstance(source, dict):
+            for key, value in source.items():
+                if _nonempty(value):
+                    ids[str(key)] = str(value)
+    for step in _list(evidence_report.get("steps")):
+        id_summary = _dict(_dict(step).get("id_summary"))
+        for key, value in id_summary.items():
+            if _nonempty(value):
+                ids[str(key)] = str(value)
+    return ids
+
+
+def _operation_layer_blockers(evidence_report: dict[str, Any]) -> list[str]:
+    blockers = list(evidence_report.get("blockers") or [])
+    for step in _list(evidence_report.get("steps")):
+        blockers.extend(_list(_dict(step).get("blockers")))
+    return _dedupe_text(blockers)
+
+
+def _operation_layer_warnings(evidence_report: dict[str, Any]) -> list[str]:
+    warnings = list(evidence_report.get("warnings") or [])
+    for step in _list(evidence_report.get("steps")):
+        warnings.extend(_list(_dict(step).get("warnings")))
+    return _dedupe_text(warnings)
+
+
+def _operation_layer_blocker_class(
+    blockers: list[str],
+    missing_ids: list[str],
+) -> str:
+    combined = " ".join([*blockers, *missing_ids]).lower()
+    if any(token in combined for token in ("withdraw", "transfer", "bypass")):
+        return "hard_safety_stop"
+    if any(token in combined for token in ("duplicate", "idempotency")):
+        return "hard_safety_stop"
+    if any(token in combined for token in ("active_position", "open_order_conflict")):
+        return "active_position_resolution"
+    if "deployment" in combined or "gateway_readiness" in combined:
+        return "deployment_issue"
+    if "owner_runtime_" in combined and "env_confirmation" in combined:
+        return "deployment_issue"
+    return "missing_fact"
+
+
+def _owner_state_for_operation_layer_ready() -> dict[str, Any]:
+    return {
+        "status": "operation_layer_ready",
+        "blocker_class": "none",
+        "blocked_at": "none",
+        "blocked_reason": "none",
+        "next_recover_condition": "official_operation_layer_submit_action_time_recheck",
+        "automatic_recovery_action": (
+            "rerun_action_time_finalgate_then_use_official_operation_layer"
+        ),
+        "downgrade_mode": "none",
+    }
+
+
+def _owner_state_for_operation_layer_blocked(
+    *,
+    blocker_class: str,
+    blockers: list[str],
+    missing_ids: list[str],
+) -> dict[str, Any]:
+    reason = blockers[0] if blockers else (
+        f"missing_evidence_id:{missing_ids[0]}"
+        if missing_ids
+        else "operation_layer_evidence_not_ready"
+    )
+    return {
+        "status": "operation_layer_blocked",
+        "blocker_class": blocker_class,
+        "blocked_at": "OperationLayerEvidence",
+        "blocked_reason": reason,
+        "next_recover_condition": "required_submit_evidence_ready_and_fresh",
+        "automatic_recovery_action": (
+            "refresh_operation_layer_evidence_and_rerun_finalgate"
+        ),
+        "downgrade_mode": "continue_watcher_observation_no_submit",
+    }
+
+
 def _fresh_authorization_binding_command_plan(
     *,
     api_base: str,
@@ -397,10 +603,18 @@ def build_dispatch_packet(
     label: str = "tokyo-runtime-signal-watcher",
     execute_preflight: bool = False,
     preflight_timeout_seconds: int = 120,
+    operation_layer_evidence_report: dict[str, Any] | None = None,
+    operation_layer_evidence_report_path: str | None = None,
 ) -> dict[str, Any]:
     action_time_resume = _dict(resume_pack.get("action_time_resume"))
     owner_state = _dict(resume_pack.get("owner_state"))
-    status = str(action_time_resume.get("status") or resume_pack.get("status") or "")
+    top_level_status = str(resume_pack.get("status") or "")
+    action_time_status = str(action_time_resume.get("status") or "")
+    status = (
+        top_level_status
+        if top_level_status == FINALGATE_READY_STATUS
+        else action_time_status or top_level_status
+    )
     allowed_auto_actions = _allowed_auto_actions(
         resume_pack=resume_pack,
         action_time_resume=action_time_resume,
@@ -562,6 +776,74 @@ def build_dispatch_packet(
             packet=packet,
             handoff_packet=handoff_packet,
             timeout_seconds=preflight_timeout_seconds,
+            operation_layer_evidence_report=operation_layer_evidence_report,
+            operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+        )
+
+    if status == FINALGATE_READY_STATUS:
+        operation_layer_command_plan = _dict(
+            resume_pack.get("operation_layer_command_plan")
+        )
+        if not operation_layer_command_plan:
+            authorization_id = _first_text(
+                action_time_resume.get("prepared_authorization_id"),
+                resume_pack.get("prepared_authorization_id"),
+                _dict(resume_pack.get("command_plan")).get("prepared_authorization_id"),
+                _dict(resume_pack.get("command_plan")).get("authorization_id"),
+            )
+            if not authorization_id:
+                return _packet(
+                    label=label,
+                    source_path=source_path,
+                    resume_pack=resume_pack,
+                    action_time_resume=action_time_resume,
+                    owner_state=_owner_state_for_operation_layer_blocked(
+                        blocker_class="missing_fact",
+                        blockers=[],
+                        missing_ids=["prepared_authorization_id"],
+                    ),
+                    status="operation_layer_blocked",
+                    blocker_class="missing_fact",
+                    dispatch_action=None,
+                    dispatch_status="blocked_by_missing_operation_layer_plan",
+                    blockers=base_blockers + [
+                        "missing_fact:operation_layer_command_plan"
+                    ],
+                    command_plan=_dict(resume_pack.get("command_plan")) or None,
+                    finalgate_preflight_result=_dict(
+                        resume_pack.get("finalgate_preflight_result")
+                    ) or None,
+                    operation_layer_command_plan=None,
+                )
+            operation_layer_command_plan = _operation_layer_command_plan(
+                authorization_id=authorization_id,
+            )
+        packet = _packet(
+            label=label,
+            source_path=source_path,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            owner_state=_owner_state_for_preflight(
+                status=FINALGATE_READY_STATUS,
+                blocker_class="none",
+                dispatch_status="official_finalgate_preflight_passed",
+                blockers=[],
+            ),
+            status=FINALGATE_READY_STATUS,
+            blocker_class="none",
+            dispatch_action=OPERATION_LAYER_ACTION,
+            dispatch_status="official_finalgate_preflight_passed",
+            blockers=[],
+            command_plan=_dict(resume_pack.get("command_plan")) or None,
+            finalgate_preflight_result=_dict(
+                resume_pack.get("finalgate_preflight_result")
+            ) or None,
+            operation_layer_command_plan=operation_layer_command_plan,
+        )
+        return _packet_with_operation_layer_readiness(
+            packet=packet,
+            evidence_report=operation_layer_evidence_report,
+            evidence_report_path=operation_layer_evidence_report_path,
         )
 
     if status == READY_STATUS:
@@ -632,6 +914,8 @@ def build_dispatch_packet(
         return _execute_finalgate_preflight(
             packet=packet,
             timeout_seconds=preflight_timeout_seconds,
+            operation_layer_evidence_report=operation_layer_evidence_report,
+            operation_layer_evidence_report_path=operation_layer_evidence_report_path,
         )
 
     return _packet(
@@ -702,6 +986,8 @@ def _execute_finalgate_preflight(
     *,
     packet: dict[str, Any],
     timeout_seconds: int,
+    operation_layer_evidence_report: dict[str, Any] | None = None,
+    operation_layer_evidence_report_path: str | None = None,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
     if command_plan.get("method") != "GET" or not command_plan.get("curl"):
@@ -800,41 +1086,10 @@ def _execute_finalgate_preflight(
             operation_layer_command_plan=None,
         )
 
-    operation_layer_command_plan = {
-        "kind": "official_operation_layer_submit_next_checkpoint",
-        "status": "pending_required_submit_evidence",
-        "next_action": OPERATION_LAYER_ACTION,
-        "authorization_id": packet["command_plan"]["prepared_authorization_id"],
-        "official_endpoint_method": "POST",
-        "official_endpoint_path": (
-            "/api/trading-console/"
-            "runtime-execution-first-real-submit-actions/authorizations/"
-            f"{packet['command_plan']['prepared_authorization_id']}"
-        ),
-        "official_query_mode": "real_gateway_action_after_required_evidence",
-        "owner_confirmed_for_first_real_submit_action": True,
-        "requires_official_operation_layer": True,
-        "requires_standing_authorization": True,
-        "requires_evidence_ids": [
-            "trusted_submit_fact_snapshot_id",
-            "submit_idempotency_policy_id",
-            "attempt_outcome_policy_id",
-            "protection_creation_failure_policy_id",
-            "local_registration_enablement_decision_id",
-            "owner_real_submit_authorization_id",
-            "order_lifecycle_submit_enablement_id",
-            "exchange_submit_adapter_enablement_id",
-            "exchange_submit_action_authorization_id",
-            "deployment_readiness_evidence_id",
-        ],
-        "places_order": False,
-        "exchange_write_called": False,
-        "order_lifecycle_called": False,
-        "automatic_recovery_action": (
-            "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
-        ),
-    }
-    return _packet_from_preflight(
+    operation_layer_command_plan = _operation_layer_command_plan(
+        authorization_id=packet["command_plan"]["prepared_authorization_id"],
+    )
+    result_packet = _packet_from_preflight(
         packet=packet,
         status="finalgate_ready",
         blocker_class="none",
@@ -843,6 +1098,11 @@ def _execute_finalgate_preflight(
         preflight_result=preflight_result,
         operation_layer_command_plan=operation_layer_command_plan,
     )
+    return _packet_with_operation_layer_readiness(
+        packet=result_packet,
+        evidence_report=operation_layer_evidence_report,
+        evidence_report_path=operation_layer_evidence_report_path,
+    )
 
 
 def _execute_fresh_authorization_binding(
@@ -850,6 +1110,8 @@ def _execute_fresh_authorization_binding(
     packet: dict[str, Any],
     handoff_packet: dict[str, Any],
     timeout_seconds: int,
+    operation_layer_evidence_report: dict[str, Any] | None = None,
+    operation_layer_evidence_report_path: str | None = None,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
     if command_plan.get("method") != "POST":
@@ -989,6 +1251,8 @@ def _execute_fresh_authorization_binding(
     return _execute_finalgate_preflight(
         packet=bound_packet,
         timeout_seconds=timeout_seconds,
+        operation_layer_evidence_report=operation_layer_evidence_report,
+        operation_layer_evidence_report_path=operation_layer_evidence_report_path,
     )
 
 
@@ -1166,6 +1430,65 @@ def _packet_from_preflight(
     }
 
 
+def _packet_with_operation_layer_readiness(
+    *,
+    packet: dict[str, Any],
+    evidence_report: dict[str, Any] | None,
+    evidence_report_path: str | None,
+) -> dict[str, Any]:
+    command_plan = _dict(packet.get("operation_layer_command_plan"))
+    readiness = _operation_layer_readiness(
+        evidence_report=evidence_report,
+        evidence_report_path=evidence_report_path,
+        command_plan=command_plan,
+    )
+    if readiness is None:
+        return packet
+
+    ready = readiness.get("status") == "ready"
+    owner_state = _dict(readiness.get("owner_state"))
+    blocker_class = str(readiness.get("blocker_class") or "missing_fact")
+    blockers = _dedupe_text(
+        [
+            *list(readiness.get("blockers") or []),
+            *[
+                f"missing_evidence_id:{item}"
+                for item in list(readiness.get("missing_evidence_ids") or [])
+            ],
+        ]
+    )
+    return {
+        **packet,
+        "status": "operation_layer_ready" if ready else "operation_layer_blocked",
+        "blocker_class": "none" if ready else blocker_class,
+        "dispatch_status": (
+            "official_operation_layer_evidence_ready"
+            if ready
+            else "blocked_by_operation_layer_evidence"
+        ),
+        "dispatch_action": OPERATION_LAYER_ACTION if ready else None,
+        "owner_state": owner_state,
+        "operation_layer_readiness": readiness,
+        "blockers": [] if ready else blockers,
+        "warnings": _dedupe_text(
+            [
+                *list(packet.get("warnings") or []),
+                *list(readiness.get("warnings") or []),
+            ]
+        ),
+        "safety_invariants": {
+            **_dict(packet.get("safety_invariants")),
+            "official_operation_layer_submit_called": False,
+            "operation_layer_evidence_report_read": True,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
 def _owner_state_for_preflight(
     *,
     status: str,
@@ -1289,6 +1612,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--resume-pack-json", default=str(DEFAULT_RESUME_PACK))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
+    parser.add_argument(
+        "--operation-layer-evidence-json",
+        default=str(DEFAULT_OPERATION_LAYER_EVIDENCE_JSON),
+        help=(
+            "Optional first-real-submit evidence flow report. If present and "
+            "FinalGate is ready, the dispatcher translates it into Operation "
+            "Layer readiness or blocker state."
+        ),
+    )
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--label", default="tokyo-runtime-signal-watcher")
     parser.add_argument(
@@ -1312,6 +1644,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     source_path = Path(args.resume_pack_json).expanduser()
+    operation_layer_evidence_report, operation_layer_evidence_report_path = (
+        _read_optional_json(args.operation_layer_evidence_json)
+    )
     packet = build_dispatch_packet(
         resume_pack=_read_json(source_path),
         source_path=source_path,
@@ -1319,6 +1654,8 @@ def main(argv: list[str] | None = None) -> int:
         label=args.label,
         execute_preflight=args.execute_preflight,
         preflight_timeout_seconds=args.preflight_timeout_seconds,
+        operation_layer_evidence_report=operation_layer_evidence_report,
+        operation_layer_evidence_report_path=operation_layer_evidence_report_path,
     )
     _write_json(Path(args.output_json).expanduser(), packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
@@ -1328,6 +1665,8 @@ def main(argv: list[str] | None = None) -> int:
         *FRESH_AUTHORIZATION_STATUSES,
         "fresh_authorization_bound",
         "finalgate_ready",
+        "operation_layer_ready",
+        "operation_layer_blocked",
         "blocked",
     } else 2
 
