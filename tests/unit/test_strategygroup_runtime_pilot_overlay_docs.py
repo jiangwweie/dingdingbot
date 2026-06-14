@@ -37,6 +37,8 @@ def test_strategygroup_runtime_pilot_overlay_preserves_standing_authorization():
     assert "evidence-packet-as-owner-interface" in text
     assert "post_signal_auto_resume" in text
     assert "ready_for_action_time_final_gate" in text
+    assert "Strategy Control Board State Contract" in text
+    assert "The useful P0 content from `codex/runtime-signal-watcher-feishu`" in text
 
 
 def test_strategygroup_runtime_pilot_overlay_keeps_hard_safety_stops():
@@ -49,6 +51,23 @@ def test_strategygroup_runtime_pilot_overlay_keeps_hard_safety_stops():
         "unauditable exchange write",
         "duplicate-submit risk",
         "conflicting active position or open order",
+    ]:
+        assert phrase in text
+
+
+def test_strategygroup_runtime_pilot_overlay_keeps_owner_interface_simple():
+    text = _read(OVERLAY_PATH)
+
+    for phrase in [
+        "evidence packet archaeology",
+        "must not become a packet browser",
+        "`observing`",
+        "`signal_ready`",
+        "`candidate_ready`",
+        "`finalgate_ready`",
+        "Stay quiet when all selected runtimes remain observing",
+        "`promote` must not mean automatic position-size increase",
+        "not carried; separate docs-governance integration item",
     ]:
         assert phrase in text
 

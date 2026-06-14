@@ -178,7 +178,90 @@ Evidence packets remain the audit trail underneath these surfaces.
 
 ---
 
-## 8. Implemented Pilot Surface
+## 8. Strategy Control Board State Contract
+
+The Strategy Control Board is the Owner-facing operating surface. Its job is to
+translate runtime evidence packets into simple product states, blockers, and
+next actions. It must not become a packet browser, research document index, raw
+watcher log viewer, manual RequiredFacts assembly tool, or manual signal
+freshness judge.
+
+Each visible row represents one selected or available StrategyGroup runtime
+unit.
+
+Required StrategyGroup row fields:
+
+| Field | Meaning |
+| --- | --- |
+| `strategy_group` | StrategyGroup identifier and display name |
+| `runtime_state` | Owner-facing state such as `observing` or `blocked` |
+| `signal_state` | `no_signal`, `fresh`, `stale`, or `conflict` |
+| `required_facts` | `pass`, `missing`, `stale`, or `not_applicable` |
+| `risk_profile` | Current bounded risk profile or risk tier |
+| `hard_stop` | Current hard-stop status and reason, if any |
+| `next_action` | Product action such as `continue`, `prepare_candidate`, or `block` |
+| `review_outcome` | Latest lifecycle decision when available |
+
+Owner-facing state contract:
+
+| Owner state | Backend evidence | Owner message | System action |
+| --- | --- | --- | --- |
+| `not_selected` | No selected StrategyGroup runtime | No StrategyGroup selected | Wait for selection |
+| `selected` | StrategyGroup selected but runtime not observing | Selected, not observing yet | Admit or block with reason |
+| `observing` | Watcher is healthy and no fresh signal exists | Watching market conditions | Continue watcher cadence |
+| `signal_ready` | Fresh signal is present and not stale or conflicted | Fresh signal detected | Check RequiredFacts |
+| `blocked` | Missing facts, stale evidence, hard stop, conflict, or safety blocker | Blocked with a short reason | Do not approach funds |
+| `candidate_ready` | Candidate, runtime grant, and authorization evidence are ready | Candidate ready for gate checks | Run action-time gate path |
+| `finalgate_ready` | Official action-time FinalGate passed | Gate passed | Use official Operation Layer only |
+| `submitted` | Operation Layer submitted an auditable action | Action submitted | Finalize and reconcile |
+| `reconciling` | Post-submit facts are being checked | Reconciling result | Settle budget and attempt state |
+| `settled` | Reconciliation and budget settlement are complete | Attempt settled | Capture review outcome |
+
+Notify the Owner when deployment state changes, watcher health regresses, a
+fresh signal appears, a candidate becomes ready, FinalGate blocks or passes,
+Operation Layer submits, post-submit reconciliation fails or settles, a hard
+stop triggers, or a review outcome is needed.
+
+Stay quiet when all selected runtimes remain observing, all signals are
+`no_signal`, the only change is a repeated no-action watcher tick, and no
+safety regression exists.
+
+Review results must use:
+
+| Outcome | Meaning |
+| --- | --- |
+| `promote` | Boundary looks more credible; increase observation priority or admissible scope |
+| `keep_observing` | Evidence is insufficient; continue observation |
+| `revise` | Change RequiredFacts, freshness, hard stops, conflict policy, or cadence |
+| `park` | Current regime is unsuitable; pause or downgrade the StrategyGroup |
+| `kill` | Logic is invalid, unreproducible, lookahead-tainted, or risk is uncontrollable |
+
+`promote` must not mean automatic position-size increase. Any risk expansion
+must remain bounded and explicit.
+
+---
+
+## 9. Watch Branch Intake Decision
+
+The useful P0 content from `codex/runtime-signal-watcher-feishu` has been
+selectively carried into this pilot branch in one of two forms:
+
+| Watch branch content | Pilot branch status |
+| --- | --- |
+| Feishu watcher notification and readiness packets | carried through watcher readiness / resume-pack code and Tokyo watcher configuration |
+| Deployment readiness and deploy apply standing authorization | carried through deploy plan, deploy executor, deploy packets, and tests |
+| Post-signal auto-resume metadata | carried through watcher tick and readiness-pack `post_signal_auto_resume` |
+| Owner-facing Strategy Control Board contract | folded into this canon overlay and Trading Console pilot page |
+| Broad docs reset / historical compression | not carried; separate docs-governance integration item |
+
+The watch branch must not be merged wholesale into this pilot branch because
+its tree deletes or replaces large parts of `docs/canon`, `docs/ops`, ADRs,
+product docs, schemas, and historical evidence. That cleanup can still be done
+later as a dedicated docs-governance integration item.
+
+---
+
+## 10. Implemented Pilot Surface
 
 The current pilot implementation surface is:
 
