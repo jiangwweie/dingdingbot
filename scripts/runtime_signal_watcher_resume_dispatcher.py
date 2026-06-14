@@ -87,6 +87,10 @@ OPERATION_LAYER_REQUIRED_EVIDENCE_IDS = (
     "exchange_submit_action_authorization_id",
     "deployment_readiness_evidence_id",
 )
+LEGACY_LOCAL_REGISTRATION_PROBE_BLOCKER_FRAGMENTS = (
+    "runtimeexecutionorderlifecycleadapterresult_not_found",
+    "runtime_execution_order_lifecycle_adapter_result_not_found",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -445,8 +449,8 @@ def _operation_layer_readiness(
         if str(item).strip()
     ] or list(OPERATION_LAYER_REQUIRED_EVIDENCE_IDS)
     missing_ids = [name for name in required_ids if not _nonempty(ids.get(name))]
-    blockers = _operation_layer_blockers(evidence_report)
-    warnings = _operation_layer_warnings(evidence_report)
+    blockers = _operation_layer_blockers(evidence_report, ids=ids)
+    warnings = _operation_layer_warnings(evidence_report, ids=ids)
     ready = not missing_ids and not blockers
     return {
         "status": "ready" if ready else "blocked",
@@ -496,17 +500,58 @@ def _operation_layer_ids(evidence_report: dict[str, Any]) -> dict[str, str]:
     return ids
 
 
-def _operation_layer_blockers(evidence_report: dict[str, Any]) -> list[str]:
+def _operation_layer_raw_blockers(evidence_report: dict[str, Any]) -> list[str]:
     blockers = list(evidence_report.get("blockers") or [])
     for step in _list(evidence_report.get("steps")):
         blockers.extend(_list(_dict(step).get("blockers")))
     return _dedupe_text(blockers)
 
 
-def _operation_layer_warnings(evidence_report: dict[str, Any]) -> list[str]:
+def _legacy_local_registration_probe_blocker_satisfied(
+    blocker: str,
+    *,
+    ids: dict[str, str],
+) -> bool:
+    text = blocker.lower()
+    if not any(
+        fragment in text
+        for fragment in LEGACY_LOCAL_REGISTRATION_PROBE_BLOCKER_FRAGMENTS
+    ):
+        return False
+    return _nonempty(ids.get("local_registration_adapter_result_id"))
+
+
+def _operation_layer_blockers(
+    evidence_report: dict[str, Any],
+    *,
+    ids: dict[str, str],
+) -> list[str]:
+    return [
+        blocker
+        for blocker in _operation_layer_raw_blockers(evidence_report)
+        if not _legacy_local_registration_probe_blocker_satisfied(
+            blocker,
+            ids=ids,
+        )
+    ]
+
+
+def _operation_layer_warnings(
+    evidence_report: dict[str, Any],
+    *,
+    ids: dict[str, str],
+) -> list[str]:
     warnings = list(evidence_report.get("warnings") or [])
     for step in _list(evidence_report.get("steps")):
         warnings.extend(_list(_dict(step).get("warnings")))
+    if any(
+        _legacy_local_registration_probe_blocker_satisfied(blocker, ids=ids)
+        for blocker in _operation_layer_raw_blockers(evidence_report)
+    ):
+        warnings.append(
+            "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
+            "local_registration_adapter_result"
+        )
     return _dedupe_text(warnings)
 
 

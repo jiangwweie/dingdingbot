@@ -177,6 +177,32 @@ def _operation_layer_blocked_report() -> dict:
     return report
 
 
+def _operation_layer_report_with_satisfied_legacy_probe_blocker() -> dict:
+    report = _operation_layer_ready_report()
+    report["ids"]["local_registration_adapter_result_id"] = "local-result-1"
+    report["steps"] = [
+        {
+            "name": "prepare_machine_evidence",
+            "id_summary": {"authorization_id": "auth-ready-1"},
+            "blockers": [
+                "first_real_submit_packet_unavailable:"
+                "runtimeexecutionorderlifecycleadapterresult_not_found"
+            ],
+            "warnings": [],
+        },
+        {
+            "name": "record_local_order_registration_result",
+            "id_summary": {
+                "adapter_result_id": "local-result-1",
+                "authorization_id": "auth-ready-1",
+            },
+            "blockers": [],
+            "warnings": [],
+        },
+    ]
+    return report
+
+
 def test_dispatcher_waiting_for_market_is_no_action():
     packet = build_dispatch_packet(
         resume_pack=_resume_pack(),
@@ -534,6 +560,48 @@ def test_dispatcher_translates_operation_layer_evidence_ready():
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_tolerates_legacy_local_registration_probe_when_result_exists():
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=(
+            _operation_layer_report_with_satisfied_legacy_probe_blocker()
+        ),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+    )
+
+    assert packet["status"] == "operation_layer_ready"
+    assert packet["blockers"] == []
+    assert packet["operation_layer_readiness"]["blockers"] == []
+    assert (
+        "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
+        "local_registration_adapter_result"
+    ) in packet["warnings"]
+
+
+def test_dispatcher_keeps_legacy_local_registration_probe_without_result():
+    report = _operation_layer_report_with_satisfied_legacy_probe_blocker()
+    report["ids"].pop("local_registration_adapter_result_id")
+
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=report,
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+    )
+
+    assert packet["status"] == "operation_layer_blocked"
+    assert packet["blocker_class"] == "missing_fact"
+    assert any(
+        "runtimeexecutionorderlifecycleadapterresult_not_found" in blocker
+        for blocker in packet["blockers"]
+    )
 
 
 def test_dispatcher_execute_preflight_blocks_finalgate_failure(monkeypatch):
