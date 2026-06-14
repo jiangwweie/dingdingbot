@@ -99,6 +99,7 @@ def _owner_packet_for_plan(plan: dict, *, head: str | None = None) -> dict:
         },
         "owner_gate": {
             "deploy_confirmation_phrase": "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+            "deploy_confirmation_phrase_required": False,
         },
         "safety_invariants": {
             "deploy_apply_requested": False,
@@ -203,6 +204,8 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
 
     assert report["status"] == "ready_for_owner_authorized_remote_git_deploy_plan"
     assert report["checks"]["blockers"] == []
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
+    assert report["checks"]["remote_mutation_authorization"]
     assert report["inputs"]["target_migration_count"] == 84
     assert report["inputs"]["local_latest_migration"] == (
         "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
@@ -215,6 +218,12 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert all(
         phase.get("requires_confirmation_phrase")
         == "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+        for phase in report["plan_phases"]
+        if phase["remote_mutation"]
+    )
+    assert all(
+        phase.get("remote_mutation_authorization")
+        == report["checks"]["remote_mutation_authorization"]
         for phase in report["plan_phases"]
         if phase["remote_mutation"]
     )
@@ -307,23 +316,48 @@ def test_git_deploy_executor_dry_run_does_not_execute_commands():
     assert report["effects"]["migrations_run"] is False
 
 
-def test_git_deploy_executor_blocks_apply_without_owner_packet():
+def test_git_deploy_executor_applies_with_standing_authorization_without_owner_packet():
+    module = _load_execute_module()
+    plan = _ready_git_plan()
+    calls = []
+
+    def runner(command: str):
+        calls.append(command)
+        return module.ShellResult(command, "ok", "", 0)
+
+    report = module.execute_git_deploy_plan(
+        plan,
+        apply=True,
+        confirmation_phrase=None,
+        runner=runner,
+    )
+
+    assert report["status"] == "applied"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
+    assert report["checks"]["commands_executed"] == report["checks"]["commands_planned"]
+    assert calls
+
+
+def test_git_deploy_executor_can_require_legacy_confirmation_phrase():
     module = _load_execute_module()
     plan = _ready_git_plan()
 
     report = module.execute_git_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
+        require_confirmation_phrase=True,
+        owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
     assert report["status"] == "blocked"
     assert report["checks"]["commands_executed"] == 0
-    assert report["checks"]["blockers"] == [
-        "owner_git_deploy_decision_packet_required"
-    ]
-    assert report["effects"]["remote_files_modified"] is False
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is True
+    assert "owner_confirmation_phrase_missing_or_mismatch" in (
+        report["checks"]["blockers"]
+    )
 
 
 def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
@@ -338,7 +372,7 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     report = module.execute_git_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
         owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=runner,
     )
@@ -352,6 +386,7 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     assert report["effects"]["remote_files_modified"] is True
     assert report["effects"]["migrations_run"] is True
     assert report["effects"]["order_created"] is False
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
 
 
 def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit():
@@ -431,6 +466,8 @@ def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit
     assert packet["checks"]["forbidden_effects"] == []
     assert packet["candidate"]["repo_url"] == plan["inputs"]["repo_url"]
     assert packet["candidate"]["git_ref"] == plan["inputs"]["git_ref"]
+    assert packet["owner_gate"]["deploy_confirmation_phrase_required"] is False
+    assert packet["owner_gate"]["deploy_apply_authorized_by"]
     assert "real runtime submit" in (
         packet["owner_gate"]["deploy_confirmation_does_not_authorize"]
     )

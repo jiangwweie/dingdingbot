@@ -66,6 +66,7 @@ export default function PilotControlBoard() {
   const strategyFreshness = dualFreshness.strategy_signal || {};
   const actionTimeFreshness = dualFreshness.action_time_facts || {};
   const watcher = data.watcher || {};
+  const autoResume = data.post_signal_auto_resume || {};
   const universe = asArray<string>(selection.selected_universe);
   const risk = selection.risk_profile || {};
   const statusTone = toneForStatus(data.status);
@@ -139,6 +140,17 @@ export default function PilotControlBoard() {
               { label: 'downgrade', value: displayValue(ownerState.downgrade_mode) },
             ]}
           />
+          <EntityRow
+            title="Auto Resume"
+            subtitle={displayValue(autoResume.automatic_recovery_action, 'pending')}
+            tone={toneForStatus(autoResume.status || data.status)}
+            cells={[
+              { label: 'status', value: displayValue(autoResume.status) },
+              { label: 'blocked_at', value: displayValue(autoResume.blocked_at) },
+              { label: 'owner chat', value: autoResume.can_continue_without_owner_chat ? 'not required' : 'required on boundary' },
+              { label: 'FinalGate', value: autoResume.requires_action_time_final_gate ? 'required' : 'not reached' },
+            ]}
+          />
         </div>
       </ConsolePanel>
 
@@ -207,7 +219,7 @@ export default function PilotControlBoard() {
             },
             {
               title: 'Current checkpoint',
-              body: displayValue(data.next_safe_checkpoint),
+              body: displayValue(autoResume.automatic_recovery_action || data.next_safe_checkpoint),
               tone: statusTone,
             },
           ]}

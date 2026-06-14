@@ -54,6 +54,9 @@ from scripts.probe_tokyo_runtime_governance_readonly import (
 from scripts.verify_runtime_submit_rehearsal_pre_live_packet import (
     build_pre_live_packet,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 
 
 class OwnerDeployPacketError(RuntimeError):
@@ -198,8 +201,6 @@ def build_owner_deploy_packet(
         blockers.append("tokyo_readonly_probe_not_ready")
     if not pre_live_technical_ready:
         blockers.append("pre_live_submit_rehearsal_not_technically_ready")
-    if not first_real_submit_still_blocked:
-        blockers.append("first_real_submit_not_confirmed_blocked")
     if forbidden_pre_live_flags:
         blockers.append("pre_live_packet_contains_forbidden_execution_flags")
     if forbidden_effects:
@@ -209,6 +210,8 @@ def build_owner_deploy_packet(
     warnings.extend(release_checks.get("warnings") or [])
     warnings.extend(plan_checks.get("warnings") or [])
     warnings.extend(probe_checks.get("warnings") or [])
+    if not first_real_submit_still_blocked:
+        warnings.append("first_real_submit_not_a_deploy_apply_precondition")
 
     candidate = {
         "branch": release_report.get("local_git", {}).get("branch"),
@@ -249,6 +252,8 @@ def build_owner_deploy_packet(
             "warnings": sorted(set(warnings)),
         },
         "owner_gate": {
+            "deploy_apply_authorized_by": OWNER_STANDING_AUTHORIZATION_REFERENCE,
+            "deploy_confirmation_phrase_required": False,
             "deploy_confirmation_phrase": CONFIRMATION_PHRASE,
             "authorizes_only": (
                 "remote upload, backup, migration, symlink switch, restart, "

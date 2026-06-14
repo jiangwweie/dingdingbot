@@ -159,12 +159,14 @@ def test_postdeploy_acceptance_packet_blocks_live_ready_true_and_head_mismatch()
     assert "postdeploy_health_live_ready_not_false" in blockers
 
 
-def test_postdeploy_acceptance_packet_blocks_if_first_real_submit_is_ready():
+def test_postdeploy_acceptance_packet_warns_if_first_real_submit_is_ready():
     packet = _build_packet(pre_live_packet=_pre_live_packet(ready_for_first_real_submit=True))
 
-    assert packet["status"] == "blocked"
-    blockers = packet["checks"]["blockers"]
-    assert "first_real_submit_not_confirmed_blocked" in blockers
+    assert packet["status"] == "postdeploy_acceptance_ready"
+    assert packet["checks"]["blockers"] == []
+    assert "first_real_submit_not_a_postdeploy_acceptance_precondition" in (
+        packet["checks"]["warnings"]
+    )
 
 
 def test_postdeploy_acceptance_packet_requires_current_head_deployed_gate():

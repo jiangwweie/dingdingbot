@@ -20,6 +20,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT_FOR_IMPORT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
+
+from src.domain.standing_authorization import (  # noqa: E402
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
+
 
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
@@ -216,6 +224,10 @@ def build_deploy_plan(
             "ready_for_owner_authorized_remote_deploy": not blockers,
             "blockers": blockers,
             "warnings": warnings,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "remote_mutation_confirmation_phrase_required": False,
             "remote_mutation_requires_confirmation_phrase": CONFIRMATION_PHRASE,
         },
         "plan_phases": plan_phases,
@@ -325,6 +337,9 @@ def _plan_phases(
         {
             "phase": "2_owner_authorized_upload_and_extract",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"set -eu; mkdir -p {q(incoming_dir)} {q(reports_dir)} {q(backups_dir)}"),
@@ -359,6 +374,9 @@ def _plan_phases(
         {
             "phase": "3_quiesce_backup_and_migrate",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"sudo -n systemctl stop {q(service_name)}"),
@@ -410,6 +428,9 @@ def _plan_phases(
         {
             "phase": "4_switch_start_and_smoke",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),

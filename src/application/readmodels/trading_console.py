@@ -1354,6 +1354,11 @@ class TradingConsoleReadModelService:
         stale = bool(age_seconds is not None and age_seconds > stale_after_seconds)
         safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
         safety = safety if isinstance(safety, dict) else {}
+        post_signal_auto_resume = (
+            watcher_tick.get("post_signal_auto_resume")
+            if isinstance(watcher_tick.get("post_signal_auto_resume"), dict)
+            else {}
+        )
         unsafe_flags = [
             name for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)
             if safety.get(name) not in {False, None}
@@ -1437,6 +1442,7 @@ class TradingConsoleReadModelService:
                     "status_packet_status": status_packet_status,
                     "blockers": watcher_tick.get("blockers") or status_packet.get("blockers") or [],
                     "warnings": watcher_tick.get("warnings") or status_packet.get("warnings") or [],
+                    "post_signal_auto_resume": post_signal_auto_resume,
                 },
                 "notification": {
                     "required": bool(notification.get("required")),
@@ -1453,6 +1459,7 @@ class TradingConsoleReadModelService:
                         if can_resume_steps_5_8
                         else "waiting_for_fresh_strategy_signal"
                     ),
+                    "post_signal_auto_resume": post_signal_auto_resume,
                     "resume_pack_path": str(report_dir / "post-signal-resume-pack.json"),
                     "next_chain": [
                         "fresh candidate",
@@ -1463,6 +1470,7 @@ class TradingConsoleReadModelService:
                         "post-submit finalize / reconciliation / budget settlement",
                     ],
                 },
+                "post_signal_auto_resume": post_signal_auto_resume,
                 "safety_invariants": {
                     **{name: bool(safety.get(name)) for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)},
                     "forbidden_effect_flags": unsafe_flags,

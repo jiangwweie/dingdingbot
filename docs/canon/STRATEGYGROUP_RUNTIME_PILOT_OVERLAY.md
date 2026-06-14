@@ -186,8 +186,15 @@ The current pilot implementation surface is:
 | --- | --- | --- |
 | Packet builder | `scripts/build_strategygroup_runtime_pilot_status.py` | Merge StrategyGroup intake, live-facts readiness, and watcher evidence into Owner-readable pilot status |
 | Watcher auto-resume decision | `scripts/runtime_signal_watcher_tick.py` field `post_signal_auto_resume` | Translate each watcher tick into waiting / non-executing prepare / action-time FinalGate / hard stop status without placing orders |
+| Resume-pack propagation | `scripts/build_runtime_signal_watcher_readiness_pack.py` field `post_signal_auto_resume` | Carry the watcher decision into `post-signal-resume-pack.json` so follow-up automation can resume without reading raw tick packets |
 | Trading Console API | `GET /api/trading-console/strategygroup-runtime-pilot-status` | Expose `blocked_at`, `blocked_reason`, `next_recover_condition`, `automatic_recovery_action`, `downgrade_mode`, `dual_freshness`, and `gate_failure_ledger` |
-| Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, dual freshness, gate ledger, candidate state, FinalGate / Operation Layer status |
+| Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, auto-resume status, dual freshness, gate ledger, candidate state, FinalGate / Operation Layer status |
+
+Selected useful content from `codex/runtime-signal-watcher-feishu` is allowed
+inside this branch only when it preserves this overlay. The Feishu watcher,
+deployment readiness, resume-pack, standing authorization, and control-board
+translation capabilities are in scope. The watch branch's broad docs deletion /
+compression remains a separate docs-governance integration item.
 
 Default pilot selection remains:
 

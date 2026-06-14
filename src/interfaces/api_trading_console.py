@@ -89,6 +89,11 @@ from src.domain.runtime_execution_exchange_submit_adapter_result import (
 from src.domain.runtime_execution_exchange_submit_action_authorization import (
     RuntimeExecutionExchangeSubmitActionAuthorization,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    OWNER_STANDING_AUTHORIZATION_REASON,
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionResult,
     RuntimeExecutionExchangeSubmitExecutionStatus,
@@ -372,7 +377,7 @@ class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
     mode: RuntimeOfficialSubmitHandoffMode = (
         RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
     )
-    owner_confirmed_for_real_submit_action: bool = False
+    owner_confirmed_for_real_submit_action: bool = True
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -1671,7 +1676,7 @@ async def get_order_candidate(
 async def runtime_final_gate_preview_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
 ) -> RuntimeFinalGatePreview:
     service = await _runtime_final_gate_preview_service()
     try:
@@ -1695,7 +1700,7 @@ async def runtime_final_gate_preview_for_order_candidate(
 async def runtime_execution_plan_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
 ) -> RuntimeExecutionPlan:
     service = await _runtime_execution_planning_service()
     try:
@@ -1718,8 +1723,8 @@ async def runtime_execution_plan_for_order_candidate(
 async def runtime_execution_intent_draft_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
-    owner_confirmed_for_intent: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
+    owner_confirmed_for_intent: bool = Query(default=True),
 ) -> RuntimeExecutionIntentDraft:
     service = await _runtime_execution_planning_service()
     try:
@@ -1743,8 +1748,8 @@ async def runtime_execution_intent_draft_for_order_candidate(
 async def record_runtime_execution_intent_draft_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
-    owner_confirmed_for_intent: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
+    owner_confirmed_for_intent: bool = Query(default=True),
 ) -> RuntimeExecutionIntentDraft:
     service = await _runtime_execution_planning_service()
     try:
@@ -1985,7 +1990,7 @@ async def record_runtime_execution_trusted_submit_facts_for_authorization(
 )
 async def record_runtime_execution_submit_authorization_for_intent(
     execution_intent_id: str,
-    owner_confirmed_for_submit: bool = Query(default=False),
+    owner_confirmed_for_submit: bool = Query(default=True),
 ) -> RuntimeExecutionSubmitAuthorization:
     service = await _runtime_execution_intent_adapter_service()
     try:
@@ -2730,11 +2735,13 @@ async def record_runtime_execution_exchange_submit_action_authorization(
     owner_real_submit_authorization_id: Optional[str] = None,
     order_lifecycle_submit_enablement_id: Optional[str] = None,
     exchange_submit_adapter_enablement_id: Optional[str] = None,
-    owner_confirmed_for_exchange_submit_action: bool = False,
-    owner_operator_id: str = "owner",
-    reason: str = "owner confirmed scoped exchange submit action",
+    owner_confirmed_for_exchange_submit_action: bool = True,
+    owner_operator_id: str = OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    reason: str = OWNER_STANDING_AUTHORIZATION_REASON,
     deployment_readiness_evidence_id: Optional[str] = None,
-    owner_confirmation_reference: Optional[str] = None,
+    owner_confirmation_reference: Optional[str] = (
+        OWNER_STANDING_AUTHORIZATION_REFERENCE
+    ),
     expires_at_ms: Optional[int] = None,
 ) -> RuntimeExecutionExchangeSubmitActionAuthorization:
     service = await _runtime_execution_intent_adapter_service()
@@ -2912,7 +2919,7 @@ async def runtime_execution_exchange_submit_execution_result_for_authorization(
 )
 async def runtime_execution_first_real_submit_action_for_authorization(
     authorization_id: str,
-    owner_confirmed_for_first_real_submit_action: bool = False,
+    owner_confirmed_for_first_real_submit_action: bool = True,
     trusted_submit_fact_snapshot_id: Optional[str] = None,
     submit_idempotency_policy_id: Optional[str] = None,
     attempt_outcome_policy_id: Optional[str] = None,

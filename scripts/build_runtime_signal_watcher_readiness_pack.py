@@ -63,6 +63,10 @@ def _file_status(paths: dict[str, Path]) -> dict[str, dict[str, Any]]:
     }
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def build_pack(
     *,
     report_dir: Path,
@@ -94,6 +98,7 @@ def build_pack(
     stale = bool(age_seconds is not None and age_seconds > stale_after_seconds)
     safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
     safety = safety if isinstance(safety, dict) else {}
+    post_signal_auto_resume = _dict(watcher_tick.get("post_signal_auto_resume"))
     unsafe_flags = [
         name for name in sorted(UNSAFE_FLAGS)
         if safety.get(name) not in {False, None}
@@ -142,6 +147,7 @@ def build_pack(
             "operator_status": operator_status,
             "status_packet_status": watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown",
         },
+        "post_signal_auto_resume": post_signal_auto_resume,
         "safety_invariants": {
             **{name: bool(safety.get(name)) for name in sorted(UNSAFE_FLAGS)},
             "forbidden_effect_flags": unsafe_flags,
@@ -161,6 +167,25 @@ def build_pack(
         "can_continue_steps_5_8": can_resume_steps_5_8,
         "current_wakeup_status": wakeup_status,
         "current_operator_status": operator_status,
+        "post_signal_auto_resume": post_signal_auto_resume,
+        "automatic_recovery_action": post_signal_auto_resume.get(
+            "automatic_recovery_action"
+        ),
+        "blocked_at": post_signal_auto_resume.get("blocked_at"),
+        "blocked_reason": post_signal_auto_resume.get("blocked_reason"),
+        "next_recover_condition": post_signal_auto_resume.get(
+            "next_recover_condition"
+        ),
+        "downgrade_mode": post_signal_auto_resume.get("downgrade_mode"),
+        "can_continue_without_owner_chat": post_signal_auto_resume.get(
+            "can_continue_without_owner_chat"
+        ),
+        "requires_action_time_final_gate": post_signal_auto_resume.get(
+            "requires_action_time_final_gate"
+        ),
+        "requires_official_operation_layer": post_signal_auto_resume.get(
+            "requires_official_operation_layer"
+        ),
         "source_paths": {name: str(path) for name, path in paths.items()},
         "required_before_real_submit": [
             "fresh candidate",

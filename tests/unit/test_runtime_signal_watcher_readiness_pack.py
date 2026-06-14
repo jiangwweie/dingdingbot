@@ -34,6 +34,21 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
                 "runtime_budget_mutated": False,
                 "withdrawal_or_transfer_created": False,
             },
+            "post_signal_auto_resume": {
+                "status": "ready_for_action_time_final_gate",
+                "blocked_at": "FinalGate",
+                "blocked_reason": "action_time_final_gate_not_run_yet",
+                "next_recover_condition": (
+                    "official_final_gate_preflight_passes_with_current_facts"
+                ),
+                "automatic_recovery_action": (
+                    "run_official_action_time_final_gate_preflight"
+                ),
+                "downgrade_mode": "no_real_submit_until_final_gate_pass",
+                "can_continue_without_owner_chat": True,
+                "requires_action_time_final_gate": True,
+                "requires_official_operation_layer": True,
+            },
         },
     )
     _write(report_dir / "wakeup-packet.json", {"status": "prepared_shadow_evidence_ready_for_owner_review"})
@@ -55,7 +70,19 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
     assert summary["can_continue_steps_5_8"] is True
     assert deployment["notification"]["duplicate_suppression_observed"] is True
     assert deployment["safety_invariants"]["exchange_write_called"] is False
+    assert deployment["post_signal_auto_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
     assert resume["can_continue_steps_5_8"] is True
+    assert resume["post_signal_auto_resume"]["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert resume["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert resume["can_continue_without_owner_chat"] is True
+    assert resume["requires_action_time_final_gate"] is True
+    assert resume["requires_official_operation_layer"] is True
     assert "action-time FinalGate" in resume["required_before_real_submit"]
 
 

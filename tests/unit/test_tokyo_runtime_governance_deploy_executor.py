@@ -105,6 +105,7 @@ def _owner_packet_for_plan(plan: dict, *, head: str | None = None) -> dict:
         },
         "owner_gate": {
             "deploy_confirmation_phrase": "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+            "deploy_confirmation_phrase_required": False,
         },
         "safety_invariants": {
             "deploy_apply_requested": False,
@@ -139,39 +140,76 @@ def test_deploy_executor_dry_run_does_not_execute_commands(tmp_path: Path):
     assert report["effects"]["migrations_run"] is False
 
 
-def test_deploy_executor_blocks_apply_without_exact_confirmation(tmp_path: Path):
+def test_deploy_executor_applies_with_standing_authorization_without_confirmation(
+    tmp_path: Path,
+):
+    module = _load_module()
+    plan = _ready_plan(tmp_path)
+    calls = []
+
+    def runner(command: str):
+        calls.append(command)
+        return module.ShellResult(command, "ok", "", 0)
+
+    report = module.execute_deploy_plan(
+        plan,
+        apply=True,
+        confirmation_phrase=None,
+        owner_deploy_packet=_owner_packet_for_plan(plan),
+        runner=runner,
+    )
+
+    assert report["status"] == "applied"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
+    assert report["checks"]["commands_executed"] == report["checks"]["commands_planned"]
+    assert calls
+
+
+def test_deploy_executor_can_require_legacy_confirmation_phrase(tmp_path: Path):
     module = _load_module()
     plan = _ready_plan(tmp_path)
 
     report = module.execute_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="wrong",
+        confirmation_phrase=None,
+        require_confirmation_phrase=True,
         owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
 
     assert report["status"] == "blocked"
     assert report["checks"]["commands_executed"] == 0
-    assert "owner_confirmation_phrase_missing_or_mismatch" in report["checks"]["blockers"]
-    assert report["effects"]["remote_files_modified"] is False
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is True
+    assert "owner_confirmation_phrase_missing_or_mismatch" in (
+        report["checks"]["blockers"]
+    )
 
 
-def test_deploy_executor_blocks_apply_without_owner_deploy_packet(tmp_path: Path):
+def test_deploy_executor_applies_with_standing_authorization_without_owner_packet(
+    tmp_path: Path,
+):
     module = _load_module()
     plan = _ready_plan(tmp_path)
+    calls = []
+
+    def runner(command: str):
+        calls.append(command)
+        return module.ShellResult(command, "ok", "", 0)
 
     report = module.execute_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
-        runner=lambda command: module.ShellResult(command, "ok", "", 0),
+        confirmation_phrase=None,
+        runner=runner,
     )
 
-    assert report["status"] == "blocked"
-    assert report["checks"]["commands_executed"] == 0
-    assert report["checks"]["blockers"] == ["owner_deploy_decision_packet_required"]
-    assert report["effects"]["remote_files_modified"] is False
+    assert report["status"] == "applied"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
+    assert report["checks"]["commands_executed"] == report["checks"]["commands_planned"]
+    assert calls
 
 
 def test_deploy_executor_blocks_apply_with_stale_owner_deploy_packet(tmp_path: Path):
@@ -181,7 +219,7 @@ def test_deploy_executor_blocks_apply_with_stale_owner_deploy_packet(tmp_path: P
     report = module.execute_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
         owner_deploy_packet=_owner_packet_for_plan(plan, head="stale-head"),
         runner=lambda command: module.ShellResult(command, "ok", "", 0),
     )
@@ -204,7 +242,7 @@ def test_deploy_executor_apply_runs_commands_with_fake_runner(tmp_path: Path):
     report = module.execute_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
         owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=runner,
     )
@@ -235,7 +273,7 @@ def test_deploy_executor_stops_on_failed_command(tmp_path: Path):
     report = module.execute_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
         owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=runner,
     )
@@ -258,7 +296,7 @@ def test_deploy_executor_failed_remote_smoke_reports_partial_effects(tmp_path: P
     report = module.execute_deploy_plan(
         plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
         owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=runner,
     )
@@ -295,7 +333,7 @@ def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Pat
     report = module.execute_deploy_plan(
         mutated_plan,
         apply=True,
-        confirmation_phrase="OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY",
+        confirmation_phrase=None,
         owner_deploy_packet=_owner_packet_for_plan(plan),
         runner=runner,
     )
@@ -303,6 +341,6 @@ def test_deploy_executor_blocks_remote_mutation_phase_without_gate(tmp_path: Pat
     assert report["status"] == "blocked"
     assert report["checks"]["commands_executed"] == 0
     assert report["checks"]["blockers"] == [
-        "remote_mutation_phase_missing_confirmation_gate:unsafe_remote_phase"
+        "remote_mutation_phase_missing_authorization_marker:unsafe_remote_phase"
     ]
     assert calls == []

@@ -69,6 +69,10 @@ def _status(value: Any) -> str:
     return str(value or "unknown").strip().lower()
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _candidate_checks(row: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(item.get("live_fact_key") or item.get("fact_key")): item
@@ -166,6 +170,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         else watcher_status
     )
     if data.get("scope") == "runtime_signal_watcher_post_signal_resume_pack":
+        post_signal_auto_resume = _dict(data.get("post_signal_auto_resume"))
         safety = (
             data.get("safety_invariants")
             if isinstance(data.get("safety_invariants"), dict)
@@ -194,6 +199,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             "blockers": list(data.get("blockers") or []),
             "warnings": list(data.get("warnings") or []),
             "unsafe_flags": sorted(set(str(item) for item in unsafe_flags if item)),
+            "post_signal_auto_resume": post_signal_auto_resume,
         }
     deployment = (
         data.get("deployment_readiness")
@@ -205,6 +211,11 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         data.get("post_signal_resume")
         if isinstance(data.get("post_signal_resume"), dict)
         else {}
+    )
+    post_signal_auto_resume = _dict(
+        data.get("post_signal_auto_resume")
+        or watcher.get("post_signal_auto_resume")
+        or resume.get("post_signal_auto_resume")
     )
     safety = (
         data.get("safety_invariants")
@@ -227,6 +238,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers,
         "warnings": list(watcher.get("warnings") or []),
         "unsafe_flags": sorted(set(str(item) for item in unsafe_flags if item)),
+        "post_signal_auto_resume": post_signal_auto_resume,
     }
 
 
@@ -494,6 +506,7 @@ def _owner_state(
     observe_ready = bool(readiness.get("observe_ready"))
     candidate_ready = bool(readiness.get("armed_candidate_prepare_ready"))
     candidate_blockers = fact_summary["candidate_blockers"]
+    auto_resume = _dict(watcher.get("post_signal_auto_resume"))
     if not selected_group_id:
         return {
             "status": "blocked_no_strategy_group",
@@ -568,7 +581,8 @@ def _owner_state(
                 "blocked_reason": "none",
                 "next_recover_condition": "fresh_signal_already_available",
                 "automatic_recovery_action": (
-                    "prepare_shadow_candidate_runtime_grant_authorization_evidence"
+                    auto_resume.get("automatic_recovery_action")
+                    or "prepare_shadow_candidate_runtime_grant_authorization_evidence"
                 ),
                 "downgrade_mode": "armed_observation",
             }
@@ -593,15 +607,19 @@ def _owner_state(
         return {
             "status": "waiting_for_market",
             "blocker_class": "waiting_for_market",
-            "blocked_at": "watcher_signal",
-            "blocked_reason": "no_fresh_strategy_signal",
+            "blocked_at": auto_resume.get("blocked_at") or "watcher_signal",
+            "blocked_reason": (
+                auto_resume.get("blocked_reason") or "no_fresh_strategy_signal"
+            ),
             "next_recover_condition": (
-                "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                auto_resume.get("next_recover_condition")
+                or "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
             ),
             "automatic_recovery_action": (
-                "continue_watcher_observation_and_notify_on_material_change"
+                auto_resume.get("automatic_recovery_action")
+                or "continue_watcher_observation_and_notify_on_material_change"
             ),
-            "downgrade_mode": "observe_only",
+            "downgrade_mode": auto_resume.get("downgrade_mode") or "observe_only",
         }
     return {
         "status": "blocked_operator_review",
@@ -711,6 +729,7 @@ def build_packet(
             },
         },
         "owner_state": owner_state,
+        "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
             "strategy_group_row": {
                 "id": group_id,

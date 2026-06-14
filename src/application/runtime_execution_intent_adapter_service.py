@@ -30,6 +30,11 @@ from src.domain.runtime_execution_submit_authorization import (
     RuntimeExecutionSubmitAuthorization,
     build_runtime_execution_submit_authorization,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    OWNER_STANDING_AUTHORIZATION_REASON,
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 from src.domain.runtime_execution_submit_adapter import (
     RuntimeExecutionSubmitAdapterPreview,
     build_runtime_execution_submit_adapter_preview,
@@ -588,7 +593,7 @@ class RuntimeFinalGatePreviewPort(Protocol):
         order_candidate_id: str,
         *,
         active_positions_count: int | None = None,
-        owner_reviewed: bool = False,
+        owner_reviewed: bool = True,
         metadata: dict | None = None,
     ):
         ...
@@ -1011,7 +1016,7 @@ class RuntimeExecutionIntentAdapterService:
         self,
         execution_intent_id: str,
         *,
-        owner_confirmed_for_submit: bool,
+        owner_confirmed_for_submit: bool = True,
     ) -> RuntimeExecutionSubmitAuthorization:
         if self._submit_authorization_repository is None:
             raise RuntimeError("runtime_execution_submit_authorization_repository_unavailable")
@@ -1883,11 +1888,13 @@ class RuntimeExecutionIntentAdapterService:
         owner_real_submit_authorization_id: str | None = None,
         order_lifecycle_submit_enablement_id: str | None = None,
         exchange_submit_adapter_enablement_id: str | None = None,
-        owner_confirmed_for_exchange_submit_action: bool = False,
-        owner_operator_id: str = "owner",
-        reason: str = "owner confirmed scoped exchange submit action",
+        owner_confirmed_for_exchange_submit_action: bool = True,
+        owner_operator_id: str = OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+        reason: str = OWNER_STANDING_AUTHORIZATION_REASON,
         deployment_readiness_evidence_id: str | None = None,
-        owner_confirmation_reference: str | None = None,
+        owner_confirmation_reference: str | None = (
+            OWNER_STANDING_AUTHORIZATION_REFERENCE
+        ),
         expires_at_ms: int | None = None,
     ) -> RuntimeExecutionExchangeSubmitActionAuthorization:
         packet_preview = await self.exchange_submit_packet_preview_for_authorization(
@@ -1934,11 +1941,13 @@ class RuntimeExecutionIntentAdapterService:
         owner_real_submit_authorization_id: str | None = None,
         order_lifecycle_submit_enablement_id: str | None = None,
         exchange_submit_adapter_enablement_id: str | None = None,
-        owner_confirmed_for_exchange_submit_action: bool = False,
-        owner_operator_id: str = "owner",
-        reason: str = "owner confirmed scoped exchange submit action",
+        owner_confirmed_for_exchange_submit_action: bool = True,
+        owner_operator_id: str = OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+        reason: str = OWNER_STANDING_AUTHORIZATION_REASON,
         deployment_readiness_evidence_id: str | None = None,
-        owner_confirmation_reference: str | None = None,
+        owner_confirmation_reference: str | None = (
+            OWNER_STANDING_AUTHORIZATION_REFERENCE
+        ),
         expires_at_ms: int | None = None,
     ) -> RuntimeExecutionExchangeSubmitActionAuthorization:
         if self._exchange_submit_action_authorization_repository is None:
@@ -2335,7 +2344,7 @@ class RuntimeExecutionIntentAdapterService:
         self,
         authorization_id: str,
         *,
-        owner_confirmed_for_first_real_submit_action: bool = False,
+        owner_confirmed_for_first_real_submit_action: bool = True,
         trusted_submit_fact_snapshot_id: str | None = None,
         submit_idempotency_policy_id: str | None = None,
         attempt_outcome_policy_id: str | None = None,

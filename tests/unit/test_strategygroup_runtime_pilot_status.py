@@ -127,6 +127,32 @@ def _watcher_waiting() -> dict:
             "post_signal_resume": {
                 "can_continue_steps_5_8": False,
                 "current_gate": "waiting_for_fresh_strategy_signal",
+                "post_signal_auto_resume": {
+                    "status": "waiting_for_market",
+                    "blocked_at": "watcher_signal",
+                    "blocked_reason": "no_fresh_strategy_signal",
+                    "next_recover_condition": (
+                        "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                    ),
+                    "automatic_recovery_action": "continue_watcher_observation",
+                    "downgrade_mode": "observe_only",
+                    "can_continue_without_owner_chat": True,
+                    "requires_action_time_final_gate": True,
+                    "requires_official_operation_layer": True,
+                },
+            },
+            "post_signal_auto_resume": {
+                "status": "waiting_for_market",
+                "blocked_at": "watcher_signal",
+                "blocked_reason": "no_fresh_strategy_signal",
+                "next_recover_condition": (
+                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                ),
+                "automatic_recovery_action": "continue_watcher_observation",
+                "downgrade_mode": "observe_only",
+                "can_continue_without_owner_chat": True,
+                "requires_action_time_final_gate": True,
+                "requires_official_operation_layer": True,
             },
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -151,6 +177,25 @@ def _watcher_ready() -> dict:
     watcher["data"]["post_signal_resume"]["current_gate"] = (
         "fresh_signal_or_prepared_shadow_ready"
     )
+    ready_auto_resume = {
+        "status": "ready_for_non_executing_prepare",
+        "blocked_at": "non_executing_prepare_records",
+        "blocked_reason": "fresh_strategy_signal_ready",
+        "next_recover_condition": (
+            "shadow_candidate_runtime_grant_authorization_evidence_exists"
+        ),
+        "automatic_recovery_action": (
+            "wait_for_prepare_records_then_rebuild_final_gate_status"
+        ),
+        "downgrade_mode": "armed_observation_no_real_submit",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+    }
+    watcher["data"]["post_signal_resume"]["post_signal_auto_resume"] = (
+        ready_auto_resume
+    )
+    watcher["data"]["post_signal_auto_resume"] = ready_auto_resume
     return watcher
 
 
@@ -175,8 +220,9 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
     assert packet["owner_state"]["blocker_class"] == "waiting_for_market"
     assert packet["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
     assert packet["owner_state"]["automatic_recovery_action"] == (
-        "continue_watcher_observation_and_notify_on_material_change"
+        "continue_watcher_observation"
     )
+    assert packet["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
     assert packet["dual_freshness"]["strategy_signal"] == {
         "status": "missing",
         "freshness_window": "15-30m",
@@ -215,7 +261,7 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
         in packet["why_not_executable"]
     )
     assert packet["control_board"]["strategy_group_row"]["next_action"] == (
-        "continue_watcher_observation_and_notify_on_material_change"
+        "continue_watcher_observation"
     )
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["creates_candidate"] is False
@@ -308,6 +354,19 @@ def test_pilot_status_accepts_raw_post_signal_resume_pack():
             "can_continue_steps_5_8": False,
             "current_wakeup_status": "operator_packet_needs_review",
             "current_operator_status": "operator_review",
+            "post_signal_auto_resume": {
+                "status": "waiting_for_market",
+                "blocked_at": "watcher_signal",
+                "blocked_reason": "no_fresh_strategy_signal",
+                "next_recover_condition": (
+                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                ),
+                "automatic_recovery_action": "continue_watcher_observation",
+                "downgrade_mode": "observe_only",
+                "can_continue_without_owner_chat": True,
+                "requires_action_time_final_gate": True,
+                "requires_official_operation_layer": True,
+            },
             "blockers": [
                 "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
             ],
@@ -326,3 +385,4 @@ def test_pilot_status_accepts_raw_post_signal_resume_pack():
 
     assert packet["status"] == "waiting_for_market"
     assert packet["owner_state"]["blocker_class"] == "waiting_for_market"
+    assert packet["post_signal_auto_resume"]["status"] == "waiting_for_market"

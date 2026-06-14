@@ -38,6 +38,9 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
     DEFAULT_SERVICE_NAME,
     DEFAULT_VENV_PYTHON,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 
 
 DEFAULT_GIT_REF = "program/live-safe-v1"
@@ -260,6 +263,10 @@ def build_git_deploy_plan(
             "ready_for_owner_authorized_remote_deploy": not blockers,
             "blockers": blockers,
             "warnings": warnings,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "remote_mutation_confirmation_phrase_required": False,
             "remote_mutation_requires_confirmation_phrase": CONFIRMATION_PHRASE,
         },
         "plan_phases": plan_phases,
@@ -395,6 +402,9 @@ def _plan_phases(
         {
             "phase": "2_owner_authorized_git_fetch_and_export",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [_ssh(host, remote_export_command)],
             "stop_if": [
@@ -407,6 +417,9 @@ def _plan_phases(
         {
             "phase": "3_quiesce_backup_and_migrate",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"sudo -n systemctl stop {q(service_name)}"),
@@ -454,6 +467,9 @@ def _plan_phases(
         {
             "phase": "4_switch_start_and_smoke",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),

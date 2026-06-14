@@ -5259,6 +5259,21 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
         },
+        "post_signal_auto_resume": {
+            "status": "ready_for_action_time_final_gate",
+            "blocked_at": "FinalGate",
+            "blocked_reason": "action_time_final_gate_not_run_yet",
+            "next_recover_condition": (
+                "official_final_gate_preflight_passes_with_current_facts"
+            ),
+            "automatic_recovery_action": (
+                "run_official_action_time_final_gate_preflight"
+            ),
+            "downgrade_mode": "no_real_submit_until_final_gate_pass",
+            "can_continue_without_owner_chat": True,
+            "requires_action_time_final_gate": True,
+            "requires_official_operation_layer": True,
+        },
     }
     files = {
         "watcher-tick.json": tick,
@@ -5286,6 +5301,12 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["deployment_readiness"]["feishu_configured"] is True
     assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
     assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True
+    assert payload["data"]["post_signal_auto_resume"]["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert payload["data"]["post_signal_resume"]["post_signal_auto_resume"][
+        "can_continue_without_owner_chat"
+    ] is True
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
@@ -5495,6 +5516,19 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
         },
+        "post_signal_auto_resume": {
+            "status": "waiting_for_market",
+            "blocked_at": "watcher_signal",
+            "blocked_reason": "no_fresh_strategy_signal",
+            "next_recover_condition": (
+                "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+            ),
+            "automatic_recovery_action": "continue_watcher_observation",
+            "downgrade_mode": "observe_only",
+            "can_continue_without_owner_chat": True,
+            "requires_action_time_final_gate": True,
+            "requires_official_operation_layer": True,
+        },
     }
     for name, packet in {
         "watcher-tick.json": tick,
@@ -5527,8 +5561,9 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     assert payload["data"]["owner_state"]["blocked_at"] == "watcher_signal"
     assert payload["data"]["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
     assert payload["data"]["control_board"]["strategy_group_row"]["next_action"] == (
-        "continue_watcher_observation_and_notify_on_material_change"
+        "continue_watcher_observation"
     )
+    assert payload["data"]["post_signal_auto_resume"]["status"] == "waiting_for_market"
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
 
 
