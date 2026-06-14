@@ -89,7 +89,7 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
     deployment = json.loads((output_dir / "deployment-readiness-packet.json").read_text())
     resume = json.loads((output_dir / "post-signal-resume-pack.json").read_text())
     assert summary["deployment_status"] == "ready"
-    assert summary["resume_status"] == "ready_for_steps_5_8"
+    assert summary["resume_status"] == "ready_for_action_time_final_gate"
     assert summary["can_continue_steps_5_8"] is True
     assert deployment["notification"]["duplicate_suppression_observed"] is True
     assert deployment["safety_invariants"]["exchange_write_called"] is False
@@ -130,6 +130,10 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
     ]
     assert resume["action_time_resume"]["requires_fresh_action_time_facts"] is True
     assert resume["action_time_resume"]["places_order"] is False
+    assert resume["owner_state"]["status"] == "ready_for_action_time_final_gate"
+    assert resume["owner_state"]["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
     assert resume["runtime_signal_summaries"] == [
         {
             "runtime_instance_id": "runtime-mpg-1",
@@ -183,3 +187,94 @@ def test_build_runtime_signal_watcher_readiness_pack_blocks_unsafe_effect(tmp_pa
     assert "exchange_write_called" in resume["blockers"]
     assert resume["action_time_resume"]["status"] == "blocked"
     assert resume["action_time_resume"]["allowed_auto_actions"] == []
+
+
+def test_build_runtime_signal_watcher_readiness_pack_normalizes_no_signal(tmp_path):
+    report_dir = tmp_path / "report"
+    output_dir = tmp_path / "out"
+    report_dir.mkdir()
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "watching_no_signal",
+            "wakeup_status": "operator_packet_needs_review",
+            "operator_status": "operator_review",
+            "status_packet_status": "ok",
+            "blockers": [
+                "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+            ],
+            "notification": {
+                "configured": True,
+                "attempted": False,
+                "sent": False,
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "execution_intent_created": False,
+                "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+            "post_signal_auto_resume": {
+                "status": "waiting_for_market",
+                "blocked_at": "watcher_signal",
+                "blocked_reason": "no_fresh_strategy_signal",
+                "next_recover_condition": (
+                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                ),
+                "automatic_recovery_action": "continue_watcher_observation",
+                "downgrade_mode": "observe_only",
+                "can_continue_without_owner_chat": True,
+                "requires_action_time_final_gate": True,
+                "requires_official_operation_layer": True,
+            },
+        },
+    )
+    _write(report_dir / "wakeup-packet.json", {"status": "operator_packet_needs_review"})
+    _write(report_dir / "operator-packet.json", {"status": "operator_review"})
+    _write(
+        report_dir / "status-packet.json",
+        {
+            "status": "ok",
+            "blockers": [
+                "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+            ],
+            "warnings": [],
+            "active_runtime_count": 1,
+            "monitored_runtime_count": 1,
+            "selected_runtime_instance_ids": ["runtime-1"],
+            "prepared_authorization_id": None,
+            "shadow_candidate_id": None,
+            "signal_input_json": None,
+        },
+    )
+    _write(report_dir / "notification-state.json", {})
+
+    summary = build_pack(
+        report_dir=report_dir,
+        output_dir=output_dir,
+        stale_after_seconds=180,
+        label="unit-test",
+    )
+
+    resume = json.loads((output_dir / "post-signal-resume-pack.json").read_text())
+    assert summary["resume_status"] == "waiting_for_market"
+    assert summary["can_continue_steps_5_8"] is False
+    assert resume["status"] == "waiting_for_market"
+    assert resume["owner_state"] == {
+        "status": "waiting_for_market",
+        "blocker_class": "waiting_for_market",
+        "blocked_at": "watcher_signal",
+        "blocked_reason": "no_fresh_strategy_signal",
+        "next_recover_condition": (
+            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+        ),
+        "automatic_recovery_action": "continue_watcher_observation",
+        "downgrade_mode": "observe_only",
+    }
+    assert resume["action_time_resume"]["status"] == "waiting_for_market"
+    assert resume["action_time_resume"]["allowed_auto_actions"] == [
+        "continue_watcher_observation"
+    ]
+    assert resume["action_time_resume"]["places_order"] is False

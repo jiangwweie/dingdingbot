@@ -5301,6 +5301,18 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["deployment_readiness"]["feishu_configured"] is True
     assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
     assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True
+    assert payload["data"]["post_signal_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert payload["data"]["post_signal_resume"]["current_gate"] == (
+        "action_time_final_gate"
+    )
+    assert payload["data"]["action_time_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
+        "run_official_action_time_final_gate_preflight"
+    ]
     assert payload["data"]["post_signal_auto_resume"]["automatic_recovery_action"] == (
         "run_official_action_time_final_gate_preflight"
     )
@@ -5323,6 +5335,143 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["post_signal_resume"]["post_signal_auto_resume"][
         "can_continue_without_owner_chat"
     ] is True
+    assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
+    assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+
+
+def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
+    monkeypatch, tmp_path
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+    auto_resume = {
+        "status": "waiting_for_market",
+        "blocked_at": "watcher_signal",
+        "blocked_reason": "no_fresh_strategy_signal",
+        "next_recover_condition": (
+            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+        ),
+        "automatic_recovery_action": "continue_watcher_observation",
+        "downgrade_mode": "observe_only",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+    }
+    action_time_resume = {
+        "status": "waiting_for_market",
+        "next_step": "continue_watcher_observation",
+        "signal_input_json": None,
+        "shadow_candidate_id": None,
+        "prepared_authorization_id": None,
+        "allowed_auto_actions": ["continue_watcher_observation"],
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": False,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": "not_reached",
+        "operation_layer_status": "not_reached",
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "watching_no_signal",
+        "wakeup_status": "operator_packet_needs_review",
+        "operator_status": "operator_review",
+        "status_packet_status": "ok",
+        "blockers": [
+            "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+        ],
+        "warnings": [],
+        "notification": {
+            "required": False,
+            "configured": True,
+            "attempted": False,
+            "sent": False,
+            "duplicate_suppressed": False,
+            "skipped_reason": "no_owner_attention_needed",
+        },
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+        "post_signal_auto_resume": auto_resume,
+    }
+    files = {
+        "watcher-tick.json": tick,
+        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
+        "operator-packet.json": {"status": "operator_review"},
+        "status-packet.json": {
+            "status": "ok",
+            "blockers": tick["blockers"],
+            "warnings": [],
+            "runtime_signal_summaries": [],
+        },
+        "notification-state.json": {},
+        "post-signal-resume-pack.json": {
+            "status": "waiting_for_market",
+            "can_continue_steps_5_8": False,
+            "post_signal_auto_resume": auto_resume,
+            "action_time_resume": action_time_resume,
+            "owner_state": {
+                "status": "waiting_for_market",
+                "blocker_class": "waiting_for_market",
+                "blocked_at": "watcher_signal",
+                "blocked_reason": "no_fresh_strategy_signal",
+                "next_recover_condition": (
+                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                ),
+                "automatic_recovery_action": "continue_watcher_observation",
+                "downgrade_mode": "observe_only",
+            },
+        },
+    }
+    for name, payload in files.items():
+        (report_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/runtime-signal-watcher-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["read_model"] == "runtime_signal_watcher_status"
+    assert payload["freshness_status"] == "fresh"
+    assert payload["data"]["post_signal_resume"]["status"] == "waiting_for_market"
+    assert payload["data"]["post_signal_resume"]["current_gate"] == (
+        "waiting_for_fresh_strategy_signal"
+    )
+    assert payload["data"]["post_signal_resume"]["raw_resume_pack_status"] == (
+        "waiting_for_market"
+    )
+    assert payload["data"]["action_time_resume"]["status"] == "waiting_for_market"
+    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
+        "continue_watcher_observation"
+    ]
+    assert payload["data"]["owner_state"]["blocked_reason"] == (
+        "no_fresh_strategy_signal"
+    )
+    assert payload["data"]["owner_state"]["automatic_recovery_action"] == (
+        "continue_watcher_observation"
+    )
+    assert payload["data"]["why_not_executable"] == ["no_fresh_strategy_signal"]
+    assert payload["data"]["next_safe_checkpoint"] == "continue_watcher_observation"
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 

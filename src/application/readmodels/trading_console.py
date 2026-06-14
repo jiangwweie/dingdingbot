@@ -234,6 +234,60 @@ def _runtime_signal_watcher_owner_state(
     }
 
 
+def _runtime_signal_watcher_action_time_resume(
+    *,
+    resume_pack: dict[str, Any],
+    post_signal_auto_resume: dict[str, Any],
+    can_resume_steps_5_8: bool,
+) -> dict[str, Any]:
+    existing = resume_pack.get("action_time_resume")
+    if isinstance(existing, dict) and existing:
+        return existing
+
+    if can_resume_steps_5_8 or post_signal_auto_resume.get("prepared_authorization_id"):
+        status = "ready_for_action_time_final_gate"
+        next_step = "run_official_action_time_final_gate_preflight"
+        allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
+        requires_fresh_action_time_facts = True
+        final_gate_status = "not_run"
+    elif post_signal_auto_resume.get("status") == "waiting_for_market":
+        status = "waiting_for_market"
+        next_step = "continue_watcher_observation"
+        allowed_auto_actions = ["continue_watcher_observation"]
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+    else:
+        status = "blocked"
+        next_step = "resolve_watcher_resume_blockers"
+        allowed_auto_actions = []
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+
+    return {
+        "status": status,
+        "next_step": next_step,
+        "signal_input_json": resume_pack.get("signal_input_json"),
+        "shadow_candidate_id": resume_pack.get("shadow_candidate_id"),
+        "prepared_authorization_id": resume_pack.get("prepared_authorization_id"),
+        "allowed_auto_actions": allowed_auto_actions,
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": requires_fresh_action_time_facts,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": final_gate_status,
+        "operation_layer_status": "not_reached",
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+
+
 class TradingConsoleReadModelResponse(BaseModel):
     """Envelope shared by all Trading Console read models."""
 
@@ -1451,6 +1505,8 @@ class TradingConsoleReadModelService:
             "notification_state": report_dir / "notification-state.json",
         }
         payloads = {name: _read_json_file(path) for name, path in files.items()}
+        resume_pack_path = report_dir / "post-signal-resume-pack.json"
+        resume_pack = _read_json_file(resume_pack_path)
         watcher_tick = payloads["watcher_tick"]
         wakeup_packet = payloads["wakeup_packet"]
         operator_packet = payloads["operator_packet"]
@@ -1478,7 +1534,9 @@ class TradingConsoleReadModelService:
         safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
         safety = safety if isinstance(safety, dict) else {}
         post_signal_auto_resume = (
-            watcher_tick.get("post_signal_auto_resume")
+            resume_pack.get("post_signal_auto_resume")
+            if isinstance(resume_pack.get("post_signal_auto_resume"), dict)
+            else watcher_tick.get("post_signal_auto_resume")
             if isinstance(watcher_tick.get("post_signal_auto_resume"), dict)
             else {}
         )
@@ -1493,7 +1551,13 @@ class TradingConsoleReadModelService:
         status_packet_status = str(
             watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown"
         )
-        can_resume_steps_5_8 = wakeup_status in SIGNAL_WATCHER_RESUME_READY_STATUSES and not unsafe_flags
+        resume_pack_can_continue = resume_pack.get("can_continue_steps_5_8")
+        can_resume_steps_5_8 = (
+            bool(resume_pack_can_continue)
+            if isinstance(resume_pack_can_continue, bool)
+            else wakeup_status in SIGNAL_WATCHER_RESUME_READY_STATUSES
+            and not unsafe_flags
+        )
         if missing:
             readiness_status = "evidence_missing"
         elif stale:
@@ -1504,14 +1568,41 @@ class TradingConsoleReadModelService:
             readiness_status = "notification_not_configured"
         else:
             readiness_status = "ready"
-        owner_state = _runtime_signal_watcher_owner_state(
+        action_time_resume = _runtime_signal_watcher_action_time_resume(
+            resume_pack=resume_pack,
             post_signal_auto_resume=post_signal_auto_resume,
-            readiness_status=readiness_status,
-            missing=missing,
-            stale=stale,
-            unsafe_flags=unsafe_flags,
             can_resume_steps_5_8=can_resume_steps_5_8,
         )
+        owner_state = resume_pack.get("owner_state")
+        if not isinstance(owner_state, dict) or not owner_state:
+            owner_state = _runtime_signal_watcher_owner_state(
+                post_signal_auto_resume=post_signal_auto_resume,
+                readiness_status=readiness_status,
+                missing=missing,
+                stale=stale,
+                unsafe_flags=unsafe_flags,
+                can_resume_steps_5_8=can_resume_steps_5_8,
+            )
+        else:
+            owner_state = dict(owner_state)
+            blocked_reason = str(owner_state.get("blocked_reason") or "none")
+            owner_state.setdefault(
+                "why_not_executable",
+                [] if blocked_reason == "none" else [blocked_reason],
+            )
+            owner_state.setdefault(
+                "can_continue_without_owner_chat",
+                bool(post_signal_auto_resume.get("can_continue_without_owner_chat"))
+                or can_resume_steps_5_8,
+            )
+            owner_state.setdefault(
+                "requires_action_time_final_gate",
+                bool(action_time_resume.get("requires_action_time_final_gate")),
+            )
+            owner_state.setdefault(
+                "requires_official_operation_layer",
+                bool(action_time_resume.get("requires_official_operation_layer")),
+            )
 
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -1596,14 +1687,21 @@ class TradingConsoleReadModelService:
                     "skipped_reason": notification.get("skipped_reason"),
                 },
                 "post_signal_resume": {
+                    "status": action_time_resume["status"],
                     "can_continue_steps_5_8": can_resume_steps_5_8,
                     "current_gate": (
-                        "fresh_signal_or_prepared_shadow_ready"
-                        if can_resume_steps_5_8
+                        "action_time_final_gate"
+                        if action_time_resume["status"]
+                        == "ready_for_action_time_final_gate"
                         else "waiting_for_fresh_strategy_signal"
+                        if action_time_resume["status"] == "waiting_for_market"
+                        else "blocked"
                     ),
                     "post_signal_auto_resume": post_signal_auto_resume,
-                    "resume_pack_path": str(report_dir / "post-signal-resume-pack.json"),
+                    "action_time_resume": action_time_resume,
+                    "resume_pack_path": str(resume_pack_path),
+                    "resume_pack_present": resume_pack_path.exists(),
+                    "raw_resume_pack_status": resume_pack.get("status"),
                     "next_chain": [
                         "fresh candidate",
                         "runtime grant",
@@ -1613,6 +1711,7 @@ class TradingConsoleReadModelService:
                         "post-submit finalize / reconciliation / budget settlement",
                     ],
                 },
+                "action_time_resume": action_time_resume,
                 "post_signal_auto_resume": post_signal_auto_resume,
                 "owner_state": owner_state,
                 "why_not_executable": owner_state["why_not_executable"],

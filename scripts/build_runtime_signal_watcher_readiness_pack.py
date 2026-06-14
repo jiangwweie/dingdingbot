@@ -122,6 +122,58 @@ def _action_time_resume(
     }
 
 
+def _owner_state(
+    *,
+    action_time_resume: dict[str, Any],
+    post_signal_auto_resume: dict[str, Any],
+) -> dict[str, Any]:
+    status = str(action_time_resume.get("status") or "blocked")
+    if status == "waiting_for_market":
+        blocker_class = "waiting_for_market"
+        blocked_at = "watcher_signal"
+        blocked_reason = "no_fresh_strategy_signal"
+        next_recover_condition = (
+            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+        )
+        automatic_recovery_action = "continue_watcher_observation"
+        downgrade_mode = "observe_only"
+    elif status == "ready_for_action_time_final_gate":
+        blocker_class = "none"
+        blocked_at = "FinalGate"
+        blocked_reason = "action_time_final_gate_not_run_yet"
+        next_recover_condition = (
+            "official_final_gate_preflight_passes_with_current_facts"
+        )
+        automatic_recovery_action = "run_official_action_time_final_gate_preflight"
+        downgrade_mode = "no_real_submit_until_final_gate_pass"
+    else:
+        blocker_class = "hard_safety_stop"
+        blocked_at = "watcher_resume"
+        blocked_reason = "watcher_resume_blocked"
+        next_recover_condition = "watcher_resume_blockers_are_resolved"
+        automatic_recovery_action = "resolve_watcher_resume_blockers"
+        downgrade_mode = "manual_review_only"
+
+    return {
+        "status": status,
+        "blocker_class": blocker_class,
+        "blocked_at": post_signal_auto_resume.get("blocked_at") or blocked_at,
+        "blocked_reason": (
+            post_signal_auto_resume.get("blocked_reason") or blocked_reason
+        ),
+        "next_recover_condition": (
+            post_signal_auto_resume.get("next_recover_condition")
+            or next_recover_condition
+        ),
+        "automatic_recovery_action": (
+            post_signal_auto_resume.get("automatic_recovery_action")
+            or automatic_recovery_action
+        ),
+        "downgrade_mode": post_signal_auto_resume.get("downgrade_mode")
+        or downgrade_mode,
+    }
+
+
 def build_pack(
     *,
     report_dir: Path,
@@ -179,6 +231,10 @@ def build_pack(
         unsafe_flags=unsafe_flags,
         missing=missing,
     )
+    owner_state = _owner_state(
+        action_time_resume=action_time_resume,
+        post_signal_auto_resume=post_signal_auto_resume,
+    )
     can_resume_steps_5_8 = wakeup_status in RESUME_READY_STATUSES and not unsafe_flags and not missing
 
     if missing:
@@ -192,9 +248,7 @@ def build_pack(
     else:
         deployment_status = "notification_not_configured"
 
-    resume_status = "ready_for_steps_5_8" if can_resume_steps_5_8 else "waiting_for_fresh_signal"
-    if wakeup_status == "operator_packet_needs_review":
-        resume_status = "operator_packet_needs_review"
+    resume_status = str(action_time_resume["status"])
     if missing or unsafe_flags:
         resume_status = "blocked"
 
@@ -258,6 +312,7 @@ def build_pack(
             "ready_for_action_time_final_gate": bool(prepared_authorization_id),
         },
         "action_time_resume": action_time_resume,
+        "owner_state": owner_state,
         "post_signal_auto_resume": post_signal_auto_resume,
         "automatic_recovery_action": post_signal_auto_resume.get(
             "automatic_recovery_action"
