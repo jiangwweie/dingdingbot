@@ -328,6 +328,56 @@ def test_pilot_status_blocks_active_position_resolution_before_signal_resume():
     assert packet["control_board"]["runtime_row"]["active_position"] == "active_position_present"
 
 
+def test_pilot_status_blocks_when_watcher_scope_does_not_match_selected_pilot():
+    watcher = _watcher_waiting()
+    watcher["data"]["watcher"]["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": "strategy-runtime-rbr-ada-short",
+            "strategy_family_id": "RBR-001",
+            "strategy_family_version_id": "RBR-001-v0",
+            "symbol": "ADA/USDT:USDT",
+            "side": "short",
+            "status": "waiting_for_signal",
+        },
+        {
+            "runtime_instance_id": "strategy-runtime-cpm-bnb-long",
+            "strategy_family_id": "CPM-001",
+            "strategy_family_version_id": "CPM-001-v0",
+            "symbol": "BNB/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        },
+    ]
+
+    packet = build_packet(
+        intake_packet=_intake(),
+        live_facts_readiness=_readiness(),
+        watcher_status=watcher,
+        generated_at_ms=1,
+    )
+
+    assert packet["status"] == "blocked_runtime_scope_mismatch"
+    assert packet["owner_state"]["blocker_class"] == "runtime_scope_mismatch"
+    assert packet["owner_state"]["blocked_at"] == "runtime_signal_watcher_scope"
+    assert packet["owner_state"]["blocked_reason"] == (
+        "watcher_not_monitoring_selected_strategygroup_universe"
+    )
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "create_or_attach_selected_strategygroup_runtime_then_constrain_watcher_scope"
+    )
+    assert packet["watcher_scope_alignment"]["status"] == "mismatch"
+    assert packet["watcher_scope_alignment"]["matched_runtime_signal_summary_count"] == 0
+    assert packet["watcher_scope_alignment"]["out_of_scope_runtime_signal_summary_count"] == 2
+    watcher_scope_gate = next(
+        item for item in packet["gate_failure_ledger"]
+        if item["gate"] == "watcher_scope"
+    )
+    assert watcher_scope_gate["status"] == "blocked"
+    assert watcher_scope_gate["blocker_class"] == "runtime_scope_mismatch"
+    assert "watcher_scope_not_bound_to_selected_pilot" in packet["why_not_executable"]
+    assert packet["control_board"]["runtime_row"]["watcher_scope"] == "mismatch"
+
+
 def test_pilot_status_hard_stops_on_forbidden_watcher_effect():
     watcher = _watcher_waiting()
     watcher["data"]["safety_invariants"]["exchange_write_called"] = True

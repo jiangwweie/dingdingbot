@@ -73,6 +73,17 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _normalize_symbol(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if ":" in text:
+        text = text.split(":", 1)[0]
+    return text.replace("/", "").replace("-", "").replace("_", "")
+
+
+def _normalize_side(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def _candidate_checks(row: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(item.get("live_fact_key") or item.get("fact_key")): item
@@ -199,6 +210,10 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             "blockers": list(data.get("blockers") or []),
             "warnings": list(data.get("warnings") or []),
             "unsafe_flags": sorted(set(str(item) for item in unsafe_flags if item)),
+            "runtime_signal_summaries": _items(
+                data.get("runtime_signal_summaries")
+                or data.get("selected_runtime_signal_summaries")
+            ),
             "post_signal_auto_resume": post_signal_auto_resume,
         }
     deployment = (
@@ -207,6 +222,9 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         else {}
     )
     watcher = data.get("watcher") if isinstance(data.get("watcher"), dict) else {}
+    status_packet = (
+        data.get("status_packet") if isinstance(data.get("status_packet"), dict) else {}
+    )
     resume = (
         data.get("post_signal_resume")
         if isinstance(data.get("post_signal_resume"), dict)
@@ -238,6 +256,11 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers,
         "warnings": list(watcher.get("warnings") or []),
         "unsafe_flags": sorted(set(str(item) for item in unsafe_flags if item)),
+        "runtime_signal_summaries": _items(
+            watcher.get("runtime_signal_summaries")
+            or status_packet.get("runtime_signal_summaries")
+            or data.get("runtime_signal_summaries")
+        ),
         "post_signal_auto_resume": post_signal_auto_resume,
     }
 
@@ -277,6 +300,76 @@ def _watcher_scope(group: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _watcher_scope_alignment(
+    *,
+    selected_universe: list[str],
+    selected_side: str,
+    watcher: dict[str, Any],
+) -> dict[str, Any]:
+    summaries = _items(watcher.get("runtime_signal_summaries"))
+    selected_symbols = {
+        _normalize_symbol(symbol)
+        for symbol in selected_universe
+        if _normalize_symbol(symbol)
+    }
+    selected_sides = {
+        _normalize_side(selected_side),
+    } - {""}
+
+    matched: list[dict[str, Any]] = []
+    out_of_scope: list[dict[str, Any]] = []
+    for summary in summaries:
+        symbol = _normalize_symbol(summary.get("symbol"))
+        side = _normalize_side(summary.get("side"))
+        row = {
+            "runtime_instance_id": summary.get("runtime_instance_id"),
+            "strategy_family_id": summary.get("strategy_family_id"),
+            "strategy_family_version_id": summary.get("strategy_family_version_id"),
+            "symbol": summary.get("symbol"),
+            "side": summary.get("side"),
+            "status": summary.get("status"),
+        }
+        if symbol in selected_symbols and (not selected_sides or side in selected_sides):
+            matched.append(row)
+        else:
+            out_of_scope.append(row)
+
+    if not summaries:
+        status = "not_visible"
+        blocker = None
+    elif not matched:
+        status = "mismatch"
+        blocker = "watcher_not_monitoring_selected_strategygroup_universe"
+    elif out_of_scope:
+        status = "mixed_scope"
+        blocker = "watcher_monitoring_unselected_runtime_scope"
+    else:
+        status = "aligned"
+        blocker = None
+
+    return {
+        "status": status,
+        "selected_symbols": sorted(selected_symbols),
+        "selected_side": sorted(selected_sides)[0] if selected_sides else None,
+        "runtime_signal_summary_count": len(summaries),
+        "matched_runtime_signal_summary_count": len(matched),
+        "out_of_scope_runtime_signal_summary_count": len(out_of_scope),
+        "matched_runtime_signal_summaries": matched,
+        "out_of_scope_runtime_signal_summaries": out_of_scope[:10],
+        "blocker": blocker,
+        "automatic_recovery_action": (
+            "create_or_attach_selected_strategygroup_runtime_then_constrain_watcher_scope"
+            if blocker
+            else "continue_selected_pilot_observation"
+        ),
+        "next_recover_condition": (
+            "runtime_signal_watcher_monitors_only_selected_strategygroup_universe_and_side"
+            if blocker
+            else "watcher_scope_matches_selected_pilot"
+        ),
+    }
+
+
 def _dual_freshness(
     *,
     group: dict[str, Any] | None,
@@ -291,6 +384,8 @@ def _dual_freshness(
         action_time_status = "blocked_hard_safety_stop"
     elif owner_state["status"] == "blocked_active_position_resolution":
         action_time_status = "blocked_live_account_facts"
+    elif owner_state["status"] == "blocked_runtime_scope_mismatch":
+        action_time_status = "blocked_runtime_scope_mismatch"
     elif not watcher["can_continue_steps_5_8"]:
         action_time_status = "not_reached_waiting_for_signal"
     elif readiness.get("armed_candidate_prepare_ready"):
@@ -355,6 +450,7 @@ def _gate_failure_ledger(
     owner_state: dict[str, Any],
     fact_summary: dict[str, Any],
     candidate_blockers: list[str],
+    watcher_scope_alignment: dict[str, Any],
 ) -> list[dict[str, Any]]:
     no_group = group is None
     account_blocked = (
@@ -363,10 +459,12 @@ def _gate_failure_ledger(
     signal_ready = bool(watcher["can_continue_steps_5_8"])
     candidate_ready = bool(readiness.get("armed_candidate_prepare_ready"))
     hard_safety_stop = owner_state["status"] == "blocked_hard_safety_stop"
+    scope_blocked = owner_state["status"] == "blocked_runtime_scope_mismatch"
 
     group_status = "blocked" if no_group else "ready"
     account_status = "blocked" if account_blocked else "ready"
-    if hard_safety_stop:
+    watcher_scope_status = "blocked" if scope_blocked else "ready"
+    if hard_safety_stop or scope_blocked:
         signal_status = "blocked"
     elif signal_ready:
         signal_status = "ready"
@@ -423,11 +521,46 @@ def _gate_failure_ledger(
             blockers=[],
         ),
         _gate_row(
+            gate="watcher_scope",
+            status=watcher_scope_status,
+            blocker_class="runtime_scope_mismatch" if scope_blocked else "none",
+            blocked_at="runtime_signal_watcher_scope" if scope_blocked else "none",
+            blocked_reason=(
+                str(watcher_scope_alignment.get("blocker"))
+                if scope_blocked
+                else "none"
+            ),
+            next_recover_condition=(
+                str(watcher_scope_alignment.get("next_recover_condition"))
+                if scope_blocked
+                else "watcher_scope_matches_selected_pilot"
+            ),
+            automatic_recovery_action=(
+                str(watcher_scope_alignment.get("automatic_recovery_action"))
+                if scope_blocked
+                else "continue_selected_pilot_observation"
+            ),
+            downgrade_mode=(
+                "observe_only_no_candidate_prepare"
+                if scope_blocked
+                else "armed_observation"
+            ),
+            blockers=(
+                [watcher_scope_alignment.get("blocker")]
+                if scope_blocked and watcher_scope_alignment.get("blocker")
+                else []
+            ),
+        ),
+        _gate_row(
             gate="strategy_signal",
             status=signal_status,
             blocker_class=(
                 owner_state["blocker_class"]
-                if owner_blocked_at in {"watcher_signal", "watcher_safety_invariants"}
+                if owner_blocked_at in {
+                    "watcher_signal",
+                    "watcher_safety_invariants",
+                    "runtime_signal_watcher_scope",
+                }
                 else ("none" if signal_ready else "waiting_for_market")
             ),
             blocked_at="none" if signal_ready else owner_blocked_at,
@@ -501,6 +634,7 @@ def _owner_state(
     selected_group_id: str | None,
     readiness: dict[str, Any],
     watcher: dict[str, Any],
+    watcher_scope_alignment: dict[str, Any],
 ) -> dict[str, Any]:
     fact_summary = _candidate_fact_summary(readiness)
     observe_ready = bool(readiness.get("observe_ready"))
@@ -569,6 +703,20 @@ def _owner_state(
             "next_recover_condition": "watcher_evidence_files_are_present_and_fresh",
             "automatic_recovery_action": (
                 "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+            ),
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+        }
+    if watcher_scope_alignment.get("status") in {"mismatch", "mixed_scope"}:
+        return {
+            "status": "blocked_runtime_scope_mismatch",
+            "blocker_class": "runtime_scope_mismatch",
+            "blocked_at": "runtime_signal_watcher_scope",
+            "blocked_reason": str(watcher_scope_alignment.get("blocker")),
+            "next_recover_condition": str(
+                watcher_scope_alignment.get("next_recover_condition")
+            ),
+            "automatic_recovery_action": str(
+                watcher_scope_alignment.get("automatic_recovery_action")
             ),
             "downgrade_mode": "observe_only_no_candidate_prepare",
         }
@@ -651,11 +799,6 @@ def build_packet(
     )
     group_id = str(group.get("strategy_group_id")) if group else None
     watcher = _watcher_state(watcher_status)
-    owner_state = _owner_state(
-        selected_group_id=group_id,
-        readiness=readiness,
-        watcher=watcher,
-    )
     fact_summary = _candidate_fact_summary(readiness)
     selected_universe = (
         _selected_symbols(group=group, readiness=readiness, max_symbols=max_symbols)
@@ -666,6 +809,17 @@ def build_packet(
         str(item) for item in (group or {}).get("supported_sides") or []
     ]
     selected_side = supported_sides[0] if supported_sides else "unknown"
+    watcher_scope_alignment = _watcher_scope_alignment(
+        selected_universe=selected_universe,
+        selected_side=selected_side,
+        watcher=watcher,
+    )
+    owner_state = _owner_state(
+        selected_group_id=group_id,
+        readiness=readiness,
+        watcher=watcher,
+        watcher_scope_alignment=watcher_scope_alignment,
+    )
     risk_defaults = (
         (group or {}).get("risk_defaults")
         if isinstance((group or {}).get("risk_defaults"), dict)
@@ -690,12 +844,15 @@ def build_packet(
         owner_state=owner_state,
         fact_summary=fact_summary,
         candidate_blockers=candidate_blockers,
+        watcher_scope_alignment=watcher_scope_alignment,
     )
     why_not_executable: list[str] = []
     if owner_state["status"] == "waiting_for_market":
         why_not_executable.append("no_fresh_strategy_signal")
     elif owner_state["blocked_reason"] != "none":
         why_not_executable.append(owner_state["blocked_reason"])
+    if owner_state["status"] == "blocked_runtime_scope_mismatch":
+        why_not_executable.append("watcher_scope_not_bound_to_selected_pilot")
     if progressive_gaps:
         why_not_executable.append(
             "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal"
@@ -729,6 +886,7 @@ def build_packet(
             },
         },
         "owner_state": owner_state,
+        "watcher_scope_alignment": watcher_scope_alignment,
         "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
             "strategy_group_row": {
@@ -768,6 +926,7 @@ def build_packet(
                     else "ready"
                 ),
                 "next_gate": owner_state["blocked_at"],
+                "watcher_scope": watcher_scope_alignment["status"],
             },
             "candidate_row": {
                 "fresh_signal_id": "pending",
@@ -806,6 +965,20 @@ def build_packet(
                 "class": "active_position_resolution"
                 if fact_summary["active_position_blocked"] or fact_summary["open_order_blocked"]
                 else "none",
+            },
+            {
+                "gate": "watcher_scope",
+                "status": "ready"
+                if watcher_scope_alignment["status"] in {"aligned", "not_visible"}
+                else "blocked",
+                "class": "runtime_scope_mismatch"
+                if watcher_scope_alignment["status"] in {"mismatch", "mixed_scope"}
+                else "none",
+                "blockers": (
+                    [watcher_scope_alignment["blocker"]]
+                    if watcher_scope_alignment.get("blocker")
+                    else []
+                ),
             },
             {
                 "gate": "strategy_signal",

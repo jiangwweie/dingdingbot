@@ -1440,9 +1440,21 @@ class TradingConsoleReadModelService:
                     "wakeup_status": wakeup_status,
                     "operator_status": operator_status,
                     "status_packet_status": status_packet_status,
+                    "runtime_signal_summaries": status_packet.get(
+                        "runtime_signal_summaries"
+                    )
+                    or [],
                     "blockers": watcher_tick.get("blockers") or status_packet.get("blockers") or [],
                     "warnings": watcher_tick.get("warnings") or status_packet.get("warnings") or [],
                     "post_signal_auto_resume": post_signal_auto_resume,
+                },
+                "status_packet": {
+                    "status": status_packet.get("status") or "unknown",
+                    "latest_status": status_packet.get("latest_status"),
+                    "runtime_signal_summaries": status_packet.get(
+                        "runtime_signal_summaries"
+                    )
+                    or [],
                 },
                 "notification": {
                     "required": bool(notification.get("required")),

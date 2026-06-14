@@ -222,9 +222,16 @@ The pilot status packet must distinguish:
 
 | Field | Meaning | Current no-signal expectation |
 | --- | --- | --- |
+| `watcher_scope_alignment` | Whether the active watcher is actually monitoring the selected StrategyGroup universe / side | `status: aligned` or a visible `blocked_runtime_scope_mismatch` |
 | `dual_freshness.strategy_signal` | Whether the strategy signal itself is fresh inside the StrategyGroup watcher window | `status: missing` |
 | `dual_freshness.action_time_facts` | Whether action-time facts have reached the FinalGate boundary | `status: not_reached_waiting_for_signal` |
 | `gate_failure_ledger` | Owner-readable gate ledger for strategy handoff, account facts, signal, RequiredFacts, FinalGate, and Operation Layer | first visible blocker is `strategy_signal: waiting`; `RequiredFacts` may be `progressive_pending` |
+
+If watcher evidence shows active runtimes outside the selected pilot universe /
+side and no selected pilot runtime is being monitored, the status must be
+`blocked_runtime_scope_mismatch`, not `waiting_for_market`. The automatic
+recovery action is to create or attach the selected StrategyGroup runtime and
+constrain watcher scope before any auto-prepare setting is enabled.
 
 The watcher tick packet must also expose `post_signal_auto_resume`. This field
 must map each tick to one safe automatic recovery action:
