@@ -71,6 +71,57 @@ def _items(value: Any) -> list[dict[str, Any]]:
     return [item for item in value or [] if isinstance(item, dict)]
 
 
+def _action_time_resume(
+    *,
+    post_signal_auto_resume: dict[str, Any],
+    signal_input_json: Any,
+    shadow_candidate_id: Any,
+    prepared_authorization_id: Any,
+    unsafe_flags: list[str],
+    missing: list[str],
+) -> dict[str, Any]:
+    prepared = bool(str(prepared_authorization_id or "").strip())
+    if unsafe_flags or missing:
+        status = "blocked"
+        next_step = "resolve_watcher_resume_blockers"
+        allowed_auto_actions: list[str] = []
+    elif prepared:
+        status = "ready_for_action_time_final_gate"
+        next_step = "run_official_action_time_final_gate_preflight"
+        allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
+    else:
+        status = "waiting_for_market"
+        next_step = (
+            post_signal_auto_resume.get("automatic_recovery_action")
+            or "continue_watcher_observation"
+        )
+        allowed_auto_actions = ["continue_watcher_observation"]
+
+    return {
+        "status": status,
+        "next_step": next_step,
+        "signal_input_json": signal_input_json,
+        "shadow_candidate_id": shadow_candidate_id,
+        "prepared_authorization_id": prepared_authorization_id,
+        "allowed_auto_actions": allowed_auto_actions,
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": prepared,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": "not_run" if prepared else "not_reached",
+        "operation_layer_status": "not_reached",
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+
+
 def build_pack(
     *,
     report_dir: Path,
@@ -120,6 +171,14 @@ def build_pack(
     signal_input_json = status_packet.get("signal_input_json")
     prepared_authorization_id = status_packet.get("prepared_authorization_id")
     shadow_candidate_id = status_packet.get("shadow_candidate_id")
+    action_time_resume = _action_time_resume(
+        post_signal_auto_resume=post_signal_auto_resume,
+        signal_input_json=signal_input_json,
+        shadow_candidate_id=shadow_candidate_id,
+        prepared_authorization_id=prepared_authorization_id,
+        unsafe_flags=unsafe_flags,
+        missing=missing,
+    )
     can_resume_steps_5_8 = wakeup_status in RESUME_READY_STATUSES and not unsafe_flags and not missing
 
     if missing:
@@ -198,6 +257,7 @@ def build_pack(
             "prepared_authorization_id": prepared_authorization_id,
             "ready_for_action_time_final_gate": bool(prepared_authorization_id),
         },
+        "action_time_resume": action_time_resume,
         "post_signal_auto_resume": post_signal_auto_resume,
         "automatic_recovery_action": post_signal_auto_resume.get(
             "automatic_recovery_action"

@@ -116,6 +116,20 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
         "prepared_authorization_id": "auth-ready-1",
         "ready_for_action_time_final_gate": True,
     }
+    assert resume["action_time_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert resume["action_time_resume"]["next_step"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert resume["action_time_resume"]["allowed_auto_actions"] == [
+        "run_official_action_time_final_gate_preflight"
+    ]
+    assert "official_operation_layer_submit" in resume["action_time_resume"][
+        "forbidden_auto_actions_until_final_gate_pass"
+    ]
+    assert resume["action_time_resume"]["requires_fresh_action_time_facts"] is True
+    assert resume["action_time_resume"]["places_order"] is False
     assert resume["runtime_signal_summaries"] == [
         {
             "runtime_instance_id": "runtime-mpg-1",
@@ -167,3 +181,5 @@ def test_build_runtime_signal_watcher_readiness_pack_blocks_unsafe_effect(tmp_pa
     assert summary["can_continue_steps_5_8"] is False
     assert resume["status"] == "blocked"
     assert "exchange_write_called" in resume["blockers"]
+    assert resume["action_time_resume"]["status"] == "blocked"
+    assert resume["action_time_resume"]["allowed_auto_actions"] == []

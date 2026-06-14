@@ -269,6 +269,12 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
         "continue_watcher_observation"
     )
     assert packet["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
+    assert packet["action_time_resume"]["status"] == "waiting_for_market"
+    assert packet["action_time_resume"]["next_step"] == "continue_watcher_observation"
+    assert packet["action_time_resume"]["allowed_auto_actions"] == [
+        "continue_watcher_observation"
+    ]
+    assert packet["action_time_resume"]["places_order"] is False
     assert packet["dual_freshness"]["strategy_signal"] == {
         "status": "missing",
         "freshness_window": "15-30m",
@@ -372,6 +378,22 @@ def test_pilot_status_promotes_prepared_evidence_to_candidate_row_and_final_gate
         "fresh_authorization_evidence_ready"
     )
     assert candidate["final_gate_status"] == "ready_to_run"
+    assert candidate["action_time_resume_status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert candidate["action_time_next_step"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert packet["action_time_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert packet["action_time_resume"]["allowed_auto_actions"] == [
+        "run_official_action_time_final_gate_preflight"
+    ]
+    assert "official_operation_layer_submit" in packet["action_time_resume"][
+        "forbidden_auto_actions_until_final_gate_pass"
+    ]
+    assert packet["action_time_resume"]["requires_fresh_action_time_facts"] is True
     final_gate = next(
         item for item in packet["gate_failure_ledger"] if item["gate"] == "FinalGate"
     )

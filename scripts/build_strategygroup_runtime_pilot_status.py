@@ -249,6 +249,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
                 "prepared_authorization_id": prepared_authorization_id,
                 "ready_for_action_time_final_gate": bool(prepared_authorization_id),
             },
+            "action_time_resume": _dict(data.get("action_time_resume")),
             "post_signal_auto_resume": post_signal_auto_resume,
         }
     deployment = (
@@ -324,6 +325,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             "prepared_authorization_id": prepared_authorization_id,
             "ready_for_action_time_final_gate": bool(prepared_authorization_id),
         },
+        "action_time_resume": _dict(data.get("action_time_resume") or resume.get("action_time_resume")),
         "post_signal_auto_resume": post_signal_auto_resume,
     }
 
@@ -1005,6 +1007,61 @@ def _owner_state(
     }
 
 
+def _action_time_resume_state(
+    *,
+    owner_state: dict[str, Any],
+    watcher: dict[str, Any],
+    candidate_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    existing = _dict(watcher.get("action_time_resume"))
+    if existing:
+        return existing
+
+    prepared = bool(candidate_evidence.get("prepared_authorization_id"))
+    if owner_state["status"] == "blocked_hard_safety_stop":
+        status = "blocked"
+        next_step = "resolve_hard_safety_stop_before_action_time_resume"
+        allowed_auto_actions: list[str] = []
+    elif prepared or owner_state["status"] == "ready_for_action_time_final_gate":
+        status = "ready_for_action_time_final_gate"
+        next_step = "run_official_action_time_final_gate_preflight"
+        allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
+    elif owner_state["status"] == "waiting_for_market":
+        status = "waiting_for_market"
+        next_step = "continue_watcher_observation"
+        allowed_auto_actions = ["continue_watcher_observation"]
+    else:
+        status = "blocked"
+        next_step = owner_state["automatic_recovery_action"]
+        allowed_auto_actions = []
+
+    return {
+        "status": status,
+        "next_step": next_step,
+        "signal_input_json": candidate_evidence.get("signal_input_json"),
+        "shadow_candidate_id": candidate_evidence.get("shadow_candidate_id"),
+        "prepared_authorization_id": candidate_evidence.get(
+            "prepared_authorization_id"
+        ),
+        "allowed_auto_actions": allowed_auto_actions,
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": prepared,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": "not_run" if prepared else "not_reached",
+        "operation_layer_status": "not_reached",
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+
+
 def build_packet(
     *,
     intake_packet: dict[str, Any],
@@ -1097,6 +1154,11 @@ def build_packet(
             watcher.get("prepared_authorization_id")
         ),
     }
+    action_time_resume = _action_time_resume_state(
+        owner_state=owner_state,
+        watcher=watcher,
+        candidate_evidence=candidate_evidence,
+    )
 
     strategy_status = (
         "armed_observation_waiting_for_signal"
@@ -1129,6 +1191,7 @@ def build_packet(
         "runtime_bridge": runtime_bridge,
         "watcher_scope_alignment": watcher_scope_alignment,
         "candidate_evidence": candidate_evidence,
+        "action_time_resume": action_time_resume,
         "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
             "strategy_group_row": {
@@ -1202,6 +1265,8 @@ def build_packet(
                     "ready_to_run" if prepared_authorization_ready else "not_reached"
                 ),
                 "operation_layer_status": "not_reached",
+                "action_time_resume_status": action_time_resume["status"],
+                "action_time_next_step": action_time_resume["next_step"],
             },
             "review_row": {
                 "outcome": "not_started",
