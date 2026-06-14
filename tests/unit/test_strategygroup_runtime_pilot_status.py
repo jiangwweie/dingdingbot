@@ -463,6 +463,16 @@ def test_pilot_status_accepts_raw_post_signal_resume_pack():
             "blockers": [
                 "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
             ],
+            "runtime_signal_summaries": [
+                {
+                    "runtime_instance_id": "runtime-1",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "MPG-001-v0",
+                    "symbol": "BTCUSDT",
+                    "side": "long",
+                    "status": "waiting_for_signal",
+                }
+            ],
             "safety_invariants": {
                 "exchange_write_called": False,
                 "order_created": False,
@@ -479,3 +489,5 @@ def test_pilot_status_accepts_raw_post_signal_resume_pack():
     assert packet["status"] == "waiting_for_market"
     assert packet["owner_state"]["blocker_class"] == "waiting_for_market"
     assert packet["post_signal_auto_resume"]["status"] == "waiting_for_market"
+    assert packet["watcher_scope_alignment"]["status"] == "aligned"
+    assert packet["control_board"]["runtime_row"]["watcher_scope"] == "aligned"

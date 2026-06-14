@@ -67,6 +67,10 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _items(value: Any) -> list[dict[str, Any]]:
+    return [item for item in value or [] if isinstance(item, dict)]
+
+
 def build_pack(
     *,
     report_dir: Path,
@@ -107,6 +111,12 @@ def build_pack(
     notification = notification if isinstance(notification, dict) else {}
     wakeup_status = str(watcher_tick.get("wakeup_status") or wakeup_packet.get("status") or "unknown")
     operator_status = str(watcher_tick.get("operator_status") or operator_packet.get("status") or "unknown")
+    runtime_signal_summaries = _items(status_packet.get("runtime_signal_summaries"))
+    selected_runtime_instance_ids = [
+        str(item)
+        for item in (status_packet.get("selected_runtime_instance_ids") or [])
+        if str(item).strip()
+    ]
     can_resume_steps_5_8 = wakeup_status in RESUME_READY_STATUSES and not unsafe_flags and not missing
 
     if missing:
@@ -167,6 +177,15 @@ def build_pack(
         "can_continue_steps_5_8": can_resume_steps_5_8,
         "current_wakeup_status": wakeup_status,
         "current_operator_status": operator_status,
+        "current_status_packet_status": (
+            watcher_tick.get("status_packet_status")
+            or status_packet.get("status")
+            or "unknown"
+        ),
+        "active_runtime_count": status_packet.get("active_runtime_count"),
+        "monitored_runtime_count": status_packet.get("monitored_runtime_count"),
+        "selected_runtime_instance_ids": selected_runtime_instance_ids,
+        "runtime_signal_summaries": runtime_signal_summaries,
         "post_signal_auto_resume": post_signal_auto_resume,
         "automatic_recovery_action": post_signal_auto_resume.get(
             "automatic_recovery_action"

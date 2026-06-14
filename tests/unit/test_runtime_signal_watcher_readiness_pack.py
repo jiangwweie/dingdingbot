@@ -53,7 +53,27 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
     )
     _write(report_dir / "wakeup-packet.json", {"status": "prepared_shadow_evidence_ready_for_owner_review"})
     _write(report_dir / "operator-packet.json", {"status": "strategy_group_signal_review_available"})
-    _write(report_dir / "status-packet.json", {"status": "ok", "blockers": [], "warnings": []})
+    _write(
+        report_dir / "status-packet.json",
+        {
+            "status": "ok",
+            "blockers": [],
+            "warnings": [],
+            "active_runtime_count": 1,
+            "monitored_runtime_count": 1,
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "runtime_signal_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-1",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "MPG-001-v0",
+                    "symbol": "COIN/USDT:USDT",
+                    "side": "long",
+                    "status": "waiting_for_signal",
+                }
+            ],
+        },
+    )
     _write(report_dir / "notification-state.json", {"last_notified_event_key": "ready-event"})
 
     summary = build_pack(
@@ -83,6 +103,17 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
     assert resume["can_continue_without_owner_chat"] is True
     assert resume["requires_action_time_final_gate"] is True
     assert resume["requires_official_operation_layer"] is True
+    assert resume["selected_runtime_instance_ids"] == ["runtime-mpg-1"]
+    assert resume["runtime_signal_summaries"] == [
+        {
+            "runtime_instance_id": "runtime-mpg-1",
+            "strategy_family_id": "MPG-001",
+            "strategy_family_version_id": "MPG-001-v0",
+            "symbol": "COIN/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        }
+    ]
     assert "action-time FinalGate" in resume["required_before_real_submit"]
 
 
