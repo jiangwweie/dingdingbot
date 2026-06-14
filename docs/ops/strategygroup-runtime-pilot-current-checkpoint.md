@@ -6,8 +6,9 @@ Status: CURRENT_CHECKPOINT
 ## Scope
 
 This checkpoint records the active StrategyGroup runtime pilot state after
-selective watch-branch intake, watcher resume dispatcher implementation, Tokyo
-deploy, and postdeploy live-readonly verification.
+selective watch-branch intake, watcher resume dispatcher implementation,
+repo-local MPG pilot handoff, Tokyo deploy, and postdeploy live-readonly
+verification.
 
 Workspace and branch:
 
@@ -15,9 +16,9 @@ Workspace and branch:
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/strategygroup-runtime-pilot` |
-| Current code head | `0329f3922aace5d687d84e89006730396601d2f8` |
-| Current release | `brc-runtime-governance-0329f392-20260615-resume-dispatcher` |
-| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-0329f392-20260615-resume-dispatcher` |
+| Current code head | `4589578a4aed4ac63d8cbf8f90a0bc06e98e7431` |
+| Current release | `brc-runtime-governance-4589578a-20260615-livefacts-owner-state` |
+| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-4589578a-20260615-livefacts-owner-state` |
 
 ## Watch Branch Intake
 
@@ -33,6 +34,9 @@ Useful content now carried in the pilot branch:
 | Short current SSOT / AI constraints | Present in `docs/current/AI_AGENT_CONSTRAINTS.md` and `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
 | Post-signal resume metadata | Present in watcher readiness and Trading Console readmodel |
 | Ready-signal dispatch record | Present in `scripts/runtime_signal_watcher_resume_dispatcher.py` |
+| Action-time FinalGate preflight auto-call | Present behind dispatcher `--execute-preflight`; waiting-market state does not call it |
+| Repo-local MPG pilot handoff | Present in `docs/current/strategy-group-handoffs/MPG-001/handoff.json` |
+| Owner-readable live-facts readiness state | Present in `scripts/build_strategy_group_live_facts_readiness_packet.py` |
 
 ## Tokyo Deployment
 
@@ -40,8 +44,8 @@ Deployment status:
 
 | Field | Value |
 | --- | --- |
-| Previous deployed head | `bbdbb61ad4b7bab77c99cc5163a6ae80963abd8d` |
-| Deployed head | `0329f3922aace5d687d84e89006730396601d2f8` |
+| Previous deployed head | `f4cb22fb20db1c282b86aea5b4e1d713f108e3b2` |
+| Deployed head | `4589578a4aed4ac63d8cbf8f90a0bc06e98e7431` |
 | Deploy apply status | `applied` |
 | Commands executed | `16` |
 | Postdeploy acceptance | `postdeploy_acceptance_passed` |
@@ -67,9 +71,9 @@ Deploy effects:
 Local deploy evidence:
 
 ```text
-output/strategygroup-runtime-pilot/deploy-0329f392/git-deploy-dry-run.json
-output/strategygroup-runtime-pilot/deploy-0329f392/git-deploy-apply-report.json
-output/strategygroup-runtime-pilot/deploy-0329f392/postdeploy-acceptance.json
+output/strategygroup-runtime-pilot/deploy-4589578a/git-deploy-dry-run.json
+output/strategygroup-runtime-pilot/deploy-4589578a/git-deploy-apply-report.json
+output/strategygroup-runtime-pilot/deploy-4589578a/postdeploy-acceptance.json
 ```
 
 ## Watcher / Resume Dispatcher
@@ -87,6 +91,7 @@ The watcher now runs this post step after the readiness pack:
 ```text
 scripts/runtime_signal_watcher_resume_dispatcher.py
 -> /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/resume-dispatch-packet.json
+--execute-preflight
 ```
 
 Latest dispatch packet:
@@ -131,6 +136,41 @@ It will then emit an official GET command plan for:
 
 It will still not call Operation Layer or submit an order.
 
+With `--execute-preflight`, the dispatcher calls the official GET endpoint only
+when the resume pack is `ready_for_action_time_final_gate`. If the preflight
+passes, the dispatch packet moves to `finalgate_ready` and exposes the next
+checkpoint as `prepare_official_operation_layer_submit`. If the preflight
+blocks, it writes Owner-readable `blocked_at`, `blocked_reason`,
+`next_recover_condition`, `automatic_recovery_action`, and `downgrade_mode`.
+Waiting-market packets do not call the endpoint.
+
+## StrategyGroup Pilot Handoff
+
+The deployed release now contains a repo-local MPG pilot handoff:
+
+```text
+docs/current/strategy-group-handoffs/MPG-001/handoff.json
+```
+
+Current pilot scope:
+
+| Field | Value |
+| --- | --- |
+| StrategyGroup | `MPG-001` |
+| Mode | `armed_observation` |
+| Risk profile | `tiny` |
+| Leverage | `1x` |
+| Max active positions | `1` |
+| Pilot symbols | `COINUSDT`, `INTCUSDT`, `MSTRUSDT` |
+
+Tokyo can now build:
+
+```text
+/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-handoff-intake.json
+/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-readonly.json
+/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-readiness.json
+```
+
 ## Live-Readonly Facts
 
 Postdeploy account-wide signed GET-only facts:
@@ -140,6 +180,8 @@ Postdeploy account-wide signed GET-only facts:
 | Status | `ready` |
 | Account can trade | `true` |
 | Assets count | `11` |
+| Pilot supported symbols | `3` |
+| Pilot exchange rules | `COINUSDT`, `INTCUSDT`, `MSTRUSDT` all `TRADING` |
 | Active positions | `0` |
 | Open orders | `0` |
 | Signed GET only | `true` |
@@ -163,11 +205,22 @@ observing
 -> continue_watcher_observation
 ```
 
+Current live-facts readiness:
+
+```text
+strategy_group_observe_ready_armed_blocked
+-> can_continue_observation=true
+-> can_prepare_fresh_candidate=false
+-> blocked_at=candidate_prepare_facts
+-> blocked_reason=MPG-001:budget:missing, MPG-001:next_attempt_gate:missing, MPG-001:protection:missing
+-> automatic_recovery_action=continue_observation_and_prepare_candidate_prerequisite_facts
+-> downgrade_mode=observe_only_until_candidate_prerequisites_ready
+```
+
 ## Not Yet Reached
 
 The following stages remain unreached because no fresh signal is present:
 
-- RequiredFacts readiness for a fresh signal;
 - fresh candidate preparation;
 - runtime grant / fresh authorization evidence;
 - action-time FinalGate pass;
@@ -179,15 +232,15 @@ The following stages remain unreached because no fresh signal is present:
 Local verification:
 
 ```text
-python3 -m py_compile scripts/runtime_signal_watcher_resume_dispatcher.py scripts/build_runtime_signal_watcher_readiness_pack.py src/application/runtime_execution_intent_adapter_service.py src/interfaces/api_trading_console.py
-/opt/homebrew/bin/pytest tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_signal_watcher_readiness_pack.py tests/unit/test_tokyo_runtime_governance_deploy_executor.py tests/unit/test_tokyo_runtime_governance_git_deploy.py tests/unit/test_strategygroup_runtime_pilot_overlay_docs.py -q
+python3 -m py_compile scripts/runtime_signal_watcher_resume_dispatcher.py scripts/build_runtime_signal_watcher_readiness_pack.py src/application/runtime_execution_intent_adapter_service.py src/interfaces/api_trading_console.py scripts/build_strategy_group_handoff_intake_packet.py scripts/collect_strategy_group_live_facts_readonly.py scripts/build_strategy_group_live_facts_readiness_packet.py
+/opt/homebrew/bin/pytest tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_signal_watcher_readiness_pack.py tests/unit/test_runtime_signal_watcher_tick.py tests/unit/test_strategygroup_runtime_pilot_status.py tests/unit/test_trading_console_readmodels.py tests/unit/test_strategy_group_handoff_intake_packet.py tests/unit/test_strategy_group_live_facts_readiness_packet.py -q
 git diff --check
 ```
 
 Result:
 
 ```text
-33 passed
+94 passed
 ```
 
 Tokyo verification:
@@ -198,6 +251,8 @@ postdeploy_acceptance=postdeploy_acceptance_passed
 watcher_service_result=success
 resume_dispatch_status=waiting_for_market
 account_can_trade=true
+strategy_group_intake=ready_for_main_control_intake
+live_facts_readiness=strategy_group_observe_ready_armed_blocked
 active_positions=0
 open_orders=0
 ```
