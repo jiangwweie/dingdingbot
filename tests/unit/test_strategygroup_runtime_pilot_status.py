@@ -18,6 +18,10 @@ def _intake() -> dict:
                     "max_active_positions": 1,
                     "max_notional_per_action_usdt": "8",
                 },
+                "watcher_scope": {
+                    "business_signal_validity": "15-30m",
+                    "candidate_packet_freshness_seconds": 120,
+                },
                 "picker": {"rank": 1, "default_mode": "armed_observation"},
             },
             {
@@ -26,13 +30,27 @@ def _intake() -> dict:
                 "supported_symbols": ["NVDAUSDT", "TSLAUSDT"],
                 "supported_sides": ["long"],
                 "risk_defaults": {"max_notional_per_action_usdt": "8"},
+                "watcher_scope": {
+                    "business_signal_validity": "15-30m",
+                    "candidate_packet_freshness_seconds": 120,
+                },
                 "picker": {"rank": 2, "default_mode": "armed_observation"},
             },
         ],
     }
 
 
-def _readiness(*, mpg_observe_ready: bool = True, teq_blockers: list[str] | None = None) -> dict:
+def _readiness(
+    *,
+    mpg_observe_ready: bool = True,
+    mpg_blockers: list[str] | None = None,
+    teq_blockers: list[str] | None = None,
+) -> dict:
+    resolved_mpg_blockers = (
+        ["protection:missing", "budget:missing", "next_attempt_gate:missing"]
+        if mpg_blockers is None
+        else mpg_blockers
+    )
     resolved_teq_blockers = (
         ["protection:missing", "budget:missing", "next_attempt_gate:missing"]
         if teq_blockers is None
@@ -43,7 +61,7 @@ def _readiness(*, mpg_observe_ready: bool = True, teq_blockers: list[str] | None
             {
                 "strategy_group_id": "MPG-001",
                 "observe_ready": mpg_observe_ready,
-                "armed_candidate_prepare_ready": False,
+                "armed_candidate_prepare_ready": resolved_mpg_blockers == [],
                 "exchange_rules": {
                     "ready_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
                 },
@@ -67,7 +85,7 @@ def _readiness(*, mpg_observe_ready: bool = True, teq_blockers: list[str] | None
                         "ready": False,
                     },
                 ],
-                "blockers": ["protection:missing", "budget:missing", "next_attempt_gate:missing"],
+                "blockers": resolved_mpg_blockers,
             },
             {
                 "strategy_group_id": "TEQ-001",
@@ -123,6 +141,19 @@ def _watcher_waiting() -> dict:
     }
 
 
+def _watcher_ready() -> dict:
+    watcher = _watcher_waiting()
+    watcher["data"]["watcher"]["wakeup_status"] = (
+        "runtime_signal_ready_for_non_executing_prepare"
+    )
+    watcher["data"]["watcher"]["blockers"] = []
+    watcher["data"]["post_signal_resume"]["can_continue_steps_5_8"] = True
+    watcher["data"]["post_signal_resume"]["current_gate"] = (
+        "fresh_signal_or_prepared_shadow_ready"
+    )
+    return watcher
+
+
 def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progressive_gaps():
     packet = build_packet(
         intake_packet=_intake(),
@@ -146,6 +177,39 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
     assert packet["owner_state"]["automatic_recovery_action"] == (
         "continue_watcher_observation_and_notify_on_material_change"
     )
+    assert packet["dual_freshness"]["strategy_signal"] == {
+        "status": "missing",
+        "freshness_window": "15-30m",
+        "candidate_packet_freshness_seconds": 120,
+        "source": "runtime_signal_watcher",
+        "current_gate": "waiting_for_fresh_strategy_signal",
+        "blockers": [
+            "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+        ],
+    }
+    assert packet["dual_freshness"]["action_time_facts"]["status"] == (
+        "not_reached_waiting_for_signal"
+    )
+    strategy_signal_gate = next(
+        item for item in packet["gate_failure_ledger"]
+        if item["gate"] == "strategy_signal"
+    )
+    required_facts_gate = next(
+        item for item in packet["gate_failure_ledger"]
+        if item["gate"] == "RequiredFacts"
+    )
+    assert strategy_signal_gate["status"] == "waiting"
+    assert strategy_signal_gate["blocker_class"] == "waiting_for_market"
+    assert strategy_signal_gate["blocked_reason"] == "no_fresh_strategy_signal"
+    assert required_facts_gate["status"] == "progressive_pending"
+    assert required_facts_gate["automatic_recovery_action"] == (
+        "wait_for_fresh_signal_before_candidate_specific_fact_materialization"
+    )
+    assert required_facts_gate["blockers"] == [
+        "protection:missing",
+        "budget:missing",
+        "next_attempt_gate:missing",
+    ]
     assert (
         "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal"
         in packet["why_not_executable"]
@@ -156,6 +220,34 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["creates_candidate"] is False
     assert packet["safety_invariants"]["mutates_pg"] is False
+
+
+def test_pilot_status_marks_fresh_signal_and_ready_facts_as_non_executing_prepare_only():
+    packet = build_packet(
+        intake_packet=_intake(),
+        live_facts_readiness=_readiness(mpg_blockers=[]),
+        watcher_status=_watcher_ready(),
+        generated_at_ms=1,
+    )
+
+    assert packet["status"] == "ready_for_non_executing_prepare"
+    assert packet["dual_freshness"]["strategy_signal"]["status"] == "fresh"
+    assert packet["dual_freshness"]["action_time_facts"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    final_gate = next(
+        item for item in packet["gate_failure_ledger"] if item["gate"] == "FinalGate"
+    )
+    operation_layer = next(
+        item for item in packet["gate_failure_ledger"]
+        if item["gate"] == "Operation Layer"
+    )
+    assert final_gate["status"] == "not_reached"
+    assert operation_layer["status"] == "not_reached"
+    assert packet["control_board"]["candidate_row"]["candidate_state"] == (
+        "ready_for_non_executing_prepare"
+    )
+    assert packet["safety_invariants"]["places_order"] is False
 
 
 def test_pilot_status_switches_to_teq_only_when_engineering_readiness_is_better():

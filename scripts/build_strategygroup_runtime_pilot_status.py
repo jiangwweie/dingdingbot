@@ -249,6 +249,241 @@ def _candidate_fact_summary(readiness: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _watcher_scope(group: dict[str, Any] | None) -> dict[str, Any]:
+    scope = (
+        group.get("watcher_scope")
+        if group and isinstance(group.get("watcher_scope"), dict)
+        else {}
+    )
+    return {
+        "business_signal_validity": str(
+            scope.get("business_signal_validity") or "unknown"
+        ),
+        "candidate_packet_freshness_seconds": scope.get(
+            "candidate_packet_freshness_seconds"
+        ),
+    }
+
+
+def _dual_freshness(
+    *,
+    group: dict[str, Any] | None,
+    readiness: dict[str, Any],
+    watcher: dict[str, Any],
+    owner_state: dict[str, Any],
+    candidate_blockers: list[str],
+) -> dict[str, Any]:
+    scope = _watcher_scope(group)
+    signal_status = "fresh" if watcher["can_continue_steps_5_8"] else "missing"
+    if owner_state["status"] == "blocked_hard_safety_stop":
+        action_time_status = "blocked_hard_safety_stop"
+    elif owner_state["status"] == "blocked_active_position_resolution":
+        action_time_status = "blocked_live_account_facts"
+    elif not watcher["can_continue_steps_5_8"]:
+        action_time_status = "not_reached_waiting_for_signal"
+    elif readiness.get("armed_candidate_prepare_ready"):
+        action_time_status = "ready_for_action_time_final_gate"
+    else:
+        action_time_status = "pending_required_facts"
+    return {
+        "strategy_signal": {
+            "status": signal_status,
+            "freshness_window": scope["business_signal_validity"],
+            "candidate_packet_freshness_seconds": scope[
+                "candidate_packet_freshness_seconds"
+            ],
+            "source": "runtime_signal_watcher",
+            "current_gate": watcher["current_gate"],
+            "blockers": list(watcher["blockers"]),
+        },
+        "action_time_facts": {
+            "status": action_time_status,
+            "requires_final_gate": True,
+            "requires_official_operation_layer": True,
+            "account_position_open_order_scope": "selected_universe",
+            "candidate_fact_blockers": candidate_blockers,
+            "reason": owner_state["blocked_reason"],
+        },
+    }
+
+
+def _gate_row(
+    *,
+    gate: str,
+    status: str,
+    blocker_class: str,
+    blocked_at: str,
+    blocked_reason: str,
+    next_recover_condition: str,
+    automatic_recovery_action: str,
+    downgrade_mode: str,
+    hard_stop: bool = False,
+    blockers: list[Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "gate": gate,
+        "status": status,
+        "blocker_class": blocker_class,
+        "blocked_at": blocked_at,
+        "blocked_reason": blocked_reason,
+        "next_recover_condition": next_recover_condition,
+        "automatic_recovery_action": automatic_recovery_action,
+        "downgrade_mode": downgrade_mode,
+        "hard_stop": hard_stop,
+        "owner_visible": status not in {"ready"},
+        "blockers": list(blockers or []),
+    }
+
+
+def _gate_failure_ledger(
+    *,
+    group: dict[str, Any] | None,
+    readiness: dict[str, Any],
+    watcher: dict[str, Any],
+    owner_state: dict[str, Any],
+    fact_summary: dict[str, Any],
+    candidate_blockers: list[str],
+) -> list[dict[str, Any]]:
+    no_group = group is None
+    account_blocked = (
+        fact_summary["active_position_blocked"] or fact_summary["open_order_blocked"]
+    )
+    signal_ready = bool(watcher["can_continue_steps_5_8"])
+    candidate_ready = bool(readiness.get("armed_candidate_prepare_ready"))
+    hard_safety_stop = owner_state["status"] == "blocked_hard_safety_stop"
+
+    group_status = "blocked" if no_group else "ready"
+    account_status = "blocked" if account_blocked else "ready"
+    if hard_safety_stop:
+        signal_status = "blocked"
+    elif signal_ready:
+        signal_status = "ready"
+    else:
+        signal_status = "waiting"
+    if candidate_ready:
+        required_facts_status = "ready"
+    elif signal_ready:
+        required_facts_status = "blocked"
+    else:
+        required_facts_status = "progressive_pending"
+
+    owner_blocked_at = str(owner_state["blocked_at"])
+    owner_reason = str(owner_state["blocked_reason"])
+    owner_recover = str(owner_state["next_recover_condition"])
+    owner_action = str(owner_state["automatic_recovery_action"])
+    owner_downgrade = str(owner_state["downgrade_mode"])
+
+    return [
+        _gate_row(
+            gate="strategy_group_handoff",
+            status=group_status,
+            blocker_class="missing_fact" if no_group else "none",
+            blocked_at="strategy_group_selection" if no_group else "none",
+            blocked_reason="no_strategy_group_handoff_available" if no_group else "none",
+            next_recover_condition=(
+                owner_recover if no_group else "strategy_group_handoff_selected"
+            ),
+            automatic_recovery_action=(
+                owner_action if no_group else "continue_selected_pilot_observation"
+            ),
+            downgrade_mode=owner_downgrade if no_group else "armed_observation",
+            blockers=[],
+        ),
+        _gate_row(
+            gate="live_account_position_open_order",
+            status=account_status,
+            blocker_class="active_position_resolution" if account_blocked else "none",
+            blocked_at="live_account_facts" if account_blocked else "none",
+            blocked_reason=owner_reason if account_blocked else "none",
+            next_recover_condition=(
+                owner_recover
+                if account_blocked
+                else "account_position_and_open_order_facts_are_flat"
+            ),
+            automatic_recovery_action=(
+                owner_action
+                if account_blocked
+                else "continue_selected_pilot_observation"
+            ),
+            downgrade_mode=(
+                owner_downgrade if account_blocked else "armed_observation"
+            ),
+            blockers=[],
+        ),
+        _gate_row(
+            gate="strategy_signal",
+            status=signal_status,
+            blocker_class=(
+                owner_state["blocker_class"]
+                if owner_blocked_at in {"watcher_signal", "watcher_safety_invariants"}
+                else ("none" if signal_ready else "waiting_for_market")
+            ),
+            blocked_at="none" if signal_ready else owner_blocked_at,
+            blocked_reason="none" if signal_ready else owner_reason,
+            next_recover_condition=(
+                "fresh_strategy_signal_available" if signal_ready else owner_recover
+            ),
+            automatic_recovery_action=(
+                "continue_to_required_facts_readiness" if signal_ready else owner_action
+            ),
+            downgrade_mode="armed_observation" if signal_ready else owner_downgrade,
+            hard_stop=hard_safety_stop,
+            blockers=watcher["blockers"],
+        ),
+        _gate_row(
+            gate="RequiredFacts",
+            status=required_facts_status,
+            blocker_class="missing_fact" if candidate_blockers else "none",
+            blocked_at="RequiredFacts" if candidate_blockers else "none",
+            blocked_reason=(
+                ",".join(candidate_blockers[:6])
+                if candidate_blockers
+                else "none"
+            ),
+            next_recover_condition=(
+                "candidate_specific_protection_budget_next_gate_are_ready"
+                if candidate_blockers
+                else "required_facts_ready_for_candidate_prepare"
+            ),
+            automatic_recovery_action=(
+                "collect_or_prepare_missing_candidate_specific_facts"
+                if signal_ready and candidate_blockers
+                else "wait_for_fresh_signal_before_candidate_specific_fact_materialization"
+                if candidate_blockers
+                else "continue_to_shadow_candidate_prepare"
+            ),
+            downgrade_mode=(
+                "observe_only_no_real_submit"
+                if candidate_blockers
+                else "armed_observation"
+            ),
+            blockers=candidate_blockers,
+        ),
+        _gate_row(
+            gate="FinalGate",
+            status="not_reached",
+            blocker_class="not_reached",
+            blocked_at="FinalGate",
+            blocked_reason="action_time_final_gate_requires_fresh_candidate_authorization",
+            next_recover_condition="fresh_candidate_runtime_grant_authorization_evidence_exists",
+            automatic_recovery_action="stop_before_action_time_final_gate_until_candidate_chain_exists",
+            downgrade_mode="no_real_submit",
+            hard_stop=True,
+        ),
+        _gate_row(
+            gate="Operation Layer",
+            status="not_reached",
+            blocker_class="not_reached",
+            blocked_at="Operation Layer",
+            blocked_reason="official_operation_layer_requires_final_gate_pass",
+            next_recover_condition="action_time_final_gate_passes_with_current_facts",
+            automatic_recovery_action="stop_before_gateway_action_until_final_gate_passes",
+            downgrade_mode="no_real_submit",
+            hard_stop=True,
+        ),
+    ]
+
+
 def _owner_state(
     *,
     selected_group_id: str | None,
@@ -418,11 +653,26 @@ def build_packet(
         if isinstance((group or {}).get("risk_defaults"), dict)
         else {}
     )
-    candidate_blockers = fact_summary["candidate_blockers"]
+    candidate_blockers = [str(item) for item in fact_summary["candidate_blockers"]]
     progressive_gaps = [
         blocker for blocker in candidate_blockers
         if blocker in {"protection:missing", "budget:missing", "next_attempt_gate:missing"}
     ]
+    dual_freshness = _dual_freshness(
+        group=group,
+        readiness=readiness,
+        watcher=watcher,
+        owner_state=owner_state,
+        candidate_blockers=candidate_blockers,
+    )
+    gate_failure_ledger = _gate_failure_ledger(
+        group=group,
+        readiness=readiness,
+        watcher=watcher,
+        owner_state=owner_state,
+        fact_summary=fact_summary,
+        candidate_blockers=candidate_blockers,
+    )
     why_not_executable: list[str] = []
     if owner_state["status"] == "waiting_for_market":
         why_not_executable.append("no_fresh_strategy_signal")
@@ -520,6 +770,8 @@ def build_packet(
                 else "pending",
             },
         },
+        "dual_freshness": dual_freshness,
+        "gate_failure_ledger": gate_failure_ledger,
         "readiness_chain": [
             {
                 "gate": "strategy_group_handoff",

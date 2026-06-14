@@ -2,7 +2,7 @@
 title: STRATEGYGROUP_RUNTIME_PILOT_OVERLAY
 status: CURRENT_CANON_OVERLAY
 authority: owner-decision-2026-06-14 + branch-scope-audit
-last_verified: 2026-06-14
+last_verified: 2026-06-15
 applies_to:
   - /Users/jiangwei/Documents/final
   - codex/strategygroup-runtime-pilot
@@ -185,8 +185,8 @@ The current pilot implementation surface is:
 | Layer | Current artifact | Purpose |
 | --- | --- | --- |
 | Packet builder | `scripts/build_strategygroup_runtime_pilot_status.py` | Merge StrategyGroup intake, live-facts readiness, and watcher evidence into Owner-readable pilot status |
-| Trading Console API | `GET /api/trading-console/strategygroup-runtime-pilot-status` | Expose `blocked_at`, `blocked_reason`, `next_recover_condition`, `automatic_recovery_action`, and `downgrade_mode` |
-| Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, candidate state, FinalGate / Operation Layer status |
+| Trading Console API | `GET /api/trading-console/strategygroup-runtime-pilot-status` | Expose `blocked_at`, `blocked_reason`, `next_recover_condition`, `automatic_recovery_action`, `downgrade_mode`, `dual_freshness`, and `gate_failure_ledger` |
+| Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, dual freshness, gate ledger, candidate state, FinalGate / Operation Layer status |
 
 Default pilot selection remains:
 
@@ -209,3 +209,11 @@ next-attempt gate may remain pending before a fresh signal. They must be
 resolved before candidate preparation or real submit, but they must not be
 reported as the top-level Owner blocker while the system is only waiting for a
 market signal.
+
+The pilot status packet must distinguish:
+
+| Field | Meaning | Current no-signal expectation |
+| --- | --- | --- |
+| `dual_freshness.strategy_signal` | Whether the strategy signal itself is fresh inside the StrategyGroup watcher window | `status: missing` |
+| `dual_freshness.action_time_facts` | Whether action-time facts have reached the FinalGate boundary | `status: not_reached_waiting_for_signal` |
+| `gate_failure_ledger` | Owner-readable gate ledger for strategy handoff, account facts, signal, RequiredFacts, FinalGate, and Operation Layer | first visible blocker is `strategy_signal: waiting`; `RequiredFacts` may be `progressive_pending` |

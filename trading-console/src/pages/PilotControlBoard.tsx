@@ -21,6 +21,9 @@ function toneForStatus(status?: string): ConsoleTone {
   const value = String(status || '');
   if (value === 'ready_for_non_executing_prepare') return 'normal';
   if (value === 'waiting_for_market') return 'attention';
+  if (value === 'ready' || value === 'fresh' || value === 'ready_for_action_time_final_gate') return 'normal';
+  if (value === 'waiting' || value === 'missing' || value === 'progressive_pending' || value === 'not_reached_waiting_for_signal') return 'attention';
+  if (value === 'not_reached') return 'unavailable';
   if (value.includes('active_position') || value.includes('hard_safety')) return 'blocked';
   if (value.includes('blocked')) return 'intervention';
   return 'unavailable';
@@ -58,6 +61,10 @@ export default function PilotControlBoard() {
   const candidateRow = board.candidate_row || {};
   const reviewRow = board.review_row || {};
   const chain = asArray<any>(data.readiness_chain);
+  const gateLedger = asArray<any>(data.gate_failure_ledger);
+  const dualFreshness = data.dual_freshness || {};
+  const strategyFreshness = dualFreshness.strategy_signal || {};
+  const actionTimeFreshness = dualFreshness.action_time_facts || {};
   const watcher = data.watcher || {};
   const universe = asArray<string>(selection.selected_universe);
   const risk = selection.risk_profile || {};
@@ -205,6 +212,54 @@ export default function PilotControlBoard() {
             },
           ]}
         />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ConsolePanel title="Dual Freshness" caption="strategy signal · action-time facts">
+          <div className="divide-y divide-slate-800/90">
+            <EntityRow
+              title="Strategy signal"
+              subtitle={displayValue(strategyFreshness.current_gate)}
+              tone={toneForStatus(strategyFreshness.status)}
+              cells={[
+                { label: 'status', value: displayValue(strategyFreshness.status) },
+                { label: 'window', value: displayValue(strategyFreshness.freshness_window) },
+                { label: 'candidate TTL', value: displayValue(strategyFreshness.candidate_packet_freshness_seconds) },
+                { label: 'blockers', value: asArray(strategyFreshness.blockers).length },
+              ]}
+            />
+            <EntityRow
+              title="Action-time facts"
+              subtitle={displayValue(actionTimeFreshness.reason)}
+              tone={toneForStatus(actionTimeFreshness.status)}
+              cells={[
+                { label: 'status', value: displayValue(actionTimeFreshness.status) },
+                { label: 'FinalGate', value: actionTimeFreshness.requires_final_gate ? 'required' : 'not required' },
+                { label: 'Operation', value: actionTimeFreshness.requires_official_operation_layer ? 'required' : 'not required' },
+                { label: 'fact blockers', value: asArray(actionTimeFreshness.candidate_fact_blockers).length },
+              ]}
+            />
+          </div>
+        </ConsolePanel>
+
+        <ConsolePanel title="Gate Failure Ledger" caption="owner-readable first blocking layer">
+          <div className="divide-y divide-slate-800/90">
+            {gateLedger.map((item, index) => (
+              <EntityRow
+                key={`${item.gate}-${index}`}
+                title={displayValue(item.gate)}
+                subtitle={displayValue(item.blocked_reason)}
+                tone={toneForStatus(item.status)}
+                cells={[
+                  { label: 'status', value: displayValue(item.status) },
+                  { label: 'class', value: displayValue(item.blocker_class) },
+                  { label: 'recover', value: displayValue(item.next_recover_condition) },
+                  { label: 'downgrade', value: displayValue(item.downgrade_mode) },
+                ]}
+              />
+            ))}
+          </div>
+        </ConsolePanel>
       </div>
 
       <ConsolePanel title="Readiness Chain">
