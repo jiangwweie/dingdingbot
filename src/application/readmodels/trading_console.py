@@ -111,6 +111,129 @@ SIGNAL_WATCHER_UNSAFE_FLAGS = {
 }
 
 
+def _runtime_signal_watcher_owner_state(
+    *,
+    post_signal_auto_resume: dict[str, Any],
+    readiness_status: str,
+    missing: list[str],
+    stale: bool,
+    unsafe_flags: list[str],
+    can_resume_steps_5_8: bool,
+) -> dict[str, Any]:
+    """Translate watcher packet fields into an Owner-facing recovery summary."""
+
+    if unsafe_flags:
+        blocked_at = "watcher_safety_invariants"
+        blocked_reason = "watcher_evidence_contains_forbidden_effect_flags"
+        automatic_recovery_action = "stop_resume_path_and_investigate_watcher_evidence"
+        state = {
+            "status": "blocked_hard_safety_stop",
+            "blocker_class": "hard_safety_stop",
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": "forbidden_effect_flags_are_absent_in_current_evidence",
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "manual_review_only",
+        }
+    elif missing:
+        blocked_at = "runtime_signal_watcher_evidence"
+        blocked_reason = "watcher_evidence_missing"
+        automatic_recovery_action = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+        state = {
+            "status": "blocked_deployment_issue",
+            "blocker_class": "deployment_issue",
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": "watcher_evidence_files_are_present",
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+        }
+    elif stale:
+        blocked_at = "runtime_signal_watcher_evidence"
+        blocked_reason = "watcher_evidence_stale"
+        automatic_recovery_action = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+        state = {
+            "status": "blocked_deployment_issue",
+            "blocker_class": "deployment_issue",
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": "watcher_evidence_files_are_fresh",
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+        }
+    else:
+        status = str(post_signal_auto_resume.get("status") or "")
+        if not status:
+            status = "ready" if readiness_status == "ready" else readiness_status
+        blocked_at = str(
+            post_signal_auto_resume.get("blocked_at")
+            or ("none" if can_resume_steps_5_8 else "watcher_signal")
+        )
+        blocked_reason = str(
+            post_signal_auto_resume.get("blocked_reason")
+            or ("none" if can_resume_steps_5_8 else "no_fresh_strategy_signal")
+        )
+        automatic_recovery_action = str(
+            post_signal_auto_resume.get("automatic_recovery_action")
+            or (
+                "continue_to_non_executing_prepare"
+                if can_resume_steps_5_8
+                else "continue_watcher_observation"
+            )
+        )
+        blocker_class = "none"
+        if blocked_reason != "none":
+            blocker_class = (
+                "waiting_for_market"
+                if blocked_reason == "no_fresh_strategy_signal"
+                else "review_only_warning"
+            )
+        state = {
+            "status": status,
+            "blocker_class": blocker_class,
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": str(
+                post_signal_auto_resume.get("next_recover_condition")
+                or (
+                    "fresh_signal_already_available"
+                    if can_resume_steps_5_8
+                    else "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                )
+            ),
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": str(
+                post_signal_auto_resume.get("downgrade_mode")
+                or ("armed_observation" if can_resume_steps_5_8 else "observe_only")
+            ),
+        }
+
+    why_not_executable: list[str] = []
+    if state["blocked_reason"] != "none":
+        why_not_executable.append(str(state["blocked_reason"]))
+    if unsafe_flags:
+        why_not_executable.extend(f"forbidden_effect:{flag}" for flag in unsafe_flags)
+    if missing:
+        why_not_executable.append("watcher_evidence_missing:" + ",".join(missing))
+    if stale:
+        why_not_executable.append("watcher_evidence_stale")
+
+    return {
+        **state,
+        "can_continue_without_owner_chat": bool(
+            post_signal_auto_resume.get("can_continue_without_owner_chat")
+        )
+        or can_resume_steps_5_8,
+        "requires_action_time_final_gate": bool(
+            post_signal_auto_resume.get("requires_action_time_final_gate")
+        ),
+        "requires_official_operation_layer": bool(
+            post_signal_auto_resume.get("requires_official_operation_layer")
+        ),
+        "why_not_executable": list(dict.fromkeys(why_not_executable)),
+    }
+
+
 class TradingConsoleReadModelResponse(BaseModel):
     """Envelope shared by all Trading Console read models."""
 
@@ -1381,6 +1504,14 @@ class TradingConsoleReadModelService:
             readiness_status = "notification_not_configured"
         else:
             readiness_status = "ready"
+        owner_state = _runtime_signal_watcher_owner_state(
+            post_signal_auto_resume=post_signal_auto_resume,
+            readiness_status=readiness_status,
+            missing=missing,
+            stale=stale,
+            unsafe_flags=unsafe_flags,
+            can_resume_steps_5_8=can_resume_steps_5_8,
+        )
 
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -1483,6 +1614,9 @@ class TradingConsoleReadModelService:
                     ],
                 },
                 "post_signal_auto_resume": post_signal_auto_resume,
+                "owner_state": owner_state,
+                "why_not_executable": owner_state["why_not_executable"],
+                "next_safe_checkpoint": owner_state["automatic_recovery_action"],
                 "safety_invariants": {
                     **{name: bool(safety.get(name)) for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)},
                     "forbidden_effect_flags": unsafe_flags,
@@ -1715,7 +1849,12 @@ class TradingConsoleReadModelService:
         blocker_class = str((packet.get("owner_state") or {}).get("blocker_class") or "")
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
-        if blocker_class in {"hard_safety_stop", "active_position_resolution", "deployment_issue"}:
+        if blocker_class in {
+            "hard_safety_stop",
+            "active_position_resolution",
+            "deployment_issue",
+            "runtime_scope_mismatch",
+        }:
             blockers.append(
                 {
                     "code": f"strategygroup_runtime_pilot_{blocker_class}",
