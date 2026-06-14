@@ -409,7 +409,8 @@ def _build_packet(
             "places_order": False,
             "calls_order_lifecycle": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": _safety(
             allow_prepare_records=args.allow_prepare_records,
@@ -422,7 +423,7 @@ def _next_step(status: str) -> str:
     if status == "ready_for_final_gate_preflight":
         return "run_official_final_gate_preflight_for_prepared_authorization"
     if status == "ready_for_prepare":
-        return "rerun_active_monitor_with_allow_prepare_records_after_owner_review"
+        return "rerun_active_monitor_with_allow_prepare_records_under_standing_authorization"
     if status == "blocked":
         return "resolve_runtime_observation_blockers"
     if status == "no_active_runtimes":
