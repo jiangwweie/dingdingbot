@@ -43,6 +43,15 @@ Each `handoff.json` includes the main-control required fields:
 All five JSON packs also include `sample_stale_signal_packet` and
 `sample_conflict_packet`.
 
+## Low-Ambiguity Intake Supplements
+
+| Document | Purpose |
+| --- | --- |
+| `main-control-admission-priority.md` | Recommended admission order, default picker visibility, observe-only defaults, and conditional session branches. |
+| `main-control-required-facts-map.md` | Maps strategy RequiredFacts to main-control runtime fact categories and missing-fact behavior. |
+| `main-control-conflict-policy.md` | Defines same-symbol, direction, mode, facts, stale, and multi-strategy conflict handling. |
+| `main-control-watcher-cadence.md` | Recommends watcher poll cadence, business signal validity, and stale behavior by strategy group. |
+
 ## Admission Interpretation
 
 | Strategy Group | Recommended Main-Control Handling |
