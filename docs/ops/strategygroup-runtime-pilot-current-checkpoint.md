@@ -7,8 +7,9 @@ Status: CURRENT_CHECKPOINT
 
 This checkpoint records the active StrategyGroup runtime pilot state after
 selective watch-branch intake, watcher resume dispatcher implementation,
-repo-local MPG pilot handoff, candidate prerequisite derivation, Tokyo deploy,
-and postdeploy live-readonly verification.
+repo-local MPG pilot handoff, candidate prerequisite derivation, standing
+authorization handoff cleanup, Tokyo deploy, and postdeploy live-readonly
+verification.
 
 Workspace and branch:
 
@@ -16,9 +17,9 @@ Workspace and branch:
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/strategygroup-runtime-pilot` |
-| Last deployed code head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
-| Current release | `brc-runtime-governance-a9b06583-20260615-postdeploy-baseline` |
-| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-a9b06583-20260615-postdeploy-baseline` |
+| Current deployed code head | `09791efe0a13c460a8c4ab9940e5d81f0dbb15a9` |
+| Current release | `brc-runtime-governance-09791efe-20260615-standing-auth-handoff` |
+| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-09791efe-20260615-standing-auth-handoff` |
 
 ## Watch Branch Intake
 
@@ -46,8 +47,8 @@ Deployment status:
 
 | Field | Value |
 | --- | --- |
-| Previous deployed head | `9316dc1e1852623b5eb121f13e6f513e4db1ecc5` |
-| Deployed head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
+| Previous deployed head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
+| Deployed head | `09791efe0a13c460a8c4ab9940e5d81f0dbb15a9` |
 | Deploy apply status | `applied` |
 | Commands executed | `16` |
 | Postdeploy acceptance | `postdeploy_acceptance_ready` |
@@ -77,6 +78,11 @@ output/strategygroup-runtime-pilot/deploy-9316dc1e/git-deploy-apply-report.json
 output/strategygroup-runtime-pilot/deploy-9316dc1e/postdeploy-acceptance-packet.json
 output/strategygroup-runtime-pilot/deploy-a9b06583/git-deploy-apply-report.json
 output/strategygroup-runtime-pilot/deploy-a9b06583/postdeploy-acceptance-packet.json
+output/strategygroup-runtime-pilot/deploy-09791efe/git-deploy-dry-run.json
+output/strategygroup-runtime-pilot/deploy-09791efe/git-owner-deploy-packet.stdout.json
+output/strategygroup-runtime-pilot/deploy-09791efe/git-deploy-apply-report.json
+output/strategygroup-runtime-pilot/deploy-09791efe/postdeploy-verify.json
+output/strategygroup-runtime-pilot/deploy-09791efe/postdeploy-acceptance-packet.json
 ```
 
 ## Watcher / Resume Dispatcher
@@ -86,7 +92,7 @@ Systemd update:
 | Unit | Current state |
 | --- | --- |
 | `brc-runtime-signal-watcher.timer` | `active` |
-| `brc-runtime-signal-watcher.service` | `Result=success`, `ExecMainStatus=0` on manual postdeploy tick |
+| `brc-runtime-signal-watcher.service` | `Result=success`, `ExecMainStatus=0` on manual postdeploy tick after `09791efe` deploy |
 | `40-resume-dispatcher.conf` | Installed and daemon-reloaded |
 
 The watcher now runs this post step after the readiness pack:
@@ -303,7 +309,7 @@ Tokyo verification:
 ```text
 deploy_apply=applied
 postdeploy_acceptance=postdeploy_acceptance_ready
-current_release=brc-runtime-governance-a9b06583-20260615-postdeploy-baseline
+current_release=brc-runtime-governance-09791efe-20260615-standing-auth-handoff
 resume_dispatch_status=waiting_for_market
 account_can_trade=true
 strategy_group_intake=ready_for_main_control_intake
