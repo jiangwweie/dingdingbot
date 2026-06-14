@@ -193,6 +193,12 @@ def test_calls_handoff_preview_when_fresh_authorization_present(tmp_path):
     assert packet["status"] == "ready_for_official_submit_call"
     assert packet["operator_action_preview"]["ready_for_call"] is True
     assert packet["operator_command_plan"]["calls_official_submit_endpoint"] is False
+    assert packet["operator_command_plan"]["requires_owner_chat_confirmation"] is False
+    assert packet["operator_command_plan"]["uses_standing_runtime_authorization"] is True
+    assert packet["operator_command_plan"]["requires_action_time_final_gate"] is True
+    assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
+    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
+    assert packet["operator_command_plan"]["requires_action_time_confirmation"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
 
 

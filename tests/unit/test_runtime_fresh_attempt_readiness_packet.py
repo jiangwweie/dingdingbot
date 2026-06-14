@@ -47,6 +47,16 @@ def _fresh_loop(status: str = "ready_for_prepare") -> dict:
     }
 
 
+def _readiness_bridge(status: str = "ready_for_official_submit_call") -> dict:
+    return {
+        "scope": "runtime_fresh_signal_readiness_bridge",
+        "status": status,
+        "runtime_instance_id": "runtime-1",
+        "blockers": [],
+        "warnings": [],
+    }
+
+
 def test_fresh_attempt_readiness_blocks_when_live_fact_gate_not_ready() -> None:
     packet = build_fresh_attempt_readiness_packet(
         operator_live_fact_packet=_operator_packet("waiting_for_position_resolution"),
@@ -84,6 +94,27 @@ def test_fresh_attempt_readiness_requires_evidence_after_fresh_signal_loop() -> 
     assert packet["status"] == "ready_for_readiness_evidence"
     assert packet["chain_coverage"]["fresh_strategy_signal"]["status"] == "present"
     assert packet["fresh_attempt_policy"]["requires_fresh_readiness_evidence"] is True
+
+
+def test_fresh_attempt_readiness_action_time_gate_uses_standing_authorization() -> None:
+    packet = build_fresh_attempt_readiness_packet(
+        operator_live_fact_packet=_operator_packet(),
+        fresh_signal_loop=_fresh_loop(),
+        readiness_bridge=_readiness_bridge(),
+        generated_at_ms=1,
+    )
+
+    command_plan = packet["operator_command_plan"]
+    assert packet["status"] == "ready_for_action_time_gate"
+    assert command_plan["next_step"] == (
+        "run_action_time_final_gate_before_any_official_submit"
+    )
+    assert command_plan["requires_owner_chat_confirmation"] is False
+    assert command_plan["uses_standing_runtime_authorization"] is True
+    assert command_plan["requires_action_time_final_gate"] is True
+    assert command_plan["requires_official_operation_layer"] is True
+    assert command_plan["can_continue_without_owner_chat"] is True
+    assert command_plan["requires_action_time_confirmation"] is False
 
 
 def test_fresh_attempt_readiness_blocks_legacy_authorization_replay() -> None:

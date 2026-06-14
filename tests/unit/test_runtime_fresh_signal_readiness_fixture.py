@@ -42,14 +42,15 @@ def test_ready_signal_fixture_can_reach_official_handoff_preview_boundary(tmp_pa
         "fresh-submit-auth-rtf058"
     )
     assert report["bridge_packet"]["operator_command_plan"]["next_step"] == (
-        "call_official_submit_endpoint_after_action_time_confirmation"
+        "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
     )
-    assert (
-        report["bridge_packet"]["operator_command_plan"][
-            "requires_action_time_confirmation"
-        ]
-        is True
-    )
+    command_plan = report["bridge_packet"]["operator_command_plan"]
+    assert command_plan["requires_owner_chat_confirmation"] is False
+    assert command_plan["uses_standing_runtime_authorization"] is True
+    assert command_plan["requires_action_time_final_gate"] is True
+    assert command_plan["requires_official_operation_layer"] is True
+    assert command_plan["can_continue_without_owner_chat"] is True
+    assert command_plan["requires_action_time_confirmation"] is False
     assert (
         report["bridge_packet"]["readiness_handoff_bridge"][
             "operator_command_plan"

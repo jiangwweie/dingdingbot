@@ -296,14 +296,19 @@ def _build_packet(
         "operator_action_preview": handoff_packet.get("operator_action_preview"),
         "operator_command_plan": {
             "next_step": (
-                "call_official_submit_endpoint_after_action_time_confirmation"
+                "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
                 if status == READY_HANDOFF_STATUS
                 else "resolve_official_submit_handoff_blocker"
             ),
             "calls_official_submit_endpoint": False,
             "places_order": False,
             "calls_order_lifecycle": False,
-            "requires_action_time_confirmation": True,
+            "requires_owner_chat_confirmation": False,
+            "uses_standing_runtime_authorization": status == READY_HANDOFF_STATUS,
+            "requires_action_time_final_gate": status == READY_HANDOFF_STATUS,
+            "requires_official_operation_layer": status == READY_HANDOFF_STATUS,
+            "can_continue_without_owner_chat": status == READY_HANDOFF_STATUS,
+            "requires_action_time_confirmation": False,
         },
         "safety_invariants": _safety(),
     }

@@ -169,7 +169,7 @@ def _operator_next_step(status: str) -> str:
     if status == READY_FOR_FRESH_SUBMIT_AUTHORIZATION:
         return "bind_or_resolve_fresh_submit_authorization"
     if status == READY_FOR_OFFICIAL_SUBMIT_CALL:
-        return "call_official_submit_endpoint_after_action_time_confirmation"
+        return "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
     if status == READY_FOR_FINAL_GATE_PREFLIGHT:
         return "run_executable_readiness_after_evidence_available"
     return "resolve_full_cycle_blocker"
@@ -265,9 +265,18 @@ def _build_packet(
             "calls_official_submit_endpoint": False,
             "places_order": False,
             "calls_order_lifecycle": False,
-            "requires_action_time_confirmation": (
+            "requires_owner_chat_confirmation": False,
+            "uses_standing_runtime_authorization": True,
+            "requires_action_time_final_gate": (
                 handoff_status == READY_FOR_OFFICIAL_SUBMIT_CALL
             ),
+            "requires_official_operation_layer": (
+                handoff_status == READY_FOR_OFFICIAL_SUBMIT_CALL
+            ),
+            "can_continue_without_owner_chat": (
+                handoff_status == READY_FOR_OFFICIAL_SUBMIT_CALL
+            ),
+            "requires_action_time_confirmation": False,
         },
         "safety_invariants": _safety(),
     }

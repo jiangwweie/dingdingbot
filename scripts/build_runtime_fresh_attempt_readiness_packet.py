@@ -466,7 +466,12 @@ def build_fresh_attempt_readiness_packet(
             "places_order": False,
             "calls_order_lifecycle": False,
             "calls_exchange_write": False,
-            "requires_action_time_confirmation": status == "ready_for_action_time_gate",
+            "requires_owner_chat_confirmation": False,
+            "uses_standing_runtime_authorization": status == "ready_for_action_time_gate",
+            "requires_action_time_final_gate": status == "ready_for_action_time_gate",
+            "requires_official_operation_layer": status == "ready_for_action_time_gate",
+            "can_continue_without_owner_chat": status == "ready_for_action_time_gate",
+            "requires_action_time_confirmation": False,
         },
         "safety_invariants": {
             "packet_only": True,

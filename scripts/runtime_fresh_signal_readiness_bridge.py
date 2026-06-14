@@ -403,7 +403,7 @@ def _build_packet(
             "next_step": (
                 "bind_or_resolve_fresh_submit_authorization"
                 if status == READY_FOR_FRESH_SUBMIT_AUTHORIZATION
-                else "call_official_submit_endpoint_after_action_time_confirmation"
+                else "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
                 if status == READY_FOR_OFFICIAL_SUBMIT_CALL
                 else "resolve_readiness_bridge_blocker"
             ),
@@ -411,9 +411,20 @@ def _build_packet(
             "places_order": False,
             "calls_order_lifecycle": False,
             "requires_fresh_authorization_before_submit": True,
-            "requires_action_time_confirmation": (
+            "requires_owner_chat_confirmation": False,
+            "uses_standing_runtime_authorization": (
                 status == READY_FOR_OFFICIAL_SUBMIT_CALL
             ),
+            "requires_action_time_final_gate": (
+                status == READY_FOR_OFFICIAL_SUBMIT_CALL
+            ),
+            "requires_official_operation_layer": (
+                status == READY_FOR_OFFICIAL_SUBMIT_CALL
+            ),
+            "can_continue_without_owner_chat": (
+                status == READY_FOR_OFFICIAL_SUBMIT_CALL
+            ),
+            "requires_action_time_confirmation": False,
         },
         "safety_invariants": _safety(),
     }
