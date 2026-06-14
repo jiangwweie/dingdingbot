@@ -48,6 +48,11 @@ function intakeLabel(value?: string): string {
 
 export default function StrategyGroupIntake() {
   const { envelope, loading, error } = useReadModel<any>('/api/trading-console/strategy-group-handoff-intake');
+  const {
+    envelope: liveEnvelope,
+    loading: liveLoading,
+    error: liveError,
+  } = useReadModel<any>('/api/trading-console/strategy-group-live-facts-readiness');
 
   if (loading) return <div className="p-4 text-sm text-slate-500">正在读取当前内容...</div>;
 
@@ -57,6 +62,8 @@ export default function StrategyGroupIntake() {
   const watcherScope = asArray<any>(data.watcher_scope);
   const factRows = asArray<any>(data.required_facts_matrix);
   const source = data.source_anchor || {};
+  const liveData = liveEnvelope?.data || {};
+  const liveCounts = liveData.counts || {};
   const visibleFactRows = factRows.slice(0, 12);
 
   return (
@@ -111,6 +118,36 @@ export default function StrategyGroupIntake() {
             icon={<ListChecks className="h-4 w-4" />}
           />
         </div>
+      </ConsolePanel>
+
+      <ConsolePanel title="Live Facts Readiness" caption={liveLoading ? '正在读取 live facts readiness' : displayValue(liveData.live_facts_source?.path, 'live facts source 未配置')}>
+        <div className="grid grid-cols-1 divide-y divide-slate-800 md:grid-cols-4 md:divide-x md:divide-y-0">
+          <MetricRailItem
+            label="Observe Ready"
+            value={liveCounts.observe_ready ?? 0}
+            tone={(liveCounts.observe_ready ?? 0) > 0 ? 'normal' : liveError ? 'blocked' : 'unavailable'}
+            icon={<RadioTower className="h-4 w-4" />}
+          />
+          <MetricRailItem
+            label="Armed Ready"
+            value={liveCounts.armed_candidate_prepare_ready ?? 0}
+            tone={(liveCounts.armed_candidate_prepare_ready ?? 0) > 0 ? 'normal' : 'attention'}
+            icon={<ShieldCheck className="h-4 w-4" />}
+          />
+          <MetricRailItem
+            label="Candidate Blocked"
+            value={liveCounts.blocked_for_candidate_prepare ?? 0}
+            tone={(liveCounts.blocked_for_candidate_prepare ?? 0) > 0 ? 'attention' : 'normal'}
+            icon={<ListChecks className="h-4 w-4" />}
+          />
+          <MetricRailItem
+            label="Gate"
+            value={displayValue(liveData.operator_path?.can_prepare_fresh_candidate ? 'candidate' : liveData.operator_path?.can_continue_observation ? 'observe' : 'blocked')}
+            tone={liveData.operator_path?.can_prepare_fresh_candidate ? 'normal' : liveData.operator_path?.can_continue_observation ? 'attention' : 'blocked'}
+            icon={<FileCheck2 className="h-4 w-4" />}
+          />
+        </div>
+        {liveError && <div className="border-t border-slate-800 px-4 py-3 text-sm text-rose-300">live facts readiness 暂不可用</div>}
       </ConsolePanel>
 
       <ConsolePanel title="Strategy Picker Intake" caption={`${displayValue(source.branch)} · ${displayValue(source.handoff_dir)}`}>

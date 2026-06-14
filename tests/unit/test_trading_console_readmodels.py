@@ -5205,6 +5205,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/signal-marker-feed",
         "/api/trading-console/runtime-signal-watcher-status",
         "/api/trading-console/strategy-group-handoff-intake",
+        "/api/trading-console/strategy-group-live-facts-readiness",
         "/api/trading-console/api-classification",
     ]
 
@@ -5374,4 +5375,53 @@ def test_strategy_group_handoff_intake_returns_picker_readiness(monkeypatch, tmp
     assert by_id["PMR-001"]["intake_status"] == "observe_only_intake_ready"
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
+    assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+
+
+def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
+    monkeypatch,
+    tmp_path,
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    handoff_dir = tmp_path / "strategy-group-handoffs"
+    _write_strategy_group_handoff(
+        handoff_dir / "MPG-001" / "handoff.json",
+        "MPG-001",
+        default_mode="armed_observation",
+    )
+    _write_strategy_group_handoff_supplements(handoff_dir)
+    live_facts_path = tmp_path / "strategy-group-live-facts.json"
+    live_facts_path.write_text(
+        json.dumps(
+            {
+                "exchange_rules": {
+                    "symbols": {
+                        "BTCUSDT": {"status": "TRADING"},
+                        "ETHUSDT": {"status": "TRADING"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/strategy-group-live-facts-readiness")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["read_model"] == "strategy_group_live_facts_readiness"
+    assert payload["live_ready"] is False
+    assert payload["data"]["status"] == "strategy_group_observe_ready_armed_blocked"
+    assert payload["data"]["counts"]["observe_ready"] == 1
+    assert payload["data"]["counts"]["armed_candidate_prepare_ready"] == 0
+    assert payload["data"]["operator_path"]["can_continue_observation"] is True
+    assert payload["data"]["operator_path"]["can_prepare_fresh_candidate"] is False
+    assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
