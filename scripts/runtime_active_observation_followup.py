@@ -667,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if packet["status"] in {
         "observation_window_complete_no_signal",
         "waiting_for_ready_final_gate_preflight",
+        "ready_for_prepare_records",
         "ready_for_disabled_smoke",
         "disabled_smoke_completed",
         "disabled_smoke_blocked",
