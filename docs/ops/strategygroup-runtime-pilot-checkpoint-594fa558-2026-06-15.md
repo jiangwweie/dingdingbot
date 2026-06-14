@@ -1,4 +1,4 @@
-# StrategyGroup Runtime Pilot Checkpoint - 419f272a
+# StrategyGroup Runtime Pilot Checkpoint - 594fa558
 
 Date: 2026-06-15
 Status: CURRENT_CHECKPOINT
@@ -7,13 +7,13 @@ Status: CURRENT_CHECKPOINT
 
 This checkpoint records the current StrategyGroup Runtime Pilot state after
 selective watcher-branch carryover, action-time handoff liveness repair, and
-Tokyo deployment.
+prepared signal evidence surfacing, and Tokyo deployment.
 
 Workspace and branch:
 
 - Workspace: `/Users/jiangwei/Documents/final`
 - Branch: `codex/strategygroup-runtime-pilot`
-- Runtime code head: `419f272a271cc46e6eb6fd00ee72fb48efa4837e`
+- Runtime code head: `594fa55883e85beac5b93791d8b954ac691262ac`
 
 ## Watcher Branch Carryover Decision
 
@@ -43,15 +43,23 @@ focused commits:
 - include scoped watcher runtime summaries in the post-signal resume pack so
   the StrategyGroup Runtime Pilot status can prove the watcher is aligned with
   the selected StrategyGroup scope.
+- surface `signal_input_json`, `shadow_candidate_id`, and
+  `prepared_authorization_id` through the watcher resume pack and
+  StrategyGroup Runtime Pilot candidate row, so fresh-signal continuation does
+  not require reading raw packets.
+- keep the legacy compatibility field
+  `requires_explicit_owner_real_submit_authorization=false` on the current
+  observation / prepare path, while using standing runtime authorization plus
+  action-time `FinalGate` and official `Operation Layer` as the real boundary.
 
 ## Tokyo Deployment
 
 Current Tokyo deployment:
 
 - Release path:
-  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-419f272a-20260615-watcher-scope-resume-pack`
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-594fa558-20260615-prepared-evidence-pilot-status`
 - Deployed head:
-  `419f272a271cc46e6eb6fd00ee72fb48efa4837e`
+  `594fa55883e85beac5b93791d8b954ac691262ac`
 - Branch in release manifest:
   `codex/strategygroup-runtime-pilot`
 - Migration count:
@@ -76,7 +84,7 @@ Postdeploy verifier result:
 
 - `postdeploy_summary.status=postdeploy_acceptance_passed`
 - `postdeploy_acceptance_packet.status=postdeploy_acceptance_ready`
-- `postdeploy_summary.current_head=419f272a271cc46e6eb6fd00ee72fb48efa4837e`
+- `postdeploy_summary.current_head=594fa55883e85beac5b93791d8b954ac691262ac`
 - `postdeploy_summary.health={status: ok, runtime_bound: true, live_ready: false}`
 - top-level postdeploy packet may still show historical pre-live rehearsal
   blockers; those are not current deploy acceptance preconditions.
@@ -115,6 +123,10 @@ Latest verified watcher status:
   watcher scope.
 - `post_signal_resume_pack.selected_runtime_instance_ids=[strategy-runtime-93353f4cf30e, strategy-runtime-579e407cc03a, strategy-runtime-3a25a46a535f]`
 - `post_signal_resume_pack.runtime_signal_summaries_count=3`
+- `post_signal_resume_pack.signal_input_json=null`
+- `post_signal_resume_pack.shadow_candidate_id=null`
+- `post_signal_resume_pack.prepared_authorization_id=null`
+- `post_signal_resume_pack.prepared_evidence.ready_for_action_time_final_gate=false`
 - `watcher_tick.notification.required=false`
 - `watcher_tick.notification.reason=waiting_for_market_no_owner_attention_needed`
 - `post_signal_auto_resume.status=waiting_for_market`
@@ -140,6 +152,11 @@ Latest verified Console readmodel state:
 - `strategygroup_runtime_pilot_status.data.pilot_selection.selected_universe=[INTCUSDT, MSTRUSDT, COINUSDT]`
 - `strategygroup_runtime_pilot_status.data.pilot_selection.risk_profile=tiny`
 - `strategygroup_runtime_pilot_status.data.pilot_selection.max_notional=8`
+- `strategygroup_runtime_pilot_status.data.candidate_evidence={signal_input_json: null, shadow_candidate_id: null, prepared_authorization_id: null, ready_for_action_time_final_gate: false}`
+- `strategygroup_runtime_pilot_status.data.control_board.candidate_row.candidate_state=not_prepared`
+- `strategygroup_runtime_pilot_status.data.control_board.candidate_row.runtime_grant_status=pending`
+- `strategygroup_runtime_pilot_status.data.control_board.candidate_row.authorization_evidence_status=pending`
+- `strategygroup_runtime_pilot_status.data.control_board.candidate_row.final_gate_status=not_reached`
 - `runtime_signal_watcher_status.data.owner_state.blocked_at=watcher_signal`
 - `runtime_signal_watcher_status.data.owner_state.blocked_reason=no_fresh_strategy_signal`
 - `runtime_signal_watcher_status.data.owner_state.next_recover_condition=runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope`
@@ -156,6 +173,16 @@ Latest verified Console readmodel state:
 - `status_packet.safety_invariants.observed_prepare_records_created=false`
 - These prepare evidence fields are expected to become true only after a fresh
   signal causes non-executing prepare records to be created.
+
+Current deployed source check:
+
+- `scripts/runtime_next_attempt_observation_monitor.py`,
+  `scripts/runtime_active_observation_loop.py`,
+  `scripts/runtime_next_attempt_observation_cycle.py`,
+  `scripts/runtime_next_attempt_prepare_api_flow.py`, and
+  `src/interfaces/api_trading_console.py` expose
+  `requires_explicit_owner_real_submit_authorization=false` on the current
+  observation / prepare path.
 
 Forbidden effects remain absent:
 
@@ -202,6 +229,7 @@ Local verification:
 
 - `/opt/homebrew/bin/python3 -m py_compile scripts/runtime_full_next_attempt_submit_cycle.py scripts/runtime_cycle_executable_submit_handoff.py scripts/runtime_fresh_signal_readiness_bridge.py scripts/runtime_fresh_signal_readiness_fixture.py scripts/build_runtime_fresh_attempt_readiness_packet.py`
 - `/opt/homebrew/bin/python3 -m py_compile scripts/build_runtime_signal_watcher_readiness_pack.py scripts/build_strategygroup_runtime_pilot_status.py`
+- `/opt/homebrew/bin/python3 -m py_compile scripts/runtime_active_observation_loop.py scripts/runtime_active_observation_status.py scripts/build_runtime_signal_watcher_readiness_pack.py scripts/build_strategygroup_runtime_pilot_status.py scripts/runtime_next_attempt_observation_monitor.py scripts/runtime_next_attempt_observation_cycle.py scripts/runtime_next_attempt_prepare_api_flow.py src/interfaces/api_trading_console.py`
 - `/opt/homebrew/bin/pytest tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_cycle_executable_submit_handoff.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_fresh_signal_readiness_fixture.py tests/unit/test_runtime_fresh_attempt_readiness_packet.py -q`
   -> `26 passed`
 - `/opt/homebrew/bin/pytest tests/unit/test_tokyo_runtime_governance_deploy_executor.py tests/unit/test_tokyo_runtime_governance_git_deploy.py tests/unit/test_tokyo_runtime_governance_owner_deploy_packet.py tests/unit/test_tokyo_runtime_governance_postdeploy_acceptance_packet.py -q`
@@ -214,11 +242,13 @@ Local verification:
   -> `57 passed`
 - `/opt/homebrew/bin/pytest tests/unit/test_runtime_signal_watcher_tick.py tests/unit/test_runtime_active_observation_status.py -q`
   -> `15 passed`
+- `/opt/homebrew/bin/pytest tests/unit/test_runtime_active_observation_loop.py tests/unit/test_runtime_active_observation_status.py tests/unit/test_runtime_signal_watcher_readiness_pack.py tests/unit/test_strategygroup_runtime_pilot_status.py tests/unit/test_runtime_active_observation_monitor.py tests/unit/test_runtime_next_attempt_observation_cycle.py tests/unit/test_runtime_next_attempt_prepare_api_flow.py tests/unit/test_trading_console_readmodels.py -q`
+  -> `99 passed`
 
 Tokyo verification:
 
 - owner deploy packet:
-  `output/strategygroup-runtime-pilot/deploy-419f272a/owner-git-deploy-packet.json`,
+  `output/strategygroup-runtime-pilot/deploy-594fa558/owner-git-deploy-packet.json`,
   `status=ready_for_owner_git_deploy_decision`, `blockers=[]`,
   `deploy_confirmation_phrase_required=false`;
 - git deploy apply report: `status=applied`, `blockers=[]`,
