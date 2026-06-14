@@ -130,8 +130,8 @@ def _preflight_command_plan(
     *,
     api_base: str,
     authorization_id: str,
-    signal_input_json: str,
-    shadow_candidate_id: str,
+    signal_input_json: str | None,
+    shadow_candidate_id: str | None,
 ) -> dict[str, Any]:
     endpoint = (
         "/api/trading-console/"
@@ -959,13 +959,31 @@ def _execute_fresh_authorization_binding(
             binding_result=binding_result,
         )
 
-    return _packet_from_fresh_authorization_binding(
+    next_command_plan = _bound_fresh_authorization_preflight_plan(
+        packet=packet,
+        binding_body=body,
+    )
+    bound_packet = _packet_from_fresh_authorization_binding(
         packet=packet,
         status="fresh_authorization_bound",
         blocker_class="none",
         dispatch_status="official_fresh_authorization_binding_ready",
         blockers=[],
         binding_result=binding_result,
+        next_command_plan=next_command_plan,
+    )
+    if next_command_plan is None:
+        return _packet_from_fresh_authorization_binding(
+            packet=packet,
+            status="blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_missing_bound_fresh_authorization_id",
+            blockers=["missing_fact:fresh_submit_authorization_id"],
+            binding_result=binding_result,
+        )
+    return _execute_finalgate_preflight(
+        packet=bound_packet,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -1002,6 +1020,35 @@ def _fresh_authorization_binding_ready(body: dict[str, Any]) -> bool:
     )
 
 
+def _bound_fresh_authorization_preflight_plan(
+    *,
+    packet: dict[str, Any],
+    binding_body: dict[str, Any],
+) -> dict[str, Any] | None:
+    fresh_authorization_id = _first_text(
+        binding_body.get("fresh_submit_authorization_id")
+    )
+    if not fresh_authorization_id:
+        return None
+    command_plan = _dict(packet.get("command_plan"))
+    action_time_resume = _dict(packet.get("action_time_resume"))
+    authorization_snapshot = _dict(binding_body.get("authorization_snapshot"))
+    return _preflight_command_plan(
+        api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
+        authorization_id=fresh_authorization_id,
+        signal_input_json=_first_text(
+            action_time_resume.get("signal_input_json"),
+            packet.get("signal_input_json"),
+        ),
+        shadow_candidate_id=_first_text(
+            action_time_resume.get("shadow_candidate_id"),
+            packet.get("shadow_candidate_id"),
+            binding_body.get("order_candidate_id"),
+            authorization_snapshot.get("order_candidate_id"),
+        ),
+    )
+
+
 def _packet_from_fresh_authorization_binding(
     *,
     packet: dict[str, Any],
@@ -1010,6 +1057,7 @@ def _packet_from_fresh_authorization_binding(
     dispatch_status: str,
     blockers: list[str],
     binding_result: dict[str, Any] | None,
+    next_command_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     body = _dict((binding_result or {}).get("body"))
     prepare_evidence_mutated = bool(
@@ -1030,6 +1078,12 @@ def _packet_from_fresh_authorization_binding(
             FINALGATE_ACTION if status == "fresh_authorization_bound" else None
         ),
         "owner_state": owner_state,
+        "command_plan": (
+            next_command_plan
+            if status == "fresh_authorization_bound" and next_command_plan
+            else packet.get("command_plan")
+        ),
+        "fresh_authorization_binding_command_plan": packet.get("command_plan"),
         "fresh_authorization_binding_result": binding_result,
         "fresh_submit_authorization_id": body.get("fresh_submit_authorization_id"),
         "blockers": blockers,
@@ -1092,7 +1146,14 @@ def _packet_from_preflight(
             "places_order": False,
             "calls_order_lifecycle": False,
             "exchange_write_called": False,
-            "mutates_pg": False,
+            "mutates_pg": bool(
+                _dict(packet.get("safety_invariants")).get("mutates_pg")
+            ),
+            "pg_prepare_evidence_mutated": bool(
+                _dict(packet.get("safety_invariants")).get(
+                    "pg_prepare_evidence_mutated"
+                )
+            ),
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
             "official_operation_layer_submit_called": False,

@@ -333,9 +333,26 @@ must map each tick to one safe automatic recovery action:
 | --- | --- | --- |
 | `waiting_for_market` | No fresh signal exists | Continue watcher observation without Owner chat |
 | `ready_for_non_executing_prepare` | Fresh signal exists but prepare records are not complete | Continue only to non-executing prepare / shadow planning records |
+| `ready_for_fresh_submit_authorization` | Shadow candidate / handoff evidence is ready but fresh submit authorization binding is not complete | Call the official non-executing fresh-submit-authorization binding API |
+| `waiting_for_fresh_authorization` | The bridge is parked at fresh authorization binding | Continue the same official non-executing binding recovery |
 | `ready_for_action_time_final_gate` | Candidate / prepared authorization evidence exists | Run official action-time FinalGate preflight; do not place an order merely because this status exists |
 | `blocked_hard_safety_stop` | Watcher evidence contains forbidden effects | Stop and investigate |
 
 `post_signal_auto_resume` is decision metadata. It must not itself bypass
 FinalGate, bypass Operation Layer, call OrderLifecycle, place exchange orders,
 mutate runtime budget, or create withdrawal / transfer actions.
+
+Current expected dispatcher liveness after a fresh signal is:
+
+```text
+fresh signal
+-> non-executing prepare evidence
+-> official fresh-submit-authorization binding
+-> official action-time FinalGate GET preflight
+-> finalgate_ready or blocked with an Owner-readable reason
+```
+
+The dispatcher may chain the binding call into the FinalGate GET preflight in a
+single `--execute-preflight` run after the official binding API returns a fresh
+submit authorization id. This remains a prepare / preflight path only. It must
+not call the official submit endpoint or create an exchange order.

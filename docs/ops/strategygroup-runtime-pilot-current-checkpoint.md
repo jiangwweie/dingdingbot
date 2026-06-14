@@ -8,8 +8,8 @@ Status: CURRENT_CHECKPOINT
 This checkpoint records the active StrategyGroup runtime pilot state after
 selective watch-branch intake, watcher resume dispatcher implementation,
 repo-local MPG pilot handoff, candidate prerequisite derivation, standing
-authorization handoff cleanup, Tokyo deploy, and postdeploy live-readonly
-verification.
+authorization handoff cleanup, fresh authorization binding, Tokyo deploy, and
+postdeploy live-readonly verification.
 
 Workspace and branch:
 
@@ -17,9 +17,11 @@ Workspace and branch:
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/strategygroup-runtime-pilot` |
-| Current deployed code head | `09791efe0a13c460a8c4ab9940e5d81f0dbb15a9` |
-| Current release | `brc-runtime-governance-09791efe-20260615-standing-auth-handoff` |
-| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-09791efe-20260615-standing-auth-handoff` |
+| Local branch head before this checkpoint update | `8237d848720124cbce79c6a962daa30b5b65711a` |
+| Tokyo deployed code head before this checkpoint update | `2df7ae9a1107971f528296e8a84dcb116e18932e` |
+| Tokyo release before this checkpoint update | `brc-runtime-governance-2df7ae9a-20260615-fresh-auth-binding` |
+| Tokyo release path before this checkpoint update | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2df7ae9a-20260615-fresh-auth-binding` |
+| New local checkpoint capability | Fresh authorization binding now chains directly into official action-time FinalGate GET preflight |
 
 ## Watch Branch Intake
 
@@ -36,6 +38,7 @@ Useful content now carried in the pilot branch:
 | Post-signal resume metadata | Present in watcher readiness and Trading Console readmodel |
 | Ready-signal dispatch record | Present in `scripts/runtime_signal_watcher_resume_dispatcher.py` |
 | Action-time FinalGate preflight auto-call | Present behind dispatcher `--execute-preflight`; waiting-market state does not call it |
+| Fresh authorization binding to FinalGate chaining | Present behind dispatcher `--execute-preflight`; binding success immediately continues to official FinalGate GET preflight |
 | Repo-local MPG pilot handoff | Present in `docs/current/strategy-group-handoffs/MPG-001/handoff.json` |
 | Owner-readable live-facts readiness state | Present in `scripts/build_strategy_group_live_facts_readiness_packet.py` |
 | Candidate prerequisite derivation | Present in `scripts/collect_strategy_group_live_facts_readonly.py` |
@@ -92,7 +95,7 @@ Systemd update:
 | Unit | Current state |
 | --- | --- |
 | `brc-runtime-signal-watcher.timer` | `active` |
-| `brc-runtime-signal-watcher.service` | `Result=success`, `ExecMainStatus=0` on manual postdeploy tick after `09791efe` deploy |
+| `brc-runtime-signal-watcher.service` | `Result=success`, `ExecMainStatus=0` on manual postdeploy tick after `2df7ae9a` deploy |
 | `40-resume-dispatcher.conf` | Installed and daemon-reloaded |
 
 The watcher now runs this post step after the readiness pack:
@@ -167,6 +170,17 @@ The dispatcher still does not call Operation Layer or submit an order by
 default. It records the official next checkpoint so later automation can
 continue only after the evidence ids are present and the official endpoint path
 is used.
+
+After the fresh-authorization-binding carryover, the dispatcher also recognizes
+`ready_for_fresh_submit_authorization` and `waiting_for_fresh_authorization`.
+With `--execute-preflight`, it can call the official non-executing fresh-submit
+authorization binding API. If that API returns a fresh submit authorization id,
+the same dispatcher run immediately continues to the official action-time
+FinalGate GET preflight.
+
+This chained path still does not call Operation Layer, OrderLifecycle, exchange
+write APIs, runtime budget mutation, withdrawal, or transfer. Binding-created
+prepare evidence is reported honestly as allowed PG prepare mutation.
 
 ## StrategyGroup Pilot Handoff
 
@@ -318,6 +332,20 @@ Result:
 52 passed
 ```
 
+Latest focused local verification after the binding-to-FinalGate dispatcher
+chain:
+
+```text
+/opt/homebrew/bin/pytest tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_fresh_attempt_readiness_packet.py tests/unit/test_runtime_signal_watcher_readiness_pack.py tests/unit/test_runtime_signal_watcher_tick.py tests/unit/test_runtime_fresh_submit_authorization_binding.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_service_api.py tests/unit/test_runtime_official_submit_handoff_from_readiness.py tests/unit/test_runtime_official_submit_handoff_api_flow.py tests/unit/test_runtime_cycle_executable_submit_handoff.py -q
+git diff --check
+```
+
+Result:
+
+```text
+74 passed
+```
+
 ## Watch Branch Carryover
 
 Useful P0 watcher behavior has been selectively carried into
@@ -345,8 +373,8 @@ Current liveness meaning:
 fresh signal
 -> readiness bridge parks at fresh authorization
 -> dispatcher binds fresh submit authorization evidence
--> dispatcher returns fresh_authorization_bound
--> next automatic recovery action reruns readiness/dispatcher toward FinalGate
+-> dispatcher runs official action-time FinalGate GET preflight
+-> finalgate_ready or blocked with an Owner-readable reason
 ```
 
 Still not allowed by this carryover:

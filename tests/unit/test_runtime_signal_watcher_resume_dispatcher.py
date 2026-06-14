@@ -214,6 +214,22 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
 
     def _request_json(**kwargs):
         calls.append(kwargs)
+        if kwargs["method"] == "GET":
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "ready_for_controlled_submit_adapter",
+                    "final_gate_verdict": "pass",
+                    "blockers": [],
+                    "warnings": [],
+                    "submit_executed": False,
+                    "order_created": False,
+                    "exchange_called": False,
+                    "owner_bounded_execution_called": False,
+                    "order_lifecycle_called": False,
+                },
+            }
         return {
             "http_status": 200,
             "error": False,
@@ -248,26 +264,36 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
         execute_preflight=True,
     )
 
-    assert packet["status"] == "fresh_authorization_bound"
+    assert packet["status"] == "finalgate_ready"
     assert packet["blocker_class"] == "none"
-    assert packet["dispatch_action"] == "run_official_action_time_final_gate_preflight"
+    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
     assert packet["fresh_submit_authorization_id"] == "fresh-auth-1"
+    assert packet["fresh_authorization_binding_result"]["called"] is True
     assert packet["owner_state"]["automatic_recovery_action"] == (
-        "rerun_readiness_bridge_or_dispatcher_for_action_time_finalgate"
+        "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
     )
     assert packet["safety_invariants"]["official_fresh_authorization_binding_called"]
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
     assert packet["safety_invariants"]["creates_submit_authorization"] is True
     assert packet["safety_invariants"]["pg_prepare_evidence_mutated"] is True
     assert packet["safety_invariants"]["mutates_pg"] is True
     assert packet["safety_invariants"]["calls_official_submit_endpoint"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["method"] == "POST"
-    assert "runtime-execution-first-real-submit-actions" not in call["url"]
-    assert call["body"]["no_exchange_side_effects"] is True
-    assert call["body"]["handoff_packet"]["handoff_id"] == "handoff-runtime-mpg-1"
+    assert packet["operation_layer_command_plan"]["authorization_id"] == "fresh-auth-1"
+    assert len(calls) == 2
+    bind_call = calls[0]
+    assert bind_call["method"] == "POST"
+    assert "runtime-execution-first-real-submit-actions" not in bind_call["url"]
+    assert bind_call["body"]["no_exchange_side_effects"] is True
+    assert bind_call["body"]["handoff_packet"]["handoff_id"] == (
+        "handoff-runtime-mpg-1"
+    )
+    preflight_call = calls[1]
+    assert preflight_call["method"] == "GET"
+    assert preflight_call["url"].endswith(
+        "/runtime-execution-controlled-submit-preflights/authorizations/fresh-auth-1"
+    )
 
 
 def test_dispatcher_execute_fresh_authorization_binding_blocks_forbidden_effect(
