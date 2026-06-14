@@ -1,4 +1,4 @@
-# StrategyGroup Runtime Pilot Checkpoint - 2fca2ba4
+# StrategyGroup Runtime Pilot Checkpoint - c10aaf0a
 
 Date: 2026-06-15
 Status: CURRENT_CHECKPOINT
@@ -12,7 +12,7 @@ Workspace and branch:
 
 - Workspace: `/Users/jiangwei/Documents/final`
 - Branch: `codex/strategygroup-runtime-pilot`
-- Local head: `2fca2ba4f307ff71e2a0d5180c289f34a5a7a32d`
+- Local head: `c10aaf0a03344e8981d18c840988d16d1a6abd3e`
 
 ## Watcher Branch Carryover Decision
 
@@ -40,9 +40,9 @@ focused commits:
 Current Tokyo deployment:
 
 - Release path:
-  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2fca2ba4-20260615-no-signal-wakeup-suppression`
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c10aaf0a-20260615-owner-readable-watcher-recovery`
 - Deployed head:
-  `2fca2ba4f307ff71e2a0d5180c289f34a5a7a32d`
+  `c10aaf0a03344e8981d18c840988d16d1a6abd3e`
 - Branch in release manifest:
   `codex/strategygroup-runtime-pilot`
 - Migration count:
@@ -62,6 +62,13 @@ Deployment apply effects were bounded:
 - `order_created=false`
 - `order_lifecycle_called=false`
 - `secrets_read_by_codex=false`
+
+Postdeploy verifier result:
+
+- `postdeploy_summary.status=postdeploy_acceptance_passed`
+- `postdeploy_summary.current_head=c10aaf0a03344e8981d18c840988d16d1a6abd3e`
+- top-level postdeploy packet may still show historical pre-live rehearsal
+  blockers; those are not current deploy acceptance preconditions.
 
 ## Watcher State
 
@@ -84,6 +91,15 @@ Latest verified watcher status:
 - `notification.required=false`
 - `notification.reason=waiting_for_market_no_owner_attention_needed`
 - `notification.sent=false`
+
+Latest verified Console readmodel state:
+
+- `runtime_signal_watcher_status.data.owner_state.blocked_at=watcher_signal`
+- `runtime_signal_watcher_status.data.owner_state.blocked_reason=no_fresh_strategy_signal`
+- `runtime_signal_watcher_status.data.owner_state.next_recover_condition=runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope`
+- `runtime_signal_watcher_status.data.owner_state.automatic_recovery_action=continue_watcher_observation`
+- `runtime_signal_watcher_status.data.owner_state.downgrade_mode=observe_only`
+- `strategygroup_runtime_pilot_status.data.why_not_executable=[no_fresh_strategy_signal, candidate_specific_protection_budget_next_gate_pending_until_fresh_signal]`
 
 Forbidden effects remain absent:
 
