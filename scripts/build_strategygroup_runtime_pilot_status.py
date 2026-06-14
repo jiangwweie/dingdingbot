@@ -192,6 +192,22 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
     )
     if data.get("scope") == "runtime_signal_watcher_post_signal_resume_pack":
         post_signal_auto_resume = _dict(data.get("post_signal_auto_resume"))
+        prepared_evidence = _dict(data.get("prepared_evidence"))
+        signal_input_json = (
+            data.get("signal_input_json")
+            or prepared_evidence.get("signal_input_json")
+            or post_signal_auto_resume.get("signal_input_json")
+        )
+        prepared_authorization_id = (
+            data.get("prepared_authorization_id")
+            or prepared_evidence.get("prepared_authorization_id")
+            or post_signal_auto_resume.get("prepared_authorization_id")
+        )
+        shadow_candidate_id = (
+            data.get("shadow_candidate_id")
+            or prepared_evidence.get("shadow_candidate_id")
+            or post_signal_auto_resume.get("shadow_candidate_id")
+        )
         safety = (
             data.get("safety_invariants")
             if isinstance(data.get("safety_invariants"), dict)
@@ -224,6 +240,15 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
                 data.get("runtime_signal_summaries")
                 or data.get("selected_runtime_signal_summaries")
             ),
+            "signal_input_json": signal_input_json,
+            "prepared_authorization_id": prepared_authorization_id,
+            "shadow_candidate_id": shadow_candidate_id,
+            "prepared_evidence": {
+                "signal_input_json": signal_input_json,
+                "shadow_candidate_id": shadow_candidate_id,
+                "prepared_authorization_id": prepared_authorization_id,
+                "ready_for_action_time_final_gate": bool(prepared_authorization_id),
+            },
             "post_signal_auto_resume": post_signal_auto_resume,
         }
     deployment = (
@@ -244,6 +269,25 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         data.get("post_signal_auto_resume")
         or watcher.get("post_signal_auto_resume")
         or resume.get("post_signal_auto_resume")
+    )
+    prepared_evidence = _dict(data.get("prepared_evidence") or resume.get("prepared_evidence"))
+    signal_input_json = (
+        data.get("signal_input_json")
+        or resume.get("signal_input_json")
+        or prepared_evidence.get("signal_input_json")
+        or post_signal_auto_resume.get("signal_input_json")
+    )
+    prepared_authorization_id = (
+        data.get("prepared_authorization_id")
+        or resume.get("prepared_authorization_id")
+        or prepared_evidence.get("prepared_authorization_id")
+        or post_signal_auto_resume.get("prepared_authorization_id")
+    )
+    shadow_candidate_id = (
+        data.get("shadow_candidate_id")
+        or resume.get("shadow_candidate_id")
+        or prepared_evidence.get("shadow_candidate_id")
+        or post_signal_auto_resume.get("shadow_candidate_id")
     )
     safety = (
         data.get("safety_invariants")
@@ -271,6 +315,15 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             or status_packet.get("runtime_signal_summaries")
             or data.get("runtime_signal_summaries")
         ),
+        "signal_input_json": signal_input_json,
+        "prepared_authorization_id": prepared_authorization_id,
+        "shadow_candidate_id": shadow_candidate_id,
+        "prepared_evidence": {
+            "signal_input_json": signal_input_json,
+            "shadow_candidate_id": shadow_candidate_id,
+            "prepared_authorization_id": prepared_authorization_id,
+            "ready_for_action_time_final_gate": bool(prepared_authorization_id),
+        },
         "post_signal_auto_resume": post_signal_auto_resume,
     }
 
@@ -548,6 +601,7 @@ def _gate_failure_ledger(
     hard_safety_stop = owner_state["status"] == "blocked_hard_safety_stop"
     bridge_blocked = runtime_bridge.get("status") != "configured"
     scope_blocked = owner_state["status"] == "blocked_runtime_scope_mismatch"
+    ready_for_final_gate = owner_state["status"] == "ready_for_action_time_final_gate"
 
     group_status = "blocked" if no_group else "ready"
     bridge_status = "blocked" if bridge_blocked else "ready"
@@ -717,13 +771,27 @@ def _gate_failure_ledger(
         ),
         _gate_row(
             gate="FinalGate",
-            status="not_reached",
-            blocker_class="not_reached",
+            status="ready_to_run" if ready_for_final_gate else "not_reached",
+            blocker_class="none" if ready_for_final_gate else "not_reached",
             blocked_at="FinalGate",
-            blocked_reason="action_time_final_gate_requires_fresh_candidate_authorization",
-            next_recover_condition="fresh_candidate_runtime_grant_authorization_evidence_exists",
-            automatic_recovery_action="stop_before_action_time_final_gate_until_candidate_chain_exists",
-            downgrade_mode="no_real_submit",
+            blocked_reason=(
+                owner_reason
+                if ready_for_final_gate
+                else "action_time_final_gate_requires_fresh_candidate_authorization"
+            ),
+            next_recover_condition=(
+                owner_recover
+                if ready_for_final_gate
+                else "fresh_candidate_runtime_grant_authorization_evidence_exists"
+            ),
+            automatic_recovery_action=(
+                owner_action
+                if ready_for_final_gate
+                else "stop_before_action_time_final_gate_until_candidate_chain_exists"
+            ),
+            downgrade_mode=(
+                owner_downgrade if ready_for_final_gate else "no_real_submit"
+            ),
             hard_stop=True,
         ),
         _gate_row(
@@ -851,6 +919,32 @@ def _owner_state(
         }
     if watcher["can_continue_steps_5_8"]:
         if candidate_ready:
+            prepared_for_final_gate = (
+                watcher.get("prepared_authorization_id")
+                or auto_resume.get("status") == "ready_for_action_time_final_gate"
+            )
+            if prepared_for_final_gate:
+                return {
+                    "status": "ready_for_action_time_final_gate",
+                    "blocker_class": "none",
+                    "blocked_at": "FinalGate",
+                    "blocked_reason": (
+                        auto_resume.get("blocked_reason")
+                        or "action_time_final_gate_not_run_yet"
+                    ),
+                    "next_recover_condition": (
+                        auto_resume.get("next_recover_condition")
+                        or "official_final_gate_preflight_passes_with_current_facts"
+                    ),
+                    "automatic_recovery_action": (
+                        auto_resume.get("automatic_recovery_action")
+                        or "run_official_action_time_final_gate_preflight"
+                    ),
+                    "downgrade_mode": (
+                        auto_resume.get("downgrade_mode")
+                        or "no_real_submit_until_final_gate_pass"
+                    ),
+                }
             return {
                 "status": "ready_for_non_executing_prepare",
                 "blocker_class": "none",
@@ -989,6 +1083,20 @@ def build_packet(
         why_not_executable.append(
             "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal"
         )
+    prepared_authorization_ready = (
+        owner_state["status"] == "ready_for_action_time_final_gate"
+    )
+    non_executing_prepare_ready = (
+        owner_state["status"] == "ready_for_non_executing_prepare"
+    )
+    candidate_evidence = {
+        "signal_input_json": watcher.get("signal_input_json"),
+        "shadow_candidate_id": watcher.get("shadow_candidate_id"),
+        "prepared_authorization_id": watcher.get("prepared_authorization_id"),
+        "ready_for_action_time_final_gate": bool(
+            watcher.get("prepared_authorization_id")
+        ),
+    }
 
     strategy_status = (
         "armed_observation_waiting_for_signal"
@@ -1020,6 +1128,7 @@ def build_packet(
         "owner_state": owner_state,
         "runtime_bridge": runtime_bridge,
         "watcher_scope_alignment": watcher_scope_alignment,
+        "candidate_evidence": candidate_evidence,
         "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
             "strategy_group_row": {
@@ -1063,16 +1172,35 @@ def build_packet(
                 "watcher_scope": watcher_scope_alignment["status"],
             },
             "candidate_row": {
-                "fresh_signal_id": "pending",
+                "fresh_signal_id": candidate_evidence["signal_input_json"] or "pending",
+                "signal_input_json": candidate_evidence["signal_input_json"],
+                "shadow_candidate_id": candidate_evidence["shadow_candidate_id"],
+                "prepared_authorization_id": candidate_evidence[
+                    "prepared_authorization_id"
+                ],
+                "runtime_grant_status": (
+                    "prepared_authorization_ready"
+                    if candidate_evidence["prepared_authorization_id"]
+                    else "pending"
+                ),
+                "authorization_evidence_status": (
+                    "fresh_authorization_evidence_ready"
+                    if candidate_evidence["prepared_authorization_id"]
+                    else "pending"
+                ),
                 "symbol": selected_universe[0] if selected_universe else "pending",
                 "side": selected_side,
                 "candidate_state": (
-                    "ready_for_non_executing_prepare"
-                    if owner_state["status"] == "ready_for_non_executing_prepare"
+                    "prepared_authorization_ready"
+                    if prepared_authorization_ready
+                    else "ready_for_non_executing_prepare"
+                    if non_executing_prepare_ready
                     else "not_prepared"
                 ),
                 "blocker": owner_state["blocked_reason"],
-                "final_gate_status": "not_reached",
+                "final_gate_status": (
+                    "ready_to_run" if prepared_authorization_ready else "not_reached"
+                ),
                 "operation_layer_status": "not_reached",
             },
             "review_row": {
@@ -1145,8 +1273,16 @@ def build_packet(
             },
             {
                 "gate": "FinalGate",
-                "status": "not_reached",
-                "class": "hard_safety_stop",
+                "status": (
+                    "ready_to_run"
+                    if owner_state["status"] == "ready_for_action_time_final_gate"
+                    else "not_reached"
+                ),
+                "class": (
+                    "none"
+                    if owner_state["status"] == "ready_for_action_time_final_gate"
+                    else "hard_safety_stop"
+                ),
             },
             {
                 "gate": "Operation Layer",

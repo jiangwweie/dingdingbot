@@ -62,6 +62,9 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
             "active_runtime_count": 1,
             "monitored_runtime_count": 1,
             "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
+            "prepared_authorization_id": "auth-ready-1",
+            "shadow_candidate_id": "shadow-candidate-1",
             "runtime_signal_summaries": [
                 {
                     "runtime_instance_id": "runtime-mpg-1",
@@ -104,6 +107,15 @@ def test_build_runtime_signal_watcher_readiness_pack_ready_for_resume(tmp_path):
     assert resume["requires_action_time_final_gate"] is True
     assert resume["requires_official_operation_layer"] is True
     assert resume["selected_runtime_instance_ids"] == ["runtime-mpg-1"]
+    assert resume["signal_input_json"] == "/reports/runtime-mpg-1/signal-input.json"
+    assert resume["prepared_authorization_id"] == "auth-ready-1"
+    assert resume["shadow_candidate_id"] == "shadow-candidate-1"
+    assert resume["prepared_evidence"] == {
+        "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
+        "shadow_candidate_id": "shadow-candidate-1",
+        "prepared_authorization_id": "auth-ready-1",
+        "ready_for_action_time_final_gate": True,
+    }
     assert resume["runtime_signal_summaries"] == [
         {
             "runtime_instance_id": "runtime-mpg-1",

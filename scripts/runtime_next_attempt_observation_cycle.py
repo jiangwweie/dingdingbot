@@ -303,7 +303,9 @@ async def _build_cycle_packet(args: argparse.Namespace) -> dict[str, Any]:
             "calls_order_lifecycle": False,
             "live_submit_allowed": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_explicit_owner_real_submit_authorization": False,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": {
             **_base_safety(allow_prepare_records=True),

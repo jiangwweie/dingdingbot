@@ -117,6 +117,9 @@ def build_pack(
         for item in (status_packet.get("selected_runtime_instance_ids") or [])
         if str(item).strip()
     ]
+    signal_input_json = status_packet.get("signal_input_json")
+    prepared_authorization_id = status_packet.get("prepared_authorization_id")
+    shadow_candidate_id = status_packet.get("shadow_candidate_id")
     can_resume_steps_5_8 = wakeup_status in RESUME_READY_STATUSES and not unsafe_flags and not missing
 
     if missing:
@@ -186,6 +189,15 @@ def build_pack(
         "monitored_runtime_count": status_packet.get("monitored_runtime_count"),
         "selected_runtime_instance_ids": selected_runtime_instance_ids,
         "runtime_signal_summaries": runtime_signal_summaries,
+        "signal_input_json": signal_input_json,
+        "prepared_authorization_id": prepared_authorization_id,
+        "shadow_candidate_id": shadow_candidate_id,
+        "prepared_evidence": {
+            "signal_input_json": signal_input_json,
+            "shadow_candidate_id": shadow_candidate_id,
+            "prepared_authorization_id": prepared_authorization_id,
+            "ready_for_action_time_final_gate": bool(prepared_authorization_id),
+        },
         "post_signal_auto_resume": post_signal_auto_resume,
         "automatic_recovery_action": post_signal_auto_resume.get(
             "automatic_recovery_action"

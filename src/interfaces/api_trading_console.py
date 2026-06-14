@@ -4350,7 +4350,9 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "calls_order_lifecycle": False,
             "live_submit_allowed": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_explicit_owner_real_submit_authorization": False,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": _runtime_next_attempt_observation_safety(),
     }

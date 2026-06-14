@@ -136,7 +136,9 @@ def _build_monitor_packet(
         "places_order": False,
         "calls_order_lifecycle": False,
         "requires_official_final_gate": True,
-        "requires_explicit_owner_real_submit_authorization": True,
+        "uses_standing_runtime_authorization": True,
+        "requires_explicit_owner_real_submit_authorization": False,
+        "requires_official_operation_layer": True,
     }
     if ready:
         latest_plan = latest.get("operator_command_plan")

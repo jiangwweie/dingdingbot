@@ -199,6 +199,37 @@ def _watcher_ready() -> dict:
     return watcher
 
 
+def _watcher_prepared() -> dict:
+    watcher = _watcher_ready()
+    prepared_auto_resume = {
+        "status": "ready_for_action_time_final_gate",
+        "blocked_at": "FinalGate",
+        "blocked_reason": "action_time_final_gate_not_run_yet",
+        "next_recover_condition": (
+            "official_final_gate_preflight_passes_with_current_facts"
+        ),
+        "automatic_recovery_action": "run_official_action_time_final_gate_preflight",
+        "downgrade_mode": "no_real_submit_until_final_gate_pass",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "shadow_candidate_id": "shadow-candidate-1",
+        "prepared_authorization_id": "auth-ready-1",
+    }
+    watcher["data"]["post_signal_resume"]["post_signal_auto_resume"] = (
+        prepared_auto_resume
+    )
+    watcher["data"]["post_signal_auto_resume"] = prepared_auto_resume
+    watcher["data"]["post_signal_resume"]["prepared_evidence"] = {
+        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "shadow_candidate_id": "shadow-candidate-1",
+        "prepared_authorization_id": "auth-ready-1",
+        "ready_for_action_time_final_gate": True,
+    }
+    return watcher
+
+
 def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progressive_gaps():
     packet = build_packet(
         intake_packet=_intake(),
@@ -309,6 +340,47 @@ def test_pilot_status_marks_fresh_signal_and_ready_facts_as_non_executing_prepar
         "ready_for_non_executing_prepare"
     )
     assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_pilot_status_promotes_prepared_evidence_to_candidate_row_and_final_gate():
+    packet = build_packet(
+        intake_packet=_intake(),
+        live_facts_readiness=_readiness(mpg_blockers=[]),
+        watcher_status=_watcher_prepared(),
+        generated_at_ms=1,
+    )
+
+    assert packet["status"] == "ready_for_action_time_final_gate"
+    assert packet["owner_state"]["blocked_at"] == "FinalGate"
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert packet["candidate_evidence"] == {
+        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "shadow_candidate_id": "shadow-candidate-1",
+        "prepared_authorization_id": "auth-ready-1",
+        "ready_for_action_time_final_gate": True,
+    }
+    candidate = packet["control_board"]["candidate_row"]
+    assert candidate["fresh_signal_id"] == "/reports/runtime-mpg/signal-input.json"
+    assert candidate["signal_input_json"] == "/reports/runtime-mpg/signal-input.json"
+    assert candidate["shadow_candidate_id"] == "shadow-candidate-1"
+    assert candidate["prepared_authorization_id"] == "auth-ready-1"
+    assert candidate["candidate_state"] == "prepared_authorization_ready"
+    assert candidate["runtime_grant_status"] == "prepared_authorization_ready"
+    assert candidate["authorization_evidence_status"] == (
+        "fresh_authorization_evidence_ready"
+    )
+    assert candidate["final_gate_status"] == "ready_to_run"
+    final_gate = next(
+        item for item in packet["gate_failure_ledger"] if item["gate"] == "FinalGate"
+    )
+    assert final_gate["status"] == "ready_to_run"
+    assert final_gate["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["mutates_pg"] is False
 
 
 def test_pilot_status_switches_to_teq_only_when_engineering_readiness_is_better():

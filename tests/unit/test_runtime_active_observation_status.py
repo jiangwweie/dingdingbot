@@ -163,7 +163,20 @@ def test_status_exposes_observed_prepare_record_evidence(tmp_path):
                 "recorded_execution_intent_created": True,
                 "submit_authorization_created": True,
                 "protection_plan_created": True,
+                "signal_input_json": "/tmp/signal-input-ready.json",
                 "prepared_authorization_id": "auth-ready-1",
+                "runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-1",
+                        "strategy_family_id": "MPG-001",
+                        "strategy_family_version_id": "MPG-001-v0",
+                        "symbol": "COIN/USDT:USDT",
+                        "side": "long",
+                        "status": "ready_for_final_gate_preflight",
+                        "signal_input_json": "/tmp/signal-input-ready.json",
+                        "prepared_authorization_id": "auth-ready-1",
+                    }
+                ],
             },
             "safety_invariants": {
                 "prepare_records_created": True,
@@ -183,7 +196,14 @@ def test_status_exposes_observed_prepare_record_evidence(tmp_path):
 
     assert packet["status"] == "attention"
     assert packet["latest_status"] == "ready_for_final_gate_preflight"
+    assert packet["signal_input_json"] == "/tmp/signal-input-ready.json"
     assert packet["prepared_authorization_id"] == "auth-ready-1"
+    assert packet["runtime_signal_summaries"][0]["signal_input_json"] == (
+        "/tmp/signal-input-ready.json"
+    )
+    assert packet["runtime_signal_summaries"][0]["prepared_authorization_id"] == (
+        "auth-ready-1"
+    )
     assert packet["allowed_prepare_record_effects"] == [
         "prepare_records_created",
         "shadow_candidate_created",

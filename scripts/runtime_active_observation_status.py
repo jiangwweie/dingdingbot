@@ -138,6 +138,8 @@ def _runtime_signal_summaries(summary: dict[str, Any] | None) -> list[dict[str, 
                 "symbol": row.get("symbol"),
                 "side": row.get("side"),
                 "status": row.get("status"),
+                "signal_input_json": row.get("signal_input_json"),
+                "prepared_authorization_id": row.get("prepared_authorization_id"),
                 "evaluation_status": signal.get("evaluation_status"),
                 "signal_type": signal.get("signal_type"),
                 "signal_side": signal.get("side"),
@@ -297,6 +299,11 @@ def build_status_packet(
             latest_summary.get("selected_runtime_instance_ids")
             if isinstance(latest_summary, dict)
             else []
+        ),
+        "signal_input_json": (
+            latest_summary.get("signal_input_json")
+            if isinstance(latest_summary, dict)
+            else None
         ),
         "prepared_authorization_id": (
             latest_summary.get("prepared_authorization_id")
