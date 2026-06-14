@@ -96,6 +96,24 @@ def test_fresh_attempt_readiness_requires_evidence_after_fresh_signal_loop() -> 
     assert packet["fresh_attempt_policy"]["requires_fresh_readiness_evidence"] is True
 
 
+def test_fresh_attempt_readiness_carries_artifact_paths_for_dispatcher() -> None:
+    packet = build_fresh_attempt_readiness_packet(
+        operator_live_fact_packet=_operator_packet(),
+        fresh_signal_loop=_fresh_loop(),
+        readiness_bridge=_readiness_bridge("ready_for_fresh_submit_authorization"),
+        artifact_paths={"readiness_handoff_bridge": "/tmp/handoff.json"},
+        generated_at_ms=1,
+    )
+
+    assert packet["status"] == "waiting_for_fresh_authorization"
+    assert packet["operator_command_plan"]["next_step"] == (
+        "bind_or_resolve_fresh_authorization"
+    )
+    assert packet["artifact_paths"]["readiness_handoff_bridge"] == (
+        "/tmp/handoff.json"
+    )
+
+
 def test_fresh_attempt_readiness_action_time_gate_uses_standing_authorization() -> None:
     packet = build_fresh_attempt_readiness_packet(
         operator_live_fact_packet=_operator_packet(),

@@ -62,6 +62,58 @@ def _resume_pack(status: str = "waiting_for_market") -> dict:
     }
 
 
+def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
+    handoff_path = tmp_path / "handoff.json"
+    handoff_path.write_text(
+        json.dumps(
+            {
+                "api_payload": {
+                    "handoff_id": "handoff-runtime-mpg-1",
+                    "runtime_instance_id": "runtime-mpg-1",
+                    "readiness_packet_id": "readiness-1",
+                    "status": "ready_for_official_submit_call",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "scope": "runtime_fresh_attempt_readiness_packet",
+        "status": "ready_for_fresh_submit_authorization",
+        "runtime_instance_id": "runtime-mpg-1",
+        "selected_runtime_instance_ids": ["runtime-mpg-1"],
+        "artifact_paths": {
+            "readiness_handoff_bridge": str(handoff_path),
+        },
+        "action_time_resume": {
+            "status": "ready_for_fresh_submit_authorization",
+            "next_step": "bind_or_resolve_fresh_submit_authorization",
+            "allowed_auto_actions": [
+                "bind_or_resolve_fresh_submit_authorization"
+            ],
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_state": {
+            "status": "ready_for_fresh_submit_authorization",
+            "blocker_class": "none",
+        },
+        "safety_invariants": {
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effect_flags": [],
+        },
+        "blockers": [],
+        "warnings": [],
+    }
+
+
 def test_dispatcher_waiting_for_market_is_no_action():
     packet = build_dispatch_packet(
         resume_pack=_resume_pack(),
@@ -98,6 +150,182 @@ def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     )
     assert command["places_order"] is False
     assert command["exchange_write_called"] is False
+
+
+def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
+    packet = build_dispatch_packet(
+        resume_pack=_fresh_authorization_resume_pack(tmp_path),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert packet["status"] == "ready_for_fresh_submit_authorization"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_action"] == (
+        "run_official_fresh_submit_authorization_binding"
+    )
+    assert packet["dispatch_status"] == (
+        "official_fresh_authorization_binding_dispatch_ready"
+    )
+    assert packet["owner_state"]["blocked_at"] == "fresh_submit_authorization"
+    command = packet["command_plan"]
+    assert command["method"] == "POST"
+    assert command["path"] == (
+        "/api/trading-console/strategy-runtimes/runtime-mpg-1/"
+        "official-submit-handoff-fresh-authorizations/bind"
+    )
+    assert command["calls_official_submit_endpoint"] is False
+    assert command["places_order"] is False
+    assert command["exchange_write_called"] is False
+
+
+def test_dispatcher_accepts_fresh_attempt_readiness_alias_next_step(tmp_path):
+    resume = _fresh_authorization_resume_pack(tmp_path)
+    resume.pop("action_time_resume")
+    resume["status"] = "waiting_for_fresh_authorization"
+    resume["operator_command_plan"] = {
+        "next_step": "bind_or_resolve_fresh_authorization",
+    }
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/fresh-attempt-readiness.json"),
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert packet["status"] == "waiting_for_fresh_authorization"
+    assert packet["dispatch_action"] == (
+        "run_official_fresh_submit_authorization_binding"
+    )
+    assert packet["command_plan"]["method"] == "POST"
+    assert packet["command_plan"]["places_order"] is False
+
+
+def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkpoint(
+    tmp_path,
+    monkeypatch,
+):
+    calls = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "created_authorization",
+                "blockers": [],
+                "warnings": [],
+                "fresh_submit_authorization_id": "fresh-auth-1",
+                "execution_intent_id": "intent-1",
+                "runtime_execution_intent_draft_id": "draft-1",
+                "ready_for_fresh_authorization_resolution": True,
+                "ready_for_disabled_smoke_call": True,
+                "binding_source": "existing_intent",
+                "creates_execution_intent": False,
+                "creates_submit_authorization": True,
+                "calls_official_submit_endpoint": False,
+                "requests_real_gateway_action": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_fresh_authorization_resume_pack(tmp_path),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "fresh_authorization_bound"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_action"] == "run_official_action_time_final_gate_preflight"
+    assert packet["fresh_submit_authorization_id"] == "fresh-auth-1"
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "rerun_readiness_bridge_or_dispatcher_for_action_time_finalgate"
+    )
+    assert packet["safety_invariants"]["official_fresh_authorization_binding_called"]
+    assert packet["safety_invariants"]["creates_submit_authorization"] is True
+    assert packet["safety_invariants"]["pg_prepare_evidence_mutated"] is True
+    assert packet["safety_invariants"]["mutates_pg"] is True
+    assert packet["safety_invariants"]["calls_official_submit_endpoint"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["method"] == "POST"
+    assert "runtime-execution-first-real-submit-actions" not in call["url"]
+    assert call["body"]["no_exchange_side_effects"] is True
+    assert call["body"]["handoff_packet"]["handoff_id"] == "handoff-runtime-mpg-1"
+
+
+def test_dispatcher_execute_fresh_authorization_binding_blocks_forbidden_effect(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "created_authorization",
+                "blockers": [],
+                "fresh_submit_authorization_id": "fresh-auth-1",
+                "ready_for_fresh_authorization_resolution": True,
+                "exchange_write_called": True,
+            },
+        },
+    )
+
+    packet = build_dispatch_packet(
+        resume_pack=_fresh_authorization_resume_pack(tmp_path),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == (
+        "blocked_by_fresh_authorization_binding_forbidden_effect"
+    )
+    assert "fresh_authorization_binding_effect:exchange_write_called" in (
+        packet["blockers"]
+    )
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_dispatcher_blocks_fresh_authorization_without_handoff_json(tmp_path):
+    resume = _fresh_authorization_resume_pack(tmp_path)
+    resume["artifact_paths"] = {}
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "missing_fact"
+    assert packet["dispatch_status"] == "blocked_by_missing_handoff_json"
+    assert "missing_fact:handoff_json" in packet["blockers"]
+    assert packet["owner_state"]["blocked_at"] == "fresh_submit_authorization"
 
 
 def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monkeypatch):

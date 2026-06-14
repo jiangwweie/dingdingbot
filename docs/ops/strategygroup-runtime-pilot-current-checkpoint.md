@@ -304,6 +304,60 @@ Result:
 43 passed
 ```
 
+Latest focused local verification after carrying the useful watcher-branch P0
+liveness behavior into the pilot branch:
+
+```text
+/opt/homebrew/bin/pytest tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_fresh_attempt_readiness_packet.py tests/unit/test_runtime_signal_watcher_readiness_pack.py tests/unit/test_runtime_signal_watcher_tick.py tests/unit/test_runtime_fresh_submit_authorization_binding.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py -q
+git diff --check
+```
+
+Result:
+
+```text
+52 passed
+```
+
+## Watch Branch Carryover
+
+Useful P0 watcher behavior has been selectively carried into
+`codex/strategygroup-runtime-pilot`. The broad watch-branch docs compression is
+not merged into this branch.
+
+Carried runtime behavior:
+
+- dispatcher now recognizes `ready_for_fresh_submit_authorization` and
+  `waiting_for_fresh_authorization`;
+- dispatcher can call the official fresh-submit-authorization binding API as a
+  non-executing recovery action;
+- the binding recovery path does not call the official submit endpoint,
+  OrderLifecycle, exchange write APIs, budget mutation, withdrawal, or transfer;
+- binding-created `ExecutionIntent` / submit authorization records are reported
+  honestly as allowed prepare-evidence PG mutation;
+- fresh-attempt readiness packets now carry artifact paths so they can be used
+  directly by dispatcher automation;
+- the old `bind_or_resolve_fresh_authorization` next-step spelling is accepted
+  as an alias for fresh submit authorization binding.
+
+Current liveness meaning:
+
+```text
+fresh signal
+-> readiness bridge parks at fresh authorization
+-> dispatcher binds fresh submit authorization evidence
+-> dispatcher returns fresh_authorization_bound
+-> next automatic recovery action reruns readiness/dispatcher toward FinalGate
+```
+
+Still not allowed by this carryover:
+
+- FinalGate bypass;
+- Operation Layer bypass;
+- real submit from the binding path;
+- exchange order creation;
+- withdrawal or transfer;
+- secrets, credential, live-profile, or order-sizing default mutation.
+
 Tokyo verification:
 
 ```text

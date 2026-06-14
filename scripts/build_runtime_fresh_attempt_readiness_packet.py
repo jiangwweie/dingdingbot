@@ -372,6 +372,7 @@ def build_fresh_attempt_readiness_packet(
     fresh_authorization_binding: dict[str, Any] | None = None,
     official_handoff: dict[str, Any] | None = None,
     final_gate_preflight: dict[str, Any] | None = None,
+    artifact_paths: dict[str, str] | None = None,
     generated_at_ms: int | None = None,
 ) -> dict[str, Any]:
     sources = {
@@ -428,6 +429,7 @@ def build_fresh_attempt_readiness_packet(
         "scope": "runtime_fresh_attempt_readiness_packet",
         "status": status,
         "runtime_instance_id": operator_live_fact_packet.get("runtime_instance_id"),
+        "artifact_paths": artifact_paths or {},
         "generated_at_ms": generated_at_ms
         if generated_at_ms is not None
         else int(time.time() * 1000),
@@ -517,6 +519,19 @@ def main(argv: list[str] | None = None) -> int:
         fresh_authorization_binding=_read_json(args.fresh_authorization_binding_json),
         official_handoff=_read_json(args.official_handoff_json),
         final_gate_preflight=_read_json(args.final_gate_preflight_json),
+        artifact_paths={
+            key: value
+            for key, value in {
+                "operator_live_fact_packet": args.operator_live_fact_packet_json,
+                "fresh_signal_loop": args.fresh_signal_loop_json,
+                "readiness_handoff_bridge": args.readiness_bridge_json,
+                "readiness_evidence": args.readiness_evidence_json,
+                "fresh_authorization_binding": args.fresh_authorization_binding_json,
+                "official_handoff": args.official_handoff_json,
+                "final_gate_preflight": args.final_gate_preflight_json,
+            }.items()
+            if value
+        },
         generated_at_ms=args.generated_at_ms,
     )
     if args.output_json:
