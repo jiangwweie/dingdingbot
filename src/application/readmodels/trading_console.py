@@ -73,6 +73,9 @@ from scripts.build_strategy_group_handoff_intake_packet import (
 from scripts.build_strategy_group_live_facts_readiness_packet import (
     build_packet as build_strategy_group_live_facts_readiness_packet,
 )
+from scripts.build_strategygroup_runtime_pilot_status import (
+    build_packet as build_strategygroup_runtime_pilot_status_packet,
+)
 
 
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
@@ -1290,6 +1293,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/budget-recommendation",
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/runtime-signal-watcher-status",
+                    "GET /api/trading-console/strategygroup-runtime-pilot-status",
                     "GET /api/trading-console/strategy-group-handoff-intake",
                     "GET /api/trading-console/strategy-group-live-facts-readiness",
                     "GET /api/trading-console/api-classification",
@@ -1593,6 +1597,63 @@ class TradingConsoleReadModelService:
             generated_at_ms=generated_at_ms,
             freshness_status=freshness_status,
             warnings=[],
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
+            live_ready=False,
+        )
+
+    def strategygroup_runtime_pilot_status(
+        self,
+        *,
+        selected_strategy_group_id: Optional[str] = None,
+        max_symbols: int = 3,
+        stale_after_seconds: int = 180,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        intake_response = self.strategy_group_handoff_intake()
+        live_facts_response = self.strategy_group_live_facts_readiness()
+        watcher_response = self.runtime_signal_watcher_status(
+            stale_after_seconds=stale_after_seconds,
+        )
+        packet = build_strategygroup_runtime_pilot_status_packet(
+            intake_packet=intake_response.data,
+            live_facts_readiness=live_facts_response.data,
+            watcher_status={"data": watcher_response.data},
+            selected_strategy_group_id=selected_strategy_group_id,
+            max_symbols=max_symbols,
+            generated_at_ms=generated_at_ms,
+        )
+        blocker_class = str((packet.get("owner_state") or {}).get("blocker_class") or "")
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if blocker_class in {"hard_safety_stop", "active_position_resolution", "deployment_issue"}:
+            blockers.append(
+                {
+                    "code": f"strategygroup_runtime_pilot_{blocker_class}",
+                    "message": "StrategyGroup runtime pilot cannot safely advance to candidate preparation.",
+                    "affected_area": str((packet.get("owner_state") or {}).get("blocked_at") or "unknown"),
+                }
+            )
+        elif blocker_class in {"waiting_for_market", "missing_fact", "review_only_warning"}:
+            warnings.append(
+                {
+                    "code": f"strategygroup_runtime_pilot_{blocker_class}",
+                    "severity": "info" if blocker_class == "waiting_for_market" else "warning",
+                    "message": str((packet.get("owner_state") or {}).get("blocked_reason") or "pending"),
+                    "count": 1,
+                }
+            )
+        freshness_status = "fresh"
+        if blockers:
+            freshness_status = "not_live_connected"
+        elif warnings:
+            freshness_status = "warning"
+        return TradingConsoleReadModelResponse(
+            read_model="strategygroup_runtime_pilot_status",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=warnings,
             blockers=blockers,
             unavailable=[],
             data=packet,

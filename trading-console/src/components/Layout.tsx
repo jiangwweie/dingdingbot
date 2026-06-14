@@ -25,6 +25,7 @@ import { ThemeToggle } from './ThemeToggle';
 
 const NAV_ITEMS = [
   { name: '控制总览', path: '/', icon: Home },
+  { name: 'Pilot', path: '/pilot', icon: CircleDot },
   { name: '策略库', path: '/strategy', icon: Layers3 },
   { name: '策略接入', path: '/strategy-intake', icon: Database },
   { name: '运行治理', path: '/runtime', icon: ShieldCheck },

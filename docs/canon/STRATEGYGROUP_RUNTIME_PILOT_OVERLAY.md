@@ -175,3 +175,37 @@ Required Owner-facing state:
 | Review row | outcome, MFE / MAE / R multiple when available, promote / keep observing / revise / park / kill |
 
 Evidence packets remain the audit trail underneath these surfaces.
+
+---
+
+## 8. Implemented Pilot Surface
+
+The current pilot implementation surface is:
+
+| Layer | Current artifact | Purpose |
+| --- | --- | --- |
+| Packet builder | `scripts/build_strategygroup_runtime_pilot_status.py` | Merge StrategyGroup intake, live-facts readiness, and watcher evidence into Owner-readable pilot status |
+| Trading Console API | `GET /api/trading-console/strategygroup-runtime-pilot-status` | Expose `blocked_at`, `blocked_reason`, `next_recover_condition`, `automatic_recovery_action`, and `downgrade_mode` |
+| Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, candidate state, FinalGate / Operation Layer status |
+
+Default pilot selection remains:
+
+```text
+MPG-001 unless TEQ-001 has strictly better engineering readiness.
+```
+
+Current expected no-signal state is:
+
+```text
+status: waiting_for_market
+blocked_at: watcher_signal
+blocked_reason: no_fresh_strategy_signal
+automatic_recovery_action: continue_watcher_observation_and_notify_on_material_change
+downgrade_mode: observe_only
+```
+
+Progressive facts such as candidate-specific protection, budget, and
+next-attempt gate may remain pending before a fresh signal. They must be
+resolved before candidate preparation or real submit, but they must not be
+reported as the top-level Owner blocker while the system is only waiting for a
+market signal.

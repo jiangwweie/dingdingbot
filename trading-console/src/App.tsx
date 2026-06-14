@@ -16,6 +16,7 @@ import ReviewState from './pages/ReviewState';
 import AuditChain from './pages/AuditChain';
 import WatcherStatus from './pages/WatcherStatus';
 import StrategyGroupIntake from './pages/StrategyGroupIntake';
+import PilotControlBoard from './pages/PilotControlBoard';
 import Login from './pages/Login';
 
 function ProtectedShell() {
@@ -46,6 +47,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedShell />}>
               <Route index element={<Dashboard />} />
+              <Route path="pilot" element={<PilotControlBoard />} />
               <Route path="strategy" element={<CarrierShelf />} />
               <Route path="runtime" element={<AuthorizationState />} />
               <Route path="strategy-intake" element={<StrategyGroupIntake />} />
@@ -66,6 +68,7 @@ export default function App() {
               <Route path="review" element={<Navigate to="/analysis" replace />} />
               <Route path="audit" element={<Navigate to="/evidence" replace />} />
               <Route path="signals" element={<Navigate to="/runtime" replace />} />
+              <Route path="strategy-runtime-pilot" element={<Navigate to="/pilot" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

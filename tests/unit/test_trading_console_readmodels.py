@@ -5205,6 +5205,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/budget-recommendation",
         "/api/trading-console/signal-marker-feed",
         "/api/trading-console/runtime-signal-watcher-status",
+        "/api/trading-console/strategygroup-runtime-pilot-status",
         "/api/trading-console/strategy-group-handoff-intake",
         "/api/trading-console/strategy-group-live-facts-readiness",
         "/api/trading-console/api-classification",
@@ -5426,3 +5427,106 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
     assert payload["data"]["operator_path"]["can_prepare_fresh_candidate"] is False
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+
+
+def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state(
+    monkeypatch,
+    tmp_path,
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    handoff_dir = tmp_path / "strategy-group-handoffs"
+    _write_strategy_group_handoff(
+        handoff_dir / "MPG-001" / "handoff.json",
+        "MPG-001",
+        default_mode="armed_observation",
+    )
+    _write_strategy_group_handoff(
+        handoff_dir / "TEQ-001" / "handoff.json",
+        "TEQ-001",
+        default_mode="armed_observation",
+    )
+    _write_strategy_group_handoff_supplements(handoff_dir)
+    live_facts_path = tmp_path / "strategy-group-live-facts.json"
+    live_facts_path.write_text(
+        json.dumps(
+            {
+                "exchange_rules": {
+                    "symbols": {
+                        "BTCUSDT": {"status": "TRADING"},
+                        "ETHUSDT": {"status": "TRADING"},
+                    }
+                },
+                "account": {"status": "fresh"},
+                "active_position": {"status": "no_active_position"},
+                "open_orders": {"status": "no_open_orders"},
+                "protection": {"status": "missing"},
+                "budget": {"status": "missing"},
+                "next_attempt_gate": {"status": "missing"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "owner_attention_pending",
+        "wakeup_status": "operator_packet_needs_review",
+        "operator_status": "operator_review",
+        "status_packet_status": "ok",
+        "blockers": [
+            "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+        ],
+        "warnings": [],
+        "notification": {
+            "required": True,
+            "configured": True,
+            "attempted": False,
+            "sent": False,
+            "duplicate_suppressed": True,
+            "skipped_reason": "event_already_notified",
+        },
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+    for name, packet in {
+        "watcher-tick.json": tick,
+        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
+        "operator-packet.json": {"status": "operator_review"},
+        "status-packet.json": {"status": "ok", "blockers": tick["blockers"], "warnings": []},
+        "notification-state.json": {"last_notified_event_key": "waiting-event"},
+    }.items():
+        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/strategygroup-runtime-pilot-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["read_model"] == "strategygroup_runtime_pilot_status"
+    assert payload["freshness_status"] == "warning"
+    assert payload["blockers"] == []
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["no_action_guarantee"]["mutates_pg"] is False
+    assert payload["data"]["status"] == "waiting_for_market"
+    assert payload["data"]["pilot_selection"]["strategy_group_id"] == "MPG-001"
+    assert payload["data"]["pilot_selection"]["selected_universe"] == ["BTCUSDT", "ETHUSDT"]
+    assert payload["data"]["owner_state"]["blocked_at"] == "watcher_signal"
+    assert payload["data"]["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
+    assert payload["data"]["control_board"]["strategy_group_row"]["next_action"] == (
+        "continue_watcher_observation_and_notify_on_material_change"
+    )
+    assert payload["data"]["safety_invariants"]["creates_candidate"] is False
