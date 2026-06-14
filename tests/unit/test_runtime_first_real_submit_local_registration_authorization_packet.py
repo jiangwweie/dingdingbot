@@ -69,9 +69,17 @@ def test_local_registration_packet_exposes_mutating_command_after_exact_confirma
         "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PREP="
         f"{APPROVAL_VALUE}"
     )
-    assert "--record-attempt-consumption" in command
+    assert "--record-attempt-consumption" not in command
     assert "--skip-exchange-arm" in command
     assert "--execute-real-submit" not in command
+    assert (
+        packet["operator_command_plan"]["authorized_command_records_attempt_consumption"]
+        is False
+    )
+    assert (
+        packet["operator_command_plan"]["authorized_command_non_mutating_arm_only"]
+        is True
+    )
 
 
 def test_local_registration_packet_blocks_without_evidence_probe():

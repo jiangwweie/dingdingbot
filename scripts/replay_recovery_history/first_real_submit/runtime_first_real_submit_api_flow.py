@@ -39,6 +39,12 @@ LOCAL_REGISTRATION_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_LOCAL_REGISTRATION_PRE
 EXCHANGE_ARM_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_EXCHANGE_ARM_PREP"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_OUTCOME_KIND = "entry_filled_protection_creation_failed"
+ARM_ATTEMPT_CONSUMPTION_BLOCKER = (
+    "arm_attempt_consumption_disabled_until_operation_layer_submit"
+)
+ARM_ATTEMPT_CONSUMPTION_WARNING = (
+    "operation_layer_arm_must_not_mutate_runtime_attempt_budget"
+)
 
 
 class ApiClient(Protocol):
@@ -580,6 +586,9 @@ class FirstRealSubmitApiFlow:
             )
 
     def _record_attempt_reservation_and_policy(self) -> None:
+        if self._config.mode == "arm":
+            self._block_arm_attempt_consumption()
+            return
         authorization_id = self._required_id("authorization_id")
         if not authorization_id:
             return
@@ -667,6 +676,9 @@ class FirstRealSubmitApiFlow:
         if any(blocker.endswith("_http_404") for blocker in self.state.blockers):
             return
         if self.state.blockers:
+            return
+        if self._config.mode == "arm" and self._config.record_attempt_consumption:
+            self._block_arm_attempt_consumption()
             return
         will_continue_to_local_registration = (
             self._config.record_attempt_consumption
@@ -1219,6 +1231,10 @@ class FirstRealSubmitApiFlow:
                 ]
             )
 
+    def _block_arm_attempt_consumption(self) -> None:
+        self.state.add_blockers([ARM_ATTEMPT_CONSUMPTION_BLOCKER])
+        self.state.add_warnings([ARM_ATTEMPT_CONSUMPTION_WARNING])
+
     def _report(self) -> dict[str, Any]:
         return {
             "script": "runtime_first_real_submit_api_flow",
@@ -1494,8 +1510,8 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         "--record-attempt-consumption",
         action="store_true",
         help=(
-            "Record attempt reservation/mutation during arm. Defaults to true "
-            "only for execute mode; disabled previews should not consume attempts."
+            "Record attempt reservation/mutation. This is rejected in arm mode; "
+            "non-executing previews must not consume runtime attempts."
         ),
     )
     parser.add_argument(

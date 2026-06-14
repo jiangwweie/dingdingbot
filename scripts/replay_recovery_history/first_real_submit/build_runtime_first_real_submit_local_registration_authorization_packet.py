@@ -269,14 +269,13 @@ def _command_plan(
         authorization_id,
         "--skip-exchange-arm",
     ]
-    mutating = [
+    authorized_preview = [
         f"{APPROVAL_ENV}={expected_confirmation}",
         *base,
         "--mode",
         "arm",
         "--authorization-id",
         authorization_id,
-        "--record-attempt-consumption",
         "--skip-exchange-arm",
     ]
     return {
@@ -285,12 +284,15 @@ def _command_plan(
         "api_base_env": API_BASE_ENV,
         "api_base": api_base,
         "preview_command": preview,
-        "authorized_local_registration_command": mutating if action_authorized else None,
+        "authorized_local_registration_command": (
+            authorized_preview if action_authorized else None
+        ),
         "authorized_command_env_required": {
             "name": APPROVAL_ENV,
             "value": expected_confirmation,
         },
-        "authorized_command_records_attempt_consumption": True,
+        "authorized_command_records_attempt_consumption": False,
+        "authorized_command_non_mutating_arm_only": True,
         "authorized_command_skips_exchange_arm": True,
         "authorized_command_not_available_until_owner_confirmation_matches": (
             not action_authorized

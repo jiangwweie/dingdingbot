@@ -74,7 +74,7 @@ def _build_flow_config(
         record_gateway_readiness=False,
         preview_disabled_first_real_submit_action=False,
         execute_real_submit=False,
-        record_attempt_consumption=True,
+        record_attempt_consumption=False,
         record_post_submit_accounting=False,
         record_post_submit_reconciliation=False,
         trusted_submit_fact_snapshot_id=prepared_ids.get(

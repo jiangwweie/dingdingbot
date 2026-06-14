@@ -276,7 +276,6 @@ def _command_plan(
         "arm",
         "--authorization-id",
         authorization_id,
-        "--record-attempt-consumption",
     ]
     return {
         "not_executed": True,
@@ -294,7 +293,8 @@ def _command_plan(
                 "value": exchange_arm_confirmation,
             },
         ],
-        "authorized_command_records_attempt_consumption": True,
+        "authorized_command_records_attempt_consumption": False,
+        "authorized_command_non_mutating_arm_only": True,
         "authorized_command_may_reuse_existing_attempt_policy": True,
         "authorized_command_does_not_execute_first_real_submit": True,
         "authorized_command_not_available_until_owner_confirmation_matches": (

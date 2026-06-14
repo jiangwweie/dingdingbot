@@ -174,7 +174,44 @@ covered by the pilot branch or this overlay.
 
 ---
 
-## 7. Owner Interface Rule
+## 7. Non-Mutating Arm Rule
+
+`arm` mode is a non-executing evidence-preparation stage. It must not consume a
+runtime attempt, reserve runtime budget, create local orders, call
+OrderLifecycle, call exchange, or mark an Operation Layer action as ready by
+using stale or already-consumed evidence.
+
+Current pilot rule:
+
+| Stage | May mutate attempt / budget | Reason |
+| --- | --- | --- |
+| Watcher observation | No | Market monitoring only |
+| Fresh signal / shadow candidate | No | Candidate preparation only |
+| FinalGate preflight | No | Action-time inspection only |
+| Operation Layer arm evidence | No | Evidence readiness must not spend the opportunity |
+| Official Operation Layer submit | Only through the official action path after action-time FinalGate | The submit path owns idempotency, execution, reconciliation, and settlement |
+| Post-submit finalize / settlement | Yes, only as outcome accounting | Budget and attempt state must match actual submit outcome |
+
+The former `arm --record-attempt-consumption` flow is not valid for this pilot.
+If a script receives that combination, it must stop with
+`arm_attempt_consumption_disabled_until_operation_layer_submit` before writing
+attempt or budget state.
+
+Tokyo evidence on 2026-06-15 exposed the failure mode this prevents:
+
+```text
+record_attempt_reservation
+-> apply_attempt_mutation
+-> record_attempt_outcome_policy
+-> record_order_lifecycle_handoff_draft blocked by attempts_exhausted
+```
+
+That ordering can consume the last runtime attempt before the handoff proves it
+is ready. It is a liveness bug, not an Owner-confirmation requirement.
+
+---
+
+## 8. Owner Interface Rule
 
 The Owner should see a Strategy Control Board / concise agent report, not raw
 evidence packet archaeology.
@@ -192,7 +229,7 @@ Evidence packets remain the audit trail underneath these surfaces.
 
 ---
 
-## 8. Strategy Control Board State Contract
+## 9. Strategy Control Board State Contract
 
 The Strategy Control Board is the Owner-facing operating surface. Its job is to
 translate runtime evidence packets into simple product states, blockers, and
