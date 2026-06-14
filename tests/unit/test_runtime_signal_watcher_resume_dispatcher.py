@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
 from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_packet, main
 
 
@@ -97,6 +98,168 @@ def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     )
     assert command["places_order"] is False
     assert command["exchange_write_called"] is False
+
+
+def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monkeypatch):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "pass",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    packet = build_dispatch_packet(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "finalgate_ready"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_status"] == "official_finalgate_preflight_passed"
+    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert packet["owner_state"]["status"] == "finalgate_ready"
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
+    )
+    assert packet["finalgate_preflight_result"]["called"] is True
+    assert packet["operation_layer_command_plan"]["places_order"] is False
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_execute_preflight_blocks_finalgate_failure(monkeypatch):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "blocked",
+                "final_gate_verdict": "block",
+                "blockers": ["active_position_conflict"],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    packet = build_dispatch_packet(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == "blocked_by_action_time_finalgate"
+    assert "active_position_conflict" in packet["blockers"]
+    assert packet["owner_state"]["blocked_at"] == "FinalGate"
+    assert packet["owner_state"]["downgrade_mode"] == "observe_only_no_submit"
+    assert packet["operation_layer_command_plan"] is None
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_dispatcher_execute_preflight_blocks_operator_session_unavailable(monkeypatch):
+    called = {"request": False}
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: (None, "operator_session_unavailable:HTTPException"),
+    )
+
+    def _request_json(**_kwargs):
+        called["request"] = True
+        return {}
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "deployment_issue"
+    assert packet["dispatch_status"] == "blocked_by_operator_session_unavailable"
+    assert packet["owner_state"]["blocked_at"] == "operator_session"
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "restore_operator_session_or_local_session_signing"
+    )
+    assert called["request"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_dispatcher_execute_preflight_blocks_forbidden_preflight_effect(monkeypatch):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "pass",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": True,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    packet = build_dispatch_packet(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == "blocked_by_finalgate_preflight_forbidden_effect"
+    assert "preflight_effect:exchange_called" in packet["blockers"]
+    assert packet["owner_state"]["blocked_at"] == "FinalGate"
+    assert packet["operation_layer_command_plan"] is None
 
 
 def test_dispatcher_blocks_ready_without_fresh_evidence():
