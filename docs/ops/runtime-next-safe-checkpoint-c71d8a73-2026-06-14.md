@@ -290,3 +290,51 @@ push reviewed branch head
 Manual continuation on c71d8a73 by ignoring `followup_command_failed:2` should
 not be used as the mainline path, because it would preserve an avoidable audit
 artifact exactly at the ready-signal to prepare-record transition.
+
+## Codex Automation - Monitor Wakeup
+
+Automation created in the Codex app:
+
+| Field | Value |
+| --- | --- |
+| Automation id | `tokyo-runtime-monitor-wakeup` |
+| Type | thread heartbeat |
+| Interval | every 15 minutes |
+| Status | `ACTIVE` |
+| Workspace expectation | `/Users/jiangwei/Documents/final` |
+
+The automation wakes this same controller thread to inspect only read-only
+evidence first:
+
+```text
+git status
+Tokyo current release path/head
+runtime-signal-watcher JSON packets
+post-signal-resume-pack.json
+supervisor/loop/followup packets
+signed GET-only account-wide position/open-order facts
+```
+
+Allowed automation behavior:
+
+```text
+detect fresh ready signals
+detect whether followup_command_failed:2 is still only the c71d8a73 exit-code artifact
+regenerate or update owner-gated deploy packet
+continue to the next safe checkpoint when official packets prove readiness
+```
+
+Forbidden automation behavior:
+
+```text
+FinalGate bypass
+Operation Layer bypass
+exchange order placement without official action-time gate readiness
+withdrawal or transfer
+secret / live profile / credential / order-sizing default changes
+manual continuation that ignores official blocker packets
+```
+
+The automation is a wakeup/checkpoint mechanism, not an independent trading
+actor. It must keep using the current goal chain and the official auditable
+runtime path.
