@@ -37,6 +37,8 @@ def test_strategygroup_runtime_pilot_overlay_preserves_standing_authorization():
     assert "evidence-packet-as-owner-interface" in text
     assert "post_signal_auto_resume" in text
     assert "ready_for_action_time_final_gate" in text
+    assert "--execute-operation-layer-submit" in text
+    assert "Operation Layer evidence readiness is `ready`" in text
     assert "Strategy Control Board State Contract" in text
     assert "The useful P0 content from `codex/runtime-signal-watcher-feishu`" in text
 

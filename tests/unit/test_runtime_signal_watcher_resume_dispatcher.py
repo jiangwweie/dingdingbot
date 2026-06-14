@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
 from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_packet, main
@@ -133,14 +134,9 @@ def _finalgate_ready_dispatch_packet() -> dict:
             },
         },
         "operation_layer_command_plan": {
-            "kind": "official_operation_layer_submit_next_checkpoint",
-            "authorization_id": "auth-ready-1",
-            "requires_evidence_ids": list(
-                dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
+            **dispatcher._operation_layer_command_plan(
+                authorization_id="auth-ready-1",
             ),
-            "places_order": False,
-            "exchange_write_called": False,
-            "order_lifecycle_called": False,
         },
     }
 
@@ -562,6 +558,110 @@ def test_dispatcher_translates_operation_layer_evidence_ready():
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypatch):
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_orders_submitted",
+                "execution_mode": "real_gateway_action",
+                "blockers": [],
+                "warnings": [],
+                "exchange_called": True,
+                "exchange_order_submitted": True,
+                "order_lifecycle_submit_called": True,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+                "submitted_exchange_order_ids": ["ex-entry-1", "ex-stop-1"],
+                "entry_exchange_order_id": "ex-entry-1",
+                "protection_exchange_order_ids": ["ex-stop-1"],
+            },
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+    )
+
+    assert packet["status"] == "submitted"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_status"] == "official_operation_layer_submit_completed"
+    assert packet["dispatch_action"] == (
+        "post_submit_finalize_reconciliation_budget_settlement"
+    )
+    assert packet["owner_state"]["status"] == "submitted"
+    assert packet["operation_layer_submit_result"]["called"] is True
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert packet["safety_invariants"]["places_order"] is True
+    assert packet["safety_invariants"]["exchange_write_called"] is True
+    assert packet["safety_invariants"]["calls_order_lifecycle"] is True
+    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["method"] == "POST"
+    parsed = urlparse(call["url"])
+    assert parsed.path.endswith(
+        "/runtime-execution-first-real-submit-actions/authorizations/auth-ready-1"
+    )
+    query = parse_qs(parsed.query)
+    assert query["owner_confirmed_for_first_real_submit_action"] == ["true"]
+    for name in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
+        assert query[name] == [f"{name}-value"]
+
+
+def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
+    monkeypatch,
+):
+    called = {"request": False}
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**_kwargs):
+        called["request"] = True
+        return {}
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+    resume = _finalgate_ready_dispatch_packet()
+    resume["finalgate_preflight_result"] = {"called": False}
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+    )
+
+    assert packet["status"] == "operation_layer_submit_blocked"
+    assert packet["dispatch_status"] == "blocked_before_official_operation_layer_submit"
+    assert "action_time_finalgate_preflight_not_called" in packet["blockers"]
+    assert called["request"] is False
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_blocks_stale_operation_layer_authorization_evidence():

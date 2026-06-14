@@ -400,13 +400,33 @@ fresh signal
 -> non-executing prepare evidence
 -> official fresh-submit-authorization binding
 -> official action-time FinalGate GET preflight
--> finalgate_ready or blocked with an Owner-readable reason
+-> Operation Layer evidence readiness
+-> official Operation Layer submit, only when explicitly enabled and ready
+-> post-submit finalize / reconciliation / budget settlement
 ```
 
 The dispatcher may chain the binding call into the FinalGate GET preflight in a
 single `--execute-preflight` run after the official binding API returns a fresh
-submit authorization id. This remains a prepare / preflight path only. It must
-not call the official submit endpoint or create an exchange order.
+submit authorization id. By default this remains a prepare / preflight path
+only. It must not call the official submit endpoint or create an exchange order
+unless `--execute-operation-layer-submit` is explicitly set and the same packet
+proves all of the following:
+
+- official action-time FinalGate preflight was called and passed;
+- Operation Layer evidence readiness is `ready`;
+- all required submit evidence IDs are present;
+- submit authorization id matches the Operation Layer evidence;
+- the endpoint is the official
+  `/runtime-execution-first-real-submit-actions/authorizations/{authorization_id}`
+  path;
+- the action uses the pilot standing authorization and still forbids
+  withdrawal, transfer, OwnerBoundedExecution bypass, FinalGate bypass, and
+  Operation Layer bypass.
+
+When this mode submits successfully, the next automatic action is post-submit
+finalize / reconciliation / budget settlement. If submit blocks or partially
+fails, the packet must expose `OperationLayerSubmit` as the blocked stage and
+must halt new entries until reconciliation / protection recovery state is clear.
 
 For the official FinalGate GET preflight, `prepared_authorization_id` is the
 required action-time identifier. `shadow_candidate_id` remains useful context
