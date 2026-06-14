@@ -26,16 +26,25 @@ class _FakeClient:
                 "body": body,
             }
         )
-        if path.endswith("/strategy-families/CPM-001"):
+        if (
+            method == "GET"
+            and "/strategy-families/" in path
+            and not path.endswith("/versions")
+        ):
             return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
-        if path.endswith("/strategy-family-versions/CPM-001-v0"):
+        if method == "GET" and "/strategy-family-versions/" in path:
             return {"http_status": 404, "body": {"detail": "not found"}, "error": True}
-        if path == "/api/brc/strategy-families":
-            return {"http_status": 200, "body": {"strategy_family_id": "CPM-001"}}
-        if path.endswith("/strategy-families/CPM-001/versions"):
+        if method == "POST" and path == "/api/brc/strategy-families":
             return {
                 "http_status": 200,
-                "body": {"strategy_family_version_id": "CPM-001-v0"},
+                "body": {"strategy_family_id": body["strategy_family_id"]},
+            }
+        if method == "POST" and path.endswith("/versions"):
+            return {
+                "http_status": 200,
+                "body": {
+                    "strategy_family_version_id": body["strategy_family_version_id"]
+                },
             }
         if path.endswith("/admissions/evidence-packets"):
             return {"http_status": 200, "body": {"evidence_packet_id": "evidence-1"}}
@@ -140,6 +149,49 @@ def test_bootstrap_creates_shadow_runtime_without_submit_endpoints():
     assert not any("first-real-submit-actions" in path for path in paths)
     assert not any("exchange-submit" in path for path in paths)
     assert not any("order-candidates" in path for path in paths)
+
+
+def test_bootstrap_creates_strategy_version_with_selected_supported_symbols():
+    client = _FakeClient()
+    flow = RuntimeLiveBootstrapApiFlow(
+        client=client,
+        config=BootstrapConfig(
+            api_base="http://unit",
+            mode="binding-only",
+            strategy_family_id="MPG-001",
+            strategy_family_version_id="MPG-001-v0",
+            family_key="mpg-momentum-persistence",
+            family_name="MPG Momentum Persistence",
+            symbol="INTC/USDT:USDT",
+            supported_symbols=[
+                "INTC/USDT:USDT",
+                "MSTR/USDT:USDT",
+                "COIN/USDT:USDT",
+            ],
+            side="long",
+            account_facts_source="static",
+            runtime_carrier_id="mpg-runtime-pilot",
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    version_calls = [
+        call for call in client.calls
+        if call["path"].endswith("/strategy-families/MPG-001/versions")
+    ]
+    assert version_calls
+    assert version_calls[0]["body"]["supported_symbols"] == [
+        "INTC/USDT:USDT",
+        "MSTR/USDT:USDT",
+        "COIN/USDT:USDT",
+    ]
+    assert all(
+        call["body"].get("carrier_id") != "first-real-submit-live-bootstrap"
+        for call in client.calls
+        if isinstance(call.get("body"), dict)
+    )
 
 
 def test_binding_only_stops_after_trial_binding_without_runtime_creation():
