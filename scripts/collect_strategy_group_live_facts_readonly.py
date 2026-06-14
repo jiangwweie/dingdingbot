@@ -21,10 +21,8 @@ import urllib.error
 import urllib.request
 
 
-DEFAULT_HANDOFF_DIR = Path(
-    "/Users/jiangwei/Documents/final-strategy-research/"
-    "docs/strategy-research/strategy-group-handoffs"
-)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_HANDOFF_DIR = PROJECT_ROOT / "docs/current/strategy-group-handoffs"
 DEFAULT_BASE_URL = "https://fapi.binance.com"
 READ_ONLY_ENDPOINTS = {
     "exchange_info": ("GET", "/fapi/v1/exchangeInfo", False),

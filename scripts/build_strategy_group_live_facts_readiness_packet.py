@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.build_strategy_group_handoff_intake_packet import (
+    DEFAULT_HANDOFF_DIR,
     build_packet as build_handoff_intake_packet,
 )
 
@@ -279,10 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         intake = build_handoff_intake_packet(
             handoff_dir=Path(args.handoff_dir).expanduser()
             if args.handoff_dir
-            else Path(
-                "/Users/jiangwei/Documents/final-strategy-research/"
-                "docs/strategy-research/strategy-group-handoffs"
-            )
+            else DEFAULT_HANDOFF_DIR
         )
     live_facts = _read_json(args.live_facts_json)
     packet = build_packet(intake_packet=intake, live_facts=live_facts)

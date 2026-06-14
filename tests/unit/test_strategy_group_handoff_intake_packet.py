@@ -91,7 +91,9 @@ def test_strategy_group_handoff_intake_packet_builds_picker_and_readiness(tmp_pa
     }
 
 
-def test_strategy_group_handoff_intake_packet_blocks_missing_supplements(tmp_path):
+def test_strategy_group_handoff_intake_packet_warns_missing_supplements_by_default(
+    tmp_path,
+):
     base = tmp_path / "handoffs"
     _write_json(base / "MPG-001" / "handoff.json", _handoff("MPG-001"))
 
@@ -100,6 +102,24 @@ def test_strategy_group_handoff_intake_packet_blocks_missing_supplements(tmp_pat
         source_repo="/strategy-repo",
         source_branch="codex/strategy-research-20260613-goal",
         source_commit="05f616b0",
+    )
+
+    assert packet["status"] == "ready_for_main_control_intake"
+    assert "supplement_missing:admission_priority" in packet["warnings"]
+    assert packet["blockers"] == []
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_strategy_group_handoff_intake_packet_can_require_supplements(tmp_path):
+    base = tmp_path / "handoffs"
+    _write_json(base / "MPG-001" / "handoff.json", _handoff("MPG-001"))
+
+    packet = build_packet(
+        handoff_dir=base,
+        source_repo="/strategy-repo",
+        source_branch="codex/strategy-research-20260613-goal",
+        source_commit="05f616b0",
+        require_supplements=True,
     )
 
     assert packet["status"] == "blocked_handoff_intake"

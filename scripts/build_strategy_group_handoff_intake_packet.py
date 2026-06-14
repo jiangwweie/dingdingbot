@@ -17,13 +17,11 @@ import time
 from typing import Any
 
 
-DEFAULT_HANDOFF_DIR = Path(
-    "/Users/jiangwei/Documents/final-strategy-research/"
-    "docs/strategy-research/strategy-group-handoffs"
-)
-DEFAULT_SOURCE_REPO = "/Users/jiangwei/Documents/final-strategy-research"
-DEFAULT_SOURCE_BRANCH = "codex/strategy-research-20260613-goal"
-DEFAULT_SOURCE_COMMIT = "05f616b0"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_HANDOFF_DIR = PROJECT_ROOT / "docs/current/strategy-group-handoffs"
+DEFAULT_SOURCE_REPO = str(PROJECT_ROOT)
+DEFAULT_SOURCE_BRANCH = "codex/strategygroup-runtime-pilot"
+DEFAULT_SOURCE_COMMIT = "repo-local-current-pilot-handoff"
 
 REQUIRED_FIELDS = {
     "strategy_group_id",
@@ -248,6 +246,7 @@ def build_packet(
     source_repo: str = DEFAULT_SOURCE_REPO,
     source_branch: str = DEFAULT_SOURCE_BRANCH,
     source_commit: str = DEFAULT_SOURCE_COMMIT,
+    require_supplements: bool = False,
 ) -> dict[str, Any]:
     generated_at_ms = int(time.time() * 1000)
     handoff_dir = handoff_dir.expanduser()
@@ -262,6 +261,7 @@ def build_packet(
     groups: list[dict[str, Any]] = []
     required_fact_matrix: list[dict[str, Any]] = []
     blockers: list[str] = []
+    warnings: list[str] = []
     for path in handoff_paths:
         row, fact_rows, row_blockers = _group_row(path, _read_json(path))
         groups.append(row)
@@ -271,7 +271,13 @@ def build_packet(
     missing_supplements = [
         name for name, status in supplements.items() if not status["present"]
     ]
-    blockers.extend([f"supplement_missing:{name}" for name in missing_supplements])
+    missing_supplement_codes = [
+        f"supplement_missing:{name}" for name in missing_supplements
+    ]
+    if require_supplements:
+        blockers.extend(missing_supplement_codes)
+    else:
+        warnings.extend(missing_supplement_codes)
     if not handoff_paths:
         blockers.append("handoff_json_missing")
     groups.sort(key=lambda item: (item["picker"]["rank"], item["strategy_group_id"]))
@@ -345,6 +351,7 @@ def build_packet(
             "mutates_pg": False,
         },
         "blockers": sorted(set(blockers)),
+        "warnings": sorted(set(warnings)),
     }
 
 
@@ -356,6 +363,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-repo", default=DEFAULT_SOURCE_REPO)
     parser.add_argument("--source-branch", default=DEFAULT_SOURCE_BRANCH)
     parser.add_argument("--source-commit", default=DEFAULT_SOURCE_COMMIT)
+    parser.add_argument(
+        "--require-supplements",
+        action="store_true",
+        help="Treat missing main-control supplement markdown files as blockers.",
+    )
     parser.add_argument("--output-json", required=True)
     return parser.parse_args(argv)
 
@@ -367,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         source_repo=args.source_repo,
         source_branch=args.source_branch,
         source_commit=args.source_commit,
+        require_supplements=args.require_supplements,
     )
     _write_json(Path(args.output_json).expanduser(), packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
