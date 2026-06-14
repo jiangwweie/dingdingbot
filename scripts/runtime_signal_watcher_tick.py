@@ -213,7 +213,11 @@ def _notification_required(
     args: argparse.Namespace,
     status_packet: dict[str, Any],
     wakeup_packet: dict[str, Any],
+    auto_resume: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
+    auto_resume_status = str((auto_resume or {}).get("status") or "")
+    if auto_resume_status == "waiting_for_market":
+        return False, "waiting_for_market_no_owner_attention_needed"
     wakeup_status = str(wakeup_packet.get("status") or "")
     status_status = str(status_packet.get("status") or "")
     if args.notify_no_signal and wakeup_status in {
@@ -492,6 +496,7 @@ def build_watcher_tick_packet(
         args=args,
         status_packet=status_packet,
         wakeup_packet=wakeup_packet,
+        auto_resume=auto_resume,
     )
     duplicate = previous_state.get("last_notified_event_key") == event_key
     webhook_url = _webhook_url(args)

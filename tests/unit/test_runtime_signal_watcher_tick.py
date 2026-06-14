@@ -198,12 +198,73 @@ def test_watcher_tick_writes_packets_without_notifying_on_no_signal(tmp_path, mo
     assert packet["operator_command_plan"]["requires_action_time_final_gate"] is True
     assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
     assert packet["notification"]["required"] is False
+    assert packet["notification"]["reason"] == (
+        "waiting_for_market_no_owner_attention_needed"
+    )
     assert sent == []
     assert (tmp_path / "watcher" / "latest-status.json").exists()
     assert (tmp_path / "watcher" / "operator-packet.json").exists()
     assert (tmp_path / "watcher" / "wakeup-packet.json").exists()
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
+
+
+def test_watcher_tick_does_not_notify_when_operator_packet_needs_review_but_waiting_for_market(
+    tmp_path,
+    monkeypatch,
+):
+    sent = []
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_operator_packet_from_path",
+        lambda **kwargs: {
+            "scope": "runtime_observation_operator_packet",
+            "status": "strategy_group_signal_review_available",
+            "active_runtime_observation": {
+                "active_runtime_count": 6,
+                "monitored_runtime_count": 3,
+                "latest_iteration": 1,
+                "iterations_completed": 1,
+                "iterations_remaining": 0,
+                "stop_reason": "max_iterations_exhausted",
+            },
+            "signal_counts": {
+                "runtime_ready_signal_count": 0,
+                "strategy_group_would_enter_signal_count": 1,
+                "strategy_group_no_action_signal_count": 7,
+            },
+            "runtime_prepare_context": {},
+            "operator_command_plan": {
+                "next_step": "review_strategy_group_would_enter_without_execution",
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "operator_packet_only": True,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "forbidden_effects": [],
+            },
+        },
+    )
+
+    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
+        supervisor_builder=_fake_supervisor("waiting_for_signal"),
+        notifier=lambda *items: sent.append(items) or {"sent": True, "status_code": 200},
+    )
+
+    assert packet["wakeup_status"] == "operator_packet_needs_review"
+    assert packet["post_signal_auto_resume"]["status"] == "waiting_for_market"
+    assert packet["notification"]["required"] is False
+    assert packet["notification"]["reason"] == (
+        "waiting_for_market_no_owner_attention_needed"
+    )
+    assert sent == []
 
 
 def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
