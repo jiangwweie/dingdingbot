@@ -99,6 +99,13 @@ def build_watch_packet(
             "packet_stale": active_status_packet.get("packet_stale"),
             "stop_reason": active_status_packet.get("stop_reason"),
             "active_runtime_count": active_status_packet.get("active_runtime_count"),
+            "monitored_runtime_count": active_status_packet.get(
+                "monitored_runtime_count"
+            ),
+            "selected_runtime_instance_ids": active_status_packet.get(
+                "selected_runtime_instance_ids"
+            )
+            or [],
             "prepared_authorization_id": active_status_packet.get(
                 "prepared_authorization_id"
             ),

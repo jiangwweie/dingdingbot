@@ -235,6 +235,7 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
     assert packet["notification"]["sent"] is True
     assert calls[0][0] == "https://example.test/hook"
     assert calls[0][1] == "secret-value"
+    assert "monitored runtimes: 1" in calls[0][2]["text"]
     assert "auth-ready-1" in calls[0][2]["text"]
     assert "secret-value" not in json.dumps(packet)
 

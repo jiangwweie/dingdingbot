@@ -237,11 +237,19 @@ def _notification_text(
     paths: dict[str, str],
 ) -> str:
     summary = wakeup_packet.get("summary") if isinstance(wakeup_packet.get("summary"), dict) else {}
+    monitored_count = summary.get("monitored_runtime_count")
+    active_count = summary.get("active_runtime_count")
+    if monitored_count is None:
+        runtime_count_line = f"active runtimes: {active_count}"
+    elif active_count is not None and active_count != monitored_count:
+        runtime_count_line = f"monitored runtimes: {monitored_count} (active total: {active_count})"
+    else:
+        runtime_count_line = f"monitored runtimes: {monitored_count}"
     lines = [
         f"BRC runtime signal watcher: {wakeup_packet.get('status')}",
         f"env: {args.label}",
         f"operator: {operator_packet.get('status')}",
-        f"active runtimes: {summary.get('active_runtime_count')}",
+        runtime_count_line,
         f"ready runtime signals: {summary.get('runtime_ready_signal_count')}",
         f"prepared authorization: {summary.get('prepared_authorization_id') or '-'}",
         f"shadow candidate: {summary.get('shadow_candidate_id') or '-'}",

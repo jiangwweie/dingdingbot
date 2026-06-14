@@ -39,6 +39,8 @@ def _status_packet(
         "packet_stale": False,
         "stop_reason": "running",
         "active_runtime_count": 1,
+        "monitored_runtime_count": 1,
+        "selected_runtime_instance_ids": ["runtime-1"],
         "prepared_authorization_id": prepared_authorization_id,
         "shadow_candidate_id": shadow_candidate_id,
         "runtime_signal_summaries": [
@@ -138,6 +140,10 @@ def test_watch_packet_summarizes_waiting_no_signal():
     )
 
     assert packet["status"] == "watching_no_signal"
+    assert packet["active_runtime_observation"]["monitored_runtime_count"] == 1
+    assert packet["active_runtime_observation"]["selected_runtime_instance_ids"] == [
+        "runtime-1"
+    ]
     assert packet["checks"]["runtime_ready_signal_count"] == 0
     assert packet["checks"]["strategy_group_would_enter_signal_count"] == 0
     assert packet["operator_command_plan"]["next_step"] == (

@@ -243,6 +243,16 @@ def build_status_packet(
             if isinstance(latest_summary, dict)
             else None
         ),
+        "monitored_runtime_count": (
+            latest_summary.get("monitored_runtime_count")
+            if isinstance(latest_summary, dict)
+            else None
+        ),
+        "selected_runtime_instance_ids": (
+            latest_summary.get("selected_runtime_instance_ids")
+            if isinstance(latest_summary, dict)
+            else []
+        ),
         "prepared_authorization_id": (
             latest_summary.get("prepared_authorization_id")
             if isinstance(latest_summary, dict)

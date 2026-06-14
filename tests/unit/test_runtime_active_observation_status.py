@@ -32,6 +32,8 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
             "latest_summary": {
                 "iteration": 2,
                 "active_runtime_count": 1,
+                "monitored_runtime_count": 1,
+                "selected_runtime_instance_ids": ["runtime-1"],
                 "runtime_signal_summaries": [
                     {
                         "runtime_instance_id": "runtime-1",
@@ -81,6 +83,8 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
         "continue_active_observation_loop"
     )
     assert packet["active_runtime_count"] == 1
+    assert packet["monitored_runtime_count"] == 1
+    assert packet["selected_runtime_instance_ids"] == ["runtime-1"]
     assert packet["runtime_signal_summaries"][0]["strategy_family_id"] == "CPM-001"
     assert packet["runtime_signal_summaries"][0]["reason_codes"] == ["cpm_no_action"]
     assert packet["safety_invariants"]["read_packets_only"] is True
@@ -155,6 +159,7 @@ def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
             "latest_summary": {
                 "iteration": 3,
                 "active_runtime_count": 2,
+                "monitored_runtime_count": 0,
                 "runtime_signal_summaries": [],
             },
             "operator_command_plan": {
