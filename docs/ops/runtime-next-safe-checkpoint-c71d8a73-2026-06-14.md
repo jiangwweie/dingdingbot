@@ -434,3 +434,37 @@ treated as real runtime submit authorization.
 
 Until Tokyo is moved from c71d8a73 to the reviewed candidate, the mainline
 should not ignore `followup_command_failed:2` to create prepare records.
+
+## Deploy Packet Refresh - Current Remote Head
+
+After the automation/checkpoint documentation commits were pushed, the current
+remote branch head became:
+
+```text
+5ceedb0672a2bcab4851f3dff3181c5060e4efff
+```
+
+The owner-gated deploy decision packet was regenerated for that exact remote
+head.
+
+Local evidence output:
+
+```text
+output/tokyo-owner-deploy-decision-5ceedb06-fullsha.json
+```
+
+| Field | Value |
+| --- | --- |
+| Status | `ready_for_owner_git_deploy_decision` |
+| Candidate head | `5ceedb0672a2bcab4851f3dff3181c5060e4efff` |
+| Remote ref head | `5ceedb0672a2bcab4851f3dff3181c5060e4efff` |
+| Release name | `brc-runtime-governance-5ceedb06-20260614-prepare-review-exit` |
+| Blockers | `[]` |
+| Forbidden effects | `[]` |
+| Git deploy plan ready | `true` |
+| Git deploy dry-run ready | `true` |
+| Tokyo readonly probe ready | `true` |
+
+This is the current deploy-ready checkpoint. Deploy apply remains separate from
+this packet-build step and must still go through the owner-gated git deploy
+executor with the generated packet path and confirmation phrase.
