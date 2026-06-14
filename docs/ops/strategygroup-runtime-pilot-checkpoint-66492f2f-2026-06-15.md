@@ -1,4 +1,4 @@
-# StrategyGroup Runtime Pilot Checkpoint - c10aaf0a
+# StrategyGroup Runtime Pilot Checkpoint - 66492f2f
 
 Date: 2026-06-15
 Status: CURRENT_CHECKPOINT
@@ -12,7 +12,7 @@ Workspace and branch:
 
 - Workspace: `/Users/jiangwei/Documents/final`
 - Branch: `codex/strategygroup-runtime-pilot`
-- Local head: `c10aaf0a03344e8981d18c840988d16d1a6abd3e`
+- Local head: `66492f2fb9f910e49f076afb96a4a90a077e417f`
 
 ## Watcher Branch Carryover Decision
 
@@ -34,15 +34,17 @@ focused commits:
 - surface scoped watcher runtime count;
 - align prepare flow with standing authorization;
 - suppress no-signal watcher wakeups.
+- expose watcher prepare evidence so ready-signal auto-resume can distinguish
+  actual non-executing prepare record creation from decision-only metadata.
 
 ## Tokyo Deployment
 
 Current Tokyo deployment:
 
 - Release path:
-  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c10aaf0a-20260615-owner-readable-watcher-recovery`
+  `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-66492f2f-20260615-watcher-prepare-evidence`
 - Deployed head:
-  `c10aaf0a03344e8981d18c840988d16d1a6abd3e`
+  `66492f2fb9f910e49f076afb96a4a90a077e417f`
 - Branch in release manifest:
   `codex/strategygroup-runtime-pilot`
 - Migration count:
@@ -66,7 +68,7 @@ Deployment apply effects were bounded:
 Postdeploy verifier result:
 
 - `postdeploy_summary.status=postdeploy_acceptance_passed`
-- `postdeploy_summary.current_head=c10aaf0a03344e8981d18c840988d16d1a6abd3e`
+- `postdeploy_summary.current_head=66492f2fb9f910e49f076afb96a4a90a077e417f`
 - top-level postdeploy packet may still show historical pre-live rehearsal
   blockers; those are not current deploy acceptance preconditions.
 
@@ -100,6 +102,11 @@ Latest verified Console readmodel state:
 - `runtime_signal_watcher_status.data.owner_state.automatic_recovery_action=continue_watcher_observation`
 - `runtime_signal_watcher_status.data.owner_state.downgrade_mode=observe_only`
 - `strategygroup_runtime_pilot_status.data.why_not_executable=[no_fresh_strategy_signal, candidate_specific_protection_budget_next_gate_pending_until_fresh_signal]`
+- `watcher_tick.safety_invariants.prepare_records_created=false`
+- `watcher_tick.safety_invariants.allowed_prepare_record_effects=[]`
+- `status_packet.safety_invariants.observed_prepare_records_created=false`
+- These prepare evidence fields are expected to become true only after a fresh
+  signal causes non-executing prepare records to be created.
 
 Forbidden effects remain absent:
 
