@@ -158,6 +158,20 @@ compression / deletion changes are a separate docs-governance integration item
 and must not be mixed into the StrategyGroup runtime pilot branch merely
 because they exist.
 
+Watcher branch intake status:
+
+| Source commit | Useful content | Pilot handling |
+| --- | --- | --- |
+| `080aad44` | Tokyo watcher deploy / postdeploy state checkpoint | Covered by current deploy packets and runtime reports; do not make the old checkpoint a current prerequisite. |
+| `fcdecda6` | Current SSOT reset and historical compression | Concept carried into `docs/current/*` and this overlay; broad deletion / archive bundle stays outside this pilot branch. |
+| `c6632eb9` | Strategy Control Board contract | Carried into Section 7, Section 8, and `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`. |
+| `40157fd9` | Confirmation minimization inside runtime boundary | Carried into Section 2 and Section 4; chat confirmation must not become an in-boundary runtime blocker. |
+| `e92c965f` | Standing authorization for deploy apply, candidate advancement, and official runtime actions | Carried into `src/domain/standing_authorization.py`, deploy scripts, runtime planning defaults, API defaults, and Section 2. |
+
+Do not merge `codex/runtime-signal-watcher-feishu` wholesale into this pilot
+branch. Replay missing value only when a focused diff proves it is not already
+covered by the pilot branch or this overlay.
+
 ---
 
 ## 7. Owner Interface Rule
