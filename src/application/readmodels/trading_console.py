@@ -70,6 +70,9 @@ from scripts.build_strategy_group_handoff_intake_packet import (
     DEFAULT_SOURCE_REPO as DEFAULT_STRATEGY_GROUP_HANDOFF_REPO,
     build_packet as build_strategy_group_handoff_intake_packet,
 )
+from scripts.build_strategy_group_live_facts_readiness_packet import (
+    build_packet as build_strategy_group_live_facts_readiness_packet,
+)
 
 
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
@@ -79,6 +82,10 @@ DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-sig
 DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategy-group-handoff-intake-packet.json"
+)
+DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "strategy-group-live-facts-input.json"
 )
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
@@ -1284,6 +1291,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/runtime-signal-watcher-status",
                     "GET /api/trading-console/strategy-group-handoff-intake",
+                    "GET /api/trading-console/strategy-group-live-facts-readiness",
                     "GET /api/trading-console/api-classification",
                 ],
                 "internal_or_legacy": [
@@ -1536,6 +1544,52 @@ class TradingConsoleReadModelService:
         freshness_status = "fresh" if not blockers else "not_live_connected"
         return TradingConsoleReadModelResponse(
             read_model="strategy_group_handoff_intake",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=[],
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
+            live_ready=False,
+        )
+
+    def strategy_group_live_facts_readiness(
+        self,
+        *,
+        live_facts_path: Optional[str] = None,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        intake = self.strategy_group_handoff_intake().data
+        resolved_live_facts_path = Path(
+            live_facts_path
+            or os.environ.get("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH")
+            or DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH
+        ).expanduser()
+        live_facts = _read_json_file(resolved_live_facts_path)
+        packet = build_strategy_group_live_facts_readiness_packet(
+            intake_packet=intake,
+            live_facts=live_facts,
+            generated_at_ms=generated_at_ms,
+        )
+        packet["live_facts_source"] = {
+            "path": str(resolved_live_facts_path),
+            "present": resolved_live_facts_path.exists(),
+        }
+        if not resolved_live_facts_path.exists():
+            packet["blockers"] = sorted(
+                set(list(packet.get("blockers") or []) + ["live_facts_path_missing"])
+            )
+            packet["status"] = "strategy_group_live_facts_blocked"
+        blockers = [
+            {
+                "code": "strategy_group_live_facts_blocked",
+                "message": "StrategyGroup live facts are not ready for armed candidate preparation.",
+                "affected_area": ",".join(list(packet.get("blockers") or [])[:8]),
+            }
+        ] if packet.get("blockers") else []
+        freshness_status = "fresh" if not blockers else "warning"
+        return TradingConsoleReadModelResponse(
+            read_model="strategy_group_live_facts_readiness",
             generated_at_ms=generated_at_ms,
             freshness_status=freshness_status,
             warnings=[],
