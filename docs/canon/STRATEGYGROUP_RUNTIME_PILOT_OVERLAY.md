@@ -252,6 +252,8 @@ selectively carried into this pilot branch in one of two forms:
 | Deployment readiness and deploy apply standing authorization | carried through deploy plan, deploy executor, deploy packets, and tests |
 | Post-signal auto-resume metadata | carried through watcher tick and readiness-pack `post_signal_auto_resume` |
 | Owner-facing Strategy Control Board contract | folded into this canon overlay and Trading Console pilot page |
+| Short current SSOT / AI constraints / Control Board docs | carried into `docs/current/*` as narrow entry files pointing back to this overlay |
+| Ready-signal resume dispatch record | carried through `scripts/runtime_signal_watcher_resume_dispatcher.py` and tests |
 | Broad docs reset / historical compression | not carried; separate docs-governance integration item |
 
 The watch branch must not be merged wholesale into this pilot branch because
