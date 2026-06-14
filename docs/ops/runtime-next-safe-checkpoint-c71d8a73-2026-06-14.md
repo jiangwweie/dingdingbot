@@ -338,3 +338,99 @@ manual continuation that ignores official blocker packets
 The automation is a wakeup/checkpoint mechanism, not an independent trading
 actor. It must keep using the current goal chain and the official auditable
 runtime path.
+
+## Deploy Packet Refresh - Full SHA
+
+The earlier `cf48bfa0` deploy decision packet was blocked because the
+short SHA was passed as `--target-commit`, while the git deploy planner compares
+against the full remote branch head.
+
+The packet was regenerated with the full remote SHA:
+
+```text
+cf48bfa07abf2f8b6655aae2fa19509c77c939d3
+```
+
+Local evidence output:
+
+```text
+output/tokyo-owner-deploy-decision-cf48bfa0-fullsha.json
+```
+
+### Deploy Decision Status
+
+| Field | Value |
+| --- | --- |
+| Status | `ready_for_owner_git_deploy_decision` |
+| Candidate head | `cf48bfa07abf2f8b6655aae2fa19509c77c939d3` |
+| Remote ref head | `cf48bfa07abf2f8b6655aae2fa19509c77c939d3` |
+| Release name | `brc-runtime-governance-cf48bfa0-20260614-prepare-review-exit` |
+| Blockers | `[]` |
+| Forbidden effects | `[]` |
+| Git deploy plan ready | `true` |
+| Git deploy dry-run ready | `true` |
+| Tokyo readonly probe ready | `true` |
+
+Safety invariants:
+
+```text
+deploy_apply_requested=false
+remote_files_modified=false
+services_restarted=false
+migrations_run=false
+execution_intent_created=false
+order_created=false
+order_lifecycle_called=false
+exchange_called=false
+withdrawal_or_transfer_created=false
+```
+
+### Latest Read-Only Tokyo Facts
+
+Tokyo still runs:
+
+```text
+/home/ubuntu/brc-deploy/releases/brc-runtime-governance-c71d8a73-20260613-next-free-live-path
+```
+
+Latest watcher packets remain consistent with the same blocker:
+
+| Packet | Status | Important Fields |
+| --- | --- | --- |
+| `loop-packet.json` | `ready_for_prepare` | `prepare_records_created=false`, `shadow_candidate_created=false`, `submit_authorization_created=false` |
+| `followup-packet.json` | `ready_for_prepare_records` | `blockers=[]`, `next_step=review_ready_signal_then_continue_prepare_record_path` |
+| `supervisor-packet.json` | `supervisor_blocked` | `blockers=[followup_command_failed:2]` |
+| `post-signal-resume-pack.json` | `ready_for_steps_5_8` | `can_continue_steps_5_8=true`, still carries old wrapper blocker |
+
+Ready runtime signals remain:
+
+| Runtime | Strategy | Symbol | Side | Status |
+| --- | --- | --- | --- | --- |
+| `strategy-runtime-rbr-001-rbr-001-v0-ada-usdt-usdt-short` | `RBR-001-v0` | `ADA/USDT:USDT` | `short` | `ready_for_prepare` |
+| `strategy-runtime-e6138ad7c88f` | `CPM-001-v0` | `BNB/USDT:USDT` | `long` | `ready_for_prepare` |
+| `strategy-runtime-95655873b76c` | `BTPC-001-v0` | `AVAX/USDT:USDT` | `short` | `waiting_for_signal` |
+
+Latest signed `GET` account-wide refresh:
+
+| Fact Area | Result |
+| --- | --- |
+| Active positions | `active_count=0`, `status=no_active_position` |
+| Open orders | `open_order_count=0`, `status=no_open_orders` |
+| Endpoint errors | `{}` |
+| Safety | `signed_get_only=true`, no exchange write, no OrderLifecycle, no budget mutation |
+
+Local evidence output:
+
+```text
+output/tokyo-account-wide-position-open-order-readonly-refresh-20260614-latest.json
+```
+
+### Current Boundary
+
+`cf48bfa0` is ready for the owner-gated git deploy decision packet. Applying
+that deploy is still a separate deploy-executor action and must use the
+official deploy confirmation phrase and deploy packet path. It must not be
+treated as real runtime submit authorization.
+
+Until Tokyo is moved from c71d8a73 to the reviewed candidate, the mainline
+should not ignore `followup_command_failed:2` to create prepare records.
