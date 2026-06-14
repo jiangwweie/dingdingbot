@@ -146,11 +146,13 @@ def _finalgate_ready_dispatch_packet() -> dict:
 
 
 def _operation_layer_ready_report() -> dict:
+    ids = {
+        key: f"{key}-value"
+        for key in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
+    }
+    ids["authorization_id"] = "auth-ready-1"
     return {
-        "ids": {
-            key: f"{key}-value"
-            for key in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
-        },
+        "ids": ids,
         "blockers": [],
         "warnings": [],
         "steps": [],
@@ -560,6 +562,29 @@ def test_dispatcher_translates_operation_layer_evidence_ready():
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_blocks_stale_operation_layer_authorization_evidence():
+    report = _operation_layer_ready_report()
+    report["ids"]["authorization_id"] = "old-auth-1"
+
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=report,
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+    )
+
+    assert packet["status"] == "operation_layer_blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == "blocked_by_operation_layer_evidence"
+    assert any(
+        blocker.startswith("operation_layer_authorization_id_mismatch:")
+        for blocker in packet["blockers"]
+    )
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
 
 
 def test_dispatcher_tolerates_legacy_local_registration_probe_when_result_exists():

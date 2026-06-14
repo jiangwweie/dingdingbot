@@ -450,6 +450,11 @@ def _operation_layer_readiness(
     ] or list(OPERATION_LAYER_REQUIRED_EVIDENCE_IDS)
     missing_ids = [name for name in required_ids if not _nonempty(ids.get(name))]
     blockers = _operation_layer_blockers(evidence_report, ids=ids)
+    authorization_blockers = _operation_layer_authorization_blockers(
+        ids=ids,
+        command_plan=command_plan,
+    )
+    blockers = _dedupe_text([*blockers, *authorization_blockers])
     warnings = _operation_layer_warnings(evidence_report, ids=ids)
     ready = not missing_ids and not blockers
     return {
@@ -536,6 +541,25 @@ def _operation_layer_blockers(
     ]
 
 
+def _operation_layer_authorization_blockers(
+    *,
+    ids: dict[str, str],
+    command_plan: dict[str, Any],
+) -> list[str]:
+    expected = str(command_plan.get("authorization_id") or "").strip()
+    if not expected:
+        return []
+    actual = str(ids.get("authorization_id") or "").strip()
+    if not actual:
+        return ["operation_layer_authorization_id_missing"]
+    if actual != expected:
+        return [
+            "operation_layer_authorization_id_mismatch:"
+            f"expected={expected}:actual={actual}"
+        ]
+    return []
+
+
 def _operation_layer_warnings(
     evidence_report: dict[str, Any],
     *,
@@ -561,6 +585,8 @@ def _operation_layer_blocker_class(
 ) -> str:
     combined = " ".join([*blockers, *missing_ids]).lower()
     if any(token in combined for token in ("withdraw", "transfer", "bypass")):
+        return "hard_safety_stop"
+    if "authorization_id_mismatch" in combined:
         return "hard_safety_stop"
     if any(token in combined for token in ("duplicate", "idempotency")):
         return "hard_safety_stop"
