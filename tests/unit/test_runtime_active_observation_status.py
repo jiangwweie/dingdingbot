@@ -147,6 +147,63 @@ def test_status_marks_prepare_followup_as_attention(tmp_path):
     )
 
 
+def test_status_exposes_observed_prepare_record_evidence(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "loop-packet.json",
+        {
+            "status": "ready_for_final_gate_preflight",
+            "latest_summary": {
+                "iteration": 1,
+                "active_runtime_count": 1,
+                "monitored_runtime_count": 1,
+                "prepare_records_created": True,
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": True,
+                "recorded_execution_intent_created": True,
+                "submit_authorization_created": True,
+                "protection_plan_created": True,
+                "prepared_authorization_id": "auth-ready-1",
+            },
+            "safety_invariants": {
+                "prepare_records_created": True,
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": True,
+                "recorded_execution_intent_created": True,
+                "submit_authorization_created": True,
+                "protection_plan_created": True,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert packet["status"] == "attention"
+    assert packet["latest_status"] == "ready_for_final_gate_preflight"
+    assert packet["prepared_authorization_id"] == "auth-ready-1"
+    assert packet["allowed_prepare_record_effects"] == [
+        "prepare_records_created",
+        "shadow_candidate_created",
+        "runtime_execution_intent_draft_created",
+        "recorded_execution_intent_created",
+        "submit_authorization_created",
+        "protection_plan_created",
+    ]
+    safety = packet["safety_invariants"]
+    assert safety["read_packets_only"] is True
+    assert safety["creates_prepare_records"] is False
+    assert safety["observed_prepare_records_created"] is True
+    assert safety["observed_shadow_candidate_created"] is True
+    assert safety["observed_runtime_execution_intent_draft_created"] is True
+    assert safety["observed_recorded_execution_intent_created"] is True
+    assert safety["observed_submit_authorization_created"] is True
+    assert safety["observed_protection_plan_created"] is True
+    assert safety["places_order"] is False
+
+
 def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
     root = tmp_path / "obs"
     _write_json(

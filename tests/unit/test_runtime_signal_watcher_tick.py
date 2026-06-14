@@ -399,9 +399,27 @@ def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_re
     assert packet["operator_command_plan"]["next_step"] == (
         "run_official_action_time_final_gate_preflight"
     )
+    assert packet["operator_command_plan"]["creates_prepare_records"] is True
     assert packet["operator_command_plan"]["creates_shadow_candidate"] is True
     assert packet["operator_command_plan"]["places_order"] is False
     assert packet["operator_command_plan"]["calls_order_lifecycle"] is False
+    assert packet["safety_invariants"]["post_signal_auto_resume_decision_only"] is False
+    assert packet["safety_invariants"]["prepare_records_created"] is True
+    assert packet["safety_invariants"]["shadow_candidate_created"] is True
+    assert packet["safety_invariants"][
+        "runtime_execution_intent_draft_created"
+    ] is True
+    assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
+    assert packet["safety_invariants"]["submit_authorization_created"] is True
+    assert packet["safety_invariants"]["protection_plan_created"] is True
+    assert packet["safety_invariants"]["allowed_prepare_record_effects"] == [
+        "prepare_records_created",
+        "shadow_candidate_created",
+        "runtime_execution_intent_draft_created",
+        "recorded_execution_intent_created",
+        "submit_authorization_created",
+        "protection_plan_created",
+    ]
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
 

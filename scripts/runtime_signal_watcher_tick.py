@@ -486,6 +486,27 @@ def build_watcher_tick_packet(
         operator_packet=operator_packet,
         wakeup_packet=wakeup_packet,
     )
+    status_safety = status_packet.get("safety_invariants")
+    if not isinstance(status_safety, dict):
+        status_safety = {}
+    observed_prepare_records_created = bool(
+        status_safety.get("observed_prepare_records_created")
+    )
+    observed_shadow_candidate_created = bool(
+        status_safety.get("observed_shadow_candidate_created")
+    )
+    observed_runtime_execution_intent_draft_created = bool(
+        status_safety.get("observed_runtime_execution_intent_draft_created")
+    )
+    observed_recorded_execution_intent_created = bool(
+        status_safety.get("observed_recorded_execution_intent_created")
+    )
+    observed_submit_authorization_created = bool(
+        status_safety.get("observed_submit_authorization_created")
+    )
+    observed_protection_plan_created = bool(
+        status_safety.get("observed_protection_plan_created")
+    )
 
     event_key = _event_key(
         status_packet=status_packet,
@@ -586,7 +607,9 @@ def build_watcher_tick_packet(
             "can_continue_without_owner_chat": bool(
                 auto_resume.get("can_continue_without_owner_chat")
             ),
-            "creates_shadow_candidate": bool(auto_resume.get("creates_shadow_candidate")),
+            "creates_prepare_records": observed_prepare_records_created,
+            "creates_shadow_candidate": observed_shadow_candidate_created
+            or bool(auto_resume.get("creates_shadow_candidate")),
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -603,7 +626,20 @@ def build_watcher_tick_packet(
             "uses_existing_active_observation_loop": True,
             "allow_prepare_records": bool(args.allow_prepare_records),
             "feishu_notification_only": True,
-            "post_signal_auto_resume_decision_only": True,
+            "post_signal_auto_resume_decision_only": not observed_prepare_records_created,
+            "prepare_records_created": observed_prepare_records_created,
+            "shadow_candidate_created": observed_shadow_candidate_created,
+            "runtime_execution_intent_draft_created": (
+                observed_runtime_execution_intent_draft_created
+            ),
+            "recorded_execution_intent_created": (
+                observed_recorded_execution_intent_created
+            ),
+            "submit_authorization_created": observed_submit_authorization_created,
+            "protection_plan_created": observed_protection_plan_created,
+            "allowed_prepare_record_effects": list(
+                status_packet.get("allowed_prepare_record_effects") or []
+            ),
             "real_submit_requested": False,
             "exchange_order_requested": False,
             "exchange_write_called": False,
