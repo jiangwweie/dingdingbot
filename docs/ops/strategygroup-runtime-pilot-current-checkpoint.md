@@ -16,7 +16,7 @@ Workspace and branch:
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/strategygroup-runtime-pilot` |
-| Current code head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
+| Last deployed code head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
 | Current release | `brc-runtime-governance-a9b06583-20260615-postdeploy-baseline` |
 | Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-a9b06583-20260615-postdeploy-baseline` |
 
@@ -38,6 +38,7 @@ Useful content now carried in the pilot branch:
 | Repo-local MPG pilot handoff | Present in `docs/current/strategy-group-handoffs/MPG-001/handoff.json` |
 | Owner-readable live-facts readiness state | Present in `scripts/build_strategy_group_live_facts_readiness_packet.py` |
 | Candidate prerequisite derivation | Present in `scripts/collect_strategy_group_live_facts_readonly.py` |
+| Real submit chat-confirmation blocker removal | Present in `src/domain/runtime_official_submit_handoff.py` and related handoff scripts |
 
 ## Tokyo Deployment
 
@@ -136,15 +137,30 @@ It will then emit an official GET command plan for:
 /api/trading-console/runtime-execution-controlled-submit-preflights/authorizations/{prepared_authorization_id}
 ```
 
-It will still not call Operation Layer or submit an order.
-
 With `--execute-preflight`, the dispatcher calls the official GET endpoint only
 when the resume pack is `ready_for_action_time_final_gate`. If the preflight
-passes, the dispatch packet moves to `finalgate_ready` and exposes the next
-checkpoint as `prepare_official_operation_layer_submit`. If the preflight
-blocks, it writes Owner-readable `blocked_at`, `blocked_reason`,
+passes, the dispatch packet moves to `finalgate_ready`, exits successfully, and
+exposes the next checkpoint as `prepare_official_operation_layer_submit` with
+the official endpoint:
+
+```text
+/api/trading-console/runtime-execution-first-real-submit-actions/authorizations/{prepared_authorization_id}
+```
+
+The plan requires concrete evidence ids for trusted submit facts, idempotency,
+attempt outcome policy, protection failure policy, local registration,
+Owner/runtime grant, OrderLifecycle submit enablement, exchange submit adapter
+enablement, exchange submit action authorization, and deployment readiness
+before the official real gateway action may run.
+
+If the preflight blocks, it writes Owner-readable `blocked_at`, `blocked_reason`,
 `next_recover_condition`, `automatic_recovery_action`, and `downgrade_mode`.
 Waiting-market packets do not call the endpoint.
+
+The dispatcher still does not call Operation Layer or submit an order by
+default. It records the official next checkpoint so later automation can
+continue only after the evidence ids are present and the official endpoint path
+is used.
 
 ## StrategyGroup Pilot Handoff
 
@@ -232,6 +248,26 @@ The following stages remain unreached because no fresh signal is present:
 - official Operation Layer gateway action;
 - post-submit finalize / reconciliation / budget settlement.
 
+## Standing Authorization Cleanup
+
+The old `owner_real_submit_action_confirmation_missing` blocker is no longer a
+valid blocker for in-boundary `real_gateway_action` handoff during this
+development-stage pilot. `RuntimeOfficialSubmitHandoff` now records standing
+authorization metadata and produces
+`owner_confirmed_for_first_real_submit_action=true` for real gateway handoff
+plans after readiness passes.
+
+This does not allow:
+
+- FinalGate bypass;
+- Operation Layer bypass;
+- missing evidence ids;
+- stale facts;
+- missing protection;
+- duplicate submit risk;
+- unauditable exchange write;
+- withdrawal or transfer.
+
 ## Verification
 
 Local verification:
@@ -246,6 +282,20 @@ Result:
 
 ```text
 115 passed
+```
+
+Latest focused local verification after the standing-authorization handoff and
+dispatcher next-checkpoint cleanup:
+
+```text
+/opt/homebrew/bin/pytest tests/unit/test_runtime_official_submit_handoff.py tests/unit/test_runtime_official_submit_handoff_service_api.py tests/unit/test_runtime_official_submit_handoff_from_readiness.py tests/unit/test_runtime_official_submit_handoff_api_flow.py tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_fresh_signal_readiness_bridge.py tests/unit/test_runtime_full_next_attempt_submit_cycle.py tests/unit/test_runtime_cycle_executable_submit_handoff.py -q
+git diff --check
+```
+
+Result:
+
+```text
+43 passed
 ```
 
 Tokyo verification:

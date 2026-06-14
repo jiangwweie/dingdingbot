@@ -106,6 +106,38 @@ def test_script_builds_ready_handoff_report(tmp_path):
     assert report["safety_invariants"]["exchange_called"] is False
 
 
+def test_script_real_gateway_handoff_defaults_to_standing_authorization(tmp_path):
+    readiness_path = _write_json(tmp_path / "readiness.json", _readiness_payload())
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--readiness-json",
+            str(readiness_path),
+            "--fresh-submit-authorization-id",
+            "fresh-auth-1",
+            "--mode",
+            "real_gateway_action",
+            "--now-ms",
+            "1765000000001",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["packet"]["status"] == "ready_for_official_submit_call"
+    assert report["packet"]["official_query"][
+        "owner_confirmed_for_first_real_submit_action"
+    ] is True
+    assert "owner_real_submit_action_confirmation_missing" not in (
+        report["packet"]["blockers"]
+    )
+
+
 def test_script_blocks_consumed_authorization_reuse(tmp_path):
     readiness_path = _write_json(tmp_path / "readiness.json", _readiness_payload())
 

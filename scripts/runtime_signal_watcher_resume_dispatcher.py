@@ -4,8 +4,10 @@
 The default mode consumes post-signal-resume-pack.json and writes an
 Owner/agent-readable dispatch packet without calling the API. With
 ``--execute-preflight`` it may call the official action-time FinalGate preflight
-GET endpoint and persist that preflight result. It never calls Operation Layer,
-OrderLifecycle, exchange APIs, or order-submit endpoints.
+GET endpoint and persist that preflight result. When FinalGate passes, it writes
+the official Operation Layer submit endpoint plan for the next checkpoint. It
+never calls Operation Layer, OrderLifecycle, exchange APIs, or order-submit
+endpoints.
 """
 
 from __future__ import annotations
@@ -544,10 +546,28 @@ def _execute_finalgate_preflight(
         "status": "pending_required_submit_evidence",
         "next_action": OPERATION_LAYER_ACTION,
         "authorization_id": packet["command_plan"]["prepared_authorization_id"],
+        "official_endpoint_method": "POST",
+        "official_endpoint_path": (
+            "/api/trading-console/"
+            "runtime-execution-first-real-submit-actions/authorizations/"
+            f"{packet['command_plan']['prepared_authorization_id']}"
+        ),
+        "official_query_mode": "real_gateway_action_after_required_evidence",
+        "owner_confirmed_for_first_real_submit_action": True,
         "requires_official_operation_layer": True,
-        "requires_exchange_submit_enablement_evidence": True,
-        "requires_action_authorization_evidence": True,
-        "requires_idempotency_and_protection_evidence": True,
+        "requires_standing_authorization": True,
+        "requires_evidence_ids": [
+            "trusted_submit_fact_snapshot_id",
+            "submit_idempotency_policy_id",
+            "attempt_outcome_policy_id",
+            "protection_creation_failure_policy_id",
+            "local_registration_enablement_decision_id",
+            "owner_real_submit_authorization_id",
+            "order_lifecycle_submit_enablement_id",
+            "exchange_submit_adapter_enablement_id",
+            "exchange_submit_action_authorization_id",
+            "deployment_readiness_evidence_id",
+        ],
         "places_order": False,
         "exchange_write_called": False,
         "order_lifecycle_called": False,
@@ -701,7 +721,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     _write_json(Path(args.output_json).expanduser(), packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] in {WAITING_STATUS, READY_STATUS, "blocked"} else 2
+    return 0 if packet["status"] in {
+        WAITING_STATUS,
+        READY_STATUS,
+        "finalgate_ready",
+        "blocked",
+    } else 2
 
 
 if __name__ == "__main__":

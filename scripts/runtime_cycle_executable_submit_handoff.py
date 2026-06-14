@@ -331,7 +331,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         choices=("disabled_smoke", "real_gateway_action"),
         default="disabled_smoke",
     )
-    parser.add_argument("--owner-confirmed-for-real-submit-action", action="store_true")
+    parser.add_argument(
+        "--owner-confirmed-for-real-submit-action",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Standing authorization flag for real_gateway_action handoff "
+            "(default: true)."
+        ),
+    )
     parser.add_argument("--readiness-warning", action="append")
     parser.add_argument("--readiness-blocker", action="append")
     parser.add_argument("--handoff-warning", action="append")

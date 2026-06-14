@@ -104,7 +104,7 @@ def test_blocks_when_readiness_is_not_ready():
     assert any(item.startswith("readiness:") for item in handoff.blockers)
 
 
-def test_real_gateway_handoff_requires_owner_confirmation():
+def test_real_gateway_handoff_uses_standing_authorization_without_chat_confirmation():
     handoff = build_runtime_official_submit_handoff_packet(
         readiness_packet=_readiness(),
         fresh_submit_authorization_id="fresh-auth-1",
@@ -113,8 +113,16 @@ def test_real_gateway_handoff_requires_owner_confirmation():
         now_ms=1,
     )
 
-    assert handoff.status == RuntimeOfficialSubmitHandoffStatus.BLOCKED
-    assert "owner_real_submit_action_confirmation_missing" in handoff.blockers
+    assert handoff.status == (
+        RuntimeOfficialSubmitHandoffStatus.READY_FOR_OFFICIAL_SUBMIT_CALL
+    )
+    assert handoff.official_query[
+        "owner_confirmed_for_first_real_submit_action"
+    ] is True
+    assert "owner_real_submit_action_confirmation_missing" not in handoff.blockers
+    assert handoff.metadata["standing_authorization_reference"].startswith(
+        "owner-standing-authorization:"
+    )
 
 
 def test_real_gateway_handoff_can_be_ready_with_confirmation():

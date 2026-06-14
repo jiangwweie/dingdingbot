@@ -143,6 +143,20 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
     )
     assert packet["finalgate_preflight_result"]["called"] is True
     assert packet["operation_layer_command_plan"]["places_order"] is False
+    assert packet["operation_layer_command_plan"]["official_endpoint_method"] == "POST"
+    assert packet["operation_layer_command_plan"]["official_endpoint_path"] == (
+        "/api/trading-console/"
+        "runtime-execution-first-real-submit-actions/authorizations/auth-ready-1"
+    )
+    assert (
+        packet["operation_layer_command_plan"][
+            "owner_confirmed_for_first_real_submit_action"
+        ]
+        is True
+    )
+    assert "exchange_submit_action_authorization_id" in (
+        packet["operation_layer_command_plan"]["requires_evidence_ids"]
+    )
     assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
@@ -313,3 +327,50 @@ def test_dispatcher_cli_writes_packet(tmp_path):
     packet = json.loads(output_path.read_text(encoding="utf-8"))
     assert packet["status"] == "waiting_for_market"
     assert packet["dispatch_action"] == "continue_watcher_observation"
+
+
+def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "pass",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+    resume_path = tmp_path / "post-signal-resume-pack.json"
+    output_path = tmp_path / "resume-dispatch-packet.json"
+    resume_path.write_text(
+        json.dumps(_resume_pack("ready_for_action_time_final_gate")),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "--resume-pack-json",
+            str(resume_path),
+            "--output-json",
+            str(output_path),
+            "--execute-preflight",
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["status"] == "finalgate_ready"
