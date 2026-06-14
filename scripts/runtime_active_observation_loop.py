@@ -56,6 +56,9 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         "status": str(packet.get("status") or "unknown"),
         "active_runtime_count": packet.get("active_runtime_count"),
         "monitored_runtime_count": packet.get("monitored_runtime_count"),
+        "selected_runtime_instance_ids": list(
+            packet.get("selected_runtime_instance_ids") or []
+        ),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
         "runtime_execution_intent_draft_created": bool(

@@ -59,6 +59,7 @@ def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=
         "status": status,
         "active_runtime_count": 2,
         "monitored_runtime_count": 2,
+        "selected_runtime_instance_ids": ["runtime-1", "runtime-2"],
         "blockers": (
             ["strategy_signal_not_ready_for_shadow_candidate_prepare"]
             if status == "waiting_for_signal"
@@ -135,6 +136,7 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
 
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
     assert latest["status"] == "waiting_for_signal"
+    assert latest["selected_runtime_instance_ids"] == ["runtime-1", "runtime-2"]
     assert latest["runtime_signal_summaries"][0]["signal_summary"]["reason_codes"] == [
         "cpm_no_action_trend_ambiguous"
     ]
