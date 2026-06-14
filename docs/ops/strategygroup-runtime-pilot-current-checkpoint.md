@@ -7,8 +7,8 @@ Status: CURRENT_CHECKPOINT
 
 This checkpoint records the active StrategyGroup runtime pilot state after
 selective watch-branch intake, watcher resume dispatcher implementation,
-repo-local MPG pilot handoff, Tokyo deploy, and postdeploy live-readonly
-verification.
+repo-local MPG pilot handoff, candidate prerequisite derivation, Tokyo deploy,
+and postdeploy live-readonly verification.
 
 Workspace and branch:
 
@@ -16,9 +16,9 @@ Workspace and branch:
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/strategygroup-runtime-pilot` |
-| Current code head | `4589578a4aed4ac63d8cbf8f90a0bc06e98e7431` |
-| Current release | `brc-runtime-governance-4589578a-20260615-livefacts-owner-state` |
-| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-4589578a-20260615-livefacts-owner-state` |
+| Current code head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
+| Current release | `brc-runtime-governance-a9b06583-20260615-postdeploy-baseline` |
+| Tokyo release path | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-a9b06583-20260615-postdeploy-baseline` |
 
 ## Watch Branch Intake
 
@@ -37,6 +37,7 @@ Useful content now carried in the pilot branch:
 | Action-time FinalGate preflight auto-call | Present behind dispatcher `--execute-preflight`; waiting-market state does not call it |
 | Repo-local MPG pilot handoff | Present in `docs/current/strategy-group-handoffs/MPG-001/handoff.json` |
 | Owner-readable live-facts readiness state | Present in `scripts/build_strategy_group_live_facts_readiness_packet.py` |
+| Candidate prerequisite derivation | Present in `scripts/collect_strategy_group_live_facts_readonly.py` |
 
 ## Tokyo Deployment
 
@@ -44,11 +45,11 @@ Deployment status:
 
 | Field | Value |
 | --- | --- |
-| Previous deployed head | `f4cb22fb20db1c282b86aea5b4e1d713f108e3b2` |
-| Deployed head | `4589578a4aed4ac63d8cbf8f90a0bc06e98e7431` |
+| Previous deployed head | `9316dc1e1852623b5eb121f13e6f513e4db1ecc5` |
+| Deployed head | `a9b065836b3dd8606f42039fdfe14846c0646376` |
 | Deploy apply status | `applied` |
 | Commands executed | `16` |
-| Postdeploy acceptance | `postdeploy_acceptance_passed` |
+| Postdeploy acceptance | `postdeploy_acceptance_ready` |
 | Backend service | `active` |
 | Watcher timer | `active` |
 | Migration count | `84` |
@@ -71,9 +72,10 @@ Deploy effects:
 Local deploy evidence:
 
 ```text
-output/strategygroup-runtime-pilot/deploy-4589578a/git-deploy-dry-run.json
-output/strategygroup-runtime-pilot/deploy-4589578a/git-deploy-apply-report.json
-output/strategygroup-runtime-pilot/deploy-4589578a/postdeploy-acceptance.json
+output/strategygroup-runtime-pilot/deploy-9316dc1e/git-deploy-apply-report.json
+output/strategygroup-runtime-pilot/deploy-9316dc1e/postdeploy-acceptance-packet.json
+output/strategygroup-runtime-pilot/deploy-a9b06583/git-deploy-apply-report.json
+output/strategygroup-runtime-pilot/deploy-a9b06583/postdeploy-acceptance-packet.json
 ```
 
 ## Watcher / Resume Dispatcher
@@ -166,8 +168,8 @@ Current pilot scope:
 Tokyo can now build:
 
 ```text
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-handoff-intake.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-readonly.json
+/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-handoff-intake-packet.json
+/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts.json
 /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-readiness.json
 ```
 
@@ -184,6 +186,9 @@ Postdeploy account-wide signed GET-only facts:
 | Pilot exchange rules | `COINUSDT`, `INTCUSDT`, `MSTRUSDT` all `TRADING` |
 | Active positions | `0` |
 | Open orders | `0` |
+| Tiny budget prerequisite | `available_for_candidate_specific_reservation` |
+| Protection prerequisite | `ready_for_candidate_specific_plan` |
+| Next-attempt gate | `ready_for_strategy_signal` |
 | Signed GET only | `true` |
 | Exchange write called | `false` |
 | Order created | `false` |
@@ -208,13 +213,13 @@ observing
 Current live-facts readiness:
 
 ```text
-strategy_group_observe_ready_armed_blocked
+strategy_group_live_facts_ready_for_armed_observation
 -> can_continue_observation=true
--> can_prepare_fresh_candidate=false
--> blocked_at=candidate_prepare_facts
--> blocked_reason=MPG-001:budget:missing, MPG-001:next_attempt_gate:missing, MPG-001:protection:missing
--> automatic_recovery_action=continue_observation_and_prepare_candidate_prerequisite_facts
--> downgrade_mode=observe_only_until_candidate_prerequisites_ready
+-> can_prepare_fresh_candidate=true
+-> blocked_at=none
+-> blocked_reason=none
+-> next_recover_condition=fresh_strategy_signal_arrives
+-> automatic_recovery_action=continue_watcher_observation
 ```
 
 ## Not Yet Reached
@@ -233,26 +238,29 @@ Local verification:
 
 ```text
 python3 -m py_compile scripts/runtime_signal_watcher_resume_dispatcher.py scripts/build_runtime_signal_watcher_readiness_pack.py src/application/runtime_execution_intent_adapter_service.py src/interfaces/api_trading_console.py scripts/build_strategy_group_handoff_intake_packet.py scripts/collect_strategy_group_live_facts_readonly.py scripts/build_strategy_group_live_facts_readiness_packet.py
-/opt/homebrew/bin/pytest tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_signal_watcher_readiness_pack.py tests/unit/test_runtime_signal_watcher_tick.py tests/unit/test_strategygroup_runtime_pilot_status.py tests/unit/test_trading_console_readmodels.py tests/unit/test_strategy_group_handoff_intake_packet.py tests/unit/test_strategy_group_live_facts_readiness_packet.py -q
+/opt/homebrew/bin/pytest tests/unit/test_collect_strategy_group_live_facts_readonly.py tests/unit/test_strategy_group_live_facts_readiness_packet.py tests/unit/test_runtime_signal_watcher_resume_dispatcher.py tests/unit/test_runtime_signal_watcher_tick.py tests/unit/test_strategygroup_runtime_pilot_status.py tests/unit/test_trading_console_readmodels.py tests/unit/test_tokyo_runtime_governance_postdeploy_verify.py tests/unit/test_tokyo_runtime_governance_postdeploy_acceptance_packet.py tests/unit/test_tokyo_runtime_governance_readonly_probe.py tests/unit/test_tokyo_runtime_governance_git_deploy.py -q
 git diff --check
 ```
 
 Result:
 
 ```text
-94 passed
+115 passed
 ```
 
 Tokyo verification:
 
 ```text
 deploy_apply=applied
-postdeploy_acceptance=postdeploy_acceptance_passed
-watcher_service_result=success
+postdeploy_acceptance=postdeploy_acceptance_ready
+current_release=brc-runtime-governance-a9b06583-20260615-postdeploy-baseline
 resume_dispatch_status=waiting_for_market
 account_can_trade=true
 strategy_group_intake=ready_for_main_control_intake
-live_facts_readiness=strategy_group_observe_ready_armed_blocked
+live_facts_readiness=strategy_group_live_facts_ready_for_armed_observation
 active_positions=0
 open_orders=0
+budget=available_for_candidate_specific_reservation
+protection=ready_for_candidate_specific_plan
+next_attempt_gate=ready_for_strategy_signal
 ```
