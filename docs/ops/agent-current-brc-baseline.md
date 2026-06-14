@@ -1,6 +1,6 @@
 # Agent Current BRC Baseline
 
-Last updated: 2026-06-12
+Last updated: 2026-06-14
 Status: CURRENT_AGENT_BASELINE
 
 This file is the current agent-facing baseline for Codex, Claude, skills,
@@ -10,12 +10,24 @@ passive dashboard, or permanently barred from execution/testnet paths.
 
 Primary product-model canon:
 
+- `docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md`
 - `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
 
 ## Project Objective
 
 The project is a BRC productized bounded-live operations system for fast
 small-capital trial-and-review Campaigns.
+
+The active StrategyGroup runtime pilot objective is:
+
+```text
+Owner selects StrategyGroup
+-> runtime admission / rejection is explained
+-> watcher observes market automatically
+-> fresh signal prepares candidate
+-> FinalGate + Operation Layer decide action-time execution
+-> post-submit finalize, reconciliation, budget settlement, and review close the loop
+```
 
 It is not:
 
@@ -71,10 +83,19 @@ because it touches controlled execution-readiness surfaces:
 - testnet order rehearsal;
 - testnet/dev/profile-scoped cleanup, reset, or repair;
 - architecture governance.
+- active-stage deploy apply with deploy packet / manifest evidence;
+- StrategyGroup watcher operation;
+- bounded development-stage archive / cleanup;
+- official in-boundary real order action after action-time FinalGate and
+  Operation Layer checks pass.
 
 This does not authorize withdrawals, transfers, credential changes, Operation
 Layer bypasses, unauditable exchange writes, stale-fact execution, missing
 protection, duplicate-submit risk, or runtime-boundary expansion.
+
+Do not use older planning docs to require a fresh chat phrase for each deploy
+or each official in-boundary real order. The current standing authorization is
+bounded by the runtime path, action-time facts, and hard safety stops.
 
 ## Gate Behavior
 
@@ -88,6 +109,10 @@ Classify blockers before stopping:
 | strategy evidence weakness | disclose as warning/evidence; do not hard-block after Owner acknowledgement |
 | incomplete observation | disclose as warning/evidence; do not hard-block after Owner acknowledgement |
 | UI/report incompleteness | fix or record as acceptance gap; do not treat as execution safety blocker |
+
+Every blocker report should expose the recovery class: `waiting_for_market`,
+`missing_fact`, `deployment_issue`, `active_position_resolution`,
+`hard_safety_stop`, or `review_only_warning`.
 
 ## Hard Blockers
 

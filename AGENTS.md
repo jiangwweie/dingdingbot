@@ -1,6 +1,6 @@
 # AGENTS.md - Dingdingbot Agent Operating Guide
 
-Last updated: 2026-06-12
+Last updated: 2026-06-14
 Current phase: BRC strategy runtime governance convergence
 
 ## Current Document Authority
@@ -23,6 +23,9 @@ decision or code change supersedes it.
 Current project baseline starts from:
 `docs/canon/PROJECT_BASELINE_CURRENT.md`
 
+Current active pilot overlay starts from:
+`docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md`
+
 Current agent execution baseline starts from:
 `docs/ops/agent-current-brc-baseline.md`
 
@@ -42,6 +45,10 @@ valuable historical short path, not the final target architecture.
 
 Do not use docs/ops/ historical documents as current fact source when a
 canon file exists. Do not use docs/archive/ as current instructions.
+Historical documents must not reintroduce per-deploy chat confirmation,
+per-order chat confirmation inside the official runtime path, or
+evidence-packet-as-Owner-interface workflows when the current canon overlay
+authorizes a bounded pilot path.
 
 ## Operating Model
 
@@ -59,6 +66,7 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 
 **Current canon (start here)**:
 
+- `docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md`
 - `docs/canon/PROJECT_BASELINE_CURRENT.md`
 - `docs/canon/BRC_TARGET_SEMANTICS.md`
 - `docs/canon/STRATEGY_RUNTIME_GUIDE.md`
@@ -75,7 +83,7 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 - `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
 - `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
 
-**Operational context (still valid)**:
+**Operational context (historical / supporting only)**:
 
 - `docs/ops/project-roadmap-v2.md`
 - `docs/ops/live-safe-v1-program.md`
@@ -86,6 +94,11 @@ System goals must be framed as capabilities, not fixed performance promises. Ann
 - `docs/ops/codex-claude-handoff-template.md`
 - `docs/adr/0001-live-safe-v1-scope.md`
 
+These files may provide background or evidence, but they must not override the
+current canon overlay or create new Owner-confirmation blockers for deploy
+apply, StrategyGroup observation, watcher operation, or official in-boundary
+runtime actions.
+
 Archived pre-reset material lives under:
 
 - `archive/2026-04-29-pre-live-safe-replan/`
@@ -94,6 +107,11 @@ Archived pre-reset material lives under:
 
 The current target is an Owner-facing productized bounded-live trading
 operations system converging on strategy runtime governance.
+
+The active pilot target is simpler and more operational: the Owner selects a
+StrategyGroup, the system turns it into an observable bounded runtime, the
+watcher monitors market state, fresh signals produce candidates, and only the
+official FinalGate + Operation Layer path can approach funds.
 
 Do not interpret Trading Console or Owner Console as merely:
 
@@ -181,14 +199,19 @@ Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Only c
 
 ## Red Lines
 
-1. New meaningful requirements need exploration, architecture options when appropriate, and user confirmation before implementation.
+1. New meaningful requirements need exploration and architecture options when
+   appropriate. Do not treat already accepted pilot scope, deploy apply inside
+   the active stage, bounded cleanup, watcher operation, or official
+   in-boundary runtime actions as new requirements that need fresh chat
+   confirmation.
 2. Task decomposition must identify dependencies and possible parallel work, but execution-chain core files must not be modified concurrently by multiple agents.
 3. Long or expensive tests require user confirmation before running.
 4. P0 Live-safe work must not optimize strategy returns or tune ETH Pinbar parameters.
 5. Live runtime profile, live trading config, exchange credentials, and
-   real-funds order-sizing default changes require explicit user approval and a
-   separate task. Testnet/dev/profile-scoped cleanup/reset/repair can proceed
-   within the active task boundary after scoped verification.
+   real-funds order-sizing default expansions require explicit user approval
+   and a separate task. Applying an already scoped pilot deployment, collecting
+   live read-only facts, or executing an official in-boundary action after
+   action-time gates pass is not a default chat-confirmation blocker.
 6. Claude may implement only from a task card with `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
 7. Do not hard-code fixed return or drawdown targets into system constraints, task cards, runtime rules, or agent instructions.
 8. Claude subtasks must stay small: one primary outcome, small file surface, low architecture coupling, and clear acceptance.

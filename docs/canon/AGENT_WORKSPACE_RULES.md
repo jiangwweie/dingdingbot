@@ -1,8 +1,8 @@
 ---
 title: AGENT_WORKSPACE_RULES
 status: CURRENT_CANON
-authority: owner-instruction + code-verification + owner-workspace-correction-2026-06-13
-last_verified: 2026-06-13
+authority: owner-instruction + code-verification + owner-workspace-correction-2026-06-13 + strategygroup-runtime-pilot-correction-2026-06-14
+last_verified: 2026-06-14
 source_of_truth:
   - CLAUDE.md
   - AGENTS.md
@@ -10,6 +10,7 @@ source_of_truth:
   - docs/ops/codex-claude-handoff-template.md
   - owner semantic audit 2026-06-09
   - owner workspace / long-goal authorization 2026-06-13
+  - docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md
 ---
 
 # Agent Workspace Rules
@@ -23,11 +24,13 @@ This document defines agent operating rules for the BRC project.
 Agent must read these files before starting project work, in order:
 
 1. `AGENTS.md` / `CLAUDE.md` — root entry points and role definitions
-2. `docs/canon/PROJECT_BASELINE_CURRENT.md` — current project reality
-3. `docs/canon/BRC_TARGET_SEMANTICS.md` — target semantics and node status
-4. `docs/canon/RUNTIME_SAFETY_BOUNDARY.md` — execution safety boundaries
-5. `docs/canon/TECH_DEBT_BASELINE.md` — known debt classification
-6. `docs/canon/DOCUMENT_GOVERNANCE.md` — document authority and trust rules
+2. `docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md` — active pilot
+   objective, standing authorizations, and liveness-preserving gate behavior
+3. `docs/canon/PROJECT_BASELINE_CURRENT.md` — current project reality
+4. `docs/canon/BRC_TARGET_SEMANTICS.md` — target semantics and node status
+5. `docs/canon/RUNTIME_SAFETY_BOUNDARY.md` — execution safety boundaries
+6. `docs/canon/TECH_DEBT_BASELINE.md` — known debt classification
+7. `docs/canon/DOCUMENT_GOVERNANCE.md` — document authority and trust rules
 
 Then read the specific task card and any referenced ADRs.
 
@@ -56,6 +59,9 @@ Then read the specific task card and any referenced ADRs.
 - Do not promote readmodel / metadata chain into execution chain.
 - Do not treat one-shot execution as final architecture.
 - Do not treat StrategyRuntimeInstance as execution authority by itself.
+- Do not convert deploy apply, watcher operation, StrategyGroup observation, or
+  official in-boundary runtime actions into new chat-confirmation blockers when
+  the active pilot overlay already authorizes them.
 
 ---
 
@@ -117,6 +123,32 @@ P0/P1/P2 runtime-governance continuation:
    compatibility preservation. It does not mean broad deletion or evidence
    disposal.
 
+## 2.1.2 StrategyGroup Runtime Pilot Authorization Baseline
+
+Owner corrected the active pilot baseline on 2026-06-14:
+
+1. The current product goal is StrategyGroup selection -> observable bounded
+   runtime -> automatic market watch -> fresh signal -> candidate -> FinalGate
+   -> Operation Layer -> finalize / reconcile / review.
+2. Deploy apply for the active pilot stage is standing-authorized when the
+   deployment packet / manifest is generated or verified and the boundary is
+   reported. It must not wait for a new chat phrase merely because it is a
+   deploy.
+3. Real order placement inside the official auditable runtime / Operation Layer
+   path is standing-authorized when current action-time gates pass. It must not
+   wait for a new chat phrase merely because the order uses real funds.
+4. Evidence packets are audit artifacts. The Owner-facing interface must
+   summarize current state, blockers, next automatic recovery / waiting
+   condition, and whether a blocker is market wait, missing fact, deployment
+   issue, active-position resolution, hard safety stop, or review-only warning.
+5. Development-stage cleanup may archive, compress, reset, or remove stale
+   development artifacts when scoped. It must not delete secrets or active
+   safety evidence required for current reconciliation.
+6. Strategy evidence weakness, low samples, or incomplete forward review are
+   warnings after Owner acceptance of small-capital right-tail experimentation.
+   They do not block StrategyGroup observation or bounded pilot wiring by
+   themselves.
+
 ## 2.2 Execution-Chain Stage Discipline
 
 Runtime and execution-chain work must use a local-first verification cadence:
@@ -173,7 +205,10 @@ Agent must stop and report if it needs files outside Allowed files.
 - No treating StrategyRuntimeInstance as execution authority by itself.
 - No treating one-shot execution as final architecture.
 - No using docs/archive or docs/ops/ historical docs as current fact source.
-- No running project without explicit instruction.
+- No running unrelated production services or unaudited exchange actions
+  outside the active task. Active pilot watcher, deploy, read-only fact
+  validation, and official in-boundary runtime actions follow the standing
+  authorization baseline.
 - No modifying files outside task scope.
 - No optimizing strategy returns or tuning strategy parameters.
 - No hard-coding return or drawdown targets as system constraints.
