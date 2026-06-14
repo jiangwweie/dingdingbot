@@ -465,6 +465,9 @@ output/tokyo-owner-deploy-decision-5ceedb06-fullsha.json
 | Git deploy dry-run ready | `true` |
 | Tokyo readonly probe ready | `true` |
 
-This is the current deploy-ready checkpoint. Deploy apply remains separate from
-this packet-build step and must still go through the owner-gated git deploy
-executor with the generated packet path and confirmation phrase.
+This packet proved that the deployment path becomes ready when the target
+commit exactly matches the remote branch head. Any later documentation-only
+commit advances the remote branch head and therefore requires regenerating the
+deploy decision packet for the new full SHA before deploy apply. Deploy apply
+remains separate from packet-build and must still go through the owner-gated
+git deploy executor with the generated packet path and confirmation phrase.
