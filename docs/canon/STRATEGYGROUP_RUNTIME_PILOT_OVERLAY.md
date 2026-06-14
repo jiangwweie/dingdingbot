@@ -189,6 +189,7 @@ The current pilot implementation surface is:
 | Resume-pack propagation | `scripts/build_runtime_signal_watcher_readiness_pack.py` field `post_signal_auto_resume` | Carry the watcher decision into `post-signal-resume-pack.json` so follow-up automation can resume without reading raw tick packets |
 | Trading Console API | `GET /api/trading-console/strategygroup-runtime-pilot-status` | Expose `blocked_at`, `blocked_reason`, `next_recover_condition`, `automatic_recovery_action`, `downgrade_mode`, `dual_freshness`, and `gate_failure_ledger` |
 | Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, auto-resume status, dual freshness, gate ledger, candidate state, FinalGate / Operation Layer status |
+| Runtime bridge check | `runtime_bridge` in the pilot status packet | Prove the selected StrategyGroup has a semantics binding and evaluator route before the watcher is treated as valid observation |
 
 Selected useful content from `codex/runtime-signal-watcher-feishu` is allowed
 inside this branch only when it preserves this overlay. The Feishu watcher,
@@ -223,6 +224,7 @@ The pilot status packet must distinguish:
 | Field | Meaning | Current no-signal expectation |
 | --- | --- | --- |
 | `watcher_scope_alignment` | Whether the active watcher is actually monitoring the selected StrategyGroup universe / side | `status: aligned` or a visible `blocked_runtime_scope_mismatch` |
+| `runtime_bridge` | Whether the selected StrategyGroup has runtime semantics binding plus evaluator route | `status: configured`; otherwise visible `blocked_runtime_bridge_missing` |
 | `dual_freshness.strategy_signal` | Whether the strategy signal itself is fresh inside the StrategyGroup watcher window | `status: missing` |
 | `dual_freshness.action_time_facts` | Whether action-time facts have reached the FinalGate boundary | `status: not_reached_waiting_for_signal` |
 | `gate_failure_ledger` | Owner-readable gate ledger for strategy handoff, account facts, signal, RequiredFacts, FinalGate, and Operation Layer | first visible blocker is `strategy_signal: waiting`; `RequiredFacts` may be `progressive_pending` |
@@ -232,6 +234,12 @@ side and no selected pilot runtime is being monitored, the status must be
 `blocked_runtime_scope_mismatch`, not `waiting_for_market`. The automatic
 recovery action is to create or attach the selected StrategyGroup runtime and
 constrain watcher scope before any auto-prepare setting is enabled.
+
+If the selected StrategyGroup lacks either `StrategyImplementationBinding` or a
+configured runtime evaluator route, the status must be
+`blocked_runtime_bridge_missing`, not `waiting_for_market`. The recovery action
+is to add the semantics binding and evaluator route before creating or attaching
+that StrategyGroup runtime.
 
 The watcher tick packet must also expose `post_signal_auto_resume`. This field
 must map each tick to one safe automatic recovery action:

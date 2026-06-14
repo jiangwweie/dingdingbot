@@ -218,6 +218,21 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
         "max_notional_per_action_usdt": "8",
     }
     assert packet["owner_state"]["blocker_class"] == "waiting_for_market"
+    assert packet["runtime_bridge"] == {
+        "status": "configured",
+        "strategy_family_id": "MPG-001",
+        "strategy_family_version_id": "MPG-001-v0",
+        "semantics_binding_found": True,
+        "evaluator_route_configured": True,
+        "candidate_mode": "shadow_order_candidate_allowed",
+        "runtime_confirmation_mode": "runtime_bounded_auto_attempts",
+        "blockers": [],
+        "automatic_recovery_action": "continue_to_runtime_scope_alignment",
+        "next_recover_condition": (
+            "strategy_semantics_binding_and_evaluator_route_are_configured"
+        ),
+        "non_executing": True,
+    }
     assert packet["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
     assert packet["owner_state"]["automatic_recovery_action"] == (
         "continue_watcher_observation"
@@ -326,6 +341,34 @@ def test_pilot_status_blocks_active_position_resolution_before_signal_resume():
     assert packet["owner_state"]["blocker_class"] == "active_position_resolution"
     assert packet["owner_state"]["blocked_at"] == "live_account_facts"
     assert packet["control_board"]["runtime_row"]["active_position"] == "active_position_present"
+
+
+def test_pilot_status_blocks_strategy_group_missing_runtime_bridge():
+    packet = build_packet(
+        intake_packet=_intake(),
+        live_facts_readiness=_readiness(),
+        watcher_status=_watcher_waiting(),
+        selected_strategy_group_id="TEQ-001",
+        generated_at_ms=1,
+    )
+
+    assert packet["status"] == "blocked_runtime_bridge_missing"
+    assert packet["owner_state"]["blocker_class"] == "missing_fact"
+    assert packet["owner_state"]["blocked_at"] == "runtime_bridge"
+    assert packet["runtime_bridge"]["strategy_family_id"] == "TEQ-001"
+    assert packet["runtime_bridge"]["strategy_family_version_id"] == "TEQ-001-v0"
+    assert packet["runtime_bridge"]["semantics_binding_found"] is False
+    assert packet["runtime_bridge"]["evaluator_route_configured"] is False
+    assert packet["runtime_bridge"]["blockers"] == [
+        "strategy_evaluator_not_configured",
+        "strategy_semantics_binding_missing",
+    ]
+    runtime_bridge_gate = next(
+        item for item in packet["gate_failure_ledger"]
+        if item["gate"] == "runtime_bridge"
+    )
+    assert runtime_bridge_gate["status"] == "blocked"
+    assert packet["control_board"]["runtime_row"]["runtime_bridge"] == "missing"
 
 
 def test_pilot_status_blocks_when_watcher_scope_does_not_match_selected_pilot():

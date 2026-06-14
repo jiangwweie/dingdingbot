@@ -97,6 +97,91 @@ def build_cpm_long_candidate_semantics(
     )
 
 
+def build_mpg_long_candidate_semantics(
+    *,
+    strategy_family_version_id: str,
+    timeframe: str,
+    evidence: dict[str, Any],
+) -> StrategyCandidateSemantics:
+    structure = dict(evidence.get("price_action_structure") or {})
+    latest_close = _decimal(structure.get("latest_close"))
+    stop_reference = _decimal(structure.get("momentum_floor_reference"))
+    trigger_open_time_ms = _optional_int(evidence.get("latest_1h_open_time_ms"))
+    quality = _quality_score(
+        structure=(
+            Decimal("0.78")
+            if structure.get("momentum_persistence")
+            else Decimal("0.35")
+        ),
+        context=(
+            Decimal("0.76")
+            if evidence.get("market_state") == "TREND_UP"
+            else Decimal("0.45")
+        ),
+        protection=Decimal("0.70") if stop_reference is not None else Decimal("0.20"),
+        labels={
+            "structure_clarity": "momentum continuation and recent floor are explicit",
+            "context_alignment": "higher-timeframe context supports long momentum",
+            "protection_clarity": "recent momentum floor can anchor a hard stop",
+        },
+        warnings=["reference_semantics_not_alpha_proof"],
+    )
+    return StrategyCandidateSemantics(
+        strategy_family_id="MPG-001",
+        strategy_family_version_id=strategy_family_version_id,
+        archetype=StrategyArchetype.MOMENTUM_PERSISTENCE,
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        feature_snapshots=[
+            StrategyFeatureSnapshot(
+                feature_set_id="mpg-momentum-persistence-v0",
+                timeframe=timeframe,
+                source="mpg_momentum_persistence_evaluator",
+                features={
+                    "market_state": evidence.get("market_state"),
+                    "htf_context": evidence.get("htf_context"),
+                    "entry_pattern": evidence.get("entry_pattern"),
+                    "momentum_state": evidence.get("momentum_state"),
+                    "price_action_structure": structure,
+                },
+            )
+        ],
+        entry=EntrySetupProposal(
+            kind=EntrySetupKind.MOMENTUM_CONTINUATION,
+            side="long",
+            trigger="mpg_momentum_persistence_confirmed",
+            entry_price_reference=latest_close,
+            trigger_candle_open_time_ms=trigger_open_time_ms,
+            valid_timeframe=timeframe,
+            evidence={
+                "latest_close": structure.get("latest_close"),
+                "previous_range_high": structure.get("previous_range_high"),
+                "consecutive_higher_closes": structure.get(
+                    "consecutive_higher_closes"
+                ),
+            },
+        ),
+        protection=ProtectionProposal(
+            reference_kind=ProtectionReferenceKind.STRUCTURE_EXTREME,
+            stop_price_reference=stop_reference,
+            invalidation_condition="close_below_recent_momentum_floor",
+            buffer_description="hard stop anchored below recent momentum floor",
+            evidence={
+                "momentum_floor_reference": structure.get(
+                    "momentum_floor_reference"
+                )
+            },
+        ),
+        exit=_right_tail_exit(
+            invalidation_condition="close_below_recent_momentum_floor",
+            runner_note=(
+                "runner trails momentum continuation after TP1 so rare right-tail "
+                "moves are not capped early"
+            ),
+        ),
+        quality=quality,
+    )
+
+
 def build_brf_short_candidate_semantics(
     *,
     strategy_family_version_id: str,

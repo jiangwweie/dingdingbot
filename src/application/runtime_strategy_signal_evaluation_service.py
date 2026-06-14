@@ -18,6 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.domain.brf_price_action_evaluator import BRF001PriceActionEvaluator
 from src.domain.cpm_historical_evaluator import CPM_FAMILY_ID, CPMRO001HistoricalEvaluator
+from src.domain.mpg_momentum_persistence_evaluator import (
+    MPG001MomentumPersistenceEvaluator,
+)
 from src.domain.reference_price_action_evaluators import (
     BTPC001PriceActionEvaluator,
     LSR001PriceActionEvaluator,
@@ -197,6 +200,17 @@ class RuntimeStrategySignalEvaluationService:
             ),
         )
 
+    def route_configured(
+        self,
+        *,
+        strategy_family_id: str,
+        strategy_family_version_id: str,
+    ) -> bool:
+        return (
+            strategy_family_id,
+            strategy_family_version_id,
+        ) in self._evaluators
+
     def _result(
         self,
         signal_input: StrategyFamilySignalInput,
@@ -243,6 +257,7 @@ def _default_evaluators() -> dict[tuple[str, str], RuntimeStrategySignalEvaluato
     return {
         ("CPM-RO-001", "CPM-RO-001-v0"): CPMRO001HistoricalEvaluator(),
         ("CPM-001", "CPM-001-v0"): _CPM001LiveReferenceEvaluator(),
+        ("MPG-001", "MPG-001-v0"): MPG001MomentumPersistenceEvaluator(),
         ("BRF-001", "BRF-001-v0"): BRF001PriceActionEvaluator(),
         ("BTPC-001", "BTPC-001-v0"): BTPC001PriceActionEvaluator(),
         ("LSR-001", "LSR-001-v0"): LSR001PriceActionEvaluator(),

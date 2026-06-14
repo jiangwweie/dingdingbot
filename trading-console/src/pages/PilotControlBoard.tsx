@@ -24,6 +24,7 @@ function toneForStatus(status?: string): ConsoleTone {
   if (value === 'ready' || value === 'fresh' || value === 'ready_for_action_time_final_gate') return 'normal';
   if (value === 'waiting' || value === 'missing' || value === 'progressive_pending' || value === 'not_reached_waiting_for_signal') return 'attention';
   if (value === 'not_reached') return 'unavailable';
+  if (value.includes('runtime_bridge')) return 'intervention';
   if (value.includes('runtime_scope')) return 'intervention';
   if (value.includes('active_position') || value.includes('hard_safety')) return 'blocked';
   if (value.includes('blocked')) return 'intervention';
@@ -40,6 +41,7 @@ function statusLabel(status?: string): string {
     blocked_hard_safety_stop: '安全硬停',
     blocked_operator_review: '审阅待处理',
     blocked_no_strategy_group: '未选策略组',
+    blocked_runtime_bridge_missing: '策略运行桥未接入',
     blocked_runtime_scope_mismatch: '监控范围不匹配',
   };
   return labels[String(status || '')] || displayValue(status, '状态未知');
@@ -68,6 +70,7 @@ export default function PilotControlBoard() {
   const strategyFreshness = dualFreshness.strategy_signal || {};
   const actionTimeFreshness = dualFreshness.action_time_facts || {};
   const watcher = data.watcher || {};
+  const runtimeBridge = data.runtime_bridge || {};
   const autoResume = data.post_signal_auto_resume || {};
   const universe = asArray<string>(selection.selected_universe);
   const risk = selection.risk_profile || {};
@@ -223,6 +226,11 @@ export default function PilotControlBoard() {
               title: 'Current checkpoint',
               body: displayValue(autoResume.automatic_recovery_action || data.next_safe_checkpoint),
               tone: statusTone,
+            },
+            {
+              title: 'Runtime bridge',
+              body: `${displayValue(runtimeBridge.strategy_family_id, 'NA')} · ${displayValue(runtimeBridge.strategy_family_version_id, 'NA')} · ${displayValue(runtimeBridge.status, 'unknown')}.`,
+              tone: toneForStatus(runtimeBridge.status),
             },
             {
               title: 'Watcher scope',

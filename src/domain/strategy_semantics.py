@@ -349,6 +349,7 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 strategy_family_id="CPM-001",
                 strategy_family_version_id="CPM-001-v0",
             ),
+            _mpg_binding(),
             _brf_binding(),
             _btpc_binding(),
             _lsr_binding(),
@@ -410,6 +411,64 @@ def _cpm_binding(
             "semantic_admission_only": True,
             "not_proven_alpha": True,
             "reference_role": "long_pullback_continuation",
+            "runtime_confirmation_note": (
+                "Owner confirms bounded runtime/profile; entries may be attempted "
+                "automatically within runtime boundaries."
+            ),
+        },
+    )
+
+
+def _mpg_binding() -> StrategyImplementationBinding:
+    return StrategyImplementationBinding(
+        strategy_family_id="MPG-001",
+        strategy_family_version_id="MPG-001-v0",
+        canonical_family_id="MPG-001",
+        implementation_id="mpg-momentum-persistence-reference-v0",
+        implementation_kind=StrategyImplementationKind.PRICE_ACTION,
+        candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
+        source_ref="src/domain/mpg_momentum_persistence_evaluator.py",
+        supported_sides=["long"],
+        required_facts=_price_action_required_facts(),
+        optional_facts=[
+            _fact(
+                "funding_rate",
+                required=False,
+                description="Optional momentum-crowding caveat for review.",
+                missing_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+                stale_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+            ),
+        ],
+        entry_policy=EntryPolicy(
+            kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
+            trigger="momentum_persistence_confirmed",
+            parameters={"reference_family": "MPG-001", "side": "long"},
+        ),
+        protection_policy=ProtectionPolicy(
+            stop_policy=StopPolicy(
+                kind=StopPolicyKind.STRUCTURE_REFERENCE,
+                required=True,
+                reference={"structure": "recent_momentum_floor_or_atr_reference"},
+                risk_notes="momentum persistence requires a concrete hard stop",
+            ),
+            max_loss_reference="runtime.max_loss_budget_per_attempt",
+            notes=[
+                "MPG is a long momentum-persistence reference candidate.",
+                "It is semantic admission only, not proof of profitable alpha.",
+            ],
+        ),
+        exit_policy=_right_tail_exit_policy("partial_tp_plus_momentum_runner"),
+        review_metrics=_right_tail_review_metrics()
+        + ["momentum_follow_through", "breakout_failure_rate"],
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
+        metadata={
+            "semantic_admission_only": True,
+            "not_proven_alpha": True,
+            "reference_role": "long_momentum_persistence",
             "runtime_confirmation_note": (
                 "Owner confirms bounded runtime/profile; entries may be attempted "
                 "automatically within runtime boundaries."

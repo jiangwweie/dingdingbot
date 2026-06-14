@@ -11,8 +11,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 import time
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.application.runtime_strategy_signal_evaluation_service import (
+    RuntimeStrategySignalEvaluationService,
+)
+from src.domain.strategy_semantics import initial_strategy_semantics_catalog
 
 
 PREFERRED_GROUP_ID = "MPG-001"
@@ -370,6 +380,80 @@ def _watcher_scope_alignment(
     }
 
 
+def _strategy_family_version_id(group: dict[str, Any] | None) -> str | None:
+    if not group:
+        return None
+    for key in (
+        "strategy_family_version_id",
+        "strategy_group_version_id",
+        "version_id",
+    ):
+        value = group.get(key)
+        if value:
+            return str(value)
+    group_id = group.get("strategy_group_id")
+    return f"{group_id}-v0" if group_id else None
+
+
+def _runtime_bridge(group: dict[str, Any] | None) -> dict[str, Any]:
+    if not group:
+        return {
+            "status": "not_selected",
+            "strategy_family_id": None,
+            "strategy_family_version_id": None,
+            "semantics_binding_found": False,
+            "evaluator_route_configured": False,
+            "blockers": ["strategy_group_not_selected"],
+            "automatic_recovery_action": "select_strategy_group",
+            "next_recover_condition": "strategy_group_selected",
+            "non_executing": True,
+        }
+    group_id = str(group.get("strategy_group_id"))
+    version_id = _strategy_family_version_id(group)
+    blockers: list[str] = []
+    candidate_mode: str | None = None
+    runtime_confirmation_mode: str | None = None
+    semantics_binding_found = False
+    try:
+        binding = initial_strategy_semantics_catalog().get_binding(
+            strategy_family_id=group_id,
+            strategy_family_version_id=str(version_id),
+        )
+        semantics_binding_found = True
+        candidate_mode = binding.candidate_mode.value
+        runtime_confirmation_mode = binding.runtime_confirmation_mode.value
+    except KeyError:
+        blockers.append("strategy_semantics_binding_missing")
+
+    evaluator_route_configured = RuntimeStrategySignalEvaluationService().route_configured(
+        strategy_family_id=group_id,
+        strategy_family_version_id=str(version_id),
+    )
+    if not evaluator_route_configured:
+        blockers.append("strategy_evaluator_not_configured")
+
+    status = "configured" if not blockers else "missing"
+    return {
+        "status": status,
+        "strategy_family_id": group_id,
+        "strategy_family_version_id": version_id,
+        "semantics_binding_found": semantics_binding_found,
+        "evaluator_route_configured": evaluator_route_configured,
+        "candidate_mode": candidate_mode,
+        "runtime_confirmation_mode": runtime_confirmation_mode,
+        "blockers": sorted(dict.fromkeys(blockers)),
+        "automatic_recovery_action": (
+            "continue_to_runtime_scope_alignment"
+            if status == "configured"
+            else "add_strategy_semantics_binding_and_evaluator_route"
+        ),
+        "next_recover_condition": (
+            "strategy_semantics_binding_and_evaluator_route_are_configured"
+        ),
+        "non_executing": True,
+    }
+
+
 def _dual_freshness(
     *,
     group: dict[str, Any] | None,
@@ -386,6 +470,8 @@ def _dual_freshness(
         action_time_status = "blocked_live_account_facts"
     elif owner_state["status"] == "blocked_runtime_scope_mismatch":
         action_time_status = "blocked_runtime_scope_mismatch"
+    elif owner_state["status"] == "blocked_runtime_bridge_missing":
+        action_time_status = "blocked_runtime_bridge_missing"
     elif not watcher["can_continue_steps_5_8"]:
         action_time_status = "not_reached_waiting_for_signal"
     elif readiness.get("armed_candidate_prepare_ready"):
@@ -450,6 +536,7 @@ def _gate_failure_ledger(
     owner_state: dict[str, Any],
     fact_summary: dict[str, Any],
     candidate_blockers: list[str],
+    runtime_bridge: dict[str, Any],
     watcher_scope_alignment: dict[str, Any],
 ) -> list[dict[str, Any]]:
     no_group = group is None
@@ -459,12 +546,14 @@ def _gate_failure_ledger(
     signal_ready = bool(watcher["can_continue_steps_5_8"])
     candidate_ready = bool(readiness.get("armed_candidate_prepare_ready"))
     hard_safety_stop = owner_state["status"] == "blocked_hard_safety_stop"
+    bridge_blocked = runtime_bridge.get("status") != "configured"
     scope_blocked = owner_state["status"] == "blocked_runtime_scope_mismatch"
 
     group_status = "blocked" if no_group else "ready"
+    bridge_status = "blocked" if bridge_blocked else "ready"
     account_status = "blocked" if account_blocked else "ready"
     watcher_scope_status = "blocked" if scope_blocked else "ready"
-    if hard_safety_stop or scope_blocked:
+    if hard_safety_stop or bridge_blocked or scope_blocked:
         signal_status = "blocked"
     elif signal_ready:
         signal_status = "ready"
@@ -521,6 +610,27 @@ def _gate_failure_ledger(
             blockers=[],
         ),
         _gate_row(
+            gate="runtime_bridge",
+            status=bridge_status,
+            blocker_class="missing_fact" if bridge_blocked else "none",
+            blocked_at="runtime_bridge" if bridge_blocked else "none",
+            blocked_reason=owner_reason if bridge_blocked else "none",
+            next_recover_condition=(
+                str(runtime_bridge.get("next_recover_condition"))
+                if bridge_blocked
+                else "strategy_semantics_binding_and_evaluator_route_are_configured"
+            ),
+            automatic_recovery_action=(
+                str(runtime_bridge.get("automatic_recovery_action"))
+                if bridge_blocked
+                else "continue_selected_pilot_observation"
+            ),
+            downgrade_mode=(
+                owner_downgrade if bridge_blocked else "armed_observation"
+            ),
+            blockers=runtime_bridge.get("blockers") or [],
+        ),
+        _gate_row(
             gate="watcher_scope",
             status=watcher_scope_status,
             blocker_class="runtime_scope_mismatch" if scope_blocked else "none",
@@ -559,6 +669,7 @@ def _gate_failure_ledger(
                 if owner_blocked_at in {
                     "watcher_signal",
                     "watcher_safety_invariants",
+                    "runtime_bridge",
                     "runtime_signal_watcher_scope",
                 }
                 else ("none" if signal_ready else "waiting_for_market")
@@ -634,6 +745,7 @@ def _owner_state(
     selected_group_id: str | None,
     readiness: dict[str, Any],
     watcher: dict[str, Any],
+    runtime_bridge: dict[str, Any],
     watcher_scope_alignment: dict[str, Any],
 ) -> dict[str, Any]:
     fact_summary = _candidate_fact_summary(readiness)
@@ -652,6 +764,23 @@ def _owner_state(
             ),
             "automatic_recovery_action": "rebuild_strategy_group_handoff_intake",
             "downgrade_mode": "no_runtime_observation",
+        }
+    if runtime_bridge.get("status") != "configured":
+        return {
+            "status": "blocked_runtime_bridge_missing",
+            "blocker_class": "missing_fact",
+            "blocked_at": "runtime_bridge",
+            "blocked_reason": ",".join(
+                str(item) for item in (runtime_bridge.get("blockers") or [])
+            )
+            or "strategy_runtime_bridge_missing",
+            "next_recover_condition": str(
+                runtime_bridge.get("next_recover_condition")
+            ),
+            "automatic_recovery_action": str(
+                runtime_bridge.get("automatic_recovery_action")
+            ),
+            "downgrade_mode": "observe_only_no_runtime_evaluation",
         }
     if watcher["unsafe_flags"]:
         return {
@@ -809,6 +938,7 @@ def build_packet(
         str(item) for item in (group or {}).get("supported_sides") or []
     ]
     selected_side = supported_sides[0] if supported_sides else "unknown"
+    runtime_bridge = _runtime_bridge(group)
     watcher_scope_alignment = _watcher_scope_alignment(
         selected_universe=selected_universe,
         selected_side=selected_side,
@@ -818,6 +948,7 @@ def build_packet(
         selected_group_id=group_id,
         readiness=readiness,
         watcher=watcher,
+        runtime_bridge=runtime_bridge,
         watcher_scope_alignment=watcher_scope_alignment,
     )
     risk_defaults = (
@@ -844,6 +975,7 @@ def build_packet(
         owner_state=owner_state,
         fact_summary=fact_summary,
         candidate_blockers=candidate_blockers,
+        runtime_bridge=runtime_bridge,
         watcher_scope_alignment=watcher_scope_alignment,
     )
     why_not_executable: list[str] = []
@@ -886,6 +1018,7 @@ def build_packet(
             },
         },
         "owner_state": owner_state,
+        "runtime_bridge": runtime_bridge,
         "watcher_scope_alignment": watcher_scope_alignment,
         "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
@@ -926,6 +1059,7 @@ def build_packet(
                     else "ready"
                 ),
                 "next_gate": owner_state["blocked_at"],
+                "runtime_bridge": runtime_bridge["status"],
                 "watcher_scope": watcher_scope_alignment["status"],
             },
             "candidate_row": {
@@ -965,6 +1099,16 @@ def build_packet(
                 "class": "active_position_resolution"
                 if fact_summary["active_position_blocked"] or fact_summary["open_order_blocked"]
                 else "none",
+            },
+            {
+                "gate": "runtime_bridge",
+                "status": "ready"
+                if runtime_bridge["status"] == "configured"
+                else "blocked",
+                "class": "missing_fact"
+                if runtime_bridge["status"] != "configured"
+                else "none",
+                "blockers": runtime_bridge["blockers"],
             },
             {
                 "gate": "watcher_scope",
