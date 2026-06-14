@@ -51,7 +51,17 @@ def test_live_facts_readiness_allows_observation_when_candidate_facts_missing():
     assert packet["counts"]["armed_candidate_prepare_ready"] == 0
     assert packet["operator_path"]["can_continue_observation"] is True
     assert packet["operator_path"]["can_prepare_fresh_candidate"] is False
+    assert packet["operator_path"]["next_gate"] == (
+        "continue_observation_and_prepare_candidate_prerequisites"
+    )
     assert packet["operator_path"]["requires_action_time_final_gate_before_submit"] is True
+    assert packet["owner_state"]["status"] == (
+        "observe_ready_candidate_prerequisites_missing"
+    )
+    assert packet["owner_state"]["blocked_at"] == "candidate_prepare_facts"
+    assert packet["owner_state"]["downgrade_mode"] == (
+        "observe_only_until_candidate_prerequisites_ready"
+    )
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["creates_candidate"] is False
     mpg = next(item for item in packet["readiness"] if item["strategy_group_id"] == "MPG-001")
@@ -78,6 +88,11 @@ def test_live_facts_readiness_marks_armed_ready_when_required_live_facts_pass():
     assert packet["counts"]["observe_ready"] == 2
     assert packet["counts"]["armed_candidate_prepare_ready"] == 1
     assert packet["operator_path"]["can_prepare_fresh_candidate"] is True
+    assert packet["operator_path"]["next_gate"] == (
+        "review_ready_groups_before_fresh_candidate_prepare"
+    )
+    assert packet["owner_state"]["status"] == "armed_observation_ready"
+    assert packet["owner_state"]["blocked_at"] == "none"
     assert packet["blockers"] == []
 
 
@@ -91,4 +106,6 @@ def test_live_facts_readiness_blocks_observation_when_exchange_rules_missing():
     assert packet["status"] == "strategy_group_live_facts_blocked"
     assert packet["counts"]["observe_ready"] == 0
     assert packet["operator_path"]["can_continue_observation"] is False
+    assert packet["owner_state"]["blocked_at"] == "live_fact_readiness"
+    assert packet["owner_state"]["downgrade_mode"] == "not_observing"
     assert "MPG-001:exchange_rules_not_ready_for_all_symbols" in packet["blockers"]

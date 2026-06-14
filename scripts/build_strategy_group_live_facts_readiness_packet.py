@@ -194,6 +194,78 @@ def _group_readiness(
     }
 
 
+def _operator_path(
+    *,
+    observe_ready_count: int,
+    armed_ready_count: int,
+    blocked: list[dict[str, Any]],
+) -> dict[str, Any]:
+    candidate_blocked = bool(blocked)
+    if armed_ready_count > 0:
+        next_gate = "review_ready_groups_before_fresh_candidate_prepare"
+    elif observe_ready_count > 0 and candidate_blocked:
+        next_gate = "continue_observation_and_prepare_candidate_prerequisites"
+    elif observe_ready_count > 0:
+        next_gate = "wait_for_or_generate_fresh_strategy_signal"
+    else:
+        next_gate = "resolve_live_fact_blockers"
+    return {
+        "can_continue_observation": observe_ready_count > 0,
+        "can_prepare_fresh_candidate": armed_ready_count > 0,
+        "next_gate": next_gate,
+        "requires_action_time_final_gate_before_submit": True,
+        "requires_official_operation_layer": True,
+    }
+
+
+def _owner_state(
+    *,
+    rows: list[dict[str, Any]],
+    observe_ready_count: int,
+    armed_ready_count: int,
+    blockers: list[str],
+) -> dict[str, Any]:
+    if not rows:
+        return {
+            "status": "blocked",
+            "blocked_at": "strategy_group_intake",
+            "blocked_reason": "no_strategy_group_handoff_intake",
+            "next_recover_condition": "repo_local_strategy_group_handoff_intake_exists",
+            "automatic_recovery_action": "build_strategy_group_handoff_intake_packet",
+            "downgrade_mode": "not_selected",
+        }
+    if armed_ready_count > 0:
+        return {
+            "status": "armed_observation_ready",
+            "blocked_at": "none",
+            "blocked_reason": "none",
+            "next_recover_condition": "fresh_strategy_signal_arrives",
+            "automatic_recovery_action": "continue_watcher_observation",
+            "downgrade_mode": "none",
+        }
+    if observe_ready_count > 0:
+        return {
+            "status": "observe_ready_candidate_prerequisites_missing",
+            "blocked_at": "candidate_prepare_facts",
+            "blocked_reason": ",".join(blockers) if blockers else "candidate_prerequisites_missing",
+            "next_recover_condition": (
+                "budget_protection_and_next_attempt_gate_are_ready_before_candidate_prepare"
+            ),
+            "automatic_recovery_action": (
+                "continue_observation_and_prepare_candidate_prerequisite_facts"
+            ),
+            "downgrade_mode": "observe_only_until_candidate_prerequisites_ready",
+        }
+    return {
+        "status": "blocked",
+        "blocked_at": "live_fact_readiness",
+        "blocked_reason": ",".join(blockers) if blockers else "live_facts_not_ready",
+        "next_recover_condition": "exchange_account_position_open_order_facts_are_ready",
+        "automatic_recovery_action": "refresh_strategy_group_live_facts_readonly",
+        "downgrade_mode": "not_observing",
+    }
+
+
 def build_packet(
     *,
     intake_packet: dict[str, Any],
@@ -217,6 +289,13 @@ def build_packet(
         status = "strategy_group_observe_ready_armed_blocked"
     else:
         status = "strategy_group_live_facts_blocked"
+    blockers = sorted(
+        {
+            f"{row['strategy_group_id']}:{blocker}"
+            for row in rows
+            for blocker in row.get("blockers") or []
+        }
+    )
     return {
         "scope": "strategy_group_live_facts_readiness",
         "status": status,
@@ -229,19 +308,17 @@ def build_packet(
             "blocked_for_candidate_prepare": len(blocked),
         },
         "readiness": rows,
-        "operator_path": {
-            "can_continue_observation": observe_ready_count > 0,
-            "can_prepare_fresh_candidate": armed_ready_count > 0,
-            "next_gate": (
-                "wait_for_or_generate_fresh_strategy_signal"
-                if observe_ready_count > 0 and armed_ready_count == 0
-                else "review_ready_groups_before_fresh_candidate_prepare"
-                if armed_ready_count > 0
-                else "resolve_live_fact_blockers"
-            ),
-            "requires_action_time_final_gate_before_submit": True,
-            "requires_official_operation_layer": True,
-        },
+        "operator_path": _operator_path(
+            observe_ready_count=observe_ready_count,
+            armed_ready_count=armed_ready_count,
+            blocked=blocked,
+        ),
+        "owner_state": _owner_state(
+            rows=rows,
+            observe_ready_count=observe_ready_count,
+            armed_ready_count=armed_ready_count,
+            blockers=blockers,
+        ),
         "safety_invariants": {
             **{name: False for name in sorted(UNSAFE_FLAGS)},
             "reads_live_facts_only": True,
@@ -251,13 +328,7 @@ def build_packet(
             "places_order": False,
             "mutates_pg": False,
         },
-        "blockers": sorted(
-            {
-                f"{row['strategy_group_id']}:{blocker}"
-                for row in rows
-                for blocker in row.get("blockers") or []
-            }
-        ),
+        "blockers": blockers,
     }
 
 
