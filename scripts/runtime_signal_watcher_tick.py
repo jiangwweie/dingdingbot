@@ -254,6 +254,165 @@ def _notification_text(
     return "\n".join(lines)
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _post_signal_auto_resume_plan(
+    *,
+    args: argparse.Namespace,
+    status_packet: dict[str, Any],
+    operator_packet: dict[str, Any],
+    wakeup_packet: dict[str, Any],
+) -> dict[str, Any]:
+    latest_status = str(status_packet.get("latest_status") or "")
+    status_status = str(status_packet.get("status") or "")
+    wakeup_status = str(wakeup_packet.get("status") or "")
+    operator_status = str(operator_packet.get("status") or "")
+    forbidden_effects = list(status_packet.get("forbidden_effects") or [])
+    blockers = [str(item) for item in status_packet.get("blockers") or []]
+    prepared_authorization_id = status_packet.get("prepared_authorization_id")
+    shadow_candidate_id = status_packet.get("shadow_candidate_id")
+    summary = _as_dict(wakeup_packet.get("summary"))
+    prepared_authorization_id = (
+        prepared_authorization_id or summary.get("prepared_authorization_id")
+    )
+    shadow_candidate_id = shadow_candidate_id or summary.get("shadow_candidate_id")
+
+    base = {
+        "source": "runtime_signal_watcher_tick",
+        "latest_status": latest_status,
+        "status_packet_status": status_status,
+        "wakeup_status": wakeup_status,
+        "operator_status": operator_status,
+        "prepared_authorization_id": prepared_authorization_id,
+        "shadow_candidate_id": shadow_candidate_id,
+        "allow_prepare_records": bool(args.allow_prepare_records),
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+
+    if forbidden_effects or wakeup_status == "blocked_forbidden_effect":
+        return {
+            **base,
+            "status": "blocked_hard_safety_stop",
+            "blocked_at": "watcher_forbidden_effects",
+            "blocked_reason": ",".join(forbidden_effects) or wakeup_status,
+            "next_recover_condition": "forbidden_effect_flags_are_absent",
+            "automatic_recovery_action": "stop_and_investigate_watcher_evidence",
+            "downgrade_mode": "manual_review_only",
+            "can_continue_without_owner_chat": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+        }
+
+    if status_status in {"blocked", "stale"}:
+        return {
+            **base,
+            "status": "blocked_observation_evidence",
+            "blocked_at": "active_observation_status",
+            "blocked_reason": status_status,
+            "next_recover_condition": "fresh_non_forbidden_observation_packets_exist",
+            "automatic_recovery_action": "refresh_or_restart_active_observation_status",
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "can_continue_without_owner_chat": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+        }
+
+    if latest_status in {
+        "ready_for_final_gate_preflight",
+        "ready_for_disabled_smoke",
+        "disabled_smoke_completed",
+    } or prepared_authorization_id:
+        return {
+            **base,
+            "status": "ready_for_action_time_final_gate",
+            "blocked_at": "FinalGate",
+            "blocked_reason": "action_time_final_gate_not_run_yet",
+            "next_recover_condition": (
+                "official_final_gate_preflight_passes_with_current_facts"
+            ),
+            "automatic_recovery_action": "run_official_action_time_final_gate_preflight",
+            "downgrade_mode": "no_real_submit_until_final_gate_pass",
+            "can_continue_without_owner_chat": True,
+            "creates_shadow_candidate": bool(
+                shadow_candidate_id or prepared_authorization_id
+            ),
+            "creates_execution_intent": False,
+        }
+
+    ready_prepare_statuses = {
+        "ready_for_prepare",
+        "ready_for_prepare_records",
+        "runtime_signal_ready_for_non_executing_prepare",
+        "prepared_shadow_evidence_ready_for_owner_review",
+    }
+    if latest_status in ready_prepare_statuses or wakeup_status in ready_prepare_statuses:
+        automatic_recovery_action = (
+            "wait_for_prepare_records_then_rebuild_final_gate_status"
+            if args.allow_prepare_records
+            else "rerun_watcher_tick_with_allow_prepare_records"
+        )
+        return {
+            **base,
+            "status": "ready_for_non_executing_prepare",
+            "blocked_at": "non_executing_prepare_records",
+            "blocked_reason": "fresh_strategy_signal_ready",
+            "next_recover_condition": (
+                "shadow_candidate_runtime_grant_authorization_evidence_exists"
+            ),
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "armed_observation_no_real_submit",
+            "can_continue_without_owner_chat": True,
+            "creates_shadow_candidate": bool(args.allow_prepare_records),
+            "creates_execution_intent": False,
+        }
+
+    no_signal = (
+        "strategy_signal_not_ready_for_shadow_candidate_prepare" in ",".join(blockers)
+        or status_status
+        in {"waiting_for_signal", "observation_window_complete_no_signal", "ok"}
+        or wakeup_status
+        in {
+            "operator_packet_needs_review",
+            "owner_sleep_safe_observation_running",
+            "observation_window_complete_no_signal",
+        }
+    )
+    if no_signal:
+        return {
+            **base,
+            "status": "waiting_for_market",
+            "blocked_at": "watcher_signal",
+            "blocked_reason": "no_fresh_strategy_signal",
+            "next_recover_condition": (
+                "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+            ),
+            "automatic_recovery_action": "continue_watcher_observation",
+            "downgrade_mode": "observe_only",
+            "can_continue_without_owner_chat": True,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+        }
+
+    return {
+        **base,
+        "status": "blocked_operator_review",
+        "blocked_at": "operator_packet",
+        "blocked_reason": wakeup_status or operator_status or "unknown",
+        "next_recover_condition": "operator_packet_maps_to_waiting_or_ready_signal",
+        "automatic_recovery_action": "rebuild_operator_and_wakeup_packets",
+        "downgrade_mode": "observe_only_no_candidate_prepare",
+        "can_continue_without_owner_chat": False,
+        "creates_shadow_candidate": False,
+        "creates_execution_intent": False,
+    }
+
+
 def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
     return argparse.Namespace(
         output_dir=str(output_dir),
@@ -309,6 +468,12 @@ def build_watcher_tick_packet(
 
     wakeup_packet = build_wakeup_packet(operator_packet)
     _write_json(output_dir / "wakeup-packet.json", wakeup_packet)
+    auto_resume = _post_signal_auto_resume_plan(
+        args=args,
+        status_packet=status_packet,
+        operator_packet=operator_packet,
+        wakeup_packet=wakeup_packet,
+    )
 
     event_key = _event_key(
         status_packet=status_packet,
@@ -395,18 +560,29 @@ def build_watcher_tick_packet(
         "status_packet_status": status_packet.get("status"),
         "operator_status": operator_packet.get("status"),
         "wakeup_status": wakeup_packet.get("status"),
+        "post_signal_auto_resume": auto_resume,
         "notification": notification,
         "blockers": list(status_packet.get("blockers") or []),
         "warnings": list(status_packet.get("warnings") or []),
         "operator_command_plan": {
             "not_executed": True,
-            "next_step": (wakeup_packet.get("summary") or {}).get("next_step"),
+            "next_step": auto_resume["automatic_recovery_action"],
+            "wakeup_next_step": (wakeup_packet.get("summary") or {}).get("next_step"),
             "records_observation_only": True,
             "sends_owner_wakeup_only": bool(notification.get("sent")),
-            "creates_shadow_candidate": False,
+            "can_continue_without_owner_chat": bool(
+                auto_resume.get("can_continue_without_owner_chat")
+            ),
+            "creates_shadow_candidate": bool(auto_resume.get("creates_shadow_candidate")),
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
+            "requires_action_time_final_gate": bool(
+                auto_resume.get("requires_action_time_final_gate")
+            ),
+            "requires_official_operation_layer": bool(
+                auto_resume.get("requires_official_operation_layer")
+            ),
             "withdrawal_or_transfer_requested": False,
         },
         "safety_invariants": {
@@ -414,6 +590,7 @@ def build_watcher_tick_packet(
             "uses_existing_active_observation_loop": True,
             "allow_prepare_records": bool(args.allow_prepare_records),
             "feishu_notification_only": True,
+            "post_signal_auto_resume_decision_only": True,
             "real_submit_requested": False,
             "exchange_order_requested": False,
             "exchange_write_called": False,

@@ -191,6 +191,12 @@ def test_watcher_tick_writes_packets_without_notifying_on_no_signal(tmp_path, mo
     )
 
     assert packet["status"] == "watching_no_signal"
+    assert packet["post_signal_auto_resume"]["status"] == "waiting_for_market"
+    assert packet["post_signal_auto_resume"]["blocked_reason"] == "no_fresh_strategy_signal"
+    assert packet["operator_command_plan"]["next_step"] == "continue_watcher_observation"
+    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
+    assert packet["operator_command_plan"]["requires_action_time_final_gate"] is True
+    assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
     assert packet["notification"]["required"] is False
     assert sent == []
     assert (tmp_path / "watcher" / "latest-status.json").exists()
@@ -219,6 +225,13 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
 
     assert packet["status"] == "owner_notified"
     assert packet["wakeup_status"] == "prepared_shadow_evidence_ready_for_owner_review"
+    assert packet["post_signal_auto_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert packet["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
+    assert packet["post_signal_auto_resume"]["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
     assert packet["notification"]["sent"] is True
     assert calls[0][0] == "https://example.test/hook"
     assert calls[0][1] == "secret-value"
@@ -275,6 +288,60 @@ def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch)
     assert calls[0][0] == "https://example.test/from-env-file"
     assert calls[0][1] == "env-file-secret"
     assert "env-file-secret" not in json.dumps(packet)
+
+
+def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(tmp_path):
+    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=False),
+        notifier=lambda *items: {"sent": True, "status_code": 200},
+    )
+
+    assert packet["post_signal_auto_resume"]["status"] == (
+        "ready_for_non_executing_prepare"
+    )
+    assert packet["post_signal_auto_resume"]["blocked_reason"] == (
+        "fresh_strategy_signal_ready"
+    )
+    assert packet["post_signal_auto_resume"]["automatic_recovery_action"] == (
+        "rerun_watcher_tick_with_allow_prepare_records"
+    )
+    assert packet["operator_command_plan"]["can_continue_without_owner_chat"] is True
+    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["operator_command_plan"]["calls_order_lifecycle"] is False
+
+
+def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_records(tmp_path):
+    packet = runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(
+            tmp_path,
+            allow_prepare_records=True,
+            feishu_webhook_url="https://example.test/hook",
+        ),
+        supervisor_builder=_fake_supervisor(
+            "ready_for_final_gate_preflight",
+            ready=True,
+        ),
+        notifier=lambda *items: {"sent": True, "status_code": 200},
+    )
+
+    assert packet["post_signal_auto_resume"]["status"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert packet["post_signal_auto_resume"]["prepared_authorization_id"] == (
+        "auth-ready-1"
+    )
+    assert packet["post_signal_auto_resume"]["automatic_recovery_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert packet["operator_command_plan"]["next_step"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert packet["operator_command_plan"]["creates_shadow_candidate"] is True
+    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["operator_command_plan"]["calls_order_lifecycle"] is False
+    assert packet["safety_invariants"]["real_submit_requested"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
 def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):

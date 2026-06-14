@@ -35,6 +35,8 @@ def test_strategygroup_runtime_pilot_overlay_preserves_standing_authorization():
     assert "fresh chat phrase" in text
     assert "FinalGate + Operation Layer" in text
     assert "evidence-packet-as-owner-interface" in text
+    assert "post_signal_auto_resume" in text
+    assert "ready_for_action_time_final_gate" in text
 
 
 def test_strategygroup_runtime_pilot_overlay_keeps_hard_safety_stops():

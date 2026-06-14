@@ -185,6 +185,7 @@ The current pilot implementation surface is:
 | Layer | Current artifact | Purpose |
 | --- | --- | --- |
 | Packet builder | `scripts/build_strategygroup_runtime_pilot_status.py` | Merge StrategyGroup intake, live-facts readiness, and watcher evidence into Owner-readable pilot status |
+| Watcher auto-resume decision | `scripts/runtime_signal_watcher_tick.py` field `post_signal_auto_resume` | Translate each watcher tick into waiting / non-executing prepare / action-time FinalGate / hard stop status without placing orders |
 | Trading Console API | `GET /api/trading-console/strategygroup-runtime-pilot-status` | Expose `blocked_at`, `blocked_reason`, `next_recover_condition`, `automatic_recovery_action`, `downgrade_mode`, `dual_freshness`, and `gate_failure_ledger` |
 | Console page | `/pilot` | Show selected StrategyGroup, selected universe, tiny risk profile, signal state, runtime facts, dual freshness, gate ledger, candidate state, FinalGate / Operation Layer status |
 
@@ -217,3 +218,17 @@ The pilot status packet must distinguish:
 | `dual_freshness.strategy_signal` | Whether the strategy signal itself is fresh inside the StrategyGroup watcher window | `status: missing` |
 | `dual_freshness.action_time_facts` | Whether action-time facts have reached the FinalGate boundary | `status: not_reached_waiting_for_signal` |
 | `gate_failure_ledger` | Owner-readable gate ledger for strategy handoff, account facts, signal, RequiredFacts, FinalGate, and Operation Layer | first visible blocker is `strategy_signal: waiting`; `RequiredFacts` may be `progressive_pending` |
+
+The watcher tick packet must also expose `post_signal_auto_resume`. This field
+must map each tick to one safe automatic recovery action:
+
+| `post_signal_auto_resume.status` | Meaning | Allowed automatic action |
+| --- | --- | --- |
+| `waiting_for_market` | No fresh signal exists | Continue watcher observation without Owner chat |
+| `ready_for_non_executing_prepare` | Fresh signal exists but prepare records are not complete | Continue only to non-executing prepare / shadow planning records |
+| `ready_for_action_time_final_gate` | Candidate / prepared authorization evidence exists | Run official action-time FinalGate preflight; do not place an order merely because this status exists |
+| `blocked_hard_safety_stop` | Watcher evidence contains forbidden effects | Stop and investigate |
+
+`post_signal_auto_resume` is decision metadata. It must not itself bypass
+FinalGate, bypass Operation Layer, call OrderLifecycle, place exchange orders,
+mutate runtime budget, or create withdrawal / transfer actions.
