@@ -28,6 +28,7 @@ from scripts.build_strategy_group_handoff_intake_packet import (
 
 PASS_VALUES = {
     "available",
+    "available_for_candidate_specific_reservation",
     "clear",
     "flat",
     "fresh",
@@ -37,6 +38,7 @@ PASS_VALUES = {
     "pass",
     "present",
     "ready",
+    "ready_for_candidate_specific_plan",
     "trading",
     "valid",
     "waiting_for_fresh_strategy_signal",

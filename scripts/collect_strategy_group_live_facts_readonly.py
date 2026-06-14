@@ -8,6 +8,7 @@ submits, cancels, replaces, or transfers anything and never prints API secrets.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
 import json
@@ -99,13 +100,55 @@ def _request_json(
     return {"payload": payload}
 
 
-def _handoff_symbols(handoff_dir: Path) -> list[str]:
+def _decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _handoff_summary(handoff_dir: Path) -> dict[str, Any]:
     symbols: set[str] = set()
+    max_notional_values: list[Decimal] = []
+    protection_templates = 0
     for path in sorted(handoff_dir.expanduser().glob("*/handoff.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
         for symbol in data.get("supported_symbols") or []:
             symbols.add(str(symbol))
-    return sorted(symbols)
+        risk_defaults = data.get("risk_defaults")
+        if isinstance(risk_defaults, dict):
+            max_notional = _decimal(
+                risk_defaults.get("max_notional_per_action_usdt")
+                or risk_defaults.get("max_notional_usdt")
+            )
+            if max_notional is not None:
+                max_notional_values.append(max_notional)
+            if risk_defaults.get("requires_sl") and (
+                risk_defaults.get("requires_tp_or_exit_plan")
+                or risk_defaults.get("default_exit_horizon")
+            ):
+                protection_templates += 1
+    max_notional_requirement = (
+        max(max_notional_values) if max_notional_values else None
+    )
+    return {
+        "symbols": sorted(symbols),
+        "strategy_group_count": len(
+            list(handoff_dir.expanduser().glob("*/handoff.json"))
+        ),
+        "max_notional_requirement_usdt": (
+            str(max_notional_requirement)
+            if max_notional_requirement is not None
+            else None
+        ),
+        "has_candidate_specific_protection_template": protection_templates > 0,
+    }
+
+
+def _handoff_symbols(handoff_dir: Path) -> list[str]:
+    return list(_handoff_summary(handoff_dir)["symbols"])
 
 
 def _exchange_rules(exchange_info: dict[str, Any], symbols: list[str]) -> dict[str, Any]:
@@ -179,13 +222,95 @@ def _account_summary(account: dict[str, Any]) -> dict[str, Any]:
     payload = account.get("payload")
     if not isinstance(payload, dict):
         return {"status": "missing"}
+    available_balance = _decimal(payload.get("availableBalance"))
     return {
         "status": "fresh",
         "can_trade": bool(payload.get("canTrade")),
         "fee_tier": payload.get("feeTier"),
         "total_wallet_balance_present": payload.get("totalWalletBalance") is not None,
         "available_balance_present": payload.get("availableBalance") is not None,
+        "available_balance_positive": (
+            available_balance is not None and available_balance > Decimal("0")
+        ),
         "assets_count": len(payload.get("assets") or []),
+    }
+
+
+def _budget_state(
+    *,
+    account_payload: dict[str, Any],
+    handoff_summary: dict[str, Any],
+) -> dict[str, Any]:
+    payload = account_payload.get("payload")
+    if not isinstance(payload, dict):
+        return {
+            "status": "missing",
+            "reason": "signed_account_fact_missing",
+        }
+    if not payload.get("canTrade"):
+        return {
+            "status": "blocked",
+            "reason": "account_cannot_trade",
+        }
+    available_balance = _decimal(payload.get("availableBalance"))
+    max_notional = _decimal(handoff_summary.get("max_notional_requirement_usdt"))
+    if available_balance is None or max_notional is None:
+        return {
+            "status": "missing",
+            "reason": "available_balance_or_handoff_notional_missing",
+        }
+    if available_balance < max_notional:
+        return {
+            "status": "blocked",
+            "reason": "available_balance_below_strategygroup_tiny_notional",
+            "max_notional_requirement_usdt": str(max_notional),
+        }
+    return {
+        "status": "available_for_candidate_specific_reservation",
+        "reason": "account_available_balance_covers_strategygroup_tiny_notional",
+        "max_notional_requirement_usdt": str(max_notional),
+        "reservation_created": False,
+    }
+
+
+def _protection_state(handoff_summary: dict[str, Any]) -> dict[str, Any]:
+    if not handoff_summary.get("has_candidate_specific_protection_template"):
+        return {
+            "status": "missing",
+            "reason": "candidate_specific_protection_template_missing",
+        }
+    return {
+        "status": "ready_for_candidate_specific_plan",
+        "reason": "handoff_risk_defaults_define_sl_and_exit_plan",
+        "protection_plan_created": False,
+    }
+
+
+def _next_attempt_gate_state(
+    *,
+    position: dict[str, Any],
+    open_orders: dict[str, Any],
+) -> dict[str, Any]:
+    if position.get("status") == "active_position_present":
+        return {
+            "status": "blocked",
+            "reason": "active_position_present",
+            "active_symbols": list(position.get("active_symbols") or []),
+        }
+    if open_orders.get("status") == "open_orders_present":
+        return {
+            "status": "blocked",
+            "reason": "open_orders_present",
+            "open_order_symbols": list(open_orders.get("open_order_symbols") or []),
+        }
+    if position.get("status") == "no_active_position" and open_orders.get("status") == "no_open_orders":
+        return {
+            "status": "ready_for_strategy_signal",
+            "reason": "flat_and_no_open_orders_for_selected_strategygroup_symbols",
+        }
+    return {
+        "status": "missing",
+        "reason": "position_or_open_order_fact_missing",
     }
 
 
@@ -197,7 +322,8 @@ def collect_live_facts(
     timeout_seconds: float = 12,
     urlopen: UrlOpen = urllib.request.urlopen,
 ) -> dict[str, Any]:
-    symbols = _handoff_symbols(handoff_dir)
+    handoff = _handoff_summary(handoff_dir)
+    symbols = list(handoff["symbols"])
     api_key = _env_value(("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"), env_file=env_file)
     api_secret = _env_value(("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"), env_file=env_file)
     payloads: dict[str, dict[str, Any]] = {}
@@ -220,6 +346,15 @@ def collect_live_facts(
     position = _position_summary(payloads["position_risk"], symbols)
     open_orders = _open_order_summary(payloads["open_orders"], symbols)
     account = _account_summary(payloads["account"])
+    budget = _budget_state(
+        account_payload=payloads["account"],
+        handoff_summary=handoff,
+    )
+    protection = _protection_state(handoff)
+    next_attempt_gate = _next_attempt_gate_state(
+        position=position,
+        open_orders=open_orders,
+    )
     return {
         "scope": "strategy_group_live_facts_input",
         "status": "ready" if not errors else "partial",
@@ -229,9 +364,9 @@ def collect_live_facts(
         "account": account,
         "active_position": position,
         "open_orders": open_orders,
-        "protection": {"status": "missing", "reason": "requires_candidate_specific_protection_plan"},
-        "budget": {"status": "missing", "reason": "requires_runtime_budget_or_budget_authorization_read_model"},
-        "next_attempt_gate": {"status": "missing", "reason": "requires_runtime_next_attempt_gate_packet"},
+        "protection": protection,
+        "budget": budget,
+        "next_attempt_gate": next_attempt_gate,
         "collector_errors": errors,
         "safety_invariants": {
             "signed_get_only": True,

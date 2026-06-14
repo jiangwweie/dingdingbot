@@ -77,9 +77,9 @@ def test_live_facts_readiness_marks_armed_ready_when_required_live_facts_pass():
             "account": {"status": "fresh"},
             "active_position": {"status": "no_active_position"},
             "open_orders": {"status": "no_open_orders"},
-            "protection": {"status": "ready"},
-            "budget": {"status": "available"},
-            "next_attempt_gate": {"status": "waiting_for_fresh_strategy_signal"},
+            "protection": {"status": "ready_for_candidate_specific_plan"},
+            "budget": {"status": "available_for_candidate_specific_reservation"},
+            "next_attempt_gate": {"status": "ready_for_strategy_signal"},
         },
         generated_at_ms=1,
     )
