@@ -37,6 +37,7 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
     DEFAULT_PG_CONTAINER_NAME,
     DEFAULT_SERVICE_NAME,
     DEFAULT_VENV_PYTHON,
+    runtime_signal_watcher_dispatcher_dropin_install_command,
 )
 from src.domain.standing_authorization import (
     OWNER_STANDING_AUTHORIZATION_REFERENCE,
@@ -476,6 +477,12 @@ def _plan_phases(
                 _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
                 _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
                 _ssh(host, health_wait_command),
+                _ssh(
+                    host,
+                    runtime_signal_watcher_dispatcher_dropin_install_command(
+                        remote_release_path=remote_release_path
+                    ),
+                ),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "

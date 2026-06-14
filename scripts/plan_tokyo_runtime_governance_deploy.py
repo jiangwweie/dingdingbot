@@ -50,6 +50,11 @@ DEFAULT_EXPECTED_LATEST_MIGRATION = (
 )
 DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
+RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf"
+)
 
 
 class DeployPlanError(RuntimeError):
@@ -437,6 +442,12 @@ def _plan_phases(
                 _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
                 _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
                 _ssh(host, health_wait_command),
+                _ssh(
+                    host,
+                    runtime_signal_watcher_dispatcher_dropin_install_command(
+                        remote_release_path=remote_release_path
+                    ),
+                ),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
@@ -465,6 +476,32 @@ def _plan_phases(
             ],
         },
     ]
+
+
+def runtime_signal_watcher_dispatcher_dropin_install_command(
+    *,
+    remote_release_path: str,
+) -> str:
+    q = shlex.quote
+    service_dropin_dir = (
+        f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
+    )
+    service_dropin_path = f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    release_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
+    )
+    return (
+        f"set -eu; test -f {q(release_dropin_path)}; "
+        f"sudo -n mkdir -p {q(service_dropin_dir)}; "
+        f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)}; "
+        "sudo -n systemctl daemon-reload; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}"
+    )
 
 
 def _ssh(host: str, remote_command: str) -> str:
