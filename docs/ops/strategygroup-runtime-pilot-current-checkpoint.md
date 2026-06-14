@@ -374,3 +374,25 @@ budget=available_for_candidate_specific_reservation
 protection=ready_for_candidate_specific_plan
 next_attempt_gate=ready_for_strategy_signal
 ```
+
+Latest Tokyo deploy after watcher fresh-authorization binding carryover:
+
+```text
+deployed_head=2df7ae9a1107971f528296e8a84dcb116e18932e
+current_release=brc-runtime-governance-2df7ae9a-20260615-fresh-auth-binding
+deploy_apply=applied
+commands_executed=16/16
+postdeploy_verify=postdeploy_acceptance_passed
+postdeploy_acceptance=postdeploy_acceptance_ready
+backend_active=active
+watcher_timer=active
+watcher_service_last_result=success
+dispatcher_binding_marker=present
+resume_dispatch_status=waiting_for_market
+resume_dispatch_action=continue_watcher_observation
+current_blocker=no_fresh_strategy_signal
+exchange_called=false
+order_created=false
+order_lifecycle_called=false
+withdrawal_or_transfer_created=false
+```
