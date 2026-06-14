@@ -356,3 +356,9 @@ The dispatcher may chain the binding call into the FinalGate GET preflight in a
 single `--execute-preflight` run after the official binding API returns a fresh
 submit authorization id. This remains a prepare / preflight path only. It must
 not call the official submit endpoint or create an exchange order.
+
+For the official FinalGate GET preflight, `prepared_authorization_id` is the
+required action-time identifier. `shadow_candidate_id` remains useful context
+when available, but it must not block the GET preflight after a concrete fresh
+submit authorization already exists. The later Operation Layer submit
+checkpoint still requires its full evidence-id set.

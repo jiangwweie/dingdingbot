@@ -547,6 +547,53 @@ def test_dispatcher_blocks_ready_without_fresh_evidence():
     assert packet["command_plan"] is None
 
 
+def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypatch):
+    calls = []
+    resume = _resume_pack("ready_for_action_time_final_gate")
+    resume["action_time_resume"]["shadow_candidate_id"] = None
+    resume["shadow_candidate_id"] = None
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "pass",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "finalgate_ready"
+    assert packet["command_plan"]["shadow_candidate_id"] is None
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith(
+        "/runtime-execution-controlled-submit-preflights/authorizations/auth-ready-1"
+    )
+
+
 def test_dispatcher_blocks_unsafe_resume_flags():
     resume = _resume_pack("ready_for_action_time_final_gate")
     resume["action_time_resume"]["exchange_write_called"] = True

@@ -182,6 +182,12 @@ This chained path still does not call Operation Layer, OrderLifecycle, exchange
 write APIs, runtime budget mutation, withdrawal, or transfer. Binding-created
 prepare evidence is reported honestly as allowed PG prepare mutation.
 
+`shadow_candidate_id` is treated as contextual evidence for this GET preflight.
+If a concrete `prepared_authorization_id` exists, missing `shadow_candidate_id`
+must not block the official FinalGate GET checkpoint. The later Operation Layer
+checkpoint still requires its full submit-evidence id set before any gateway
+action.
+
 ## StrategyGroup Pilot Handoff
 
 The deployed release now contains a repo-local MPG pilot handoff:

@@ -68,7 +68,6 @@ UNSAFE_TRUE_FLAGS = {
 }
 READY_REQUIRED_FIELDS = (
     "signal_input_json",
-    "shadow_candidate_id",
     "prepared_authorization_id",
 )
 
@@ -592,15 +591,15 @@ def build_dispatch_packet(
                 command_plan=None,
             )
 
-        authorization_id = str(
+        authorization_id = _first_text(
             action_time_resume.get("prepared_authorization_id")
             or resume_pack.get("prepared_authorization_id")
         )
-        signal_input_json = str(
+        signal_input_json = _first_text(
             action_time_resume.get("signal_input_json")
             or resume_pack.get("signal_input_json")
         )
-        shadow_candidate_id = str(
+        shadow_candidate_id = _first_text(
             action_time_resume.get("shadow_candidate_id")
             or resume_pack.get("shadow_candidate_id")
         )
