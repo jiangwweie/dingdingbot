@@ -5204,6 +5204,7 @@ def test_all_trading_console_read_model_endpoints_return_envelopes(monkeypatch):
         "/api/trading-console/budget-recommendation",
         "/api/trading-console/signal-marker-feed",
         "/api/trading-console/runtime-signal-watcher-status",
+        "/api/trading-console/strategy-group-handoff-intake",
         "/api/trading-console/api-classification",
     ]
 
@@ -5283,4 +5284,94 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
     assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
+    assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+
+
+def _write_strategy_group_handoff(path: Path, strategy_group_id: str, *, default_mode: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "strategy_group_id": strategy_group_id,
+                "version": "2026-06-14-r0",
+                "name": f"{strategy_group_id} handoff",
+                "supported_symbols": ["BTCUSDT", "ETHUSDT"],
+                "supported_sides": ["long"],
+                "mode_recommendation": {
+                    "default": default_mode,
+                    "allowed": ["observe_only", "armed_observation"],
+                    "not_allowed_by_research_window": ["auto_execute_after_gate"],
+                },
+                "signal_ready_rule": {"requires_fresh_closed_candle": True},
+                "required_facts": {
+                    "market": ["latest_price", "recent_1h_candles"],
+                    "account": ["active_position", "open_orders"],
+                    "exchange": ["symbol_availability", "min_notional"],
+                    "risk": ["protection_plan_state"],
+                },
+                "risk_defaults": {"max_notional_usdt": 8, "leverage": 1},
+                "hard_stops": ["active_position", "open_order"],
+                "sample_signal_packet": {"status": "ready_for_shadow_candidate_prepare"},
+                "sample_no_signal_packet": {"status": "no_signal"},
+                "sample_stale_signal_packet": {"status": "stale_signal"},
+                "sample_conflict_packet": {"status": "signal_conflict"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_strategy_group_handoff_supplements(base: Path) -> None:
+    for name in [
+        "main-control-admission-priority.md",
+        "main-control-required-facts-map.md",
+        "main-control-conflict-policy.md",
+        "main-control-watcher-cadence.md",
+        "main-control-handoff-index.md",
+        "main-control-task-card.md",
+    ]:
+        (base / name).write_text(f"# {name}\n", encoding="utf-8")
+
+
+def test_strategy_group_handoff_intake_returns_picker_readiness(monkeypatch, tmp_path):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    handoff_dir = tmp_path / "strategy-group-handoffs"
+    _write_strategy_group_handoff(
+        handoff_dir / "MPG-001" / "handoff.json",
+        "MPG-001",
+        default_mode="armed_observation",
+    )
+    _write_strategy_group_handoff(
+        handoff_dir / "PMR-001" / "handoff.json",
+        "PMR-001",
+        default_mode="observe_only",
+    )
+    _write_strategy_group_handoff_supplements(handoff_dir)
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT", "05f616b0")
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/strategy-group-handoff-intake")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["read_model"] == "strategy_group_handoff_intake"
+    assert payload["freshness_status"] == "fresh"
+    assert payload["live_ready"] is False
+    assert payload["no_action_guarantee"]["places_order"] is False
+    assert payload["data"]["status"] == "ready_for_main_control_intake"
+    assert payload["data"]["source_anchor"]["commit"] == "05f616b0"
+    assert payload["data"]["counts"]["strategy_groups"] == 2
+    by_id = {
+        item["strategy_group_id"]: item
+        for item in payload["data"]["strategy_picker"]
+    }
+    assert by_id["MPG-001"]["intake_status"] == "armed_observation_intake_ready"
+    assert by_id["PMR-001"]["intake_status"] == "observe_only_intake_ready"
+    assert payload["data"]["safety_invariants"]["places_order"] is False
+    assert payload["data"]["safety_invariants"]["creates_candidate"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False

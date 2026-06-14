@@ -63,12 +63,23 @@ from src.application.owner_action_carrier_catalog import owner_action_carrier_id
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
+from scripts.build_strategy_group_handoff_intake_packet import (
+    DEFAULT_HANDOFF_DIR as DEFAULT_STRATEGY_GROUP_HANDOFF_DIR,
+    DEFAULT_SOURCE_BRANCH as DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH,
+    DEFAULT_SOURCE_COMMIT as DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT,
+    DEFAULT_SOURCE_REPO as DEFAULT_STRATEGY_GROUP_HANDOFF_REPO,
+    build_packet as build_strategy_group_handoff_intake_packet,
+)
 
 
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
 DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
+DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "strategy-group-handoff-intake-packet.json"
+)
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
@@ -1272,6 +1283,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/budget-recommendation",
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/runtime-signal-watcher-status",
+                    "GET /api/trading-console/strategy-group-handoff-intake",
                     "GET /api/trading-console/api-classification",
                 ],
                 "internal_or_legacy": [
@@ -1444,6 +1456,92 @@ class TradingConsoleReadModelService:
                     "mutates_pg": False,
                 },
             },
+            live_ready=False,
+        )
+
+    def strategy_group_handoff_intake(
+        self,
+        *,
+        handoff_dir: Optional[str] = None,
+        source_repo: Optional[str] = None,
+        source_branch: Optional[str] = None,
+        source_commit: Optional[str] = None,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        resolved_handoff_dir = Path(
+            handoff_dir
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_DIR")
+            or str(DEFAULT_STRATEGY_GROUP_HANDOFF_DIR)
+        ).expanduser()
+        resolved_source_repo = (
+            source_repo
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_REPO")
+            or DEFAULT_STRATEGY_GROUP_HANDOFF_REPO
+        )
+        resolved_source_branch = (
+            source_branch
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_BRANCH")
+            or DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH
+        )
+        resolved_source_commit = (
+            source_commit
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT")
+            or DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT
+        )
+        try:
+            packet = build_strategy_group_handoff_intake_packet(
+                handoff_dir=resolved_handoff_dir,
+                source_repo=resolved_source_repo,
+                source_branch=resolved_source_branch,
+                source_commit=resolved_source_commit,
+            )
+        except Exception as exc:
+            packet = {
+                "scope": "strategy_group_handoff_main_control_intake",
+                "status": "blocked_handoff_intake",
+                "generated_at_ms": generated_at_ms,
+                "source_anchor": {
+                    "repo": resolved_source_repo,
+                    "branch": resolved_source_branch,
+                    "commit": resolved_source_commit,
+                    "handoff_dir": str(resolved_handoff_dir),
+                },
+                "counts": {
+                    "strategy_groups": 0,
+                    "armed_observation_intake_ready": 0,
+                    "observe_only_intake_ready": 0,
+                    "required_fact_rows": 0,
+                },
+                "strategy_picker": [],
+                "required_facts_matrix": [],
+                "watcher_scope": [],
+                "blockers": [f"handoff_intake_build_failed:{type(exc).__name__}"],
+                "safety_invariants": {
+                    "reads_research_handoff_only": True,
+                    "registers_runtime": False,
+                    "creates_candidate": False,
+                    "authorizes_execution": False,
+                    "places_order": False,
+                    "mutates_pg": False,
+                },
+            }
+        packet_blockers = list(packet.get("blockers") or [])
+        blockers = [
+            {
+                "code": "strategy_group_handoff_intake_blocked",
+                "message": "StrategyGroup handoff intake is not ready for main-control consumption.",
+                "affected_area": ",".join(packet_blockers[:8]),
+            }
+        ] if packet_blockers else []
+        freshness_status = "fresh" if not blockers else "not_live_connected"
+        return TradingConsoleReadModelResponse(
+            read_model="strategy_group_handoff_intake",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=[],
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
             live_ready=False,
         )
 

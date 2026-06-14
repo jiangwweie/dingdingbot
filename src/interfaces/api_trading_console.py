@@ -3623,6 +3623,11 @@ async def runtime_signal_watcher_status(
     )
 
 
+@router.get("/strategy-group-handoff-intake", response_model=TradingConsoleReadModelResponse)
+async def strategy_group_handoff_intake() -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).strategy_group_handoff_intake()
+
+
 @router.get("/api-classification", response_model=TradingConsoleReadModelResponse)
 async def api_classification() -> TradingConsoleReadModelResponse:
     return _service(include_exchange=False).api_classification()
