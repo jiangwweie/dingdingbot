@@ -1,0 +1,267 @@
+{
+  "strategy_group_id": "MPG-001",
+  "version": "2026-06-14-r0",
+  "name": "Momentum Persistence Group",
+  "status": "handoff_ready_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "INTCUSDT",
+    "MSTRUSDT",
+    "COINUSDT",
+    "CRCLUSDT",
+    "HOODUSDT",
+    "PLTRUSDT",
+    "MUUSDT",
+    "SNDKUSDT",
+    "TSLAUSDT",
+    "AMZNUSDT",
+    "EWYUSDT",
+    "NVDAUSDT",
+    "METAUSDT",
+    "GOOGLUSDT",
+    "TSMUSDT",
+    "MRVLUSDT",
+    "AVGOUSDT",
+    "FLNCUSDT",
+    "SOXLUSDT",
+    "XAGUSDT",
+    "XAUUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long"
+  ],
+  "mode_recommendation": {
+    "default": "armed_observation",
+    "allowed": [
+      "observe_only",
+      "armed_observation"
+    ],
+    "not_allowed_by_research_window": [
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "ready_for_shadow_candidate_prepare",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "source_member",
+      "classifier_id",
+      "entry_reason",
+      "invalidation_reason",
+      "protection_plan_hint",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "overbought_persistence",
+      "momentum_persistence",
+      "zero_cross",
+      "trend_strength"
+    ],
+    "preferred_classifier_lanes": [
+      "mpg_lcd_body_le_1p5",
+      "mpg_equity_regular_proxy_12h",
+      "mpg_bounded_impulse_72h_revival"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state",
+      "tradfi_offhour_mark_index_state"
+    ],
+    "strategy": [
+      "mpg_member_signal_state",
+      "mpg_group_pool_selection_state",
+      "momentum_clean_persistence_state",
+      "momentum_exhaustion_disable_state",
+      "mpg_late_cycle_disable_state",
+      "mpg_signal_body_extension_state",
+      "mpg_exit_horizon_state",
+      "mpg_time_stop_tradeoff_state",
+      "mpg_2x_tradeoff_lane_state",
+      "mpg_leverage_horizon_boundary_state",
+      "mpg_high_leverage_disable_state",
+      "mpg_drawdown_attribution_state",
+      "mpg_member_drawdown_contribution_state",
+      "mpg_symbol_concentration_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "real_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "disabled_leverage": [
+      "5"
+    ],
+    "stress_only_leverage": [
+      "3"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "12h_tradeoff_lane",
+    "revival_exit_horizon": "72h_bounded_impulse_lane"
+  },
+  "hard_stops": [
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "missing_closed_candle",
+    "no_stop_loss_plan",
+    "missing_exit_horizon",
+    "late_cycle_extension_detected",
+    "high_leverage_requested",
+    "strategy_signal_conflict",
+    "missing_real_margin_model_for_leverage",
+    "missing_fill_gap_slippage_state",
+    "same_symbol_duplicate_candidate"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_signal",
+    "strategy_group_id": "MPG-001",
+    "strategy_group_version": "2026-06-14-r0",
+    "status": "ready_for_shadow_candidate_prepare",
+    "generated_at": "2026-06-14T00:00:00Z",
+    "fresh_until": "2026-06-14T00:02:00Z",
+    "symbol": "INTCUSDT",
+    "direction": "long",
+    "confidence": "0.74",
+    "source_member": "WPR-001",
+    "classifier_id": "mpg_lcd_body_le_1p5",
+    "timeframe": "1h",
+    "entry_reason": "Closed 1h candle shows momentum persistence with accepted MPG body-capped bounded impulse state.",
+    "invalidation_reason": "Invalidate if the next closed 1h candle breaks the momentum persistence state, late-cycle extension appears, exchange facts are missing, or same-symbol exposure exists.",
+    "protection_plan_hint": {
+      "requires_stop_loss": true,
+      "requires_exit_plan": true,
+      "preferred_exit_horizon": "12h_tradeoff_lane",
+      "revival_exit_horizon": "72h_only_after_main_control_review",
+      "leverage_hint": "1x_default_2x_research_lane_only"
+    },
+    "required_facts_snapshot": {
+      "recent_1h_candles": "present",
+      "mpg_member_signal_state": "WPR-001_overbought_persistence_long",
+      "mpg_group_pool_selection_state": "accepted",
+      "mpg_late_cycle_disable_state": "not_triggered",
+      "mpg_signal_body_extension_state": "body_le_1p5",
+      "mpg_exit_horizon_state": "12h_tradeoff_or_72h_revival",
+      "mpg_high_leverage_disable_state": "5x_disabled",
+      "exchange_symbol_rules_state": "pending_main_control",
+      "account_conflict_state": "pending_main_control"
+    },
+    "candidate_prepare_allowed_by_research": true,
+    "execution_allowed_by_research": false
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_signal",
+    "strategy_group_id": "MPG-001",
+    "strategy_group_version": "2026-06-14-r0",
+    "status": "no_signal",
+    "generated_at": "2026-06-14T00:00:00Z",
+    "symbol": "INTCUSDT",
+    "direction": "long",
+    "reason": "No accepted MPG member signal or group classifier acceptance on the latest closed 1h candle.",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_signal",
+    "strategy_group_id": "MPG-001",
+    "strategy_group_version": "2026-06-14-r0",
+    "status": "stale_signal",
+    "generated_at": "2026-06-14T00:03:00Z",
+    "symbol": "INTCUSDT",
+    "direction": "long",
+    "reason": "Signal freshness window exceeded 120 seconds before candidate preparation.",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_signal",
+    "strategy_group_id": "MPG-001",
+    "strategy_group_version": "2026-06-14-r0",
+    "status": "signal_conflict",
+    "generated_at": "2026-06-14T00:00:00Z",
+    "symbol": "INTCUSDT",
+    "direction": "long",
+    "reason": "MPG member or classifier state conflicts with late-cycle disable, same-symbol exposure, or required exchange/account facts.",
+    "conflicts": [
+      "late_cycle_extension_detected",
+      "account_conflict_state_pending"
+    ],
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false
+  },
+  "evidence_references": [
+    "docs/strategy-research/strategy-groups/MPG-001-momentum-persistence-group.md",
+    "docs/strategy-research/momentum-persistence-strategy-group/momentum-persistence-strategy-group-summary.md",
+    "docs/strategy-research/mpg-group-decay-classifier/mpg-group-decay-classifier-summary.md",
+    "docs/strategy-research/mpg-exit-horizon-reslot/mpg-exit-horizon-reslot-summary.md",
+    "docs/strategy-research/mpg-leverage-horizon-envelope/mpg-leverage-horizon-envelope-summary.md",
+    "docs/strategy-research/mpg-late-cycle-disable/mpg-late-cycle-disable-summary.md",
+    "docs/strategy-research/mpg-drawdown-attribution/mpg-drawdown-attribution-summary.md"
+  ],
+  "main_control_handoff": {
+    "recommended_next_consumer": "main_control_strategy_runtime_admission",
+    "recommended_ui_surface": "Strategy Picker candidate",
+    "handoff_meaning": "observable_experimental_strategy_group_candidate",
+    "main_control_owns": [
+      "strategy_group_admission",
+      "runtime_binding",
+      "watcher_scope",
+      "required_facts_readiness",
+      "candidate_preparation",
+      "final_gate",
+      "operation_layer",
+      "real_execution_boundary",
+      "review_ledger"
+    ]
+  }
+}
