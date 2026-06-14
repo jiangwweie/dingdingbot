@@ -220,7 +220,7 @@ def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkp
                 "error": False,
                 "body": {
                     "status": "ready_for_controlled_submit_adapter",
-                    "final_gate_verdict": "pass",
+                    "final_gate_verdict": "PASS",
                     "blockers": [],
                     "warnings": [],
                     "submit_executed": False,

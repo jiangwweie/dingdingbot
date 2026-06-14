@@ -188,6 +188,10 @@ must not block the official FinalGate GET checkpoint. The later Operation Layer
 checkpoint still requires its full submit-evidence id set before any gateway
 action.
 
+The dispatcher normalizes FinalGate verdict casing. Service responses such as
+`PASS` and `pass` both mean a passed FinalGate verdict when blockers are empty
+and the controlled-submit plan status is ready.
+
 ## StrategyGroup Pilot Handoff
 
 The deployed release now contains a repo-local MPG pilot handoff:

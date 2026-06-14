@@ -251,9 +251,13 @@ def _preflight_forbidden_effects(body: Any) -> list[str]:
 
 def _preflight_passed(body: Any) -> bool:
     payload = _dict(body)
+    status = str(
+        payload.get("status") or payload.get("controlled_submit_plan_status") or ""
+    ).lower()
+    verdict = str(payload.get("final_gate_verdict") or "").lower()
     return (
-        payload.get("status") == "ready_for_controlled_submit_adapter"
-        and payload.get("final_gate_verdict") == "pass"
+        status == "ready_for_controlled_submit_adapter"
+        and verdict == "pass"
         and not payload.get("blockers")
     )
 
@@ -261,10 +265,12 @@ def _preflight_passed(body: Any) -> bool:
 def _preflight_blockers(body: Any) -> list[str]:
     payload = _dict(body)
     blockers = [str(item) for item in _list(payload.get("blockers")) if str(item).strip()]
-    if payload.get("status") not in {None, "ready_for_controlled_submit_adapter"}:
-        blockers.append(f"preflight_status:{payload.get('status')}")
+    raw_status = payload.get("status") or payload.get("controlled_submit_plan_status")
+    normalized_status = str(raw_status or "").lower()
+    if raw_status is not None and normalized_status != "ready_for_controlled_submit_adapter":
+        blockers.append(f"preflight_status:{raw_status}")
     verdict = payload.get("final_gate_verdict")
-    if verdict not in {None, "pass"}:
+    if verdict is not None and str(verdict).lower() != "pass":
         blockers.append(f"final_gate_verdict:{verdict}")
     return sorted(set(blockers))
 
