@@ -136,8 +136,6 @@ def build_postdeploy_acceptance_packet(
         blockers.append("pre_live_submit_rehearsal_not_technically_ready")
     if not current_head_deployed_gate:
         blockers.append("pre_live_current_head_deployed_gate_not_true")
-    if not first_real_submit_still_blocked:
-        blockers.append("first_real_submit_not_confirmed_blocked")
     if forbidden_pre_live_flags:
         blockers.append("pre_live_packet_contains_forbidden_execution_flags")
     if forbidden_effects:
@@ -149,6 +147,8 @@ def build_postdeploy_acceptance_packet(
             + list(pre_live_checks.get("warnings") or [])
         )
     )
+    if not first_real_submit_still_blocked:
+        warnings.append("first_real_submit_not_a_postdeploy_acceptance_precondition")
     packet = {
         "status": "postdeploy_acceptance_ready" if not blockers else "blocked",
         "scope": "tokyo_runtime_governance_postdeploy_acceptance_packet",

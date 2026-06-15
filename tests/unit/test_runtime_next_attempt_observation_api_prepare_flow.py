@@ -149,9 +149,11 @@ def test_observation_api_prepare_ready_writes_signal_without_records(monkeypatch
     assert payload["signal_input_json"] == str(signal_path)
     assert signal_path.exists()
     assert payload["operator_command_plan"]["next_step"] == (
-        "rerun_with_allow_prepare_records_after_owner_review"
+        "rerun_with_allow_prepare_records_under_standing_authorization"
     )
     assert payload["operator_command_plan"]["creates_execution_intent"] is False
+    assert payload["operator_command_plan"]["uses_standing_runtime_authorization"] is True
+    assert payload["operator_command_plan"]["requires_official_operation_layer"] is True
     assert payload["safety_invariants"]["prepare_records_created"] is False
 
 

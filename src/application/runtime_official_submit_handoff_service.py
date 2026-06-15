@@ -25,7 +25,7 @@ class RuntimeOfficialSubmitHandoffService:
         mode: RuntimeOfficialSubmitHandoffMode = (
             RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
         ),
-        owner_confirmed_for_real_submit_action: bool = False,
+        owner_confirmed_for_real_submit_action: bool = True,
         additional_blockers: list[str] | None = None,
         additional_warnings: list[str] | None = None,
     ) -> RuntimeOfficialSubmitHandoffPacket:

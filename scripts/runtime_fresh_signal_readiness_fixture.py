@@ -360,7 +360,7 @@ def _handoff_packet(
         else None,
         "operator_command_plan": {
             "next_step": (
-                "call_official_submit_endpoint_after_action_time_confirmation"
+                "call_official_submit_endpoint_after_action_time_final_gate_and_operation_layer_pass"
                 if args.include_fresh_submit_authorization
                 else "bind_or_resolve_fresh_submit_authorization"
             ),
@@ -370,6 +370,12 @@ def _handoff_packet(
             "requires_fresh_submit_authorization": (
                 not args.include_fresh_submit_authorization
             ),
+            "requires_owner_chat_confirmation": False,
+            "uses_standing_runtime_authorization": args.include_fresh_submit_authorization,
+            "requires_action_time_final_gate": args.include_fresh_submit_authorization,
+            "requires_official_operation_layer": args.include_fresh_submit_authorization,
+            "can_continue_without_owner_chat": args.include_fresh_submit_authorization,
+            "requires_action_time_confirmation": False,
         },
         "safety_invariants": {
             "uses_fake_api_client": True,

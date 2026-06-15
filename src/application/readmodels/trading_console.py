@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from enum import Enum
 from typing import Any, Optional
 
@@ -61,15 +63,229 @@ from src.application.owner_action_carrier_catalog import owner_action_carrier_id
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
+from scripts.build_strategy_group_handoff_intake_packet import (
+    DEFAULT_HANDOFF_DIR as DEFAULT_STRATEGY_GROUP_HANDOFF_DIR,
+    DEFAULT_SOURCE_BRANCH as DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH,
+    DEFAULT_SOURCE_COMMIT as DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT,
+    DEFAULT_SOURCE_REPO as DEFAULT_STRATEGY_GROUP_HANDOFF_REPO,
+    build_packet as build_strategy_group_handoff_intake_packet,
+)
+from scripts.build_strategy_group_live_facts_readiness_packet import (
+    build_packet as build_strategy_group_live_facts_readiness_packet,
+)
+from scripts.build_strategygroup_runtime_pilot_status import (
+    build_packet as build_strategygroup_runtime_pilot_status_packet,
+)
 
 
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
+DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
+DEFAULT_STRATEGY_GROUP_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/strategygroup-runtime-pilot"
+DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "strategy-group-handoff-intake-packet.json"
+)
+DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "strategy-group-live-facts-input.json"
+)
+DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
+DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
 TERMINAL_INTENT_STATUSES = {"blocked", "failed", "completed"}
+SIGNAL_WATCHER_RESUME_READY_STATUSES = {
+    "runtime_signal_ready_for_non_executing_prepare",
+    "prepared_shadow_evidence_ready_for_owner_review",
+}
+SIGNAL_WATCHER_UNSAFE_FLAGS = {
+    "exchange_write_called",
+    "order_created",
+    "order_lifecycle_called",
+    "execution_intent_created",
+    "runtime_budget_mutated",
+    "withdrawal_or_transfer_created",
+}
+
+
+def _runtime_signal_watcher_owner_state(
+    *,
+    post_signal_auto_resume: dict[str, Any],
+    readiness_status: str,
+    missing: list[str],
+    stale: bool,
+    unsafe_flags: list[str],
+    can_resume_steps_5_8: bool,
+) -> dict[str, Any]:
+    """Translate watcher packet fields into an Owner-facing recovery summary."""
+
+    if unsafe_flags:
+        blocked_at = "watcher_safety_invariants"
+        blocked_reason = "watcher_evidence_contains_forbidden_effect_flags"
+        automatic_recovery_action = "stop_resume_path_and_investigate_watcher_evidence"
+        state = {
+            "status": "blocked_hard_safety_stop",
+            "blocker_class": "hard_safety_stop",
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": "forbidden_effect_flags_are_absent_in_current_evidence",
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "manual_review_only",
+        }
+    elif missing:
+        blocked_at = "runtime_signal_watcher_evidence"
+        blocked_reason = "watcher_evidence_missing"
+        automatic_recovery_action = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+        state = {
+            "status": "blocked_deployment_issue",
+            "blocker_class": "deployment_issue",
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": "watcher_evidence_files_are_present",
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+        }
+    elif stale:
+        blocked_at = "runtime_signal_watcher_evidence"
+        blocked_reason = "watcher_evidence_stale"
+        automatic_recovery_action = "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
+        state = {
+            "status": "blocked_deployment_issue",
+            "blocker_class": "deployment_issue",
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": "watcher_evidence_files_are_fresh",
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+        }
+    else:
+        status = str(post_signal_auto_resume.get("status") or "")
+        if not status:
+            status = "ready" if readiness_status == "ready" else readiness_status
+        blocked_at = str(
+            post_signal_auto_resume.get("blocked_at")
+            or ("none" if can_resume_steps_5_8 else "watcher_signal")
+        )
+        blocked_reason = str(
+            post_signal_auto_resume.get("blocked_reason")
+            or ("none" if can_resume_steps_5_8 else "no_fresh_strategy_signal")
+        )
+        automatic_recovery_action = str(
+            post_signal_auto_resume.get("automatic_recovery_action")
+            or (
+                "continue_to_non_executing_prepare"
+                if can_resume_steps_5_8
+                else "continue_watcher_observation"
+            )
+        )
+        blocker_class = "none"
+        if blocked_reason != "none":
+            blocker_class = (
+                "waiting_for_market"
+                if blocked_reason == "no_fresh_strategy_signal"
+                else "review_only_warning"
+            )
+        state = {
+            "status": status,
+            "blocker_class": blocker_class,
+            "blocked_at": blocked_at,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": str(
+                post_signal_auto_resume.get("next_recover_condition")
+                or (
+                    "fresh_signal_already_available"
+                    if can_resume_steps_5_8
+                    else "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                )
+            ),
+            "automatic_recovery_action": automatic_recovery_action,
+            "downgrade_mode": str(
+                post_signal_auto_resume.get("downgrade_mode")
+                or ("armed_observation" if can_resume_steps_5_8 else "observe_only")
+            ),
+        }
+
+    why_not_executable: list[str] = []
+    if state["blocked_reason"] != "none":
+        why_not_executable.append(str(state["blocked_reason"]))
+    if unsafe_flags:
+        why_not_executable.extend(f"forbidden_effect:{flag}" for flag in unsafe_flags)
+    if missing:
+        why_not_executable.append("watcher_evidence_missing:" + ",".join(missing))
+    if stale:
+        why_not_executable.append("watcher_evidence_stale")
+
+    return {
+        **state,
+        "can_continue_without_owner_chat": bool(
+            post_signal_auto_resume.get("can_continue_without_owner_chat")
+        )
+        or can_resume_steps_5_8,
+        "requires_action_time_final_gate": bool(
+            post_signal_auto_resume.get("requires_action_time_final_gate")
+        ),
+        "requires_official_operation_layer": bool(
+            post_signal_auto_resume.get("requires_official_operation_layer")
+        ),
+        "why_not_executable": list(dict.fromkeys(why_not_executable)),
+    }
+
+
+def _runtime_signal_watcher_action_time_resume(
+    *,
+    resume_pack: dict[str, Any],
+    post_signal_auto_resume: dict[str, Any],
+    can_resume_steps_5_8: bool,
+) -> dict[str, Any]:
+    existing = resume_pack.get("action_time_resume")
+    if isinstance(existing, dict) and existing:
+        return existing
+
+    if can_resume_steps_5_8 or post_signal_auto_resume.get("prepared_authorization_id"):
+        status = "ready_for_action_time_final_gate"
+        next_step = "run_official_action_time_final_gate_preflight"
+        allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
+        requires_fresh_action_time_facts = True
+        final_gate_status = "not_run"
+    elif post_signal_auto_resume.get("status") == "waiting_for_market":
+        status = "waiting_for_market"
+        next_step = "continue_watcher_observation"
+        allowed_auto_actions = ["continue_watcher_observation"]
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+    else:
+        status = "blocked"
+        next_step = "resolve_watcher_resume_blockers"
+        allowed_auto_actions = []
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+
+    return {
+        "status": status,
+        "next_step": next_step,
+        "signal_input_json": resume_pack.get("signal_input_json"),
+        "shadow_candidate_id": resume_pack.get("shadow_candidate_id"),
+        "prepared_authorization_id": resume_pack.get("prepared_authorization_id"),
+        "allowed_auto_actions": allowed_auto_actions,
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": requires_fresh_action_time_facts,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": final_gate_status,
+        "operation_layer_status": "not_reached",
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
 
 
 class TradingConsoleReadModelResponse(BaseModel):
@@ -839,6 +1055,18 @@ class TradingConsoleReadModelService:
             active_position=active_position,
             autonomy=autonomy,
         )
+        runtime_governance = _cockpit_runtime_governance_summary(
+            overall=overall,
+            autonomy=autonomy,
+            budget=budget,
+            active_position=active_position,
+            protection=_cockpit_protection_summary(protection),
+            review=review,
+            blockers=blockers,
+            post_action=post_action,
+            runtime_control=snap.runtime_control_state,
+            budget_authorization=snap.budget_authorization_state,
+        )
         return self._response(
             "operations_cockpit",
             snap,
@@ -869,6 +1097,7 @@ class TradingConsoleReadModelService:
                 "budget": budget,
                 "active_position": active_position,
                 "protection": _cockpit_protection_summary(protection),
+                "runtime_governance": runtime_governance,
                 "candidate": _cockpit_candidate_summary(
                     selected_proposal=selected_proposal,
                     owner_flow=owner_flow,
@@ -887,6 +1116,7 @@ class TradingConsoleReadModelService:
                     "authorization": snap.authorization_state,
                     "runtime_control_state": snap.runtime_control_state,
                     "budget_authorization_state": snap.budget_authorization_state,
+                    "runtime_governance": runtime_governance,
                     "budgeted_autonomy_loop": owner_flow.get("budgeted_autonomy_loop") or {},
                     "budgeted_autonomy_v01": owner_flow.get("budgeted_autonomy_v01") or {},
                     "post_action_state": post_action,
@@ -1242,6 +1472,10 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/action-entry-readiness",
                     "GET /api/trading-console/budget-recommendation",
                     "GET /api/trading-console/signal-marker-feed",
+                    "GET /api/trading-console/runtime-signal-watcher-status",
+                    "GET /api/trading-console/strategygroup-runtime-pilot-status",
+                    "GET /api/trading-console/strategy-group-handoff-intake",
+                    "GET /api/trading-console/strategy-group-live-facts-readiness",
                     "GET /api/trading-console/api-classification",
                 ],
                 "internal_or_legacy": [
@@ -1252,6 +1486,504 @@ class TradingConsoleReadModelService:
                 "action_api_policy": "official_brc_operation_layer_required_for_submit",
                 "sample_data_policy": "not_allowed_as_trading_console_truth_source",
             },
+        )
+
+    def runtime_signal_watcher_status(
+        self,
+        *,
+        stale_after_seconds: int = 180,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        report_dir = Path(
+            os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR", DEFAULT_SIGNAL_WATCHER_REPORT_DIR)
+        ).expanduser()
+        files = {
+            "watcher_tick": report_dir / "watcher-tick.json",
+            "wakeup_packet": report_dir / "wakeup-packet.json",
+            "operator_packet": report_dir / "operator-packet.json",
+            "status_packet": report_dir / "status-packet.json",
+            "notification_state": report_dir / "notification-state.json",
+        }
+        payloads = {name: _read_json_file(path) for name, path in files.items()}
+        resume_pack_path = report_dir / "post-signal-resume-pack.json"
+        resume_pack = _read_json_file(resume_pack_path)
+        watcher_tick = payloads["watcher_tick"]
+        wakeup_packet = payloads["wakeup_packet"]
+        operator_packet = payloads["operator_packet"]
+        status_packet = payloads["status_packet"]
+        notification_state = payloads["notification_state"]
+        file_status = {
+            name: {
+                "path": str(path),
+                "present": path.exists(),
+                "mtime_ms": _file_mtime_ms(path),
+            }
+            for name, path in files.items()
+        }
+        missing = [name for name, status in file_status.items() if not status["present"]]
+        latest_mtime_ms = max(
+            [int(status["mtime_ms"] or 0) for status in file_status.values()],
+            default=0,
+        )
+        age_seconds = (
+            max(0, int((generated_at_ms - latest_mtime_ms) / 1000))
+            if latest_mtime_ms
+            else None
+        )
+        stale = bool(age_seconds is not None and age_seconds > stale_after_seconds)
+        safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
+        safety = safety if isinstance(safety, dict) else {}
+        post_signal_auto_resume = (
+            resume_pack.get("post_signal_auto_resume")
+            if isinstance(resume_pack.get("post_signal_auto_resume"), dict)
+            else watcher_tick.get("post_signal_auto_resume")
+            if isinstance(watcher_tick.get("post_signal_auto_resume"), dict)
+            else {}
+        )
+        unsafe_flags = [
+            name for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)
+            if safety.get(name) not in {False, None}
+        ]
+        notification = watcher_tick.get("notification") if isinstance(watcher_tick, dict) else {}
+        notification = notification if isinstance(notification, dict) else {}
+        wakeup_status = str(watcher_tick.get("wakeup_status") or wakeup_packet.get("status") or "unknown")
+        operator_status = str(watcher_tick.get("operator_status") or operator_packet.get("status") or "unknown")
+        status_packet_status = str(
+            watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown"
+        )
+        resume_pack_can_continue = resume_pack.get("can_continue_steps_5_8")
+        can_resume_steps_5_8 = (
+            bool(resume_pack_can_continue)
+            if isinstance(resume_pack_can_continue, bool)
+            else wakeup_status in SIGNAL_WATCHER_RESUME_READY_STATUSES
+            and not unsafe_flags
+        )
+        if missing:
+            readiness_status = "evidence_missing"
+        elif stale:
+            readiness_status = "evidence_stale"
+        elif unsafe_flags:
+            readiness_status = "unsafe_watcher_effect_detected"
+        elif not notification.get("configured"):
+            readiness_status = "notification_not_configured"
+        else:
+            readiness_status = "ready"
+        action_time_resume = _runtime_signal_watcher_action_time_resume(
+            resume_pack=resume_pack,
+            post_signal_auto_resume=post_signal_auto_resume,
+            can_resume_steps_5_8=can_resume_steps_5_8,
+        )
+        owner_state = resume_pack.get("owner_state")
+        if not isinstance(owner_state, dict) or not owner_state:
+            owner_state = _runtime_signal_watcher_owner_state(
+                post_signal_auto_resume=post_signal_auto_resume,
+                readiness_status=readiness_status,
+                missing=missing,
+                stale=stale,
+                unsafe_flags=unsafe_flags,
+                can_resume_steps_5_8=can_resume_steps_5_8,
+            )
+        else:
+            owner_state = dict(owner_state)
+            blocked_reason = str(owner_state.get("blocked_reason") or "none")
+            owner_state.setdefault(
+                "why_not_executable",
+                [] if blocked_reason == "none" else [blocked_reason],
+            )
+            owner_state.setdefault(
+                "can_continue_without_owner_chat",
+                bool(post_signal_auto_resume.get("can_continue_without_owner_chat"))
+                or can_resume_steps_5_8,
+            )
+            owner_state.setdefault(
+                "requires_action_time_final_gate",
+                bool(action_time_resume.get("requires_action_time_final_gate")),
+            )
+            owner_state.setdefault(
+                "requires_official_operation_layer",
+                bool(action_time_resume.get("requires_official_operation_layer")),
+            )
+
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if missing:
+            blockers.append(
+                {
+                    "code": "runtime_signal_watcher_evidence_missing",
+                    "message": "Runtime Signal Watcher evidence files are missing.",
+                    "affected_area": ",".join(missing),
+                }
+            )
+        if unsafe_flags:
+            blockers.append(
+                {
+                    "code": "runtime_signal_watcher_unsafe_effect",
+                    "message": "Watcher evidence contains forbidden effect flags.",
+                    "affected_area": ",".join(unsafe_flags),
+                }
+            )
+        if stale:
+            warnings.append(
+                {
+                    "code": "runtime_signal_watcher_evidence_stale",
+                    "severity": "warning",
+                    "message": "Runtime Signal Watcher evidence is older than the configured freshness window.",
+                    "count": 1,
+                }
+            )
+        freshness_status = "fresh"
+        if blockers:
+            freshness_status = "not_live_connected"
+        elif warnings:
+            freshness_status = "warning"
+
+        return TradingConsoleReadModelResponse(
+            read_model="runtime_signal_watcher_status",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=warnings,
+            blockers=blockers,
+            unavailable=[],
+            data={
+                "deployment_readiness": {
+                    "status": readiness_status,
+                    "report_dir": str(report_dir),
+                    "file_status": file_status,
+                    "latest_evidence_age_seconds": age_seconds,
+                    "stale_after_seconds": stale_after_seconds,
+                    "systemd_timer": "verified_by_deployment_readiness_packet",
+                    "feishu_configured": bool(notification.get("configured")),
+                    "duplicate_suppression": "active"
+                    if notification_state.get("last_notified_event_key")
+                    else "not_yet_observed",
+                },
+                "watcher": {
+                    "status": watcher_tick.get("status") or "unknown",
+                    "wakeup_status": wakeup_status,
+                    "operator_status": operator_status,
+                    "status_packet_status": status_packet_status,
+                    "runtime_signal_summaries": status_packet.get(
+                        "runtime_signal_summaries"
+                    )
+                    or [],
+                    "blockers": watcher_tick.get("blockers") or status_packet.get("blockers") or [],
+                    "warnings": watcher_tick.get("warnings") or status_packet.get("warnings") or [],
+                    "post_signal_auto_resume": post_signal_auto_resume,
+                },
+                "status_packet": {
+                    "status": status_packet.get("status") or "unknown",
+                    "latest_status": status_packet.get("latest_status"),
+                    "runtime_signal_summaries": status_packet.get(
+                        "runtime_signal_summaries"
+                    )
+                    or [],
+                },
+                "notification": {
+                    "required": bool(notification.get("required")),
+                    "configured": bool(notification.get("configured")),
+                    "attempted": bool(notification.get("attempted")),
+                    "sent": bool(notification.get("sent")),
+                    "duplicate_suppressed": bool(notification.get("duplicate_suppressed")),
+                    "skipped_reason": notification.get("skipped_reason"),
+                },
+                "post_signal_resume": {
+                    "status": action_time_resume["status"],
+                    "can_continue_steps_5_8": can_resume_steps_5_8,
+                    "current_gate": (
+                        "action_time_final_gate"
+                        if action_time_resume["status"]
+                        == "ready_for_action_time_final_gate"
+                        else "waiting_for_fresh_strategy_signal"
+                        if action_time_resume["status"] == "waiting_for_market"
+                        else "blocked"
+                    ),
+                    "post_signal_auto_resume": post_signal_auto_resume,
+                    "action_time_resume": action_time_resume,
+                    "resume_pack_path": str(resume_pack_path),
+                    "resume_pack_present": resume_pack_path.exists(),
+                    "raw_resume_pack_status": resume_pack.get("status"),
+                    "next_chain": [
+                        "fresh candidate",
+                        "runtime grant",
+                        "fresh authorization evidence",
+                        "action-time FinalGate",
+                        "official Operation Layer gateway action",
+                        "post-submit finalize / reconciliation / budget settlement",
+                    ],
+                },
+                "action_time_resume": action_time_resume,
+                "post_signal_auto_resume": post_signal_auto_resume,
+                "owner_state": owner_state,
+                "why_not_executable": owner_state["why_not_executable"],
+                "next_safe_checkpoint": owner_state["automatic_recovery_action"],
+                "safety_invariants": {
+                    **{name: bool(safety.get(name)) for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)},
+                    "forbidden_effect_flags": unsafe_flags,
+                    "watcher_status_read_model_only": True,
+                    "places_order": False,
+                    "mutates_pg": False,
+                },
+            },
+            live_ready=False,
+        )
+
+    def strategy_group_handoff_intake(
+        self,
+        *,
+        handoff_dir: Optional[str] = None,
+        source_repo: Optional[str] = None,
+        source_branch: Optional[str] = None,
+        source_commit: Optional[str] = None,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        configured_packet_path = os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_PACKET_PATH")
+        default_packet_path = Path(DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_PATH).expanduser()
+        resolved_packet_path = (
+            Path(configured_packet_path).expanduser()
+            if configured_packet_path
+            else default_packet_path
+        )
+        latest_packet_path = _latest_existing_path(
+            Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
+            DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB,
+        )
+        packet_path = (
+            resolved_packet_path
+            if resolved_packet_path.exists()
+            else latest_packet_path
+        )
+        resolved_handoff_dir = Path(
+            handoff_dir
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_DIR")
+            or str(DEFAULT_STRATEGY_GROUP_HANDOFF_DIR)
+        ).expanduser()
+        resolved_source_repo = (
+            source_repo
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_REPO")
+            or DEFAULT_STRATEGY_GROUP_HANDOFF_REPO
+        )
+        resolved_source_branch = (
+            source_branch
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_BRANCH")
+            or DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH
+        )
+        resolved_source_commit = (
+            source_commit
+            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT")
+            or DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT
+        )
+        if packet_path is not None and handoff_dir is None:
+            packet = _read_json_file(packet_path)
+            if packet:
+                packet["handoff_packet_source"] = {
+                    "path": str(packet_path),
+                    "present": True,
+                    "source": "prebuilt_strategy_group_handoff_intake_packet",
+                }
+        else:
+            packet = {}
+        if not packet:
+            try:
+                packet = build_strategy_group_handoff_intake_packet(
+                    handoff_dir=resolved_handoff_dir,
+                    source_repo=resolved_source_repo,
+                    source_branch=resolved_source_branch,
+                    source_commit=resolved_source_commit,
+                )
+            except Exception as exc:
+                packet = {
+                    "scope": "strategy_group_handoff_main_control_intake",
+                    "status": "blocked_handoff_intake",
+                    "generated_at_ms": generated_at_ms,
+                    "source_anchor": {
+                        "repo": resolved_source_repo,
+                        "branch": resolved_source_branch,
+                        "commit": resolved_source_commit,
+                        "handoff_dir": str(resolved_handoff_dir),
+                    },
+                    "counts": {
+                        "strategy_groups": 0,
+                        "armed_observation_intake_ready": 0,
+                        "observe_only_intake_ready": 0,
+                        "required_fact_rows": 0,
+                    },
+                    "strategy_picker": [],
+                    "required_facts_matrix": [],
+                    "watcher_scope": [],
+                    "blockers": [f"handoff_intake_build_failed:{type(exc).__name__}"],
+                    "safety_invariants": {
+                        "reads_research_handoff_only": True,
+                        "registers_runtime": False,
+                        "creates_candidate": False,
+                        "authorizes_execution": False,
+                        "places_order": False,
+                        "mutates_pg": False,
+                    },
+                }
+        if not packet:
+            packet = {
+                "scope": "strategy_group_handoff_main_control_intake",
+                "status": "blocked_handoff_intake",
+                "generated_at_ms": generated_at_ms,
+                "source_anchor": {
+                    "repo": resolved_source_repo,
+                    "branch": resolved_source_branch,
+                    "commit": resolved_source_commit,
+                    "handoff_dir": str(resolved_handoff_dir),
+                },
+                "counts": {
+                    "strategy_groups": 0,
+                    "armed_observation_intake_ready": 0,
+                    "observe_only_intake_ready": 0,
+                    "required_fact_rows": 0,
+                },
+                "strategy_picker": [],
+                "required_facts_matrix": [],
+                "watcher_scope": [],
+                "blockers": [f"handoff_intake_build_failed:{type(exc).__name__}"],
+                "safety_invariants": {
+                    "reads_research_handoff_only": True,
+                    "registers_runtime": False,
+                    "creates_candidate": False,
+                    "authorizes_execution": False,
+                    "places_order": False,
+                    "mutates_pg": False,
+                },
+            }
+        packet_blockers = list(packet.get("blockers") or [])
+        blockers = [
+            {
+                "code": "strategy_group_handoff_intake_blocked",
+                "message": "StrategyGroup handoff intake is not ready for main-control consumption.",
+                "affected_area": ",".join(packet_blockers[:8]),
+            }
+        ] if packet_blockers else []
+        freshness_status = "fresh" if not blockers else "not_live_connected"
+        return TradingConsoleReadModelResponse(
+            read_model="strategy_group_handoff_intake",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=[],
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
+            live_ready=False,
+        )
+
+    def strategy_group_live_facts_readiness(
+        self,
+        *,
+        live_facts_path: Optional[str] = None,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        intake = self.strategy_group_handoff_intake().data
+        configured_live_facts_path = (
+            live_facts_path or os.environ.get("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH")
+        )
+        resolved_live_facts_path = Path(
+            configured_live_facts_path or DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH
+        ).expanduser()
+        if configured_live_facts_path is None and not resolved_live_facts_path.exists():
+            latest_live_facts_path = _latest_existing_path(
+                Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
+                DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB,
+            )
+            if latest_live_facts_path is not None:
+                resolved_live_facts_path = latest_live_facts_path
+        live_facts = _read_json_file(resolved_live_facts_path)
+        packet = build_strategy_group_live_facts_readiness_packet(
+            intake_packet=intake,
+            live_facts=live_facts,
+            generated_at_ms=generated_at_ms,
+        )
+        packet["live_facts_source"] = {
+            "path": str(resolved_live_facts_path),
+            "present": resolved_live_facts_path.exists(),
+        }
+        if not resolved_live_facts_path.exists():
+            packet["blockers"] = sorted(
+                set(list(packet.get("blockers") or []) + ["live_facts_path_missing"])
+            )
+            packet["status"] = "strategy_group_live_facts_blocked"
+        blockers = [
+            {
+                "code": "strategy_group_live_facts_blocked",
+                "message": "StrategyGroup live facts are not ready for armed candidate preparation.",
+                "affected_area": ",".join(list(packet.get("blockers") or [])[:8]),
+            }
+        ] if packet.get("blockers") else []
+        freshness_status = "fresh" if not blockers else "warning"
+        return TradingConsoleReadModelResponse(
+            read_model="strategy_group_live_facts_readiness",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=[],
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
+            live_ready=False,
+        )
+
+    def strategygroup_runtime_pilot_status(
+        self,
+        *,
+        selected_strategy_group_id: Optional[str] = None,
+        max_symbols: int = 3,
+        stale_after_seconds: int = 180,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        intake_response = self.strategy_group_handoff_intake()
+        live_facts_response = self.strategy_group_live_facts_readiness()
+        watcher_response = self.runtime_signal_watcher_status(
+            stale_after_seconds=stale_after_seconds,
+        )
+        packet = build_strategygroup_runtime_pilot_status_packet(
+            intake_packet=intake_response.data,
+            live_facts_readiness=live_facts_response.data,
+            watcher_status={"data": watcher_response.data},
+            selected_strategy_group_id=selected_strategy_group_id,
+            max_symbols=max_symbols,
+            generated_at_ms=generated_at_ms,
+        )
+        blocker_class = str((packet.get("owner_state") or {}).get("blocker_class") or "")
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if blocker_class in {
+            "hard_safety_stop",
+            "active_position_resolution",
+            "deployment_issue",
+            "runtime_scope_mismatch",
+        }:
+            blockers.append(
+                {
+                    "code": f"strategygroup_runtime_pilot_{blocker_class}",
+                    "message": "StrategyGroup runtime pilot cannot safely advance to candidate preparation.",
+                    "affected_area": str((packet.get("owner_state") or {}).get("blocked_at") or "unknown"),
+                }
+            )
+        elif blocker_class in {"waiting_for_market", "missing_fact", "review_only_warning"}:
+            warnings.append(
+                {
+                    "code": f"strategygroup_runtime_pilot_{blocker_class}",
+                    "severity": "info" if blocker_class == "waiting_for_market" else "warning",
+                    "message": str((packet.get("owner_state") or {}).get("blocked_reason") or "pending"),
+                    "count": 1,
+                }
+            )
+        freshness_status = "fresh"
+        if blockers:
+            freshness_status = "not_live_connected"
+        elif warnings:
+            freshness_status = "warning"
+        return TradingConsoleReadModelResponse(
+            read_model="strategygroup_runtime_pilot_status",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=warnings,
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
+            live_ready=False,
         )
 
     def _response(
@@ -2471,6 +3203,35 @@ class TradingConsoleReadModelService:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _latest_existing_path(directory: Path, pattern: str) -> Optional[Path]:
+    try:
+        paths = [path for path in directory.expanduser().glob(pattern) if path.is_file()]
+    except OSError:
+        return None
+    if not paths:
+        return None
+    return max(paths, key=lambda path: path.stat().st_mtime)
+
+
+def _file_mtime_ms(path: Path) -> Optional[int]:
+    if not path.exists():
+        return None
+    try:
+        return int(path.stat().st_mtime * 1000)
+    except OSError:
+        return None
 
 
 def _iso_ms(value: Optional[int]) -> Optional[str]:
@@ -5189,6 +5950,143 @@ def _cockpit_protection_summary(protection: dict[str, Any]) -> dict[str, Any]:
         "actions_exposed": protection.get("actions_exposed") or [],
         "deferred_actions": protection.get("deferred_actions") or [],
     }
+
+
+def _cockpit_runtime_governance_summary(
+    *,
+    overall: dict[str, Any],
+    autonomy: dict[str, Any],
+    budget: dict[str, Any],
+    active_position: dict[str, Any],
+    protection: dict[str, Any],
+    review: dict[str, Any],
+    blockers: list[dict[str, Any]],
+    post_action: dict[str, Any],
+    runtime_control: dict[str, Any],
+    budget_authorization: dict[str, Any],
+) -> dict[str, Any]:
+    hard_blockers = [
+        item for item in blockers
+        if item.get("severity") in {"hard_blocker", "recovery_required"}
+    ]
+    if active_position.get("exists"):
+        status = "blocked_by_active_position"
+        next_gate_status = "waiting_for_position_resolution"
+        next_gate_blocker = "active_position_open"
+        next_step = "monitor_position_or_follow_owner_authorized_close_path"
+    elif review.get("review_required_before_next_action"):
+        status = "blocked_by_review_gate"
+        next_gate_status = "waiting_for_closed_review"
+        next_gate_blocker = "review_required_before_next_action"
+        next_step = "complete_review_ledger_before_fresh_attempt"
+    elif hard_blockers:
+        status = "blocked_by_runtime_governance"
+        next_gate_status = "blocked"
+        next_gate_blocker = str(hard_blockers[0].get("code") or "runtime_blocker")
+        next_step = "resolve_runtime_governance_blocker"
+    elif budget.get("another_action_allowed") is True:
+        status = "ready_for_fresh_strategy_signal"
+        next_gate_status = "ready_for_strategy_signal"
+        next_gate_blocker = None
+        next_step = "start_fresh_strategy_signal_observation"
+    else:
+        status = "waiting_for_budget_or_runtime_gate"
+        next_gate_status = "blocked"
+        next_gate_blocker = "budget_not_actionable"
+        next_step = "refresh_or_reauthorize_budget_before_fresh_attempt"
+
+    latest_settlement = dict(post_action.get("latest_budget_settlement") or {})
+    post_submit_finalize = dict(post_action.get("post_submit_finalize") or {})
+    if not latest_settlement:
+        latest_settlement = {
+            "status": post_action.get("budget_settlement_status") or "not_available",
+            "settlement_id": post_action.get("post_submit_budget_settlement_id"),
+        }
+    if not post_submit_finalize:
+        post_submit_finalize = {
+            "status": post_action.get("post_submit_finalize_status") or "not_available",
+            "packet_id": post_action.get("post_submit_finalize_packet_id"),
+        }
+
+    budget_auth_id = budget.get("budget_authorization_id") or budget_authorization.get(
+        "budget_authorization_id"
+    )
+    runtime_control_status = runtime_control.get("status") or autonomy.get(
+        "runtime_control_state",
+        {},
+    ).get("status")
+
+    return {
+        "status": status,
+        "label": _runtime_governance_label(status),
+        "current_gate": {
+            "status": overall.get("status"),
+            "label": overall.get("label"),
+            "message": overall.get("message"),
+            "source": overall.get("source"),
+        },
+        "runtime_grant": {
+            "status": runtime_control_status or "not_available",
+            "budget_authorization_id": budget_auth_id,
+            "budget_authorization_status": budget.get("budget_authorization_status"),
+            "autonomy_effective_state": autonomy.get("autonomy_effective_state"),
+            "grants_trading_permission": False,
+        },
+        "active_position": {
+            "present": bool(active_position.get("exists")),
+            "symbol": active_position.get("symbol"),
+            "side": active_position.get("side"),
+            "quantity": active_position.get("quantity"),
+            "notional": active_position.get("notional"),
+            "source": active_position.get("source"),
+        },
+        "protection": {
+            "status": protection.get("status"),
+            "tp_count": protection.get("tp_count"),
+            "sl_count": protection.get("sl_count"),
+            "completeness": protection.get("completeness"),
+        },
+        "budget": {
+            "status": budget.get("status"),
+            "remaining_budget": budget.get("remaining_budget"),
+            "daily_attempts_used": budget.get("daily_attempts_used"),
+            "daily_attempts_remaining": budget.get("daily_attempts_remaining"),
+            "can_attempt_next_budgeted_action": budget.get(
+                "can_attempt_next_budgeted_action"
+            ),
+        },
+        "post_submit_finalize": post_submit_finalize,
+        "budget_settlement": latest_settlement,
+        "next_attempt_gate": {
+            "status": next_gate_status,
+            "blocker": next_gate_blocker,
+            "next_step": next_step,
+            "requires_fresh_strategy_signal": True,
+            "requires_fresh_authorization_before_submit": True,
+            "legacy_authorization_replay_allowed": False,
+            "executable_submit_allowed_by_cockpit": False,
+        },
+        "hard_blockers": hard_blockers,
+        "safety_invariants": {
+            "read_model_only": True,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "calls_exchange_write": False,
+            "mutates_runtime_budget": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _runtime_governance_label(status: str) -> str:
+    labels = {
+        "blocked_by_active_position": "Active position gate",
+        "blocked_by_review_gate": "Review gate",
+        "blocked_by_runtime_governance": "Runtime blocker",
+        "ready_for_fresh_strategy_signal": "Ready for fresh signal",
+        "waiting_for_budget_or_runtime_gate": "Budget or runtime gate",
+    }
+    return labels.get(status, "Runtime governance")
 
 
 def _cockpit_candidate_summary(

@@ -99,7 +99,6 @@ def _operator_command_preview(
         "arm",
         "--authorization-id",
         authorization_id,
-        "--record-attempt-consumption",
         "--skip-exchange-arm",
     ]
     if api_base:

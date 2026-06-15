@@ -1,104 +1,74 @@
-> [!IMPORTANT]
-> **Current product operating model**: `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
-> **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
-> **Current agent baseline**: `docs/ops/agent-current-brc-baseline.md`
-> **Current fact registry**: `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
-> **Current readiness blockers**: `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
-> **Document governance rules**: `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
->
-> Older docs may be historical, superseded, or research-only. Use the governance rules to determine authority.
-> Project definition (Owner 2026-06-08): "BRC productized bounded-live operations system".
+# BRC Current Documentation
 
----
+Status: CURRENT_DOC_ENTRY
+Last updated: 2026-06-15
 
-# Docs Index
+## Start Here
 
-Last updated: 2026-06-08
+Current documentation is intentionally small. Agents and workers must start
+from these files:
 
-## Current Baseline (start here)
+```text
+docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
+docs/current/AI_AGENT_CONSTRAINTS.md
+docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
+docs/current/strategy-group-handoffs/main-control-handoff-index.md
+```
 
-Read the current baseline documents first:
+## Current Meaning
 
-1. `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md` — product and execution model; Console is Owner operations surface, not merely read-only dashboard
-2. `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md` — project definition and current state
-3. `docs/ops/agent-current-brc-baseline.md` — current agent/task execution boundary
-4. `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md` — verified facts and blockers
-5. `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md` — what blocks current bounded-live action readiness
-6. `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md` — how to read and trust documents
-7. `docs/ops/knowledge-pack/CURRENT_POSITION_REBUILD.md` — historical detailed position analysis with evidence
-8. `docs/ops/knowledge-pack/TRUTH_REBUILD_PASS1.md` — which old claims are stale and why
-9. `docs/ops/knowledge-pack/DOCS_GOVERNANCE_EXPLORATION_REPORT.md` — full docs audit
+The project is a StrategyGroup runtime-governance pilot:
 
-## Historical Mainline (superseded)
+```text
+Owner selects a StrategyGroup
+-> system admits or rejects it with clear reasons
+-> watcher observes the market
+-> fresh signal prepares candidate evidence
+-> action-time FinalGate runs
+-> official Operation Layer is the only real order path
+-> post-submit finalize, reconciliation, budget settlement, and review close the loop
+```
 
-The following was the previous mainline pointer. It is preserved for historical context but is no longer the current entry point:
+The Owner should not operate the system by reading raw evidence packets.
+Evidence packets are audit and recovery material under the Owner-facing
+Strategy Control Board.
 
-The previous Owner-facing project mainline was:
+## Kept Current Docs
 
-`Personal Leveraged Campaign Mainline v0`
+| Path | Role |
+| --- | --- |
+| `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` | Owner workflow and standing authorization |
+| `docs/current/AI_AGENT_CONSTRAINTS.md` | Agent execution constraints and confirmation minimization |
+| `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md` | Owner-facing state and notification contract |
+| `docs/current/strategy-group-handoffs/` | Current StrategyGroup handoff packs and main-control intake |
+| `docs/schemas/` | Schema contracts still exercised by tests |
 
-Previous reading list:
+## Historical Archive
 
-- `docs/ops/personal-leveraged-campaign-mainline-v0.md`
-- `docs/ops/personal-leveraged-campaign-local-sandbox-v0.md`
-- `docs/ops/project-branch-and-doc-governance-2026-05-25.md`
-- `docs/ops/personal-campaign-risk-rule-matrix-v0.md`
-- `docs/ops/personal-campaign-promotion-checklist-v0.md`
-- `docs/ops/sq02-downside-cont-strategy-contract-skeleton-v0.md`
-- `docs/adr/0008-personal-leveraged-campaign-business-chain.md`
-- `docs/ops/project-roadmap-v2.md`
-- `docs/ops/research-to-runtime-promotion-gate.md`
-- `docs/ops/runtime-safety-boundary.md`
+Older docs were compressed into:
 
-The short chain is:
+```text
+docs/history-archive-2026-06-15-pre-governance.tar.gz
+```
 
-`StrategyFamily / Carrier -> ActionCandidate -> Owner risk understanding -> Owner/BudgetEnvelope authorization -> ActionSpec -> FinalGate -> Operation Layer -> bounded live action -> protection -> Review Ledger`
+The archive is recovery material only. It must not be used as current
+instructions, current product truth, or a source of new Owner-confirmation
+blockers.
 
-## Active Research Context
+## Removed From Current Authority
 
-Current research context is tracked in:
+The following historical documentation namespaces were removed from the active
+tree after compression:
 
-- `docs/ops/opportunity-research-governance-v0.md`
-- `docs/ops/opportunity-research-control-board.md`
-- `docs/ops/opportunity-hypothesis-register.md`
+```text
+docs/adr
+docs/archive
+docs/audit
+docs/canon
+docs/gpt
+docs/ops
+docs/product
+```
 
-Research documents may inform strategy-contract design, but they do not
-authorize real live trading, real-funds orders, real API key changes, live
-account permission changes, withdrawal, transfer, leverage expansion, sizing
-advice, or direct research-to-real-order wiring. Research-only/read-only labels
-are scope-limited to those documents and do not globally prohibit controlled
-testnet/dev/readiness work under `agent-current-brc-baseline.md`. They also do
-not define Trading Console as a read-only product; current Console product
-direction is governed by `CURRENT_PRODUCT_OPERATING_MODEL.md`.
-
-## Runtime Safety Context
-
-Live-safe v1 documents remain useful as execution-safety foundation material.
-They are not the current business mainline and do not authorize real trading.
-
-Important runtime-safety references:
-
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-findings.md`
-- `docs/adr/0001-live-safe-v1-scope.md`
-
-## Historical Source Material
-
-Older files under `docs/gpt/`, Direction A, CPM, Strategy Research Re-entry,
-and BTC+ETH Phase 1 are historical source or evidence archive material unless a
-current SSOT document explicitly promotes them.
-
-Archived pre-reset material remains under:
-
-- `archive/2026-04-29-pre-live-safe-replan/docs/`
-
-## Local Schemas
-
-Personal Leveraged Campaign local object schemas live under:
-
-- `docs/schemas/personal_campaign/`
-
-These schemas are docs/design contracts only. They do not authorize runtime,
-paper/testnet/live/tiny-live, real API keys, real account actions, real orders,
-or any withdrawal path. Owner handles withdrawals outside this system.
+Those paths may still appear in legacy code evidence references or older tests.
+Such references are provenance strings, not current operating instructions.

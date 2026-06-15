@@ -1,75 +1,29 @@
-# 个人量化项目 - 记忆索引
+# BRC Repository Memory Index
 
-> [!IMPORTANT]
-> **Current product operating model**: `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
-> **Current project baseline**: `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
-> **Current positioning** (Owner 2026-06-08): BRC productized bounded-live operations system for fast small-capital trial-and-review Campaigns.
-> **Docs governance commit**: `3df699b` — establishes current canon and archives stale knowledge-pack v0.
->
-> The memory entries below are from an earlier project phase (v3 migration / Phase 1-2, updated 2026-03-30).
-> They are preserved as historical context but do not represent current project state.
-> For current facts, blockers, and read order, start from the knowledge-pack canon above.
+Status: HISTORICAL_POINTER
+Last updated: 2026-06-15
 
-> 本项目使用文件化记忆系统，记录用户偏好、项目决策和参考资源。
-> 最后更新：2026-03-30（历史内容）。当前基准见上方 knowledge-pack 链接。
+## Current Entry
 
----
+This repository no longer uses this file as the current project truth source.
+Start from:
 
-## 记忆列表
+```text
+AGENTS.md
+docs/README.md
+docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
+docs/current/AI_AGENT_CONSTRAINTS.md
+docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
+```
 
-### 用户记忆
+## Historical Material
 
-| 文件 | 说明 |
-|------|------|
-| [user-role.md](./memory/user-role.md) | 用户角色与职责 |
-| [user-goals.md](./memory/user-goals.md) | 用户目标与期望 |
+Pre-governance docs and older memory-style project notes were compressed into:
 
-### 反馈记忆
+```text
+docs/history-archive-2026-06-15-pre-governance.tar.gz
+```
 
-| 文件 | 说明 |
-|------|------|
-| [feedback-workflow.md](./memory/feedback-workflow.md) | 工作流程偏好 |
-| [feedback-quality.md](./memory/feedback-quality.md) | 质量要求与审查标准 |
-
-### 项目记忆
-
-| 文件 | 说明 |
-|------|------|
-| [project-v3-priority.md](./memory/project-v3-priority.md) | v3.0 迁移为唯一优先事项 |
-| [project-phase1-complete.md](./memory/project-phase1-complete.md) | Phase 1 完成状态记录 |
-| [project-decisions.md](./memory/project-decisions.md) | 关键技术决策 |
-
-### 参考记忆
-
-| 文件 | 说明 |
-|------|------|
-| [reference-docs.md](./memory/reference-docs.md) | 核心文档索引 |
-| [reference-external.md](./memory/reference-external.md) | 外部资源链接 |
-
----
-
-## 快速导航
-
-- **当前项目阶段**: Phase 1 完成 → Phase 2 准备中
-- **v3 迁移进度**: 1/6 阶段完成
-- **测试覆盖率**: 143 测试，100% 通过
-
-### 核心文档
-
-| 文档 | 路径 |
-|------|------|
-| 项目配置 | `CLAUDE.md` |
-| v3 演进路线 | `docs/v3/v3-evolution-roadmap.md` |
-| Phase 1 完成报告 | `docs/v3/v3-phase1-complete-report.md` |
-| Phase 1 进度追踪 | `docs/v3/v3-phase1-progress.md` |
-| 任务计划 | `docs/planning/task_plan.md` |
-
-### 下次重启后
-
-1. 阅读 `docs/v3/v3-phase1-progress.md` 了解当前进度
-2. 检查 `docs/planning/task_plan.md` 查看待办任务
-3. 准备启动 Phase 2 - 撮合引擎
-
----
-
-*最后更新：2026-03-30*
+That archive is recovery material only. It must not be used as current product
+truth, current blocker definition, or a source of Owner-confirmation
+requirements.

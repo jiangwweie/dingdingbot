@@ -38,6 +38,7 @@ class StrategyPayoffProfile(str, Enum):
 
 class StrategyArchetype(str, Enum):
     LONG_PULLBACK_CONTINUATION = "long_pullback_continuation"
+    MOMENTUM_PERSISTENCE = "momentum_persistence"
     BEAR_RALLY_FAILURE = "bear_rally_failure"
     BEAR_TREND_PULLBACK_CONTINUATION = "bear_trend_pullback_continuation"
     LIQUIDITY_SWEEP_REVERSAL = "liquidity_sweep_reversal"
@@ -49,6 +50,7 @@ class StrategyArchetype(str, Enum):
 
 class EntrySetupKind(str, Enum):
     PULLBACK_RECLAIM = "pullback_reclaim"
+    MOMENTUM_CONTINUATION = "momentum_continuation"
     RALLY_FAILURE = "rally_failure"
     TREND_PULLBACK_LOSS = "trend_pullback_loss"
     LIQUIDITY_SWEEP_RECLAIM = "liquidity_sweep_reclaim"
@@ -160,4 +162,3 @@ class StrategyCandidateSemantics(StrategyCandidateSemanticsModel):
     not_order: Literal[True] = True
     not_execution_intent: Literal[True] = True
     not_execution_authority: Literal[True] = True
-

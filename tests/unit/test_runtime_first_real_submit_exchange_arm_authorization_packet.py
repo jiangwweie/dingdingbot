@@ -68,9 +68,17 @@ def test_exchange_arm_packet_exposes_command_after_exact_confirmation():
         "OWNER_APPROVED_RUNTIME_EXCHANGE_ARM_PREP="
         f"{EXCHANGE_ARM_VALUE}"
     )
-    assert "--record-attempt-consumption" in command
+    assert "--record-attempt-consumption" not in command
     assert "--skip-exchange-arm" not in command
     assert "--execute-real-submit" not in command
+    assert (
+        packet["operator_command_plan"]["authorized_command_records_attempt_consumption"]
+        is False
+    )
+    assert (
+        packet["operator_command_plan"]["authorized_command_non_mutating_arm_only"]
+        is True
+    )
 
 
 def test_exchange_arm_packet_blocks_without_local_registration_result():

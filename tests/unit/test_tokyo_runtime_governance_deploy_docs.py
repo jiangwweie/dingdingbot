@@ -1,29 +1,20 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_DOCS = [
-    REPO_ROOT / "docs" / "ops" / "tokyo-runtime-governance-owner-deploy-authorization-packet-2026-06-10.md",
-    REPO_ROOT / "docs" / "ops" / "tokyo-runtime-governance-controlled-deployment-runbook-2026-06-10.md",
-]
+ARCHIVE_PATH = REPO_ROOT / "docs" / "history-archive-2026-06-15-pre-governance.tar.gz"
 
 
-def test_tokyo_deploy_docs_do_not_pin_local_release_artifact_candidates():
-    """Tracked deploy docs must defer local candidate identity to the manifest."""
+def test_historical_tokyo_deploy_docs_are_compressed_out_of_current_entrypoints():
+    """Old deploy docs remain recoverable but are no longer current authority."""
 
-    local_candidate_artifact_pattern = re.compile(
-        r"output/tokyo-runtime-governance-release/"
-        r"brc-runtime-governance-[0-9a-f]{8}-20[0-9]{6}T[0-9]{6}Z"
-    )
-    for path in DEPLOY_DOCS:
-        text = path.read_text()
+    docs_readme = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+    agent_guide = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-        assert local_candidate_artifact_pattern.search(text) is None, path
-        assert "candidate archive:" not in text
-        assert "candidate manifest:" not in text
-        assert "Last locally verified candidate" not in text
-        assert "release-readiness-manifest.json" in text
-        assert "current HEAD" in text or "newer HEAD" in text
+    assert ARCHIVE_PATH.exists()
+    assert "recovery material only" in docs_readme
+    assert "recovery material only" in agent_guide
+    assert "docs/current/OWNER_RUNTIME_OPERATING_MODEL.md" in docs_readme
+    assert "tokyo-runtime-governance-owner-deploy-authorization-packet" not in docs_readme

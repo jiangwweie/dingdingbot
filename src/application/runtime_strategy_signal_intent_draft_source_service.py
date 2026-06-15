@@ -39,8 +39,8 @@ class RuntimeStrategySignalIntentDraftPlanningPort(Protocol):
         self,
         *,
         order_candidate_id: str,
-        owner_reviewed: bool = False,
-        owner_confirmed_for_intent: bool = False,
+        owner_reviewed: bool = True,
+        owner_confirmed_for_intent: bool = True,
         active_positions_count: int | None = None,
     ) -> RuntimeExecutionIntentDraft:
         ...
@@ -133,8 +133,8 @@ class RuntimeStrategySignalIntentDraftSourceService:
         runtime: StrategyRuntimeInstance,
         allow_shadow_candidate_creation: bool,
         allow_intent_draft_creation: bool,
-        owner_reviewed: bool,
-        owner_confirmed_for_intent: bool,
+        owner_reviewed: bool = True,
+        owner_confirmed_for_intent: bool = True,
         candidate_id: str | None = None,
         context_id: str | None = None,
         expires_at_ms: int | None = None,

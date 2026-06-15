@@ -464,7 +464,7 @@ def test_arm_preview_stops_before_attempt_consumption_by_default():
     assert "attempt_consumption_not_recorded_in_arm_preview" in report["warnings"]
 
 
-def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_consumption(
+def test_arm_rejects_explicit_attempt_consumption_before_runtime_mutation(
     monkeypatch,
 ):
     monkeypatch.setenv(
@@ -488,29 +488,23 @@ def test_arm_records_local_and_exchange_submit_evidence_with_explicit_attempt_co
 
     report = flow.run()
 
-    assert report["blockers"] == []
-    assert report["ids"]["local_registration_enablement_decision_id"] == "local-enable-1"
-    assert report["ids"]["exchange_submit_enablement_decision_id"] == "exchange-enable-1"
+    assert (
+        "arm_attempt_consumption_disabled_until_operation_layer_submit"
+        in report["blockers"]
+    )
+    assert (
+        "operation_layer_arm_must_not_mutate_runtime_attempt_budget"
+        in report["warnings"]
+    )
     paths = [call["path"] for call in client.calls]
-    assert any("runtime-execution-attempt-reservations" in path for path in paths)
-    assert any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert any("runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths)
-    assert any("exchange-submit-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths)
+    assert not any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
-    mutation_index = next(
-        index
-        for index, path in enumerate(paths)
-        if "runtime-execution-attempt-mutations" in path
-    )
-    handoff_index = next(
-        index
-        for index, path in enumerate(paths)
-        if "runtime-execution-order-lifecycle-handoff-drafts" in path
-    )
-    assert mutation_index < handoff_index
 
 
-def test_arm_blocks_exchange_arm_without_exchange_arm_confirmation(monkeypatch):
+def test_arm_blocks_explicit_attempt_consumption_before_exchange_arm_confirmation(monkeypatch):
     monkeypatch.setenv(
         LOCAL_REGISTRATION_APPROVAL_ENV,
         _local_registration_approval_value("auth-1"),
@@ -529,16 +523,19 @@ def test_arm_blocks_exchange_arm_without_exchange_arm_confirmation(monkeypatch):
 
     report = flow.run()
 
-    assert "owner_runtime_exchange_arm_env_confirmation_missing" in report["blockers"]
+    assert (
+        "arm_attempt_consumption_disabled_until_operation_layer_submit"
+        in report["blockers"]
+    )
     paths = [call["path"] for call in client.calls]
-    assert any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert not any("runtime-execution-exchange-submit-action-authorizations" in path for path in paths)
     assert not any("exchange-submit-adapter-results" in path for path in paths)
     assert not any("first-real-submit-actions" in path for path in paths)
 
 
-def test_arm_blocks_attempt_consumption_without_local_registration_confirmation(
+def test_arm_blocks_attempt_consumption_before_local_registration_confirmation(
     monkeypatch,
 ):
     monkeypatch.delenv(LOCAL_REGISTRATION_APPROVAL_ENV, raising=False)
@@ -556,7 +553,7 @@ def test_arm_blocks_attempt_consumption_without_local_registration_confirmation(
     report = flow.run()
 
     assert (
-        "owner_runtime_local_registration_env_confirmation_missing"
+        "arm_attempt_consumption_disabled_until_operation_layer_submit"
         in report["blockers"]
     )
     paths = [call["path"] for call in client.calls]
@@ -567,7 +564,7 @@ def test_arm_blocks_attempt_consumption_without_local_registration_confirmation(
     assert not any("exchange-submit-adapter-results" in path for path in paths)
 
 
-def test_arm_consumes_attempt_before_handoff_when_explicitly_enabled(monkeypatch):
+def test_arm_does_not_consume_attempt_before_handoff_when_explicitly_enabled(monkeypatch):
     monkeypatch.setenv(
         LOCAL_REGISTRATION_APPROVAL_ENV,
         _local_registration_approval_value("auth-1"),
@@ -585,12 +582,15 @@ def test_arm_consumes_attempt_before_handoff_when_explicitly_enabled(monkeypatch
 
     report = flow.run()
 
-    assert "handoff_internal_fact_missing" in report["blockers"]
+    assert (
+        "arm_attempt_consumption_disabled_until_operation_layer_submit"
+        in report["blockers"]
+    )
     paths = [call["path"] for call in client.calls]
-    assert any("runtime-execution-attempt-reservations" in path for path in paths)
-    assert any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert any("runtime-execution-attempt-outcome-policies" in path for path in paths)
-    assert any(
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-attempt-outcome-policies" in path for path in paths)
+    assert not any(
         "runtime-execution-order-lifecycle-handoff-drafts" in path
         for path in paths
     )

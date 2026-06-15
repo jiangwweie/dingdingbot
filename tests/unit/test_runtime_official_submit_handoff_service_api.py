@@ -31,7 +31,7 @@ async def test_service_builds_disabled_smoke_handoff_preview():
 
 
 @pytest.mark.asyncio
-async def test_service_blocks_real_gateway_without_owner_confirmation():
+async def test_service_uses_standing_authorization_for_real_gateway_handoff():
     service = RuntimeOfficialSubmitHandoffService()
 
     packet = await service.preview_from_readiness_packet(
@@ -41,8 +41,13 @@ async def test_service_blocks_real_gateway_without_owner_confirmation():
         owner_confirmed_for_real_submit_action=False,
     )
 
-    assert packet.status == RuntimeOfficialSubmitHandoffStatus.BLOCKED
-    assert "owner_real_submit_action_confirmation_missing" in packet.blockers
+    assert packet.status == (
+        RuntimeOfficialSubmitHandoffStatus.READY_FOR_OFFICIAL_SUBMIT_CALL
+    )
+    assert packet.official_query[
+        "owner_confirmed_for_first_real_submit_action"
+    ] is True
+    assert "owner_real_submit_action_confirmation_missing" not in packet.blockers
 
 
 @pytest.mark.asyncio

@@ -89,6 +89,11 @@ from src.domain.runtime_execution_exchange_submit_adapter_result import (
 from src.domain.runtime_execution_exchange_submit_action_authorization import (
     RuntimeExecutionExchangeSubmitActionAuthorization,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    OWNER_STANDING_AUTHORIZATION_REASON,
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 from src.domain.runtime_execution_exchange_submit_execution_result import (
     RuntimeExecutionExchangeSubmitExecutionResult,
     RuntimeExecutionExchangeSubmitExecutionStatus,
@@ -372,7 +377,7 @@ class RuntimeOfficialSubmitHandoffPreviewRequest(BaseModel):
     mode: RuntimeOfficialSubmitHandoffMode = (
         RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
     )
-    owner_confirmed_for_real_submit_action: bool = False
+    owner_confirmed_for_real_submit_action: bool = True
     additional_blockers: list[str] = Field(default_factory=list)
     additional_warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -1671,7 +1676,7 @@ async def get_order_candidate(
 async def runtime_final_gate_preview_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
 ) -> RuntimeFinalGatePreview:
     service = await _runtime_final_gate_preview_service()
     try:
@@ -1695,7 +1700,7 @@ async def runtime_final_gate_preview_for_order_candidate(
 async def runtime_execution_plan_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
 ) -> RuntimeExecutionPlan:
     service = await _runtime_execution_planning_service()
     try:
@@ -1718,8 +1723,8 @@ async def runtime_execution_plan_for_order_candidate(
 async def runtime_execution_intent_draft_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
-    owner_confirmed_for_intent: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
+    owner_confirmed_for_intent: bool = Query(default=True),
 ) -> RuntimeExecutionIntentDraft:
     service = await _runtime_execution_planning_service()
     try:
@@ -1743,8 +1748,8 @@ async def runtime_execution_intent_draft_for_order_candidate(
 async def record_runtime_execution_intent_draft_for_order_candidate(
     order_candidate_id: str,
     active_positions_count: Optional[int] = Query(default=None, ge=0),
-    owner_reviewed: bool = Query(default=False),
-    owner_confirmed_for_intent: bool = Query(default=False),
+    owner_reviewed: bool = Query(default=True),
+    owner_confirmed_for_intent: bool = Query(default=True),
 ) -> RuntimeExecutionIntentDraft:
     service = await _runtime_execution_planning_service()
     try:
@@ -1985,7 +1990,7 @@ async def record_runtime_execution_trusted_submit_facts_for_authorization(
 )
 async def record_runtime_execution_submit_authorization_for_intent(
     execution_intent_id: str,
-    owner_confirmed_for_submit: bool = Query(default=False),
+    owner_confirmed_for_submit: bool = Query(default=True),
 ) -> RuntimeExecutionSubmitAuthorization:
     service = await _runtime_execution_intent_adapter_service()
     try:
@@ -2730,11 +2735,13 @@ async def record_runtime_execution_exchange_submit_action_authorization(
     owner_real_submit_authorization_id: Optional[str] = None,
     order_lifecycle_submit_enablement_id: Optional[str] = None,
     exchange_submit_adapter_enablement_id: Optional[str] = None,
-    owner_confirmed_for_exchange_submit_action: bool = False,
-    owner_operator_id: str = "owner",
-    reason: str = "owner confirmed scoped exchange submit action",
+    owner_confirmed_for_exchange_submit_action: bool = True,
+    owner_operator_id: str = OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    reason: str = OWNER_STANDING_AUTHORIZATION_REASON,
     deployment_readiness_evidence_id: Optional[str] = None,
-    owner_confirmation_reference: Optional[str] = None,
+    owner_confirmation_reference: Optional[str] = (
+        OWNER_STANDING_AUTHORIZATION_REFERENCE
+    ),
     expires_at_ms: Optional[int] = None,
 ) -> RuntimeExecutionExchangeSubmitActionAuthorization:
     service = await _runtime_execution_intent_adapter_service()
@@ -2912,7 +2919,7 @@ async def runtime_execution_exchange_submit_execution_result_for_authorization(
 )
 async def runtime_execution_first_real_submit_action_for_authorization(
     authorization_id: str,
-    owner_confirmed_for_first_real_submit_action: bool = False,
+    owner_confirmed_for_first_real_submit_action: bool = True,
     trusted_submit_fact_snapshot_id: Optional[str] = None,
     submit_idempotency_policy_id: Optional[str] = None,
     attempt_outcome_policy_id: Optional[str] = None,
@@ -3614,6 +3621,38 @@ async def signal_marker_feed(
     return await _service(include_exchange=False).signal_marker_feed(symbol=symbol, limit=limit)
 
 
+@router.get("/runtime-signal-watcher-status", response_model=TradingConsoleReadModelResponse)
+async def runtime_signal_watcher_status(
+    stale_after_seconds: int = Query(default=180, ge=30, le=3600),
+) -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).runtime_signal_watcher_status(
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
+@router.get("/strategygroup-runtime-pilot-status", response_model=TradingConsoleReadModelResponse)
+async def strategygroup_runtime_pilot_status(
+    selected_strategy_group_id: Optional[str] = Query(default=None),
+    max_symbols: int = Query(default=3, ge=1, le=3),
+    stale_after_seconds: int = Query(default=180, ge=30, le=3600),
+) -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).strategygroup_runtime_pilot_status(
+        selected_strategy_group_id=selected_strategy_group_id,
+        max_symbols=max_symbols,
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
+@router.get("/strategy-group-handoff-intake", response_model=TradingConsoleReadModelResponse)
+async def strategy_group_handoff_intake() -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).strategy_group_handoff_intake()
+
+
+@router.get("/strategy-group-live-facts-readiness", response_model=TradingConsoleReadModelResponse)
+async def strategy_group_live_facts_readiness() -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).strategy_group_live_facts_readiness()
+
+
 @router.get("/api-classification", response_model=TradingConsoleReadModelResponse)
 async def api_classification() -> TradingConsoleReadModelResponse:
     return _service(include_exchange=False).api_classification()
@@ -4311,7 +4350,9 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "calls_order_lifecycle": False,
             "live_submit_allowed": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_explicit_owner_real_submit_authorization": False,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": _runtime_next_attempt_observation_safety(),
     }

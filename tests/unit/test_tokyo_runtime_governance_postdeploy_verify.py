@@ -158,9 +158,9 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
 def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 81
+    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 84
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-06-11-081_create_llm_advisory_plane.py"
+        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
     )
 
 

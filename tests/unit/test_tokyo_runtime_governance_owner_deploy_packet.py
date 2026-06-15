@@ -218,6 +218,8 @@ def test_owner_deploy_packet_ready_only_for_deploy_decision():
     assert packet["owner_gate"]["deploy_confirmation_phrase"] == (
         "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
     )
+    assert packet["owner_gate"]["deploy_confirmation_phrase_required"] is False
+    assert packet["owner_gate"]["deploy_apply_authorized_by"]
     assert "real runtime submit" in packet["owner_gate"]["does_not_authorize"]
     assert packet["safety_invariants"]["deploy_apply_requested"] is False
     assert packet["safety_invariants"]["order_created"] is False
@@ -245,4 +247,5 @@ def test_owner_deploy_packet_requires_remote_probe_and_pre_live_packet():
     assert packet["status"] == "blocked"
     assert "tokyo_readonly_probe_not_ready" in packet["checks"]["blockers"]
     assert "pre_live_submit_rehearsal_not_technically_ready" in packet["checks"]["blockers"]
-    assert "first_real_submit_not_confirmed_blocked" in packet["checks"]["blockers"]
+    assert "first_real_submit_not_confirmed_blocked" not in packet["checks"]["blockers"]
+    assert "first_real_submit_not_a_deploy_apply_precondition" in packet["checks"]["warnings"]

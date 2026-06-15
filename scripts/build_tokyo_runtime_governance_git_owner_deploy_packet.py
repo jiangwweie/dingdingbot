@@ -27,6 +27,9 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
     DEFAULT_SERVICE_NAME,
     DEFAULT_VENV_PYTHON,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 from scripts.plan_tokyo_runtime_governance_git_deploy import (
     DEFAULT_EXPECTED_LATEST_MIGRATION,
     DEFAULT_GIT_REF,
@@ -187,8 +190,6 @@ def build_git_owner_deploy_packet(
         blockers.append("tokyo_readonly_probe_not_ready")
     if not pre_live_technical_ready:
         blockers.append("pre_live_submit_rehearsal_not_technically_ready")
-    if not first_real_submit_still_blocked:
-        blockers.append("first_real_submit_not_confirmed_blocked")
     if forbidden_pre_live_flags:
         blockers.append("pre_live_packet_contains_forbidden_execution_flags")
     if forbidden_effects:
@@ -200,6 +201,8 @@ def build_git_owner_deploy_packet(
     warnings.extend(probe_checks.get("warnings") or [])
     if pre_live_packet_skipped:
         warnings.append("pre_live_packet_skipped_for_deploy_only")
+    if not first_real_submit_still_blocked:
+        warnings.append("first_real_submit_not_a_deploy_apply_precondition")
 
     plan_inputs = deploy_plan.get("inputs", {})
     release = deploy_plan.get("release", {})
@@ -240,6 +243,8 @@ def build_git_owner_deploy_packet(
             "warnings": _dedupe(warnings),
         },
         "owner_gate": {
+            "deploy_apply_authorized_by": OWNER_STANDING_AUTHORIZATION_REFERENCE,
+            "deploy_confirmation_phrase_required": False,
             "deploy_confirmation_phrase": CONFIRMATION_PHRASE,
             "deploy_confirmation_authorizes": [
                 "git fetch/export release tree",

@@ -66,6 +66,11 @@ def build_wakeup_packet(operator_packet: dict[str, Any]) -> dict[str, Any]:
         "owner_attention": owner_attention,
         "summary": {
             "active_runtime_count": active.get("active_runtime_count"),
+            "monitored_runtime_count": active.get("monitored_runtime_count"),
+            "selected_runtime_instance_ids": active.get(
+                "selected_runtime_instance_ids"
+            )
+            or [],
             "latest_iteration": active.get("latest_iteration"),
             "iterations_completed": active.get("iterations_completed"),
             "iterations_remaining": active.get("iterations_remaining"),

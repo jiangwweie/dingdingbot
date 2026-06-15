@@ -14,6 +14,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+    standing_authorization_metadata,
+)
 from src.domain.runtime_executable_submit_readiness import (
     RuntimeExecutableSubmitReadinessPacket,
     RuntimeExecutableSubmitReadinessStatus,
@@ -103,7 +107,7 @@ def build_runtime_official_submit_handoff_packet(
     mode: RuntimeOfficialSubmitHandoffMode = (
         RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
     ),
-    owner_confirmed_for_real_submit_action: bool = False,
+    owner_confirmed_for_real_submit_action: bool = True,
     additional_blockers: list[str] | None = None,
     additional_warnings: list[str] | None = None,
     now_ms: int,
@@ -128,12 +132,10 @@ def build_runtime_official_submit_handoff_packet(
         mode == RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION
         and not owner_confirmed_for_real_submit_action
     ):
-        blockers.append("owner_real_submit_action_confirmation_missing")
-    if (
-        mode == RuntimeOfficialSubmitHandoffMode.DISABLED_SMOKE
-        and owner_confirmed_for_real_submit_action
-    ):
-        warnings.append("disabled_smoke_ignores_real_submit_confirmation")
+        warnings.append(
+            "real_gateway_action_owner_confirmation_false_ignored_under_"
+            "standing_authorization"
+        )
 
     evidence = readiness_packet.evidence
     query = {
@@ -164,7 +166,6 @@ def build_runtime_official_submit_handoff_packet(
         ),
         "owner_confirmed_for_first_real_submit_action": (
             mode == RuntimeOfficialSubmitHandoffMode.REAL_GATEWAY_ACTION
-            and owner_confirmed_for_real_submit_action
         ),
     }
     missing_query_keys = [
@@ -220,6 +221,10 @@ def build_runtime_official_submit_handoff_packet(
         metadata={
             "scope": "runtime_official_submit_handoff",
             "read_only_handoff": True,
+            **standing_authorization_metadata(
+                scope="runtime_official_submit_handoff"
+            ),
+            "owner_confirmation_reference": OWNER_STANDING_AUTHORIZATION_REFERENCE,
             "uses_existing_first_real_submit_endpoint": True,
             "does_not_call_official_endpoint": True,
             "does_not_create_execution_intent": True,

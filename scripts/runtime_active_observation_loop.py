@@ -56,6 +56,9 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         "status": str(packet.get("status") or "unknown"),
         "active_runtime_count": packet.get("active_runtime_count"),
         "monitored_runtime_count": packet.get("monitored_runtime_count"),
+        "selected_runtime_instance_ids": list(
+            packet.get("selected_runtime_instance_ids") or []
+        ),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
         "runtime_execution_intent_draft_created": bool(
@@ -88,9 +91,36 @@ def _summary(packet: dict[str, Any], *, iteration: int, cycle_dir: Path) -> dict
         ),
         "blockers": list(packet.get("blockers") or []),
         "warnings": list(packet.get("warnings") or []),
+        "signal_input_json": _signal_input_json(packet),
         "prepared_authorization_id": _prepared_authorization_id(packet),
         "runtime_signal_summaries": _runtime_signal_summaries(packet),
     }
+
+
+def _signal_input_json(packet: dict[str, Any]) -> str | None:
+    for candidate in (
+        packet.get("signal_input_json"),
+        _nested_get(packet, ("operator_command_plan", "signal_input_json")),
+        _nested_get(packet, ("latest_packet", "signal_input_json")),
+        _nested_get(packet, ("latest_packet", "operator_command_plan", "signal_input_json")),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+
+    for item in packet.get("runtime_summaries") or []:
+        if not isinstance(item, dict):
+            continue
+        for candidate in (
+            item.get("signal_input_json"),
+            _nested_get(item, ("operator_command_plan", "signal_input_json")),
+            _nested_get(item, ("latest_packet", "signal_input_json")),
+            _nested_get(item, ("latest_packet", "operator_command_plan", "signal_input_json")),
+        ):
+            text = str(candidate or "").strip()
+            if text:
+                return text
+    return None
 
 
 def _prepared_authorization_id(packet: dict[str, Any]) -> str | None:
@@ -145,6 +175,8 @@ def _runtime_signal_summaries(packet: dict[str, Any]) -> list[dict[str, Any]]:
                 ),
                 "status": item.get("status"),
                 "blockers": list(item.get("blockers") or []),
+                "signal_input_json": item.get("signal_input_json"),
+                "prepared_authorization_id": item.get("prepared_authorization_id"),
                 "signal_summary": item.get("signal_summary") or {},
             }
         )
@@ -327,7 +359,9 @@ def _blocked_cycle_packet(*, reason: str, output_json: str) -> dict[str, Any]:
             "places_order": False,
             "calls_order_lifecycle": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_explicit_owner_real_submit_authorization": False,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": {
             "uses_official_trading_console_api": True,

@@ -72,6 +72,7 @@ def _selected_active_runtimes(
     active: list[dict[str, Any]],
     *,
     runtime_instance_ids: list[str] | None,
+    strategy_family_ids: list[str] | None,
     max_runtimes: int,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     requested = [
@@ -79,6 +80,18 @@ def _selected_active_runtimes(
         for item in (runtime_instance_ids or [])
         if str(item or "").strip()
     ]
+    requested_families = {
+        str(item).strip()
+        for item in (strategy_family_ids or [])
+        if str(item or "").strip()
+    }
+    if requested_families:
+        active = [
+            runtime
+            for runtime in active
+            if str(_runtime_value(runtime, "strategy_family_id", "family") or "")
+            in requested_families
+        ]
     if not requested:
         return active[: max(max_runtimes, 0)], []
 
@@ -347,9 +360,13 @@ def _build_packet(
     requested_runtime_instance_ids = list(
         getattr(args, "runtime_instance_id", None) or []
     )
+    requested_strategy_family_ids = list(
+        getattr(args, "strategy_family_id", None) or []
+    )
     selected, missing_runtime_instance_ids = _selected_active_runtimes(
         active,
         runtime_instance_ids=requested_runtime_instance_ids,
+        strategy_family_ids=requested_strategy_family_ids,
         max_runtimes=int(args.max_runtimes or 100),
     )
 
@@ -386,6 +403,7 @@ def _build_packet(
         "active_runtime_count": len(active),
         "monitored_runtime_count": len(selected),
         "requested_runtime_instance_ids": requested_runtime_instance_ids,
+        "requested_strategy_family_ids": requested_strategy_family_ids,
         "selected_runtime_instance_ids": [
             str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
             for runtime in selected
@@ -409,7 +427,8 @@ def _build_packet(
             "places_order": False,
             "calls_order_lifecycle": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": _safety(
             allow_prepare_records=args.allow_prepare_records,
@@ -422,7 +441,7 @@ def _next_step(status: str) -> str:
     if status == "ready_for_final_gate_preflight":
         return "run_official_final_gate_preflight_for_prepared_authorization"
     if status == "ready_for_prepare":
-        return "rerun_active_monitor_with_allow_prepare_records_after_owner_review"
+        return "rerun_active_monitor_with_allow_prepare_records_under_standing_authorization"
     if status == "blocked":
         return "resolve_runtime_observation_blockers"
     if status == "no_active_runtimes":
@@ -446,6 +465,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Limit monitoring to the given ACTIVE runtime instance. "
             "May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--strategy-family-id",
+        action="append",
+        default=[],
+        help=(
+            "Limit monitoring to ACTIVE runtimes belonging to this strategy "
+            "family. May be repeated."
         ),
     )
     parser.add_argument("--max-runtimes", type=int, default=100)

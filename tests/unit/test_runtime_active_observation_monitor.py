@@ -31,6 +31,7 @@ def _args(**overrides):
         "include_exchange": False,
         "allow_prepare_records": False,
         "runtime_instance_id": [],
+        "strategy_family_id": [],
         "max_runtimes": 100,
         "max_cycles_per_runtime": 1,
         "interval_seconds": 0.0,
@@ -50,14 +51,22 @@ def _args(**overrides):
     return type("Args", (), values)()
 
 
-def _runtime(runtime_id, *, status="active", symbol="AVAX/USDT:USDT", side="short"):
+def _runtime(
+    runtime_id,
+    *,
+    status="active",
+    symbol="AVAX/USDT:USDT",
+    side="short",
+    strategy_family_id="BTPC-001",
+    strategy_family_version_id="BTPC-001-v0",
+):
     return {
         "runtime_instance_id": runtime_id,
         "status": status,
         "symbol": symbol,
         "side": side,
-        "strategy_family_id": "BTPC-001",
-        "strategy_family_version_id": "BTPC-001-v0",
+        "strategy_family_id": strategy_family_id,
+        "strategy_family_version_id": strategy_family_version_id,
     }
 
 
@@ -214,6 +223,58 @@ def test_active_monitor_can_filter_specific_active_runtimes(tmp_path):
     assert packet["selected_runtime_instance_ids"] == ["runtime-ada", "runtime-avax"]
     assert packet["status"] == "waiting_for_signal"
     assert packet["warnings"] == []
+
+
+def test_active_monitor_can_filter_by_strategy_family(tmp_path):
+    client = _FakeClient(
+        [
+            _runtime(
+                "runtime-mpg",
+                strategy_family_id="MPG-001",
+                strategy_family_version_id="MPG-001-v0",
+            ),
+            _runtime(
+                "runtime-teq",
+                strategy_family_id="TEQ-001",
+                strategy_family_version_id="TEQ-001-v0",
+            ),
+            _runtime(
+                "runtime-legacy",
+                strategy_family_id="CPM-001",
+                strategy_family_version_id="CPM-001-v0",
+            ),
+        ]
+    )
+    seen = []
+
+    def builder(args):
+        seen.append((args.runtime_instance_id, args.strategy_family_id))
+        return {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(output_dir=str(tmp_path), strategy_family_id=["MPG-001", "TEQ-001"]),
+        client=client,
+        monitor_builder=builder,
+    )
+
+    assert seen == [("runtime-mpg", "MPG-001"), ("runtime-teq", "TEQ-001")]
+    assert packet["active_runtime_count"] == 3
+    assert packet["monitored_runtime_count"] == 2
+    assert packet["requested_strategy_family_ids"] == ["MPG-001", "TEQ-001"]
+    assert packet["selected_runtime_instance_ids"] == ["runtime-mpg", "runtime-teq"]
 
 
 def test_active_monitor_reports_missing_requested_runtime_as_warning(tmp_path):

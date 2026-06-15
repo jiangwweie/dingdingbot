@@ -327,7 +327,9 @@ def _build_packet(
             "blockers": [],
             "warnings": list(observation_payload.get("warnings") or []),
             "operator_command_plan": {
-                "next_step": "rerun_with_allow_prepare_records_after_owner_review",
+                "next_step": (
+                    "rerun_with_allow_prepare_records_under_standing_authorization"
+                ),
                 "signal_input_json": signal_input_json,
                 "not_executed": True,
                 "creates_shadow_candidate": False,
@@ -335,7 +337,8 @@ def _build_packet(
                 "places_order": False,
                 "calls_order_lifecycle": False,
                 "requires_official_final_gate": True,
-                "requires_explicit_owner_real_submit_authorization": True,
+                "uses_standing_runtime_authorization": True,
+                "requires_official_operation_layer": True,
             },
             "safety_invariants": _safety(
                 allow_prepare_records=False,
@@ -374,7 +377,8 @@ def _build_packet(
             "calls_order_lifecycle": False,
             "live_submit_allowed": False,
             "requires_official_final_gate": True,
-            "requires_explicit_owner_real_submit_authorization": True,
+            "uses_standing_runtime_authorization": True,
+            "requires_official_operation_layer": True,
         },
         "safety_invariants": _safety(
             allow_prepare_records=True,
@@ -427,7 +431,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--reason",
-        default="owner reviewed runtime next-attempt observation API prepare",
+        default="owner standing-authorized runtime next-attempt observation API prepare",
     )
     parser.add_argument("--next-attempt-symbol")
     parser.add_argument("--next-attempt-side")

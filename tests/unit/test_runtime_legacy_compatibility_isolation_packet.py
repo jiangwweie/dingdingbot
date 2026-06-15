@@ -19,6 +19,7 @@ def _write_all_required(root: Path) -> None:
         _write(root, rel_path, text)
     for item in script.LEGACY_COMPATIBILITY_ARTIFACTS:
         _write(root, item["path"], "# legacy\n")
+        _write(root, item["history_path"], "# history\n")
 
 
 def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
@@ -30,17 +31,22 @@ def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
     assert packet["blockers"] == []
     assert packet["checks"]["mainline_artifacts_present"] is True
     assert packet["checks"]["legacy_artifacts_classified"] is True
+    assert packet["checks"]["legacy_artifacts_archived_to_replay_recovery_history"] is True
+    assert packet["checks"]["legacy_wrapper_paths_preserved"] is True
     assert packet["checks"]["mainline_has_no_legacy_primary_gate_terms"] is True
     assert packet["checks"]["runtime_level_chain_remains_primary"] is True
     assert packet["checks"]["legacy_pre_attempt_not_primary_gate"] is True
     assert packet["checks"]["one_shot_owner_bounded_execution_preserved"] is True
     assert any(
         item["classification"] == "legacy_pre_attempt_rehearsal_replay_only"
+        and item["wrapper_exists"]
+        and item["history_exists"]
         for item in packet["legacy_compatibility_artifacts"]
     )
     assert packet["cleanup_policy"]["mainline_exit_cleanup_complete"] is True
     assert packet["cleanup_policy"]["future_cleanup_required"] is False
-    assert packet["cleanup_policy"]["future_archive_hygiene_recommended"] is True
+    assert packet["cleanup_policy"]["future_archive_hygiene_recommended"] is False
+    assert packet["cleanup_policy"]["archive_hygiene_completed"] is True
     assert packet["safety_invariants"]["exchange_called"] is False
 
 
@@ -88,7 +94,7 @@ def test_isolation_blocks_when_mainline_uses_legacy_primary_gate(tmp_path):
 
 def test_isolation_blocks_missing_legacy_artifact(tmp_path):
     _write_all_required(tmp_path)
-    missing = tmp_path / script.LEGACY_COMPATIBILITY_ARTIFACTS[0]["path"]
+    missing = tmp_path / script.LEGACY_COMPATIBILITY_ARTIFACTS[0]["history_path"]
     missing.unlink()
 
     packet = script.build_isolation_packet(repo_root=tmp_path)
@@ -99,6 +105,7 @@ def test_isolation_blocks_missing_legacy_artifact(tmp_path):
         for blocker in packet["blockers"]
     )
     assert packet["checks"]["legacy_artifacts_classified"] is False
+    assert packet["checks"]["legacy_artifacts_archived_to_replay_recovery_history"] is False
 
 
 def test_isolation_cli_outputs_json(tmp_path, capsys, monkeypatch):

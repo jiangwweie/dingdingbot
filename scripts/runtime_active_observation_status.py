@@ -34,6 +34,14 @@ FORBIDDEN_SAFETY_FLAGS = (
     "withdrawal_instruction_created",
     "transfer_instruction_created",
 )
+ALLOWED_PREPARE_RECORD_FLAGS = (
+    "prepare_records_created",
+    "shadow_candidate_created",
+    "runtime_execution_intent_draft_created",
+    "recorded_execution_intent_created",
+    "submit_authorization_created",
+    "protection_plan_created",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -78,6 +86,37 @@ def _collect_forbidden_effects(*packets: dict[str, Any] | None) -> list[str]:
     return effects
 
 
+def _collect_allowed_prepare_records(
+    *packets: dict[str, Any] | None,
+) -> dict[str, bool]:
+    observed = {flag: False for flag in ALLOWED_PREPARE_RECORD_FLAGS}
+    for packet in packets:
+        if not packet:
+            continue
+        safety = packet.get("safety_invariants")
+        if not isinstance(safety, dict):
+            safety = {}
+        for flag in ALLOWED_PREPARE_RECORD_FLAGS:
+            if bool(packet.get(flag)) or bool(safety.get(flag)):
+                observed[flag] = True
+        created = packet.get("created_records")
+        if isinstance(created, dict):
+            if bool(created.get("shadow_candidate_created")):
+                observed["shadow_candidate_created"] = True
+            if bool(created.get("runtime_execution_intent_draft_created")):
+                observed["runtime_execution_intent_draft_created"] = True
+            if bool(
+                created.get("recorded_execution_intent_created")
+                or created.get("execution_intent_created")
+            ):
+                observed["recorded_execution_intent_created"] = True
+            if bool(created.get("submit_authorization_created")):
+                observed["submit_authorization_created"] = True
+            if bool(created.get("protection_plan_created")):
+                observed["protection_plan_created"] = True
+    return observed
+
+
 def _runtime_signal_summaries(summary: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not summary:
         return []
@@ -99,6 +138,8 @@ def _runtime_signal_summaries(summary: dict[str, Any] | None) -> list[dict[str, 
                 "symbol": row.get("symbol"),
                 "side": row.get("side"),
                 "status": row.get("status"),
+                "signal_input_json": row.get("signal_input_json"),
+                "prepared_authorization_id": row.get("prepared_authorization_id"),
                 "evaluation_status": signal.get("evaluation_status"),
                 "signal_type": signal.get("signal_type"),
                 "signal_side": signal.get("side"),
@@ -150,6 +191,12 @@ def build_status_packet(
             break
 
     forbidden_effects = _collect_forbidden_effects(
+        supervisor,
+        loop,
+        followup,
+        latest_summary,
+    )
+    allowed_prepare_records = _collect_allowed_prepare_records(
         supervisor,
         loop,
         followup,
@@ -243,6 +290,21 @@ def build_status_packet(
             if isinstance(latest_summary, dict)
             else None
         ),
+        "monitored_runtime_count": (
+            latest_summary.get("monitored_runtime_count")
+            if isinstance(latest_summary, dict)
+            else None
+        ),
+        "selected_runtime_instance_ids": (
+            latest_summary.get("selected_runtime_instance_ids")
+            if isinstance(latest_summary, dict)
+            else []
+        ),
+        "signal_input_json": (
+            latest_summary.get("signal_input_json")
+            if isinstance(latest_summary, dict)
+            else None
+        ),
         "prepared_authorization_id": (
             latest_summary.get("prepared_authorization_id")
             if isinstance(latest_summary, dict)
@@ -257,6 +319,9 @@ def build_status_packet(
         "blockers": blockers,
         "warnings": warnings,
         "forbidden_effects": forbidden_effects,
+        "allowed_prepare_record_effects": [
+            flag for flag, observed in allowed_prepare_records.items() if observed
+        ],
         "operator_command_plan": {
             "not_executed": True,
             "latest_summary_next_step": (
@@ -278,6 +343,24 @@ def build_status_packet(
             "connects_to_api": False,
             "connects_to_exchange": False,
             "creates_prepare_records": False,
+            "observed_prepare_records_created": allowed_prepare_records[
+                "prepare_records_created"
+            ],
+            "observed_shadow_candidate_created": allowed_prepare_records[
+                "shadow_candidate_created"
+            ],
+            "observed_runtime_execution_intent_draft_created": (
+                allowed_prepare_records["runtime_execution_intent_draft_created"]
+            ),
+            "observed_recorded_execution_intent_created": allowed_prepare_records[
+                "recorded_execution_intent_created"
+            ],
+            "observed_submit_authorization_created": allowed_prepare_records[
+                "submit_authorization_created"
+            ],
+            "observed_protection_plan_created": allowed_prepare_records[
+                "protection_plan_created"
+            ],
             "creates_shadow_candidate": False,
             "creates_execution_intent": False,
             "places_order": False,

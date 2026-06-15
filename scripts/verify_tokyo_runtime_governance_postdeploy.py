@@ -23,9 +23,9 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 81
+DEFAULT_EXPECTED_MIGRATION_COUNT = 84
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-11-081_create_llm_advisory_plane.py"
+    "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
 )
 
 

@@ -28,7 +28,7 @@ def test_sample_rehearsal_dry_run_stays_blocked_without_api_calls(tmp_path):
     assert report["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_execute_blocks_when_local_registration_env_confirmation_missing(tmp_path):
+def test_execute_stops_before_attempt_consumption_without_local_registration(tmp_path):
     evidence_path = _write_evidence(tmp_path)
     client = _Client()
 
@@ -43,18 +43,19 @@ def test_execute_blocks_when_local_registration_env_confirmation_missing(tmp_pat
         client=client,
     )
 
-    assert report["status"] == "blocked_local_registration_env_confirmation_missing"
+    assert report["status"] == "blocked_scoped_local_registration_proof"
     assert (
-        "owner_runtime_local_registration_env_confirmation_missing"
+        "attempt_consumption_required_before_order_lifecycle_handoff"
         in report["blockers"]
     )
     paths = [call["path"] for call in client.calls]
     assert any("runtime-execution-first-real-submit-evidence-preparations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
     assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert not any("runtime-execution-exchange-submit" in path for path in paths)
 
 
-def test_execute_records_scoped_local_registration_without_exchange(tmp_path, monkeypatch):
+def test_execute_with_env_still_does_not_record_scoped_local_registration(tmp_path, monkeypatch):
     evidence_path = _write_evidence(tmp_path)
     monkeypatch.setenv(
         LOCAL_REGISTRATION_APPROVAL_ENV,
@@ -73,13 +74,18 @@ def test_execute_records_scoped_local_registration_without_exchange(tmp_path, mo
         client=client,
     )
 
-    assert report["status"] == "scoped_local_registration_proof_recorded"
-    assert report["local_registration_adapter_result_id"] == "local-result-rtf018"
-    assert report["safety_invariants"]["local_registration_recorded"] is True
+    assert report["status"] == "blocked_scoped_local_registration_proof"
+    assert (
+        "attempt_consumption_required_before_order_lifecycle_handoff"
+        in report["blockers"]
+    )
+    assert report["local_registration_adapter_result_id"] is None
+    assert report["safety_invariants"]["local_registration_recorded"] is False
     assert report["safety_invariants"]["exchange_arm_enabled"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
     paths = [call["path"] for call in client.calls]
-    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert not any("runtime-execution-exchange-submit" in path for path in paths)
     assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
 

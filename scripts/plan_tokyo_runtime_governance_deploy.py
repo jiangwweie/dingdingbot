@@ -20,6 +20,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT_FOR_IMPORT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
+
+from src.domain.standing_authorization import (  # noqa: E402
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
+
 
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
@@ -42,6 +50,17 @@ DEFAULT_EXPECTED_LATEST_MIGRATION = (
 )
 DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
+RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service"
+)
+RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.timer"
+)
+RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf"
+)
 
 
 class DeployPlanError(RuntimeError):
@@ -104,10 +123,25 @@ def build_deploy_plan(
     head = _git(repo_root, "rev-parse", "HEAD").stdout
     short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD").stdout
     tracked_dirty = _tracked_dirty(repo_root)
+    target_migration_count = _local_migration_count(repo_root)
+    local_latest_migration = _local_latest_migration(repo_root)
+    remote_migration_revision = _migration_revision(expected_remote_latest_migration)
+    target_migration_revision = _migration_revision(expected_latest_migration)
+    migration_gap_revision_count = (
+        target_migration_count - expected_remote_migration_count
+    )
     blockers: list[str] = []
     warnings: list[str] = []
     if tracked_dirty:
         blockers.append("tracked_worktree_dirty")
+    if local_latest_migration != expected_latest_migration:
+        blockers.append("expected_latest_migration_not_local_latest")
+    if remote_migration_revision is None:
+        blockers.append("expected_remote_latest_migration_revision_unparseable")
+    if target_migration_revision is None:
+        blockers.append("expected_latest_migration_revision_unparseable")
+    if migration_gap_revision_count < 0:
+        blockers.append("expected_remote_migration_count_ahead_of_target")
 
     manifest: dict[str, Any] | None = None
     if archive_path is None:
@@ -171,6 +205,10 @@ def build_deploy_plan(
         expected_remote_latest_migration=expected_remote_latest_migration,
         head=head,
         expected_latest_migration=expected_latest_migration,
+        target_migration_count=target_migration_count,
+        remote_migration_revision=remote_migration_revision,
+        target_migration_revision=target_migration_revision,
+        migration_gap_revision_count=migration_gap_revision_count,
     )
 
     return {
@@ -197,6 +235,10 @@ def build_deploy_plan(
             "expected_remote_migration_count": expected_remote_migration_count,
             "expected_remote_latest_migration": expected_remote_latest_migration,
             "expected_latest_migration": expected_latest_migration,
+            "target_migration_count": target_migration_count,
+            "remote_migration_revision": remote_migration_revision,
+            "target_migration_revision": target_migration_revision,
+            "migration_gap_revision_count": migration_gap_revision_count,
         },
         "release": {
             "head": head,
@@ -216,6 +258,10 @@ def build_deploy_plan(
             "ready_for_owner_authorized_remote_deploy": not blockers,
             "blockers": blockers,
             "warnings": warnings,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "remote_mutation_confirmation_phrase_required": False,
             "remote_mutation_requires_confirmation_phrase": CONFIRMATION_PHRASE,
         },
         "plan_phases": plan_phases,
@@ -262,6 +308,10 @@ def _plan_phases(
     expected_remote_latest_migration: str,
     head: str,
     expected_latest_migration: str,
+    target_migration_count: int,
+    remote_migration_revision: str | None,
+    target_migration_revision: str | None,
+    migration_gap_revision_count: int,
 ) -> list[dict[str, Any]]:
     q = shlex.quote
     local_python = "/opt/homebrew/bin/python3"
@@ -279,6 +329,9 @@ def _plan_phases(
         "done; "
         'curl -fsS "$HEALTH_URL"'
     )
+    base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
+    head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
+    expected_gap_count = max(migration_gap_revision_count, 0)
 
     return [
         {
@@ -286,11 +339,15 @@ def _plan_phases(
             "remote_mutation": False,
             "commands": [
                 f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/prepare_tokyo_runtime_governance_release.py --json",
+                "scripts/prepare_tokyo_runtime_governance_release.py --json "
+                f"--deployed-head {q(expected_deployed_head)} "
+                f"--expected-min-migrations {target_migration_count} "
+                f"--expected-latest-migration {q(expected_latest_migration)}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
-                "--base-revision 064 --head-revision 070 "
-                "--expected-revision-count 6",
+                f"--base-revision {q(base_revision)} "
+                f"--head-revision {q(head_revision)} "
+                f"--expected-revision-count {expected_gap_count}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
@@ -325,6 +382,9 @@ def _plan_phases(
         {
             "phase": "2_owner_authorized_upload_and_extract",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"set -eu; mkdir -p {q(incoming_dir)} {q(reports_dir)} {q(backups_dir)}"),
@@ -359,6 +419,9 @@ def _plan_phases(
         {
             "phase": "3_quiesce_backup_and_migrate",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"sudo -n systemctl stop {q(service_name)}"),
@@ -410,23 +473,34 @@ def _plan_phases(
         {
             "phase": "4_switch_start_and_smoke",
             "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
                 _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),
                 _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
                 _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
                 _ssh(host, health_wait_command),
+                _ssh(
+                    host,
+                    runtime_signal_watcher_dispatcher_dropin_install_command(
+                        remote_release_path=remote_release_path
+                    ),
+                ),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
                     f"--expected-current-head {q(head)} "
-                    "--expected-migration-count 70 "
+                    f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/verify_tokyo_runtime_governance_postdeploy.py --json "
-                    f"--expected-current-head {q(head)}"
+                    f"--expected-current-head {q(head)} "
+                    f"--expected-migration-count {target_migration_count} "
+                    f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 _ssh(
                     host,
@@ -444,6 +518,53 @@ def _plan_phases(
             ],
         },
     ]
+
+
+def runtime_signal_watcher_dispatcher_dropin_install_command(
+    *,
+    remote_release_path: str,
+) -> str:
+    q = shlex.quote
+    service_dir = "/etc/systemd/system"
+    service_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}"
+    timer_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME}"
+    service_dropin_dir = (
+        f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
+    )
+    service_dropin_path = f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    stale_scope_dropin_path = (
+        f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
+    )
+    release_service_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH}"
+    )
+    release_timer_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH}"
+    )
+    release_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
+    )
+    return (
+        f"set -eu; "
+        f"test -f {q(release_service_path)}; "
+        f"test -f {q(release_timer_path)}; "
+        f"test -f {q(release_dropin_path)}; "
+        f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
+        f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)}; "
+        f"sudo -n mkdir -p {q(service_dropin_dir)}; "
+        f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
+        "sudo -n systemctl daemon-reload; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}"
+    )
 
 
 def _ssh(host: str, remote_command: str) -> str:
@@ -532,6 +653,25 @@ def _tracked_dirty(repo_root: Path) -> bool:
         if line and not line.startswith("?? "):
             return True
     return False
+
+
+def _local_migration_files(repo_root: Path) -> list[Path]:
+    return sorted((repo_root / "migrations" / "versions").glob("*.py"))
+
+
+def _local_migration_count(repo_root: Path) -> int:
+    return len(_local_migration_files(repo_root))
+
+
+def _local_latest_migration(repo_root: Path) -> str | None:
+    files = _local_migration_files(repo_root)
+    return files[-1].name if files else None
+
+
+def _migration_revision(filename: str) -> str | None:
+    prefix = Path(str(filename)).name.split("_", 1)[0]
+    revision = prefix.rsplit("-", 1)[-1]
+    return revision if revision.isdigit() else None
 
 
 def _run(command: tuple[str, ...], *, cwd: Path) -> CommandResult:

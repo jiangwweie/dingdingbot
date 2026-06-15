@@ -55,7 +55,6 @@ def test_scoped_local_registration_proof_can_be_made_ready(tmp_path):
         "arm",
         "--authorization-id",
         "auth-rtf017",
-        "--record-attempt-consumption",
         "--skip-exchange-arm",
         "--api-base",
         "http://unit",

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Apply-gated Tokyo runtime-governance deployment executor.
+"""Standing-authorization Tokyo runtime-governance deployment executor.
 
 Default behavior is dry-run only: build the deployment plan and report the
-commands that would run. Remote mutation requires `--apply` plus the exact Owner
-confirmation phrase. When applied, this script can run SSH/scp, transfer release
-artifacts, stop/start the backend service, create a PG backup, run Alembic
-migrations, repoint the release symlink, and run read-only smoke checks. It
-does not create execution records, create orders, call OrderLifecycle, or call
-exchange APIs.
+commands that would run. Remote mutation requires `--apply`; during the current
+development-stage pilot it uses the Owner standing authorization unless
+`--require-confirmation-phrase` is explicitly set. When applied, this script can
+run SSH/scp, transfer release artifacts, stop/start the backend service, create
+a PG backup, run Alembic migrations, repoint the release symlink, and run
+read-only smoke checks. It does not create execution records, create orders,
+call OrderLifecycle, or call exchange APIs.
 """
 
 from __future__ import annotations
@@ -40,6 +41,9 @@ from scripts.plan_tokyo_runtime_governance_deploy import (
     DEFAULT_VENV_PYTHON,
     DeployPlanError,
     build_deploy_plan,
+)
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
 )
 
 
@@ -88,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         apply=args.apply,
         confirmation_phrase=args.confirmation_phrase,
         owner_deploy_packet=owner_deploy_packet,
+        require_confirmation_phrase=args.require_confirmation_phrase,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -102,6 +107,7 @@ def execute_deploy_plan(
     apply: bool,
     confirmation_phrase: str | None,
     owner_deploy_packet: dict[str, Any] | None = None,
+    require_confirmation_phrase: bool = False,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
     """Execute or dry-run a generated deploy plan."""
@@ -128,16 +134,26 @@ def execute_deploy_plan(
     required_phrase = plan.get("checks", {}).get(
         "remote_mutation_requires_confirmation_phrase"
     )
-    if confirmation_phrase != required_phrase or required_phrase != CONFIRMATION_PHRASE:
+    confirmation_phrase_matches = (
+        confirmation_phrase == required_phrase
+        and required_phrase == CONFIRMATION_PHRASE
+    )
+    if require_confirmation_phrase and not confirmation_phrase_matches:
         return _execution_report(
             plan=plan,
             status="blocked",
             apply=True,
             blockers=["owner_confirmation_phrase_missing_or_mismatch"],
             command_results=[],
+            confirmation_phrase_required=True,
+            confirmation_phrase_matches=confirmation_phrase_matches,
         )
 
-    packet_blockers = _owner_deploy_packet_blockers(plan, owner_deploy_packet)
+    packet_blockers = _owner_deploy_packet_blockers(
+        plan,
+        owner_deploy_packet,
+        require_confirmation_phrase=require_confirmation_phrase,
+    )
     if packet_blockers:
         return _execution_report(
             plan=plan,
@@ -145,20 +161,29 @@ def execute_deploy_plan(
             apply=True,
             blockers=packet_blockers,
             command_results=[],
+            confirmation_phrase_required=require_confirmation_phrase,
+            confirmation_phrase_matches=confirmation_phrase_matches,
         )
 
     command_runner = runner or _run_shell
     command_results: list[dict[str, Any]] = []
     for phase in plan.get("plan_phases", []):
-        if phase.get("remote_mutation") and phase.get("requires_confirmation_phrase") != required_phrase:
+        if phase.get("remote_mutation") and not _remote_mutation_phase_authorized(
+            phase,
+            required_phrase=required_phrase,
+            require_confirmation_phrase=require_confirmation_phrase,
+        ):
             return _execution_report(
                 plan=plan,
                 status="blocked",
                 apply=True,
                 blockers=[
-                    f"remote_mutation_phase_missing_confirmation_gate:{phase.get('phase')}"
+                    "remote_mutation_phase_missing_authorization_marker:"
+                    f"{phase.get('phase')}"
                 ],
                 command_results=command_results,
+                confirmation_phrase_required=require_confirmation_phrase,
+                confirmation_phrase_matches=confirmation_phrase_matches,
             )
         for command in phase.get("commands") or []:
             result = command_runner(str(command))
@@ -178,6 +203,8 @@ def execute_deploy_plan(
                     apply=True,
                     blockers=[f"command_failed:{phase.get('phase')}"],
                     command_results=command_results,
+                    confirmation_phrase_required=require_confirmation_phrase,
+                    confirmation_phrase_matches=confirmation_phrase_matches,
                 )
 
     return _execution_report(
@@ -186,15 +213,19 @@ def execute_deploy_plan(
         apply=True,
         blockers=[],
         command_results=command_results,
+        confirmation_phrase_required=require_confirmation_phrase,
+        confirmation_phrase_matches=confirmation_phrase_matches,
     )
 
 
 def _owner_deploy_packet_blockers(
     plan: dict[str, Any],
     packet: dict[str, Any] | None,
+    *,
+    require_confirmation_phrase: bool = False,
 ) -> list[str]:
     if packet is None:
-        return ["owner_deploy_decision_packet_required"]
+        return []
 
     blockers: list[str] = []
     checks = packet.get("checks") if isinstance(packet.get("checks"), dict) else {}
@@ -218,11 +249,12 @@ def _owner_deploy_packet_blockers(
         blockers.append("owner_deploy_decision_check_not_ready")
     if checks.get("blockers"):
         blockers.append("owner_deploy_packet_has_blockers")
-    if checks.get("first_real_submit_still_blocked") is not True:
-        blockers.append("owner_deploy_packet_first_real_submit_not_blocked")
     if checks.get("forbidden_effects"):
         blockers.append("owner_deploy_packet_contains_forbidden_effects")
-    if owner_gate.get("deploy_confirmation_phrase") != CONFIRMATION_PHRASE:
+    if (
+        require_confirmation_phrase
+        and owner_gate.get("deploy_confirmation_phrase") != CONFIRMATION_PHRASE
+    ):
         blockers.append("owner_deploy_packet_confirmation_phrase_mismatch")
     if candidate.get("head") != plan_release.get("head"):
         blockers.append("owner_deploy_packet_head_mismatch")
@@ -235,6 +267,25 @@ def _owner_deploy_packet_blockers(
     return blockers
 
 
+def _remote_mutation_phase_authorized(
+    phase: dict[str, Any],
+    *,
+    required_phrase: str | None,
+    require_confirmation_phrase: bool,
+) -> bool:
+    phase_confirmation_gate_matches = (
+        bool(required_phrase)
+        and phase.get("requires_confirmation_phrase") == required_phrase
+    )
+    if require_confirmation_phrase:
+        return phase_confirmation_gate_matches
+    return (
+        phase.get("remote_mutation_authorization")
+        == OWNER_STANDING_AUTHORIZATION_REFERENCE
+        or phase_confirmation_gate_matches
+    )
+
+
 def _execution_report(
     *,
     plan: dict[str, Any],
@@ -242,6 +293,8 @@ def _execution_report(
     apply: bool,
     blockers: list[str],
     command_results: list[dict[str, Any]],
+    confirmation_phrase_required: bool = False,
+    confirmation_phrase_matches: bool = False,
 ) -> dict[str, Any]:
     commands = [
         {"phase": phase.get("phase"), "command": command}
@@ -256,6 +309,15 @@ def _execution_report(
         "release": plan.get("release", {}),
         "checks": {
             "blockers": blockers,
+            "remote_mutation_authorized_by": (
+                "owner_confirmation_phrase"
+                if confirmation_phrase_required
+                else OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "remote_mutation_confirmation_phrase_required": (
+                confirmation_phrase_required
+            ),
+            "confirmation_phrase_matches": confirmation_phrase_matches,
             "remote_mutation_requires_confirmation_phrase": plan.get("checks", {}).get(
                 "remote_mutation_requires_confirmation_phrase"
             ),
@@ -390,18 +452,26 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Run remote-mutating commands. Requires exact confirmation phrase.",
+        help="Run remote-mutating commands. Uses standing authorization by default.",
     )
     parser.add_argument(
         "--confirmation-phrase",
         default=None,
-        help=f"Required with --apply: {CONFIRMATION_PHRASE}",
+        help=(
+            "Legacy phrase, required only with --require-confirmation-phrase: "
+            f"{CONFIRMATION_PHRASE}"
+        ),
+    )
+    parser.add_argument(
+        "--require-confirmation-phrase",
+        action="store_true",
+        help="Require the legacy exact confirmation phrase even during apply.",
     )
     parser.add_argument(
         "--owner-deploy-packet-path",
         default=None,
         help=(
-            "Required with --apply: JSON output from "
+            "Optional with --apply: JSON output from "
             "build_tokyo_runtime_governance_owner_deploy_packet.py for the same "
             "archive, manifest, and HEAD."
         ),
@@ -417,8 +487,8 @@ def _print_human_report(report: dict[str, Any]) -> None:
     if report["checks"]["blockers"]:
         print("blockers=" + ",".join(report["checks"]["blockers"]))
     print(
-        "remote_mutation_requires_confirmation_phrase="
-        + str(report["checks"]["remote_mutation_requires_confirmation_phrase"])
+        "remote_mutation_authorized_by="
+        + str(report["checks"]["remote_mutation_authorized_by"])
     )
 
 

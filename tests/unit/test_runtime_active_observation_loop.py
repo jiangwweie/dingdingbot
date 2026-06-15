@@ -43,11 +43,14 @@ def _args(
 
 def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=False):
     prepared_authorization_id = "auth-ready-1" if prepare else None
+    signal_input_json = "/tmp/signal-input-ready.json" if prepare else None
     runtime_summary_extra = {}
     if nested_authorization:
         runtime_summary_extra = {
             "prepared_authorization_id": prepared_authorization_id,
+            "signal_input_json": signal_input_json,
             "latest_packet": {
+                "signal_input_json": signal_input_json,
                 "prepare_packet": {
                     "ids": {
                         "authorization_id": prepared_authorization_id,
@@ -59,6 +62,7 @@ def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=
         "status": status,
         "active_runtime_count": 2,
         "monitored_runtime_count": 2,
+        "selected_runtime_instance_ids": ["runtime-1", "runtime-2"],
         "blockers": (
             ["strategy_signal_not_ready_for_shadow_candidate_prepare"]
             if status == "waiting_for_signal"
@@ -84,10 +88,14 @@ def _packet(status="waiting_for_signal", *, prepare=False, nested_authorization=
                     "reason_codes": ["cpm_no_action_trend_ambiguous"],
                     "human_summary": "4h trend is ambiguous under CPM v0.",
                 },
+                "signal_input_json": signal_input_json,
+                "prepared_authorization_id": prepared_authorization_id,
                 **runtime_summary_extra,
             }
         ],
         "operator_command_plan": {
+            "signal_input_json": signal_input_json,
+            "prepared_authorization_id": prepared_authorization_id,
             "creates_shadow_candidate": prepare,
             "creates_execution_intent": False,
             "places_order": False,
@@ -135,6 +143,7 @@ def test_active_observation_loop_runs_waiting_cycles_without_side_effects(tmp_pa
 
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
     assert latest["status"] == "waiting_for_signal"
+    assert latest["selected_runtime_instance_ids"] == ["runtime-1", "runtime-2"]
     assert latest["runtime_signal_summaries"][0]["signal_summary"]["reason_codes"] == [
         "cpm_no_action_trend_ambiguous"
     ]
@@ -240,8 +249,18 @@ def test_active_observation_loop_summarizes_nested_prepared_authorization_id(tmp
 
     assert packet["status"] == "ready_for_final_gate_preflight"
     assert packet["latest_summary"]["prepared_authorization_id"] == "auth-ready-1"
+    assert packet["latest_summary"]["signal_input_json"] == (
+        "/tmp/signal-input-ready.json"
+    )
+    assert packet["latest_summary"]["runtime_signal_summaries"][0][
+        "prepared_authorization_id"
+    ] == "auth-ready-1"
+    assert packet["latest_summary"]["runtime_signal_summaries"][0][
+        "signal_input_json"
+    ] == "/tmp/signal-input-ready.json"
     latest = json.loads((tmp_path / "loop" / "latest-summary.json").read_text())
     assert latest["prepared_authorization_id"] == "auth-ready-1"
+    assert latest["signal_input_json"] == "/tmp/signal-input-ready.json"
 
 
 def test_active_observation_loop_blocks_and_writes_audit_packet_on_cycle_timeout(tmp_path):

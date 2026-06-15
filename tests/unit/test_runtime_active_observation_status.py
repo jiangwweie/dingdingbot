@@ -32,6 +32,8 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
             "latest_summary": {
                 "iteration": 2,
                 "active_runtime_count": 1,
+                "monitored_runtime_count": 1,
+                "selected_runtime_instance_ids": ["runtime-1"],
                 "runtime_signal_summaries": [
                     {
                         "runtime_instance_id": "runtime-1",
@@ -81,6 +83,8 @@ def test_status_summarizes_waiting_loop_without_side_effects(tmp_path):
         "continue_active_observation_loop"
     )
     assert packet["active_runtime_count"] == 1
+    assert packet["monitored_runtime_count"] == 1
+    assert packet["selected_runtime_instance_ids"] == ["runtime-1"]
     assert packet["runtime_signal_summaries"][0]["strategy_family_id"] == "CPM-001"
     assert packet["runtime_signal_summaries"][0]["reason_codes"] == ["cpm_no_action"]
     assert packet["safety_invariants"]["read_packets_only"] is True
@@ -143,6 +147,83 @@ def test_status_marks_prepare_followup_as_attention(tmp_path):
     )
 
 
+def test_status_exposes_observed_prepare_record_evidence(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "loop-packet.json",
+        {
+            "status": "ready_for_final_gate_preflight",
+            "latest_summary": {
+                "iteration": 1,
+                "active_runtime_count": 1,
+                "monitored_runtime_count": 1,
+                "prepare_records_created": True,
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": True,
+                "recorded_execution_intent_created": True,
+                "submit_authorization_created": True,
+                "protection_plan_created": True,
+                "signal_input_json": "/tmp/signal-input-ready.json",
+                "prepared_authorization_id": "auth-ready-1",
+                "runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-1",
+                        "strategy_family_id": "MPG-001",
+                        "strategy_family_version_id": "MPG-001-v0",
+                        "symbol": "COIN/USDT:USDT",
+                        "side": "long",
+                        "status": "ready_for_final_gate_preflight",
+                        "signal_input_json": "/tmp/signal-input-ready.json",
+                        "prepared_authorization_id": "auth-ready-1",
+                    }
+                ],
+            },
+            "safety_invariants": {
+                "prepare_records_created": True,
+                "shadow_candidate_created": True,
+                "runtime_execution_intent_draft_created": True,
+                "recorded_execution_intent_created": True,
+                "submit_authorization_created": True,
+                "protection_plan_created": True,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert packet["status"] == "attention"
+    assert packet["latest_status"] == "ready_for_final_gate_preflight"
+    assert packet["signal_input_json"] == "/tmp/signal-input-ready.json"
+    assert packet["prepared_authorization_id"] == "auth-ready-1"
+    assert packet["runtime_signal_summaries"][0]["signal_input_json"] == (
+        "/tmp/signal-input-ready.json"
+    )
+    assert packet["runtime_signal_summaries"][0]["prepared_authorization_id"] == (
+        "auth-ready-1"
+    )
+    assert packet["allowed_prepare_record_effects"] == [
+        "prepare_records_created",
+        "shadow_candidate_created",
+        "runtime_execution_intent_draft_created",
+        "recorded_execution_intent_created",
+        "submit_authorization_created",
+        "protection_plan_created",
+    ]
+    safety = packet["safety_invariants"]
+    assert safety["read_packets_only"] is True
+    assert safety["creates_prepare_records"] is False
+    assert safety["observed_prepare_records_created"] is True
+    assert safety["observed_shadow_candidate_created"] is True
+    assert safety["observed_runtime_execution_intent_draft_created"] is True
+    assert safety["observed_recorded_execution_intent_created"] is True
+    assert safety["observed_submit_authorization_created"] is True
+    assert safety["observed_protection_plan_created"] is True
+    assert safety["places_order"] is False
+
+
 def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
     root = tmp_path / "obs"
     _write_json(
@@ -155,6 +236,7 @@ def test_status_marks_exhausted_waiting_window_as_complete_no_signal(tmp_path):
             "latest_summary": {
                 "iteration": 3,
                 "active_runtime_count": 2,
+                "monitored_runtime_count": 0,
                 "runtime_signal_summaries": [],
             },
             "operator_command_plan": {

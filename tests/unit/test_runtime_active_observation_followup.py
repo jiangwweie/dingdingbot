@@ -196,6 +196,31 @@ def test_followup_surfaces_ready_for_prepare_without_running_smoke():
     assert calls == []
 
 
+def test_followup_cli_exits_zero_for_ready_prepare_review(tmp_path, capsys):
+    loop_path = tmp_path / "loop-packet.json"
+    output_path = tmp_path / "followup-packet.json"
+    loop_path.write_text(
+        json.dumps(_loop_packet("ready_for_prepare")),
+        encoding="utf-8",
+    )
+
+    exit_code = runtime_active_observation_followup.main(
+        [
+            "--loop-packet-json",
+            str(loop_path),
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert json.loads(output_path.read_text(encoding="utf-8"))["status"] == (
+        "ready_for_prepare_records"
+    )
+    stdout = capsys.readouterr().out
+    assert "ready_for_prepare_records" in stdout
+
+
 def test_followup_requires_explicit_disabled_smoke_flag_when_ready():
     packet = runtime_active_observation_followup.build_followup_packet(
         _args(),

@@ -15,6 +15,10 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
 )
+from src.domain.strategy_candidate_semantics import (
+    StrategyArchetype,
+    StrategyCandidateSemantics,
+)
 
 
 NOW_MS = 1781000000000
@@ -88,6 +92,30 @@ def _cpm_up_context_4h() -> list[dict[str, Any]]:
             )
         )
     return candles
+
+
+def _mpg_long_1h() -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index in range(16):
+        close = Decimal("100") + Decimal(index) * Decimal("0.35")
+        candles.append(
+            _candle(
+                index,
+                str(close),
+                str(close + Decimal("0.3")),
+                str(close - Decimal("0.3")),
+                str(close),
+            )
+        )
+    candles.append(_candle(16, "105.4", "107.2", "105", "107"))
+    return candles
+
+
+def _mpg_flat_1h() -> list[dict[str, Any]]:
+    return [
+        _candle(index, "100", "101", "99", "100")
+        for index in range(17)
+    ]
 
 
 def _signal_input(
@@ -261,6 +289,85 @@ def test_cpm_live_reference_route_ready_for_semantic_binding():
     assert result.order_candidate_created is False
     assert result.execution_intent_created is False
     assert result.exchange_called is False
+
+
+def test_mpg_momentum_persistence_route_ready_for_semantic_binding():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MPG-001",
+            version_id="MPG-001-v0",
+            one_hour=_mpg_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    assert result.blockers == []
+    assert result.evaluator_called is True
+    assert result.evaluator_id == "MPG001MomentumPersistenceEvaluator"
+    assert result.can_call_semantic_binding is True
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.WOULD_ENTER
+    assert result.output.side == SignalSide.LONG
+    semantics = StrategyCandidateSemantics.model_validate(
+        result.output.evidence_payload["candidate_semantics"]
+    )
+    assert semantics.strategy_family_id == "MPG-001"
+    assert semantics.strategy_family_version_id == "MPG-001-v0"
+    assert semantics.archetype == StrategyArchetype.MOMENTUM_PERSISTENCE
+    assert semantics.not_order is True
+    assert semantics.not_execution_intent is True
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+
+
+def test_mpg_momentum_persistence_no_action_stays_observe_only():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MPG-001",
+            version_id="MPG-001-v0",
+            one_hour=_mpg_flat_1h(),
+            four_hour=_cpm_up_context_4h(),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.OBSERVE_ONLY
+    assert "strategy_signal_not_would_enter" in result.blockers
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    assert result.output.side == SignalSide.NONE
+    assert result.can_call_semantic_binding is False
+    assert result.order_candidate_created is False
+    assert result.exchange_called is False
+
+
+def test_strategygroup_pilot_reference_routes_are_configured_and_non_executing():
+    service = RuntimeStrategySignalEvaluationService()
+
+    for family_id, version_id in [
+        ("TEQ-001", "TEQ-001-v0"),
+        ("FBS-001", "FBS-001-v0"),
+        ("PMR-001", "PMR-001-v0"),
+        ("SOR-001", "SOR-001-v0"),
+    ]:
+        assert service.route_configured(
+            strategy_family_id=family_id,
+            strategy_family_version_id=version_id,
+        )
+        result = service.evaluate(
+            _signal_input(family_id=family_id, version_id=version_id)
+        )
+
+        assert result.semantics_binding_found is True
+        assert result.evaluator_called is True
+        assert result.order_candidate_created is False
+        assert result.execution_intent_created is False
+        assert result.order_created is False
+        assert result.order_lifecycle_called is False
+        assert result.exchange_called is False
 
 
 def test_rmr_classifier_binding_observe_only_without_evaluator_call():

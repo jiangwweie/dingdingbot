@@ -55,6 +55,7 @@ class BootstrapConfig:
     family_key: str = "cpm-price-action"
     family_name: str = "CPM Price Action Reference"
     symbol: str = "BNB/USDT:USDT"
+    supported_symbols: list[str] = field(default_factory=list)
     side: str = "long"
     timeframe: str = "1h"
     capital_base: Decimal = Decimal("30")
@@ -67,7 +68,8 @@ class BootstrapConfig:
     account_facts_source: str = "binance_readonly"
     account_facts_json: str | None = None
     owner_operator_id: str = "owner"
-    reason: str = "Owner authorized first-real-submit live runtime bootstrap"
+    runtime_carrier_id: str = "strategygroup-runtime-bootstrap"
+    reason: str = "Owner standing-authorized StrategyGroup runtime bootstrap"
 
 
 @dataclass
@@ -197,7 +199,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "entry_logic_family": "catalog-bound price-action trigger",
                 "exit_logic_family": "TP1 partial plus runner/trailing metadata",
                 "risk_model": "bounded small-capital attempts; no runaway",
-                "supported_symbols": [self._config.symbol],
+                "supported_symbols": _supported_symbols(self._config),
                 "supported_timeframes": [self._config.timeframe],
                 "required_data": ["closed_ohlcv", "trusted_account_facts", "active_positions"],
                 "required_execution_capabilities": ["market_entry", "hard_stop_protection"],
@@ -242,7 +244,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "payload_json": {
                     "reference_implementation": True,
                     "proven_alpha": False,
-                    "owner_authorized_first_real_submit": True,
+                    "owner_standing_authorized_strategygroup_runtime": True,
                     "bounded_loss_not_runaway": True,
                 },
                 "mandatory_complete": True,
@@ -469,10 +471,11 @@ class RuntimeLiveBootstrapApiFlow:
             ),
             body={
                 "trial_binding_id": self.state.ids.get("trial_binding_id"),
-                "carrier_id": "first-real-submit-live-bootstrap",
+                "carrier_id": self._config.runtime_carrier_id,
                 "metadata": {
                     "script": "runtime_live_bootstrap_api_flow",
                     "live_runtime_candidate": True,
+                    "strategygroup_runtime_pilot": True,
                 },
             },
         )
@@ -622,7 +625,9 @@ def _static_account_facts(config: BootstrapConfig) -> dict[str, Any]:
         account_equity=config.capital_base,
         available_margin=config.capital_base,
         timestamp_ms=int(time.time() * 1000),
-        account_facts_snapshot_ref="static_owner_authorized_first_real_submit_account_facts",
+        account_facts_snapshot_ref=(
+            "static_owner_authorized_strategygroup_runtime_account_facts"
+        ),
         metadata={"source": "static_cli", "used_for_tests": True},
     )
 
@@ -648,7 +653,7 @@ def _account_snapshot_from_values(
         "available_margin": str(available_margin),
         "timestamp_ms": timestamp_ms,
         "risk_capital_resolution": {
-            "risk_policy_version": "owner-first-real-submit-small-cap-v1",
+            "risk_policy_version": "owner-strategygroup-runtime-pilot-small-cap-v1",
             "max_loss_budget": str(config.max_loss_budget),
             "max_notional": str(config.max_notional),
             "max_leverage": config.max_leverage,
@@ -663,6 +668,19 @@ def _account_snapshot_from_values(
 
 def _all_true(keys: list[str]) -> dict[str, bool]:
     return {key: True for key in keys}
+
+
+def _supported_symbols(config: BootstrapConfig) -> list[str]:
+    values = [item.strip() for item in config.supported_symbols if item.strip()]
+    if not values:
+        values = [config.symbol]
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    if config.symbol not in result:
+        result.insert(0, config.symbol)
+    return result
 
 
 def _profile_with_owner_overrides(
@@ -754,6 +772,15 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
     parser.add_argument("--family-key", default="cpm-price-action")
     parser.add_argument("--family-name", default="CPM Price Action Reference")
     parser.add_argument("--symbol", default="BNB/USDT:USDT")
+    parser.add_argument(
+        "--supported-symbol",
+        action="append",
+        default=[],
+        help=(
+            "StrategyFamilyVersion supported symbol. May be repeated. Defaults "
+            "to --symbol when omitted."
+        ),
+    )
     parser.add_argument("--side", default="long")
     parser.add_argument("--timeframe", default="1h")
     parser.add_argument("--capital-base", type=Decimal, default=Decimal("30"))
@@ -771,8 +798,12 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
     parser.add_argument("--account-facts-json")
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
+        "--runtime-carrier-id",
+        default="strategygroup-runtime-bootstrap",
+    )
+    parser.add_argument(
         "--reason",
-        default="Owner authorized first-real-submit live runtime bootstrap",
+        default="Owner standing-authorized StrategyGroup runtime bootstrap",
     )
     args = parser.parse_args(argv)
     return BootstrapConfig(
@@ -783,6 +814,7 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         family_key=args.family_key,
         family_name=args.family_name,
         symbol=args.symbol,
+        supported_symbols=args.supported_symbol,
         side=args.side,
         timeframe=args.timeframe,
         capital_base=args.capital_base,
@@ -795,6 +827,7 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         account_facts_source=args.account_facts_source,
         account_facts_json=args.account_facts_json,
         owner_operator_id=args.owner_operator_id,
+        runtime_carrier_id=args.runtime_carrier_id,
         reason=args.reason,
     )
 

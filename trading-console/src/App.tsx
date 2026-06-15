@@ -14,6 +14,9 @@ import AuthorizationState from './pages/AuthorizationState';
 import RecoveryState from './pages/RecoveryState';
 import ReviewState from './pages/ReviewState';
 import AuditChain from './pages/AuditChain';
+import WatcherStatus from './pages/WatcherStatus';
+import StrategyGroupIntake from './pages/StrategyGroupIntake';
+import PilotControlBoard from './pages/PilotControlBoard';
 import Login from './pages/Login';
 
 function ProtectedShell() {
@@ -44,8 +47,11 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedShell />}>
               <Route index element={<Dashboard />} />
+              <Route path="pilot" element={<PilotControlBoard />} />
               <Route path="strategy" element={<CarrierShelf />} />
               <Route path="runtime" element={<AuthorizationState />} />
+              <Route path="strategy-intake" element={<StrategyGroupIntake />} />
+              <Route path="watcher" element={<WatcherStatus />} />
               <Route path="trades" element={<OrderLedger />} />
               <Route path="analysis" element={<ReviewState />} />
               <Route path="incident" element={<RecoveryState />} />
@@ -54,6 +60,7 @@ export default function App() {
               <Route path="ledger" element={<Navigate to="/trades" replace />} />
               <Route path="protection" element={<Navigate to="/trades" replace />} />
               <Route path="carrier" element={<Navigate to="/strategy" replace />} />
+              <Route path="strategy-groups" element={<Navigate to="/strategy-intake" replace />} />
               <Route path="authorization" element={<Navigate to="/runtime" replace />} />
               <Route path="execution" element={<Navigate to="/runtime" replace />} />
               <Route path="action-entry" element={<Navigate to="/runtime" replace />} />
@@ -61,6 +68,7 @@ export default function App() {
               <Route path="review" element={<Navigate to="/analysis" replace />} />
               <Route path="audit" element={<Navigate to="/evidence" replace />} />
               <Route path="signals" element={<Navigate to="/runtime" replace />} />
+              <Route path="strategy-runtime-pilot" element={<Navigate to="/pilot" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

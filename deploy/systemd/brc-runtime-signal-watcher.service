@@ -1,0 +1,36 @@
+[Unit]
+Description=BRC runtime signal watcher tick
+Wants=network-online.target
+After=network-online.target brc-owner-console-backend.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/brc-deploy/app/current
+EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
+EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
+ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_signal_watcher_tick.py \
+  --env-file /home/ubuntu/brc-deploy/env/live-readonly.env \
+  --api-base http://127.0.0.1:18080 \
+  --source live_market \
+  --strategy-source live_market \
+  --output-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \
+  --max-iterations 1 \
+  --cycle-timeout-seconds 180 \
+  --status-stale-after-seconds 900 \
+  --allow-prepare-records \
+  --strategy-family-id MPG-001 \
+  --strategy-family-id TEQ-001 \
+  --strategy-family-id FBS-001 \
+  --strategy-family-id PMR-001 \
+  --strategy-family-id SOR-001 \
+  --label tokyo-runtime-signal-watcher
+ExecStartPost=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/build_runtime_signal_watcher_readiness_pack.py \
+  --report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \
+  --output-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \
+  --stale-after-seconds 180 \
+  --label tokyo-runtime-signal-watcher
+
+NoNewPrivileges=true
+PrivateTmp=true

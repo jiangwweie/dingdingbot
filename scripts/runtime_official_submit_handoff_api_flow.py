@@ -179,7 +179,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--owner-confirmed-for-real-submit-action",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Standing authorization flag for real_gateway_action handoff "
+            "(default: true)."
+        ),
     )
     parser.add_argument("--additional-warning", action="append")
     parser.add_argument("--additional-blocker", action="append")
