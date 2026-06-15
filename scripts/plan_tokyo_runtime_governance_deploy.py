@@ -52,6 +52,12 @@ DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
 DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
 DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
+RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service"
+)
+RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.timer"
+)
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf"
 )
@@ -483,19 +489,40 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     remote_release_path: str,
 ) -> str:
     q = shlex.quote
+    service_dir = "/etc/systemd/system"
+    service_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}"
+    timer_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME}"
     service_dropin_dir = (
         f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
     )
     service_dropin_path = f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    stale_scope_dropin_path = (
+        f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
+    )
+    release_service_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH}"
+    )
+    release_timer_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH}"
+    )
     release_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
     )
     return (
-        f"set -eu; test -f {q(release_dropin_path)}; "
+        f"set -eu; "
+        f"test -f {q(release_service_path)}; "
+        f"test -f {q(release_timer_path)}; "
+        f"test -f {q(release_dropin_path)}; "
+        f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
+        f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
         f"sudo -n chmod 0644 {q(service_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "

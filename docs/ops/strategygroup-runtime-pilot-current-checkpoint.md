@@ -23,6 +23,50 @@ Workspace and branch:
 | Tokyo release path before this checkpoint update | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2df7ae9a-20260615-fresh-auth-binding` |
 | New local checkpoint capability | Fresh authorization binding now chains directly into official action-time FinalGate GET preflight |
 
+## 2026-06-15 P0/P1 StrategyGroup Runtime Pilot Update
+
+Current local and Tokyo state after the StrategyGroup runtime pilot expansion:
+
+| Field | Value |
+| --- | --- |
+| Local branch | `codex/strategygroup-runtime-pilot` |
+| Local/pushed pilot commit | `bc1c834746399d38326d1ac5cd1fadf77856b1ca` |
+| Tokyo deployed pilot commit | `bc1c834746399d38326d1ac5cd1fadf77856b1ca` |
+| Tokyo release | `brc-runtime-governance-bc1c8347-20260615-strategygroup-runtime-pilot` |
+| Handoff groups admitted to main control | `MPG-001`, `TEQ-001`, `FBS-001`, `PMR-001`, `SOR-001` |
+| Live facts readiness | `strategy_group_live_facts_ready_for_armed_observation` |
+| Observe-ready groups | `5` |
+| Armed candidate-prepare-ready groups | `4` |
+| Candidate-prepare blocked groups | `0` |
+
+Non-executing runtime bootstrap created these additional ACTIVE shadow runtime
+records through the official local runtime-admission API. It did not create an
+ActionCandidate, ExecutionIntent, order, exchange submit, withdrawal, or
+transfer:
+
+| StrategyGroup | Runtime | Symbol | Side | Status |
+| --- | --- | --- | --- | --- |
+| `TEQ-001` | `strategy-runtime-0e752724b18a` | `INTC/USDT:USDT` | `long` | `active` |
+| `FBS-001` | `strategy-runtime-5e9ae30d4f33` | `INTC/USDT:USDT` | `long` | `active` |
+| `SOR-001` | `strategy-runtime-4240b69f85e0` | `XAG/USDT:USDT` | `short` | `active` |
+
+Post-bootstrap watcher verification found a real operational blocker:
+
+| Check | Observed value |
+| --- | --- |
+| ACTIVE runtimes reported by API | `9` |
+| Runtimes monitored by watcher | `3` |
+| Selected runtime ids | `strategy-runtime-93353f4cf30e`, `strategy-runtime-579e407cc03a`, `strategy-runtime-3a25a46a535f` |
+| Root cause | stale Tokyo systemd drop-in `30-strategygroup-runtime-pilot-scope.conf` pinned watcher to three old MPG runtime ids |
+| Safety impact | no forbidden trading effect; the issue only prevented TEQ/FBS/SOR observation |
+
+The repo-level fix is to make the runtime signal watcher systemd unit include
+`--allow-prepare-records` without any `--runtime-instance-id` pin, and to make
+the Tokyo deploy plan install the watcher service/timer while removing the stale
+`30-strategygroup-runtime-pilot-scope.conf` drop-in. This preserves the official
+FinalGate / Operation Layer boundary while preventing stale runtime-id scope from
+blocking StrategyGroup observation.
+
 ## Watch Branch Intake
 
 `codex/runtime-signal-watcher-feishu` was not merged wholesale. Its large docs

@@ -19,6 +19,7 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --max-iterations 1 \
   --cycle-timeout-seconds 180 \
   --status-stale-after-seconds 900 \
+  --allow-prepare-records \
   --label tokyo-runtime-signal-watcher
 ExecStartPost=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/build_runtime_signal_watcher_readiness_pack.py \
   --report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \

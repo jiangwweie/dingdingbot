@@ -11,6 +11,19 @@ DROPIN_PATH = (
     / "brc-runtime-signal-watcher.service.d"
     / "40-resume-dispatcher.conf"
 )
+SERVICE_PATH = (
+    REPO_ROOT
+    / "deploy"
+    / "systemd"
+    / "brc-runtime-signal-watcher.service"
+)
+
+
+def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin():
+    text = SERVICE_PATH.read_text(encoding="utf-8")
+
+    assert "--allow-prepare-records" in text
+    assert "--runtime-instance-id" not in text
 
 
 def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
@@ -73,7 +86,11 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     commands = "\n".join(
         command for phase in phases for command in phase["commands"]
     )
+    assert "brc-runtime-signal-watcher.service" in commands
+    assert "brc-runtime-signal-watcher.timer" in commands
     assert "40-resume-dispatcher.conf" in commands
+    assert "30-strategygroup-runtime-pilot-scope.conf" in commands
+    assert "rm -f" in commands
     assert "systemctl daemon-reload" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
