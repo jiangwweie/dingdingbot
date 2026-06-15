@@ -492,13 +492,15 @@ def _plan_phases(
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
                     f"--expected-current-head {q(head)} "
-                    "--expected-migration-count 70 "
+                    f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/verify_tokyo_runtime_governance_postdeploy.py --json "
-                    f"--expected-current-head {q(head)}"
+                    f"--expected-current-head {q(head)} "
+                    f"--expected-migration-count {target_migration_count} "
+                    f"--expected-latest-migration {q(expected_latest_migration)}"
                 ),
                 _ssh(
                     host,

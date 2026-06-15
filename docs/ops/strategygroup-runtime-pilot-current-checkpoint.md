@@ -71,6 +71,24 @@ still exist in PG. This preserves the official FinalGate / Operation Layer
 boundary while preventing stale runtime-id scope and legacy runtime drift from
 blocking or polluting StrategyGroup observation.
 
+Postdeploy verification after the family allowlist deploy:
+
+| Check | Observed value |
+| --- | --- |
+| Tokyo deployed head | `b81464bf61bc96f1f4499e28b75b2f9ec87b6b20` |
+| Tokyo release | `brc-runtime-governance-b81464bf-20260615-watcher-family-scope-r1` |
+| Postdeploy probe | `ready_for_controlled_deploy_preflight` |
+| Postdeploy acceptance | `postdeploy_acceptance_passed` |
+| Watcher service result | `success`, `ExecMainStatus=0` |
+| ACTIVE runtimes reported by API | `9` |
+| Runtimes monitored by watcher | `6` |
+| Monitored families | `SOR-001`, `FBS-001`, `TEQ-001`, `MPG-001` |
+| Excluded legacy families | `RBR-001`, `CPM-001`, `BTPC-001` |
+| Latest watcher status | `observation_window_complete_no_signal` |
+| Resume/dispatch status | `waiting_for_market` / `continue_watcher_observation` |
+| Forbidden effects | `[]` |
+| Exchange/order/OrderLifecycle effects | `false` / `false` / `false` |
+
 ## Watch Branch Intake
 
 `codex/runtime-signal-watcher-feishu` was not merged wholesale. Its large docs
