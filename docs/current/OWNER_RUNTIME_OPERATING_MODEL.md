@@ -32,6 +32,8 @@ The Owner decides:
 The system handles:
 
 - watcher observation;
+- signed GET-only live fact precollection for account, position, open orders,
+  budget coverage, protection templates, and next-attempt readiness;
 - fresh signal detection;
 - RequiredFacts readiness;
 - candidate and authorization evidence;
@@ -58,6 +60,23 @@ The Owner should see product states:
 
 Raw evidence packets remain available for audit but are not the Owner's daily
 operating interface.
+
+## Runtime Product State
+
+During the StrategyGroup runtime pilot, the server should refresh Owner-readable
+product state after each watcher tick:
+
+```text
+watcher tick
+-> signed GET-only live facts
+-> StrategyGroup readiness packet
+-> runtime pilot product state
+-> notification only when state materially changes
+```
+
+If live facts are ready but no fresh signal exists, the correct product state is
+`waiting_for_opportunity`. This is not an Owner blocker and should not ask for
+chat confirmation.
 
 ## Product Language Rule
 

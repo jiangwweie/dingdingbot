@@ -51,6 +51,18 @@ Internal gate names such as `FinalGate`, `Operation Layer`, `RequiredFacts`,
 `blocker code` are not allowed as primary Owner table columns, cards, or
 actions. They belong in details, audit, or developer drawers.
 
+## Internal Lifecycle Mapping
+
+Developer and audit surfaces may retain compact lifecycle labels, but the main
+Owner surface must translate them into plain product states.
+
+| Internal lifecycle | Main Owner wording |
+| --- | --- |
+| `observing` | `等待机会` |
+| `signal_ready` | `处理中` |
+| `candidate_ready` | `处理中` |
+| `submitted` | `处理中` |
+
 ## Notification Rule
 
 Notify the Owner when deployment changes, watcher health regresses, a

@@ -73,6 +73,7 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
     assert all(call[2] == "session=test" for call in calls)
     assert packet["safety_invariants"] == {
         "readmodel_refresh_only": True,
+        "optional_signed_get_live_facts_precollect": False,
         "exchange_write_called": False,
         "order_created": False,
         "order_lifecycle_called": False,
@@ -82,3 +83,74 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
         "places_order": False,
         "mutates_pg": False,
     }
+
+
+def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_path):
+    payloads = {
+        "/api/trading-console/strategy-group-live-facts-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {
+                "status": "strategy_group_live_facts_ready_for_armed_observation",
+                "blockers": [],
+                "candidate_prepare_blockers": [],
+            },
+        },
+        "/api/trading-console/strategygroup-runtime-pilot-status": {
+            "freshness_status": "warning",
+            "blockers": [],
+            "warnings": [{"code": "strategygroup_runtime_pilot_waiting_for_market"}],
+            "data": {"status": "waiting_for_market"},
+        },
+    }
+
+    def opener(request, timeout):
+        path = request.full_url.replace("http://unit", "")
+        return _FakeResponse(payloads[path])
+
+    def collect_live_facts(**kwargs):
+        assert kwargs["handoff_dir"] == tmp_path / "handoffs"
+        assert kwargs["env_file"] == tmp_path / "live-readonly.env"
+        assert kwargs["base_url"] == "https://unit-binance.test"
+        return {
+            "scope": "strategy_group_live_facts_input",
+            "status": "ready",
+            "collector_errors": {},
+            "safety_invariants": {
+                "signed_get_only": True,
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    packet = refresh_packets(
+        api_base="http://unit",
+        output_dir=tmp_path,
+        label="unit",
+        timeout_seconds=7,
+        cookie="session=test",
+        opener=opener,
+        generated_at_ms=1,
+        collect_live_facts_before_refresh=True,
+        handoff_dir=tmp_path / "handoffs",
+        env_file=tmp_path / "live-readonly.env",
+        live_facts_base_url="https://unit-binance.test",
+        live_facts_collector=collect_live_facts,
+    )
+
+    live_facts_path = tmp_path / "strategy-group-live-facts-input.json"
+    assert live_facts_path.exists()
+    assert json.loads(live_facts_path.read_text())["status"] == "ready"
+    assert packet["status"] == "refreshed"
+    assert packet["live_facts_precollect"] == {
+        "enabled": True,
+        "status": "ready",
+        "output_json": str(live_facts_path),
+        "collector_error_count": 0,
+        "signed_get_only": True,
+    }
+    assert packet["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
