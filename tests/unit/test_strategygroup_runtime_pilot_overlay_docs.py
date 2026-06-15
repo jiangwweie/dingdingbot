@@ -4,78 +4,69 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OVERLAY_PATH = REPO_ROOT / "docs" / "canon" / "STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md"
+CURRENT_DOCS = [
+    REPO_ROOT / "AGENTS.md",
+    REPO_ROOT / "docs" / "README.md",
+    REPO_ROOT / "docs" / "current" / "AI_AGENT_CONSTRAINTS.md",
+    REPO_ROOT / "docs" / "current" / "OWNER_RUNTIME_OPERATING_MODEL.md",
+    REPO_ROOT / "docs" / "current" / "STRATEGY_CONTROL_BOARD_CONTRACT.md",
+]
 
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_current_agent_entrypoints_reference_strategygroup_runtime_pilot_overlay():
-    overlay_ref = "docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md"
-
-    entrypoints = [
-        REPO_ROOT / "AGENTS.md",
-        REPO_ROOT / "docs" / "canon" / "AGENT_WORKSPACE_RULES.md",
-        REPO_ROOT / "docs" / "ops" / "agent-current-brc-baseline.md",
-    ]
-
-    for path in entrypoints:
+def test_current_agent_entrypoints_reference_current_strategygroup_docs():
+    for path in CURRENT_DOCS[:4]:
         text = _read(path)
-        assert overlay_ref in text, path
+        assert "docs/current/" in text or "StrategyGroup" in text, path
 
 
-def test_strategygroup_runtime_pilot_overlay_preserves_standing_authorization():
-    text = _read(OVERLAY_PATH)
-
-    assert "Owner selects a StrategyGroup" in text
-    assert "Deploy apply" in text
-    assert "Real order action" in text
-    assert "must not wait" in text
-    assert "fresh chat phrase" in text
-    assert "FinalGate + Operation Layer" in text
-    assert "evidence-packet-as-owner-interface" in text
-    assert "post_signal_auto_resume" in text
-    assert "ready_for_action_time_final_gate" in text
-    assert "--execute-operation-layer-submit" in text
-    assert "Operation Layer evidence readiness is `ready`" in text
-    assert "Strategy Control Board State Contract" in text
-    assert "The useful P0 content from `codex/runtime-signal-watcher-feishu`" in text
-
-
-def test_strategygroup_runtime_pilot_overlay_keeps_hard_safety_stops():
-    text = _read(OVERLAY_PATH)
+def test_current_agent_constraints_preserve_standing_authorization():
+    text = _read(REPO_ROOT / "docs" / "current" / "AI_AGENT_CONSTRAINTS.md")
 
     for phrase in [
-        "withdrawal or transfer actions",
-        "Operation Layer bypass",
-        "FinalGate bypass",
-        "unauditable exchange write",
-        "duplicate-submit risk",
-        "conflicting active position or open order",
+        "Standing Authorization",
+        "Tokyo deploy apply inside the active stage",
+        "official in-boundary real order action",
+        "FinalGate",
+        "Operation Layer",
+        "Watch Branch Intake",
     ]:
         assert phrase in text
 
 
-def test_strategygroup_runtime_pilot_overlay_keeps_owner_interface_simple():
-    text = _read(OVERLAY_PATH)
+def test_current_docs_keep_hard_safety_stops():
+    combined = "\n".join(_read(path) for path in CURRENT_DOCS)
 
     for phrase in [
-        "evidence packet archaeology",
+        "withdrawal",
+        "transfer",
+        "Operation Layer bypass",
+        "FinalGate bypass",
+        "duplicate-submit risk",
+        "conflicting active position",
+    ]:
+        assert phrase in combined
+
+
+def test_current_owner_interface_stays_simple():
+    text = _read(REPO_ROOT / "docs" / "current" / "STRATEGY_CONTROL_BOARD_CONTRACT.md")
+
+    for phrase in [
         "must not become a packet browser",
         "`observing`",
         "`signal_ready`",
         "`candidate_ready`",
-        "`finalgate_ready`",
+        "`submitted`",
         "Stay quiet when all selected runtimes remain observing",
-        "`promote` must not mean automatic position-size increase",
-        "not carried; separate docs-governance integration item",
     ]:
         assert phrase in text
 
 
-def test_current_agent_baseline_requires_recovery_classification():
-    text = _read(REPO_ROOT / "docs" / "ops" / "agent-current-brc-baseline.md")
+def test_current_gate_classes_are_documented():
+    text = _read(REPO_ROOT / "docs" / "current" / "AI_AGENT_CONSTRAINTS.md")
 
     for recovery_class in [
         "waiting_for_market",

@@ -1,7 +1,7 @@
 ---
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
-authority: docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md
+authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 last_verified: 2026-06-15
 ---
 
@@ -57,3 +57,9 @@ The Owner should see:
 
 Raw evidence packets remain available for audit but are not the Owner's daily
 operating interface.
+
+## Document Authority
+
+This file is the current Owner-operating SSOT. Historical docs compressed into
+`docs/history-archive-2026-06-15-pre-governance.tar.gz` are recovery material
+only and must not become current operating instructions.

@@ -1,14 +1,13 @@
 ---
 title: STRATEGY_CONTROL_BOARD_CONTRACT
 status: CURRENT
-authority: docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md
+authority: docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
 last_verified: 2026-06-15
 ---
 
 # Strategy Control Board Contract
 
-The Strategy Control Board is the Owner-facing operating surface. It is not a
-packet browser, research-doc index, or manual gate assembly tool.
+The Strategy Control Board is the Owner-facing operating surface. It must not become a packet browser, research-doc index, or manual gate assembly tool.
 
 ## Required Row Fields
 

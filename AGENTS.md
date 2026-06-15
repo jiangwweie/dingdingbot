@@ -1,354 +1,209 @@
-# AGENTS.md - Dingdingbot Agent Operating Guide
+# AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-14
-Current phase: BRC strategy runtime governance convergence
+Last updated: 2026-06-15
+Current phase: StrategyGroup runtime-governance pilot
 
 ## Current Document Authority
 
 When project documents conflict, follow this order:
 
-1. Owner explicit correction / decision
-2. Current tracked code + current git status
-3. `docs/canon/*` (canon files)
-4. Current verified reports
-5. ADR / decision records
-6. Historical docs / `docs/ops/*`
-7. Archived knowledge-pack v0
+1. Owner explicit correction / decision.
+2. Current tracked code + current git status.
+3. `docs/current/*`.
+4. Current verified runtime reports.
+5. Historical archive material only when the task explicitly requires recovery.
 
-Canon files (`docs/canon/`) are the primary agent reading source.
-They distill verified facts from knowledge-pack and code.
-If canon and knowledge-pack disagree, canon wins unless a newer Owner
-decision or code change supersedes it.
-
-Current project baseline starts from:
-`docs/canon/PROJECT_BASELINE_CURRENT.md`
-
-Current active pilot overlay starts from:
-`docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md`
-
-Current agent execution baseline starts from:
-`docs/ops/agent-current-brc-baseline.md`
-
-Untracked files must never be described as integrated capabilities.
-Owner authorization as of 2026-06-12 permits real live trading / real-funds
-order placement by default when the action goes through the official auditable
-BRC runtime / Operation Layer path and current action-time gates pass. This is
-not permission to bypass FinalGate, runtime boundaries, idempotency,
-protection, reconciliation, audit logging, or scoped action evidence.
-Withdrawal and transfer remain prohibited unless Owner explicitly authorizes
-that separate fund movement task.
-
-Current target semantics: BRC is strategy runtime governance. Owner
-authorization should ultimately authorize a bounded StrategyRuntimeInstance,
-not one immediate trade. Current one-shot OwnerBoundedExecution remains a
-valuable historical short path, not the final target architecture.
-
-Do not use docs/ops/ historical documents as current fact source when a
-canon file exists. Do not use docs/archive/ as current instructions.
-Historical documents must not reintroduce per-deploy chat confirmation,
-per-order chat confirmation inside the official runtime path, or
-evidence-packet-as-Owner-interface workflows when the current canon overlay
-authorizes a bounded pilot path.
-
-## Operating Model
-
-This project uses a Codex-led, Claude-bounded workflow.
-
-Codex owns requirements analysis, planning, architecture options, ADRs, core decisions, core implementation, skeleton development, code review, and merge readiness decisions.
-
-Claude Code owns bounded implementation and tests from Codex-issued task cards. Claude must not redefine scope, architecture, priorities, runtime profiles, or strategy parameters.
-
-The user remains Owner / PM / final architecture decision maker.
-
-System goals must be framed as capabilities, not fixed performance promises. Annual return and max drawdown numbers may be used as investor preferences or evaluation dimensions, but must not become architecture constraints, runtime rules, or agent task requirements.
-
-## Current Program SSOT
-
-**Current canon (start here)**:
-
-- `docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md`
-- `docs/canon/PROJECT_BASELINE_CURRENT.md`
-- `docs/canon/BRC_TARGET_SEMANTICS.md`
-- `docs/canon/STRATEGY_RUNTIME_GUIDE.md`
-- `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
-- `docs/canon/TECH_DEBT_BASELINE.md`
-- `docs/canon/DOCUMENT_GOVERNANCE.md`
-- `docs/canon/AGENT_WORKSPACE_RULES.md`
-
-**Verified source canon (detailed evidence)**:
-
-- `docs/ops/knowledge-pack/CURRENT_PRODUCT_OPERATING_MODEL.md`
-- `docs/ops/knowledge-pack/PROJECT_BASELINE_CURRENT.md`
-- `docs/ops/knowledge-pack/CURRENT_FACT_REGISTRY.md`
-- `docs/ops/knowledge-pack/CURRENT_READINESS_BLOCKERS.md`
-- `docs/ops/knowledge-pack/DOCUMENT_GOVERNANCE.md`
-
-**Operational context (historical / supporting only)**:
-
-- `docs/ops/project-roadmap-v2.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-findings.md`
-- `docs/ops/live-safe-v1-progress.md`
-- `docs/ops/agent-working-rules.md`
-- `docs/ops/codex-claude-handoff-template.md`
-- `docs/adr/0001-live-safe-v1-scope.md`
-
-These files may provide background or evidence, but they must not override the
-current canon overlay or create new Owner-confirmation blockers for deploy
-apply, StrategyGroup observation, watcher operation, or official in-boundary
-runtime actions.
-
-Archived pre-reset material lives under:
-
-- `archive/2026-04-29-pre-live-safe-replan/`
-
-## Current Product Direction
-
-The current target is an Owner-facing productized bounded-live trading
-operations system converging on strategy runtime governance.
-
-The active pilot target is simpler and more operational: the Owner selects a
-StrategyGroup, the system turns it into an observable bounded runtime, the
-watcher monitors market state, fresh signals produce candidates, and only the
-official FinalGate + Operation Layer path can approach funds.
-
-Do not interpret Trading Console or Owner Console as merely:
-
-- a read-only dashboard;
-- a PG/read-model browser;
-- a research dashboard;
-- a passive status or enum display;
-- a documentation surface.
-
-The console is the Owner's operating surface for understanding system state,
-reviewing `ActionCandidate` records, seeing budget availability, seeing blockers
-and recovery conditions, authorizing bounded live actions through the official
-path, checking `FinalGate`, monitoring active position/protection, pausing or
-revoking autonomy or budget, reviewing completed trades, and feeding Review
-Ledger outcomes into promote / revise / park decisions.
-
-Current product chain (current code reality):
+Start from:
 
 ```text
-StrategyFamily / Carrier
--> ActionCandidate
--> Owner risk understanding
--> Owner authorization or BudgetEnvelope authorization
--> ActionSpec
--> FinalGate
--> Operation Layer
--> official bounded live action
--> active position / TP/SL protection monitoring
--> close / TP / SL
--> Review Ledger
--> promote / revise / park
+docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
+docs/current/AI_AGENT_CONSTRAINTS.md
+docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
+docs/current/strategy-group-handoffs/main-control-handoff-index.md
 ```
 
-Target product chain (strategy runtime governance):
+Compressed historical docs live in:
 
 ```text
-StrategyFamily
--> StrategyFamilyVersion
--> AdmissionDecision
--> OwnerRiskAcceptance
--> TrialBinding
--> StrategyRuntimeInstance
--> SignalEvaluation
--> OrderCandidate
--> FinalGate
--> ExecutionIntent
--> OrderLifecycle
--> Order / Position
--> Reconciliation
--> Review
+docs/history-archive-2026-06-15-pre-governance.tar.gz
 ```
 
-One-shot OwnerBoundedExecution is a valuable historical short path for
-single-trade Owner authorization. It is not the final target architecture.
-See `docs/canon/BRC_TARGET_SEMANTICS.md` for the full status map.
+The archive is recovery material only. It must not reintroduce per-deploy chat
+confirmation, per-order chat confirmation inside the official runtime path, or
+evidence-packet-as-Owner-interface workflows.
 
-Read-only documents remain valid only for the specific namespace, report, or
-handoff they describe. They must not be generalized into "the product is
-read-only" or "no PG mutation/deployment/exchange access is allowed."
+## Product Objective
 
-## Planning And Memory
+The Owner goal is:
 
-Plan-with-files is still required, but it is now program-scoped.
+```text
+Owner selects a StrategyGroup.
+The server admits it into an observable bounded runtime.
+The watcher monitors market conditions.
+Fresh in-boundary signals can advance through RequiredFacts, candidate evidence,
+FinalGate, and the official Operation Layer.
+The Owner is notified about material state, blockers, execution, reconciliation,
+settlement, and review outcomes.
+```
 
-For Live-safe v1, write planning state to:
+The system is not an institutional quant platform, a raw packet browser, or a
+manual evidence-interpretation workflow.
 
-- `docs/ops/project-roadmap-v2.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-findings.md`
-- `docs/ops/live-safe-v1-progress.md`
+## Standing Authorization
 
-Use Memory MCP only for durable knowledge:
+During the development-stage pilot, do not create new chat-confirmation
+blockers for:
 
-- Accepted collaboration rules.
-- Long-lived architecture constraints.
-- Accepted ADR summaries.
-- Program-level safety decisions.
-- Lessons that should apply beyond the current session.
+- focused `codex/*` branches;
+- bounded local commits;
+- Tokyo deploy apply inside the active stage;
+- read-only Tokyo/live fact validation;
+- watcher observation after StrategyGroup selection;
+- StrategyGroup runtime bootstrap / attach through official API surfaces;
+- fresh signal readiness checks;
+- non-executing prepare records;
+- shadow candidate, runtime grant, or authorization evidence inside boundary;
+- official in-boundary real order action after action-time FinalGate and
+  Operation Layer pass;
+- post-submit finalize, reconciliation, budget settlement, and review capture;
+- server historical report archival or compression.
 
-Do not use Memory MCP for daily progress logs.
+This does not authorize:
 
-Do not recreate the old global `docs/planning/*` workflow unless the user explicitly asks for it.
+- FinalGate bypass;
+- Operation Layer bypass;
+- withdrawal or transfer actions;
+- credential or secret mutation;
+- live profile expansion;
+- order-sizing default expansion;
+- stale-fact execution;
+- missing protection;
+- duplicate-submit risk;
+- conflicting active position or open-order execution;
+- destructive data migration or irreversible production cleanup.
 
-Treat `docs/ops/project-roadmap-v2.md` as the high-level scope authority. Only current active tracks should produce direct implementation tasks by default.
+## Gate Behavior
 
-## Red Lines
+Every blocker must classify itself as one of:
 
-1. New meaningful requirements need exploration and architecture options when
-   appropriate. Do not treat already accepted pilot scope, deploy apply inside
-   the active stage, bounded cleanup, watcher operation, or official
-   in-boundary runtime actions as new requirements that need fresh chat
-   confirmation.
-2. Task decomposition must identify dependencies and possible parallel work, but execution-chain core files must not be modified concurrently by multiple agents.
-3. Long or expensive tests require user confirmation before running.
-4. P0 Live-safe work must not optimize strategy returns or tune ETH Pinbar parameters.
-5. Live runtime profile, live trading config, exchange credentials, and
-   real-funds order-sizing default expansions require explicit user approval
-   and a separate task. Applying an already scoped pilot deployment, collecting
-   live read-only facts, or executing an official in-boundary action after
-   action-time gates pass is not a default chat-confirmation blocker.
-6. Claude may implement only from a task card with `Allowed files`, `Forbidden files`, `Requirements`, `Tests`, and `Done When`.
-7. Do not hard-code fixed return or drawdown targets into system constraints, task cards, runtime rules, or agent instructions.
-8. Claude subtasks must stay small: one primary outcome, small file surface, low architecture coupling, and clear acceptance.
-9. Real live trading / real-funds order placement is allowed by default only
-   through the official auditable runtime / Operation Layer path when current
-   runtime, account, position, protection, idempotency, deployment, gateway,
-   FinalGate, and scoped action evidence validate. Any unauditable exchange
-   write, Operation Layer bypass, boundary expansion, missing protection,
-   stale facts, duplicate-submit risk, or withdrawal/transfer request remains a
-   hard stop.
-10. Blocker handling must be progress-first: live/real-funds blockers that are
-    caused by missing or stale evidence should be inspected and repaired where
-    bounded; blockers indicating unauditable or uncontrolled execution stop.
-    testnet/dev/profile-scoped blockers should be inspected, safely repaired,
-    reset, or cleaned up where bounded, then work should continue; unknown
-    unsafe blockers stop only after investigation cannot establish safety.
+| Class | Meaning |
+| --- | --- |
+| `waiting_for_market` | No fresh signal exists |
+| `missing_fact` | Required fact or evidence is absent or stale |
+| `deployment_issue` | Tokyo or local deployment is behind current code |
+| `active_position_resolution` | Position, open order, or protection state needs resolution |
+| `hard_safety_stop` | Execution would violate the safety boundary |
+| `review_only_warning` | Strategy evidence is weak but not a live-safety blocker |
+
+Gates protect bounded real-funds safety. They must not become opaque all-AND
+project blockers.
+
+## StrategyGroup Runtime Path
+
+Current target chain:
+
+```text
+StrategyGroup selection
+-> runtime admission
+-> armed observation
+-> fresh strategy signal
+-> RequiredFacts readiness
+-> non-executing prepare records
+-> shadow candidate / runtime grant / authorization evidence
+-> action-time FinalGate
+-> official Operation Layer gateway action
+-> post-submit finalize / reconciliation / budget settlement
+-> notification and review
+```
+
+## Owner Interface
+
+The normal Owner-facing states are:
+
+```text
+observing
+signal_ready
+blocked
+candidate_ready
+finalgate_ready
+submitted
+reconciling
+settled
+review
+```
+
+Evidence packets are audit artifacts. Do not ask the Owner to read raw watcher
+packets, manually judge signal freshness, manually assemble RequiredFacts, or
+hand-approve every in-boundary candidate after a bounded runtime is selected.
+
+## Strategy Research Boundary
+
+Strategy research artifacts belong in:
+
+```text
+/Users/jiangwei/Documents/final-strategy-research
+```
+
+Main control accepts only StrategyGroup handoff packs, runtime admission facts,
+RequiredFacts definitions, risk defaults, hard stops, sample packets, and review
+outcomes.
+
+## Codex / Claude Workflow
+
+Codex owns requirements analysis, planning, architecture options, core
+decisions, core implementation, code review, and merge readiness decisions.
+
+Claude Code owns bounded implementation and tests from Codex-issued task cards.
+Claude must not redefine scope, architecture, priorities, runtime profiles, or
+strategy parameters.
+
+Claude tasks must include:
+
+```text
+Task ID
+Goal
+Why
+Allowed files
+Forbidden files
+Requirements
+Tests
+Done When
+Hard Stop
+```
 
 ## Core Files
 
 Only Codex should modify these by default:
 
-- `src/application/execution_orchestrator.py`
-- `src/application/order_lifecycle_service.py`
-- `src/application/position_projection_service.py`
-- `src/application/capital_protection.py`
-- `src/infrastructure/exchange_gateway.py`
-- `src/application/reconciliation.py`
-- `src/application/startup_reconciliation_service.py`
+```text
+src/application/execution_orchestrator.py
+src/application/order_lifecycle_service.py
+src/application/position_projection_service.py
+src/application/capital_protection.py
+src/infrastructure/exchange_gateway.py
+src/application/reconciliation.py
+src/application/startup_reconciliation_service.py
+```
 
 Claude can touch a core file only when the task card explicitly allows it.
 
-## Claude Task Card
-
-Use `docs/ops/codex-claude-handoff-template.md` as the reusable handoff template.
-
-Use this format when handing work to Claude:
-
-```markdown
-# Task ID
-LS-xxx
-
-## Goal
-...
-
-## Why
-...
-
-## Allowed files
-- ...
-
-## Forbidden files
-- ...
-
-## Requirements
-1. ...
-
-## Tests
-- ...
-
-## Done When
-- ...
-```
-
-Claude must stop and report if it needs files outside `Allowed files`.
-
-## Claude Return Format
-
-Claude should return:
-
-- Files changed.
-- What changed.
-- Tests run.
-- Tests not run and why.
-- Risks.
-- Hard blockers, if any.
-- Safety proof.
-
-Claude and Codex worker reports should not include "Next recommended task",
-"Recommended next step", or "What should we do next". The project controller
-decides sequencing.
-
-Codex reviews the result before merge decisions.
-
 ## Engineering Constraints
 
-- `domain/` must remain pure business logic and must not import I/O frameworks such as `ccxt`, `aiohttp`, `requests`, `fastapi`, or `yaml`.
+- `domain/` must remain pure business logic and must not import I/O frameworks.
 - Financial calculations must use `decimal.Decimal`, not `float`.
 - Sensitive values must be masked in logs.
-- Core parameters should use named Pydantic models instead of unstructured `Dict[str, Any]`.
-- Polymorphic models should use discriminators where appropriate.
-- Execution, recovery, reconciliation, and circuit-breaker state should prefer the PG mainline unless explicitly documented as transitional.
-
-## Live-safe v1 Non-goals
-
-- No strategy-return optimization.
-- No multi-asset expansion.
-- No unauditable real live trading, real-funds activation, Operation Layer
-  bypass, or boundary expansion. Auditable first-real-submit / runtime exchange
-  actions are allowed by default when current action-time gates pass.
-- Testnet/dev/readiness/controlled rehearsal work is not a live authorization
-  boundary by itself.
-- No architecture rewrite.
-- No live runtime profile changes without a separate explicit Owner
-  authorization decision.
-
-## Testing
-
-Current tests were archived and will be rebuilt from zero.
-
-Old tests live under:
-
-- `archive/2026-04-29-pre-live-safe-replan/tests/`
-
-New tests should be added only when tied to current Live-safe v1 acceptance criteria.
-
-Do not run long suites without user confirmation.
+- Core parameters should use named Pydantic models instead of unstructured
+  dictionaries.
+- Execution, recovery, reconciliation, and circuit-breaker state should prefer
+  the PG mainline unless explicitly documented as transitional.
 
 ## Git Discipline
 
 - `dev` is integration, not a scratch branch.
-- `program/live-safe-v1` is the Live-safe v1 integration branch.
-- Each task should use a focused branch from the program branch.
-- Do not commit or push unless the user asks or the active task explicitly includes it.
-- Never revert user changes unless explicitly asked.
-
-## Branch And Side-Task Discipline
-
-- Long-running goal mode belongs only in the main controller window.
-- Side-task, worker, or parallel-agent branches must use a bounded task card
-  with explicit `Goal`, `Allowed files`, `Forbidden files`, `Done When`, and
-  `Hard Stop` conditions.
-- Side-task branches must stop after their stated task is done and report back;
-  they must not continue the broader runtime-governance goal on their own.
-- Branch names must match the task scope. For example, an `llm-advisory-*`
-  branch must not drift into submit, exchange, `OrderLifecycle`, or other core
-  execution-chain work unless a new Owner-approved task explicitly allows it.
+- `program/live-safe-v1` is the older integration branch name and historical
+  baseline.
+- Current StrategyGroup runtime-governance pilot work proceeds on focused
+  `codex/*` branches.
 - Side-task output is not automatically integrated. The main controller must
-  review, cherry-pick, replay, or merge the work into `program/live-safe-v1`.
-- `dev` receives only reviewed integration snapshots. Deployment branches must
-  be cut from a named, verified commit rather than from an arbitrary side branch.
+  review, cherry-pick, replay, or merge the work.
+- Do not revert user changes unless explicitly asked.

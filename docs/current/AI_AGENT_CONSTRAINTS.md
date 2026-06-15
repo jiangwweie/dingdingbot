@@ -1,15 +1,14 @@
 ---
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
-authority: docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md
+authority: docs/current/AI_AGENT_CONSTRAINTS.md
 last_verified: 2026-06-15
 ---
 
 # AI Agent Constraints
 
 This is the short current entry for agents working on the StrategyGroup runtime
-pilot. If this file conflicts with `docs/canon/STRATEGYGROUP_RUNTIME_PILOT_OVERLAY.md`,
-the canon overlay wins.
+pilot. If this file conflicts with historical archive material, this file wins.
 
 ## Objective
 
@@ -45,7 +44,7 @@ blockers for:
 
 This does not authorize FinalGate bypass, Operation Layer bypass, withdrawals,
 transfers, credential changes, live-profile expansion, order-sizing default
-expansion, stale-fact execution, missing protection, duplicate submit, or
+expansion, stale-fact execution, missing protection, duplicate-submit risk, or
 conflicting active position/open order execution.
 
 ## StrategyGroup Runtime Bootstrap
@@ -81,5 +80,16 @@ all-AND project blockers.
 ## Watch Branch Intake
 
 Useful P0 content from `codex/runtime-signal-watcher-feishu` is carried
-selectively. The broad docs reset and historical compression from that branch
-remain a separate docs-governance integration item.
+selectively. The broad docs reset has been completed on this branch through the
+2026-06-15 docs-governance compression.
+
+## Historical Docs
+
+Historical docs are compressed into:
+
+```text
+docs/history-archive-2026-06-15-pre-governance.tar.gz
+```
+
+They are recovery material only. They must not be used as current product truth
+or as a source of new chat-confirmation blockers.
