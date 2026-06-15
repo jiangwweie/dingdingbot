@@ -56,7 +56,7 @@ def test_deploy_plan_requires_artifact_and_manifest():
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
+            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
         ),
     )
 
@@ -106,8 +106,12 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
             "brc-runtime-governance-ae9b209e-20260610T061250Z"
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
+        expected_remote_migration_count=84,
+        expected_remote_latest_migration=(
+            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+        ),
         expected_latest_migration=(
-            "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
+            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
         ),
     )
 
@@ -150,17 +154,18 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
     assert "systemctl start brc-owner-console-backend.service" in all_commands
     assert "--expected-current-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
-    assert "--expected-migration-count 64" in all_commands
+    assert "--deployed-head ae9b209e33cd287273491f2e93dfdff3b6a814fd" in all_commands
+    assert "--expected-min-migrations 84" in all_commands
+    assert "--expected-migration-count 84" in all_commands
     assert (
         "--expected-latest-migration "
-        "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
     ) in all_commands
     assert "HEALTH_URL=http://127.0.0.1:18080/api/health" in all_commands
     assert "for attempt in $(seq 1 30)" in all_commands
     assert 'curl -fsS "$HEALTH_URL"' in all_commands
-    assert "--base-revision 064 --head-revision 070" in all_commands
-    assert "--expected-revision-count 6" in all_commands
-    assert "--expected-migration-count 70" in all_commands
+    assert "--base-revision 084 --head-revision 084" in all_commands
+    assert "--expected-revision-count 0" in all_commands
     assert "verify_strategy_observation_shadow_planning_rehearsal.py --json" in all_commands
     assert "verify_runtime_submit_rehearsal_pre_live_packet.py --json" in all_commands
     assert "--skip-current-head-deployed-check" in all_commands
@@ -203,7 +208,7 @@ def test_deploy_plan_blocks_manifest_head_mismatch(tmp_path: Path):
         ),
         expected_deployed_head="ae9b209e33cd287273491f2e93dfdff3b6a814fd",
         expected_latest_migration=(
-            "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
+            "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
         ),
     )
 

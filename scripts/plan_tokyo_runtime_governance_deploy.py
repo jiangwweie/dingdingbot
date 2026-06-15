@@ -123,10 +123,25 @@ def build_deploy_plan(
     head = _git(repo_root, "rev-parse", "HEAD").stdout
     short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD").stdout
     tracked_dirty = _tracked_dirty(repo_root)
+    target_migration_count = _local_migration_count(repo_root)
+    local_latest_migration = _local_latest_migration(repo_root)
+    remote_migration_revision = _migration_revision(expected_remote_latest_migration)
+    target_migration_revision = _migration_revision(expected_latest_migration)
+    migration_gap_revision_count = (
+        target_migration_count - expected_remote_migration_count
+    )
     blockers: list[str] = []
     warnings: list[str] = []
     if tracked_dirty:
         blockers.append("tracked_worktree_dirty")
+    if local_latest_migration != expected_latest_migration:
+        blockers.append("expected_latest_migration_not_local_latest")
+    if remote_migration_revision is None:
+        blockers.append("expected_remote_latest_migration_revision_unparseable")
+    if target_migration_revision is None:
+        blockers.append("expected_latest_migration_revision_unparseable")
+    if migration_gap_revision_count < 0:
+        blockers.append("expected_remote_migration_count_ahead_of_target")
 
     manifest: dict[str, Any] | None = None
     if archive_path is None:
@@ -190,6 +205,10 @@ def build_deploy_plan(
         expected_remote_latest_migration=expected_remote_latest_migration,
         head=head,
         expected_latest_migration=expected_latest_migration,
+        target_migration_count=target_migration_count,
+        remote_migration_revision=remote_migration_revision,
+        target_migration_revision=target_migration_revision,
+        migration_gap_revision_count=migration_gap_revision_count,
     )
 
     return {
@@ -216,6 +235,10 @@ def build_deploy_plan(
             "expected_remote_migration_count": expected_remote_migration_count,
             "expected_remote_latest_migration": expected_remote_latest_migration,
             "expected_latest_migration": expected_latest_migration,
+            "target_migration_count": target_migration_count,
+            "remote_migration_revision": remote_migration_revision,
+            "target_migration_revision": target_migration_revision,
+            "migration_gap_revision_count": migration_gap_revision_count,
         },
         "release": {
             "head": head,
@@ -285,6 +308,10 @@ def _plan_phases(
     expected_remote_latest_migration: str,
     head: str,
     expected_latest_migration: str,
+    target_migration_count: int,
+    remote_migration_revision: str | None,
+    target_migration_revision: str | None,
+    migration_gap_revision_count: int,
 ) -> list[dict[str, Any]]:
     q = shlex.quote
     local_python = "/opt/homebrew/bin/python3"
@@ -302,6 +329,9 @@ def _plan_phases(
         "done; "
         'curl -fsS "$HEALTH_URL"'
     )
+    base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
+    head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
+    expected_gap_count = max(migration_gap_revision_count, 0)
 
     return [
         {
@@ -309,11 +339,15 @@ def _plan_phases(
             "remote_mutation": False,
             "commands": [
                 f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/prepare_tokyo_runtime_governance_release.py --json",
+                "scripts/prepare_tokyo_runtime_governance_release.py --json "
+                f"--deployed-head {q(expected_deployed_head)} "
+                f"--expected-min-migrations {target_migration_count} "
+                f"--expected-latest-migration {q(expected_latest_migration)}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
-                "--base-revision 064 --head-revision 070 "
-                "--expected-revision-count 6",
+                f"--base-revision {q(base_revision)} "
+                f"--head-revision {q(head_revision)} "
+                f"--expected-revision-count {expected_gap_count}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
                 f"cd {q(str(repo_root))} && {local_python} "
@@ -617,6 +651,25 @@ def _tracked_dirty(repo_root: Path) -> bool:
         if line and not line.startswith("?? "):
             return True
     return False
+
+
+def _local_migration_files(repo_root: Path) -> list[Path]:
+    return sorted((repo_root / "migrations" / "versions").glob("*.py"))
+
+
+def _local_migration_count(repo_root: Path) -> int:
+    return len(_local_migration_files(repo_root))
+
+
+def _local_latest_migration(repo_root: Path) -> str | None:
+    files = _local_migration_files(repo_root)
+    return files[-1].name if files else None
+
+
+def _migration_revision(filename: str) -> str | None:
+    prefix = Path(str(filename)).name.split("_", 1)[0]
+    revision = prefix.rsplit("-", 1)[-1]
+    return revision if revision.isdigit() else None
 
 
 def _run(command: tuple[str, ...], *, cwd: Path) -> CommandResult:
