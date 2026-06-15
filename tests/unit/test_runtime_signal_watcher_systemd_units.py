@@ -23,6 +23,8 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     text = SERVICE_PATH.read_text(encoding="utf-8")
 
     assert "--allow-prepare-records" in text
+    for strategy_family_id in ("MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"):
+        assert f"--strategy-family-id {strategy_family_id}" in text
     assert "--runtime-instance-id" not in text
 
 

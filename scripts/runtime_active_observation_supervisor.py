@@ -84,6 +84,8 @@ def _loop_command(
         command.extend(["--env-file", args.env_file])
     for runtime_instance_id in args.runtime_instance_id or []:
         command.extend(["--runtime-instance-id", runtime_instance_id])
+    for strategy_family_id in args.strategy_family_id or []:
+        command.extend(["--strategy-family-id", strategy_family_id])
     if args.allow_prepare_records:
         command.append("--allow-prepare-records")
     if args.include_packets:
@@ -369,6 +371,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Limit the active observation loop to the given ACTIVE runtime "
             "instance. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--strategy-family-id",
+        action="append",
+        default=[],
+        help=(
+            "Limit the active observation loop to ACTIVE runtimes belonging "
+            "to this strategy family. May be repeated."
         ),
     )
     parser.add_argument("--max-iterations", type=int, default=1)

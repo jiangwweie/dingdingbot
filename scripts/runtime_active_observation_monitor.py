@@ -72,6 +72,7 @@ def _selected_active_runtimes(
     active: list[dict[str, Any]],
     *,
     runtime_instance_ids: list[str] | None,
+    strategy_family_ids: list[str] | None,
     max_runtimes: int,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     requested = [
@@ -79,6 +80,18 @@ def _selected_active_runtimes(
         for item in (runtime_instance_ids or [])
         if str(item or "").strip()
     ]
+    requested_families = {
+        str(item).strip()
+        for item in (strategy_family_ids or [])
+        if str(item or "").strip()
+    }
+    if requested_families:
+        active = [
+            runtime
+            for runtime in active
+            if str(_runtime_value(runtime, "strategy_family_id", "family") or "")
+            in requested_families
+        ]
     if not requested:
         return active[: max(max_runtimes, 0)], []
 
@@ -347,9 +360,13 @@ def _build_packet(
     requested_runtime_instance_ids = list(
         getattr(args, "runtime_instance_id", None) or []
     )
+    requested_strategy_family_ids = list(
+        getattr(args, "strategy_family_id", None) or []
+    )
     selected, missing_runtime_instance_ids = _selected_active_runtimes(
         active,
         runtime_instance_ids=requested_runtime_instance_ids,
+        strategy_family_ids=requested_strategy_family_ids,
         max_runtimes=int(args.max_runtimes or 100),
     )
 
@@ -386,6 +403,7 @@ def _build_packet(
         "active_runtime_count": len(active),
         "monitored_runtime_count": len(selected),
         "requested_runtime_instance_ids": requested_runtime_instance_ids,
+        "requested_strategy_family_ids": requested_strategy_family_ids,
         "selected_runtime_instance_ids": [
             str(_runtime_value(runtime, "runtime_instance_id", "runtime_id") or "")
             for runtime in selected
@@ -447,6 +465,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Limit monitoring to the given ACTIVE runtime instance. "
             "May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--strategy-family-id",
+        action="append",
+        default=[],
+        help=(
+            "Limit monitoring to ACTIVE runtimes belonging to this strategy "
+            "family. May be repeated."
         ),
     )
     parser.add_argument("--max-runtimes", type=int, default=100)

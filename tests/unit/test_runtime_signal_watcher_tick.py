@@ -16,6 +16,7 @@ def _args(tmp_path: Path, **overrides):
         "source": "sample",
         "strategy_source": "sample",
         "runtime_instance_id": [],
+        "strategy_family_id": [],
         "max_iterations": 1,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 0.0,

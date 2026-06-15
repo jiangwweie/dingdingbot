@@ -20,6 +20,11 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --cycle-timeout-seconds 180 \
   --status-stale-after-seconds 900 \
   --allow-prepare-records \
+  --strategy-family-id MPG-001 \
+  --strategy-family-id TEQ-001 \
+  --strategy-family-id FBS-001 \
+  --strategy-family-id PMR-001 \
+  --strategy-family-id SOR-001 \
   --label tokyo-runtime-signal-watcher
 ExecStartPost=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/build_runtime_signal_watcher_readiness_pack.py \
   --report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \

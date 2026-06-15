@@ -63,9 +63,13 @@ Post-bootstrap watcher verification found a real operational blocker:
 The repo-level fix is to make the runtime signal watcher systemd unit include
 `--allow-prepare-records` without any `--runtime-instance-id` pin, and to make
 the Tokyo deploy plan install the watcher service/timer while removing the stale
-`30-strategygroup-runtime-pilot-scope.conf` drop-in. This preserves the official
-FinalGate / Operation Layer boundary while preventing stale runtime-id scope from
-blocking StrategyGroup observation.
+`30-strategygroup-runtime-pilot-scope.conf` drop-in. The follow-up scope
+correction adds an explicit StrategyGroup family allowlist for `MPG-001`,
+`TEQ-001`, `FBS-001`, `PMR-001`, and `SOR-001` so historical ACTIVE runtimes do
+not enter the automatic watcher / resume / FinalGate chain merely because they
+still exist in PG. This preserves the official FinalGate / Operation Layer
+boundary while preventing stale runtime-id scope and legacy runtime drift from
+blocking or polluting StrategyGroup observation.
 
 ## Watch Branch Intake
 

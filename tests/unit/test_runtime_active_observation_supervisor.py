@@ -17,6 +17,7 @@ def _args(tmp_path, **overrides):
         "api_base": "http://unit",
         "source": "live_market",
         "runtime_instance_id": [],
+        "strategy_family_id": [],
         "max_iterations": 2,
         "loop_interval_seconds": 0.0,
         "cycle_timeout_seconds": 180.0,
@@ -109,6 +110,44 @@ def test_supervisor_runs_loop_then_followup_without_real_submit_flags(tmp_path):
     assert status_packet["safety_invariants"]["read_packets_only"] is True
     assert status_packet["safety_invariants"]["connects_to_api"] is False
     assert status_packet["safety_invariants"]["places_order"] is False
+
+
+def test_supervisor_passes_strategy_family_filters_to_loop(tmp_path):
+    calls = []
+
+    def runner(command, stdout_path):
+        calls.append(command)
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-packet.json",
+                {
+                    "status": "waiting_for_signal",
+                    "safety_invariants": {},
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-packet.json",
+                {
+                    "status": "waiting_for_ready_final_gate_preflight",
+                    "safety_invariants": {},
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    runtime_active_observation_supervisor.build_supervisor_packet(
+        _args(tmp_path, strategy_family_id=["MPG-001", "TEQ-001"]),
+        runner=runner,
+    )
+
+    assert "--strategy-family-id" in calls[0]
+    assert "MPG-001" in calls[0]
+    assert "TEQ-001" in calls[0]
 
 
 def test_supervisor_writes_running_packet_before_loop_blocks(tmp_path):
