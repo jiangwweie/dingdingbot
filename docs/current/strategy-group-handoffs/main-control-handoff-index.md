@@ -3,6 +3,18 @@
 Status: CURRENT_PILOT_SUPPLEMENT
 Last updated: 2026-06-15
 
+## Research Sync
+
+Current research handoff source:
+
+```text
+branch: codex/strategy-research-20260613-goal
+commit: d62ce55727614fcfdb2d12f8fee1d3c226950048
+status: reviewed_and_synced_to_main_control_baseline
+```
+
+See `docs/current/strategy-group-handoffs/main-control-research-sync.md`.
+
 ## Batch
 
 | StrategyGroup | Role | Default Mode |

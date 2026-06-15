@@ -65,6 +65,28 @@ def test_current_owner_interface_stays_simple():
         assert phrase in text
 
 
+def test_current_strategygroup_handoff_records_research_sync_boundary():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "strategy-group-handoffs"
+        / "main-control-research-sync.md"
+    )
+
+    for phrase in [
+        "d62ce55727614fcfdb2d12f8fee1d3c226950048",
+        "Raw research artifacts",
+        "not integrated",
+        "not a direct runtime expansion",
+        "docs/current/strategy-group-handoffs/",
+        "FinalGate bypass",
+        "Operation Layer bypass",
+        "automatic admission of every broader research symbol",
+    ]:
+        assert phrase in text
+
+
 def test_current_gate_classes_are_documented():
     text = _read(REPO_ROOT / "docs" / "current" / "AI_AGENT_CONSTRAINTS.md")
 
