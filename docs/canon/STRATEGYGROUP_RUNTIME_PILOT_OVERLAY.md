@@ -177,6 +177,7 @@ Current deployed checkpoint:
 | Date | Tokyo release | Deployed head | Runtime watcher state |
 | --- | --- | --- | --- |
 | 2026-06-15 | `brc-runtime-governance-9bdc1894-20260615-watcher-submit-dispatch-dropin` | `9bdc18949da8f14bed05fc4568f76406919724fe` | `brc-runtime-signal-watcher.service` has the strategygroup scope drop-in and the resume dispatcher drop-in with `--execute-preflight` and `--execute-operation-layer-submit`; latest manual tick stayed `waiting_for_market` / `no_action_continue_observation`. Follow-up local work adds `--execute-post-submit-finalize` so a successful official submit can immediately call the official post-submit finalize packet API. |
+| 2026-06-15 | `brc-runtime-governance-c2463125-20260615-post-submit-finalize` | `c2463125a72630d361be489116c0d7e68b285e34` | Tokyo deploy apply succeeded under standing authorization. `brc-owner-console-backend.service` is active, `brc-runtime-signal-watcher.timer` is enabled / active, the resume dispatcher drop-in now includes `--execute-preflight`, `--execute-operation-layer-submit`, and `--execute-post-submit-finalize`; latest packet state remains `waiting_for_market` / `no_action_continue_observation`. |
 
 ---
 
