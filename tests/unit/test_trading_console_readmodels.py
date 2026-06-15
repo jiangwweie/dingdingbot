@@ -5606,11 +5606,18 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
 
     assert payload["read_model"] == "strategy_group_live_facts_readiness"
     assert payload["live_ready"] is False
-    assert payload["data"]["status"] == "strategy_group_observe_ready_armed_blocked"
+    assert payload["data"]["status"] == (
+        "strategy_group_observe_ready_candidate_prerequisites_pending"
+    )
     assert payload["data"]["counts"]["observe_ready"] == 1
     assert payload["data"]["counts"]["armed_candidate_prepare_ready"] == 0
     assert payload["data"]["operator_path"]["can_continue_observation"] is True
     assert payload["data"]["operator_path"]["can_prepare_fresh_candidate"] is False
+    assert payload["blockers"] == []
+    assert payload["warnings"][0]["code"] == (
+        "strategy_group_candidate_prerequisites_pending"
+    )
+    assert "MPG-001:account:missing" in payload["data"]["candidate_prepare_blockers"]
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 

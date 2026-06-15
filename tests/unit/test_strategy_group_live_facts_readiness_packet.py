@@ -46,7 +46,9 @@ def test_live_facts_readiness_allows_observation_when_candidate_facts_missing():
         generated_at_ms=1,
     )
 
-    assert packet["status"] == "strategy_group_observe_ready_armed_blocked"
+    assert packet["status"] == (
+        "strategy_group_observe_ready_candidate_prerequisites_pending"
+    )
     assert packet["counts"]["observe_ready"] == 2
     assert packet["counts"]["armed_candidate_prepare_ready"] == 0
     assert packet["operator_path"]["can_continue_observation"] is True
@@ -64,6 +66,8 @@ def test_live_facts_readiness_allows_observation_when_candidate_facts_missing():
     )
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["creates_candidate"] is False
+    assert packet["blockers"] == []
+    assert "MPG-001:account:missing" in packet["candidate_prepare_blockers"]
     mpg = next(item for item in packet["readiness"] if item["strategy_group_id"] == "MPG-001")
     assert mpg["observe_ready"] is True
     assert "account:missing" in mpg["blockers"]
@@ -94,6 +98,7 @@ def test_live_facts_readiness_marks_armed_ready_when_required_live_facts_pass():
     assert packet["owner_state"]["status"] == "armed_observation_ready"
     assert packet["owner_state"]["blocked_at"] == "none"
     assert packet["blockers"] == []
+    assert packet["candidate_prepare_blockers"] == []
 
 
 def test_live_facts_readiness_blocks_observation_when_exchange_rules_missing():

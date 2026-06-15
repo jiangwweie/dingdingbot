@@ -1908,16 +1908,27 @@ class TradingConsoleReadModelService:
         blockers = [
             {
                 "code": "strategy_group_live_facts_blocked",
-                "message": "StrategyGroup live facts are not ready for armed candidate preparation.",
+                "message": "StrategyGroup live facts are not ready for observation.",
                 "affected_area": ",".join(list(packet.get("blockers") or [])[:8]),
             }
         ] if packet.get("blockers") else []
+        warnings = [
+            {
+                "code": "strategy_group_candidate_prerequisites_pending",
+                "severity": "info",
+                "message": (
+                    "StrategyGroup observation can continue; candidate preparation "
+                    "is waiting for budget, protection, or next-attempt facts."
+                ),
+                "count": len(packet.get("candidate_prepare_blockers") or []),
+            }
+        ] if packet.get("candidate_prepare_blockers") else []
         freshness_status = "fresh" if not blockers else "warning"
         return TradingConsoleReadModelResponse(
             read_model="strategy_group_live_facts_readiness",
             generated_at_ms=generated_at_ms,
             freshness_status=freshness_status,
-            warnings=[],
+            warnings=warnings,
             blockers=blockers,
             unavailable=[],
             data=packet,
