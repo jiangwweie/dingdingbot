@@ -59,6 +59,7 @@ export default function PilotControlBoard() {
   const data = envelope?.data || {};
   const selection = data.pilot_selection || {};
   const ownerState = data.owner_state || {};
+  const ownerActionCard = data.owner_action_card || {};
   const board = data.control_board || {};
   const strategyRow = board.strategy_group_row || {};
   const runtimeRow = board.runtime_row || {};
@@ -127,6 +128,23 @@ export default function PilotControlBoard() {
             value={boolClean((data.safety_invariants || {}).places_order === false)}
             tone={(data.safety_invariants || {}).places_order === false ? 'normal' : 'blocked'}
             icon={<ShieldCheck className="h-4 w-4" />}
+          />
+        </div>
+      </ConsolePanel>
+
+      <ConsolePanel title="Current Action" caption={displayValue(ownerActionCard.current_state || data.status)}>
+        <div className="divide-y divide-slate-800/90">
+          <EntityRow
+            title={displayValue(ownerActionCard.headline, statusLabel(data.status))}
+            subtitle={displayValue(ownerActionCard.blocked_reason)}
+            tone={statusTone}
+            active
+            cells={[
+              { label: 'blocked_at', value: displayValue(ownerActionCard.blocked_at) },
+              { label: 'recover', value: displayValue(ownerActionCard.next_recover_condition) },
+              { label: 'auto action', value: displayValue(ownerActionCard.automatic_recovery_action) },
+              { label: 'owner', value: displayValue(ownerActionCard.owner_next_action) },
+            ]}
           />
         </div>
       </ConsolePanel>
@@ -272,18 +290,19 @@ export default function PilotControlBoard() {
         <ConsolePanel title="Gate Failure Ledger" caption="owner-readable first blocking layer">
           <div className="divide-y divide-slate-800/90">
             {gateLedger.map((item, index) => (
-              <EntityRow
-                key={`${item.gate}-${index}`}
-                title={displayValue(item.gate)}
-                subtitle={displayValue(item.blocked_reason)}
-                tone={toneForStatus(item.status)}
-                cells={[
-                  { label: 'status', value: displayValue(item.status) },
-                  { label: 'class', value: displayValue(item.blocker_class) },
-                  { label: 'recover', value: displayValue(item.next_recover_condition) },
-                  { label: 'downgrade', value: displayValue(item.downgrade_mode) },
-                ]}
-              />
+              <div key={`${item.gate}-${index}`}>
+                <EntityRow
+                  title={displayValue(item.gate)}
+                  subtitle={displayValue(item.blocked_reason)}
+                  tone={toneForStatus(item.status)}
+                  cells={[
+                    { label: 'status', value: displayValue(item.status) },
+                    { label: 'class', value: displayValue(item.blocker_class) },
+                    { label: 'recover', value: displayValue(item.next_recover_condition) },
+                    { label: 'downgrade', value: displayValue(item.downgrade_mode) },
+                  ]}
+                />
+              </div>
             ))}
           </div>
         </ConsolePanel>

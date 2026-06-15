@@ -5725,10 +5725,26 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     assert payload["data"]["pilot_selection"]["selected_universe"] == ["BTCUSDT", "ETHUSDT"]
     assert payload["data"]["owner_state"]["blocked_at"] == "watcher_signal"
     assert payload["data"]["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
+    assert payload["data"]["owner_action_card"]["headline"] == (
+        "Watcher is active; waiting for a fresh strategy signal."
+    )
+    assert payload["data"]["owner_action_card"]["blocked_at"] == "watcher_signal"
+    assert payload["data"]["owner_action_card"]["blocked_reason"] == (
+        "no_fresh_strategy_signal"
+    )
+    assert payload["data"]["owner_action_card"]["owner_next_action"] == (
+        "none_wait_for_signal_notification"
+    )
+    assert payload["data"]["owner_action_card"]["no_packet_read_required"] is True
     assert payload["data"]["why_not_executable"] == [
         "no_fresh_strategy_signal",
         "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal",
     ]
+    readiness_by_gate = {
+        item["gate"]: item for item in payload["data"]["readiness_chain"]
+    }
+    assert readiness_by_gate["FinalGate"]["class"] == "not_reached"
+    assert readiness_by_gate["Operation Layer"]["class"] == "not_reached"
     assert payload["data"]["control_board"]["strategy_group_row"]["next_action"] == (
         "continue_watcher_observation"
     )

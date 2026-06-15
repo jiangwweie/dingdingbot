@@ -1062,6 +1062,69 @@ def _action_time_resume_state(
     }
 
 
+def _owner_action_card(
+    *,
+    owner_state: dict[str, Any],
+    action_time_resume: dict[str, Any],
+    post_signal_auto_resume: dict[str, Any],
+) -> dict[str, Any]:
+    status = str(owner_state.get("status") or "unknown")
+    blocked_reason = str(owner_state.get("blocked_reason") or "none")
+    blocked_at = str(owner_state.get("blocked_at") or "unknown")
+    auto_action = str(
+        owner_state.get("automatic_recovery_action") or "review_current_state"
+    )
+    if status == "waiting_for_market":
+        headline = "Watcher is active; waiting for a fresh strategy signal."
+        owner_next_action = "none_wait_for_signal_notification"
+    elif status == "ready_for_non_executing_prepare":
+        headline = "Fresh signal is ready; system can prepare non-executing evidence."
+        owner_next_action = "none_system_prepares_candidate_evidence"
+    elif status == "ready_for_action_time_final_gate":
+        headline = "Fresh authorization evidence is ready for action-time FinalGate."
+        owner_next_action = "none_system_runs_official_finalgate"
+    elif str(owner_state.get("blocker_class")) == "hard_safety_stop":
+        headline = "Hard safety stop; automatic execution is halted."
+        owner_next_action = "review_hard_safety_stop"
+    elif str(owner_state.get("blocker_class")) == "active_position_resolution":
+        headline = "Existing position or open-order state must be resolved first."
+        owner_next_action = "review_position_resolution"
+    else:
+        headline = "Pilot cannot advance yet; recovery condition is explicit."
+        owner_next_action = "none_system_attempts_recovery_if_bounded"
+
+    return {
+        "headline": headline,
+        "current_state": status,
+        "blocked_at": blocked_at,
+        "blocked_reason": blocked_reason,
+        "next_recover_condition": str(
+            owner_state.get("next_recover_condition") or "unknown"
+        ),
+        "automatic_recovery_action": auto_action,
+        "downgrade_mode": str(owner_state.get("downgrade_mode") or "unknown"),
+        "owner_next_action": owner_next_action,
+        "can_continue_without_owner_chat": bool(
+            owner_state.get("can_continue_without_owner_chat")
+            or post_signal_auto_resume.get("can_continue_without_owner_chat")
+        ),
+        "requires_action_time_final_gate": bool(
+            owner_state.get("requires_action_time_final_gate")
+            or action_time_resume.get("requires_action_time_final_gate")
+            or post_signal_auto_resume.get("requires_action_time_final_gate")
+        ),
+        "requires_official_operation_layer": bool(
+            owner_state.get("requires_official_operation_layer")
+            or action_time_resume.get("requires_official_operation_layer")
+            or post_signal_auto_resume.get("requires_official_operation_layer")
+        ),
+        "no_packet_read_required": True,
+        "why_not_executable": []
+        if blocked_reason == "none"
+        else [blocked_reason],
+    }
+
+
 def build_packet(
     *,
     intake_packet: dict[str, Any],
@@ -1346,16 +1409,24 @@ def build_packet(
                 "class": (
                     "none"
                     if owner_state["status"] == "ready_for_action_time_final_gate"
-                    else "hard_safety_stop"
+                    else "not_reached"
                 ),
             },
             {
                 "gate": "Operation Layer",
                 "status": "not_reached",
-                "class": "hard_safety_stop",
+                "class": "not_reached",
             },
         ],
         "why_not_executable": why_not_executable,
+        "owner_action_card": {
+            **_owner_action_card(
+                owner_state=owner_state,
+                action_time_resume=action_time_resume,
+                post_signal_auto_resume=watcher["post_signal_auto_resume"],
+            ),
+            "why_not_executable": why_not_executable,
+        },
         "next_safe_checkpoint": owner_state["automatic_recovery_action"],
         "watcher": watcher,
         "source_anchor": {

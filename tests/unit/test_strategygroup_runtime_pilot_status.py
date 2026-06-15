@@ -268,6 +268,26 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
     assert packet["owner_state"]["automatic_recovery_action"] == (
         "continue_watcher_observation"
     )
+    assert packet["owner_action_card"] == {
+        "headline": "Watcher is active; waiting for a fresh strategy signal.",
+        "current_state": "waiting_for_market",
+        "blocked_at": "watcher_signal",
+        "blocked_reason": "no_fresh_strategy_signal",
+        "next_recover_condition": (
+            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+        ),
+        "automatic_recovery_action": "continue_watcher_observation",
+        "downgrade_mode": "observe_only",
+        "owner_next_action": "none_wait_for_signal_notification",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "no_packet_read_required": True,
+        "why_not_executable": [
+            "no_fresh_strategy_signal",
+            "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal",
+        ],
+    }
     assert packet["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
     assert packet["action_time_resume"]["status"] == "waiting_for_market"
     assert packet["action_time_resume"]["next_step"] == "continue_watcher_observation"
@@ -308,6 +328,9 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
         "budget:missing",
         "next_attempt_gate:missing",
     ]
+    readiness_by_gate = {item["gate"]: item for item in packet["readiness_chain"]}
+    assert readiness_by_gate["FinalGate"]["class"] == "not_reached"
+    assert readiness_by_gate["Operation Layer"]["class"] == "not_reached"
     assert (
         "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal"
         in packet["why_not_executable"]
@@ -360,6 +383,12 @@ def test_pilot_status_promotes_prepared_evidence_to_candidate_row_and_final_gate
     assert packet["owner_state"]["blocked_at"] == "FinalGate"
     assert packet["owner_state"]["automatic_recovery_action"] == (
         "run_official_action_time_final_gate_preflight"
+    )
+    assert packet["owner_action_card"]["current_state"] == (
+        "ready_for_action_time_final_gate"
+    )
+    assert packet["owner_action_card"]["owner_next_action"] == (
+        "none_system_runs_official_finalgate"
     )
     assert packet["candidate_evidence"] == {
         "signal_input_json": "/reports/runtime-mpg/signal-input.json",
