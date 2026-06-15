@@ -147,6 +147,7 @@ def _operation_layer_ready_report() -> dict:
         for key in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
     }
     ids["authorization_id"] = "auth-ready-1"
+    ids["attempt_reservation_id"] = "runtime-attempt-reservation-auth-ready-1"
     return {
         "ids": ids,
         "blockers": [],
@@ -626,6 +627,168 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
     assert query["owner_confirmed_for_first_real_submit_action"] == ["true"]
     for name in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
         assert query[name] == [f"{name}-value"]
+
+
+def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        if "post-submit-finalize-packets" in kwargs["url"]:
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "finalized_ready_for_next_attempt",
+                    "authorization_id": "auth-ready-1",
+                    "runtime_instance_id": "runtime-mpg-1",
+                    "exchange_submit_execution_result_id": "submit-result-1",
+                    "submit_outcome_review_id": "review-1",
+                    "post_submit_budget_settlement_id": "settlement-1",
+                    "blockers": [],
+                    "warnings": ["reservation_id_resolved_from_attempt_reservation"],
+                    "next_attempt_gate": {
+                        "status": "ready_for_fresh_signal",
+                        "blockers": [],
+                    },
+                    "exchange_called": False,
+                    "exchange_order_submitted": False,
+                    "order_lifecycle_called": False,
+                    "owner_bounded_execution_called": False,
+                    "withdrawal_or_transfer_created": False,
+                    "position_closed": False,
+                    "order_cancelled": False,
+                    "order_created": False,
+                },
+            }
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_orders_submitted",
+                "authorization_id": "auth-ready-1",
+                "runtime_instance_id": "runtime-mpg-1",
+                "execution_mode": "real_gateway_action",
+                "blockers": [],
+                "warnings": [],
+                "exchange_called": True,
+                "exchange_order_submitted": True,
+                "order_lifecycle_submit_called": True,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+                "submitted_exchange_order_ids": ["ex-entry-1", "ex-stop-1"],
+                "entry_exchange_order_id": "ex-entry-1",
+                "protection_exchange_order_ids": ["ex-stop-1"],
+            },
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+        execute_post_submit_finalize=True,
+    )
+
+    assert packet["status"] == "settled"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_status"] == (
+        "post_submit_finalize_completed_next_attempt_ready"
+    )
+    assert packet["dispatch_action"] == "continue_watcher_observation"
+    assert packet["owner_state"]["status"] == "settled"
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "continue_watcher_observation"
+    )
+    assert packet["post_submit_finalize_result"]["called"] is True
+    assert packet["post_submit_finalize_result"]["authorization_id"] == "auth-ready-1"
+    assert packet["post_submit_finalize_result"]["runtime_instance_id"] == (
+        "runtime-mpg-1"
+    )
+    assert packet["post_submit_finalize_result"]["reservation_id"] == (
+        "runtime-attempt-reservation-auth-ready-1"
+    )
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert packet["safety_invariants"]["official_post_submit_finalize_called"] is True
+    assert packet["safety_invariants"]["post_submit_budget_settlement_called"] is True
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is True
+    assert packet["safety_invariants"]["places_order"] is True
+    assert packet["safety_invariants"]["exchange_write_called"] is True
+    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert len(calls) == 2
+    submit_call, finalize_call = calls
+    assert submit_call["method"] == "POST"
+    assert finalize_call["method"] == "POST"
+    assert finalize_call["url"].endswith(
+        "/api/trading-console/strategy-runtimes/runtime-mpg-1/"
+        "post-submit-finalize-packets"
+    )
+    assert finalize_call["body"]["authorization_id"] == "auth-ready-1"
+    assert finalize_call["body"]["reservation_id"] == (
+        "runtime-attempt-reservation-auth-ready-1"
+    )
+    assert finalize_call["body"]["non_executing"] is True
+
+
+def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_orders_submitted",
+                "authorization_id": "auth-ready-1",
+                "runtime_instance_id": "other-runtime",
+                "execution_mode": "real_gateway_action",
+                "blockers": [],
+                "exchange_called": True,
+                "exchange_order_submitted": True,
+                "order_lifecycle_submit_called": True,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+        execute_post_submit_finalize=True,
+    )
+
+    assert packet["status"] == "post_submit_finalize_blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == "blocked_before_post_submit_finalize"
+    assert any(
+        blocker.startswith("post_submit_finalize_runtime_instance_id_mismatch:")
+        for blocker in packet["blockers"]
+    )
+    assert packet["post_submit_finalize_result"]["called"] is False
+    assert packet["safety_invariants"]["official_post_submit_finalize_called"] is False
 
 
 def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(

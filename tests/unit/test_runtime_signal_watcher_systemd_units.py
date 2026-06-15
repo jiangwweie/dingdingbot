@@ -19,6 +19,7 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "runtime_signal_watcher_resume_dispatcher.py" in text
     assert "--execute-preflight" in text
     assert "--execute-operation-layer-submit" in text
+    assert "--execute-post-submit-finalize" in text
     assert "OwnerBoundedExecution" not in text
     assert "withdrawal" not in text
     assert "transfer" not in text

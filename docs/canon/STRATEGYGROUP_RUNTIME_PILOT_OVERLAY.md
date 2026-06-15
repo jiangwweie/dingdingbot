@@ -176,7 +176,7 @@ Current deployed checkpoint:
 
 | Date | Tokyo release | Deployed head | Runtime watcher state |
 | --- | --- | --- | --- |
-| 2026-06-15 | `brc-runtime-governance-9bdc1894-20260615-watcher-submit-dispatch-dropin` | `9bdc18949da8f14bed05fc4568f76406919724fe` | `brc-runtime-signal-watcher.service` has the strategygroup scope drop-in and the resume dispatcher drop-in with `--execute-preflight` and `--execute-operation-layer-submit`; latest manual tick stayed `waiting_for_market` / `no_action_continue_observation`. |
+| 2026-06-15 | `brc-runtime-governance-9bdc1894-20260615-watcher-submit-dispatch-dropin` | `9bdc18949da8f14bed05fc4568f76406919724fe` | `brc-runtime-signal-watcher.service` has the strategygroup scope drop-in and the resume dispatcher drop-in with `--execute-preflight` and `--execute-operation-layer-submit`; latest manual tick stayed `waiting_for_market` / `no_action_continue_observation`. Follow-up local work adds `--execute-post-submit-finalize` so a successful official submit can immediately call the official post-submit finalize packet API. |
 
 ---
 
@@ -433,6 +433,15 @@ When this mode submits successfully, the next automatic action is post-submit
 finalize / reconciliation / budget settlement. If submit blocks or partially
 fails, the packet must expose `OperationLayerSubmit` as the blocked stage and
 must halt new entries until reconciliation / protection recovery state is clear.
+
+Post-submit finalize execution is explicit. It requires
+`--execute-post-submit-finalize` after official Operation Layer submit succeeds.
+The dispatcher then calls the official
+`/strategy-runtimes/{runtime_instance_id}/post-submit-finalize-packets` API,
+records the result as `settled`,
+`post_submit_finalized_next_attempt_blocked`, or
+`post_submit_finalize_blocked`, and preserves the no-withdrawal / no-transfer
+boundary.
 
 For the official FinalGate GET preflight, `prepared_authorization_id` is the
 required action-time identifier. `shadow_candidate_id` remains useful context

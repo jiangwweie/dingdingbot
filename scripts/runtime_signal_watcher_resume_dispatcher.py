@@ -5,10 +5,11 @@ The default mode consumes post-signal-resume-pack.json and writes an
 Owner/agent-readable dispatch packet without calling the API. With
 ``--execute-preflight`` it may call the official action-time FinalGate preflight
 GET endpoint, or the official fresh-submit-authorization binding endpoint when
-the resume pack is parked at that non-executing checkpoint. When FinalGate
-passes, it writes the official Operation Layer submit endpoint plan for the next
-checkpoint. It never calls Operation Layer, OrderLifecycle, exchange APIs, or
-order-submit endpoints.
+the resume pack is parked at that non-executing checkpoint. With
+``--execute-operation-layer-submit`` it may call the official Operation Layer
+submit endpoint after the same-run FinalGate and evidence checks pass. With
+``--execute-post-submit-finalize`` it may then call the official post-submit
+finalize endpoint to record reconciliation and budget settlement evidence.
 """
 
 from __future__ import annotations
@@ -89,6 +90,13 @@ OPERATION_LAYER_REQUIRED_EVIDENCE_IDS = (
     "exchange_submit_adapter_enablement_id",
     "exchange_submit_action_authorization_id",
     "deployment_readiness_evidence_id",
+)
+POST_SUBMIT_FINALIZE_OPTIONAL_EVIDENCE_IDS = (
+    "authorization_id",
+    "runtime_instance_id",
+    "reservation_id",
+    "attempt_reservation_id",
+    "attempt_reservation",
 )
 LEGACY_LOCAL_REGISTRATION_PROBE_BLOCKER_FRAGMENTS = (
     "runtimeexecutionorderlifecycleadapterresult_not_found",
@@ -520,7 +528,11 @@ def _operation_layer_readiness(
         "available_evidence_ids": {
             key: value
             for key, value in ids.items()
-            if key in required_ids and _nonempty(value)
+            if (
+                key in required_ids
+                or key in POST_SUBMIT_FINALIZE_OPTIONAL_EVIDENCE_IDS
+            )
+            and _nonempty(value)
         },
         "missing_evidence_ids": missing_ids,
         "blockers": blockers,
@@ -732,6 +744,7 @@ def build_dispatch_packet(
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
     execute_operation_layer_submit: bool = False,
+    execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     action_time_resume = _dict(resume_pack.get("action_time_resume"))
     owner_state = _dict(resume_pack.get("owner_state"))
@@ -906,6 +919,7 @@ def build_dispatch_packet(
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
     if status == FINALGATE_READY_STATUS:
@@ -976,6 +990,7 @@ def build_dispatch_packet(
         return _maybe_execute_operation_layer_submit(
             packet=packet,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            execute_post_submit_finalize=execute_post_submit_finalize,
             timeout_seconds=preflight_timeout_seconds,
         )
 
@@ -1050,6 +1065,7 @@ def build_dispatch_packet(
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
     return _packet(
@@ -1123,6 +1139,7 @@ def _execute_finalgate_preflight(
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
     execute_operation_layer_submit: bool = False,
+    execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
     if command_plan.get("method") != "GET" or not command_plan.get("curl"):
@@ -1241,6 +1258,7 @@ def _execute_finalgate_preflight(
     return _maybe_execute_operation_layer_submit(
         packet=result_packet,
         execute_operation_layer_submit=execute_operation_layer_submit,
+        execute_post_submit_finalize=execute_post_submit_finalize,
         timeout_seconds=timeout_seconds,
     )
 
@@ -1253,6 +1271,7 @@ def _execute_fresh_authorization_binding(
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
     execute_operation_layer_submit: bool = False,
+    execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
     if command_plan.get("method") != "POST":
@@ -1395,6 +1414,7 @@ def _execute_fresh_authorization_binding(
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
         execute_operation_layer_submit=execute_operation_layer_submit,
+        execute_post_submit_finalize=execute_post_submit_finalize,
     )
 
 
@@ -1635,6 +1655,7 @@ def _maybe_execute_operation_layer_submit(
     *,
     packet: dict[str, Any],
     execute_operation_layer_submit: bool,
+    execute_post_submit_finalize: bool,
     timeout_seconds: int,
 ) -> dict[str, Any]:
     if not execute_operation_layer_submit:
@@ -1657,6 +1678,7 @@ def _maybe_execute_operation_layer_submit(
     return _execute_operation_layer_submit(
         packet=packet,
         timeout_seconds=timeout_seconds,
+        execute_post_submit_finalize=execute_post_submit_finalize,
     )
 
 
@@ -1664,6 +1686,7 @@ def _execute_operation_layer_submit(
     *,
     packet: dict[str, Any],
     timeout_seconds: int,
+    execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     cookie, cookie_error = _session_cookie()
     if not cookie:
@@ -1744,13 +1767,20 @@ def _execute_operation_layer_submit(
     body_status = str(body.get("status") or "")
     body_blockers = _dedupe_text(body.get("blockers") or [])
     if body_status == "exchange_submit_orders_submitted":
-        return _packet_from_operation_layer_submit(
+        submit_packet = _packet_from_operation_layer_submit(
             packet=packet,
             status="submitted",
             blocker_class="none",
             dispatch_status="official_operation_layer_submit_completed",
             blockers=[],
             submit_result=submit_result,
+        )
+        if not execute_post_submit_finalize:
+            return submit_packet
+        return _execute_post_submit_finalize(
+            packet=submit_packet,
+            cookie=cookie,
+            timeout_seconds=timeout_seconds,
         )
     if body_status in {"entry_submit_failed", "protection_submit_failed"}:
         return _packet_from_operation_layer_submit(
@@ -1845,6 +1875,296 @@ def _packet_from_operation_layer_submit(
             "withdrawal_or_transfer_created": bool(
                 body.get("withdrawal_or_transfer_created")
             ),
+            "official_post_submit_finalize_called": False,
+            "post_submit_budget_settlement_called": False,
+        },
+    }
+
+
+def _execute_post_submit_finalize(
+    *,
+    packet: dict[str, Any],
+    cookie: str,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    context = _post_submit_finalize_context(packet)
+    blockers = list(context.get("blockers") or [])
+    if blockers:
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="post_submit_finalize_blocked",
+            blocker_class=_post_submit_finalize_blocker_class(blockers),
+            dispatch_status="blocked_before_post_submit_finalize",
+            blockers=blockers,
+            finalize_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "post_submit_finalize_precondition_failed",
+            },
+        )
+
+    api_base = str(
+        _dict(packet.get("operation_layer_command_plan")).get("api_base")
+        or DEFAULT_API_BASE
+    ).rstrip("/")
+    runtime_instance_id = str(context["runtime_instance_id"])
+    authorization_id = str(context["authorization_id"])
+    reservation_id = context.get("reservation_id")
+    path = (
+        "/api/trading-console/strategy-runtimes/"
+        f"{urllib.parse.quote(runtime_instance_id, safe='')}"
+        "/post-submit-finalize-packets"
+    )
+    body: dict[str, Any] = {
+        "authorization_id": authorization_id,
+        "closed_review_required": False,
+        "protection_blockers": [],
+        "metadata": {
+            "runtime_signal_watcher_resume_dispatcher": True,
+            "automatic_recovery_action": POST_SUBMIT_FINALIZE_ACTION,
+            "operation_layer_submit_dispatch_status": packet.get("dispatch_status"),
+        },
+        "non_executing": True,
+    }
+    if reservation_id:
+        body["reservation_id"] = str(reservation_id)
+
+    response = _request_json(
+        method="POST",
+        url=api_base + path,
+        cookie=cookie,
+        timeout_seconds=timeout_seconds,
+        body=body,
+    )
+    finalize_result = {
+        "called": True,
+        "method": "POST",
+        "path": path,
+        "http_status": response.get("http_status"),
+        "body": response.get("body"),
+        "error": bool(response.get("error")),
+        "error_type": response.get("error_type"),
+        "error_message": response.get("error_message"),
+        "authorization_id": authorization_id,
+        "runtime_instance_id": runtime_instance_id,
+        "reservation_id": reservation_id,
+        "official_post_submit_finalize_endpoint": True,
+        "exchange_write_called": False,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "withdrawal_or_transfer_created": False,
+    }
+    http_status = response.get("http_status")
+    if http_status in {401, 403}:
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="post_submit_finalize_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_operator_session_http_error",
+            blockers=[f"operator_session_http_status:{http_status}"],
+            finalize_result=finalize_result,
+        )
+    if response.get("error"):
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="post_submit_finalize_blocked",
+            blocker_class="deployment_issue",
+            dispatch_status="blocked_by_post_submit_finalize_http_error",
+            blockers=[
+                f"post_submit_finalize_http_status:{http_status or 'unavailable'}"
+            ],
+            finalize_result=finalize_result,
+        )
+
+    finalize_body = _dict(response.get("body"))
+    forbidden_effects = _post_submit_finalize_forbidden_effects(finalize_body)
+    if forbidden_effects:
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="post_submit_finalize_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_post_submit_finalize_forbidden_effect",
+            blockers=forbidden_effects,
+            finalize_result=finalize_result,
+        )
+
+    body_status = str(finalize_body.get("status") or "")
+    blockers = _dedupe_text(
+        [
+            *list(finalize_body.get("blockers") or []),
+            *list(_dict(finalize_body.get("next_attempt_gate")).get("blockers") or []),
+        ]
+    )
+    if body_status == "finalized_ready_for_next_attempt":
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="settled",
+            blocker_class="none",
+            dispatch_status="post_submit_finalize_completed_next_attempt_ready",
+            blockers=[],
+            finalize_result=finalize_result,
+        )
+    if body_status == "finalized_next_attempt_blocked":
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="post_submit_finalized_next_attempt_blocked",
+            blocker_class=_post_submit_finalize_blocker_class(blockers),
+            dispatch_status="post_submit_finalize_completed_next_attempt_blocked",
+            blockers=blockers or ["next_attempt_gate_blocked"],
+            finalize_result=finalize_result,
+        )
+    return _packet_from_post_submit_finalize(
+        packet=packet,
+        status="post_submit_finalize_blocked",
+        blocker_class=_post_submit_finalize_blocker_class(blockers),
+        dispatch_status="blocked_by_post_submit_finalize_result",
+        blockers=blockers or [
+            f"post_submit_finalize_status:{body_status or 'missing'}"
+        ],
+        finalize_result=finalize_result,
+    )
+
+
+def _post_submit_finalize_context(packet: dict[str, Any]) -> dict[str, Any]:
+    body = _dict(_dict(packet.get("operation_layer_submit_result")).get("body"))
+    command_plan = _dict(packet.get("operation_layer_command_plan"))
+    readiness = _dict(packet.get("operation_layer_readiness"))
+    ids = _dict(readiness.get("available_evidence_ids"))
+    selected_runtime_ids = [
+        str(item)
+        for item in _list(packet.get("selected_runtime_instance_ids"))
+        if str(item or "").strip()
+    ]
+    authorization_id = _first_text(
+        body.get("authorization_id"),
+        command_plan.get("authorization_id"),
+        ids.get("authorization_id"),
+    )
+    runtime_instance_id = _first_text(
+        body.get("runtime_instance_id"),
+        ids.get("runtime_instance_id"),
+        selected_runtime_ids[0] if len(selected_runtime_ids) == 1 else None,
+    )
+    reservation_id = _first_text(
+        body.get("reservation_id"),
+        ids.get("reservation_id"),
+        ids.get("attempt_reservation_id"),
+        ids.get("attempt_reservation"),
+    )
+    blockers: list[str] = []
+    if not authorization_id:
+        blockers.append("post_submit_finalize_authorization_id_missing")
+    if not runtime_instance_id:
+        blockers.append("post_submit_finalize_runtime_instance_id_missing")
+    body_runtime_id = _first_text(body.get("runtime_instance_id"))
+    if body_runtime_id and selected_runtime_ids and body_runtime_id not in selected_runtime_ids:
+        blockers.append(
+            "post_submit_finalize_runtime_instance_id_mismatch:"
+            f"body={body_runtime_id}:selected={','.join(selected_runtime_ids)}"
+        )
+    return {
+        "authorization_id": authorization_id,
+        "runtime_instance_id": runtime_instance_id,
+        "reservation_id": reservation_id,
+        "blockers": blockers,
+    }
+
+
+def _post_submit_finalize_forbidden_effects(body: dict[str, Any]) -> list[str]:
+    effects: list[str] = []
+    checks = {
+        "exchange_called": False,
+        "exchange_order_submitted": False,
+        "order_lifecycle_called": False,
+        "owner_bounded_execution_called": False,
+        "withdrawal_or_transfer_created": False,
+        "position_closed": False,
+        "order_cancelled": False,
+        "order_created": False,
+    }
+    for name, expected in checks.items():
+        if body.get(name) not in {expected, None, "", 0}:
+            effects.append(f"post_submit_finalize_effect:{name}")
+    return effects
+
+
+def _post_submit_finalize_blocker_class(blockers: list[str]) -> str:
+    combined = " ".join(str(item).lower() for item in blockers)
+    if any(token in combined for token in ("withdraw", "transfer", "bypass")):
+        return "hard_safety_stop"
+    if "runtime_instance_id_mismatch" in combined:
+        return "hard_safety_stop"
+    if any(
+        token in combined
+        for token in ("active_position", "open_order", "protection")
+    ):
+        return "active_position_resolution"
+    if any(token in combined for token in ("session", "http", "repository", "service")):
+        return "deployment_issue"
+    return "missing_fact"
+
+
+def _packet_from_post_submit_finalize(
+    *,
+    packet: dict[str, Any],
+    status: str,
+    blocker_class: str,
+    dispatch_status: str,
+    blockers: list[str],
+    finalize_result: dict[str, Any],
+) -> dict[str, Any]:
+    body = _dict(finalize_result.get("body"))
+    owner_state = _owner_state_for_post_submit_finalize(
+        status=status,
+        blocker_class=blocker_class,
+        dispatch_status=dispatch_status,
+        blockers=blockers,
+        body=body,
+    )
+    finalize_called = bool(finalize_result.get("called"))
+    settlement_called = bool(body.get("post_submit_budget_settlement_id"))
+    return {
+        **packet,
+        "status": status,
+        "blocker_class": blocker_class,
+        "dispatch_status": dispatch_status,
+        "dispatch_action": CONTINUE_ACTION if status == "settled" else None,
+        "owner_state": owner_state,
+        "post_submit_finalize_result": finalize_result,
+        "blockers": blockers,
+        "warnings": _dedupe_text(
+            [
+                *list(packet.get("warnings") or []),
+                *list(body.get("warnings") or []),
+            ]
+        ),
+        "safety_invariants": {
+            **_dict(packet.get("safety_invariants")),
+            "dispatcher_only": False,
+            "official_post_submit_finalize_called": finalize_called,
+            "official_post_submit_finalize_endpoint": finalize_called,
+            "post_submit_budget_settlement_called": settlement_called,
+            "runtime_budget_mutated": settlement_called,
+            "mutates_pg": bool(
+                finalize_called
+                or _dict(packet.get("safety_invariants")).get("mutates_pg")
+            ),
+            "places_order": bool(
+                _dict(packet.get("safety_invariants")).get("places_order")
+            ),
+            "calls_order_lifecycle": bool(
+                _dict(packet.get("safety_invariants")).get("calls_order_lifecycle")
+            ),
+            "exchange_write_called": bool(
+                _dict(packet.get("safety_invariants")).get("exchange_write_called")
+            ),
+            "withdrawal_or_transfer_created": bool(
+                body.get("withdrawal_or_transfer_created")
+                or _dict(packet.get("safety_invariants")).get(
+                    "withdrawal_or_transfer_created"
+                )
+            ),
         },
     }
 
@@ -1894,6 +2214,55 @@ def _owner_state_for_operation_layer_submit(
         ),
         "downgrade_mode": "continue_watcher_observation_no_submit",
         "exchange_submit_execution_status": body.get("status"),
+    }
+
+
+def _owner_state_for_post_submit_finalize(
+    *,
+    status: str,
+    blocker_class: str,
+    dispatch_status: str,
+    blockers: list[str],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    if status == "settled":
+        return {
+            "status": "settled",
+            "blocker_class": "none",
+            "blocked_at": "none",
+            "blocked_reason": "none",
+            "next_recover_condition": "fresh_strategy_signal_for_next_attempt",
+            "automatic_recovery_action": CONTINUE_ACTION,
+            "downgrade_mode": "none",
+            "post_submit_finalize_status": body.get("status"),
+            "next_attempt_gate_status": _dict(body.get("next_attempt_gate")).get(
+                "status"
+            ),
+        }
+    if status == "post_submit_finalized_next_attempt_blocked":
+        return {
+            "status": status,
+            "blocker_class": blocker_class,
+            "blocked_at": "NextAttemptGate",
+            "blocked_reason": blockers[0] if blockers else dispatch_status,
+            "next_recover_condition": "next_attempt_gate_blocker_resolved",
+            "automatic_recovery_action": (
+                "resolve_next_attempt_gate_blocker_before_new_signal"
+            ),
+            "downgrade_mode": "halt_new_entries_until_next_gate_ready",
+            "post_submit_finalize_status": body.get("status"),
+        }
+    return {
+        "status": status,
+        "blocker_class": blocker_class,
+        "blocked_at": "PostSubmitFinalize",
+        "blocked_reason": blockers[0] if blockers else dispatch_status,
+        "next_recover_condition": "post_submit_finalize_blocker_resolved",
+        "automatic_recovery_action": (
+            "retry_official_post_submit_finalize_after_repair"
+        ),
+        "downgrade_mode": "halt_new_entries_until_post_submit_settled",
+        "post_submit_finalize_status": body.get("status"),
     }
 
 
@@ -2051,6 +2420,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--execute-post-submit-finalize",
+        action="store_true",
+        help=(
+            "After official Operation Layer submit succeeds, call the official "
+            "post-submit finalize endpoint to record reconciliation and budget "
+            "settlement evidence."
+        ),
+    )
+    parser.add_argument(
         "--preflight-timeout-seconds",
         type=int,
         default=120,
@@ -2075,6 +2453,7 @@ def main(argv: list[str] | None = None) -> int:
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
         execute_operation_layer_submit=args.execute_operation_layer_submit,
+        execute_post_submit_finalize=args.execute_post_submit_finalize,
     )
     _write_json(Path(args.output_json).expanduser(), packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
@@ -2089,6 +2468,9 @@ def main(argv: list[str] | None = None) -> int:
         "operation_layer_submit_blocked",
         "operation_layer_submit_failed",
         "submitted",
+        "settled",
+        "post_submit_finalize_blocked",
+        "post_submit_finalized_next_attempt_blocked",
         "blocked",
     } else 2
 
