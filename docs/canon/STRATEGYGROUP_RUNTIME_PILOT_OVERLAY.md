@@ -172,6 +172,12 @@ Do not merge `codex/runtime-signal-watcher-feishu` wholesale into this pilot
 branch. Replay missing value only when a focused diff proves it is not already
 covered by the pilot branch or this overlay.
 
+Current deployed checkpoint:
+
+| Date | Tokyo release | Deployed head | Runtime watcher state |
+| --- | --- | --- | --- |
+| 2026-06-15 | `brc-runtime-governance-9bdc1894-20260615-watcher-submit-dispatch-dropin` | `9bdc18949da8f14bed05fc4568f76406919724fe` | `brc-runtime-signal-watcher.service` has the strategygroup scope drop-in and the resume dispatcher drop-in with `--execute-preflight` and `--execute-operation-layer-submit`; latest manual tick stayed `waiting_for_market` / `no_action_continue_observation`. |
+
 ---
 
 ## 7. Non-Mutating Arm Rule
