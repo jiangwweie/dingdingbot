@@ -89,6 +89,21 @@ Postdeploy verification after the family allowlist deploy:
 | Forbidden effects | `[]` |
 | Exchange/order/OrderLifecycle effects | `false` / `false` / `false` |
 
+Final checkpoint-alignment deploy:
+
+| Check | Observed value |
+| --- | --- |
+| Tokyo deployed head | `9db10d6c654d29be5e47cd4efbf9fe2728311844` |
+| Tokyo release | `brc-runtime-governance-9db10d6c-20260615-checkpoint-align` |
+| Postdeploy probe | `ready_for_controlled_deploy_preflight` |
+| Postdeploy acceptance | `postdeploy_acceptance_passed` |
+| Watcher service result | `success`, `ExecMainStatus=0` |
+| Runtimes monitored by watcher | `6` |
+| Monitored families | `SOR-001`, `FBS-001`, `TEQ-001`, `MPG-001` |
+| Latest watcher status | `observation_window_complete_no_signal` |
+| Resume/dispatch status | `waiting_for_market` / `continue_watcher_observation` |
+| Forbidden effects | `[]` |
+
 ## Watch Branch Intake
 
 `codex/runtime-signal-watcher-feishu` was not merged wholesale. Its large docs
