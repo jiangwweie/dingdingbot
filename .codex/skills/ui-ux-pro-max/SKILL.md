@@ -1,18 +1,32 @@
 ---
 name: ui-ux-pro-max
 description: >-
-  Use for frontend UI/UX design, redesign, polish, product console
-  implementation, SaaS/operator interfaces, React/Tailwind implementation,
-  visual review, and when the user asks for UI UMAX, UI/UX Pro Max, AI Studio
-  visual migration, or non-document-style product UI. For this repo, use before
-  editing Owner Console or Trading Console screens, especially Action Entry,
-  ActionCandidate review, budget/authorization, FinalGate, blocker/warning,
-  position/protection, and Review Ledger flows. Follow the BRC product
-  principles: the console is an Owner bounded-live operations surface, not a
-  read-only dashboard, documentation page, code explanation, raw JSON viewer, or
-  passive report unless the specific artifact is explicitly scoped read-only.
+  Supplemental BRC UI/UX checklist for Owner Runtime Console and Trading
+  Console work. For new frontend products, prefer Product Design, ImageGen,
+  Build Web Apps, Browser, and Figma workflows first. Use this skill only as a
+  repository-specific semantic guardrail for StrategyGroup runtime surfaces,
+  FinalGate, Operation Layer, readiness, blocker, protection, reconciliation,
+  and Review Ledger flows. It must not override docs/current/*, AGENTS.md,
+  Product Design visual-brief gates, or accepted ImageGen/Figma concepts.
 ---
 # ui-ux-pro-max
+
+## Current Status
+
+This skill is **supplemental only** for the current StrategyGroup runtime pilot.
+
+Primary frontend design authority now comes from:
+
+1. `AGENTS.md` and explicit Owner corrections.
+2. `docs/current/*`.
+3. Product Design brief and accepted ImageGen / Figma visual targets.
+4. Build Web Apps implementation and Browser verification workflows.
+5. This skill as a BRC semantic checklist and optional design-system search
+   helper.
+
+For a new frontend such as `owner-runtime-console/`, do not use this skill as
+the primary design workflow and do not inherit the legacy `trading-console`
+page model.
 
 ## Codex Project Path
 
@@ -24,30 +38,35 @@ python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system 
 
 ## BRC Owner Console Project Adaptation
 
-The Owner Console and Trading Console are the Owner's bounded-live operating surfaces. They are not merely read-only dashboards, documentation pages, debug pages, code explanations, PG/read-model browsers, enum displays, or raw API field viewers.
+The Owner Console and Trading Console are the Owner's bounded-live operating
+surfaces. They are not merely read-only dashboards, documentation pages, debug
+pages, code explanations, PG/read-model browsers, enum displays, or raw API
+field viewers.
 
 Project authority for this repository:
-1. Owner explicit correction, `AGENTS.md`, current tracked code, and current `docs/ops/knowledge-pack/*`.
-2. This BRC project adaptation.
-3. Existing product UI and Gemini/front-end design baseline.
-4. Generic design-system search output from this skill.
+1. Owner explicit correction, `AGENTS.md`, current tracked code, and current
+   `docs/current/*`.
+2. Product Design brief and selected visual target for the active frontend.
+3. This BRC project adaptation.
+4. Legacy product UI only as API or anti-pattern reference.
+5. Generic design-system search output from this skill.
 
 Generic design recommendations are supporting input only. They must not override project product semantics, safety boundaries, or the current Owner correction that the console is not a read-only product.
 
 Primary UX goal:
 Help the Owner quickly understand:
 - current environment and safety state;
-- active StrategyFamily / Carrier;
+- selected StrategyGroup and runtime admission state;
+- watcher health and signal freshness;
 - available next action or why no action is currently available;
-- ActionCandidate records and candidate actionability;
-- budget availability and authorization state;
-- FinalGate preview, required inputs, and gate result;
+- RequiredFacts, account, budget, position, open-order, and hard-stop readiness;
+- candidate and authorization evidence state;
+- FinalGate state for the exact action;
+- Operation Layer state as the only official real-action path;
 - hard blockers vs acknowledgeable strategy warnings;
-- evidence behind the decision;
 - active position / TP/SL protection state when relevant;
-- pause, revoke, or recovery controls when relevant;
-- post-action evidence and Review Ledger outcomes;
-- what will happen after authorization and what remains disabled.
+- reconciliation and budget settlement state;
+- Review Ledger outcomes such as promote, keep observing, revise, park, or kill.
 
 Core rules:
 - Use product UI, not Markdown-like report layouts.
@@ -61,17 +80,19 @@ Core rules:
 - Collapse technical/debug details by default.
 - Never hide live/testnet/observe mode.
 - Never imply live readiness without explicit Owner live authorization.
-- Never bypass or visually imply bypass of ActionCandidate -> Owner/BudgetEnvelope authorization -> ActionSpec -> FinalGate -> Operation Layer -> protection -> Review Ledger.
+- Never bypass or visually imply bypass of candidate / authorization evidence -> action-time FinalGate -> official Operation Layer -> protection -> reconciliation -> Review Ledger.
 - Never auto-fill confirmation phrases, fake live execution, or add controls that imply real-funds action without the official backend path and explicit Owner authorization.
 - Do not present BNB as the whole architecture; BNB is only the first Carrier.
 
 Domain vocabulary:
-- StrategyFamily = strategy logic, no order authority.
-- Carrier = StrategyFamily + symbol + side + risk cap.
-- ActionCandidate = reviewable proposed action, not direct order authority.
+- StrategyGroup = Owner-selectable strategy operating group.
+- StrategyRuntime = admitted observable runtime instance.
+- RequiredFacts = readiness facts required before candidate and gate progression.
+- Candidate = reviewable proposed action state, not direct order authority.
 - ActionSpec = official execution intent evaluated by FinalGate.
 - FinalGate = final safety gate for the exact action.
-- BoundedLiveTrialAuthorization = one-time Owner-confirmed live trial authorization.
+- Operation Layer = only official gateway for in-boundary real order actions.
+- Reconciliation = post-submit finalize, position, protection, and budget settlement.
 - Warning = strategy/evidence/regime risk; Owner may acknowledge.
 - Hard Blocker = execution safety issue; cannot be bypassed.
 
@@ -111,7 +132,26 @@ winget install Python.Python.3.12
 
 ## How to Use This Skill
 
-When user requests UI/UX work (design, build, create, implement, review, fix, improve), follow this workflow:
+When user requests UI/UX work (design, build, create, implement, review, fix,
+improve), follow this workflow:
+
+### Step 0: Route New Frontend Work Correctly
+
+For new product surfaces, redesigns, or full-screen prototype work, use the
+installed Product Design and Build Web Apps workflows before this skill:
+
+```text
+Product Design get-context
+-> ImageGen / ideate
+-> selected visual target
+-> image-to-code / frontend-app-builder
+-> Browser verification
+-> visual comparison
+```
+
+Use this skill after that as a BRC semantic checklist. Do not let this skill's
+generic design-system search replace a confirmed Product Design brief or
+accepted visual target.
 
 ### Step 1: Analyze User Requirements
 
@@ -122,33 +162,36 @@ Extract key information from user request:
 - **Stack**: React, Vue, Next.js, or default to `html-tailwind`
 
 For this repository, also identify whether the screen is:
-- an Owner/Trading Console action surface;
+- an Owner Runtime Console or Trading Console operating surface;
 - a read-model endpoint view supporting an action surface;
 - a genuinely read-only evidence/report artifact;
 - a debug/developer-only surface.
 
-If it is Owner Console or Trading Console work, map the UI to the product chain before choosing layout details:
+If it is Owner Runtime Console or Trading Console work, map the UI to the
+current product chain before choosing layout details:
 
 ```text
-StrategyFamily / Carrier
--> ActionCandidate
--> Owner risk understanding
--> Owner authorization or BudgetEnvelope authorization
--> ActionSpec
--> FinalGate
--> Operation Layer
--> official bounded live action
--> active position / TP/SL protection monitoring
--> close / TP / SL
+StrategyGroup selection
+-> runtime admission / observation
+-> fresh signal
+-> RequiredFacts readiness
+-> candidate / authorization evidence
+-> action-time FinalGate
+-> official Operation Layer
+-> position / protection
+-> reconciliation / settlement
 -> Review Ledger
--> promote / revise / park
 ```
 
 ### Step 2: Establish Design Authority
 
 For general projects, use `--design-system` to get comprehensive recommendations with reasoning.
 
-For this repository, first inspect the existing screen patterns and project product rules. Use design-system search only as supplemental guidance for visual polish, chart selection, typography, responsiveness, and accessibility.
+For this repository, first inspect `docs/current/*`, the active Product Design
+brief, and the selected visual target. Use legacy screen patterns only for API
+and anti-pattern reference unless the user explicitly requests legacy
+continuity. Use design-system search only as supplemental guidance for visual
+polish, chart selection, typography, responsiveness, and accessibility.
 
 ```bash
 python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<product_type> <industry> <keywords>" --design-system [-p "Project Name"]

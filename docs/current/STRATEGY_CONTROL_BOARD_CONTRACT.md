@@ -7,26 +7,56 @@ last_verified: 2026-06-15
 
 # Strategy Control Board Contract
 
-The Strategy Control Board is the Owner-facing operating surface. It must not become a packet browser, research-doc index, or manual gate assembly tool.
+The Strategy Control Board is the Owner-facing automation supervision surface.
+It must not become a packet browser, research-doc index, manual gate assembly
+tool, or operator workflow for internal execution gates.
 
 ## Required Row Fields
 
 | Field | Meaning |
 | --- | --- |
 | `strategy_group` | StrategyGroup id and display name |
-| `runtime_state` | `observing`, `signal_ready`, `blocked`, `candidate_ready`, `submitted`, or `settled` |
-| `signal_state` | `no_signal`, `fresh`, `stale`, or `conflict` |
-| `required_facts` | `pass`, `missing`, `stale`, or `not_applicable` |
-| `risk_profile` | Current bounded risk profile |
-| `hard_stop` | Current hard-stop status and reason |
-| `next_action` | `continue`, `prepare_candidate`, `run_finalgate`, `block`, or `review` |
-| `review_outcome` | `promote`, `keep_observing`, `revise`, `park`, or `kill` |
+| `enabled_state` | `not_enabled`, `enabled`, or `paused` |
+| `owner_status` | `running`, `waiting_for_opportunity`, `processing`, `temporarily_unavailable`, `needs_intervention`, or `completed` |
+| `automation_summary` | One short Owner-facing sentence, for example `系统自动运行中` |
+| `funds_status` | `资金正常`, `预算不足`, or a similarly terse Owner-facing phrase |
+| `order_position_status` | `订单正常`, `有订单处理中`, `有持仓处理中`, or similar |
+| `protection_status` | `保护正常`, `保护未就绪`, or similar |
+| `intervention` | `无需操作` unless Owner action is required |
+| `reason` | One plain sentence when unavailable or intervention is required |
+| `review_outcome` | `保留`, `调整`, `暂停`, `停用`, or `待复盘` |
+
+## Main UI Language
+
+Main Owner screens should use only small, plain product vocabulary:
+
+```text
+未启用
+运行中
+等待机会
+处理中
+暂不可用
+需要介入
+已暂停
+已完成
+无需操作
+资金正常
+订单正常
+持仓正常
+保护正常
+```
+
+Internal gate names such as `FinalGate`, `Operation Layer`, `RequiredFacts`,
+`candidate`, `authorization`, `preflight`, `proof`, `route`, `refId`, and
+`blocker code` are not allowed as primary Owner table columns, cards, or
+actions. They belong in details, audit, or developer drawers.
 
 ## Notification Rule
 
-Notify the Owner when deployment changes, watcher health regresses, a fresh
-signal appears, a candidate becomes ready, FinalGate blocks or passes, Operation
-Layer submits, post-submit reconciliation fails or settles, or review is needed.
+Notify the Owner when deployment changes, watcher health regresses, a
+StrategyGroup becomes usable/unusable, automation starts processing, funds/order/
+position/protection safety changes, reconciliation fails or settles, or Owner
+intervention is needed.
 
 Stay quiet when all selected runtimes remain observing with repeated
 `no_signal` and no safety regression.
