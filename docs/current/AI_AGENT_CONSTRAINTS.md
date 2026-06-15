@@ -38,6 +38,8 @@ blockers for:
 - Tokyo deploy apply inside the active stage;
 - read-only Tokyo/live fact validation;
 - watcher observation after StrategyGroup selection;
+- StrategyGroup runtime bootstrap / attach through the official API path when
+  it only creates admission, binding, and shadow runtime records;
 - official in-boundary real order action after action-time FinalGate and
   Operation Layer pass.
 
@@ -45,6 +47,20 @@ This does not authorize FinalGate bypass, Operation Layer bypass, withdrawals,
 transfers, credential changes, live-profile expansion, order-sizing default
 expansion, stale-fact execution, missing protection, duplicate submit, or
 conflicting active position/open order execution.
+
+## StrategyGroup Runtime Bootstrap
+
+`scripts/bootstrap_strategygroup_runtime_pilot.py` is the current bounded bridge
+from StrategyGroup picker state to observable runtime instances.
+
+Default mode is plan-only. `--execute` may be used during this development
+stage under standing authorization when the packet shows no inventory blocker.
+The script may create StrategyFamily, StrategyFamilyVersion, Admission,
+TrialBinding, risk acceptance, promotion confirmation, and shadow
+StrategyRuntimeInstance records through official API surfaces.
+
+It must not create candidate records, ExecutionIntents, orders, withdrawals,
+transfers, exchange submit actions, or Operation Layer bypasses.
 
 ## Gate Behavior
 

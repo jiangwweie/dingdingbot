@@ -219,6 +219,147 @@ Tokyo can now build:
 /home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-readiness.json
 ```
 
+## 2026-06-15 P0/P1 Local Stage
+
+Status:
+
+```text
+local_verified_not_yet_deployed
+```
+
+The main-control handoff scope has expanded from the single MPG pilot to five
+StrategyGroup handoff contracts:
+
+| StrategyGroup | Default mode | Main-control status |
+| --- | --- | --- |
+| `MPG-001` | `armed_observation` | Already represented by active watcher runtimes |
+| `TEQ-001` | `armed_observation` | Ready for runtime bootstrap planning |
+| `FBS-001` | `armed_observation` | Ready for runtime bootstrap planning with higher fact threshold |
+| `SOR-001` | `armed_observation` / session conditional | Ready for runtime bootstrap planning |
+| `PMR-001` | `observe_only` | Kept out of bootstrap by default |
+
+Current local intake packet:
+
+```text
+output/strategygroup-runtime-pilot/handoff-intake-current.json
+```
+
+Local intake result:
+
+| Field | Value |
+| --- | --- |
+| Status | `ready_for_main_control_intake` |
+| StrategyGroups | `5` |
+| Armed intake ready | `4` |
+| Observe-only intake ready | `1` |
+| RequiredFacts rows | `121` |
+| Supplements present | `6 / 6` |
+
+Current local live-facts readiness packet:
+
+```text
+output/strategygroup-runtime-pilot/live-facts-readiness-current-5groups.json
+```
+
+Local readiness result:
+
+| Field | Value |
+| --- | --- |
+| Status | `strategy_group_observe_ready_armed_blocked` |
+| Observe ready | `5` |
+| Candidate prepare ready | `0` |
+| Candidate blocker class | Local signed account / position / open-order / budget / next-gate facts unavailable from the local IP |
+| Interpretation | Observation can continue; candidate preparation still requires trusted action-time facts |
+
+The local signed GET-only account call failed from the local Mac due Binance API
+key / IP / permission restrictions for the current request IP. This is a local
+fact-source limitation, not proof that Tokyo live-readonly facts are unavailable.
+
+## Runtime Bridge Expansion
+
+The current local branch adds non-executing StrategyGroup evaluator routes and
+semantics bindings for:
+
+| StrategyGroup | Evaluator role | Execution authority |
+| --- | --- | --- |
+| `TEQ-001` | Equity-like perpetual momentum reference observer | None |
+| `FBS-001` | Funding / basis stress reference observer | None |
+| `PMR-001` | Precious-metal short overlay observer | None |
+| `SOR-001` | Session opening-range observer | None |
+
+These evaluators emit `StrategyFamilySignalOutput` only. They do not create
+OrderCandidates, ExecutionIntents, orders, Operation Layer actions, exchange
+calls, withdrawals, or transfers.
+
+## Runtime Bootstrap Plan
+
+New bounded bridge:
+
+```text
+scripts/bootstrap_strategygroup_runtime_pilot.py
+```
+
+Default behavior is plan-only. With `--execute`, it can create admission,
+binding, risk acceptance, promotion confirmation, and shadow
+StrategyRuntimeInstance records through official API surfaces. This is PG
+runtime-admission mutation only, not candidate or order authority.
+
+Current local plan packet:
+
+```text
+output/strategygroup-runtime-pilot/runtime-bootstrap-plan-current-5groups.json
+```
+
+Plan result:
+
+| Field | Value |
+| --- | --- |
+| Status | `planned_runtime_bootstrap` |
+| Source active runtime count reported | `6` |
+| Source monitored runtime count reported | `3` |
+| Parsed runtime rows | `3` |
+| Planned targets | `3` |
+| Skipped groups | `2` |
+
+Planned bootstrap targets:
+
+| StrategyGroup | Runtime symbol | Side | Reason |
+| --- | --- | --- | --- |
+| `TEQ-001` | `INTC/USDT:USDT` | `long` | `ready_for_runtime_bootstrap` |
+| `FBS-001` | `INTC/USDT:USDT` | `long` | `ready_for_runtime_bootstrap` |
+| `SOR-001` | `XAG/USDT:USDT` | `short` | `ready_for_runtime_bootstrap` |
+
+Skipped groups:
+
+| StrategyGroup | Reason |
+| --- | --- |
+| `MPG-001` | `strategy_group_already_has_active_runtime` |
+| `PMR-001` | `mode_not_bootstrappable:observe_only` |
+
+If executed after deployment, the next safe checkpoint is watcher restart or
+the next timer tick, followed by verifying that the active watcher scope includes
+the newly created runtime ids. If the server uses an env/drop-in runtime id
+filter, that filter must be updated or removed before considering the new
+runtime observable.
+
+## Console Productization
+
+The StrategyGroup runtime pilot status packet now exposes:
+
+```text
+control_board.strategy_group_rows
+control_board.strategy_group_counts
+```
+
+The Trading Console `PilotControlBoard` now renders these rows directly so the
+Owner can see each StrategyGroup's runtime state, signal state, RequiredFacts
+state, and next action without reading raw JSON packets.
+
+The monitor automation `tokyo-runtime-signal-watch-postdeploy` has been updated
+to active 30-minute cadence for current StrategyGroup runtime pilot monitoring.
+It stays quiet on repeated no-signal / no-action states and reports only fresh
+ready signals, deploy drift, watcher regressions, or safety regressions.
+
 ## Live-Readonly Facts
 
 Postdeploy account-wide signed GET-only facts:

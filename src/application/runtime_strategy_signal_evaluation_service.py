@@ -23,8 +23,12 @@ from src.domain.mpg_momentum_persistence_evaluator import (
 )
 from src.domain.reference_price_action_evaluators import (
     BTPC001PriceActionEvaluator,
+    FBS001PilotReferenceEvaluator,
     LSR001PriceActionEvaluator,
+    PMR001PilotReferenceEvaluator,
     RBR001PriceActionEvaluator,
+    SOR001PilotReferenceEvaluator,
+    TEQ001PilotReferenceEvaluator,
     VCB001PriceActionEvaluator,
 )
 from src.domain.strategy_family_signal import (
@@ -258,6 +262,10 @@ def _default_evaluators() -> dict[tuple[str, str], RuntimeStrategySignalEvaluato
         ("CPM-RO-001", "CPM-RO-001-v0"): CPMRO001HistoricalEvaluator(),
         ("CPM-001", "CPM-001-v0"): _CPM001LiveReferenceEvaluator(),
         ("MPG-001", "MPG-001-v0"): MPG001MomentumPersistenceEvaluator(),
+        ("TEQ-001", "TEQ-001-v0"): TEQ001PilotReferenceEvaluator(),
+        ("FBS-001", "FBS-001-v0"): FBS001PilotReferenceEvaluator(),
+        ("PMR-001", "PMR-001-v0"): PMR001PilotReferenceEvaluator(),
+        ("SOR-001", "SOR-001-v0"): SOR001PilotReferenceEvaluator(),
         ("BRF-001", "BRF-001-v0"): BRF001PriceActionEvaluator(),
         ("BTPC-001", "BTPC-001-v0"): BTPC001PriceActionEvaluator(),
         ("LSR-001", "LSR-001-v0"): LSR001PriceActionEvaluator(),

@@ -350,6 +350,52 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 strategy_family_version_id="CPM-001-v0",
             ),
             _mpg_binding(),
+            _pilot_strategygroup_binding(
+                strategy_family_id="TEQ-001",
+                strategy_family_version_id="TEQ-001-v0",
+                canonical_family_id="TEQ-001",
+                implementation_id="teq-equity-like-momentum-pilot-v0",
+                source_ref="src/domain/reference_price_action_evaluators.py",
+                supported_sides=["long"],
+                trigger="equity_like_momentum_breakout",
+                stop_reference="recent_breakout_floor_or_atr_reference",
+                reference_role="equity_like_long_momentum",
+            ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="FBS-001",
+                strategy_family_version_id="FBS-001-v0",
+                canonical_family_id="FBS-001",
+                implementation_id="fbs-funding-basis-stress-pilot-v0",
+                source_ref="src/domain/reference_price_action_evaluators.py",
+                supported_sides=["long"],
+                trigger="negative_funding_squeeze_followthrough",
+                stop_reference="funding_stress_invalidation_or_atr_reference",
+                reference_role="negative_funding_long_squeeze",
+                optional_fact_key="funding_rate",
+            ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="PMR-001",
+                strategy_family_version_id="PMR-001-v0",
+                canonical_family_id="PMR-001",
+                implementation_id="pmr-metal-breakdown-pilot-v0",
+                source_ref="src/domain/reference_price_action_evaluators.py",
+                supported_sides=["short"],
+                trigger="metal_role_breakdown_short",
+                stop_reference="recent_breakdown_reclaim_or_atr_reference",
+                reference_role="precious_metal_short_overlay",
+            ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="SOR-001",
+                strategy_family_version_id="SOR-001-v0",
+                canonical_family_id="SOR-001",
+                implementation_id="sor-opening-range-breakdown-pilot-v0",
+                source_ref="src/domain/reference_price_action_evaluators.py",
+                supported_sides=["short"],
+                trigger="session_opening_range_breakdown",
+                stop_reference="opening_range_reclaim_or_atr_reference",
+                reference_role="session_opening_range_short",
+                optional_fact_key="session_window_state",
+            ),
             _brf_binding(),
             _btpc_binding(),
             _lsr_binding(),
@@ -472,6 +518,83 @@ def _mpg_binding() -> StrategyImplementationBinding:
             "runtime_confirmation_note": (
                 "Owner confirms bounded runtime/profile; entries may be attempted "
                 "automatically within runtime boundaries."
+            ),
+        },
+    )
+
+
+def _pilot_strategygroup_binding(
+    *,
+    strategy_family_id: str,
+    strategy_family_version_id: str,
+    canonical_family_id: str,
+    implementation_id: str,
+    source_ref: str,
+    supported_sides: list[str],
+    trigger: str,
+    stop_reference: str,
+    reference_role: str,
+    optional_fact_key: str | None = None,
+) -> StrategyImplementationBinding:
+    optional_facts = [
+        _fact(
+            optional_fact_key,
+            required=False,
+            description=(
+                f"Optional {optional_fact_key} caveat for pilot review."
+            ),
+            missing_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+            stale_behavior=FactUnavailableBehavior.OBSERVE_ONLY,
+        )
+    ] if optional_fact_key else []
+    return StrategyImplementationBinding(
+        strategy_family_id=strategy_family_id,
+        strategy_family_version_id=strategy_family_version_id,
+        canonical_family_id=canonical_family_id,
+        implementation_id=implementation_id,
+        implementation_kind=StrategyImplementationKind.PRICE_ACTION,
+        candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
+        source_ref=source_ref,
+        supported_sides=supported_sides,
+        required_facts=_price_action_required_facts(),
+        optional_facts=optional_facts,
+        entry_policy=EntryPolicy(
+            kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
+            trigger=trigger,
+            parameters={
+                "reference_family": strategy_family_id,
+                "supported_sides": supported_sides,
+            },
+        ),
+        protection_policy=ProtectionPolicy(
+            stop_policy=StopPolicy(
+                kind=StopPolicyKind.STRUCTURE_REFERENCE,
+                required=True,
+                reference={"structure": stop_reference},
+                risk_notes="pilot StrategyGroup actions require a concrete hard stop",
+            ),
+            max_loss_reference="runtime.max_loss_budget_per_attempt",
+            notes=[
+                f"{strategy_family_id} is a pilot StrategyGroup reference route.",
+                "It is semantic admission only, not proof of profitable alpha.",
+            ],
+        ),
+        exit_policy=_right_tail_exit_policy("partial_tp_plus_review_runner"),
+        review_metrics=_right_tail_review_metrics()
+        + ["strategygroup_pilot_follow_through", "false_signal_rate"],
+        payoff_profile=StrategyPayoffProfile.RIGHT_TAIL,
+        runtime_confirmation_mode=(
+            StrategyRuntimeConfirmationMode.RUNTIME_BOUNDED_AUTO_ATTEMPTS
+        ),
+        owner_confirm_each_entry_required=False,
+        metadata={
+            "semantic_admission_only": True,
+            "not_proven_alpha": True,
+            "reference_role": reference_role,
+            "pilot_strategygroup_route": True,
+            "runtime_confirmation_note": (
+                "Owner confirms bounded runtime/profile; entries may be attempted "
+                "automatically only within runtime boundaries and after FinalGate."
             ),
         },
     )

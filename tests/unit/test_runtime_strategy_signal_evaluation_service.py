@@ -344,6 +344,32 @@ def test_mpg_momentum_persistence_no_action_stays_observe_only():
     assert result.exchange_called is False
 
 
+def test_strategygroup_pilot_reference_routes_are_configured_and_non_executing():
+    service = RuntimeStrategySignalEvaluationService()
+
+    for family_id, version_id in [
+        ("TEQ-001", "TEQ-001-v0"),
+        ("FBS-001", "FBS-001-v0"),
+        ("PMR-001", "PMR-001-v0"),
+        ("SOR-001", "SOR-001-v0"),
+    ]:
+        assert service.route_configured(
+            strategy_family_id=family_id,
+            strategy_family_version_id=version_id,
+        )
+        result = service.evaluate(
+            _signal_input(family_id=family_id, version_id=version_id)
+        )
+
+        assert result.semantics_binding_found is True
+        assert result.evaluator_called is True
+        assert result.order_candidate_created is False
+        assert result.execution_intent_created is False
+        assert result.order_created is False
+        assert result.order_lifecycle_called is False
+        assert result.exchange_called is False
+
+
 def test_rmr_classifier_binding_observe_only_without_evaluator_call():
     result = RuntimeStrategySignalEvaluationService().evaluate(
         _signal_input(family_id="RMR-001", version_id="RMR-001-v0")

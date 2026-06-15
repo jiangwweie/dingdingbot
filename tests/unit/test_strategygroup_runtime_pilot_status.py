@@ -446,6 +446,13 @@ def test_pilot_status_switches_to_teq_only_when_engineering_readiness_is_better(
     assert packet["pilot_selection"]["selection_reason"] == (
         "fallback_teq_has_better_engineering_readiness"
     )
+    rows = packet["control_board"]["strategy_group_rows"]
+    by_id = {row["strategy_group_id"]: row for row in rows}
+    assert packet["control_board"]["strategy_group_counts"]["total"] == 2
+    assert by_id["MPG-001"]["runtime_state"] == "blocked"
+    assert by_id["TEQ-001"]["runtime_bridge"] == "configured"
+    assert by_id["TEQ-001"]["runtime_state"] == "admission_ready"
+    assert by_id["TEQ-001"]["next_action"] == "create_or_attach_strategygroup_runtime"
 
 
 def test_pilot_status_blocks_active_position_resolution_before_signal_resume():
@@ -467,19 +474,46 @@ def test_pilot_status_blocks_active_position_resolution_before_signal_resume():
 
 
 def test_pilot_status_blocks_strategy_group_missing_runtime_bridge():
+    intake = _intake()
+    intake["strategy_picker"].append(
+        {
+            "strategy_group_id": "UNK-001",
+            "name": "Unknown StrategyGroup",
+            "supported_symbols": ["BTCUSDT"],
+            "supported_sides": ["long"],
+            "risk_defaults": {"max_notional_per_action_usdt": "8"},
+            "watcher_scope": {
+                "business_signal_validity": "15-30m",
+                "candidate_packet_freshness_seconds": 120,
+            },
+            "picker": {"rank": 99, "default_mode": "armed_observation"},
+        }
+    )
+    readiness = _readiness()
+    readiness["readiness"].append(
+        {
+            "strategy_group_id": "UNK-001",
+            "observe_ready": True,
+            "armed_candidate_prepare_ready": False,
+            "exchange_rules": {"ready_symbols": ["BTCUSDT"]},
+            "candidate_fact_checks": [],
+            "blockers": ["protection:missing"],
+        }
+    )
+
     packet = build_packet(
-        intake_packet=_intake(),
-        live_facts_readiness=_readiness(),
+        intake_packet=intake,
+        live_facts_readiness=readiness,
         watcher_status=_watcher_waiting(),
-        selected_strategy_group_id="TEQ-001",
+        selected_strategy_group_id="UNK-001",
         generated_at_ms=1,
     )
 
     assert packet["status"] == "blocked_runtime_bridge_missing"
     assert packet["owner_state"]["blocker_class"] == "missing_fact"
     assert packet["owner_state"]["blocked_at"] == "runtime_bridge"
-    assert packet["runtime_bridge"]["strategy_family_id"] == "TEQ-001"
-    assert packet["runtime_bridge"]["strategy_family_version_id"] == "TEQ-001-v0"
+    assert packet["runtime_bridge"]["strategy_family_id"] == "UNK-001"
+    assert packet["runtime_bridge"]["strategy_family_version_id"] == "UNK-001-v0"
     assert packet["runtime_bridge"]["semantics_binding_found"] is False
     assert packet["runtime_bridge"]["evaluator_route_configured"] is False
     assert packet["runtime_bridge"]["blockers"] == [

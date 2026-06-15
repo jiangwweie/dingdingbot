@@ -121,7 +121,7 @@ def _symbols_exchange_ready(
             ready.append(symbol)
         else:
             blocked.append(symbol)
-    return not blocked and bool(symbols), ready, blocked
+    return bool(ready), ready, blocked
 
 
 def _candidate_fact_checks(live_facts: dict[str, Any]) -> list[dict[str, Any]]:
@@ -165,7 +165,17 @@ def _group_readiness(
         if not item["ready"]
     ]
     if blocked_symbols:
-        candidate_blockers.append("exchange_rules_not_ready_for_all_symbols")
+        if ready_symbols:
+            candidate_warnings = [
+                "exchange_rules_not_ready_for_some_supported_symbols"
+            ]
+        else:
+            candidate_warnings = []
+            candidate_blockers.append(
+                "exchange_rules_not_ready_for_any_supported_symbol"
+            )
+    else:
+        candidate_warnings = []
     observe_ready = exchange_ready
     default_mode = str((group.get("picker") or {}).get("default_mode") or "")
     if not observe_ready:
@@ -192,7 +202,10 @@ def _group_readiness(
         },
         "candidate_fact_checks": candidate_checks,
         "blockers": candidate_blockers,
-        "warnings": list(group.get("warnings") or []),
+        "warnings": [
+            *list(group.get("warnings") or []),
+            *candidate_warnings,
+        ],
     }
 
 

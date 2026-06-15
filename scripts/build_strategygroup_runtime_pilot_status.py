@@ -509,6 +509,104 @@ def _runtime_bridge(group: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _strategy_group_board_rows(
+    *,
+    intake_packet: dict[str, Any],
+    live_facts_readiness: dict[str, Any],
+    watcher: dict[str, Any],
+    selected_group_id: str | None,
+) -> list[dict[str, Any]]:
+    readiness_by_id = _by_id(_items(live_facts_readiness.get("readiness")))
+    summaries_by_group: dict[str, list[dict[str, Any]]] = {}
+    for summary in _items(watcher.get("runtime_signal_summaries")):
+        group_id = str(summary.get("strategy_family_id") or "")
+        if group_id:
+            summaries_by_group.setdefault(group_id, []).append(summary)
+
+    rows: list[dict[str, Any]] = []
+    for group in _items(intake_packet.get("strategy_picker")):
+        group_id = str(group.get("strategy_group_id") or "")
+        readiness = readiness_by_id.get(group_id, {})
+        bridge = _runtime_bridge(group)
+        summaries = summaries_by_group.get(group_id, [])
+        default_mode = str((group.get("picker") or {}).get("default_mode") or "")
+        observe_ready = bool(readiness.get("observe_ready"))
+        armed_ready = bool(readiness.get("armed_candidate_prepare_ready"))
+        ready_symbols = list((readiness.get("exchange_rules") or {}).get("ready_symbols") or [])
+        blocked_symbols = list((readiness.get("exchange_rules") or {}).get("blocked_symbols") or [])
+        blockers = [str(item) for item in readiness.get("blockers") or []]
+        warnings = [str(item) for item in readiness.get("warnings") or []]
+
+        signal_types = {
+            str(item.get("signal_type") or item.get("status") or "")
+            for item in summaries
+        }
+        if bridge.get("status") != "configured":
+            runtime_state = "blocked"
+            next_action = "add_strategy_semantics_binding_and_evaluator_route"
+            blocked_reason = ",".join(str(item) for item in bridge.get("blockers") or [])
+        elif not observe_ready:
+            runtime_state = "blocked"
+            next_action = "refresh_exchange_rules_or_reduce_symbol_scope"
+            blocked_reason = ",".join(blockers) or "no_exchange_ready_symbol"
+        elif default_mode == "observe_only":
+            runtime_state = "observe_only_ready"
+            next_action = "continue_observe_only_until_upgrade_facts_pass"
+            blocked_reason = "observe_only_default"
+        elif summaries and "no_action" not in signal_types:
+            runtime_state = "signal_review"
+            next_action = "review_runtime_signal_summary"
+            blocked_reason = "none"
+        elif summaries:
+            runtime_state = "observing"
+            next_action = "continue_watcher_observation"
+            blocked_reason = "no_fresh_strategy_signal"
+        else:
+            runtime_state = "admission_ready"
+            next_action = "create_or_attach_strategygroup_runtime"
+            blocked_reason = "runtime_not_selected_for_watcher_scope"
+
+        rows.append(
+            {
+                "strategy_group_id": group_id,
+                "name": group.get("name") or group_id,
+                "selected": group_id == selected_group_id,
+                "picker_rank": (group.get("picker") or {}).get("rank"),
+                "default_mode": default_mode,
+                "intake_status": group.get("intake_status"),
+                "runtime_state": runtime_state,
+                "signal_state": (
+                    "fresh_or_review"
+                    if runtime_state == "signal_review"
+                    else "no_signal"
+                    if summaries
+                    else "not_observed"
+                ),
+                "required_facts": (
+                    "pass"
+                    if armed_ready
+                    else "observe_ready"
+                    if observe_ready
+                    else "missing"
+                ),
+                "runtime_bridge": bridge.get("status"),
+                "ready_symbols": ready_symbols,
+                "blocked_symbols": blocked_symbols,
+                "blockers": blockers,
+                "warnings": warnings,
+                "blocked_reason": blocked_reason,
+                "next_action": next_action,
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda item: (
+            item.get("picker_rank") if item.get("picker_rank") is not None else 999,
+            str(item.get("strategy_group_id") or ""),
+        ),
+    )
+
+
 def _dual_freshness(
     *,
     group: dict[str, Any] | None,
@@ -1222,6 +1320,12 @@ def build_packet(
         watcher=watcher,
         candidate_evidence=candidate_evidence,
     )
+    strategy_group_rows = _strategy_group_board_rows(
+        intake_packet=intake_packet,
+        live_facts_readiness=live_facts_readiness,
+        watcher=watcher,
+        selected_group_id=group_id,
+    )
 
     strategy_status = (
         "armed_observation_waiting_for_signal"
@@ -1257,6 +1361,27 @@ def build_packet(
         "action_time_resume": action_time_resume,
         "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
+            "strategy_group_rows": strategy_group_rows,
+            "strategy_group_counts": {
+                "total": len(strategy_group_rows),
+                "selected": sum(1 for row in strategy_group_rows if row["selected"]),
+                "observing": sum(
+                    1 for row in strategy_group_rows
+                    if row["runtime_state"] == "observing"
+                ),
+                "admission_ready": sum(
+                    1 for row in strategy_group_rows
+                    if row["runtime_state"] == "admission_ready"
+                ),
+                "blocked": sum(
+                    1 for row in strategy_group_rows
+                    if row["runtime_state"] == "blocked"
+                ),
+                "observe_only_ready": sum(
+                    1 for row in strategy_group_rows
+                    if row["runtime_state"] == "observe_only_ready"
+                ),
+            },
             "strategy_group_row": {
                 "id": group_id,
                 "role": (group or {}).get("name") or group_id,

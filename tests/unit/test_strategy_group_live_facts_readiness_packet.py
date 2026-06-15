@@ -108,4 +108,53 @@ def test_live_facts_readiness_blocks_observation_when_exchange_rules_missing():
     assert packet["operator_path"]["can_continue_observation"] is False
     assert packet["owner_state"]["blocked_at"] == "live_fact_readiness"
     assert packet["owner_state"]["downgrade_mode"] == "not_observing"
-    assert "MPG-001:exchange_rules_not_ready_for_all_symbols" in packet["blockers"]
+    assert (
+        "MPG-001:exchange_rules_not_ready_for_any_supported_symbol"
+        in packet["blockers"]
+    )
+
+
+def test_live_facts_readiness_allows_partial_supported_symbol_availability():
+    packet = build_packet(
+        intake_packet=_intake(),
+        live_facts={
+            "exchange_rules": {
+                "symbols": {
+                    "BTCUSDT": {"status": "TRADING"},
+                    "ETHUSDT": {"status": "missing"},
+                    "XAUUSDT": {"status": "missing"},
+                }
+            },
+            "account": {"status": "fresh"},
+            "active_position": {"status": "no_active_position"},
+            "open_orders": {"status": "no_open_orders"},
+            "protection": {"status": "ready_for_candidate_specific_plan"},
+            "budget": {"status": "available_for_candidate_specific_reservation"},
+            "next_attempt_gate": {"status": "ready_for_strategy_signal"},
+        },
+        generated_at_ms=1,
+    )
+
+    mpg = next(
+        item for item in packet["readiness"]
+        if item["strategy_group_id"] == "MPG-001"
+    )
+    pmr = next(
+        item for item in packet["readiness"]
+        if item["strategy_group_id"] == "PMR-001"
+    )
+
+    assert mpg["observe_ready"] is True
+    assert mpg["armed_candidate_prepare_ready"] is True
+    assert mpg["exchange_rules"]["ready_symbols"] == ["BTCUSDT"]
+    assert mpg["exchange_rules"]["blocked_symbols"] == ["ETHUSDT"]
+    assert "exchange_rules_not_ready_for_some_supported_symbols" in mpg["warnings"]
+    assert (
+        "MPG-001:exchange_rules_not_ready_for_any_supported_symbol"
+        not in packet["blockers"]
+    )
+    assert pmr["observe_ready"] is False
+    assert (
+        "PMR-001:exchange_rules_not_ready_for_any_supported_symbol"
+        in packet["blockers"]
+    )

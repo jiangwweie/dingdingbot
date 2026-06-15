@@ -35,6 +35,10 @@ function statusLabel(status?: string): string {
   const labels: Record<string, string> = {
     waiting_for_market: '等待市场信号',
     ready_for_non_executing_prepare: '可准备候选',
+    admission_ready: '可接入观察',
+    observe_only_ready: '只观察就绪',
+    observing: '观察中',
+    signal_review: '信号待审阅',
     blocked_missing_fact: '事实缺失',
     blocked_active_position_resolution: '仓位待处理',
     blocked_deployment_issue: '部署证据异常',
@@ -62,6 +66,8 @@ export default function PilotControlBoard() {
   const ownerActionCard = data.owner_action_card || {};
   const board = data.control_board || {};
   const strategyRow = board.strategy_group_row || {};
+  const strategyRows = asArray<any>(board.strategy_group_rows);
+  const strategyCounts = board.strategy_group_counts || {};
   const runtimeRow = board.runtime_row || {};
   const candidateRow = board.candidate_row || {};
   const reviewRow = board.review_row || {};
@@ -129,6 +135,43 @@ export default function PilotControlBoard() {
             tone={(data.safety_invariants || {}).places_order === false ? 'normal' : 'blocked'}
             icon={<ShieldCheck className="h-4 w-4" />}
           />
+        </div>
+      </ConsolePanel>
+
+      <ConsolePanel
+        title="StrategyGroup Runtime Rows"
+        caption={`${strategyCounts.total ?? strategyRows.length} groups · ${strategyCounts.admission_ready ?? 0} admission ready · ${strategyCounts.blocked ?? 0} blocked`}
+      >
+        <div className="divide-y divide-slate-800/90">
+          {strategyRows.map((row) => (
+            <div key={row.strategy_group_id}>
+              <EntityRow
+                title={displayValue(row.strategy_group_id)}
+                subtitle={displayValue(row.name)}
+                tone={toneForStatus(row.runtime_state)}
+                active={Boolean(row.selected)}
+                cells={[
+                  { label: 'runtime', value: statusLabel(row.runtime_state) },
+                  { label: 'signal', value: displayValue(row.signal_state) },
+                  { label: 'facts', value: displayValue(row.required_facts) },
+                  { label: 'next', value: displayValue(row.next_action) },
+                ]}
+              />
+            </div>
+          ))}
+          {strategyRows.length === 0 && (
+            <EntityRow
+              title="StrategyGroup rows"
+              subtitle="No control-board rows are available."
+              tone="blocked"
+              cells={[
+                { label: 'runtime', value: 'missing' },
+                { label: 'signal', value: 'missing' },
+                { label: 'facts', value: 'missing' },
+                { label: 'next', value: 'rebuild pilot status packet' },
+              ]}
+            />
+          )}
         </div>
       </ConsolePanel>
 

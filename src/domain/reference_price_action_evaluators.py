@@ -36,6 +36,10 @@ BTPC_FAMILY_ID = "BTPC-001"
 LSR_FAMILY_ID = "LSR-001"
 RBR_FAMILY_ID = "RBR-001"
 VCB_FAMILY_ID = "VCB-001"
+TEQ_FAMILY_ID = "TEQ-001"
+FBS_FAMILY_ID = "FBS-001"
+PMR_FAMILY_ID = "PMR-001"
+SOR_FAMILY_ID = "SOR-001"
 
 
 @dataclass(frozen=True)
@@ -565,6 +569,280 @@ class VCB001PriceActionEvaluator(_ReferencePriceActionEvaluator):
             human_summary="VCB v0 volatility compression breakout detected for review.",
             evidence_payload=evidence,
             expected_risk_shape=ExpectedRiskShape.VOLATILITY_EXPANSION,
+        )
+
+
+class TEQ001PilotReferenceEvaluator(_ReferencePriceActionEvaluator):
+    family_id = TEQ_FAMILY_ID
+    logic_version = "teq-001-pilot-reference-v0"
+
+    def _evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        one_hour: list[_Candle],
+        four_hour: list[_Candle],
+    ) -> StrategyFamilySignalOutput:
+        latest = one_hour[-1]
+        lookback = one_hour[-(self._config.lookback_bars + 1) : -1]
+        previous_high = max(candle.high for candle in lookback)
+        one_hour_net_pct = _pct(latest.close - lookback[0].close, lookback[0].close)
+        four_hour_net_pct = _pct(four_hour[-1].close - four_hour[0].close, four_hour[0].close)
+        breakout = latest.close > previous_high and latest.close > latest.open
+        theme_momentum = (
+            breakout
+            and one_hour_net_pct >= Decimal("1.2")
+            and four_hour_net_pct >= Decimal("0.6")
+        )
+        evidence = {
+            "market_state": "TREND_UP" if four_hour_net_pct >= Decimal("0.6") else "UNCERTAIN",
+            "entry_pattern": "equity_like_momentum_breakout" if breakout else "none",
+            "latest_1h_open_time_ms": latest.open_time_ms,
+            "price_action_structure": {
+                "theme_momentum": theme_momentum,
+                "latest_close": _s(latest.close),
+                "previous_high": _s(previous_high),
+                "one_hour_net_pct": _s(_q(one_hour_net_pct)),
+                "four_hour_net_pct": _s(_q(four_hour_net_pct)),
+                "breakout_close": breakout,
+            },
+            "invalidation_conditions": [
+                {
+                    "condition_type": "close_back_below_breakout_reference",
+                    "description": "TEQ invalidates if price closes back below the breakout reference.",
+                },
+                {
+                    "condition_type": "post_burst_overextension",
+                    "description": "Post-burst extension or concentration warnings should downshift the candidate.",
+                },
+            ],
+        }
+        if not theme_momentum:
+            return self._no_action(
+                signal_input,
+                ["teq_no_action_theme_momentum_not_confirmed"],
+                "TEQ-001 v0 did not confirm equity-like long momentum.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.TREND_FOLLOWING_WIDE_STOP,
+            )
+        return self._would_enter(
+            signal_input,
+            side=SignalSide.LONG,
+            confidence=Decimal("0.62"),
+            reason_codes=[
+                "teq_theme_momentum_state",
+                "teq_breakout_close_confirmed",
+                "teq_htf_context_positive",
+            ],
+            human_summary="TEQ-001 v0 equity-like long momentum detected for review.",
+            evidence_payload=evidence,
+            expected_risk_shape=ExpectedRiskShape.TREND_FOLLOWING_WIDE_STOP,
+        )
+
+
+class FBS001PilotReferenceEvaluator(_ReferencePriceActionEvaluator):
+    family_id = FBS_FAMILY_ID
+    logic_version = "fbs-001-pilot-reference-v0"
+
+    def _evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        one_hour: list[_Candle],
+        four_hour: list[_Candle],
+    ) -> StrategyFamilySignalOutput:
+        del four_hour
+        latest = one_hour[-1]
+        lookback = one_hour[-(self._config.lookback_bars + 1) : -1]
+        funding_rate = signal_input.market_snapshot.funding_rate
+        one_hour_net_pct = _pct(latest.close - lookback[0].close, lookback[0].close)
+        negative_funding = (
+            funding_rate is not None and funding_rate <= Decimal("-0.0002")
+        )
+        squeeze_followthrough = latest.close > latest.open and one_hour_net_pct >= Decimal("0.5")
+        confirmed = negative_funding and squeeze_followthrough
+        evidence = {
+            "market_state": "FUNDING_STRESS" if negative_funding else "UNCERTAIN",
+            "entry_pattern": "negative_funding_squeeze_followthrough" if confirmed else "none",
+            "latest_1h_open_time_ms": latest.open_time_ms,
+            "funding_state": {
+                "funding_rate": str(funding_rate) if funding_rate is not None else None,
+                "negative_funding": negative_funding,
+            },
+            "price_action_structure": {
+                "squeeze_followthrough": squeeze_followthrough,
+                "one_hour_net_pct": _s(_q(one_hour_net_pct)),
+                "latest_close": _s(latest.close),
+            },
+            "invalidation_conditions": [
+                {
+                    "condition_type": "funding_stress_disappears",
+                    "description": "FBS invalidates if negative funding stress disappears before candidate preparation.",
+                },
+                {
+                    "condition_type": "mark_deviation_spike",
+                    "description": "Abnormal mark deviation should block armed observation.",
+                },
+            ],
+        }
+        if funding_rate is None:
+            return self._no_action(
+                signal_input,
+                ["fbs_no_action_funding_rate_missing"],
+                "FBS-001 v0 requires funding facts before funding-stress observation.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.UNKNOWN,
+            )
+        if not confirmed:
+            return self._no_action(
+                signal_input,
+                ["fbs_no_action_funding_stress_not_confirmed"],
+                "FBS-001 v0 did not confirm negative-funding squeeze follow-through.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.UNKNOWN,
+            )
+        return self._would_enter(
+            signal_input,
+            side=SignalSide.LONG,
+            confidence=Decimal("0.60"),
+            reason_codes=[
+                "fbs_negative_funding_stress",
+                "fbs_squeeze_followthrough_confirmed",
+            ],
+            human_summary="FBS-001 v0 negative-funding long squeeze detected for review.",
+            evidence_payload=evidence,
+            expected_risk_shape=ExpectedRiskShape.UNKNOWN,
+        )
+
+
+class PMR001PilotReferenceEvaluator(_ReferencePriceActionEvaluator):
+    family_id = PMR_FAMILY_ID
+    logic_version = "pmr-001-pilot-reference-v0"
+
+    def _evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        one_hour: list[_Candle],
+        four_hour: list[_Candle],
+    ) -> StrategyFamilySignalOutput:
+        latest = one_hour[-1]
+        lookback = one_hour[-(self._config.lookback_bars + 1) : -1]
+        previous_low = min(candle.low for candle in lookback)
+        one_hour_net_pct = _pct(latest.close - lookback[0].close, lookback[0].close)
+        four_hour_net_pct = _pct(four_hour[-1].close - four_hour[0].close, four_hour[0].close)
+        breakdown = latest.close < previous_low and latest.close < latest.open
+        metal_breakdown = (
+            breakdown
+            and one_hour_net_pct <= Decimal("-0.8")
+            and four_hour_net_pct <= Decimal("-0.4")
+        )
+        evidence = {
+            "market_state": "TREND_DOWN" if four_hour_net_pct <= Decimal("-0.4") else "UNCERTAIN",
+            "entry_pattern": "metal_role_breakdown_short" if breakdown else "none",
+            "latest_1h_open_time_ms": latest.open_time_ms,
+            "price_action_structure": {
+                "metal_breakdown": metal_breakdown,
+                "latest_close": _s(latest.close),
+                "previous_low": _s(previous_low),
+                "one_hour_net_pct": _s(_q(one_hour_net_pct)),
+                "four_hour_net_pct": _s(_q(four_hour_net_pct)),
+                "breakdown_close": breakdown,
+            },
+            "invalidation_conditions": [
+                {
+                    "condition_type": "close_back_above_breakdown_reference",
+                    "description": "PMR invalidates if price closes back above the breakdown reference.",
+                },
+                {
+                    "condition_type": "role_conflict",
+                    "description": "Mixed metal role or session context should keep PMR observe-only.",
+                },
+            ],
+        }
+        if not metal_breakdown:
+            return self._no_action(
+                signal_input,
+                ["pmr_no_action_metal_breakdown_not_confirmed"],
+                "PMR-001 v0 did not confirm precious-metal short breakdown.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.BREAKOUT_FALSE_BREAKOUT_PRONE,
+            )
+        return self._would_enter(
+            signal_input,
+            side=SignalSide.SHORT,
+            confidence=Decimal("0.59"),
+            reason_codes=[
+                "pmr_metal_breakdown_state",
+                "pmr_short_followthrough_confirmed",
+            ],
+            human_summary="PMR-001 v0 precious-metal short breakdown detected for review.",
+            evidence_payload=evidence,
+            expected_risk_shape=ExpectedRiskShape.BREAKOUT_FALSE_BREAKOUT_PRONE,
+        )
+
+
+class SOR001PilotReferenceEvaluator(_ReferencePriceActionEvaluator):
+    family_id = SOR_FAMILY_ID
+    logic_version = "sor-001-pilot-reference-v0"
+
+    def _evaluate(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        one_hour: list[_Candle],
+        four_hour: list[_Candle],
+    ) -> StrategyFamilySignalOutput:
+        del four_hour
+        latest = one_hour[-1]
+        opening_range = one_hour[-5:-1]
+        range_high = max(candle.high for candle in opening_range)
+        range_low = min(candle.low for candle in opening_range)
+        short_break = latest.close < range_low and latest.close < latest.open
+        evidence = {
+            "market_state": "SESSION_BREAKOUT" if short_break else "UNCERTAIN",
+            "entry_pattern": "session_opening_range_breakdown" if short_break else "none",
+            "latest_1h_open_time_ms": latest.open_time_ms,
+            "session_structure": {
+                "range_high_reference": _s(range_high),
+                "range_low_reference": _s(range_low),
+                "reference_window_bars": len(opening_range),
+            },
+            "price_action_structure": {
+                "session_opening_range_breakdown": short_break,
+                "latest_close": _s(latest.close),
+                "range_low_reference": _s(range_low),
+            },
+            "invalidation_conditions": [
+                {
+                    "condition_type": "close_back_inside_opening_range",
+                    "description": "SOR invalidates if price closes back inside the opening range.",
+                },
+                {
+                    "condition_type": "session_mapping_missing",
+                    "description": "Missing session mapping blocks candidate preparation.",
+                },
+            ],
+        }
+        if not short_break:
+            return self._no_action(
+                signal_input,
+                ["sor_no_action_session_breakout_not_confirmed"],
+                "SOR-001 v0 did not confirm a session opening-range breakdown.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.BREAKOUT_FALSE_BREAKOUT_PRONE,
+            )
+        return self._would_enter(
+            signal_input,
+            side=SignalSide.SHORT,
+            confidence=Decimal("0.58"),
+            reason_codes=[
+                "sor_opening_range_breakdown",
+                "sor_closed_trigger_confirmed",
+            ],
+            human_summary="SOR-001 v0 session opening-range short breakdown detected for review.",
+            evidence_payload=evidence,
+            expected_risk_shape=ExpectedRiskShape.BREAKOUT_FALSE_BREAKOUT_PRONE,
         )
 
 
