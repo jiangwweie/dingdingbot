@@ -24,6 +24,10 @@ def _args(tmp_path: Path, **overrides):
         "one_hour_limit": 25,
         "four_hour_limit": 25,
         "allow_prepare_records": False,
+        "allow_arm_preview": False,
+        "allow_attempt_policy_prepare": False,
+        "allow_disabled_smoke": False,
+        "skip_disabled_smoke_prerequisite_probe": True,
         "include_packets": False,
         "notify_no_signal": False,
         "notification_dry_run": False,
@@ -208,6 +212,73 @@ def test_watcher_tick_writes_packets_without_notifying_on_no_signal(tmp_path, mo
     assert (tmp_path / "watcher" / "wakeup-packet.json").exists()
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
+
+
+def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_operator_packet_from_path",
+        lambda **kwargs: {
+            "scope": "runtime_observation_operator_packet",
+            "status": "observation_running_no_signal",
+            "active_runtime_observation": {
+                "active_runtime_count": 1,
+                "latest_iteration": 1,
+                "iterations_completed": 1,
+                "iterations_remaining": 0,
+                "stop_reason": "max_iterations_exhausted",
+            },
+            "signal_counts": {
+                "runtime_ready_signal_count": 0,
+                "strategy_group_would_enter_signal_count": 0,
+                "strategy_group_no_action_signal_count": 1,
+            },
+            "runtime_prepare_context": {},
+            "operator_command_plan": {
+                "next_step": "continue_active_runtime_observation",
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "operator_packet_only": True,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "forbidden_effects": [],
+            },
+        },
+    )
+
+    def supervisor_builder(args):
+        captured["allow_arm_preview"] = args.allow_arm_preview
+        captured["allow_attempt_policy_prepare"] = args.allow_attempt_policy_prepare
+        captured["allow_disabled_smoke"] = args.allow_disabled_smoke
+        captured["skip_disabled_smoke_prerequisite_probe"] = (
+            args.skip_disabled_smoke_prerequisite_probe
+        )
+        return _fake_supervisor("waiting_for_signal")(args)
+
+    runtime_signal_watcher_tick.build_watcher_tick_packet(
+        _args(
+            tmp_path,
+            allow_arm_preview=True,
+            allow_attempt_policy_prepare=True,
+            allow_disabled_smoke=True,
+            skip_disabled_smoke_prerequisite_probe=False,
+        ),
+        supervisor_builder=supervisor_builder,
+    )
+
+    assert captured == {
+        "allow_arm_preview": True,
+        "allow_attempt_policy_prepare": True,
+        "allow_disabled_smoke": True,
+        "skip_disabled_smoke_prerequisite_probe": False,
+    }
 
 
 def test_watcher_tick_does_not_notify_when_operator_packet_needs_review_but_waiting_for_market(

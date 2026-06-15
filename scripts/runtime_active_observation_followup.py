@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Callable, Mapping
@@ -22,10 +23,15 @@ if str(ROOT_DIR) not in sys.path:
 
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     DEFAULT_API_BASE,
+    DEFAULT_OUTCOME_KIND,
+    EXCHANGE_ARM_APPROVAL_ENV,
     FirstRealSubmitApiFlow,
     FlowConfig,
+    LOCAL_REGISTRATION_APPROVAL_ENV,
     UrlLibApiClient,
     _load_env_file,
+    _exchange_arm_approval_value,
+    _local_registration_approval_value,
 )
 
 
@@ -46,6 +52,7 @@ LOCAL_REGISTRATION_REQUIRED_EVIDENCE_IDS = (
     "submit_idempotency_policy_id",
     "protection_creation_failure_policy_id",
 )
+ATTEMPT_POLICY_PREPARED_STATUS = "attempt_policy_prepared"
 FORBIDDEN_LOOP_FLAGS = (
     "exchange_write_called",
     "order_created",
@@ -245,8 +252,18 @@ def _run_arm_preview(
     *,
     authorization_id: str,
     args: argparse.Namespace,
+    evidence_ids: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _load_env_file(args.env_file)
+    ids = evidence_ids or {}
+    os.environ.setdefault(
+        LOCAL_REGISTRATION_APPROVAL_ENV,
+        _local_registration_approval_value(authorization_id),
+    )
+    os.environ.setdefault(
+        EXCHANGE_ARM_APPROVAL_ENV,
+        _exchange_arm_approval_value(authorization_id),
+    )
     config = FlowConfig(
         api_base=args.api_base,
         mode="arm",
@@ -254,11 +271,220 @@ def _run_arm_preview(
         authorization_id=authorization_id,
         record_attempt_consumption=False,
         preview_disabled_first_real_submit_action=False,
+        attempt_outcome_policy_id=_optional_id(ids, "attempt_outcome_policy_id"),
     )
     return FirstRealSubmitApiFlow(
         client=UrlLibApiClient(api_base=config.api_base),
         config=config,
     ).run()
+
+
+def _prepare_attempt_policy(
+    *,
+    authorization_id: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    _load_env_file(args.env_file)
+    client = UrlLibApiClient(api_base=args.api_base)
+    steps: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    warnings: list[str] = []
+    ids: dict[str, str] = {}
+
+    reservation = _attempt_policy_step(
+        client,
+        steps=steps,
+        blockers=blockers,
+        warnings=warnings,
+        name="record_attempt_reservation",
+        method="POST",
+        path=(
+            "/api/trading-console/"
+            f"runtime-execution-attempt-reservations/authorizations/{authorization_id}"
+        ),
+    )
+    ids.update(_ids_from_body(_as_dict(reservation.get("body"))))
+    reservation_id = ids.get("reservation_id")
+    if not reservation_id and _recoverable_existing_record(reservation):
+        reservation_id = f"runtime-attempt-reservation-{authorization_id}"
+        ids["reservation_id"] = reservation_id
+        warnings.append("existing_attempt_reservation_reused")
+        _remove_step_http_blocker(blockers, "record_attempt_reservation")
+    if not reservation_id:
+        blockers.append("attempt_reservation_id_missing")
+
+    if reservation_id and not blockers:
+        mutation = _attempt_policy_step(
+            client,
+            steps=steps,
+            blockers=blockers,
+            warnings=warnings,
+            name="apply_attempt_mutation",
+            method="POST",
+            path=(
+                "/api/trading-console/"
+                f"runtime-execution-attempt-mutations/reservations/{reservation_id}"
+            ),
+        )
+        ids.update(_ids_from_body(_as_dict(mutation.get("body"))))
+        if not ids.get("mutation_id") and _recoverable_existing_record(mutation):
+            ids["mutation_id"] = f"runtime-attempt-mutation-{reservation_id}"
+            warnings.append("existing_attempt_mutation_reused")
+            _remove_step_http_blocker(blockers, "apply_attempt_mutation")
+        if not ids.get("mutation_id"):
+            blockers.append("attempt_mutation_id_missing")
+
+    if reservation_id and not blockers:
+        policy = _attempt_policy_step(
+            client,
+            steps=steps,
+            blockers=blockers,
+            warnings=warnings,
+            name="record_attempt_outcome_policy",
+            method="POST",
+            path=(
+                "/api/trading-console/"
+                f"runtime-execution-attempt-outcome-policies/reservations/{reservation_id}"
+            ),
+            query={"outcome_kind": DEFAULT_OUTCOME_KIND},
+        )
+        ids.update(_ids_from_body(_as_dict(policy.get("body"))))
+        if not ids.get("policy_id") and _recoverable_existing_record(policy):
+            ids["policy_id"] = (
+                f"runtime-attempt-outcome-policy-{reservation_id}-{DEFAULT_OUTCOME_KIND}"
+            )
+            warnings.append("existing_attempt_outcome_policy_reused")
+            _remove_step_http_blocker(blockers, "record_attempt_outcome_policy")
+        if not ids.get("policy_id"):
+            blockers.append("attempt_outcome_policy_id_missing")
+
+    status = ATTEMPT_POLICY_PREPARED_STATUS if not blockers else "attempt_policy_blocked"
+    return {
+        "scope": "runtime_attempt_policy_preparation",
+        "status": status,
+        "authorization_id": authorization_id,
+        "ids": {
+            "reservation_id": ids.get("reservation_id"),
+            "attempt_mutation_id": ids.get("mutation_id"),
+            "attempt_outcome_policy_id": ids.get("policy_id"),
+        },
+        "steps": steps,
+        "blockers": _dedupe_text(blockers),
+        "warnings": _dedupe_text(warnings),
+        "safety": {
+            "uses_official_trading_console_api": True,
+            "mutates_attempt_counter": status == ATTEMPT_POLICY_PREPARED_STATUS,
+            "mutates_runtime_budget": status == ATTEMPT_POLICY_PREPARED_STATUS,
+            "exchange_write_called": False,
+            "exchange_order_submitted": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _run_attempt_policy_preflight(
+    *,
+    authorization_id: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    _load_env_file(args.env_file)
+    result = UrlLibApiClient(api_base=args.api_base).request_json(
+        "GET",
+        (
+            "/api/trading-console/"
+            f"runtime-execution-controlled-submit-preflights/authorizations/{authorization_id}"
+        ),
+    )
+    body = _as_dict(result.get("body"))
+    blockers = [str(item) for item in body.get("blockers") or []]
+    raw_status = body.get("status") or body.get("controlled_submit_plan_status")
+    verdict = body.get("final_gate_verdict")
+    if raw_status is not None and str(raw_status) != "ready_for_controlled_submit_adapter":
+        blockers.append(f"preflight_status:{raw_status}")
+    if verdict is not None and str(verdict).lower() != "pass":
+        blockers.append(f"final_gate_verdict:{verdict}")
+    if result.get("http_status", 0) >= 300 or result.get("error"):
+        blockers.append(f"preflight_http_{result.get('http_status')}")
+    passed = (
+        result.get("http_status") == 200
+        and str(raw_status) == "ready_for_controlled_submit_adapter"
+        and str(verdict).lower() == "pass"
+        and not blockers
+    )
+    return {
+        "scope": "runtime_attempt_policy_preflight",
+        "status": "pass" if passed else "blocked",
+        "authorization_id": authorization_id,
+        "http_status": result.get("http_status"),
+        "body_status": raw_status,
+        "final_gate_verdict": verdict,
+        "blockers": _dedupe_text(blockers),
+        "warnings": [str(item) for item in body.get("warnings") or []],
+        "safety": {
+            "uses_official_trading_console_api": True,
+            "mutates_attempt_counter": False,
+            "mutates_runtime_budget": False,
+            "exchange_write_called": False,
+            "exchange_order_submitted": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _attempt_policy_step(
+    client: UrlLibApiClient,
+    *,
+    steps: list[dict[str, Any]],
+    blockers: list[str],
+    warnings: list[str],
+    name: str,
+    method: str,
+    path: str,
+    query: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = client.request_json(method, path, query=query)
+    body = _as_dict(result.get("body"))
+    steps.append(
+        {
+            "name": name,
+            "method": method,
+            "path": path,
+            "query_keys": sorted((query or {}).keys()),
+            "http_status": result.get("http_status"),
+            "status": body.get("status"),
+            "detail": body.get("detail") or body.get("message"),
+            "id_summary": _ids_from_body(body),
+            "blockers": list(body.get("blockers") or []),
+            "warnings": list(body.get("warnings") or []),
+        }
+    )
+    if result.get("http_status", 0) >= 300 or result.get("error"):
+        blockers.append(f"{name}_http_{result.get('http_status')}")
+    blockers.extend(str(item) for item in body.get("blockers") or [])
+    warnings.extend(str(item) for item in body.get("warnings") or [])
+    return result
+
+
+def _ids_from_body(body: Mapping[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key in ("reservation_id", "mutation_id", "policy_id"):
+        value = body.get(key)
+        text = str(value or "").strip()
+        if text:
+            result[key] = text
+    return result
+
+
+def _recoverable_existing_record(result: Mapping[str, Any]) -> bool:
+    if int(result.get("http_status") or 0) < 300:
+        return False
+    text = json.dumps(result.get("body"), ensure_ascii=False, default=str).lower()
+    return any(fragment in text for fragment in ("already", "exist", "duplicate"))
+
+
+def _remove_step_http_blocker(blockers: list[str], name: str) -> None:
+    expected = f"{name}_http_"
+    blockers[:] = [item for item in blockers if not item.startswith(expected)]
 
 
 def _disabled_smoke_forbidden_effects(report: dict[str, Any]) -> list[str]:
@@ -291,17 +517,11 @@ def _arm_preview_forbidden_effects(report: dict[str, Any]) -> list[str]:
         path = str(step.get("path") or "")
         name = str(step.get("name") or "")
         if "attempt-mutations" in path:
-            effects.append(f"{name}:attempt_mutation")
+            effects.append(f"{name}:unexpected_attempt_mutation_in_arm_preview")
         if "attempt-reservations" in path:
-            effects.append(f"{name}:attempt_reservation")
-        if "local-registration-action-authorizations" in path:
-            effects.append(f"{name}:local_registration_authorization")
-        if "exchange-submit-action-authorizations" in path:
-            effects.append(f"{name}:exchange_submit_authorization")
-        if "exchange-submit-adapter-results" in path:
-            effects.append(f"{name}:exchange_submit_adapter_arm")
+            effects.append(f"{name}:unexpected_attempt_reservation_in_arm_preview")
         if "order-lifecycle-adapter-results" in path:
-            effects.append(f"{name}:order_lifecycle_adapter_result")
+            continue
         if "first-real-submit-actions" in path:
             effects.append(f"{name}:first_real_submit_action")
     if report.get("ready_for_real_submit_action") is True:
@@ -429,6 +649,10 @@ def build_followup_packet(
     loop_packet: dict[str, Any] | None = None,
     arm_preview_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
     | None = None,
+    attempt_policy_preflight_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
+    | None = None,
+    attempt_policy_preparer: Callable[[str, argparse.Namespace], dict[str, Any]]
+    | None = None,
     disabled_smoke_runner: Callable[[str, argparse.Namespace], dict[str, Any]]
     | None = None,
 ) -> dict[str, Any]:
@@ -442,6 +666,8 @@ def build_followup_packet(
     arm_report: dict[str, Any] | None = None
     arm_report_json_used = False
     arm_forbidden: list[str] = []
+    attempt_policy_preflight: dict[str, Any] | None = None
+    attempt_policy_report: dict[str, Any] | None = None
     disabled_report: dict[str, Any] | None = None
     disabled_forbidden: list[str] = []
     local_registration_readiness: dict[str, Any] = {
@@ -485,25 +711,65 @@ def build_followup_packet(
             if arm_forbidden:
                 blockers.append("arm_report_contains_forbidden_effects")
         elif args.allow_arm_preview:
-            arm_runner = arm_preview_runner or (
-                lambda auth_id, parsed_args: _run_arm_preview(
-                    authorization_id=auth_id,
-                    args=parsed_args,
+            if getattr(args, "allow_attempt_policy_prepare", False):
+                preflight_runner = attempt_policy_preflight_runner or (
+                    lambda auth_id, parsed_args: _run_attempt_policy_preflight(
+                        authorization_id=auth_id,
+                        args=parsed_args,
+                    )
                 )
-            )
-            arm_report = arm_runner(authorization_id, args)
-            arm_forbidden = _arm_preview_forbidden_effects(arm_report)
-            warnings.extend(
-                f"arm_preview:{item}"
-                for item in arm_report.get("blockers") or []
-            )
-            warnings.extend(
-                f"arm_preview:{item}"
-                for item in arm_report.get("warnings") or []
-            )
-            if arm_forbidden:
-                blockers.append("arm_preview_contains_forbidden_effects")
-        if disabled_smoke_runner is not None:
+                attempt_policy_preflight = preflight_runner(authorization_id, args)
+                warnings.extend(
+                    f"attempt_policy_preflight:{item}"
+                    for item in attempt_policy_preflight.get("warnings") or []
+                )
+                if attempt_policy_preflight.get("status") != "pass":
+                    blockers.extend(
+                        f"attempt_policy_preflight:{item}"
+                        for item in attempt_policy_preflight.get("blockers") or []
+                    )
+                    blockers.append("attempt_policy_preflight_not_passed")
+                else:
+                    preparer = attempt_policy_preparer or (
+                        lambda auth_id, parsed_args: _prepare_attempt_policy(
+                            authorization_id=auth_id,
+                            args=parsed_args,
+                        )
+                    )
+                    attempt_policy_report = preparer(authorization_id, args)
+                    blockers.extend(
+                        f"attempt_policy_prepare:{item}"
+                        for item in attempt_policy_report.get("blockers") or []
+                    )
+                    warnings.extend(
+                        f"attempt_policy_prepare:{item}"
+                        for item in attempt_policy_report.get("warnings") or []
+                    )
+                    if attempt_policy_report.get("status") != ATTEMPT_POLICY_PREPARED_STATUS:
+                        blockers.append("attempt_policy_prepare_not_ready")
+            if not blockers:
+                arm_runner = arm_preview_runner or (
+                    lambda auth_id, parsed_args: _run_arm_preview(
+                        authorization_id=auth_id,
+                        args=parsed_args,
+                        evidence_ids=_as_dict((attempt_policy_report or {}).get("ids")),
+                    )
+                )
+                arm_report = arm_runner(authorization_id, args)
+                arm_forbidden = _arm_preview_forbidden_effects(arm_report)
+                warnings.extend(
+                    f"arm_preview:{item}"
+                    for item in arm_report.get("blockers") or []
+                )
+                warnings.extend(
+                    f"arm_preview:{item}"
+                    for item in arm_report.get("warnings") or []
+                )
+                if arm_forbidden:
+                    blockers.append("arm_preview_contains_forbidden_effects")
+        if blockers:
+            disabled_report = None
+        elif disabled_smoke_runner is not None:
             disabled_report = disabled_smoke_runner(authorization_id, args)
         else:
             disabled_report = _run_disabled_smoke(
@@ -511,17 +777,18 @@ def build_followup_packet(
                 args=args,
                 evidence_ids=_as_dict((arm_report or {}).get("ids")),
             )
-        disabled_forbidden = _disabled_smoke_forbidden_effects(disabled_report)
-        blockers.extend(
-            f"disabled_smoke:{item}"
-            for item in disabled_report.get("blockers") or []
-        )
-        warnings.extend(
-            f"disabled_smoke:{item}"
-            for item in disabled_report.get("warnings") or []
-        )
-        if disabled_forbidden:
-            blockers.append("disabled_smoke_contains_forbidden_effects")
+        if disabled_report is not None:
+            disabled_forbidden = _disabled_smoke_forbidden_effects(disabled_report)
+            blockers.extend(
+                f"disabled_smoke:{item}"
+                for item in disabled_report.get("blockers") or []
+            )
+            warnings.extend(
+                f"disabled_smoke:{item}"
+                for item in disabled_report.get("warnings") or []
+            )
+            if disabled_forbidden:
+                blockers.append("disabled_smoke_contains_forbidden_effects")
         followup_status = (
             "disabled_smoke_completed"
             if not blockers
@@ -539,6 +806,8 @@ def build_followup_packet(
         "source_loop_status": status,
         "source_loop_stop_reason": packet.get("stop_reason"),
         "prepared_authorization_id": authorization_id,
+        "attempt_policy_preflight_report": attempt_policy_preflight,
+        "attempt_policy_prepare_report": attempt_policy_report,
         "arm_preview_report": arm_report,
         "disabled_smoke_report": disabled_report,
         "local_registration_readiness": local_registration_readiness,
@@ -550,6 +819,8 @@ def build_followup_packet(
             "arm_preview_called": arm_report is not None and not arm_report_json_used,
             "arm_report_attached": arm_report is not None,
             "arm_report_json_used": arm_report_json_used,
+            "attempt_policy_preflight_called": attempt_policy_preflight is not None,
+            "attempt_policy_prepare_called": attempt_policy_report is not None,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
             "next_step": _next_step(
@@ -564,7 +835,10 @@ def build_followup_packet(
                 )
                 else None
             ),
-            "mutating_attempt_consumption_allowed_by_this_packet": False,
+            "mutating_attempt_consumption_allowed_by_this_packet": (
+                attempt_policy_report is not None
+                and attempt_policy_report.get("status") == ATTEMPT_POLICY_PREPARED_STATUS
+            ),
             "requires_fresh_real_signal_revalidation_before_mutation": (
                 local_registration_readiness.get(
                     "requires_fresh_real_signal_revalidation"
@@ -577,6 +851,8 @@ def build_followup_packet(
             "arm_preview_called": arm_report is not None and not arm_report_json_used,
             "arm_report_attached": arm_report is not None,
             "arm_report_json_used": arm_report_json_used,
+            "attempt_policy_preflight_called": attempt_policy_preflight is not None,
+            "attempt_policy_prepare_called": attempt_policy_report is not None,
             "disabled_smoke_called": disabled_report is not None,
             "owner_confirmed_for_first_real_submit_action": False,
             "real_submit_requested": False,
@@ -584,12 +860,65 @@ def build_followup_packet(
             "exchange_order_submitted": False,
             "order_created": False,
             "order_lifecycle_submit_called": False,
-            "attempt_counter_mutated": False,
-            "runtime_budget_mutated": False,
+            "attempt_counter_mutated": (
+                attempt_policy_report is not None
+                and _as_dict(attempt_policy_report.get("safety")).get(
+                    "mutates_attempt_counter"
+                )
+                is True
+            ),
+            "runtime_budget_mutated": (
+                attempt_policy_report is not None
+                and _as_dict(attempt_policy_report.get("safety")).get(
+                    "mutates_runtime_budget"
+                )
+                is True
+            ),
             "withdrawal_or_transfer_created": False,
             "loop_forbidden_effects": loop_forbidden,
             "arm_preview_forbidden_effects": arm_forbidden,
             "disabled_smoke_forbidden_effects": disabled_forbidden,
+        },
+}
+
+
+def _dedupe_text(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value)
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
+
+
+def _operation_layer_arm_evidence_path(args: argparse.Namespace, output_path: Path) -> Path:
+    if args.operation_layer_arm_evidence_json:
+        return Path(args.operation_layer_arm_evidence_json).expanduser()
+    return output_path.parent / "operation-layer-arm-evidence.json"
+
+
+def _operation_layer_arm_evidence_payload(packet: Mapping[str, Any]) -> dict[str, Any]:
+    arm_report = packet.get("arm_preview_report")
+    if isinstance(arm_report, dict):
+        return dict(arm_report)
+    return {
+        "scope": "runtime_operation_layer_arm_evidence",
+        "status": "no_current_arm_preview",
+        "source_followup_status": packet.get("status"),
+        "prepared_authorization_id": packet.get("prepared_authorization_id"),
+        "blockers": [],
+        "warnings": [],
+        "ids": {},
+        "safety": {
+            "stale_arm_evidence_cleared": True,
+            "exchange_called": False,
+            "exchange_order_submitted": False,
+            "order_created": False,
+            "order_lifecycle_submit_called": False,
+            "real_submit_requested": False,
+            "withdrawal_or_transfer_created": False,
         },
     }
 
@@ -637,6 +966,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--env-file")
     parser.add_argument("--allow-arm-preview", action="store_true")
     parser.add_argument(
+        "--allow-attempt-policy-prepare",
+        action="store_true",
+        help=(
+            "For a fresh prepared authorization, record the official attempt "
+            "reservation, attempt mutation, and outcome policy before arm preview."
+        ),
+    )
+    parser.add_argument(
+        "--operation-layer-arm-evidence-json",
+        help=(
+            "Write the current arm preview report for the resume dispatcher. "
+            "Defaults to operation-layer-arm-evidence.json next to --output-json."
+        ),
+    )
+    parser.add_argument(
         "--arm-report-json",
         help=(
             "Reuse an existing successful arm report as the evidence source for "
@@ -660,6 +1004,19 @@ def main(argv: list[str] | None = None) -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(
             json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            + "\n",
+            encoding="utf-8",
+        )
+        arm_evidence_path = _operation_layer_arm_evidence_path(args, output_path)
+        arm_evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        arm_evidence_path.write_text(
+            json.dumps(
+                _operation_layer_arm_evidence_payload(packet),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
             + "\n",
             encoding="utf-8",
         )

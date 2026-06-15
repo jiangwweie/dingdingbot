@@ -444,10 +444,13 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         one_hour_limit=args.one_hour_limit,
         four_hour_limit=args.four_hour_limit,
         allow_prepare_records=args.allow_prepare_records,
-        allow_arm_preview=False,
-        allow_disabled_smoke=False,
+        allow_arm_preview=args.allow_arm_preview,
+        allow_attempt_policy_prepare=args.allow_attempt_policy_prepare,
+        allow_disabled_smoke=args.allow_disabled_smoke,
         include_packets=args.include_packets,
-        skip_disabled_smoke_prerequisite_probe=True,
+        skip_disabled_smoke_prerequisite_probe=(
+            args.skip_disabled_smoke_prerequisite_probe
+        ),
     )
 
 
@@ -696,6 +699,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--allow-prepare-records", action="store_true")
+    parser.add_argument("--allow-arm-preview", action="store_true")
+    parser.add_argument("--allow-attempt-policy-prepare", action="store_true")
+    parser.add_argument("--allow-disabled-smoke", action="store_true")
+    parser.add_argument(
+        "--skip-disabled-smoke-prerequisite-probe",
+        action="store_true",
+        default=True,
+    )
+    parser.add_argument(
+        "--run-disabled-smoke-prerequisite-probe",
+        action="store_false",
+        dest="skip_disabled_smoke_prerequisite_probe",
+    )
     parser.add_argument("--include-packets", action="store_true")
     parser.add_argument("--notify-no-signal", action="store_true")
     parser.add_argument("--notification-dry-run", action="store_true")

@@ -9,8 +9,10 @@ from scripts import runtime_active_observation_followup
 def _args(
     *,
     allow_arm_preview=False,
+    allow_attempt_policy_prepare=False,
     allow_disabled_smoke=False,
     arm_report_json=None,
+    operation_layer_arm_evidence_json=None,
 ):
     return Namespace(
         loop_packet_json="unused.json",
@@ -18,7 +20,9 @@ def _args(
         api_base="http://unit",
         env_file=None,
         allow_arm_preview=allow_arm_preview,
+        allow_attempt_policy_prepare=allow_attempt_policy_prepare,
         arm_report_json=arm_report_json,
+        operation_layer_arm_evidence_json=operation_layer_arm_evidence_json,
         allow_disabled_smoke=allow_disabled_smoke,
         skip_disabled_smoke_prerequisite_probe=False,
     )
@@ -132,6 +136,53 @@ def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False):
     }
 
 
+def _attempt_policy_report():
+    return {
+        "scope": "runtime_attempt_policy_preparation",
+        "status": "attempt_policy_prepared",
+        "authorization_id": "auth-1",
+        "ids": {
+            "reservation_id": "reserve-1",
+            "attempt_mutation_id": "mutation-1",
+            "attempt_outcome_policy_id": "policy-1",
+        },
+        "steps": [],
+        "blockers": [],
+        "warnings": [],
+        "safety": {
+            "mutates_attempt_counter": True,
+            "mutates_runtime_budget": True,
+            "exchange_write_called": False,
+            "exchange_order_submitted": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _attempt_policy_preflight_report(status="pass", blockers=None):
+    return {
+        "scope": "runtime_attempt_policy_preflight",
+        "status": status,
+        "authorization_id": "auth-1",
+        "http_status": 200,
+        "body_status": (
+            "ready_for_controlled_submit_adapter"
+            if status == "pass"
+            else "blocked"
+        ),
+        "final_gate_verdict": "PASS" if status == "pass" else "BLOCK",
+        "blockers": blockers or [],
+        "warnings": [],
+        "safety": {
+            "mutates_attempt_counter": False,
+            "mutates_runtime_budget": False,
+            "exchange_write_called": False,
+            "exchange_order_submitted": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
 def test_followup_waits_when_loop_is_not_ready():
     calls = []
 
@@ -221,6 +272,52 @@ def test_followup_cli_exits_zero_for_ready_prepare_review(tmp_path, capsys):
     assert "ready_for_prepare_records" in stdout
 
 
+def test_followup_cli_refreshes_arm_evidence_when_no_current_arm(tmp_path):
+    loop_path = tmp_path / "loop-packet.json"
+    output_path = tmp_path / "followup-packet.json"
+    arm_evidence_path = tmp_path / "operation-layer-arm-evidence.json"
+    loop_path.write_text(
+        json.dumps(
+            _loop_packet(
+                "waiting_for_signal",
+                authorization_id=None,
+                stop_reason="max_iterations_exhausted",
+            )
+        ),
+        encoding="utf-8",
+    )
+    arm_evidence_path.write_text(
+        json.dumps(
+            {
+                "status": "stale_blocked",
+                "blockers": ["attempts_exhausted"],
+                "safety": {"exchange_called": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = runtime_active_observation_followup.main(
+        [
+            "--loop-packet-json",
+            str(loop_path),
+            "--output-json",
+            str(output_path),
+            "--operation-layer-arm-evidence-json",
+            str(arm_evidence_path),
+        ]
+    )
+
+    arm_evidence = json.loads(arm_evidence_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert arm_evidence["status"] == "no_current_arm_preview"
+    assert arm_evidence["source_followup_status"] == (
+        "observation_window_complete_no_signal"
+    )
+    assert arm_evidence["blockers"] == []
+    assert arm_evidence["safety"]["stale_arm_evidence_cleared"] is True
+
+
 def test_followup_requires_explicit_disabled_smoke_flag_when_ready():
     packet = runtime_active_observation_followup.build_followup_packet(
         _args(),
@@ -289,6 +386,98 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
         "not_ready_for_local_registration_authorization_packet"
     )
     assert packet["safety_invariants"]["real_submit_requested"] is False
+
+
+def test_followup_prepares_attempt_policy_before_arm_when_allowed():
+    calls = []
+
+    def attempt_preparer(auth_id, args):
+        calls.append(("attempt", auth_id, args.api_base))
+        return _attempt_policy_report()
+
+    def arm_runner(auth_id, args):
+        calls.append(("arm", auth_id, args.api_base))
+        return _arm_preview_report(blockers=[], warnings=[])
+
+    def disabled_runner(auth_id, args):
+        calls.append(("disabled", auth_id, args.api_base))
+        return _disabled_smoke_report()
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(
+            allow_arm_preview=True,
+            allow_attempt_policy_prepare=True,
+            allow_disabled_smoke=True,
+        ),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        attempt_policy_preflight_runner=lambda auth_id, args: (
+            calls.append(("preflight", auth_id, args.api_base))
+            or _attempt_policy_preflight_report()
+        ),
+        attempt_policy_preparer=attempt_preparer,
+        arm_preview_runner=arm_runner,
+        disabled_smoke_runner=disabled_runner,
+    )
+
+    assert packet["status"] == "disabled_smoke_completed"
+    assert calls == [
+        ("preflight", "auth-1", "http://unit"),
+        ("attempt", "auth-1", "http://unit"),
+        ("arm", "auth-1", "http://unit"),
+        ("disabled", "auth-1", "http://unit"),
+    ]
+    assert packet["operator_command_plan"]["attempt_policy_preflight_called"] is True
+    assert packet["operator_command_plan"]["attempt_policy_prepare_called"] is True
+    assert (
+        packet["operator_command_plan"][
+            "mutating_attempt_consumption_allowed_by_this_packet"
+        ]
+        is True
+    )
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is True
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is True
+    assert packet["safety_invariants"]["exchange_order_submitted"] is False
+
+
+def test_followup_blocks_attempt_policy_prepare_when_preflight_blocks():
+    calls = []
+
+    def attempt_preparer(auth_id, args):
+        calls.append(("attempt", auth_id))
+        return _attempt_policy_report()
+
+    def arm_runner(auth_id, args):
+        calls.append(("arm", auth_id))
+        return _arm_preview_report(blockers=[], warnings=[])
+
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(
+            allow_arm_preview=True,
+            allow_attempt_policy_prepare=True,
+            allow_disabled_smoke=True,
+        ),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        attempt_policy_preflight_runner=lambda auth_id, args: (
+            calls.append(("preflight", auth_id))
+            or _attempt_policy_preflight_report(
+                status="blocked",
+                blockers=["attempts_exhausted"],
+            )
+        ),
+        attempt_policy_preparer=attempt_preparer,
+        arm_preview_runner=arm_runner,
+        disabled_smoke_runner=lambda auth_id, args: calls.append(("disabled", auth_id))
+        or _disabled_smoke_report(),
+    )
+
+    assert packet["status"] == "disabled_smoke_blocked"
+    assert calls == [("preflight", "auth-1")]
+    assert "attempt_policy_preflight_not_passed" in packet["blockers"]
+    assert "attempt_policy_preflight:attempts_exhausted" in packet["blockers"]
+    assert packet["operator_command_plan"]["attempt_policy_preflight_called"] is True
+    assert packet["operator_command_plan"]["attempt_policy_prepare_called"] is False
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is False
 
 
 def test_followup_classifies_expected_local_registration_boundary():
@@ -517,7 +706,7 @@ def test_followup_blocks_when_arm_preview_touches_forbidden_surfaces():
     assert packet["status"] == "disabled_smoke_blocked"
     assert "arm_preview_contains_forbidden_effects" in packet["blockers"]
     assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == [
-        "apply_attempt_mutation:attempt_mutation"
+        "apply_attempt_mutation:unexpected_attempt_mutation_in_arm_preview"
     ]
 
 

@@ -69,6 +69,7 @@ from src.domain.runtime_execution_trusted_submit_facts import (
 )
 from src.domain.runtime_execution_order_lifecycle_handoff import (
     RuntimeExecutionOrderLifecycleHandoffDraft,
+    RuntimeExecutionOrderLifecycleHandoffStatus,
     build_runtime_execution_order_lifecycle_handoff_draft,
 )
 from src.domain.runtime_execution_order_lifecycle_adapter import (
@@ -1339,7 +1340,65 @@ class RuntimeExecutionIntentAdapterService:
             protection_plan=protection_plan,
             now_ms=_now_ms(),
         )
+        draft = await self._align_handoff_quantities_to_trusted_market_rules(
+            draft,
+            execution_intent_id=intent.id,
+        )
         return await self._order_lifecycle_handoff_repository.create(draft)
+
+    async def _align_handoff_quantities_to_trusted_market_rules(
+        self,
+        draft: RuntimeExecutionOrderLifecycleHandoffDraft,
+        *,
+        execution_intent_id: str,
+    ) -> RuntimeExecutionOrderLifecycleHandoffDraft:
+        if self._trusted_submit_facts_repository is None:
+            return draft
+        trusted = await self._trusted_submit_facts_repository.get(
+            f"trusted-submit-facts-{execution_intent_id}"
+        )
+        if trusted is None:
+            return draft
+        market_rule_source = getattr(trusted, "market_rule_source", None)
+        metadata = getattr(market_rule_source, "metadata", None)
+        if not isinstance(metadata, dict):
+            return draft
+        step_size = _market_step_from_metadata(
+            metadata.get("step_size"),
+            metadata.get("quantity_precision"),
+        )
+        if step_size is None:
+            return draft
+        min_qty = _decimal_or_none(metadata.get("min_qty"))
+        aligned_draft, alignment_warnings, alignment_blockers = (
+            _align_handoff_quantity_fields_to_step(
+                draft,
+                step_size=step_size,
+                min_qty=min_qty,
+            )
+        )
+        if not alignment_warnings and not alignment_blockers:
+            return draft
+        return aligned_draft.model_copy(
+            update={
+                "status": (
+                    RuntimeExecutionOrderLifecycleHandoffStatus.BLOCKED
+                    if alignment_blockers
+                    else aligned_draft.status
+                ),
+                "warnings": _dedupe(list(draft.warnings) + alignment_warnings),
+                "blockers": _dedupe(list(draft.blockers) + alignment_blockers),
+                "metadata": {
+                    **dict(draft.metadata or {}),
+                    "market_quantity_step_alignment": {
+                        "source": "trusted_submit_fact_market_rule",
+                        "step_size": str(step_size),
+                        "min_qty": str(min_qty) if min_qty is not None else None,
+                        "aligned": bool(alignment_warnings),
+                    },
+                },
+            }
+        )
 
     async def order_lifecycle_adapter_preview_for_authorization(
         self,
@@ -3951,6 +4010,129 @@ class RuntimeExecutionIntentAdapterService:
 
 def _now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+def _align_handoff_quantity_fields_to_step(
+    draft: RuntimeExecutionOrderLifecycleHandoffDraft,
+    *,
+    step_size: Decimal,
+    min_qty: Decimal | None,
+) -> tuple[
+    RuntimeExecutionOrderLifecycleHandoffDraft,
+    list[str],
+    list[str],
+]:
+    warnings: list[str] = []
+    blockers: list[str] = []
+
+    requested_qty = _align_quantity_for_handoff(
+        draft.requested_qty,
+        reference="handoff.requested_qty",
+        step_size=step_size,
+        min_qty=min_qty,
+        warnings=warnings,
+        blockers=blockers,
+    )
+    entry_order_draft = _aligned_handoff_order_draft(
+        draft.entry_order_draft,
+        step_size=step_size,
+        min_qty=min_qty,
+        warnings=warnings,
+        blockers=blockers,
+    )
+    protection_order_drafts = [
+        _aligned_handoff_order_draft(
+            order_draft,
+            step_size=step_size,
+            min_qty=min_qty,
+            warnings=warnings,
+            blockers=blockers,
+        )
+        for order_draft in draft.protection_order_drafts
+    ]
+    order_model_drafts = [
+        _aligned_handoff_order_draft(
+            order_draft,
+            step_size=step_size,
+            min_qty=min_qty,
+            warnings=warnings,
+            blockers=blockers,
+        )
+        for order_draft in draft.order_model_drafts
+    ]
+    return (
+        draft.model_copy(
+            update={
+                "requested_qty": requested_qty,
+                "entry_order_draft": entry_order_draft,
+                "protection_order_drafts": protection_order_drafts,
+                "order_model_drafts": order_model_drafts,
+            }
+        ),
+        _dedupe(warnings),
+        _dedupe(blockers),
+    )
+
+
+def _aligned_handoff_order_draft(
+    order_draft: dict[str, Any],
+    *,
+    step_size: Decimal,
+    min_qty: Decimal | None,
+    warnings: list[str],
+    blockers: list[str],
+) -> dict[str, Any]:
+    aligned = dict(order_draft)
+    value = _decimal_or_none(aligned.get("requested_qty"))
+    reference = str(
+        aligned.get("local_order_draft_id")
+        or aligned.get("order_role")
+        or "order_draft"
+    )
+    if value is None:
+        blockers.append(f"order_lifecycle_quantity_invalid:{reference}")
+        return aligned
+    aligned_value = _align_quantity_for_handoff(
+        value,
+        reference=reference,
+        step_size=step_size,
+        min_qty=min_qty,
+        warnings=warnings,
+        blockers=blockers,
+    )
+    aligned["requested_qty"] = str(aligned_value)
+    return aligned
+
+
+def _align_quantity_for_handoff(
+    value: Decimal,
+    *,
+    reference: str,
+    step_size: Decimal,
+    min_qty: Decimal | None,
+    warnings: list[str],
+    blockers: list[str],
+) -> Decimal:
+    if step_size <= Decimal("0"):
+        return value
+    aligned = _floor_to_step(value, step_size)
+    if aligned <= Decimal("0"):
+        blockers.append(f"order_lifecycle_quantity_zero_after_step_alignment:{reference}")
+        return aligned
+    if min_qty is not None and aligned < min_qty:
+        blockers.append(f"order_lifecycle_quantity_below_min_qty_after_step_alignment:{reference}")
+    if aligned != value:
+        warnings.append(
+            "order_lifecycle_quantity_step_aligned:"
+            f"{reference}:from={value}:to={aligned}:step={step_size}"
+        )
+    return aligned
+
+
+def _floor_to_step(value: Decimal, step_size: Decimal) -> Decimal:
+    if step_size <= Decimal("0"):
+        return value
+    return (value // step_size) * step_size
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:

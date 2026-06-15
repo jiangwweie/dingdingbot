@@ -4,6 +4,7 @@ import importlib.util
 import asyncio
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from alembic.operations import Operations
@@ -2929,6 +2930,65 @@ async def test_runtime_execution_order_lifecycle_handoff_records_ready_adapter_i
     assert handoff.order_lifecycle_called is False
 
 
+@pytest.mark.asyncio
+async def test_order_lifecycle_handoff_aligns_quantities_to_trusted_market_step():
+    candidate = _candidate(
+        proposed_quantity=Decimal("0.0752842"),
+        intended_notional=Decimal("6"),
+        entry_price_reference=Decimal("600"),
+        risk_preview=OrderCandidateRiskPreview(
+            intended_notional=Decimal("6"),
+            proposed_quantity=Decimal("0.0752842"),
+            leverage=Decimal("1"),
+            margin_required=Decimal("3"),
+            liquidation_price_reference=Decimal("0"),
+            liquidation_stop_buffer=Decimal("130"),
+        ),
+        protection_preview=OrderCandidateProtectionPreview(
+            requires_protection=True,
+            stop_reference="bounded_loss_reference",
+            stop_price_reference=Decimal("594"),
+        ),
+    )
+    trusted_facts = _TrustedSubmitFactsLookup(
+        market_rule_metadata={
+            "min_qty": "0.01",
+            "step_size": "0.01",
+            "price_precision": "0.01",
+        }
+    )
+
+    _service, _authorization, handoff, _repo = await _order_lifecycle_handoff_setup(
+        candidate=candidate,
+        trusted_submit_facts_repository=trusted_facts,
+    )
+
+    assert handoff.status == (
+        RuntimeExecutionOrderLifecycleHandoffStatus.READY_FOR_ORDER_LIFECYCLE_ADAPTER
+    )
+    assert handoff.blockers == []
+    assert handoff.requested_qty == Decimal("0.07")
+    assert handoff.entry_order_draft["requested_qty"] == "0.07"
+    assert {draft["requested_qty"] for draft in handoff.protection_order_drafts} == {
+        "0.07"
+    }
+    assert {draft["requested_qty"] for draft in handoff.order_model_drafts} == {
+        "0.07"
+    }
+    assert any(
+        warning.startswith("order_lifecycle_quantity_step_aligned:")
+        and ":from=0.0752842:to=0.07:step=0.01" in warning
+        for warning in handoff.warnings
+    )
+    assert handoff.metadata["market_quantity_step_alignment"] == {
+        "source": "trusted_submit_fact_market_rule",
+        "step_size": "0.01",
+        "min_qty": "0.01",
+        "aligned": True,
+    }
+    assert trusted_facts.lookups == [f"trusted-submit-facts-{handoff.execution_intent_id}"]
+
+
 async def test_runtime_execution_order_lifecycle_handoff_blocks_when_protection_plan_blocked():
     draft = await _planning_service(active_positions=[]).intent_draft_for_order_candidate(
         order_candidate_id="candidate-1",
@@ -4363,7 +4423,11 @@ def _blocked_final_gate_lookup() -> _FinalGatePreviewLookup:
     )
 
 
-async def _order_lifecycle_handoff_setup(*, candidate=None):
+async def _order_lifecycle_handoff_setup(
+    *,
+    candidate=None,
+    trusted_submit_facts_repository=None,
+):
     candidate = candidate or _candidate()
     draft = await _planning_service(
         active_positions=[],
@@ -4385,6 +4449,7 @@ async def _order_lifecycle_handoff_setup(*, candidate=None):
         attempt_mutation_repository=mutation_repo,
         protection_plan_repository=protection_repo,
         order_lifecycle_handoff_repository=handoff_repo,
+        trusted_submit_facts_repository=trusted_submit_facts_repository,
         final_gate_preview_service=_ready_final_gate_lookup(),
         runtime_service=_RuntimeMutator(),
     )
@@ -4506,3 +4571,17 @@ class _OrderLifecycleHandoffRecorder:
     async def create(self, draft):
         self.items.append(draft)
         return draft
+
+
+class _TrustedSubmitFactsLookup:
+    def __init__(self, *, market_rule_metadata):
+        self.market_rule_metadata = dict(market_rule_metadata)
+        self.lookups = []
+
+    async def get(self, trusted_submit_fact_snapshot_id: str):
+        self.lookups.append(trusted_submit_fact_snapshot_id)
+        return SimpleNamespace(
+            market_rule_source=SimpleNamespace(
+                metadata=dict(self.market_rule_metadata),
+            ),
+        )
