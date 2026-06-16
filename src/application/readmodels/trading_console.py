@@ -114,6 +114,7 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "operation_layer_authorization_chain_guard_checked",
     "post_submit_closed_loop_evidence_guard_checked",
     "operation_layer_submit_result_identity_guard_checked",
+    "post_submit_finalize_result_identity_guard_checked",
     "shared_runtime_pipeline_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
@@ -7691,6 +7692,12 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 "operation_layer_submit_result_identity_guard_checked": (
                     checks.get(
                         "operation_layer_submit_result_identity_guard_checked"
+                    )
+                    is True
+                ),
+                "post_submit_finalize_result_identity_guard_checked": (
+                    checks.get(
+                        "post_submit_finalize_result_identity_guard_checked"
                     )
                     is True
                 ),

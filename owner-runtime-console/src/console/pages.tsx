@@ -410,6 +410,7 @@ function buildDryRunSummaryRows(summary: Record<string, unknown> | undefined) {
     summary.operation_layer_authorization_chain_guard_checked === true ? { label: "证据接力", value: "已校验" } : null,
     summary.post_submit_closed_loop_evidence_guard_checked === true ? { label: "闭环证据", value: "已校验" } : null,
     summary.operation_layer_submit_result_identity_guard_checked === true ? { label: "提交回执", value: "已校验" } : null,
+    summary.post_submit_finalize_result_identity_guard_checked === true ? { label: "收尾回执", value: "已校验" } : null,
     summary.dangerous_effects_absent === true && summary.disabled_smoke_is_real_execution_proof === false
       ? { label: "危险动作", value: "未发生" }
       : null,
