@@ -117,6 +117,8 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
         "release_identity_from_manifest_without_git_status"
     ]
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
+    assert report["facts"]["release_identity_source"] == "release_manifest"
+    assert report["facts"]["current_head"] == EXPECTED_HEAD
     assert len(report["facts"]["http_checks"]) == 17
     auth_checks = [
         item
