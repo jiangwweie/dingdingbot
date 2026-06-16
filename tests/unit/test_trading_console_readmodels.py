@@ -5967,6 +5967,62 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
 
+    (report_dir / "strategygroup-runtime-goal-status.json").write_text(
+        json.dumps(
+            {
+                "scope": "strategygroup_runtime_goal_status",
+                "status": "runtime_liveness_degraded",
+                "owner_state": {
+                    "label": "需要介入",
+                    "detail": (
+                        "watcher 已报告 runtime attempt 或 scope 接力异常，"
+                        "先修复自动观察链路"
+                    ),
+                    "next_safe_checkpoint": "repair_runtime_attempt_renewal_or_scope",
+                },
+                "blockers": [
+                    "watcher_tick:loop_command_failed:2",
+                    "strategy-runtime-1:runtime_attempts_exhausted",
+                ],
+                "checks": {"watcher_liveness_healthy": False},
+                "real_order_boundary": {
+                    "ready_for_real_order_action": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-console-source-readiness")
+        assert response.status_code == 200
+        degraded_payload = response.json()
+
+    assert degraded_payload["data"]["status"] == "ready"
+    assert degraded_payload["data"]["owner_state"]["status"] == "needs_intervention"
+    assert degraded_payload["data"]["owner_state"]["label"] == "需要介入"
+    assert degraded_payload["data"]["owner_state"]["needs_owner_action"] is False
+    assert degraded_payload["data"]["owner_summary"]["market_opportunity"] == "需要介入"
+    assert (
+        degraded_payload["data"]["source_health"]["strategygroup_runtime_goal_status"][
+            "status"
+        ]
+        == "degraded"
+    )
+    assert (
+        degraded_payload["data"]["raw_status_refs"][
+            "strategygroup_runtime_goal_status"
+        ]
+        == "runtime_liveness_degraded"
+    )
+    assert (
+        degraded_payload["data"]["raw_status_refs"][
+            "strategygroup_runtime_goal_real_order_ready"
+        ]
+        is False
+    )
+
 
 def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     monkeypatch,

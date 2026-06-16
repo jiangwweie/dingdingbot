@@ -72,6 +72,7 @@ protection
 reconciliation detail state
 operation audit detail state
 runtime dry-run audit state
+StrategyGroup runtime goal status
 ```
 
 ### Required Artifacts
@@ -94,6 +95,7 @@ runtime dry-run audit state
 | Account facts readable | Source status is `ready`, Owner language is `资金正常` |
 | Watcher waiting for signal | Owner state is `waiting_for_opportunity`, Owner language is `等待机会` |
 | Runtime dry-run audit passed | Source status is `ready`, Owner language is `审计演练正常` |
+| Runtime goal status reports liveness or safety degradation | Owner state is `needs_intervention` or `temporarily_unavailable`, not `waiting_for_opportunity` |
 | Reconciliation/audit detail missing | Detail degrades without hiding StrategyGroups |
 | Safety | No order, exchange write, FinalGate bypass, Operation Layer bypass, secret mutation, profile expansion, sizing change, withdrawal, or transfer |
 
@@ -106,6 +108,7 @@ runtime dry-run audit state
 | System page | Shows `审计演练` as a secondary system-health item, not a homepage gate |
 | Visual governance | Strategy rows show one primary health chip plus one Owner-readable summary sentence instead of a four-chip evidence wall |
 | Verification | Python source-readiness/dry-run tests, frontend build, real-backend smoke, normal smoke, state smoke, and visual QA passed |
+| Runtime goal overlay | Source-readiness API now reads `strategygroup-runtime-goal-status.json`; `runtime_liveness_degraded` overrides the Owner state to `需要介入` so the console does not mislabel liveness repair as market waiting |
 
 ## P0 Subgoal: Runtime Liveness Repair
 
