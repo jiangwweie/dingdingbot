@@ -27,15 +27,21 @@ index.
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
 | --- | --- | --- | --- | --- |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | active | Produce `owner-console-source-readiness.json` and `GET /api/trading-console/owner-console-source-readiness` |
-| P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate without accidental watcher-side attempt burn | Main runtime window | active | Keep watcher waiting; on fresh signal continue official chain only |
+| P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
-| P1 Owner Console Productization | Owner sees simple state, not raw gate vocabulary | Owner Console window | active in isolated worktree | Consume source-readiness packet/API and remove source-unavailable false negatives |
+| P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | mainline integrated | Keep source-readiness API/packet stable while UI refinements continue from the mainline contract |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
 | P2 LLM Assistance | LLM supports audit/readiness/notification without changing execution authority | Main runtime window | pending | Start with read-only audit summaries and Feishu notification text only |
 | P2 External Information Capture | External information can inform research/watch context without becoming execution authority | Strategy/research window first | pending | Treat as research input, not live-submit permission |
 
 ## P0 Subgoal: Owner Console Source Readiness Productization
+
+### Current State
+
+Owner Console exploration is no longer treated as an isolated authority source.
+The main runtime branch now owns the source-readiness contract and exposes the
+machine-readable packet/API that the console consumes.
 
 ### Scope
 
@@ -76,12 +82,43 @@ operation audit detail state
 | Reconciliation/audit detail missing | Detail degrades without hiding StrategyGroups |
 | Safety | No order, exchange write, FinalGate bypass, Operation Layer bypass, secret mutation, profile expansion, sizing change, withdrawal, or transfer |
 
+## P0 Subgoal: Runtime Liveness Repair
+
+### Current State
+
+The watcher has reached the post-signal boundary where the fresh StrategyGroup
+signal, candidate, grant, authorization, and FinalGate preview can exist, but
+the official Operation Layer submit path still depends on prepared evidence
+IDs. The previous blocker language was still tied to old per-chat Owner
+confirmation for attempt consumption and local registration.
+
+### Correct Current Path
+
+```text
+fresh signal
+-> standing-authorized scoped evidence preparation
+-> action-time FinalGate
+-> official Operation Layer action only
+-> post-submit finalize / reconciliation / budget settlement
+```
+
+### Acceptance
+
+| Requirement | Expected result |
+| --- | --- |
+| Default arm preview | Still stops before attempt consumption |
+| Standing evidence prep | Records bounded attempt/local-registration/exchange-arm evidence only when explicitly enabled |
+| Disabled smoke | Can prove the action endpoint without exchange write |
+| FinalGate | Must rerun at action time before real Operation Layer action |
+| Operation Layer | Must use official endpoint and required evidence IDs |
+| Safety | No secret mutation, profile expansion, sizing change, withdrawal, transfer, stale-fact execution, duplicate submit, or conflicting position/order execution |
+
 ## Boundaries
 
-- Keep frontend implementation in `/Users/jiangwei/Documents/final-owner-console`.
+- Keep UI experiments outside mainline until reviewed, but the Owner Console
+  source-readiness contract is now mainline-owned in `/Users/jiangwei/Documents/final`.
 - Keep strategy research in `/Users/jiangwei/Documents/final-strategy-research`.
 - Keep main runtime work in `/Users/jiangwei/Documents/final`.
 - Do not expose internal gate names as Owner homepage labels.
 - Do not treat weak strategy evidence as a live-safety blocker.
 - Do not treat missing audit detail as a reason to hide StrategyGroups.
-

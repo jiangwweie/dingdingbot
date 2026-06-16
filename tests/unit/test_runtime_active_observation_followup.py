@@ -11,6 +11,7 @@ def _args(
     allow_arm_preview=False,
     allow_attempt_policy_prepare=False,
     allow_disabled_smoke=False,
+    allow_standing_operation_layer_evidence_prep=False,
     arm_report_json=None,
     operation_layer_arm_evidence_json=None,
 ):
@@ -24,6 +25,9 @@ def _args(
         arm_report_json=arm_report_json,
         operation_layer_arm_evidence_json=operation_layer_arm_evidence_json,
         allow_disabled_smoke=allow_disabled_smoke,
+        allow_standing_operation_layer_evidence_prep=(
+            allow_standing_operation_layer_evidence_prep
+        ),
         skip_disabled_smoke_prerequisite_probe=False,
     )
 
@@ -92,7 +96,7 @@ def _disabled_smoke_report(*, blockers=None, warnings=None):
     }
 
 
-def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False):
+def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False, standing=False):
     steps = [
         {
             "name": "hydrate_controlled_submit_plan",
@@ -121,6 +125,34 @@ def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False):
                 ),
             }
         )
+    if standing:
+        steps.extend(
+            [
+                {
+                    "name": "apply_attempt_mutation",
+                    "path": (
+                        "/api/trading-console/runtime-execution-attempt-mutations/"
+                        "reservations/reserve-1"
+                    ),
+                },
+                {
+                    "name": "record_local_order_registration_result",
+                    "path": (
+                        "/api/trading-console/"
+                        "runtime-execution-order-lifecycle-adapter-results/"
+                        "authorizations/auth-1"
+                    ),
+                },
+                {
+                    "name": "record_exchange_submit_adapter_result",
+                    "path": (
+                        "/api/trading-console/"
+                        "runtime-execution-exchange-submit-adapter-results/"
+                        "authorizations/auth-1"
+                    ),
+                },
+            ]
+        )
     return {
         "script": "runtime_first_real_submit_api_flow",
         "mode": "arm",
@@ -133,6 +165,9 @@ def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False):
         "warnings": warnings
         if warnings is not None
         else ["attempt_consumption_not_recorded_in_arm_preview"],
+        "safety": {
+            "standing_authorized_scoped_evidence_preparation": standing,
+        },
     }
 
 
@@ -505,7 +540,7 @@ def test_followup_classifies_expected_local_registration_boundary():
 
     assert packet["status"] == "disabled_smoke_blocked"
     assert packet["local_registration_readiness"]["classification"] == (
-        "ready_for_owner_local_registration_authorization_packet"
+        "ready_for_standing_authorized_operation_layer_evidence_prep"
     )
     assert packet["local_registration_readiness"][
         "expected_non_mutating_preview_stop"
@@ -521,14 +556,13 @@ def test_followup_classifies_expected_local_registration_boundary():
     ] is True
     assert packet["local_registration_readiness"]["missing_evidence_ids"] == []
     assert packet["operator_command_plan"]["next_step"] == (
-        "for_fresh_real_signal_build_local_registration_authorization_packet_"
-        "then_owner_confirm_attempt_consumption"
+        "for_fresh_real_signal_run_standing_authorized_operation_layer_"
+        "evidence_prep_then_rerun_action_time_finalgate"
     )
     assert packet["operator_command_plan"][
         "local_registration_authorization_packet_script"
     ] == (
-        "scripts/build_runtime_first_real_submit_"
-        "local_registration_authorization_packet.py"
+        "scripts/runtime_first_real_submit_api_flow.py"
     )
     assert packet["operator_command_plan"][
         "mutating_attempt_consumption_allowed_by_this_packet"
@@ -538,6 +572,42 @@ def test_followup_classifies_expected_local_registration_boundary():
     ] is True
     assert packet["safety_invariants"]["attempt_counter_mutated"] is False
     assert packet["safety_invariants"]["runtime_budget_mutated"] is False
+    assert packet["safety_invariants"]["exchange_order_submitted"] is False
+
+
+def test_followup_allows_standing_operation_layer_evidence_prep_effects():
+    packet = runtime_active_observation_followup.build_followup_packet(
+        _args(
+            allow_arm_preview=True,
+            allow_disabled_smoke=True,
+            allow_standing_operation_layer_evidence_prep=True,
+        ),
+        loop_packet=_loop_packet("ready_for_final_gate_preflight"),
+        arm_preview_runner=lambda auth_id, args: _arm_preview_report(
+            blockers=[],
+            warnings=[],
+            standing=True,
+        ),
+        disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
+    )
+
+    assert packet["status"] == "disabled_smoke_completed"
+    assert packet["blockers"] == []
+    assert packet["operator_command_plan"][
+        "standing_authorized_operation_layer_evidence_prep_allowed"
+    ] is True
+    assert packet["operator_command_plan"][
+        "mutating_attempt_consumption_allowed_by_this_packet"
+    ] is True
+    assert packet["safety_invariants"][
+        "standing_authorized_operation_layer_evidence_prep_called"
+    ] is True
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is True
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is True
+    assert packet["safety_invariants"]["local_registration_recorded"] is True
+    assert packet["safety_invariants"]["exchange_submit_adapter_armed"] is True
+    assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == []
+    assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
 
 

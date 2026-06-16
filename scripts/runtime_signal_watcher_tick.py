@@ -447,6 +447,9 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         allow_arm_preview=args.allow_arm_preview,
         allow_attempt_policy_prepare=args.allow_attempt_policy_prepare,
         allow_disabled_smoke=args.allow_disabled_smoke,
+        allow_standing_operation_layer_evidence_prep=(
+            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+        ),
         include_packets=args.include_packets,
         skip_disabled_smoke_prerequisite_probe=(
             args.skip_disabled_smoke_prerequisite_probe
@@ -702,6 +705,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--allow-arm-preview", action="store_true")
     parser.add_argument("--allow-attempt-policy-prepare", action="store_true")
     parser.add_argument("--allow-disabled-smoke", action="store_true")
+    parser.add_argument(
+        "--allow-standing-operation-layer-evidence-prep",
+        action="store_true",
+    )
     parser.add_argument(
         "--skip-disabled-smoke-prerequisite-probe",
         action="store_true",

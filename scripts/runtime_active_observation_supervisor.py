@@ -112,6 +112,8 @@ def _followup_command(args: argparse.Namespace, loop_packet_path: Path, followup
         command.append("--allow-attempt-policy-prepare")
     if args.allow_disabled_smoke:
         command.append("--allow-disabled-smoke")
+    if getattr(args, "allow_standing_operation_layer_evidence_prep", False):
+        command.append("--allow-standing-operation-layer-evidence-prep")
     if args.skip_disabled_smoke_prerequisite_probe:
         command.append("--skip-disabled-smoke-prerequisite-probe")
     return command
@@ -140,6 +142,7 @@ def _forbidden_effects(
     followup_packet: dict[str, Any] | None,
     *,
     allow_attempt_policy_prepare: bool = False,
+    allow_standing_operation_layer_evidence_prep: bool = False,
 ) -> list[str]:
     effects: list[str] = []
     for source_name, packet in (
@@ -171,6 +174,21 @@ def _forbidden_effects(
                 "runtime_budget_mutated",
             ]
         )
+        if (
+            source_name == "followup"
+            and allow_standing_operation_layer_evidence_prep
+            and safety.get("standing_authorized_operation_layer_evidence_prep_called")
+            is True
+        ):
+            forbidden_keys = [
+                key
+                for key in forbidden_keys
+                if key
+                not in {
+                    "attempt_counter_mutated",
+                    "runtime_budget_mutated",
+                }
+            ]
         for key in forbidden_keys:
             if safety.get(key) is True:
                 effects.append(f"{source_name}.{key}")
@@ -250,6 +268,9 @@ def build_supervisor_packet(
         loop_packet,
         followup_packet,
         allow_attempt_policy_prepare=args.allow_attempt_policy_prepare,
+        allow_standing_operation_layer_evidence_prep=bool(
+            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+        ),
     )
     if forbidden_effects:
         blockers.append("supervisor_detected_forbidden_effects")
@@ -289,6 +310,9 @@ def build_supervisor_packet(
             "allow_arm_preview": bool(args.allow_arm_preview),
             "allow_attempt_policy_prepare": bool(args.allow_attempt_policy_prepare),
             "allow_disabled_smoke": bool(args.allow_disabled_smoke),
+            "allow_standing_operation_layer_evidence_prep": bool(
+                getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+            ),
             "real_submit_requested": False,
             "exchange_order_requested": False,
             "order_lifecycle_submit_requested": False,
@@ -421,6 +445,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--allow-arm-preview", action="store_true")
     parser.add_argument("--allow-attempt-policy-prepare", action="store_true")
     parser.add_argument("--allow-disabled-smoke", action="store_true")
+    parser.add_argument(
+        "--allow-standing-operation-layer-evidence-prep",
+        action="store_true",
+    )
     parser.add_argument("--include-packets", action="store_true")
     parser.add_argument("--skip-disabled-smoke-prerequisite-probe", action="store_true")
     return parser.parse_args(argv)

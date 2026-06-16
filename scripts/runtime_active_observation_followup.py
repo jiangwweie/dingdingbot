@@ -269,7 +269,12 @@ def _run_arm_preview(
         mode="arm",
         env_file=args.env_file,
         authorization_id=authorization_id,
-        record_attempt_consumption=False,
+        record_attempt_consumption=bool(
+            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+        ),
+        standing_authorized_scoped_evidence_preparation=bool(
+            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+        ),
         preview_disabled_first_real_submit_action=False,
         attempt_outcome_policy_id=_optional_id(ids, "attempt_outcome_policy_id"),
     )
@@ -510,18 +515,24 @@ def _disabled_smoke_forbidden_effects(report: dict[str, Any]) -> list[str]:
 
 
 def _arm_preview_forbidden_effects(report: dict[str, Any]) -> list[str]:
+    safety = _as_dict(report.get("safety"))
+    standing_prep = (
+        safety.get("standing_authorized_scoped_evidence_preparation") is True
+    )
     effects: list[str] = []
     for step in report.get("steps") or []:
         if not isinstance(step, dict):
             continue
         path = str(step.get("path") or "")
         name = str(step.get("name") or "")
-        if "attempt-mutations" in path:
+        if "attempt-mutations" in path and not standing_prep:
             effects.append(f"{name}:unexpected_attempt_mutation_in_arm_preview")
-        if "attempt-reservations" in path:
+        if "attempt-reservations" in path and not standing_prep:
             effects.append(f"{name}:unexpected_attempt_reservation_in_arm_preview")
-        if "order-lifecycle-adapter-results" in path:
+        if "order-lifecycle-adapter-results" in path and not standing_prep:
             continue
+        if "exchange-submit-execution" in path:
+            effects.append(f"{name}:exchange_submit_execution")
         if "first-real-submit-actions" in path:
             effects.append(f"{name}:first_real_submit_action")
     if report.get("ready_for_real_submit_action") is True:
@@ -546,6 +557,16 @@ def _attached_arm_report_forbidden_effects(report: dict[str, Any]) -> list[str]:
     if report.get("ready_for_real_submit_action") is True:
         effects.append("arm_report.ready_for_real_submit_action_true")
     return sorted(set(effects))
+
+
+def _report_has_step_path(report: dict[str, Any] | None, fragment: str) -> bool:
+    if not isinstance(report, dict):
+        return False
+    return any(
+        fragment in str(step.get("path") or "")
+        for step in report.get("steps") or []
+        if isinstance(step, dict)
+    )
 
 
 def _local_registration_readiness(
@@ -603,7 +624,7 @@ def _local_registration_readiness(
         and not missing_evidence_ids
     )
     if ready_for_packet:
-        classification = "ready_for_owner_local_registration_authorization_packet"
+        classification = "ready_for_standing_authorized_operation_layer_evidence_prep"
     elif expected_stop:
         classification = "expected_non_mutating_preview_stop_missing_evidence"
     else:
@@ -613,6 +634,7 @@ def _local_registration_readiness(
         "classification": classification,
         "expected_non_mutating_preview_stop": expected_stop,
         "ready_for_local_registration_authorization_packet": ready_for_packet,
+        "ready_for_standing_authorized_operation_layer_evidence_prep": ready_for_packet,
         "authorization_id_present": bool(authorization_id),
         "arm_stopped_before_attempt_consumption": arm_stopped_before_attempt,
         "disabled_smoke_stopped_before_first_real_submit_action": (
@@ -621,7 +643,10 @@ def _local_registration_readiness(
         "missing_order_lifecycle_adapter_result_proven": adapter_result_missing,
         "required_evidence_ids_present": not missing_evidence_ids,
         "missing_evidence_ids": missing_evidence_ids,
-        "next_mutating_stage": "attempt_consumption_and_local_order_registration",
+        "next_mutating_stage": (
+            "standing_authorized_attempt_consumption_local_registration_"
+            "and_exchange_submit_evidence_preparation"
+        ),
         "requires_fresh_real_signal_revalidation": True,
         "must_not_consume_attempt_for_sample_or_stale_signal": True,
         "does_not_authorize": [
@@ -814,15 +839,23 @@ def build_followup_packet(
                 local_registration_readiness=local_registration_readiness,
             ),
             "local_registration_authorization_packet_script": (
-                "scripts/build_runtime_first_real_submit_"
-                "local_registration_authorization_packet.py"
+                "scripts/runtime_first_real_submit_api_flow.py"
                 if local_registration_readiness.get(
                     "expected_non_mutating_preview_stop"
                 )
                 else None
             ),
+            "standing_authorized_operation_layer_evidence_prep_allowed": bool(
+                getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+            ),
             "mutating_attempt_consumption_allowed_by_this_packet": (
-                False
+                bool(
+                    getattr(
+                        args,
+                        "allow_standing_operation_layer_evidence_prep",
+                        False,
+                    )
+                )
             ),
             "requires_fresh_real_signal_revalidation_before_mutation": (
                 local_registration_readiness.get(
@@ -846,18 +879,44 @@ def build_followup_packet(
             "order_created": False,
             "order_lifecycle_submit_called": False,
             "attempt_counter_mutated": (
-                attempt_policy_report is not None
-                and _as_dict(attempt_policy_report.get("safety")).get(
-                    "mutates_attempt_counter"
+                (
+                    attempt_policy_report is not None
+                    and _as_dict(attempt_policy_report.get("safety")).get(
+                        "mutates_attempt_counter"
+                    )
+                    is True
+                )
+                or _report_has_step_path(
+                    arm_report,
+                    "runtime-execution-attempt-mutations",
+                )
+            ),
+            "runtime_budget_mutated": (
+                (
+                    attempt_policy_report is not None
+                    and _as_dict(attempt_policy_report.get("safety")).get(
+                        "mutates_runtime_budget"
+                    )
+                    is True
+                )
+                or _report_has_step_path(
+                    arm_report,
+                    "runtime-execution-attempt-mutations",
+                )
+            ),
+            "standing_authorized_operation_layer_evidence_prep_called": (
+                _as_dict((arm_report or {}).get("safety")).get(
+                    "standing_authorized_scoped_evidence_preparation"
                 )
                 is True
             ),
-            "runtime_budget_mutated": (
-                attempt_policy_report is not None
-                and _as_dict(attempt_policy_report.get("safety")).get(
-                    "mutates_runtime_budget"
-                )
-                is True
+            "local_registration_recorded": _report_has_step_path(
+                arm_report,
+                "runtime-execution-order-lifecycle-adapter-results",
+            ),
+            "exchange_submit_adapter_armed": _report_has_step_path(
+                arm_report,
+                "runtime-execution-exchange-submit-adapter-results",
             ),
             "withdrawal_or_transfer_created": False,
             "loop_forbidden_effects": loop_forbidden,
@@ -927,8 +986,8 @@ def _next_step(
     if status == "disabled_smoke_blocked":
         if readiness.get("ready_for_local_registration_authorization_packet") is True:
             return (
-                "for_fresh_real_signal_build_local_registration_authorization_packet_"
-                "then_owner_confirm_attempt_consumption"
+                "for_fresh_real_signal_run_standing_authorized_operation_layer_"
+                "evidence_prep_then_rerun_action_time_finalgate"
             )
         if readiness.get("expected_non_mutating_preview_stop") is True:
             return (
@@ -974,6 +1033,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--allow-disabled-smoke", action="store_true")
+    parser.add_argument(
+        "--allow-standing-operation-layer-evidence-prep",
+        action="store_true",
+        help=(
+            "For a fresh live signal, allow standing-authorization bounded "
+            "attempt/local-registration/exchange-arm evidence preparation. "
+            "This never calls the first-real-submit action."
+        ),
+    )
     parser.add_argument(
         "--skip-disabled-smoke-prerequisite-probe",
         action="store_true",

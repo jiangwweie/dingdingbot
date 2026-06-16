@@ -31,6 +31,11 @@ from src.interfaces.operator_auth import (
     _load_auth_config,
     _sign_payload,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    OWNER_STANDING_AUTHORIZATION_REASON,
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 
 
 API_BASE_ENV = "RUNTIME_FIRST_REAL_SUBMIT_API_BASE"
@@ -87,6 +92,7 @@ class FlowConfig:
     preview_disabled_first_real_submit_action: bool = False
     execute_real_submit: bool = False
     record_attempt_consumption: bool = False
+    standing_authorized_scoped_evidence_preparation: bool = False
     record_post_submit_accounting: bool = True
     record_post_submit_reconciliation: bool = True
     post_submit_reconciliation_symbol: str | None = None
@@ -586,7 +592,10 @@ class FirstRealSubmitApiFlow:
             )
 
     def _record_attempt_reservation_and_policy(self) -> None:
-        if self._config.mode == "arm":
+        if (
+            self._config.mode == "arm"
+            and not self._config.standing_authorized_scoped_evidence_preparation
+        ):
             self._block_arm_attempt_consumption()
             return
         authorization_id = self._required_id("authorization_id")
@@ -677,14 +686,22 @@ class FirstRealSubmitApiFlow:
             return
         if self.state.blockers:
             return
-        if self._config.mode == "arm" and self._config.record_attempt_consumption:
+        if (
+            self._config.mode == "arm"
+            and self._config.record_attempt_consumption
+            and not self._config.standing_authorized_scoped_evidence_preparation
+        ):
             self._block_arm_attempt_consumption()
             return
         will_continue_to_local_registration = (
             self._config.record_attempt_consumption
             or bool(self.state.ids.get("attempt_outcome_policy_id"))
         )
-        if self._config.mode == "arm" and will_continue_to_local_registration:
+        if (
+            self._config.mode == "arm"
+            and will_continue_to_local_registration
+            and not self._config.standing_authorized_scoped_evidence_preparation
+        ):
             self._require_local_registration_guard(authorization_id)
             if self.state.blockers:
                 return
@@ -778,7 +795,10 @@ class FirstRealSubmitApiFlow:
         )
         if not self._config.arm_exchange_submit_adapter:
             return
-        if self._config.mode == "arm":
+        if (
+            self._config.mode == "arm"
+            and not self._config.standing_authorized_scoped_evidence_preparation
+        ):
             self._require_exchange_arm_guard(authorization_id)
             if self.state.blockers:
                 return
@@ -1262,6 +1282,9 @@ class FirstRealSubmitApiFlow:
                 ),
                 "exchange_arm_requires_env_confirmation": True,
                 "exchange_arm_env_confirmation_name": EXCHANGE_ARM_APPROVAL_ENV,
+                "standing_authorized_scoped_evidence_preparation": (
+                    self._config.standing_authorized_scoped_evidence_preparation
+                ),
                 "no_withdrawal_or_transfer": True,
             },
         }
@@ -1515,6 +1538,16 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         ),
     )
     parser.add_argument(
+        "--standing-authorized-scoped-evidence-preparation",
+        action="store_true",
+        help=(
+            "Allow arm mode to record bounded attempt/local/exchange preparation "
+            "evidence under the Owner standing authorization. This still does "
+            "not call the first-real-submit action unless execute mode and the "
+            "real-submit guards pass."
+        ),
+    )
+    parser.add_argument(
         "--preview-disabled-first-real-submit-action",
         action="store_true",
         help=(
@@ -1562,9 +1595,25 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         runtime_instance_id=args.runtime_instance_id,
         candidate_id=args.candidate_id,
         context_id=args.context_id,
-        owner_operator_id=args.owner_operator_id,
-        owner_confirmation_reference=args.owner_confirmation_reference,
-        reason=args.reason,
+        owner_operator_id=(
+            OWNER_STANDING_AUTHORIZATION_OPERATOR_ID
+            if args.standing_authorized_scoped_evidence_preparation
+            and args.owner_operator_id == "owner"
+            else args.owner_operator_id
+        ),
+        owner_confirmation_reference=(
+            OWNER_STANDING_AUTHORIZATION_REFERENCE
+            if args.standing_authorized_scoped_evidence_preparation
+            and args.owner_confirmation_reference
+            == "owner-authorized-first-real-submit"
+            else args.owner_confirmation_reference
+        ),
+        reason=(
+            OWNER_STANDING_AUTHORIZATION_REASON
+            if args.standing_authorized_scoped_evidence_preparation
+            and args.reason == "owner authorized first real runtime submit"
+            else args.reason
+        ),
         outcome_kind=args.outcome_kind,
         next_attempt_symbol=args.next_attempt_symbol,
         next_attempt_side=args.next_attempt_side,
@@ -1582,6 +1631,9 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         execute_real_submit=args.execute_real_submit,
         record_attempt_consumption=(
             args.record_attempt_consumption or args.mode == "execute"
+        ),
+        standing_authorized_scoped_evidence_preparation=(
+            args.standing_authorized_scoped_evidence_preparation
         ),
         record_post_submit_accounting=not args.skip_post_submit_accounting,
         record_post_submit_reconciliation=(

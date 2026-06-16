@@ -599,6 +599,35 @@ def test_arm_does_not_consume_attempt_before_handoff_when_explicitly_enabled(mon
     assert not any("first-real-submit-actions" in path for path in paths)
 
 
+def test_arm_standing_authorized_scoped_evidence_prep_records_operation_layer_ids():
+    client = _FakeClient()
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["attempt_outcome_policy_id"] == "policy-1"
+    assert report["ids"]["local_registration_enablement_decision_id"] == "local-enable-1"
+    assert report["ids"]["exchange_submit_action_authorization_id"] == "exchange-action-1"
+    assert report["ids"]["exchange_submit_enablement_decision_id"] == "exchange-enable-1"
+    assert report["ids"]["exchange_submit_adapter_result_id"] == "exchange-adapter-1"
+    assert report["safety"]["standing_authorized_scoped_evidence_preparation"] is True
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
+
+
 def test_arm_can_preview_disabled_first_real_submit_action_without_real_submit():
     client = _FakeClient()
     flow = FirstRealSubmitApiFlow(

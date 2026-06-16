@@ -22,6 +22,11 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     UrlLibApiClient,
     _load_env_file,
 )
+from src.domain.standing_authorization import (  # noqa: E402
+    OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    OWNER_STANDING_AUTHORIZATION_REASON,
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 from scripts.runtime_scoped_local_order_adapter_boundary_from_evidence import (  # noqa: E402
     _build_report as build_boundary_report,
 )
@@ -74,7 +79,8 @@ def _build_flow_config(
         record_gateway_readiness=False,
         preview_disabled_first_real_submit_action=False,
         execute_real_submit=False,
-        record_attempt_consumption=False,
+        record_attempt_consumption=True,
+        standing_authorized_scoped_evidence_preparation=True,
         record_post_submit_accounting=False,
         record_post_submit_reconciliation=False,
         trusted_submit_fact_snapshot_id=prepared_ids.get(
@@ -250,14 +256,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--execute-scoped-local-registration-proof", action="store_true")
     parser.add_argument("--api-base")
     parser.add_argument("--env-file")
-    parser.add_argument("--owner-operator-id", default="owner")
+    parser.add_argument(
+        "--owner-operator-id",
+        default=OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    )
     parser.add_argument(
         "--owner-confirmation-reference",
-        default="owner-authorized-scoped-local-registration-proof",
+        default=OWNER_STANDING_AUTHORIZATION_REFERENCE,
     )
     parser.add_argument(
         "--reason",
-        default="owner authorized scoped local registration proof",
+        default=OWNER_STANDING_AUTHORIZATION_REASON,
     )
     parser.add_argument(
         "--outcome-kind",
