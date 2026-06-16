@@ -5921,6 +5921,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "legacy_local_registration_probe_tolerance_checked": True,
                 "mock_operation_layer_closed_loop_checked": True,
                 "operation_layer_blocker_review_policy_checked": True,
+                "operation_layer_hard_safety_blocker_matrix_checked": True,
                 "operation_layer_evidence_relay_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
@@ -6071,6 +6072,10 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         ]
         is True
     )
+    assert (
+        dry_run_summary["operation_layer_hard_safety_blocker_matrix_checked"]
+        is True
+    )
     assert dry_run_summary["disabled_smoke_is_real_execution_proof"] is False
     assert set(dry_run_summary["required_checks"]) == {
         "required_scenarios_present",
@@ -6082,6 +6087,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "legacy_local_registration_probe_tolerance_checked",
         "mock_operation_layer_closed_loop_checked",
         "operation_layer_blocker_review_policy_checked",
+        "operation_layer_hard_safety_blocker_matrix_checked",
         "shared_runtime_pipeline_checked",
         "selected_strategygroup_dispatch_guard_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
@@ -6265,6 +6271,10 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         ready["summary"][
             "all_selected_strategygroups_reach_finalgate_dispatch_checked"
         ]
+        is True
+    )
+    assert (
+        ready["summary"]["operation_layer_hard_safety_blocker_matrix_checked"]
         is True
     )
     assert ready["summary"]["required_checks"] == {

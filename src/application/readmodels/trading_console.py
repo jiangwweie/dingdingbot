@@ -109,6 +109,7 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "legacy_local_registration_probe_tolerance_checked",
     "mock_operation_layer_closed_loop_checked",
     "operation_layer_blocker_review_policy_checked",
+    "operation_layer_hard_safety_blocker_matrix_checked",
     "shared_runtime_pipeline_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
@@ -7665,6 +7666,10 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                     checks.get(
                         "all_selected_strategygroups_reach_finalgate_dispatch_checked"
                     )
+                    is True
+                ),
+                "operation_layer_hard_safety_blocker_matrix_checked": (
+                    checks.get("operation_layer_hard_safety_blocker_matrix_checked")
                     is True
                 ),
                 "required_checks": required_checks,

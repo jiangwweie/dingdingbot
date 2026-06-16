@@ -102,6 +102,8 @@ try {
   await expectVisible(page, "已校验");
   await expectVisible(page, "五组策略");
   await expectVisible(page, "已覆盖");
+  await expectVisible(page, "安全矩阵");
+  await expectVisible(page, "已覆盖");
   await expectVisible(page, "危险动作");
   await expectVisible(page, "未发生");
   await openNav(page, "首页", "系统安全运行");

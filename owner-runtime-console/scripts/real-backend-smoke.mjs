@@ -281,6 +281,7 @@ async function createRuntimeFixtures() {
       legacy_local_registration_probe_tolerance_checked: true,
       mock_operation_layer_closed_loop_checked: true,
       operation_layer_blocker_review_policy_checked: true,
+      operation_layer_hard_safety_blocker_matrix_checked: true,
       operation_layer_evidence_relay_checked: true,
       selected_strategygroup_dispatch_guard_checked: true,
       all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
@@ -497,6 +498,9 @@ async function runConnectedSmoke(browser) {
     }
     if (dryRunSummary?.all_selected_strategygroups_reach_finalgate_dispatch_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm all selected StrategyGroups reach FinalGate dispatch");
+    }
+    if (dryRunSummary?.operation_layer_hard_safety_blocker_matrix_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm hard safety blocker matrix coverage");
     }
     if (sourcePayload?.data?.owner_summary?.real_order_readiness !== "等待机会") {
       throw new Error("Expected source-readiness real-order readiness to show 等待机会");

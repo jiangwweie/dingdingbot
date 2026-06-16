@@ -23,6 +23,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "shared_runtime_pipeline_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
+        "operation_layer_hard_safety_blocker_matrix_checked": True,
     }
     assert packet["required_checks"] == {
         "all_scenarios_passed": True,
@@ -32,6 +33,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "legacy_local_registration_probe_tolerance_checked": True,
         "mock_operation_layer_closed_loop_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
+        "operation_layer_hard_safety_blocker_matrix_checked": True,
         "operation_layer_evidence_relay_checked": True,
         "required_scenarios_present": True,
         "selected_strategygroup_dispatch_guard_checked": True,
@@ -143,6 +145,16 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     matrix = scenarios["operation_layer_blocker_review_matrix"]["artifacts"][
         "review_matrix"
     ]
+    matrix_checks = scenarios["operation_layer_blocker_review_matrix"]["artifacts"][
+        "matrix_checks"
+    ]
+    assert matrix_checks == {
+        "expected_blocker_cases_present": True,
+        "all_cases_block_real_submit": True,
+        "all_cases_avoid_operation_layer_submit": True,
+        "all_cases_have_owner_review_state": True,
+        "all_cases_have_no_dangerous_effects": True,
+    }
     assert set(matrix) == {
         "active_position",
         "open_order",
@@ -173,6 +185,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     ] is True
     assert packet["checks"]["mock_operation_layer_closed_loop_checked"] is True
     assert packet["checks"]["operation_layer_blocker_review_policy_checked"] is True
+    assert (
+        packet["checks"]["operation_layer_hard_safety_blocker_matrix_checked"]
+        is True
+    )
     assert packet["checks"]["shared_runtime_pipeline_checked"] is True
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]

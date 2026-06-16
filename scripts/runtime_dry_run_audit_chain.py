@@ -41,6 +41,17 @@ RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
 EXPECTED_STRATEGY_GROUPS = {"MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"}
+EXPECTED_HARD_SAFETY_BLOCKER_CASES = {
+    "active_position",
+    "open_order",
+    "protection_missing",
+    "budget_missing",
+    "duplicate_submit_risk",
+    "symbol_scope_mismatch",
+    "side_scope_mismatch",
+    "notional_scope_mismatch",
+    "leverage_scope_mismatch",
+}
 SHARED_RUNTIME_PIPELINE_STAGES = [
     "runtime_admission",
     "fresh_signal_to_candidate_authorization",
@@ -1105,7 +1116,32 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             for check_name, ok in checks.items()
             if ok is not True
         )
-    passed = not blockers
+    matrix_checks = {
+        "expected_blocker_cases_present": (
+            set(results) == EXPECTED_HARD_SAFETY_BLOCKER_CASES
+        ),
+        "all_cases_block_real_submit": all(
+            case.get("checks", {}).get("real_submit_forbidden") is True
+            for case in results.values()
+        ),
+        "all_cases_avoid_operation_layer_submit": all(
+            case.get("checks", {}).get("operation_layer_not_called") is True
+            for case in results.values()
+        ),
+        "all_cases_have_owner_review_state": all(
+            bool(case.get("owner_console_state")) and bool(case.get("owner_sentence"))
+            for case in results.values()
+        ),
+        "all_cases_have_no_dangerous_effects": all(
+            case.get("checks", {}).get("no_dangerous_effects") is True
+            for case in results.values()
+        ),
+    }
+    blockers.extend(
+        f"matrix:{check_name}"
+        for check_name, ok in matrix_checks.items()
+        if ok is not True
+    )
     return _scenario_packet(
         name="operation_layer_blocker_review_matrix",
         expected=(
@@ -1113,8 +1149,8 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             "and scope mismatches produce reviewable blocked packets while "
             "keeping real submit forbidden"
         ),
-        artifacts={"review_matrix": results},
-        passed=passed,
+        artifacts={"review_matrix": results, "matrix_checks": matrix_checks},
+        passed=not blockers,
         blockers=blockers,
     )
 
@@ -1531,6 +1567,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).values()
             )
         ),
+        "operation_layer_hard_safety_blocker_matrix_checked": (
+            _scenario_artifact(
+                scenarios,
+                "operation_layer_blocker_review_matrix",
+                "matrix_checks",
+            )
+            != {}
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "operation_layer_blocker_review_matrix",
+                    "matrix_checks",
+                ).values()
+            )
+        ),
         "shared_runtime_pipeline_checked": (
             shared_pipeline.get("status") == "passed"
             and all(
@@ -1582,6 +1633,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": checks[
             "all_selected_strategygroups_reach_finalgate_dispatch_checked"
+        ],
+        "operation_layer_hard_safety_blocker_matrix_checked": checks[
+            "operation_layer_hard_safety_blocker_matrix_checked"
         ],
     }
     return {
