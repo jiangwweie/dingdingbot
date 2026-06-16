@@ -1046,12 +1046,15 @@
       "primary_blockers": [
         "full_sequence_decay",
         "cloud_breakout_disable_missing",
+        "no_future_cloud_policy_must_remain_explicit",
+        "component_leakage_risk",
         "category_decay",
         "session_fill_missing",
         "product_risk_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/ich-no-future-cloud-decay-boundary-20260616.md",
         "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
         "docs/strategy-research/candidate-packets/ICH-001-ichimoku-cloud-breakout-packet.md",
         "docs/strategy-research/ichimoku-cloud-breakout-replay/ichimoku-cloud-breakout-summary.md"
