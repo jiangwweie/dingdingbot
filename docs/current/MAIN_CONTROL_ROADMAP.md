@@ -188,6 +188,19 @@ post-deploy or watcher-adjacent non-executing audit refresh.
 | RequiredFacts missing | Clear `missing_fact` blocker before Operation Layer |
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
 
+### Evidence Relay Checks
+
+The mock fresh signal pass scenario must prove these handoff checks before a
+real signal appears:
+
+| Check | Expected result |
+| --- | --- |
+| Required Operation Layer evidence IDs | All required IDs are present; no `missing_evidence_id` remains |
+| Authorization chain | Operation Layer command, evidence report, and closed-loop shapes use the same fresh authorization |
+| Action-time FinalGate | Same-run FinalGate preflight is called and passes before Operation Layer readiness |
+| Official Operation Layer endpoint | The selected endpoint is the official first-real-submit action path |
+| Legacy local-registration probe | Legacy `RuntimeExecutionOrderLifecycleAdapterResult` probe blocker is tolerated only when adapter result evidence exists |
+
 ### Full Close-Loop Shape
 
 The dry-run pass scenario must prove these non-executing shapes exist before the

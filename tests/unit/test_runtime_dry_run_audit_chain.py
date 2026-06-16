@@ -39,6 +39,28 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         ]["status"]
         == "disabled_smoke_passed"
     )
+    relay_checks = scenarios["mock_fresh_signal_dry_run_pass"]["artifacts"][
+        "operation_layer_relay_checks"
+    ]
+    assert relay_checks == {
+        "required_evidence_ids_present": True,
+        "no_missing_evidence_ids": True,
+        "operation_layer_ready_flag_true": True,
+        "operation_layer_official_endpoint_selected": True,
+        "same_authorization_chain": True,
+        "action_time_finalgate_called": True,
+        "action_time_finalgate_passed": True,
+        "closed_loop_uses_same_authorization": True,
+    }
+    legacy_probe = scenarios["mock_fresh_signal_dry_run_pass"]["artifacts"][
+        "legacy_local_registration_probe_tolerance"
+    ]
+    assert legacy_probe["status"] == "operation_layer_ready"
+    assert legacy_probe["blockers"] == []
+    assert (
+        "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
+        "local_registration_adapter_result"
+    ) in legacy_probe["warnings"]
     closed_loop = scenarios["mock_fresh_signal_dry_run_pass"]["artifacts"][
         "closed_loop_shape"
     ]
@@ -59,6 +81,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert scenarios["active_position_or_open_order_conflict"]["artifacts"][
         "resume_dispatch"
     ]["blocker_class"] == "active_position_resolution"
+    assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
+    assert packet["checks"][
+        "legacy_local_registration_probe_tolerance_checked"
+    ] is True
 
 
 def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, capsys):

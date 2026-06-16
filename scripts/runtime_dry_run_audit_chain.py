@@ -127,6 +127,99 @@ def _operation_evidence_report(*, blockers: list[str] | None = None) -> dict[str
     }
 
 
+def _legacy_local_registration_probe_report() -> dict[str, Any]:
+    report = _operation_evidence_report(
+        blockers=[
+            "first_real_submit_packet_unavailable:"
+            "runtimeexecutionorderlifecycleadapterresult_not_found"
+        ]
+    )
+    report["status"] = "ready"
+    report["steps"].append(
+        {
+            "name": "dry_run_record_local_order_registration_result",
+            "id_summary": {
+                "authorization_id": FRESH_AUTHORIZATION_ID,
+                "local_registration_adapter_result_id": (
+                    "dry-run-local-adapter-result-1"
+                ),
+            },
+            "blockers": [],
+            "warnings": [],
+            "places_order": False,
+            "exchange_write_called": False,
+            "order_lifecycle_called": False,
+        }
+    )
+    return report
+
+
+def _operation_layer_relay_checks(
+    *,
+    operation_layer: dict[str, Any],
+    closed_loop_shape: dict[str, Any],
+) -> dict[str, bool]:
+    readiness = operation_layer.get("operation_layer_readiness")
+    if not isinstance(readiness, dict):
+        readiness = {}
+    available_ids = readiness.get("available_evidence_ids")
+    if not isinstance(available_ids, dict):
+        available_ids = {}
+    required_ids = readiness.get("required_evidence_ids")
+    if not isinstance(required_ids, list):
+        required_ids = []
+    command_plan = operation_layer.get("operation_layer_command_plan")
+    if not isinstance(command_plan, dict):
+        command_plan = {}
+    finalgate = operation_layer.get("finalgate_preflight_result")
+    if not isinstance(finalgate, dict):
+        finalgate = {}
+    finalgate_body = finalgate.get("body")
+    if not isinstance(finalgate_body, dict):
+        finalgate_body = {}
+
+    same_authorization = (
+        str(command_plan.get("authorization_id") or "")
+        == str(available_ids.get("authorization_id") or "")
+        == FRESH_AUTHORIZATION_ID
+    )
+    closed_loop_authorizations = [
+        closed_loop_shape.get("post_submit_finalize_result", {}).get(
+            "authorization_id"
+        ),
+        closed_loop_shape.get("reconciliation_result", {}).get("authorization_id"),
+        closed_loop_shape.get("budget_settlement_result", {}).get(
+            "authorization_id"
+        ),
+        closed_loop_shape.get("review_record_result", {}).get("authorization_id"),
+    ]
+    return {
+        "required_evidence_ids_present": all(
+            str(available_ids.get(str(name)) or "").strip() for name in required_ids
+        ),
+        "no_missing_evidence_ids": readiness.get("missing_evidence_ids") == [],
+        "operation_layer_ready_flag_true": (
+            readiness.get("ready_for_official_operation_layer_submit") is True
+        ),
+        "operation_layer_official_endpoint_selected": (
+            command_plan.get("official_endpoint_method") == "POST"
+            and "runtime-execution-first-real-submit-actions/authorizations/"
+            in str(command_plan.get("official_endpoint_path") or "")
+        ),
+        "same_authorization_chain": same_authorization,
+        "action_time_finalgate_called": finalgate.get("called") is True,
+        "action_time_finalgate_passed": (
+            finalgate_body.get("status") == "ready_for_controlled_submit_adapter"
+            and str(finalgate_body.get("final_gate_verdict") or "").lower()
+            == "pass"
+            and not finalgate_body.get("blockers")
+        ),
+        "closed_loop_uses_same_authorization": all(
+            item == FRESH_AUTHORIZATION_ID for item in closed_loop_authorizations
+        ),
+    }
+
+
 def _fresh_loop_packet(
     *,
     output_dir: Path,
@@ -561,27 +654,63 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         client=_DisabledSmokeClient(),
     )
     closed_loop_shape = _fake_closed_loop_shape()
+    relay_checks = _operation_layer_relay_checks(
+        operation_layer=operation_layer,
+        closed_loop_shape=closed_loop_shape,
+    )
+    legacy_probe = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_finalgate_ready(),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        operation_layer_evidence_report=_legacy_local_registration_probe_report(),
+        operation_layer_evidence_report_path=(
+            "/tmp/dry-run-operation-layer-legacy-probe-evidence.json"
+        ),
+        execute_operation_layer_submit=False,
+    )
+    legacy_probe_passed = (
+        legacy_probe["status"] == "operation_layer_ready"
+        and legacy_probe["blockers"] == []
+        and (
+            "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
+            "local_registration_adapter_result"
+        )
+        in legacy_probe.get("warnings", [])
+    )
     passed = (
         readiness["status"] == "ready_for_fresh_submit_authorization"
         and finalgate_plan["status"] == "ready_for_action_time_final_gate"
         and finalgate_plan["dispatch_action"]
         == "run_official_action_time_final_gate_preflight"
         and operation_layer["status"] == "operation_layer_ready"
+        and all(relay_checks.values())
+        and legacy_probe_passed
         and disabled_report["status"] == "disabled_smoke_passed"
         and closed_loop_shape["status"] == "shape_checked"
         and all(closed_loop_shape["closed_loop_checks"].values())
-        and not _dangerous_effects(readiness, finalgate_plan, operation_layer, disabled_report, closed_loop_shape)
+        and not _dangerous_effects(
+            readiness,
+            finalgate_plan,
+            operation_layer,
+            disabled_report,
+            closed_loop_shape,
+            legacy_probe,
+        )
     )
     return _scenario_packet(
         name="mock_fresh_signal_dry_run_pass",
         expected=(
-            "evidence IDs connect, disabled submit stays non-executing, and "
+            "evidence IDs connect through the official Operation Layer handoff, "
+            "legacy local-registration probe blockers are satisfied by adapter "
+            "evidence, disabled submit stays non-executing, and "
             "finalize/reconciliation/budget/review shapes are present"
         ),
         artifacts={
             "readiness_bridge": readiness,
             "finalgate_dispatch_plan": finalgate_plan,
             "operation_layer_evidence_prep": operation_layer,
+            "operation_layer_relay_checks": relay_checks,
+            "legacy_local_registration_probe_tolerance": legacy_probe,
             "disabled_submit_smoke": disabled_report,
             "closed_loop_shape": closed_loop_shape,
         },
@@ -590,6 +719,12 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             *readiness.get("blockers", []),
             *finalgate_plan.get("blockers", []),
             *operation_layer.get("blockers", []),
+            *(legacy_probe.get("blockers", []) if not legacy_probe_passed else []),
+            *[
+                f"relay_check_failed:{name}"
+                for name, value in relay_checks.items()
+                if not value
+            ],
             *disabled_report.get("blockers", []),
         ],
     )
@@ -745,6 +880,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
+        "operation_layer_evidence_relay_checked": all(
+            _scenario_artifact(
+                scenarios,
+                "mock_fresh_signal_dry_run_pass",
+                "operation_layer_relay_checks",
+            ).values()
+        ),
+        "legacy_local_registration_probe_tolerance_checked": (
+            _scenario_artifact(
+                scenarios,
+                "mock_fresh_signal_dry_run_pass",
+                "legacy_local_registration_probe_tolerance",
+            ).get("status")
+            == "operation_layer_ready"
+        ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
     return {
@@ -775,6 +925,18 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             "dangerous_effects": dangerous_effects,
         },
     }
+
+
+def _scenario_artifact(
+    scenarios: list[dict[str, Any]],
+    scenario_name: str,
+    artifact_name: str,
+) -> dict[str, Any]:
+    for scenario in scenarios:
+        if scenario.get("name") == scenario_name:
+            artifact = scenario.get("artifacts", {}).get(artifact_name)
+            return artifact if isinstance(artifact, dict) else {}
+    return {}
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
