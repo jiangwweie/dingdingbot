@@ -117,6 +117,13 @@ function mapRealOrderReadiness(source: OwnerConsoleSourceReadinessData, health: 
   };
 }
 
+function realOrderChangeTitle(readiness: OwnerRealOrderReadiness) {
+  if (readiness.blockedCount > 0) return "实盘状态暂不可用";
+  if (readiness.readyForRealOrderAction) return "实盘路径已就绪";
+  if (readiness.waitingCount > 0) return "实盘状态等待机会";
+  return "实盘状态处理中";
+}
+
 function stateFromOwnerLabel(label: string, status: string | null | undefined): OwnerAutomationState {
   if (label === "已暂停") return "paused";
   if (label === "处理中") return "processing";
@@ -277,9 +284,9 @@ export function sourceReadinessToProjection(response: OwnerConsoleSourceReadines
       },
       {
         id: "real-order-readiness-state",
-        title: `实盘边界${realOrderReadiness.ownerLabel}`,
-        detail: `${realOrderReadiness.passCount} 项正常，${realOrderReadiness.waitingCount} 项等待，${realOrderReadiness.blockedCount} 项阻断`,
-        tone: realOrderReadiness.blockedCount > 0 ? "danger" : realOrderReadiness.readyForRealOrderAction ? "processing" : "waiting",
+        title: realOrderChangeTitle(realOrderReadiness),
+        detail: `${realOrderReadiness.passCount} 项正常，${realOrderReadiness.waitingCount} 项等待，${realOrderReadiness.blockedCount} 项不可用`,
+        tone: realOrderReadiness.blockedCount > 0 ? "danger" : realOrderReadiness.readyForRealOrderAction ? "safe" : "waiting",
         sourceKind: "safety_state",
       },
       ...rowChanges,

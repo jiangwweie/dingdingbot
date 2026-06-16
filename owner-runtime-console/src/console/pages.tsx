@@ -71,7 +71,7 @@ function HomePage({
 function realOrderTone(projection: OwnerProductProjection) {
   const readiness = projection.realOrderReadiness;
   if (readiness.blockedCount > 0 || projection.sourceHealth.realOrderReadiness.status === "unavailable") return "danger" as const;
-  if (readiness.readyForRealOrderAction) return "processing" as const;
+  if (readiness.readyForRealOrderAction) return "safe" as const;
   if (readiness.waitingCount > 0) return "waiting" as const;
   return sourceStatusTone[projection.sourceHealth.realOrderReadiness.status];
 }
@@ -80,16 +80,16 @@ function RealOrderReadinessCard({ projection }: { projection: OwnerProductProjec
   const readiness = projection.realOrderReadiness;
   const tone = realOrderTone(projection);
   const actionText = readiness.readyForRealOrderAction
-    ? "系统已到达实盘动作边界"
+    ? "路径已就绪，系统自动处理"
     : readiness.blockedCount > 0
-      ? "真实动作保持关闭"
-      : "正常等待市场机会";
+      ? "路径未就绪，系统保持关闭"
+      : "路径健康，等待市场机会";
 
   return (
     <Card className="rounded-lg shadow-[var(--shadow-panel)]">
       <CardHeader>
         <CardTitle>实盘边界</CardTitle>
-        <CardDescription>只显示是否能靠近真实订单，不展示内部证据名</CardDescription>
+        <CardDescription>系统自动判断是否可以靠近真实订单</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         <div className="flex items-center justify-between gap-3">
@@ -98,13 +98,13 @@ function RealOrderReadinessCard({ projection }: { projection: OwnerProductProjec
         </div>
         <div className="rounded-lg border bg-[color:var(--background-card-raised)] p-4">
           <div className="text-lg font-semibold">
-            {readiness.passCount} 项正常 / {readiness.waitingCount} 项等待 / {readiness.blockedCount} 项阻断
+            {readiness.passCount} 项正常 / {readiness.waitingCount} 项等待 / {readiness.blockedCount} 项不可用
           </div>
           <div className="mt-1 text-sm text-muted-foreground">
-            {readiness.blockedCount > 0 ? "系统会保持关闭，直到阻断解除" : "市场没有机会时，系统继续观察"}
+            {readiness.blockedCount > 0 ? "系统会保持关闭，直到状态恢复" : "市场没有机会时，系统继续观察"}
           </div>
         </div>
-        <ContextRow label="资金动作" tone={tone} value={readiness.readyForRealOrderAction ? "可进入官方路径" : "保持关闭"} />
+        <ContextRow label="真实订单" tone={tone} value={readiness.readyForRealOrderAction ? "路径就绪" : "保持关闭"} />
       </CardContent>
     </Card>
   );
