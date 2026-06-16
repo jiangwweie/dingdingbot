@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
 from typing import Any, Callable
 import urllib.request
+import urllib.parse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +87,22 @@ def _request_json(
     return payload
 
 
+def _runtime_pilot_status_query(
+    *,
+    selected_strategy_group_id: str | None,
+    max_symbols: int | None,
+    stale_after_seconds: int | None,
+) -> str:
+    query: dict[str, str] = {}
+    if selected_strategy_group_id:
+        query["selected_strategy_group_id"] = selected_strategy_group_id
+    if max_symbols is not None:
+        query["max_symbols"] = str(max_symbols)
+    if stale_after_seconds is not None:
+        query["stale_after_seconds"] = str(stale_after_seconds)
+    return urllib.parse.urlencode(query)
+
+
 def refresh_packets(
     *,
     api_base: str,
@@ -100,6 +118,9 @@ def refresh_packets(
     live_facts_output: Path | None = None,
     live_facts_base_url: str | None = None,
     live_facts_collector: Callable[..., dict[str, Any]] | None = None,
+    selected_strategy_group_id: str | None = None,
+    max_symbols: int | None = None,
+    stale_after_seconds: int | None = None,
 ) -> dict[str, Any]:
     cookie = cookie or _operator_cookie()
     generated_at_ms = generated_at_ms or int(time.time() * 1000)
@@ -158,7 +179,14 @@ def refresh_packets(
 
     api_root = api_base.rstrip("/")
     for endpoint, filename in ENDPOINTS:
-        url = f"{api_root}{endpoint}"
+        query = ""
+        if endpoint == "/api/trading-console/strategygroup-runtime-pilot-status":
+            query = _runtime_pilot_status_query(
+                selected_strategy_group_id=selected_strategy_group_id,
+                max_symbols=max_symbols,
+                stale_after_seconds=stale_after_seconds,
+            )
+        url = f"{api_root}{endpoint}" + (f"?{query}" if query else "")
         output_path = output_dir / filename
         try:
             response = _request_json(
@@ -197,6 +225,12 @@ def refresh_packets(
         "live_facts_precollect": live_facts_precollect,
         "blockers": blockers,
         "warnings": warnings,
+        "selected_scope_config": {
+            "selected_strategy_group_id": selected_strategy_group_id,
+            "max_symbols": max_symbols,
+            "stale_after_seconds": stale_after_seconds,
+            "source": "cli_or_env" if selected_strategy_group_id else "default",
+        },
         "safety_invariants": {
             "readmodel_refresh_only": True,
             "optional_signed_get_live_facts_precollect": collect_live_facts_before_refresh,
@@ -226,6 +260,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env-file")
     parser.add_argument("--live-facts-output")
     parser.add_argument("--live-facts-base-url")
+    parser.add_argument(
+        "--selected-strategy-group-id",
+        default=os.environ.get("BRC_SELECTED_STRATEGY_GROUP_ID")
+        or os.environ.get("BRC_STRATEGYGROUP_SELECTED_ID"),
+    )
+    parser.add_argument(
+        "--max-symbols",
+        type=int,
+        default=(
+            int(os.environ["BRC_STRATEGYGROUP_MAX_SYMBOLS"])
+            if os.environ.get("BRC_STRATEGYGROUP_MAX_SYMBOLS")
+            else None
+        ),
+    )
+    parser.add_argument(
+        "--stale-after-seconds",
+        type=int,
+        default=(
+            int(os.environ["BRC_STRATEGYGROUP_STALE_AFTER_SECONDS"])
+            if os.environ.get("BRC_STRATEGYGROUP_STALE_AFTER_SECONDS")
+            else None
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -245,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
             else None
         ),
         live_facts_base_url=args.live_facts_base_url,
+        selected_strategy_group_id=args.selected_strategy_group_id,
+        max_symbols=args.max_symbols,
+        stale_after_seconds=args.stale_after_seconds,
     )
     if args.output_json:
         _write_json(Path(args.output_json).expanduser(), packet)

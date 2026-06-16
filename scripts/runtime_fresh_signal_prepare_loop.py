@@ -199,7 +199,7 @@ def _operator_next_step(status: str) -> str:
     if status == READY_FOR_FINAL_GATE_PREFLIGHT:
         return "run_official_final_gate_preflight"
     if status == READY_FOR_PREPARE:
-        return "rerun_with_allow_prepare_records_after_owner_review"
+        return "rerun_with_allow_prepare_records_under_standing_authorization"
     if status == WAITING_FOR_SIGNAL:
         return "continue_observation_until_fresh_runtime_signal"
     return "resolve_post_submit_or_prepare_loop_blocker"

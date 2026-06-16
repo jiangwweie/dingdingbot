@@ -154,3 +154,57 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
     assert packet["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp_path):
+    calls = []
+    payloads = {
+        "/api/trading-console/strategy-group-live-facts-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "ready", "blockers": []},
+        },
+        (
+            "/api/trading-console/strategygroup-runtime-pilot-status"
+            "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"
+        ): {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {
+                "status": "waiting_for_market",
+                "selected": {"strategy_group_id": "SOR-001"},
+            },
+        },
+    }
+
+    def opener(request, timeout):
+        calls.append(request.full_url.replace("http://unit", ""))
+        path = request.full_url.replace("http://unit", "")
+        return _FakeResponse(payloads[path])
+
+    packet = refresh_packets(
+        api_base="http://unit",
+        output_dir=tmp_path,
+        label="unit",
+        timeout_seconds=7,
+        cookie="session=test",
+        opener=opener,
+        generated_at_ms=1,
+        selected_strategy_group_id="SOR-001",
+        max_symbols=2,
+        stale_after_seconds=240,
+    )
+
+    assert packet["status"] == "refreshed"
+    assert packet["selected_scope_config"] == {
+        "selected_strategy_group_id": "SOR-001",
+        "max_symbols": 2,
+        "stale_after_seconds": 240,
+        "source": "cli_or_env",
+    }
+    assert calls[-1] == (
+        "/api/trading-console/strategygroup-runtime-pilot-status"
+        "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"
+    )
