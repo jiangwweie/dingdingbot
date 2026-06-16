@@ -198,12 +198,14 @@
         ]
       },
       "primary_blockers": [
-        "role_split_incomplete",
+        "target_specific_overlay_policy_incomplete",
         "xag_concentration",
+        "standalone_short_blocked",
         "session_fill_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/pmr-overlay-role-split-20260616.md",
         "docs/strategy-research/candidate-packets/PMR-001-precious-metal-regime-overlay-packet.md",
         "docs/strategy-research/pmr-metal-dislocation-refresh/pmr-metal-dislocation-refresh-summary.md",
         "docs/strategy-research/pmr-metal-relative-spread-replay/pmr-metal-relative-spread-summary.md"
@@ -212,7 +214,7 @@
         "docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.md",
         "docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.json"
       ],
-      "revival_condition": "Upgrade only after PMR role split, session facts, mark/funding, fill, and margin evidence improve.",
+      "revival_condition": "Upgrade only after target-specific overlay policy, session facts, mark/funding, fill, and margin evidence improve; standalone broad-metal promotion stays blocked.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

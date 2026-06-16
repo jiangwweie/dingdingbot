@@ -101,6 +101,20 @@ P0 availability supplement:
 | `mark_deviation_bound_state` | `mark_price_state` | `block_armed_observation_for_perps` |
 | `gold_token_context_state` | Product/context policy | `context_only` |
 
+P0 role-split supplement:
+`docs/strategy-research/pmr-overlay-role-split-20260616.md`.
+
+| Role-Split Fact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `pmr_role_branch_state` | Strategy role classifier branch | `observe_only_no_candidate` |
+| `pmr_target_overlay_policy_state` | Target-strategy overlay mapping | `block_overlay_application` |
+| `nlpd_pmr_disable_state` | NLPD-specific PMR disable/downshift condition | `no_disable_tag` |
+| `teq_pmr_support_state` | TEQ-specific PMR support annotation | `no_support_tag` |
+| `pmr_standalone_short_block_state` | Standalone PMR short block | `block_candidate_prepare` |
+| `pmr_broad_long_negative_state` | Broad metal-long negative evidence | `block_long_claim` |
+| `pmr_regular_xag_short_watch_state` | XAG-led regular-session short watchlist | `no_signal` |
+| `stop_vs_right_tail_tradeoff_state` | Stop-risk versus right-tail tradeoff | `observe_only` |
+
 ### `SOR-001`
 
 | RequiredFact | Normalized Fact | Missing Behavior |

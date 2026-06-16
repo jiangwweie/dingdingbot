@@ -28,7 +28,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `MPG-001` | Group-pool momentum persistence and bounded impulse rows preserve high right-tail windows; 12h and 72h horizons have different tradeoffs. | Full-sequence drawdown and late-cycle decay. | `mpg_late_cycle_disable_state`, `mpg_member_drawdown_contribution_state`, `mpg_exit_horizon_state`, `fill_gap_slippage_state`, `real_margin_liquidation_model_state`. | Build a member-level drawdown-to-disable table that does not use future attribution as signal input. |
 | `FBS-001` | TEQ negative-funding squeeze lane remains the strongest FBS lead. | Funding settlement, OI/long-short/top-trader facts, and concentration. | `negative_funding_crowding_state`, `funding_settlement_timing_state`, `open_interest_state`, `long_short_ratio_state`, `funding_squeeze_concentration_state`, `real_exchange_margin_liquidation_model`. | Completed `fbs-derivatives-facts-readiness-split-20260616.md`: fresh facts can keep armed observation, partial/stale facts downshift, missing facts block candidate prepare. |
 | `TEQ-001` | Binance 2026 equity-like universe supports momentum and relative-strength discovery. | Low history, product availability, session gap, concentration, and real margin. | `expanded_tradfi_universe_manifest_state`, `product_eligibility_state`, `low_history_dataset_state`, `session_gap_context`, `mark_funding_review_state`, `exchange_margin_liquidation_state`. | Completed `teq-current-product-availability-refresh-20260616.md`: current TEQ handoff symbols are not visible in the refreshed USD-S exchangeInfo response, so cached evidence stays research-only until symbol availability is refreshed. |
-| `PMR-001` | XAG-led short/weakness and PMR target-specific overlay can disable some continuation labels and support metal context. | Role split, XAG concentration, external session/settlement, fill, and margin. | `xag_dominance_state`, `metal_role_split_state`, `commodity_session_gap_state`, `mark_deviation_bound_state`, `real_margin_model_state`. | Separate PMR into disable-overlay, support-tag, and standalone-short branches. |
+| `PMR-001` | XAG-led short/weakness and PMR target-specific overlay can disable some continuation labels and support metal context. | Target-specific overlay policy, XAG concentration, external session/settlement, fill, and margin. | `pmr_role_branch_state`, `pmr_target_overlay_policy_state`, `xag_dominance_state`, `commodity_session_gap_state`, `mark_deviation_bound_state`, `real_margin_model_state`. | Completed `pmr-overlay-role-split-20260616.md`: PMR is split into NLPD disable overlay, TEQ support tag, XAG short watchlist, metal context, and blocked standalone branches. |
 | `SOR-001` | Opening-range/session-transfer branches preserve narrow right-tail windows. | Second-half decay, branch narrowness, and session/fill ambiguity. | `session_open_range_state`, `post_open_decay_disable_state`, `time_stop_exit_horizon_state`, `tradfi_session_mapping_state`, `mark_funding_session_review_state`, `exchange_margin_liquidation_state`. | Produce branch eligibility table: TEQ short 72h, PMR short support, long revival-only, and disable branches. |
 
 ## Admission Guidance For Main Control
@@ -38,7 +38,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `MPG-001` | First-batch candidate. | `armed_observation` after RequiredFacts pass. | Prepare candidate only when late-cycle, member drawdown, exit horizon, and protection facts are present. |
 | `FBS-001` | First-batch but facts-heavy. | `armed_observation` when derivatives facts are fresh; degrade to observe-only when stale. | Do not prepare without current funding/mark/OI context. |
 | `TEQ-001` | First-batch low-history lane. | `armed_observation` with low-history warning. | Do not treat cached 2026 data as current product eligibility. |
-| `PMR-001` | Overlay / context. | `observe_only`. | Prepare only after role split and target-specific overlay behavior is explicit. |
+| `PMR-001` | Overlay / context. | `observe_only`. | Do not prepare standalone candidates; allow target-specific disable/support annotation only after PMR role branch and target policy facts are explicit. |
 | `SOR-001` | Conditional branch. | `conditional_observation`. | Prepare only for named branches with session and time-stop facts. |
 
 ## FBS-001 Readiness Split
@@ -59,6 +59,17 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `teq_cached_research_only` | Research symbol has cached 2026 evidence but is not visible in current exchangeInfo. | Keep in strategy picker/research context; block candidate prepare. |
 | `teq_symbol_mapping_unclear` | Cached symbol may have changed or is not directly mappable to a current symbol. | Require mapping review before watcher binding. |
 | `teq_low_history_event_only` | bStocks or recent symbols have too little history for promotion. | Event-study observation only. |
+
+## PMR-001 Overlay Role Split
+
+| State | Meaning | Main-Control Behavior |
+| --- | --- | --- |
+| `pmr_disable_overlay_for_nlpd` | PMR state has historically toxic overlap with `NLPD-001` continuation labels. | Allow observe-only disable/downshift annotation for NLPD; do not emit PMR standalone signal. |
+| `pmr_teq_support_tag` | PMR state has positive overlap with TEQ evidence but TEQ remains the primary signal source. | Annotate TEQ context only; do not activate TEQ from PMR alone. |
+| `pmr_regular_xag_short_watchlist` | XAG-led regular-session short/weakness branch has right-tail windows but unresolved drawdown. | Observe-only watchlist; no candidate prepare without session, mark, fill, and margin facts. |
+| `pmr_metal_dislocation_context` | Metals dislocation describes relative weakness or session mismatch. | Context fact for PMR/MDS; not standalone action. |
+| `pmr_standalone_short_blocked` | Broad standalone PMR short promotion remains blocked. | Block candidate prepare. |
+| `pmr_broad_long_blocked` | Broad metal-long momentum is negative evidence. | Block long-side metal momentum claims. |
 
 ## Leverage Boundary
 
@@ -81,6 +92,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 3. Keep `TEQ-001` current-product availability refresh active after
    `teq-current-product-availability-refresh-20260616.md`; do not treat cached
    2026 symbols as current runtime symbols without exchangeInfo visibility.
-4. Add a `PMR-001` overlay role split between disable, support, and standalone
-   branches.
+4. Keep `PMR-001` overlay role split current after
+   `pmr-overlay-role-split-20260616.md`; next evidence task is target-specific
+   overlay policy testing with current session, fill, mark, and margin facts.
 5. Add a `SOR-001` branch table for session eligibility and time-stop behavior.
