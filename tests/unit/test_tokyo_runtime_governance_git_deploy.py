@@ -365,6 +365,64 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "--base-revision 064 --head-revision 070" not in all_commands
 
 
+def test_git_deploy_plan_allows_dirty_worktree_for_remote_git_export():
+    module = _load_plan_module()
+    head = _git("rev-parse", "HEAD")
+    module._tracked_dirty = lambda repo_root: True
+    module._remote_branch_probe = (
+        lambda *, repo_url, branch: module.RemoteBranchProbeResult(
+            head=head,
+            status="head_resolved",
+            blocker=None,
+            attempts=[
+                {
+                    "transport": "test",
+                    "returncode": 0,
+                    "stdout_tail": f"{head}\trefs/heads/{branch}",
+                }
+            ],
+        )
+    )
+
+    report = module.build_git_deploy_plan(
+        repo_root=REPO_ROOT,
+        repo_url="https://github.com/example/dingdingbot.git",
+        git_ref="release/test",
+        target_commit=head,
+        release_name="brc-runtime-governance-test",
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python=(
+            "/home/ubuntu/brc-deploy/venvs/"
+            "brc-bnb-prelive-20260601/bin/python"
+        ),
+        api_base="http://127.0.0.1:18080",
+        previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
+        expected_deployed_head="baseline-head",
+        expected_remote_migration_count=81,
+        expected_remote_latest_migration=(
+            "2026-06-11-081_create_llm_advisory_plane.py"
+        ),
+    )
+
+    assert report["status"] == "ready_for_owner_authorized_remote_git_deploy_plan"
+    assert "tracked_worktree_dirty" not in report["checks"]["blockers"]
+    assert (
+        "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
+        in report["checks"]["warnings"]
+    )
+    all_commands = "\n".join(
+        command
+        for phase in report["plan_phases"]
+        for command in phase["commands"]
+    )
+    assert "--allow-tracked-dirty-for-remote-git-export" in all_commands
+    assert "git archive" in all_commands
+    assert "scp " not in all_commands
+
+
 def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_check():
     module = _load_plan_module()
     head = _git("rev-parse", "HEAD")

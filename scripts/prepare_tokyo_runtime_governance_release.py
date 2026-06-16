@@ -47,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
         expected_latest_migration=args.expected_latest_migration,
         write_artifacts=args.write_artifacts,
         output_dir=Path(args.output_dir),
+        allow_tracked_dirty_for_remote_git_export=(
+            args.allow_tracked_dirty_for_remote_git_export
+        ),
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -63,6 +66,7 @@ def build_release_readiness_report(
     expected_latest_migration: str,
     write_artifacts: bool,
     output_dir: Path,
+    allow_tracked_dirty_for_remote_git_export: bool = False,
 ) -> dict[str, Any]:
     """Build a local-only readiness manifest for a future Tokyo release."""
 
@@ -85,8 +89,12 @@ def build_release_readiness_report(
 
     blockers: list[str] = []
     warnings: list[str] = []
-    if tracked_dirty:
+    if tracked_dirty and not allow_tracked_dirty_for_remote_git_export:
         blockers.append("tracked_worktree_dirty")
+    elif tracked_dirty:
+        warnings.append(
+            "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
+        )
     if not deployed_is_ancestor:
         blockers.append("deployed_head_not_ancestor_of_local_head")
     if len(migration_files) < expected_min_migrations:
@@ -218,6 +226,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=(
             "Write a local git archive and manifest. This never deploys or "
             "modifies remote state."
+        ),
+    )
+    parser.add_argument(
+        "--allow-tracked-dirty-for-remote-git-export",
+        action="store_true",
+        help=(
+            "Downgrade tracked dirty state to a warning when the caller deploys "
+            "from a pushed remote git commit instead of a local archive."
         ),
     )
     return parser.parse_args(argv)

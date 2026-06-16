@@ -139,6 +139,35 @@ def test_release_readiness_blocks_dirty_tracked_tree_and_refuses_artifacts(
         )
 
 
+def test_release_readiness_can_warn_for_remote_git_export_dirty_tree(
+    tmp_path: Path,
+):
+    module = _load_module()
+    repo, deployed_head = _init_release_repo(tmp_path)
+    _write(repo / "README.md", "dirty tracked change\n")
+
+    report = module.build_release_readiness_report(
+        repo_root=repo,
+        deployed_head=deployed_head,
+        expected_min_migrations=1,
+        expected_latest_migration=(
+            "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
+        ),
+        write_artifacts=False,
+        output_dir=Path("output/release-check"),
+        allow_tracked_dirty_for_remote_git_export=True,
+    )
+
+    assert report["status"] == "ready_for_local_packaging"
+    assert report["release_checks"]["ready_for_packaging"] is True
+    assert "tracked_worktree_dirty" not in report["release_checks"]["blockers"]
+    assert (
+        "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
+        in report["release_checks"]["warnings"]
+    )
+    assert report["local_git"]["tracked_dirty"] is True
+
+
 def test_release_artifact_uses_git_archive_and_excludes_untracked_files(
     tmp_path: Path,
 ):

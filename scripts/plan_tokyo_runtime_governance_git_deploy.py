@@ -135,7 +135,9 @@ def build_git_deploy_plan(
     warnings: list[str] = []
 
     if tracked_dirty:
-        blockers.append("tracked_worktree_dirty")
+        warnings.append(
+            "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
+        )
     if not migration_files:
         blockers.append("local_migration_files_missing")
     if local_latest_migration != expected_latest_migration:
@@ -391,7 +393,8 @@ def _plan_phases(
                 "scripts/prepare_tokyo_runtime_governance_release.py --json "
                 f"--deployed-head {q(expected_deployed_head)} "
                 f"--expected-min-migrations {target_migration_count} "
-                f"--expected-latest-migration {q(expected_latest_migration)}",
+                f"--expected-latest-migration {q(expected_latest_migration)} "
+                "--allow-tracked-dirty-for-remote-git-export",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/audit_tokyo_runtime_governance_migration_gap.py --json "
                 f"--base-revision {q(base_revision)} "

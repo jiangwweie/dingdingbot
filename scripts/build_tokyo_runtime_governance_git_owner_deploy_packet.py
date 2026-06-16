@@ -73,6 +73,7 @@ async def _build_owner_deploy_packet_from_args(
         expected_latest_migration=args.expected_latest_migration,
         write_artifacts=False,
         output_dir=Path(args.output_dir),
+        allow_tracked_dirty_for_remote_git_export=True,
     )
     deploy_plan = build_git_deploy_plan(
         repo_root=repo_root,
