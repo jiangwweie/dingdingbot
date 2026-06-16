@@ -13,6 +13,50 @@ execution authority, exchange-write authority, deploy authority, credential
 authority, live-profile authority, FinalGate authority, OrderLifecycle
 authority, exchange gateway authority, or order-sizing authority.
 
+## 2026-06-16: Shift From Pool Expansion To Main-Control Strategy Cabinet Intake
+
+### Instruction
+
+Owner provided a follow-up assessment that the strategy research line has
+completed a stage of pool expansion. The next high-value step is not to keep
+adding strategy IDs, but to let main control consume the current `24` strategy
+semantics and `12` handoff / observe-only handoff packs through Strategy
+Picker, RequiredFacts Registry, Watcher Observation, SignalEvaluation shadow
+records, OrderCandidate preview, and Owner Review Queue.
+
+### Research Interpretation
+
+1. Strategy research should preserve and maintain the current strategy pool,
+   but broad expansion is no longer the primary next step.
+2. The current Strategy Cabinet should be treated as a handoff asset for
+   main-control ingest, not as a runtime registry or return leaderboard.
+3. `handoff_ready` means main control can review, ingest, and observe the
+   strategy. It does not mean executable-ready.
+4. `MPG-001`, `TEQ-001`, `FBS-001`, `VCB-001`, and `NLPD-001` form the
+   recommended first Strategy Picker / watcher intake scope.
+5. `PMR-001`, `SOR-001`, `RSR-001`, `SCF-001`, `DMI-001`, `MASS-001`, and
+   `UO-001` should remain observe-only, overlay, scorer, or
+   structure-confirmation intake candidates.
+6. `LCF-001`, `EFI-001`, `HAT-001`, `LSR-001`, `TRIX-001`, `PSAR-001`,
+   `ICH-001`, `AEB-001`, `STOCH-001`, `RBR-001`, `MDS-001`, and `CCI-001`
+   should stay in the cabinet as research, facts-pipeline, parked, or revival
+   candidates until their blockers improve.
+7. `FBS-001` and `LCF-001` have high right-tail potential, but they must not
+   become execution candidates without funding, mark/index, OI, top-trader,
+   ADL, liquidation, depth, spread, and real-margin facts.
+8. Strategy research must not use this direction change to modify FinalGate,
+   Operation Layer, exchange gateway, live profile, credentials, deploy files,
+   or order-sizing defaults.
+
+### Current Evidence Hooks
+
+| Artifact | Current Role |
+| --- | --- |
+| `docs/strategy-research/main-control-strategy-cabinet-intake-sprint-20260616.md` | Main-control intake recommendation for Strategy Cabinet ingest, RequiredFacts registry, watcher state, SignalEvaluation shadow ledger, OrderCandidate preview, and Owner review queue. |
+| `docs/strategy-research/strategy-line-handoff-summary-20260616.md` | Owner/main-control-readable summary of current strategy semantics and intake grouping. |
+| `docs/strategy-research/strategy-group-handoffs/main-control-handoff-index.md` | Current handoff index for the `12` reviewable handoff / observe-only handoff packs. |
+| `docs/strategy-research/strategy-cabinet/strategy-cabinet.json` | System-readable current Strategy Cabinet. |
+
 ## 2026-06-16: P0 / P1 / P2 Goal Mode Started
 
 ### Instruction
