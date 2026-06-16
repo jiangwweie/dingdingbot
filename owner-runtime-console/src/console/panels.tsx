@@ -80,7 +80,7 @@ export function SafetyOverviewStrip({ summary }: { summary: OwnerProductSummary 
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <CompactCount label="需处理" tone="danger" value={summary.ownerAttentionCount} />
+          <CompactCount label="需要介入" tone="danger" value={summary.ownerAttentionCount} />
           <CompactCount label="处理中" tone="processing" value={summary.processingCount} />
           <CompactCount label="暂不可用" tone="danger" value={summary.unavailableCount} />
           <CompactCount label="运行中" tone="safe" value={summary.runningCount} />

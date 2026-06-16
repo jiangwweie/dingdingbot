@@ -86,7 +86,14 @@ async function serveStatic(request, response) {
     response.writeHead(200, {
       "content-type": contentTypes.get(path.extname(filePath)) || "application/octet-stream",
     });
-    createReadStream(filePath).pipe(response);
+    const stream = createReadStream(filePath);
+    stream.on("error", (error) => {
+      if (!response.headersSent) {
+        response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      }
+      response.end(`Static file read failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    stream.pipe(response);
   } catch {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     response.end("Not found");

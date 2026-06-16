@@ -73,7 +73,7 @@ function RuntimeMetrics({ summary }: { summary: OwnerProductProjection["productS
     { label: "运行中", value: summary.runningCount, tone: "safe" as const, icon: <Activity /> },
     { label: "等待机会", value: summary.waitingCount, tone: "waiting" as const, icon: <Clock3 /> },
     { label: "处理中", value: summary.processingCount, tone: "processing" as const, icon: <RefreshCw /> },
-    { label: "需处理", value: summary.ownerAttentionCount, tone: "danger" as const, icon: <AlertTriangle /> },
+    { label: "需要介入", value: summary.ownerAttentionCount, tone: "danger" as const, icon: <AlertTriangle /> },
   ];
 
   return (
@@ -109,7 +109,7 @@ function StrategyGroupsPage({
               <ContextRow label="运行中" tone="safe" value={`${projection.productSummary.runningCount} 个`} />
               <ContextRow label="等待机会" tone="waiting" value={`${projection.productSummary.waitingCount} 个`} />
               <ContextRow label="处理中" tone="processing" value={`${projection.productSummary.processingCount} 个`} />
-              <ContextRow label="需处理" tone="danger" value={`${projection.productSummary.ownerAttentionCount} 个`} />
+              <ContextRow label="需要介入" tone="danger" value={`${projection.productSummary.ownerAttentionCount} 个`} />
             </CardContent>
           </Card>
           <StrategyRunSettings strategy={selectedStrategy} />

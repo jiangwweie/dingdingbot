@@ -201,7 +201,7 @@ function buildProjection(
       pausedCount: countState(rows, "paused"),
       ownerAttentionCount,
       dataFreshnessLabel: "数据新鲜 < 60秒",
-      systemLabel: ownerAttentionCount > 0 ? "需处理" : unavailableCount > 0 ? "暂不可用" : "系统正常",
+      systemLabel: ownerAttentionCount > 0 ? "需要介入" : unavailableCount > 0 ? "暂不可用" : "系统正常",
       ...overrides,
     },
     strategies: rows,
@@ -268,7 +268,7 @@ export function buildMockProjection(scenario: OwnerMockScenario): OwnerProductPr
     rows[2].automationState = "temporarily_unavailable";
     rows[2].automationLabel = "暂不可用";
     rows[2].ownerAttention = "owner_required";
-    rows[2].ownerAttentionLabel = "需处理";
+    rows[2].ownerAttentionLabel = "需要介入";
     rows[2].funds = "abnormal";
     rows[2].orders = "abnormal";
     rows[2].availabilityReason = "事实不可用，暂不能使用";
@@ -279,7 +279,7 @@ export function buildMockProjection(scenario: OwnerMockScenario): OwnerProductPr
       applySelection(rows, "FBS-001"),
       {
         overallStatus: "attention",
-        systemLabel: "需处理",
+        systemLabel: "需要介入",
         reason: "事实不可用，暂不能使用",
       },
       { ...baseFundPool, protectionLabel: "正常" },
@@ -345,7 +345,7 @@ export function configuredMockScenario(value: unknown): OwnerMockScenario {
 
 export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerConsoleSourceReadinessResponse {
   const ready = scenario !== "stale" && scenario !== "intervention" && scenario !== "empty";
-  const ownerLabel = scenario === "processing" ? "处理中" : scenario === "intervention" ? "需处理" : ready ? "等待机会" : "暂不可用";
+  const ownerLabel = scenario === "processing" ? "处理中" : scenario === "intervention" ? "需要介入" : ready ? "等待机会" : "暂不可用";
   const sourceStatus = ready ? "ready" : "source_unavailable";
   const baseHealth = {
     strategy_catalog: { status: "ready", label: "策略组可见", detail: "mock_strategy_catalog" },

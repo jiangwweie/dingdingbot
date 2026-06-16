@@ -43,7 +43,7 @@ export type StrategyGroupProductRow = {
   automationState: OwnerAutomationState;
   automationLabel: string;
   ownerAttention: OwnerAttentionState;
-  ownerAttentionLabel: "无需操作" | "系统处理" | "需处理";
+  ownerAttentionLabel: "无需操作" | "系统处理" | "需要介入";
   availabilityReason?: string;
   funds: OwnerHealthState;
   orders: OwnerHealthState;

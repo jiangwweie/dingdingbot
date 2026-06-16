@@ -134,7 +134,7 @@ function strategyRows(source: OwnerConsoleSourceReadinessData, health: OwnerSour
       automationState: state,
       automationLabel: automationStateLabels[state],
       ownerAttention: source.owner_state?.needs_owner_action && state === "temporarily_unavailable" ? "owner_required" : state === "temporarily_unavailable" ? "system_required" : "none",
-      ownerAttentionLabel: source.owner_state?.needs_owner_action && state === "temporarily_unavailable" ? "需处理" : state === "temporarily_unavailable" ? "系统处理" : "无需操作",
+      ownerAttentionLabel: source.owner_state?.needs_owner_action && state === "temporarily_unavailable" ? "需要介入" : state === "temporarily_unavailable" ? "系统处理" : "无需操作",
       availabilityReason: state === "temporarily_unavailable" || state === "paused" ? reason || "状态暂不可用" : undefined,
       funds: healthFromSource(health.accountFunds),
       orders: healthFromSource(health.orders),

@@ -44,6 +44,7 @@ const forbiddenTerms = [
   "ref" + "Id",
   "blocker code",
   "read" + "model",
+  "需处理",
   "next" + " step",
   "下一步",
   "检查器",
@@ -237,7 +238,11 @@ async function collectChecks(page, target, viewport, consoleIssues) {
     const abnormalEmptyState = ["暂无订单", "暂无持仓"].some((emptyLabel) => {
       return Array.from(document.querySelectorAll("div, section, article")).some((element) => {
         const text = element.textContent?.trim().replace(/\s+/g, " ") ?? "";
-        return text.includes(emptyLabel) && /异常|需要介入|错误/.test(text);
+        const rect = element.getBoundingClientRect();
+        if (text.length > 220) return false;
+        if (element.children.length > 8) return false;
+        if (rect.height > 240 || rect.width > window.innerWidth * 0.65) return false;
+        return text.includes(emptyLabel) && /异常|错误|需要介入(?!\s*0)/.test(text);
       });
     });
     if (abnormalEmptyState) {
