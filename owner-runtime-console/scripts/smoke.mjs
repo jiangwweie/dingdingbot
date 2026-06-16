@@ -95,7 +95,7 @@ try {
   await openNav(page, "系统", "只读保证");
   await expectVisible(page, "审计演练摘要");
   await expectVisible(page, "演练场景");
-  await expectVisible(page, "7 项通过");
+  await expectVisible(page, "8 项通过");
   await expectVisible(page, "共性管道");
   await expectVisible(page, "已覆盖");
   await expectVisible(page, "选中范围");
@@ -104,6 +104,8 @@ try {
   await expectVisible(page, "已覆盖");
   await expectVisible(page, "安全矩阵");
   await expectVisible(page, "已覆盖");
+  await expectVisible(page, "观察范围");
+  await expectVisible(page, "已隔离");
   await expectVisible(page, "危险动作");
   await expectVisible(page, "未发生");
   await openNav(page, "首页", "系统安全运行");

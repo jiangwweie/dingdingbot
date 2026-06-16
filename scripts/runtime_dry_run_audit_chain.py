@@ -1247,6 +1247,137 @@ def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[st
     )
 
 
+def _scenario_expanded_watcher_scope_execution_guard(output_dir: Path) -> dict[str, Any]:
+    expanded_waiting_resume = _resume_pack_waiting()
+    expanded_waiting_resume["selected_runtime_instance_ids"] = [
+        "dry-run-runtime-mpg-001",
+        "dry-run-runtime-sor-001",
+    ]
+    expanded_waiting_resume["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": "dry-run-runtime-mpg-001",
+            "strategy_family_id": "MPG-001",
+            "strategy_family_version_id": "MPG-001-v0",
+            "symbol": "MSTR/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        },
+        {
+            "runtime_instance_id": "dry-run-runtime-sor-001",
+            "strategy_family_id": "SOR-001",
+            "strategy_family_version_id": "SOR-001-v0",
+            "symbol": "XAG/USDT:USDT",
+            "side": "short",
+            "status": "waiting_for_signal",
+        },
+    ]
+    expanded_observation = dispatcher.build_dispatch_packet(
+        resume_pack=expanded_waiting_resume,
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        selected_strategy_group_id="MPG-001",
+    )
+
+    ambiguous_actionable_resume = _resume_pack_ready_for_finalgate(
+        strategy_group_id="MPG-001",
+        runtime_instance_id="dry-run-runtime-mpg-001",
+    )
+    ambiguous_actionable_resume["runtime_instance_id"] = None
+    ambiguous_actionable_resume["action_time_resume"]["runtime_instance_id"] = None
+    ambiguous_actionable_resume["action_time_resume"].pop("strategy_family_id", None)
+    ambiguous_actionable_resume["selected_runtime_instance_ids"] = [
+        "dry-run-runtime-mpg-001",
+        "dry-run-runtime-sor-001",
+    ]
+    ambiguous_actionable_resume["runtime_signal_summaries"] = []
+    ambiguous_action = dispatcher.build_dispatch_packet(
+        resume_pack=ambiguous_actionable_resume,
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        selected_strategy_group_id="MPG-001",
+        execute_preflight=True,
+    )
+
+    out_of_scope_action = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_ready_for_finalgate(
+            strategy_group_id="SOR-001",
+            runtime_instance_id="dry-run-runtime-sor-001",
+        ),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        selected_strategy_group_id="MPG-001",
+        execute_preflight=True,
+    )
+    checks = {
+        "expanded_scope_observation_allowed": (
+            expanded_observation.get("status") == "waiting_for_market"
+            and expanded_observation.get("dispatch_action")
+            == "continue_watcher_observation"
+            and expanded_observation.get("command_plan") is None
+        ),
+        "ambiguous_actionable_scope_blocked": (
+            ambiguous_action.get("status") == "blocked"
+            and ambiguous_action.get("dispatch_status")
+            == "blocked_by_selected_strategygroup_scope"
+            and ambiguous_action.get("command_plan") is None
+            and ambiguous_action.get("blockers")
+            == ["missing_fact:selected_strategy_group_id_for_action"]
+        ),
+        "out_of_scope_actionable_signal_blocked": (
+            out_of_scope_action.get("status") == "blocked"
+            and out_of_scope_action.get("dispatch_status")
+            == "blocked_by_selected_strategygroup_scope"
+            and out_of_scope_action.get("command_plan") is None
+        ),
+        "finalgate_not_called_for_blocked_scope": (
+            ambiguous_action.get("safety_invariants", {}).get(
+                "official_finalgate_preflight_called"
+            )
+            is False
+            and out_of_scope_action.get("safety_invariants", {}).get(
+                "official_finalgate_preflight_called"
+            )
+            is False
+        ),
+        "operation_layer_not_called_for_blocked_scope": (
+            ambiguous_action.get("safety_invariants", {}).get(
+                "official_operation_layer_submit_called"
+            )
+            is False
+            and out_of_scope_action.get("safety_invariants", {}).get(
+                "official_operation_layer_submit_called"
+            )
+            is False
+        ),
+        "no_dangerous_effects": not _dangerous_effects(
+            expanded_observation,
+            ambiguous_action,
+            out_of_scope_action,
+        ),
+    }
+    blockers = [
+        f"expanded_watcher_scope_execution_guard:{name}"
+        for name, value in checks.items()
+        if value is not True
+    ]
+    return _scenario_packet(
+        name="expanded_watcher_scope_execution_guard",
+        expected=(
+            "expanded watcher scope may observe multiple runtimes, but any "
+            "actionable step must prove selected StrategyGroup scope before "
+            "FinalGate or Operation Layer"
+        ),
+        artifacts={
+            "checks": checks,
+            "expanded_observation": expanded_observation,
+            "ambiguous_action": ambiguous_action,
+            "out_of_scope_action": out_of_scope_action,
+        },
+        passed=not blockers,
+        blockers=blockers,
+    )
+
+
 def _mock_operation_layer_closed_loop() -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     original_session_cookie = dispatcher._session_cookie
@@ -1502,6 +1633,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_active_conflict(output_dir),
         _scenario_operation_layer_blocker_review_matrix(output_dir),
         _scenario_selected_strategygroup_dispatch_guard(output_dir),
+        _scenario_expanded_watcher_scope_execution_guard(output_dir),
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
     blockers = [
@@ -1517,7 +1649,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 7,
+        "required_scenarios_present": len(scenarios) == 8,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -1612,6 +1744,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             ).get("all_selected_strategygroups_reach_finalgate_dispatch")
             is True
         ),
+        "expanded_watcher_scope_execution_guard_checked": (
+            _scenario_artifact(
+                scenarios,
+                "expanded_watcher_scope_execution_guard",
+                "checks",
+            )
+            != {}
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "expanded_watcher_scope_execution_guard",
+                    "checks",
+                ).values()
+            )
+        ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
     required_checks = {
@@ -1636,6 +1783,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "operation_layer_hard_safety_blocker_matrix_checked": checks[
             "operation_layer_hard_safety_blocker_matrix_checked"
+        ],
+        "expanded_watcher_scope_execution_guard_checked": checks[
+            "expanded_watcher_scope_execution_guard_checked"
         ],
     }
     return {

@@ -10,12 +10,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["scenario_count"] == 7
-    assert packet["checks"]["scenario_count"] == 7
+    assert packet["scenario_count"] == 8
+    assert packet["checks"]["scenario_count"] == 8
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["summary"] == {
-        "scenario_count": 7,
+        "scenario_count": 8,
         "required_checks_present": True,
         "all_scenarios_passed": True,
         "dangerous_effects_absent": True,
@@ -24,6 +24,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
+        "expanded_watcher_scope_execution_guard_checked": True,
     }
     assert packet["required_checks"] == {
         "all_scenarios_passed": True,
@@ -34,6 +35,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "mock_operation_layer_closed_loop_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
+        "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_evidence_relay_checked": True,
         "required_scenarios_present": True,
         "selected_strategygroup_dispatch_guard_checked": True,
@@ -55,6 +57,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "active_position_or_open_order_conflict",
         "operation_layer_blocker_review_matrix",
         "selected_strategygroup_dispatch_guard",
+        "expanded_watcher_scope_execution_guard",
     }
     assert scenarios["no_signal"]["artifacts"]["resume_dispatch"]["command_plan"] is None
     assert (
@@ -189,6 +192,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         packet["checks"]["operation_layer_hard_safety_blocker_matrix_checked"]
         is True
     )
+    assert packet["checks"]["expanded_watcher_scope_execution_guard_checked"] is True
     assert packet["checks"]["shared_runtime_pipeline_checked"] is True
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
@@ -222,6 +226,26 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "blocked_by_selected_strategygroup_scope"
     )
     assert selected_guard["out_of_scope_dispatch"]["command_plan"] is None
+    expanded_guard = scenarios["expanded_watcher_scope_execution_guard"][
+        "artifacts"
+    ]
+    assert expanded_guard["checks"] == {
+        "expanded_scope_observation_allowed": True,
+        "ambiguous_actionable_scope_blocked": True,
+        "out_of_scope_actionable_signal_blocked": True,
+        "finalgate_not_called_for_blocked_scope": True,
+        "operation_layer_not_called_for_blocked_scope": True,
+        "no_dangerous_effects": True,
+    }
+    assert expanded_guard["expanded_observation"]["dispatch_action"] == (
+        "continue_watcher_observation"
+    )
+    assert expanded_guard["ambiguous_action"]["blockers"] == [
+        "missing_fact:selected_strategy_group_id_for_action"
+    ]
+    assert expanded_guard["out_of_scope_action"]["dispatch_status"] == (
+        "blocked_by_selected_strategygroup_scope"
+    )
     shared = packet["shared_runtime_pipeline_validation"]
     assert shared["status"] == "passed"
     assert shared["judgment"] == {
