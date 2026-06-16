@@ -23,6 +23,7 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 | Strategy Group | Status | Symbols | Sides | Warnings |
 | --- | --- | ---: | --- | ---: |
 | `FBS-001` | `PASS` | `9` | `long,short_disable_or_redesign_only` | `0` |
+| `DMI-001` | `PASS` | `15` | `long` | `0` |
 | `MPG-001` | `PASS` | `21` | `long` | `0` |
 | `NLPD-001` | `PASS` | `10` | `long,short_analysis_only` | `0` |
 | `PMR-001` | `PASS` | `7` | `short,long_context_only` | `0` |
@@ -34,8 +35,8 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 Summary:
 
 ```text
-Validated handoffs: 8
-Passed: 8
+Validated handoffs: 9
+Passed: 9
 Failed: 0
 ```
 
@@ -43,18 +44,18 @@ Failed: 0
 
 | Required Field | Coverage |
 | --- | ---: |
-| `strategy_group_id` | `8/8` |
-| `version` | `8/8` |
-| `supported_symbols` | `8/8` |
-| `supported_sides` | `8/8` |
-| `signal_ready_rule` | `8/8` |
-| `required_facts` | `8/8` |
-| `risk_defaults` | `8/8` |
-| `hard_stops` | `8/8` |
-| `sample_signal_packet` | `8/8` |
-| `sample_no_signal_packet` | `8/8` |
-| `sample_stale_signal_packet` | `8/8` |
-| `sample_conflict_packet` | `8/8` |
+| `strategy_group_id` | `9/9` |
+| `version` | `9/9` |
+| `supported_symbols` | `9/9` |
+| `supported_sides` | `9/9` |
+| `signal_ready_rule` | `9/9` |
+| `required_facts` | `9/9` |
+| `risk_defaults` | `9/9` |
+| `hard_stops` | `9/9` |
+| `sample_signal_packet` | `9/9` |
+| `sample_no_signal_packet` | `9/9` |
+| `sample_stale_signal_packet` | `9/9` |
+| `sample_conflict_packet` | `9/9` |
 
 ## Commands Run
 

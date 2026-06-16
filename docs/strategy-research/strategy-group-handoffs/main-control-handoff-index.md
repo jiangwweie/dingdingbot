@@ -26,6 +26,7 @@ changes, live-profile changes, or order-sizing defaults.
 | `VCB-001` | `VCB-001/handoff.md` | `VCB-001/handoff.json` | Volatility compression true-breakout classifier draft | `observe_only` | `long` |
 | `RSR-001` | `RSR-001/handoff.md` | `RSR-001/handoff.json` | Relative-strength rotation TEQ support scorer draft | `observe_only` | `long` |
 | `NLPD-001` | `NLPD-001/handoff.md` | `NLPD-001/handoff.json` | New-listing / contract-event low-history observer draft | `observe_only` | `long`; short as analysis-only |
+| `DMI-001` | `DMI-001/handoff.md` | `DMI-001/handoff.json` | ADX/DMI equity ADX-rising directional ignition draft | `observe_only` | `long` |
 
 ## Main-Control Consumption Contract
 
@@ -33,18 +34,18 @@ Each `handoff.json` includes the main-control required fields:
 
 | Field | Present In Batch | Main-Control Use |
 | --- | ---: | --- |
-| `strategy_group_id` | `8/8` | Stable Strategy Picker / admission identifier. |
-| `version` | `8/8` | Traceable signal and handoff source version. |
-| `supported_symbols` | `8/8` | Research observation universe pending exchange-rule validation. |
-| `supported_sides` | `8/8` | Direction scope and disabled/revival-side semantics. |
-| `signal_ready_rule` | `8/8` | Fresh-signal readiness semantics. |
-| `required_facts` | `8/8` | Runtime readiness, account, market, exchange, and strategy fact requirements. |
-| `risk_defaults` | `8/8` | Research risk proposal only; not live order-sizing defaults. |
-| `hard_stops` | `8/8` | Strategy-level blockers before observation/candidate preparation/execution review. |
-| `sample_signal_packet` | `8/8` | Example fresh signal output. |
-| `sample_no_signal_packet` | `8/8` | Example no-signal output. |
+| `strategy_group_id` | `9/9` | Stable Strategy Picker / admission identifier. |
+| `version` | `9/9` | Traceable signal and handoff source version. |
+| `supported_symbols` | `9/9` | Research observation universe pending exchange-rule validation. |
+| `supported_sides` | `9/9` | Direction scope and disabled/revival-side semantics. |
+| `signal_ready_rule` | `9/9` | Fresh-signal readiness semantics. |
+| `required_facts` | `9/9` | Runtime readiness, account, market, exchange, and strategy fact requirements. |
+| `risk_defaults` | `9/9` | Research risk proposal only; not live order-sizing defaults. |
+| `hard_stops` | `9/9` | Strategy-level blockers before observation/candidate preparation/execution review. |
+| `sample_signal_packet` | `9/9` | Example fresh signal output. |
+| `sample_no_signal_packet` | `9/9` | Example no-signal output. |
 
-All eight JSON packs also include `sample_stale_signal_packet` and
+All nine JSON packs also include `sample_stale_signal_packet` and
 `sample_conflict_packet`.
 
 ## Low-Ambiguity Intake Supplements
@@ -63,6 +64,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `../vcb-signal-time-classifier-boundary-20260616.md` | P1 supplement for `VCB-001` signal-time breakout facts, post-entry label boundary, and observe-only classifier behavior. |
 | `../rsr-scorer-standalone-boundary-20260616.md` | P1 supplement for `RSR-001` TEQ support scoring, Strategy Picker rank hints, and standalone activation blockers. |
 | `../nlpd-low-history-event-boundary-20260616.md` | P1 supplement for `NLPD-001` listing-event observation, low-history blockers, product class, executable-side, and PMR disable context. |
+| `DMI-001/handoff.md` | P2-to-P1 observe-only handoff draft for `DMI-001` equity ADX-rising long directional ignition, 24h time-stop, and cost/fill/session/margin blockers. |
 | `../lcf-facts-pipeline-boundary-20260616.md` | P1 non-handoff supplement for `LCF-001` force-order, liquidation-cluster, OI, positioning, depth, ADL, margin, and facts-missing no-signal behavior. |
 | `../mds-target-pairing-boundary-20260616.md` | P1 non-handoff supplement for `MDS-001` NLPD disable tags, TEQ support tags, coverage-missing policies, and standalone-blocked overlay behavior. |
 
@@ -78,6 +80,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `VCB-001` | Keep observe-only as true-breakout classifier draft; post-entry true/false labels are research targets only, and broad breakout or armed observation stays blocked until signal-time classifier quality improves. |
 | `RSR-001` | Keep observe-only as TEQ support scorer and Strategy Picker rank hint; standalone activation remains blocked until decay, session/fill, product, mark/funding, and margin facts improve. |
 | `NLPD-001` | Keep observe-only as low-history event observer; listing labels remain research-only and armed observation stays blocked until cohort breadth, survivorship, spread/liquidity, product-risk, and executable-side facts improve. |
+| `DMI-001` | Keep observe-only as equity ADX-rising long directional-ignition draft; generic DMI, short-side DMI, and precious-metal generalization stay blocked until cost/fill/session/product and real-margin facts improve. |
 
 Non-handoff P1 interpretation: `LCF-001` should stay in the Strategy Cabinet as
 `facts_pipeline_required`. Main control should not treat it as a runtime intake
@@ -131,6 +134,7 @@ PY
 ```text
 OK docs/strategy-research/strategy-group-handoffs/FBS-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/MPG-001/handoff.json
+OK docs/strategy-research/strategy-group-handoffs/DMI-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/TEQ-001/handoff.json
@@ -138,6 +142,7 @@ OK docs/strategy-research/strategy-group-handoffs/VCB-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/RSR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/NLPD-001/handoff.json
 
+DMI-001 complete symbols 15 sides long
 FBS-001 complete symbols 9 sides long,short_disable_or_redesign_only
 MPG-001 complete symbols 21 sides long
 PMR-001 complete symbols 7 sides short,long_context_only

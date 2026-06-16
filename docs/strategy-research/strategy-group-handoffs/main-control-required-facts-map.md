@@ -235,6 +235,31 @@ P1 low-history boundary supplement:
 | `nlpd_post_entry_label_boundary_state` | Event labels are research targets, not runtime entry facts. | `block_candidate_prepare` |
 | `nlpd_pmr_disable_overlay_state` | PMR downshift/disable context for NLPD continuation labels. | `no_disable_annotation` |
 
+### `DMI-001`
+
+`DMI-001` is an observe-only handoff draft. This mapping exists to let main
+control evaluate a directional-ignition watcher without treating generic ADX,
+short-side DMI, or metal rows as executable evidence.
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `dmi_adx_trend_strength_state` | Closed-candle ADX >= 25 and rising trend-strength state. | `no_dmi_signal` |
+| `dmi_directional_spread_state` | +DI / -DI direction and spread state. | `no_dmi_signal` |
+| `dmi_di_cross_state` | Directional movement cross context. | `block_generic_dmi_claim` |
+| `directional_decay_disable_state` | Late-window or post-ignition decay state. | `observe_only` |
+| `dmi_asset_role_state` | Equity-like versus precious-metal role split. | `block_broad_asset_claim` |
+| `dmi_raw_pool_classifier_state` | Signal-time classifier provenance. | `block_candidate_prepare` |
+| `dmi_exit_horizon_state` | 24h time-stop state for the current lead row. | `block_candidate_prepare` |
+| `dmi_fill_gap_slippage_sensitivity_state` | Deterministic extra-cost stress state. | `observe_only_or_block_promotion` |
+| `dmi_extra_cost_tolerance_state` | Maximum tolerated extra round-trip cost. | `block_candidate_prepare` |
+| `dmi_live_spread_proxy_state` | Live-like spread or bid/ask proxy. | `block_promotion` |
+| `dmi_low_history_product_risk_state` | Product and short-history risk state for equity-like perps. | `observe_only` |
+| `fill_gap_slippage_state` | Next-open and 24h exit fill/gap/slippage state. | `block_promotion` |
+| `real_exchange_margin_liquidation_model` | Venue-specific margin and liquidation behavior. | `block_leverage_promotion` |
+
+DMI handoff pack:
+`docs/strategy-research/strategy-group-handoffs/DMI-001/handoff.md`.
+
 ### `LCF-001`
 
 `LCF-001` is not a handoff pack. This mapping exists only to preserve the

@@ -74,7 +74,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |
 | `mds-target-pairing-boundary-20260616.md` | `MDS-001` target-pairing boundary for NLPD disable tags, TEQ support tags, coverage-missing policies, and standalone blockers. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
-| `p2-cabinet-extension-batch1-20260616.md` | P2 cabinet extension batch preserving six additional right-tail review or revival candidates without handoff or runtime intake. |
+| `p2-cabinet-extension-batch1-20260616.md` | P2 cabinet extension batch preserving six additional right-tail review or revival candidates; `DMI-001` has since been converted to observe-only handoff draft. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
 | `strategy-cabinet/strategy-cabinet.md` | Human-readable Strategy Cabinet, listing active, parked, blocked, and handoff-ready strategy semantics. |
@@ -83,7 +83,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-research-v3-goal-completion-audit.md` | Requirement-by-requirement completion audit for the active Strategy Research v3 main-control handoff goal. |
 | `strategy-group-experimental-candidate-admission.md` | Owner correction for converting research into experimental StrategyGroup candidates; known flaws may be acceptable when bounded, while execution-chain mutation remains out of scope. |
 | `strategy-group-handoffs/README.md` | Strategy Group Handoff Pack contract for main-control consumption; defines required fields, packet semantics, and non-execution boundaries. |
-| `strategy-group-handoffs/main-control-handoff-index.md` | Main-control entry point for the first five StrategyGroup handoff packs, including verification commands and boundary proof. |
+| `strategy-group-handoffs/main-control-handoff-index.md` | Main-control entry point for current StrategyGroup handoff packs, including verification commands and boundary proof. |
 | `strategy-group-handoffs/handoff-validation-report.md` | Validation report proving the first five handoff JSON packs satisfy the main-control field contract. |
 | `strategy-group-handoffs/main-control-task-card.md` | Main-control task card for reviewing and consuming StrategyGroup handoff batch 1. |
 | `strategy-group-handoffs/MPG-001/handoff.md` | Human-readable `MPG-001` Momentum Persistence StrategyGroup handoff pack for main-control review. |
@@ -102,6 +102,8 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-group-handoffs/RSR-001/handoff.json` | System-readable observe-only `RSR-001` scorer handoff contract with TEQ support semantics, RequiredFacts, hard stops, and sample packets. |
 | `strategy-group-handoffs/NLPD-001/handoff.md` | Human-readable observe-only `NLPD-001` new-listing / event-study handoff draft. |
 | `strategy-group-handoffs/NLPD-001/handoff.json` | System-readable observe-only `NLPD-001` event-study handoff contract with low-history semantics, RequiredFacts, hard stops, and sample packets. |
+| `strategy-group-handoffs/DMI-001/handoff.md` | Human-readable observe-only `DMI-001` ADX / DMI directional-ignition handoff draft. |
+| `strategy-group-handoffs/DMI-001/handoff.json` | System-readable observe-only `DMI-001` handoff contract with equity ADX-rising long semantics, RequiredFacts, hard stops, and sample packets. |
 | `document-governance-v3.md` | Document authority, supersession rules, and old-document handling. |
 | `owner-direction-log.md` | Owner strategy-research instructions that change search space, evaluation semantics, or evidence governance. |
 | `community-research-plan.md` | GitHub, Freqtrade, QuantConnect, Reddit/forum, and official-data intake plan. |

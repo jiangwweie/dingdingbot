@@ -1,0 +1,245 @@
+{
+  "strategy_group_id": "DMI-001",
+  "version": "2026-06-16-r0",
+  "name": "ADX Directional Ignition",
+  "status": "observe_only_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "CRCLUSDT",
+    "FLNCUSDT",
+    "MRVLUSDT",
+    "NBISUSDT",
+    "ORCLUSDT",
+    "HOODUSDT",
+    "METAUSDT",
+    "EWYUSDT",
+    "COINUSDT",
+    "MSTRUSDT",
+    "PLTRUSDT",
+    "MUUSDT",
+    "SNDKUSDT",
+    "NVDAUSDT",
+    "TSLAUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_dmi_adx_rising_candidate_seen",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "dmi_adx_trend_strength_state",
+      "dmi_directional_spread_state",
+      "dmi_asset_role_state",
+      "dmi_exit_horizon_state",
+      "dmi_fill_gap_slippage_sensitivity_state",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "dmi_long_equity_adx_rising_24h_observe_only",
+      "dmi_long_equity_adx_rising_12h_support"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state",
+      "spread_proxy_state"
+    ],
+    "strategy": [
+      "dmi_adx_trend_strength_state",
+      "dmi_directional_spread_state",
+      "dmi_di_cross_state",
+      "directional_decay_disable_state",
+      "dmi_asset_role_state",
+      "dmi_raw_pool_classifier_state",
+      "dmi_exit_horizon_state",
+      "dmi_time_stop_tradeoff_state",
+      "dmi_fill_gap_slippage_sensitivity_state",
+      "dmi_extra_cost_tolerance_state",
+      "dmi_symbol_cost_concentration_state",
+      "dmi_live_spread_proxy_state",
+      "dmi_low_history_product_risk_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "product_risk_state",
+      "session_gap_state",
+      "real_exchange_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "stress_only_leverage": [
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "24h_observe_only_review_lane"
+  },
+  "hard_stops": [
+    "generic_dmi_mode_requested",
+    "short_side_requested",
+    "precious_metal_generalization_requested",
+    "dmi_adx_trend_strength_missing",
+    "dmi_directional_spread_missing",
+    "dmi_exit_horizon_missing",
+    "dmi_fill_gap_slippage_sensitivity_missing",
+    "extra_cost_tolerance_exceeded",
+    "product_session_policy_missing",
+    "real_margin_model_missing",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "lead_mode": "dmi_long_equity_adx_rising_24h",
+    "lead_events": "169",
+    "lead_full_2x": "481.350915%",
+    "lead_best_90d_2x": "852.623789%",
+    "lead_second_half_2x": "254.307331%",
+    "lead_dd_2x": "-50.301484%",
+    "lead_2x_liq_proxy": "0",
+    "lead_5x_liq_proxy": "0",
+    "cost_0_25_full_2x": "150.419770%",
+    "cost_0_50_full_2x": "7.411572%",
+    "cost_1_00_full_2x": "-80.492724%",
+    "negative_scope": "short-side and precious-metal generalization fail current evidence"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/candidate-packets/DMI-001-adx-directional-ignition-packet.md",
+    "docs/strategy-research/dmi-adx-directional-ignition-replay/dmi-adx-directional-ignition-summary.md",
+    "docs/strategy-research/dmi-decay-asset-role-classifier/dmi-decay-asset-role-classifier-summary.md",
+    "docs/strategy-research/dmi-exit-horizon-reslot/dmi-exit-horizon-reslot-summary.md",
+    "docs/strategy-research/dmi-fill-gap-slippage-sensitivity/dmi-fill-gap-slippage-sensitivity-summary.md"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "DMI-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_dmi_adx_rising_candidate_seen",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Closed 1h candle shows +DI greater than -DI, ADX >= 25 and rising, equity-like asset role, and the 24h time-stop review lane remains inside the DMI observe-only scope.",
+    "invalidation_reason": "Missing fill/gap/session/product/margin facts, stale DMI facts, non-equity role, short-side request, or cost tolerance above the research boundary.",
+    "required_facts_snapshot": {
+      "dmi_adx_trend_strength_state": "present",
+      "dmi_directional_spread_state": "present",
+      "dmi_asset_role_state": "present",
+      "dmi_exit_horizon_state": "present",
+      "dmi_fill_gap_slippage_sensitivity_state": "present",
+      "dmi_live_spread_proxy_state": "missing",
+      "session_gap_state": "missing",
+      "real_exchange_margin_liquidation_model_state": "missing"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "DMI-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_dmi_adx_rising_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No closed-candle equity-like symbol clears the DMI long ADX-rising observe-only rule."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "DMI-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_dmi_adx_rising_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or the closed-candle DMI / asset-role / exit-horizon facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "DMI-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_dmi_adx_rising_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "DMI observe-only signal conflicts with short-side strategy state, non-equity asset role, same-symbol exposure, stale product facts, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

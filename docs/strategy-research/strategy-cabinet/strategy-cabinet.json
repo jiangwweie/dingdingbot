@@ -631,12 +631,12 @@
       "strategy_id": "DMI-001",
       "semantic_name": "ADX Directional Ignition",
       "strategy_family": "directional_movement_ignition",
-      "current_status": "right_tail_candidate",
+      "current_status": "observe_only",
       "default_mode": "observe_only",
       "supported_sides": [
         "long"
       ],
-      "research_role": "ADX/DMI equity ADX-rising long review lane with 24h exit-horizon evidence",
+      "research_role": "Observe-only ADX/DMI equity ADX-rising long handoff draft with 24h exit-horizon evidence",
       "required_facts_level": "high",
       "leverage_boundary": {
         "default": "1x",
@@ -666,8 +666,11 @@
         "docs/strategy-research/dmi-fill-gap-slippage-sensitivity/dmi-fill-gap-slippage-sensitivity-summary.md",
         "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
       ],
-      "handoff_paths": [],
-      "revival_condition": "Convert only as equity ADX-rising long semantics after live-like cost/fill, product/session, metal-role split, and real margin facts improve.",
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/DMI-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/DMI-001/handoff.json"
+      ],
+      "revival_condition": "Upgrade beyond observe-only only after live-like cost/fill, product/session, metal-role split, and real margin facts improve.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

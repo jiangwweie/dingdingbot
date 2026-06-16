@@ -21,6 +21,7 @@ sample packet expectations, and non-execution flags.
 | 3 | `NLPD-001` | `observe_only event-study handoff draft plus low-history boundary complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/` and `nlpd-low-history-event-boundary-20260616.md`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
 | 4 | `LCF-001` | `RequiredFacts design plus facts-pipeline boundary complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md` and `lcf-facts-pipeline-boundary-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay note plus target-pairing boundary complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md` and `mds-target-pairing-boundary-20260616.md`; useful for target-specific disable/support tags, but not yet a standalone strategy group. |
+| 6 | `DMI-001` | `observe_only handoff draft complete from P2 batch` | Equity ADX-rising directional-ignition observer draft. | Completed in `strategy-group-handoffs/DMI-001/`; converted from P2 cabinet extension after exit-horizon and cost-sensitivity evidence clarified a narrow long-only 24h semantic. |
 
 ## VCB-001 Handoff Draft Scope
 
@@ -110,6 +111,18 @@ tags, `TEQ-001` PMR support tags, and historical coverage-missing policies for
 `BTPC-001`, `DCB-001`, and `THR-001`. It also fixes the sample overlay packet
 as `overlay_context_only` with `decision=no_candidate`.
 
+## DMI-001 Observe-Only Handoff Draft Scope
+
+| Field | Draft Decision |
+| --- | --- |
+| Strategy role | ADX/DMI equity-like directional ignition observer. |
+| Supported side | Long only in current evidence. |
+| Positive evidence | `dmi_long_equity_adx_rising` at `24h` has full 2x `481.350915%`, best 90d 2x `852.623789%`, second-half 2x `254.307331%`, and `0` 2x/5x proxy liquidation events. |
+| Negative evidence | Generic DMI overreach, short-side rows, and precious-metal generalization fail current evidence. |
+| Main blocker | Cost sensitivity, product/session/fill, live spread, and real exchange-margin facts. |
+| RequiredFacts | `dmi_adx_trend_strength_state`, `dmi_directional_spread_state`, `dmi_asset_role_state`, `dmi_exit_horizon_state`, `dmi_fill_gap_slippage_sensitivity_state`, `fill_gap_slippage_state`, `real_exchange_margin_liquidation_model`. |
+| Handoff mode | `observe_only`; no armed observation until live-like cost/fill/session/product and margin facts improve. |
+
 ## P1 Next Actions
 
 1. Keep `VCB-001` observe-only after
@@ -133,3 +146,7 @@ as `overlay_context_only` with `decision=no_candidate`.
    activation/disable pair; current boundaries are
    `mds-metals-dislocation-overlay-note-20260616.md` and
    `mds-target-pairing-boundary-20260616.md`.
+6. Keep `DMI-001` as observe-only after
+   `strategy-group-handoffs/DMI-001/handoff.md`; next evidence task is
+   live-like spread/gap/session/product and real-margin fact attachment before
+   any armed-observation discussion.
