@@ -696,6 +696,16 @@ resolved through the official path.
 and Owner Console detail surfaces distinguish normal market waiting from
 submit-blocking safety conditions.
 
+The packet also projects the common readiness decision at stable top-level
+fields so automation and UI consumers do not need to know internal packet
+nesting:
+
+| Field | Meaning |
+| --- | --- |
+| `ready_for_real_order_action` | Direct boolean mirror of the common real-order boundary decision. It remains `false` while waiting for market, missing facts, blocked by safety matrix items, or before official Operation Layer readiness. |
+| `checks.ready_for_real_order_action` | Machine-check mirror for smoke tests, heartbeat monitors, and readmodel consumers. |
+| `next_safe_checkpoint` | Direct Owner/runtime continuation point, such as `continue_watcher_observation` while no fresh signal exists. |
+
 | Matrix item | Purpose |
 | --- | --- |
 | `selected_strategygroup_scope` | Proves the signal/runtime belongs to the selected StrategyGroup before any real-submit boundary. |

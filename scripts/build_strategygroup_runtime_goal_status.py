@@ -972,10 +972,13 @@ def build_goal_status_packet(
             dangerous_effects=dangerous,
             real_order_ready=real_order_ready,
         )
+    checks["ready_for_real_order_action"] = real_order_ready
     return {
         "scope": "strategygroup_runtime_goal_status",
         "generated_at_ms": int(time.time() * 1000),
         "status": status,
+        "ready_for_real_order_action": real_order_ready,
+        "next_safe_checkpoint": next_checkpoint,
         "owner_state": {
             "label": (
                 "等待机会"

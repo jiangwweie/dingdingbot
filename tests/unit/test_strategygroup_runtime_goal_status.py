@@ -189,11 +189,14 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     )
 
     assert packet["status"] == "waiting_for_signal"
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
     assert packet["owner_state"]["label"] == "等待机会"
     assert packet["owner_state"]["next_safe_checkpoint"] == (
         "continue_watcher_observation"
     )
     assert packet["checks"]["fresh_signal_present"] is False
+    assert packet["checks"]["ready_for_real_order_action"] is False
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
     assert packet["checks"]["common_execution_chain_reuse_checked"] is True
@@ -623,8 +626,10 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     )
 
     assert packet["status"] == "operation_layer_ready"
+    assert packet["ready_for_real_order_action"] is True
     assert packet["owner_state"]["label"] == "处理中"
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
+    assert packet["checks"]["ready_for_real_order_action"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is True
     matrix = _matrix_by_key(packet)
     assert matrix["fresh_signal"]["status"] == "pass"
@@ -1106,5 +1111,9 @@ def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
     assert output_path.exists()
     packet = json.loads(output_path.read_text(encoding="utf-8"))
     assert packet["status"] == "waiting_for_signal"
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
     stdout_packet = json.loads(capsys.readouterr().out)
     assert stdout_packet["status"] == "waiting_for_signal"
+    assert stdout_packet["ready_for_real_order_action"] is False
+    assert stdout_packet["next_safe_checkpoint"] == "continue_watcher_observation"
