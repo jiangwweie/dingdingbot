@@ -64,7 +64,13 @@ def _write_base_packets(report_dir: Path) -> None:
             "status": "passed",
             "checks": {
                 "scenario_count": 5,
+                "required_scenarios_present": True,
+                "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
+                "disabled_smoke_not_real_execution_proof": True,
+                "operation_layer_evidence_relay_checked": True,
+                "legacy_local_registration_probe_tolerance_checked": True,
+                "mock_operation_layer_closed_loop_checked": True,
             },
             "safety_invariants": {
                 "dangerous_effects": [],
@@ -134,6 +140,51 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["checks"]["fresh_signal_present"] is False
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["safety_invariants"]["calls_operation_layer"] is False
+
+
+def test_goal_status_requires_specific_dry_run_order_chain_checks(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "runtime-dry-run-audit-chain.json",
+        {
+            "status": "passed",
+            "checks": {
+                "scenario_count": 5,
+                "dangerous_effects_absent": True,
+            },
+            "safety_invariants": {
+                "dangerous_effects": [],
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "dry_run_audit_degraded"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "repair_runtime_dry_run_audit_chain"
+    )
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert "runtime_dry_run_audit_not_passed" in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:operation_layer_evidence_relay_checked"
+        in packet["blockers"]
+    )
+    assert (
+        "runtime_dry_run_missing_required_check:mock_operation_layer_closed_loop_checked"
+        in packet["blockers"]
+    )
 
 
 def test_goal_status_routes_fresh_signal_to_action_time_finalgate(

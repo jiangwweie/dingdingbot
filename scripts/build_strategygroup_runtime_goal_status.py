@@ -58,6 +58,16 @@ FRESH_SIGNAL_STATUSES = {
     "finalgate_ready",
 }
 
+REQUIRED_DRY_RUN_CHECKS = {
+    "required_scenarios_present",
+    "all_scenarios_passed",
+    "dangerous_effects_absent",
+    "disabled_smoke_not_real_execution_proof",
+    "operation_layer_evidence_relay_checked",
+    "legacy_local_registration_probe_tolerance_checked",
+    "mock_operation_layer_closed_loop_checked",
+}
+
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
@@ -154,6 +164,14 @@ def _release_head(release_manifest: dict[str, Any] | None) -> str | None:
 def _source_owner_summary(packet: dict[str, Any] | None) -> dict[str, Any]:
     data = _data(packet)
     return _dict(data.get("owner_summary"))
+
+
+def _runtime_dry_run_required_checks_passed(checks: dict[str, Any]) -> bool:
+    return all(checks.get(name) is True for name in REQUIRED_DRY_RUN_CHECKS)
+
+
+def _runtime_dry_run_missing_required_checks(checks: dict[str, Any]) -> list[str]:
+    return sorted(name for name in REQUIRED_DRY_RUN_CHECKS if checks.get(name) is not True)
 
 
 def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
@@ -322,6 +340,9 @@ def build_goal_status_packet(
 
     dry_run = _data(packets["runtime_dry_run_audit"])
     dry_run_checks = _dict(dry_run.get("checks"))
+    dry_run_missing_required_checks = _runtime_dry_run_missing_required_checks(
+        dry_run_checks
+    )
     source = _data(packets["source_readiness"])
     live_facts = _data(packets["live_facts_readiness"])
     dangerous = _dangerous_effects(*packets.values())
@@ -335,6 +356,7 @@ def build_goal_status_packet(
         "runtime_dry_run_audit_passed": (
             dry_run.get("status") == "passed"
             and dry_run_checks.get("dangerous_effects_absent") is True
+            and _runtime_dry_run_required_checks_passed(dry_run_checks)
         ),
         "source_readiness_ready": source.get("status") == "ready",
         "live_facts_ready": str(live_facts.get("status") or "").startswith(
@@ -355,6 +377,10 @@ def build_goal_status_packet(
         *deployment_blockers,
         *[f"missing_packet:{key}" for key in missing_packets],
         *([] if checks["runtime_dry_run_audit_passed"] else ["runtime_dry_run_audit_not_passed"]),
+        *[
+            f"runtime_dry_run_missing_required_check:{name}"
+            for name in dry_run_missing_required_checks
+        ],
         *([] if checks["source_readiness_ready"] else ["source_readiness_not_ready"]),
         *([] if checks["live_facts_ready"] else ["live_facts_not_ready"]),
         *([] if checks["dangerous_effects_absent"] else ["dangerous_effects_present"]),
@@ -394,6 +420,10 @@ def build_goal_status_packet(
             ),
             "source_owner_summary": source_summary,
             "dry_run_scenario_count": dry_run_checks.get("scenario_count"),
+            "dry_run_required_checks": {
+                name: dry_run_checks.get(name) for name in sorted(REQUIRED_DRY_RUN_CHECKS)
+            },
+            "dry_run_missing_required_checks": dry_run_missing_required_checks,
         },
         "real_order_boundary": {
             "ready_for_real_order_action": real_order_ready,

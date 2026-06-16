@@ -278,6 +278,21 @@ order action ready unless selected StrategyGroup, tiny risk, fresh signal,
 RequiredFacts, candidate/grant/authorization evidence, action-time FinalGate,
 and official Operation Layer evidence are all represented by current packets.
 
+The `runtime_dry_run_audit_passed` check is intentionally stricter than
+`runtime-dry-run-audit-chain.json.status=passed`. The goal status packet must
+also see these dry-run sub-checks as true before treating the runtime chain as
+healthy:
+
+| Dry-run sub-check | Purpose |
+| --- | --- |
+| `required_scenarios_present` | Confirms the no-signal, mock signal, missing fact, conflict, and closed-loop scenarios are all represented. |
+| `all_scenarios_passed` | Confirms every dry-run scenario passed. |
+| `dangerous_effects_absent` | Confirms no forbidden effect flag escaped the dry-run packet. |
+| `disabled_smoke_not_real_execution_proof` | Prevents disabled smoke from being mistaken for real execution evidence. |
+| `operation_layer_evidence_relay_checked` | Confirms evidence IDs connect through the Operation Layer handoff shape. |
+| `legacy_local_registration_probe_tolerance_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
+| `mock_operation_layer_closed_loop_checked` | Confirms fake submit/finalize/reconcile/budget/review shape remains covered without exchange write. |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline until reviewed, but the Owner Console
