@@ -413,6 +413,26 @@ digging into the raw dry-run packet.
 | Current local effect | Local `goal-status` can report `runtime_dry_run_audit_passed=true` while still blocking real submit on `missing_packet:*`, `source_readiness_not_ready`, or `live_facts_not_ready` |
 | Safety | This is read-only projection only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
+### 2026-06-17 Tokyo Deploy Checkpoint
+
+The latest main-control branch head was deployed to Tokyo through the
+git-based standing-authorization deploy path.
+
+| Item | Result |
+| --- | --- |
+| Local / remote branch head | `ee0c248e` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ee0c248e-goal-status-projection` |
+| Deploy apply | `status=applied`, `commands_executed=18`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; release identity is read from `.brc-release-manifest.json` because the release is a git export, not a git working tree |
+| Watcher timer | `brc-runtime-signal-watcher.timer` is enabled and active |
+| Current Tokyo goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal` |
+| Source readiness | `owner-console-source-readiness.status=ready` |
+| Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=12` |
+| Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
+| Next checkpoint | `continue_watcher_observation` until a fresh selected StrategyGroup signal appears |
+| Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### Mock Dispatcher Close-Loop
 
 The dry-run audit chain also includes a local mock dispatcher close-loop. It
