@@ -48,7 +48,7 @@ The first P2 cabinet extension is recorded in
 | `DMI-001` | ADX/DMI directional ignition observe-only handoff draft. | Converted to `strategy-group-handoffs/DMI-001/`; generic DMI, short-side, and metals branches stay blocked. |
 | `MASS-001` | Mass Index range-expansion reversal observe-only handoff draft. | Converted to `strategy-group-handoffs/MASS-001/`; armed observation remains blocked until direction-context, decay, concentration, fill/product-risk, and margin facts improve. |
 | `EFI-001` | Elder Force Index exhaustion-reversal right-tail candidate. | Boundary fixed in `efi-drawdown-disable-boundary-20260616.md`; review only until drawdown, short-side failure, high-leverage, fill/product-risk, and margin blockers improve. |
-| `HAT-001` | Heikin-Ashi stop-reslot revival candidate. | Revival only until drawdown, stop-fill/gap, exit/disable, session/product, and margin facts improve. |
+| `HAT-001` | Heikin-Ashi stop-reslot revival candidate. | Boundary fixed in `hat-heikin-ashi-stop-reslot-boundary-20260616.md`; revive only when drawdown, stop-fill/gap, HA smoothing lag, exit/disable, session/product, and margin facts improve. |
 | `LSR-001` | Liquidity-sweep upper-range revival candidate. | Revival only until full-sequence collapse, cost/fill, slot/M2M, classifier, and margin blockers improve. |
 
 The second P2 cabinet extension is recorded in

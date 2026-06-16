@@ -91,7 +91,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 策略 | 具体语义 | 当前状态 | 复活条件 |
 | --- | --- | --- | --- |
 | `RBR-001` | **range boundary reversion / calm range vocabulary**。 | `parked_or_research_vocab` | 只有出现 materially different 的 reclaim/range classifier，且能避免趋势破位尾部风险时复活。 |
-| `HAT-001` | **Heikin-Ashi 平滑趋势复活 lane**。 | `research_candidate` | 需要更强 exit/disable、stop-fill/gap、session/product 和 margin 事实。 |
+| `HAT-001` | **Heikin-Ashi 平滑趋势复活 lane**。保留 green-run、clean-combo classifier 和 fixed-stop reslot 的右尾线索。 | `research_candidate` | 边界已固定在 `hat-heikin-ashi-stop-reslot-boundary-20260616.md`；需要更强 drawdown control、HA smoothing lag disable、stop-fill/gap、session/product 和 margin 事实。 |
 | `LSR-001` | **流动性扫单后 upper-range rejection short**。 | `research_candidate` | 需要解决 full-sequence collapse、cost/fill、slot M2M 和 classifier 质量。 |
 
 ## 本次推进的实际成果
