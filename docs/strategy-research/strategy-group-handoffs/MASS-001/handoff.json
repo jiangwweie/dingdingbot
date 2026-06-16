@@ -1,0 +1,250 @@
+{
+  "strategy_group_id": "MASS-001",
+  "version": "2026-06-16-r0",
+  "name": "Mass Index Range Expansion Reversal",
+  "status": "observe_only_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "CRCLUSDT",
+    "COINUSDT",
+    "MUUSDT",
+    "MSTRUSDT",
+    "INTCUSDT",
+    "MRVLUSDT",
+    "HOODUSDT",
+    "TSLAUSDT",
+    "ORCLUSDT",
+    "CBRSUSDT",
+    "SPCXUSDT",
+    "AVGOUSDT",
+    "AMZNUSDT",
+    "PLTRUSDT",
+    "SNDKUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long",
+    "short_support_only"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_mass_bulge_reversal_candidate_seen",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "primary_side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "mass_index_state",
+      "mass_bulge_trigger_state",
+      "mass_direction_context_state",
+      "mass_reversal_quality_state",
+      "mass_window_decay_state",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "mass_bulge_reversal_long_48h_observe_only",
+      "mass_range_expansion_continuation_long_48h_support",
+      "mass_precious_bulge_reversal_short_support_only"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state",
+      "spread_proxy_state"
+    ],
+    "strategy": [
+      "mass_index_state",
+      "mass_bulge_trigger_state",
+      "mass_direction_context_state",
+      "mass_reversal_quality_state",
+      "mass_range_expansion_continuation_state",
+      "mass_short_side_failure_state",
+      "mass_window_decay_state",
+      "mass_symbol_concentration_state",
+      "mass_asset_role_state",
+      "mass_monthly_persistence_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "product_risk_state",
+      "session_gap_state",
+      "real_exchange_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "stress_only_leverage": [
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "48h_observe_only_review_lane"
+  },
+  "hard_stops": [
+    "mass_index_state_missing",
+    "mass_bulge_trigger_missing",
+    "mass_direction_context_missing",
+    "non_directional_mass_index_used_as_direction",
+    "short_side_requested_as_primary",
+    "precious_metal_promotion_requested",
+    "mass_window_decay_unresolved",
+    "mass_symbol_concentration_unbounded",
+    "continuation_branch_promoted_without_drawdown_disable",
+    "product_session_policy_missing",
+    "fill_gap_slippage_missing",
+    "real_margin_model_missing",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "candidate_pool_raw_signals": "1234",
+    "candidate_pool_accepted_events": "125",
+    "candidate_pool_full_2x": "1504.589885%",
+    "candidate_pool_best_90d_2x": "4543.361872%",
+    "candidate_pool_dd_2x": "-64.749326%",
+    "lead_mode": "mass_bulge_reversal_long_48h",
+    "lead_events": "33",
+    "lead_full_2x": "395.155223%",
+    "lead_best_90d_2x": "338.952327%",
+    "lead_dd_2x": "-10.652922%",
+    "lead_2x_liq_proxy": "0",
+    "lead_5x_liq_proxy": "0",
+    "support_mode": "mass_range_expansion_continuation_long_48h",
+    "support_full_2x": "367.350795%",
+    "support_best_90d_2x": "1211.621762%",
+    "support_dd_2x": "-71.259030%",
+    "negative_scope": "short-side and precious-metal branches are support-only or negative in current evidence"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/candidate-packets/MASS-001-mass-index-reversal-packet.md",
+    "docs/strategy-research/mass-index-reversal-replay/mass-index-reversal-summary.md",
+    "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+    "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "MASS-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_mass_bulge_reversal_candidate_seen",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Closed 1h Mass Index bulge setup crossed below the contraction trigger, prefix-safe prior trend context assigns long direction, and the 48h reversal review lane remains inside the MASS observe-only scope.",
+    "invalidation_reason": "Missing direction context, stale Mass Index facts, short-side primary request, precious-metal promotion request, continuation branch drawdown, missing fill/session/product/margin facts, or high-leverage request.",
+    "required_facts_snapshot": {
+      "mass_index_state": "present",
+      "mass_bulge_trigger_state": "present",
+      "mass_direction_context_state": "present",
+      "mass_reversal_quality_state": "present",
+      "mass_window_decay_state": "unresolved",
+      "mass_symbol_concentration_state": "unresolved",
+      "fill_gap_slippage_state": "missing",
+      "real_exchange_margin_liquidation_model_state": "missing"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "MASS-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_mass_bulge_reversal_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No closed-candle Mass Index bulge contraction trigger with prefix-safe long direction context is present."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "MASS-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_mass_bulge_reversal_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or closed-candle Mass Index, direction context, or product facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "MASS-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_mass_bulge_reversal_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "MASS observe-only signal conflicts with missing direction context, continuation drawdown state, same-symbol exposure, stale product facts, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

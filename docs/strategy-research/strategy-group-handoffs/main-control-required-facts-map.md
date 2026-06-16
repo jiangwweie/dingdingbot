@@ -289,6 +289,31 @@ as executable evidence.
 SCF handoff pack:
 `docs/strategy-research/strategy-group-handoffs/SCF-001/handoff.md`.
 
+### `MASS-001`
+
+`MASS-001` is an observe-only handoff draft. This mapping exists to let main
+control evaluate Mass Index range-expansion reversal semantics without treating
+Mass Index itself as a directional signal or treating continuation rows as
+promotion evidence before drawdown disable facts exist.
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `mass_index_state` | Mass Index value, setup level, trigger level, parameters, and closed-candle timestamp. | `no_mass_signal` |
+| `mass_bulge_trigger_state` | Bulge setup and contraction trigger state. | `no_mass_signal` |
+| `mass_direction_context_state` | Prefix-safe prior trend context that assigns direction. | `block_candidate_prepare` |
+| `mass_reversal_quality_state` | Reversal branch quality after range expansion. | `observe_only` |
+| `mass_range_expansion_continuation_state` | Continuation branch quality and drawdown state. | `support_only_no_candidate` |
+| `mass_short_side_failure_state` | Short-side failure facts. | `block_short_candidate` |
+| `mass_window_decay_state` | Monthly and rolling-window decay state. | `observe_only` |
+| `mass_symbol_concentration_state` | CRCL/COIN/MU/MSTR/INTC concentration state. | `observe_only_or_review` |
+| `mass_asset_role_state` | Equity-like versus precious-metal role split. | `block_broad_asset_claim` |
+| `mass_monthly_persistence_state` | Month-level persistence and June decay state. | `observe_only` |
+| `fill_gap_slippage_state` | Next-open and session fill/gap/slippage state. | `block_promotion` |
+| `real_exchange_margin_liquidation_model` | Venue-specific margin and liquidation behavior. | `block_leverage_promotion` |
+
+MASS handoff pack:
+`docs/strategy-research/strategy-group-handoffs/MASS-001/handoff.md`.
+
 ### `LCF-001`
 
 `LCF-001` is not a handoff pack. This mapping exists only to preserve the

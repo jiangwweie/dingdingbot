@@ -23,6 +23,7 @@ sample packet expectations, and non-execution flags.
 | 5 | `MDS-001` | `overlay note plus target-pairing boundary complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md` and `mds-target-pairing-boundary-20260616.md`; useful for target-specific disable/support tags, but not yet a standalone strategy group. |
 | 6 | `DMI-001` | `observe_only handoff draft complete from P2 batch` | Equity ADX-rising directional-ignition observer draft. | Completed in `strategy-group-handoffs/DMI-001/`; converted from P2 cabinet extension after exit-horizon and cost-sensitivity evidence clarified a narrow long-only 24h semantic. |
 | 7 | `SCF-001` | `observe_only handoff draft complete from P2 batch` | TEQ session-confluence structure-confirmation observer draft. | Completed in `strategy-group-handoffs/SCF-001/`; converted from P2 cabinet extension after exit-horizon evidence clarified a narrow TEQ long 12h semantic. |
+| 8 | `MASS-001` | `observe_only handoff draft complete from P2 batch` | Mass Index bulge-reversal observer draft. | Completed in `strategy-group-handoffs/MASS-001/`; converted from P2 cabinet extension because its reversal-long branch is cleaner than EFI's current drawdown profile. |
 
 ## VCB-001 Handoff Draft Scope
 
@@ -141,6 +142,24 @@ P1 supplement:
 facts, TEQ long lead semantics, PMR support-only context, 12h/72h time-stop
 tradeoff, and high-leverage disable semantics.
 
+## MASS-001 Observe-Only Handoff Draft Scope
+
+| Field | Draft Decision |
+| --- | --- |
+| Strategy role | Mass Index range-expansion reversal observer. |
+| Supported side | Long first; short and precious-metal rows are support-only or negative. |
+| Positive evidence | `mass_bulge_reversal_long_48h` has full 2x `395.155223%`, best 90d 2x `338.952327%`, DD 2x `-10.652922%`, and `0` 2x/5x proxy liquidation events. |
+| Negative evidence | Continuation long has larger best-window but DD 2x `-71.259030%`; short-side and precious-metal branches fail or support only. |
+| Main blocker | Direction context, symbol concentration, monthly decay, product/session/fill, and real margin. |
+| RequiredFacts | `mass_index_state`, `mass_bulge_trigger_state`, `mass_direction_context_state`, `mass_reversal_quality_state`, `mass_range_expansion_continuation_state`, `mass_window_decay_state`, `mass_symbol_concentration_state`, `fill_gap_slippage_state`, `real_exchange_margin_liquidation_model`. |
+| Handoff mode | `observe_only`; no armed observation until direction-context, concentration/decay, fill/session/product, and margin facts improve. |
+
+P1 supplement:
+`strategy-group-handoffs/MASS-001/handoff.md` separates Mass Index as a
+non-directional range-expansion indicator, long reversal lead semantics,
+continuation drawdown support semantics, short-side failure facts, and
+product/margin blockers.
+
 ## P1 Next Actions
 
 1. Keep `VCB-001` observe-only after
@@ -172,3 +191,7 @@ tradeoff, and high-leverage disable semantics.
    `strategy-group-handoffs/SCF-001/handoff.md`; next evidence task is
    live-like fill/gap/session/product, prefix-safe confluence fact binding, and
    real-margin review before any armed-observation discussion.
+8. Keep `MASS-001` as observe-only after
+   `strategy-group-handoffs/MASS-001/handoff.md`; next evidence task is
+   direction-context hardening, symbol-concentration review, monthly decay
+   disable, and fill/session/product/margin fact attachment.
