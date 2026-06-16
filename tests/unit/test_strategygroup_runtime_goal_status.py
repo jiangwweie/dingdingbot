@@ -508,6 +508,50 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     ]
 
 
+def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "ready_for_operation_layer",
+            "dispatch_status": "official_operation_layer_evidence_ready",
+            "dispatch_action": "call_official_operation_layer_submit",
+            "blocker_class": "none",
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "ready_runtime_signals": 1,
+            "blockers": ["duplicate_submit_risk"],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "hard_safety_stop"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "record_submit_blocker_review_packet"
+    )
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert "matrix_submit_blocker:duplicate_submit" in packet["blockers"]
+    assert packet["evidence"]["matrix_submit_blockers"] == ["duplicate_submit"]
+    matrix = _matrix_by_key(packet)
+    assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
+    assert matrix["official_operation_layer"]["blocks_real_submit"] is True
+    assert matrix["duplicate_submit"]["status"] == "blocked"
+    assert matrix["duplicate_submit"]["blocks_real_submit"] is True
+
+
 def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
     tmp_path: Path,
 ) -> None:

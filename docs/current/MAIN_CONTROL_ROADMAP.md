@@ -428,6 +428,27 @@ errors such as `symbol_read_error` also must not become scope blockers, while
 true `scope_mismatch` and out-of-scope StrategyGroup signals still block real
 submit.
 
+### 2026-06-17 Submit-Boundary Closure Checkpoint
+
+`Operation Layer evidence ready` is not sufficient by itself to open the real
+order boundary. If any `real_order_readiness_matrix` item has
+`blocks_real_submit=true`, `ready_for_real_order_action` must remain false and
+the packet must record `matrix_submit_blocker:<key>`.
+
+This keeps the project moving while preserving the live-funds boundary:
+
+| Condition | Project behavior | Real submit behavior |
+| --- | --- | --- |
+| No fresh signal | Continue watcher observation | Closed |
+| Fresh signal with candidate/auth/FinalGate progress | Continue automatic evidence chain | Closed until Operation Layer and matrix pass |
+| Operation Layer evidence ready but matrix blocker exists | Record submit-blocker review packet | Closed |
+| Operation Layer evidence ready and matrix has no submit blockers | Call official Operation Layer only | Open inside selected tiny boundary |
+
+Submit blockers such as active position, open order, missing protection,
+missing budget, duplicate-submit risk, and symbol/side/notional/leverage
+mismatch therefore become reviewable evidence and Owner-readable status, not
+per-strategy execution forks or opaque project-wide chat confirmations.
+
 ## P0 Subgoal: Common Runtime Pipe Before Strategy-Specific Adapters
 
 ### Current Judgment

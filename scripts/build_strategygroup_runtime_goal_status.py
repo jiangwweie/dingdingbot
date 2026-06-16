@@ -442,6 +442,44 @@ def _real_order_readiness_matrix(
     ]
 
 
+def _matrix_submit_blocking_items(
+    readiness_matrix: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in readiness_matrix
+        if item.get("blocks_real_submit") is True
+    ]
+
+
+def _status_from_submit_blockers(
+    blocking_items: list[dict[str, Any]],
+) -> tuple[str, str, str]:
+    keys = {str(item.get("key") or "") for item in blocking_items}
+    if "active_position_open_order" in keys:
+        return (
+            "active_position_resolution",
+            "record_submit_blocker_review_and_resolve_active_position",
+            "Operation Layer evidence 已到边界，但存在持仓或挂单冲突，真实提交保持关闭",
+        )
+    if keys & {
+        "selected_strategygroup_scope",
+        "symbol_side_notional_leverage_scope",
+        "duplicate_submit",
+        "hard_safety",
+    }:
+        return (
+            "hard_safety_stop",
+            "record_submit_blocker_review_packet",
+            "Operation Layer evidence 已到边界，但存在真实提交硬阻断，真实提交保持关闭",
+        )
+    return (
+        "missing_fact",
+        "record_submit_blocker_review_and_refresh_required_facts",
+        "Operation Layer evidence 已到边界，但仍有事实、保护或预算缺口，真实提交保持关闭",
+    )
+
+
 def _runtime_dry_run_required_checks_passed(checks: dict[str, Any]) -> bool:
     return all(checks.get(name) is True for name in REQUIRED_DRY_RUN_CHECKS)
 
@@ -768,6 +806,27 @@ def build_goal_status_packet(
         dangerous_effects=dangerous,
         real_order_ready=real_order_ready,
     )
+    matrix_submit_blockers = _matrix_submit_blocking_items(readiness_matrix)
+    if real_order_ready and matrix_submit_blockers:
+        status, next_checkpoint, owner_detail = _status_from_submit_blockers(
+            matrix_submit_blockers
+        )
+        real_order_ready = False
+        blockers = [
+            *blockers,
+            *[
+                f"matrix_submit_blocker:{item.get('key')}"
+                for item in matrix_submit_blockers
+            ],
+        ]
+        readiness_matrix = _real_order_readiness_matrix(
+            status=status,
+            checks=checks,
+            packets=packets,
+            blockers=blockers,
+            dangerous_effects=dangerous,
+            real_order_ready=real_order_ready,
+        )
     return {
         "scope": "strategygroup_runtime_goal_status",
         "generated_at_ms": int(time.time() * 1000),
@@ -810,6 +869,9 @@ def build_goal_status_packet(
             "dry_run_missing_required_checks": dry_run_missing_required_checks,
             "watcher_liveness_blockers": watcher_liveness,
             "selected_scope_blockers": selected_scope_blockers,
+            "matrix_submit_blockers": [
+                str(item.get("key") or "") for item in matrix_submit_blockers
+            ],
             "pilot_matched_runtime_instance_ids": _pilot_matched_runtime_instance_ids(
                 packets["pilot_status"]
             ),
