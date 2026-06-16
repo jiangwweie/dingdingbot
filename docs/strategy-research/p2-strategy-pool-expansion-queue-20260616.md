@@ -32,7 +32,7 @@ or parked vocabulary.
 | Breakout / compression | `VCB-001`, AEB, DCB, KSB, IBB | Candidate and vocabulary pool. | Separate true breakout, false breakout, and cost/M2M states. |
 | Funding / crowding | `FBS-001`, LCF-like derivatives facts | Facts-heavy right-tail lane. | Improve derivatives fact capture and stale-fact behavior. |
 | Equity-like rotation | `TEQ-001`, `RSR-001`, NLPD-adjacent event windows | Low-history but important 2026 lane. | Refresh product availability and split scorer versus action semantics. |
-| Precious-metal overlay | `PMR-001`, `MDS-001`, RVI metal rows | Overlay and possible conditional short lane. | Split disable/support/standalone roles. |
+| Precious-metal overlay | `PMR-001`, `MDS-001`, RVI metal rows | Overlay and possible conditional short lane. | Expand target-specific overlay coverage after `MDS-001` split NLPD disable, TEQ support, and standalone-blocked roles. |
 | Session structure | `SOR-001`, session transfer, opening range | Conditional branch lane. | Build branch eligibility and time-stop tables. |
 | New listing / event | `NLPD-001`, bStocks event studies | Low-history event observer. | Broaden event cohort and survivorship controls. |
 | Parked vocabulary | `RBR-001`, failed calm-range variants | Negative evidence and future redesign vocabulary. | Revive only with materially different reclaim/range classifier. |
@@ -56,6 +56,7 @@ or parked vocabulary.
 | Broad `VCB-001` breakout | Negative as broad rule. | Revive only if signal-time classifier separates true follow-through from false breakout with full-sequence improvement. |
 | `NLPD-001` spot fade labels | Analysis-only. | Revive only with executable venue facts and survivorship/liquidity controls. |
 | `PMR-001` standalone short | Observe-only overlay. | Revive only after role split, session mapping, fill, mark/funding, and margin facts improve. |
+| `MDS-001` universal metal overlay | Overlay candidate. | Revive only with target-specific coverage, PMR-state freshness, session/fill/margin facts, and a stable activation/disable pair. |
 | `SOR-001` broad branch | Conditional. | Revive only through named branch eligibility and time-stop evidence. |
 
 ## P2 Next Actions

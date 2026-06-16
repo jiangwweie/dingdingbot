@@ -536,7 +536,7 @@
         "long_context",
         "short_context"
       ],
-      "research_role": "PMR-adjacent metals dislocation and session mismatch overlay",
+      "research_role": "PMR-adjacent metals dislocation target-specific overlay for NLPD disable tags, TEQ support tags, and session mismatch context",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -556,17 +556,22 @@
         "settlement_window_missing",
         "current_product_availability_missing",
         "spread_fill_missing",
+        "pmr_state_freshness_missing",
         "target_specific_overlay_coverage_missing",
+        "standalone_activation_disable_pair_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/mds-target-pairing-boundary-20260616.md",
         "docs/strategy-research/mds-metals-dislocation-overlay-note-20260616.md",
+        "docs/strategy-research/pmr-overlay-target-pairing/pmr-overlay-target-pairing-summary.md",
+        "docs/strategy-research/pmr-target-specific-overlay-classifier/pmr-target-specific-overlay-classifier-summary.md",
         "docs/strategy-research/pmr-metal-dislocation-refresh/pmr-metal-dislocation-refresh-summary.md",
         "docs/strategy-research/pmr-metal-relative-spread-replay/pmr-metal-relative-spread-summary.md",
         "docs/strategy-research/extended-universe-us-equity-metals-refresh-20260613.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Advance after external session, settlement, current availability, spread/fill, target-specific overlay coverage, and margin facts are captured.",
+      "revival_condition": "Advance after PMR-state freshness, target-specific coverage, external session, settlement, current availability, spread/fill, stable activation/disable, and margin facts are captured.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

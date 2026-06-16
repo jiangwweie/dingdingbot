@@ -266,6 +266,37 @@ P1 facts-pipeline supplement:
 | `lcf_margin_model_state` | Exchange margin and liquidation model is present. | `block_leverage_promotion` |
 | `lcf_no_signal_when_facts_missing_state` | Missing facts emit no-signal rather than weak signal. | `block_handoff_if_absent` |
 
+### `MDS-001`
+
+`MDS-001` is not a handoff pack. This mapping exists only to preserve
+target-specific overlay semantics for future main-control review.
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `instrument_type` | Metal perp, gold token, copper, or related product class. | `block_standalone_claim` |
+| `metal_role_split_state` | Long context, short weakness, hedge, support, or disable role. | `observe_only_no_candidate` |
+| `xag_dominance_state` | Whether the useful evidence is XAG-led rather than broad basket. | `block_broad_basket_claim` |
+| `commodity_session_gap_state` | Commodity regular/off-hours/weekend mismatch state. | `observe_only` |
+| `overlay_target_pairing_coverage_state` | Whether target strategy events overlap PMR/MDS evidence. | `no_overlay_policy` |
+| `target_specific_overlay_effect_state` | Target-specific NLPD disable or TEQ support effect. | `no_overlay_policy` |
+| `spread_fill_state` | Spread, depth, and next-open fill suitability. | `block_promotion` |
+| `real_margin_model_state` | Metal-perp margin and liquidation interpretation. | `block_leverage_promotion` |
+
+P1 target-pairing supplement:
+`docs/strategy-research/mds-target-pairing-boundary-20260616.md`.
+
+| Boundary Fact | Main-Control Meaning | Missing Behavior |
+| --- | --- | --- |
+| `mds_overlay_role_state` | Context, disable tag, support tag, or standalone blocked. | `observe_only_no_candidate` |
+| `mds_target_pairing_state` | Direct PMR/MDS overlap exists for the target strategy. | `no_overlay_policy` |
+| `mds_target_policy_state` | Target-specific policy is known. | `no_overlay_policy` |
+| `historical_pmr_coverage_state` | Older 2024-2025 candidates have usable PMR/MDS coverage. | `coverage_missing_no_policy` |
+| `mds_pmr_state_freshness` | PMR/MDS state is fresh enough for overlay tagging. | `no_overlay_tag` |
+| `mds_session_mismatch_state` | Session mismatch is classified. | `observe_only` |
+| `mds_xag_dominance_state` | XAG-led concentration is disclosed. | `block_broad_basket_claim` |
+| `mds_spread_fill_state` | Spread, depth, and fill facts exist. | `block_promotion` |
+| `mds_margin_model_state` | Real margin/liquidation model exists. | `block_leverage_promotion` |
+
 ## Readiness Levels
 
 | Readiness Level | Meaning |

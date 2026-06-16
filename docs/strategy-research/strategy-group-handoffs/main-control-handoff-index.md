@@ -64,6 +64,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `../rsr-scorer-standalone-boundary-20260616.md` | P1 supplement for `RSR-001` TEQ support scoring, Strategy Picker rank hints, and standalone activation blockers. |
 | `../nlpd-low-history-event-boundary-20260616.md` | P1 supplement for `NLPD-001` listing-event observation, low-history blockers, product class, executable-side, and PMR disable context. |
 | `../lcf-facts-pipeline-boundary-20260616.md` | P1 non-handoff supplement for `LCF-001` force-order, liquidation-cluster, OI, positioning, depth, ADL, margin, and facts-missing no-signal behavior. |
+| `../mds-target-pairing-boundary-20260616.md` | P1 non-handoff supplement for `MDS-001` NLPD disable tags, TEQ support tags, coverage-missing policies, and standalone-blocked overlay behavior. |
 
 ## Admission Interpretation
 
@@ -82,6 +83,11 @@ Non-handoff P1 interpretation: `LCF-001` should stay in the Strategy Cabinet as
 `facts_pipeline_required`. Main control should not treat it as a runtime intake
 candidate until force-order, liquidation-cluster, OI, positioning, depth, ADL,
 and margin facts reach replay-ready form and a separate handoff pack exists.
+
+Non-handoff P1 interpretation: `MDS-001` should stay in the Strategy Cabinet as
+`overlay_candidate`. Main control should not treat it as a standalone Strategy
+Group; if consumed later, its first useful shape is target-specific overlay
+context, especially `NLPD-001` disable tags and `TEQ-001` support tags.
 
 ## Shared Main-Control Hard Stops
 

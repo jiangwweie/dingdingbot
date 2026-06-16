@@ -24,6 +24,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | Research-only RequiredFacts design packet for `LCF-001`; not a handoff and not runtime intake. |
 | `lcf-facts-pipeline-boundary-20260616.md` | P1 supplement defining `LCF-001` facts-pipeline states, missing-fact behavior, and no-signal packet boundary. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | Research-only overlay note for `MDS-001`; preserves metals dislocation and session-mismatch semantics without runtime intake. |
+| `mds-target-pairing-boundary-20260616.md` | P1 supplement defining `MDS-001` target-specific overlay pairing, allowed tags, blocked universal filters, and sample overlay packet. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 queue for pool expansion, revival, and parked-strategy governance. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
@@ -70,6 +71,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | `LCF-001` liquidation-cascade RequiredFacts design packet and facts-missing no-signal shape. |
 | `lcf-facts-pipeline-boundary-20260616.md` | `LCF-001` facts-pipeline boundary for force-order, liquidation-cluster, OI, positioning, depth, ADL, margin, and no-signal behavior. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |
+| `mds-target-pairing-boundary-20260616.md` | `MDS-001` target-pairing boundary for NLPD disable tags, TEQ support tags, coverage-missing policies, and standalone blockers. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
