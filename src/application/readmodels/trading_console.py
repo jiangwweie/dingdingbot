@@ -7638,6 +7638,10 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
         and safety.get("disabled_smoke_is_real_execution_proof") is False
     )
     if passed:
+        required_checks = {
+            name: checks.get(name)
+            for name in sorted(OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS)
+        }
         return {
             **_owner_console_detail_source(
                 status="ready",
@@ -7649,6 +7653,14 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 "dangerous_effects_absent": True,
                 "disabled_smoke_is_real_execution_proof": False,
                 "required_checks_present": True,
+                "shared_runtime_pipeline_checked": (
+                    checks.get("shared_runtime_pipeline_checked") is True
+                ),
+                "selected_strategygroup_dispatch_guard_checked": (
+                    checks.get("selected_strategygroup_dispatch_guard_checked")
+                    is True
+                ),
+                "required_checks": required_checks,
             },
         }
     return _owner_console_detail_source(

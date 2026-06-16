@@ -6057,6 +6057,27 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
     assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
+    dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
+        "summary"
+    ]
+    assert dry_run_summary["scenario_count"] == 7
+    assert dry_run_summary["required_checks_present"] is True
+    assert dry_run_summary["shared_runtime_pipeline_checked"] is True
+    assert dry_run_summary["selected_strategygroup_dispatch_guard_checked"] is True
+    assert dry_run_summary["disabled_smoke_is_real_execution_proof"] is False
+    assert set(dry_run_summary["required_checks"]) == {
+        "required_scenarios_present",
+        "all_scenarios_passed",
+        "dangerous_effects_absent",
+        "disabled_smoke_not_real_execution_proof",
+        "operation_layer_evidence_relay_checked",
+        "fresh_signal_fast_auto_chain_checked",
+        "legacy_local_registration_probe_tolerance_checked",
+        "mock_operation_layer_closed_loop_checked",
+        "operation_layer_blocker_review_policy_checked",
+        "shared_runtime_pipeline_checked",
+        "selected_strategygroup_dispatch_guard_checked",
+    }
     assert payload["data"]["source_health"]["real_order_readiness"]["status"] == "ready_empty"
     assert payload["data"]["real_order_readiness"]["status"] == "waiting_for_market"
     assert payload["data"]["real_order_readiness"]["ready_for_real_order_action"] is False
@@ -6230,6 +6251,11 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     assert ready["owner_label"] == "审计演练正常"
     assert ready["summary"]["scenario_count"] == 7
     assert ready["summary"]["required_checks_present"] is True
+    assert ready["summary"]["shared_runtime_pipeline_checked"] is True
+    assert ready["summary"]["selected_strategygroup_dispatch_guard_checked"] is True
+    assert ready["summary"]["required_checks"] == {
+        name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
+    }
 
     packet["checks"] = {
         key: value
