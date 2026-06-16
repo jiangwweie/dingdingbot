@@ -550,6 +550,9 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     stale_operation_layer_flags_dropin_path = (
         f"{service_dropin_dir}/30-operation-layer-followup-flags.conf"
     )
+    stale_product_state_refresh_dropin_path = (
+        f"{service_dropin_dir}/50-product-state-refresh.conf"
+    )
     release_service_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH}"
@@ -593,6 +596,7 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)} {q(goal_status_dropin_path)} {q(product_state_dropin_path)}; "
         f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_product_state_refresh_dropin_path)}; "
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "

@@ -9,6 +9,9 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
+Environment=BRC_SELECTED_STRATEGY_GROUP_ID=MPG-001
+Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3
+Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
 ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_signal_watcher_tick.py \
   --env-file /home/ubuntu/brc-deploy/env/live-readonly.env \

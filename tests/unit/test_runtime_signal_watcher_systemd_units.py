@@ -44,6 +44,10 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     text = SERVICE_PATH.read_text(encoding="utf-8")
 
     assert "--allow-prepare-records" in text
+    assert "Environment=BRC_SELECTED_STRATEGY_GROUP_ID=MPG-001" in text
+    assert "Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3" in text
+    assert "Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180" in text
+    assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env" in text
     for strategy_family_id in ("MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"):
         assert f"--strategy-family-id {strategy_family_id}" in text
     assert "--runtime-instance-id" not in text
@@ -87,6 +91,10 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     text = PRODUCT_STATE_DROPIN_PATH.read_text(encoding="utf-8")
 
     assert "refresh_strategygroup_runtime_product_state_packets.py" in text
+    assert "--collect-live-facts-before-refresh" in text
+    assert "--live-facts-output" in text
+    assert "strategy-group-live-facts-input.json" in text
+    assert "product-state-refresh-packet.json" in text
     assert "owner-console-source-readiness" not in text
     assert "FinalGate" in text
     assert "Operation" in text
@@ -150,6 +158,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "70-goal-status.conf" in commands
     assert "80-product-state-refresh.conf" in commands
     assert "30-strategygroup-runtime-pilot-scope.conf" in commands
+    assert "50-product-state-refresh.conf" in commands
     assert "rm -f" in commands
     assert "systemctl daemon-reload" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
