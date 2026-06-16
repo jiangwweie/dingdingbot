@@ -997,6 +997,7 @@
       },
       "primary_blockers": [
         "whipsaw_disable_missing",
+        "stop_reverse_decay",
         "continuation_failure",
         "drawdown_unresolved",
         "session_fill_missing",
@@ -1004,6 +1005,7 @@
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/psar-whipsaw-stop-reverse-boundary-20260616.md",
         "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
         "docs/strategy-research/candidate-packets/PSAR-001-stop-reverse-packet.md",
         "docs/strategy-research/psar-stop-reverse-replay/psar-stop-reverse-summary.md"

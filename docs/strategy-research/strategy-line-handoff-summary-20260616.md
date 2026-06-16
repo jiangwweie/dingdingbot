@@ -80,7 +80,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 策略 | 具体语义 | 当前状态 | 为什么保留 | 为什么不 handoff |
 | --- | --- | --- | --- | --- |
 | `TRIX-001` | **TRIX zero-cross long**。三重 EMA 动量从负转正后的薄样本机会。 | `right_tail_candidate` | `8` 个事件，full 2x `117.088679%`，DD 2x `-1.881580%`；边界已固定在 `trix-thin-sample-concentration-boundary-20260616.md`。 | 样本太薄，INTC/CRCL 贡献集中，broad persistence 失败，不 handoff。 |
-| `PSAR-001` | **Parabolic SAR bullish flip burst**。只保留 bullish flip 后的短爆发，不做 stop-reverse 系统。 | `right_tail_candidate` | best-90d 2x `124.602670%`，且 `0/0` 2x/5x proxy liquidation。 | DD 2x `-57.821226%`，continuation 和 short-side 失败。 |
+| `PSAR-001` | **Parabolic SAR bullish flip burst**。只保留 bullish flip 后的短爆发，不做 stop-reverse 系统。 | `right_tail_candidate` | best-90d 2x `124.602670%`，且 `0/0` 2x/5x proxy liquidation；边界已固定在 `psar-whipsaw-stop-reverse-boundary-20260616.md`。 | DD 2x `-57.821226%`，HOOD 单笔极端亏损，continuation 和 short-side 失败，不 handoff。 |
 | `ICH-001` | **Ichimoku cloud breakout revival**。明确 no-future-cloud policy。 | `research_candidate` | cloud breakout long 有 best-90d 2x `296.354715%`。 | full 2x `-78.421778%`，DD 2x `-85.398509%`。 |
 | `CCI-001` | **CCI trend escape / failure revival**。重点是 precious-metal +100 failure short。 | `research_candidate` | 金属 failure short full 2x `72.496535%`，best-90d 2x `105.400734%`。 | DD 2x `-74.614868%`，generic CCI 和权益 reclaim 衰减严重。 |
 | `AEB-001` | **ATR expansion breakout short-window revival**。ATR24 equity expansion 的短窗口爆发。 | `research_candidate` | best-30d 2x `218.708454%`。 | best-90d 2x 只有 `31.950523%`，false-breakout 风险大。 |

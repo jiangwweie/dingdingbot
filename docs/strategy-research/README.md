@@ -30,6 +30,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `p2-cabinet-extension-batch2-20260616.md` | Second P2 strategy-cabinet expansion batch for `UO-001`, `TRIX-001`, `PSAR-001`, `ICH-001`, `CCI-001`, `AEB-001`, and `STOCH-001`; `UO-001` is now an observe-only handoff draft and the rest remain research-only. |
 | `efi-drawdown-disable-boundary-20260616.md` | P2 supplement preserving `EFI-001` negative-force exhaustion reversal as a right-tail candidate while blocking handoff on drawdown, high leverage, short-side failure, product/session/fill, and margin facts. |
 | `trix-thin-sample-concentration-boundary-20260616.md` | P2 supplement preserving `TRIX-001` zero-cross long as a thin-sample right-tail candidate while blocking handoff on sample size, concentration, broad TRIX decay, product/session/fill, and margin facts. |
+| `psar-whipsaw-stop-reverse-boundary-20260616.md` | P2 supplement preserving `PSAR-001` bullish flip burst as a right-tail candidate while blocking handoff on whipsaw, stop-reverse decay, drawdown, product/session/fill, and margin facts. |
 | `strategy-line-handoff-summary-20260616.md` | Owner/main-control-readable strategy-line handoff summary covering current vision, original strategy groups, new observe-only handoff drafts, non-handoff candidates, and strategy semantics. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
@@ -82,6 +83,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `p2-cabinet-extension-batch2-20260616.md` | P2 cabinet extension batch preserving seven more indicator-derived semantics; `UO-001` has since been converted to an observe-only handoff draft. |
 | `efi-drawdown-disable-boundary-20260616.md` | `EFI-001` boundary that preserves negative-force exhaustion reversal evidence while blocking handoff until drawdown, high-leverage, short-side, product/session/fill, and real-margin blockers improve. |
 | `trix-thin-sample-concentration-boundary-20260616.md` | `TRIX-001` boundary that preserves zero-cross long right-tail evidence while blocking handoff until sample size, concentration, zero-cross quality, product/session/fill, and real-margin blockers improve. |
+| `psar-whipsaw-stop-reverse-boundary-20260616.md` | `PSAR-001` boundary that preserves bullish flip burst evidence while blocking handoff until whipsaw, stop-reverse decay, drawdown, product/session/fill, and real-margin blockers improve. |
 | `strategy-line-handoff-summary-20260616.md` | Strategy-line handoff summary for Owner and main control, translating strategy IDs into semantics and current intake decisions. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
