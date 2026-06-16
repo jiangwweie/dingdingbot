@@ -6297,6 +6297,33 @@ def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation()
     assert "tokyo_readonly_probe_error" in source["summary"]["blockers"]
 
 
+def test_owner_console_deploy_channel_source_surfaces_postdeploy_ready():
+    from src.application.readmodels.trading_console import (
+        _owner_console_deploy_channel_source,
+    )
+
+    source = _owner_console_deploy_channel_source(
+        {
+            "status": "postdeploy_accepted",
+            "checks": {
+                "blockers": [],
+                "tokyo_connectivity_blockers": [],
+                "tokyo_connectivity_probe_ready": True,
+                "postdeploy_acceptance_passed": True,
+            },
+        }
+    )
+
+    assert source["status"] == "ready"
+    assert source["owner_label"] == "部署通道正常"
+    assert source["reason"] == "postdeploy_accepted"
+    assert source["summary"] == {
+        "checked": True,
+        "connectivity_ready": True,
+        "blockers": [],
+    }
+
+
 def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     from src.application.readmodels.trading_console import (
         OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS,
