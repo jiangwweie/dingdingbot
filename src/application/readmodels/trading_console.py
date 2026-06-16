@@ -7136,19 +7136,15 @@ def _owner_console_source_readiness_packet(
         unavailable_label="持仓状态暂不可用",
     )
     protection_source = _owner_console_protection_source(protection)
-    reconciliation_source = _owner_console_detail_source(
-        status="degraded",
-        owner_label="对账详情暂不可用",
-        reason=(
-            "latest_reconciliation_summary_not_in_source_readiness_packet"
-            if orders["status"] == "ready_empty" and positions["status"] == "ready_empty"
-            else "reconciliation_detail_source_not_wired"
-        ),
+    reconciliation_source = _owner_console_reconciliation_source(
+        orders=orders,
+        positions=positions,
+        live_facts=live_facts,
+        watcher=watcher,
     )
-    operation_audit_source = _owner_console_detail_source(
-        status="degraded",
-        owner_label="审计详情暂不可用",
-        reason="operation_audit_list_probe_not_wired_to_source_readiness_packet",
+    operation_audit_source = _owner_console_operation_audit_source(
+        runtime=runtime,
+        watcher=watcher,
     )
     source_health = {
         "strategy_catalog": _owner_console_detail_source(
@@ -7403,6 +7399,144 @@ def _owner_console_protection_source(protection: dict[str, Any]) -> dict[str, An
         owner_label="保护未就绪",
         reason=status or "protection_status_unknown",
     )
+
+
+def _owner_console_reconciliation_source(
+    *,
+    orders: dict[str, Any],
+    positions: dict[str, Any],
+    live_facts: dict[str, Any],
+    watcher: dict[str, Any],
+) -> dict[str, Any]:
+    if _owner_console_forbidden_effect_detected(live_facts, watcher):
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="对账需要检查",
+            reason="forbidden_effect_or_write_flag_detected",
+        )
+    if (
+        orders.get("status") == "ready_empty"
+        and positions.get("status") == "ready_empty"
+    ):
+        return {
+            **_owner_console_detail_source(
+                status="ready",
+                owner_label="对账正常",
+                reason="flat_no_open_order_no_reconciliation_action_required",
+            ),
+            "summary": {
+                "open_order_count": orders.get("count", 0),
+                "active_position_count": positions.get("count", 0),
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        }
+    if (
+        orders.get("status") == "ready_nonempty"
+        or positions.get("status") == "ready_nonempty"
+    ):
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="对账需要检查",
+            reason="open_order_or_active_position_requires_reconciliation_detail",
+        )
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="对账详情暂不可用",
+        reason="reconciliation_detail_source_not_fully_readable",
+    )
+
+
+def _owner_console_operation_audit_source(
+    *,
+    runtime: dict[str, Any],
+    watcher: dict[str, Any],
+) -> dict[str, Any]:
+    if _owner_console_forbidden_effect_detected({}, watcher):
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="审计需要检查",
+            reason="forbidden_effect_or_write_flag_detected",
+        )
+    action_time_resume = (
+        runtime.get("action_time_resume")
+        if isinstance(runtime.get("action_time_resume"), dict)
+        else {}
+    )
+    post_signal_resume = (
+        runtime.get("post_signal_auto_resume")
+        if isinstance(runtime.get("post_signal_auto_resume"), dict)
+        else {}
+    )
+    prepared_authorization_id = action_time_resume.get("prepared_authorization_id")
+    shadow_candidate_id = action_time_resume.get("shadow_candidate_id")
+    status = str(
+        action_time_resume.get("status")
+        or post_signal_resume.get("status")
+        or runtime.get("status")
+        or ""
+    )
+    if not prepared_authorization_id and not shadow_candidate_id and status in {
+        "waiting_for_market",
+        "watching_no_signal",
+        "ready_for_armed_observation",
+        "strategy_group_live_facts_ready_for_armed_observation",
+        "",
+    }:
+        return {
+            **_owner_console_detail_source(
+                status="ready_empty",
+                owner_label="暂无审计动作",
+                reason="no_operation_action_in_current_cycle",
+            ),
+            "summary": {
+                "shadow_candidate_id": None,
+                "prepared_authorization_id": None,
+                "operation_layer_reached": False,
+            },
+        }
+    if prepared_authorization_id or shadow_candidate_id:
+        return _owner_console_detail_source(
+            status="ready_nonempty",
+            owner_label="有审计记录",
+            reason="candidate_or_authorization_evidence_present",
+        )
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="审计详情暂不可用",
+        reason=status or "operation_audit_status_unknown",
+    )
+
+
+def _owner_console_forbidden_effect_detected(
+    live_facts: dict[str, Any],
+    watcher: dict[str, Any],
+) -> bool:
+    safety_sources = [
+        live_facts.get("safety_invariants") if isinstance(live_facts, dict) else {},
+        watcher.get("safety_invariants") if isinstance(watcher, dict) else {},
+        (watcher.get("watcher") or {}).get("safety_invariants")
+        if isinstance(watcher.get("watcher"), dict)
+        else {},
+    ]
+    forbidden_keys = {
+        "exchange_write_called",
+        "order_created",
+        "order_lifecycle_called",
+        "execution_intent_created",
+        "runtime_budget_mutated",
+        "withdrawal_or_transfer_created",
+        "withdrawal_or_transfer_requested",
+        "mutates_pg",
+        "places_order",
+    }
+    for safety in safety_sources:
+        if not isinstance(safety, dict):
+            continue
+        for key in forbidden_keys:
+            if safety.get(key) is True:
+                return True
+    return False
 
 
 def _owner_console_detail_source(

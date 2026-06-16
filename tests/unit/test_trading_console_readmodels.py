@@ -5930,8 +5930,12 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["orders"] == "暂无订单"
     assert payload["data"]["owner_summary"]["positions"] == "暂无持仓"
     assert payload["data"]["owner_summary"]["protection"] == "保护正常"
+    assert payload["data"]["owner_summary"]["reconciliation"] == "对账正常"
+    assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
+    assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
+    assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
     assert len(payload["data"]["strategy_groups"]) == 5
     assert payload["data"]["frontend_contract"] == {
         "single_api_source": True,
