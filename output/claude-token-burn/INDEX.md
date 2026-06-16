@@ -27,13 +27,6 @@ Mode: read-only index — no file modifications except this report and NEXT_QUEU
 | 15 | `CLAUDE-FINAL-CODETRACE-008-handoff-runtime-consumption-audit.md` | code-trace | read-only | P1 | 追踪 HANDOFFQA-007 的 P1 发现到后端代码；确认 conditional_armed_observation 是 phantom mode | 等 Codex 决定 |
 | 16 | `CLAUDE-FINAL-DECISIONPACK-009-runtime-semantics-adr-options.md` | decision-pack | decision-needed | P1 | 3 个运行时语义决策选项（SOR-001 mode、freshness、review vocabulary） | 等 Codex 选择方案 |
 | 17 | `CLAUDE-FINAL-DOCFIX-010-docs-semantic-cleanup-report.md` | docs-fix | docs-applied | LOW | 4 个 docs/current 文件的语义清理（review mapping、gate class、freshness note） | 已应用，可验证 |
-| 18 | `CLAUDE-FINAL-COMMITAUDIT-012-worktree-commit-boundary-audit.md` | review | read-only | MEDIUM | 将脏工作树拆分为 agent cleanup、docs cleanup、token-burn artifacts 与排除项 | 已由 012A 复核当前状态 |
-| 19 | `CODEX-COMMITAUDIT-012A-current-state-addendum.md` | review | read-only | LOW | Codex 复核当前 tracked diff，确认 scripts/tests 瞬时观察不再适用 | 已用于提交边界 |
-| 20 | `CLAUDE-FINAL-PRECOMMIT-013-safe-local-commit-verification.md` | review | read-only | LOW | 提交前 PASS 校验，确认 27 个 agent 文件与 4 个 docs 文件可拆分提交 | 已应用为 2 个本地提交 |
-| 21 | `CLAUDE-FINAL-ARTIFACTAUDIT-014-token-burn-artifact-publication-audit.md` | review | read-only | LOW | 检查 token-burn artifacts 无 secrets / workspace contamination / live data | 已应用为 output artifact 提交 |
-| 22 | `CLAUDE-FINAL-LOCALARTIFACTS-015-untracked-artifact-hygiene-audit.md` | audit | read-only | MEDIUM | metadata-only 盘点 648MB / 717 个未跟踪本地产物，形成清理与 .gitignore 建议 | 等 Owner 明确授权后再清理 |
-| 23 | `INDEX.md` | index | read-only | LOW | token-burn 报告总索引 | 持续补齐 |
-| 24 | `NEXT_QUEUE.md` | index/queue | read-only | LOW | token-burn 后续任务队列和 resume prompt | 持续补齐 |
 
 ---
 
@@ -48,7 +41,6 @@ Mode: read-only index — no file modifications except this report and NEXT_QUEU
 | **review outcome vocabulary** | HANDOFFQA-007, CODETRACE-008, DECISIONPACK-009 | 后端 emit `promote/revise/park`；board contract 定义 `保留/调整/暂停/停用/待复盘`；无映射层 | P2 | DECISIONPACK-009 推荐 Option C（文档映射表） |
 | **agent/Claude 指令权威清理** | DOC-DEBT-001, CLEANUP-PLAN-001, REVIEW-002 | 27 文件已重写（Wave 1）；8 个 quarantined 文件待处理 | MEDIUM | Wave 1 已应用；Wave 2 待 mainline 后 |
 | **deletion/consolidation 候选** | DEBT-001 | 940MB 非源码质量；35 个 domain 文件链；9 个旧 SQLite repo；config_manager vs config/ | HIGH | 等 mainline 后分 6 wave 执行 |
-| **本地产物 / 未跟踪输出治理** | LOCALARTIFACTS-015, ARTIFACTAUDIT-014 | 648MB / 717 个未跟踪本地产物；live-config.env 仅识别存在、不读取；output/claude-token-burn 已安全提交 | MEDIUM | 等 Owner 授权后分阶段清理或更新 .gitignore |
 
 ---
 
@@ -89,7 +81,6 @@ Mode: read-only index — no file modifications except this report and NEXT_QUEU
 | HANDOFFQA-007 | 5 StrategyGroup handoff 完整性证据（9 QA 卡执行结果） |
 | CODETRACE-008 | handoff→runtime 代码消费追踪证据 |
 | SCHEMA-DEBT-001 | 11 个 personal_campaign schema 使用证据 |
-| LOCALARTIFACTS-015 | 未跟踪本地产物 metadata-only 清单和未来清理门控 |
 
 ### 3.4 被后续报告取代的报告
 
@@ -125,7 +116,7 @@ Mode: read-only index — no file modifications except this report and NEXT_QUEU
 ```bash
 # 确认所有报告文件存在
 ls -la output/claude-token-burn/*.md | wc -l
-# 预期: 24 (22 reports + INDEX.md + NEXT_QUEUE.md)
+# 预期: 19 (17 existing + INDEX.md + NEXT_QUEUE.md)
 
 # 确认 INDEX.md 和 NEXT_QUEUE.md 已创建
 ls -la output/claude-token-burn/INDEX.md output/claude-token-burn/NEXT_QUEUE.md

@@ -11,7 +11,7 @@ Mode: read-only queue — no file modifications except this report
 | 分组 | 数量 | 说明 |
 |------|------|------|
 | Safe Now / docs-only | 2 | 纯文档，零代码变更，可立即执行 |
-| Safe Now / output-only planning | 2 | 仅写 output/，不影响 mainline |
+| Safe Now / output-only planning | 1 | 仅写 output/，不影响 mainline |
 | Safe After Mainline Acceptance | 8 | mainline 完成后可安全分发 |
 | Decision Required Before Implementation | 5 | 需 Codex 先做决策 |
 | Do Not Touch During Mainline Acceptance | 4 | mainline 期间禁止触碰 |
@@ -61,19 +61,6 @@ Mode: read-only queue — no file modifications except this report
 | **Forbidden files** | 所有其他文件 |
 | **Tests/verification** | `ls output/claude-token-burn/INDEX.md output/claude-token-burn/NEXT_QUEUE.md`；`git status --short` 确认只改了这两个文件 |
 | **Risk level** | NONE |
-| **Parallelism safety** | solo |
-
-### Q-020: Local Artifact Hygiene Audit（已完成）
-
-| Field | Value |
-|---|---|
-| **Queue ID** | Q-020 |
-| **Source report(s)** | CLAUDE-FINAL-LOCALARTIFACTS-015 |
-| **Goal** | 对 `.playwright-cli/`、`local-archives/`、`output/`、`live-config.env` 做 metadata-only 未跟踪产物清单审计 |
-| **Allowed files** | `output/claude-token-burn/CLAUDE-FINAL-LOCALARTIFACTS-015-untracked-artifact-hygiene-audit.md` |
-| **Forbidden files** | `live-config.env` 内容、`.env*` 内容、`output/` artifact payload 内容、任何删除/移动/stage/commit/clean 操作 |
-| **Tests/verification** | `du -sh .playwright-cli local-archives output`；`git status --short`；不读取 secret 内容 |
-| **Risk level** | NONE（metadata-only） |
 | **Parallelism safety** | solo |
 
 ---
@@ -281,38 +268,6 @@ Mode: read-only queue — no file modifications except this report
 
 ---
 
-## F. Local Artifact Hygiene / Requires Explicit Owner Approval
-
-### Q-021: Add .gitignore Rules For Local Artifacts
-
-| Field | Value |
-|---|---|
-| **Queue ID** | Q-021 |
-| **Source report(s)** | LOCALARTIFACTS-015 |
-| **Goal** | 在 `.gitignore` 中加入 `live-config.env`、`.playwright-cli/`、`local-archives/` 与非 token-burn output 产物规则 |
-| **Decision needed** | Codex/Owner 选择是否保留 `output/claude-token-burn/` 为 tracked exception |
-| **Allowed files** | `.gitignore` |
-| **Forbidden files** | `live-config.env`、`.env*`、任何 output artifact 内容、任何删除/移动 |
-| **Tests/verification** | `git check-ignore -v live-config.env .playwright-cli/ local-archives/ output/playwright/`；确认 `git ls-files output/claude-token-burn` 仍为 tracked |
-| **Risk level** | LOW |
-| **Parallelism safety** | max-1 |
-
-### Q-022: Owner-Approved Local Artifact Cleanup
-
-| Field | Value |
-|---|---|
-| **Queue ID** | Q-022 |
-| **Source report(s)** | LOCALARTIFACTS-015 |
-| **Goal** | 在 Owner 明确授权后分阶段清理 stale tooling/cache 和过期 runtime output |
-| **Decision needed** | 每个删除/移动阶段都需要 Owner 明确确认；不得默认删除验收证据 |
-| **Allowed files** | 待 Owner 指定；默认 none |
-| **Forbidden files** | `live-config.env`、`.env*`、当前 mainline acceptance evidence、未确认的 Tokyo/runtime/playwright evidence |
-| **Tests/verification** | 仅 metadata commands；每一步前后 `du -sh` 与 `git status --short` |
-| **Risk level** | MEDIUM |
-| **Parallelism safety** | solo |
-
----
-
 ## 并发推荐
 
 ### 约束
@@ -322,7 +277,6 @@ Mode: read-only queue — no file modifications except this report
 - tests-only 卡可并行（无源码冲突）
 - docs-only 卡可并行（无代码冲突）
 - Codex-owned 卡需串行（等待审批）
-- local artifact cleanup 必须串行并等待 Owner 明确授权
 
 ### 推荐分发波次
 
@@ -376,7 +330,6 @@ Mainline status: active acceptance in progress
 Immediate safe actions (no mainline interference):
 - Q-001: Commit the 27-file agent instruction cleanup diff
 - Q-002: Add forbidden-term scanner to owner-runtime-console visual:qa
-- Q-020: Local artifact hygiene audit is complete; Q-021/Q-022 require explicit Owner approval before .gitignore or cleanup changes
 
 Pending Codex decisions:
 - Q-011: SOR-001 mode (recommended: Option B — collapse to armed_observation)
