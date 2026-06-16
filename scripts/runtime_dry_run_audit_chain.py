@@ -1532,6 +1532,24 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
+    required_checks = {
+        name: checks.get(name)
+        for name in sorted(checks)
+        if name != "scenario_count"
+    }
+    summary = {
+        "scenario_count": checks["scenario_count"],
+        "required_checks_present": checks["required_scenarios_present"],
+        "all_scenarios_passed": checks["all_scenarios_passed"],
+        "dangerous_effects_absent": checks["dangerous_effects_absent"],
+        "disabled_smoke_is_real_execution_proof": False,
+        "shared_runtime_pipeline_checked": checks[
+            "shared_runtime_pipeline_checked"
+        ],
+        "selected_strategygroup_dispatch_guard_checked": checks[
+            "selected_strategygroup_dispatch_guard_checked"
+        ],
+    }
     return {
         "scope": "runtime_dry_run_audit_chain",
         "status": status,
@@ -1543,6 +1561,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "scenarios": scenarios,
         "shared_runtime_pipeline_validation": shared_pipeline,
         "checks": checks,
+        "scenario_count": checks["scenario_count"],
+        "required_checks": required_checks,
+        "summary": summary,
         "blockers": blockers,
         "safety_invariants": {
             "uses_mock_fresh_signal": True,

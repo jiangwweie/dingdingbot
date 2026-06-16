@@ -10,9 +10,32 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
+    assert packet["scenario_count"] == 7
     assert packet["checks"]["scenario_count"] == 7
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
+    assert packet["summary"] == {
+        "scenario_count": 7,
+        "required_checks_present": True,
+        "all_scenarios_passed": True,
+        "dangerous_effects_absent": True,
+        "disabled_smoke_is_real_execution_proof": False,
+        "shared_runtime_pipeline_checked": True,
+        "selected_strategygroup_dispatch_guard_checked": True,
+    }
+    assert packet["required_checks"] == {
+        "all_scenarios_passed": True,
+        "dangerous_effects_absent": True,
+        "disabled_smoke_not_real_execution_proof": True,
+        "fresh_signal_fast_auto_chain_checked": True,
+        "legacy_local_registration_probe_tolerance_checked": True,
+        "mock_operation_layer_closed_loop_checked": True,
+        "operation_layer_blocker_review_policy_checked": True,
+        "operation_layer_evidence_relay_checked": True,
+        "required_scenarios_present": True,
+        "selected_strategygroup_dispatch_guard_checked": True,
+        "shared_runtime_pipeline_checked": True,
+    }
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_created"] is False
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
