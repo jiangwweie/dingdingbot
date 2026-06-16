@@ -57,7 +57,7 @@ The second P2 cabinet extension is recorded in
 | Strategy | Added Role | Current Boundary |
 | --- | --- | --- |
 | `UO-001` | Ultimate Oscillator bullish-divergence right-tail review. | Preserve bullish divergence only; generic midline and short-side rows stay disabled. |
-| `TRIX-001` | TRIX zero-cross thin-sample right-tail review. | Preserve zero-cross long only; sample, concentration, and broad persistence blockers remain. |
+| `TRIX-001` | TRIX zero-cross thin-sample right-tail review. | Boundary fixed in `trix-thin-sample-concentration-boundary-20260616.md`; preserve zero-cross long only while sample, concentration, broad persistence, session/fill, product-risk, and margin blockers remain. |
 | `PSAR-001` | Parabolic SAR bullish-flip burst review. | Preserve bullish flip only; continuous stop-reverse, continuation, and short-side PSAR stay blocked. |
 | `ICH-001` | Ichimoku cloud-breakout window-revival vocabulary. | Preserve no-future-cloud breakout only; full-sequence decay blocks handoff. |
 | `CCI-001` | CCI trend escape / precious-metal failure-short revival. | Preserve metal +100 failure short and equity reclaim vocabulary; drawdown and off-hour facts block promotion. |
