@@ -65,6 +65,7 @@ def _promotion_result(
     runtime: StrategyRuntimeInstance,
     *,
     confirmed: bool = True,
+    operation_layer_ids_present: bool = True,
 ) -> object:
     binding = initial_strategy_semantics_catalog().get_binding(
         strategy_family_id=runtime.strategy_family_id,
@@ -117,7 +118,11 @@ def _promotion_result(
                         "runtime-post-submit-budget-settlement-persistence-084"
                     ),
                     protection_creation_failure_policy_confirmed=True,
-                    attempt_outcome_policy_id="runtime-attempt-outcome-policy-test",
+                    attempt_outcome_policy_id=(
+                        "runtime-attempt-outcome-policy-test"
+                        if operation_layer_ids_present
+                        else None
+                    ),
                     trusted_submit_fact_snapshot_id=(
                         "trusted-submit-facts-snapshot-test"
                     ),
@@ -129,13 +134,23 @@ def _promotion_result(
                     ),
                     local_registration_enablement_decision_id=(
                         "runtime-local-registration-enable-test"
+                        if operation_layer_ids_present
+                        else None
                     ),
                     exchange_submit_enablement_decision_id=(
                         "runtime-exchange-submit-enable-test"
+                        if operation_layer_ids_present
+                        else None
                     ),
-                    runtime_submit_rehearsal_id="runtime-submit-rehearsal-test",
+                    runtime_submit_rehearsal_id=(
+                        "runtime-submit-rehearsal-test"
+                        if operation_layer_ids_present
+                        else None
+                    ),
                     deployment_readiness_evidence_id=(
                         "runtime-exchange-gateway-readiness-test"
+                        if operation_layer_ids_present
+                        else None
                     ),
                     owner_real_submit_authorization_id=(
                         "owner-real-submit-authorization-test"
@@ -306,3 +321,91 @@ def test_live_enablement_preview_blocks_missing_runtime_safety_facts():
     assert "runtime_safety_max_loss_budget_present" in preview.blockers
     assert "runtime_safety_protection_required" in preview.blockers
     assert preview.not_execution_authority is True
+
+
+def test_live_enablement_preview_defers_downstream_operation_layer_evidence_ids():
+    runtime = _runtime()
+    preview = build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(runtime),
+        promotion_gate_result=_promotion_result(
+            runtime,
+            operation_layer_ids_present=False,
+        ),
+        current_head_deployed=True,
+        owner_live_runtime_enablement_authorized=True,
+        owner_real_submit_authorization_present=True,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=False,
+        staged_submit_chain_available=True,
+        forbidden_execution_flags=[],
+    )
+
+    assert (
+        preview.status
+        == StrategyRuntimeLiveEnablementPreviewStatus.READY_FOR_LIVE_RUNTIME_ENABLEMENT_MUTATION_DESIGN
+    )
+    assert preview.blockers == []
+    assert "promotion_gate_operation_layer_evidence_deferred" in preview.warnings
+    assert (
+        "promotion_gate_deferred_until_operation_layer:"
+        "first_real_submit_attempt_outcome_policy_id_missing"
+    ) in preview.warnings
+    assert (
+        "promotion_gate_deferred_until_operation_layer:"
+        "first_real_submit_runtime_submit_rehearsal_or_execution_result_id_missing"
+    ) in preview.warnings
+    assert preview.not_execution_authority is True
+    assert preview.order_created is False
+    assert preview.exchange_called is False
+
+
+def test_live_enablement_preview_keeps_downstream_ids_hard_when_chain_not_staged():
+    runtime = _runtime()
+    preview = build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(runtime),
+        promotion_gate_result=_promotion_result(
+            runtime,
+            operation_layer_ids_present=False,
+        ),
+        current_head_deployed=True,
+        owner_live_runtime_enablement_authorized=True,
+        owner_real_submit_authorization_present=True,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=False,
+        staged_submit_chain_available=False,
+        forbidden_execution_flags=[],
+    )
+
+    assert preview.status == StrategyRuntimeLiveEnablementPreviewStatus.BLOCKED
+    assert "controlled_submit_adapter_not_implemented" in preview.blockers
+    assert "promotion_gate_not_ready_for_first_real_submit" in preview.blockers
+    assert (
+        "promotion_gate_first_real_submit_attempt_outcome_policy_id_missing"
+        in preview.blockers
+    )
+
+
+def test_live_enablement_preview_keeps_non_deferable_promotion_blockers_hard():
+    runtime = _runtime()
+    preview = build_strategy_runtime_live_enablement_preview(
+        runtime=runtime,
+        safety_readiness=evaluate_strategy_runtime_safety_readiness(runtime),
+        promotion_gate_result=_promotion_result(runtime, confirmed=False),
+        current_head_deployed=True,
+        owner_live_runtime_enablement_authorized=True,
+        owner_real_submit_authorization_present=True,
+        submit_technical_rehearsal_passed=True,
+        submit_adapter_implemented=False,
+        staged_submit_chain_available=True,
+        forbidden_execution_flags=[],
+    )
+
+    assert preview.status == StrategyRuntimeLiveEnablementPreviewStatus.BLOCKED
+    assert "promotion_gate_not_ready_for_first_real_submit" in preview.blockers
+    assert "promotion_gate_semantic_strategy_family_confirmed_missing" in (
+        preview.blockers
+    )
+    assert preview.order_created is False
+    assert preview.exchange_called is False

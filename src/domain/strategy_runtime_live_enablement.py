@@ -75,6 +75,17 @@ class StrategyRuntimeLiveEnablementPreview(StrategyRuntimeLiveEnablementModel):
     transfer_instruction_created: Literal[False] = False
 
 
+DEFERABLE_OPERATION_LAYER_PROMOTION_BLOCKERS = frozenset(
+    {
+        "first_real_submit_attempt_outcome_policy_id_missing",
+        "first_real_submit_local_registration_enablement_decision_id_missing",
+        "first_real_submit_exchange_submit_enablement_decision_id_missing",
+        "first_real_submit_runtime_submit_rehearsal_or_execution_result_id_missing",
+        "first_real_submit_deployment_readiness_evidence_id_missing",
+    }
+)
+
+
 class StrategyRuntimeLiveEnablementMutation(StrategyRuntimeLiveEnablementModel):
     mutation_id: str = Field(min_length=1, max_length=180)
     runtime_instance_id: str
@@ -146,10 +157,31 @@ def build_strategy_runtime_live_enablement_preview(
     if promotion_gate_result.status != (
         StrategyRuntimePromotionGateStatus.READY_FOR_FIRST_REAL_SUBMIT_GATE_REVIEW
     ):
-        blockers.append("promotion_gate_not_ready_for_first_real_submit")
-        blockers.extend(
-            f"promotion_gate_{blocker}" for blocker in promotion_gate_result.blockers
+        hard_promotion_blockers, deferred_promotion_blockers = (
+            _split_deferable_operation_layer_promotion_blockers(
+                promotion_gate_result.blockers,
+                current_head_deployed=current_head_deployed,
+                owner_live_runtime_enablement_authorized=(
+                    owner_live_runtime_enablement_authorized
+                ),
+                owner_real_submit_authorization_present=(
+                    owner_real_submit_authorization_present
+                ),
+                submit_technical_rehearsal_passed=submit_technical_rehearsal_passed,
+                staged_submit_chain_available=staged_submit_chain_available,
+            )
         )
+        if hard_promotion_blockers:
+            blockers.append("promotion_gate_not_ready_for_first_real_submit")
+            blockers.extend(
+                f"promotion_gate_{blocker}" for blocker in hard_promotion_blockers
+            )
+        if deferred_promotion_blockers:
+            warnings.append("promotion_gate_operation_layer_evidence_deferred")
+            warnings.extend(
+                f"promotion_gate_deferred_until_operation_layer:{blocker}"
+                for blocker in deferred_promotion_blockers
+            )
     warnings.extend(
         f"promotion_gate_warning_{warning}"
         for warning in promotion_gate_result.warnings
@@ -270,3 +302,32 @@ def build_strategy_runtime_live_enablement_mutation(
 
 def _dedupe_sorted(items: list[str]) -> list[str]:
     return sorted(set(items))
+
+
+def _split_deferable_operation_layer_promotion_blockers(
+    blockers: list[str],
+    *,
+    current_head_deployed: bool,
+    owner_live_runtime_enablement_authorized: bool,
+    owner_real_submit_authorization_present: bool,
+    submit_technical_rehearsal_passed: bool,
+    staged_submit_chain_available: bool,
+) -> tuple[list[str], list[str]]:
+    can_defer_operation_layer_ids = (
+        current_head_deployed
+        and owner_live_runtime_enablement_authorized
+        and owner_real_submit_authorization_present
+        and submit_technical_rehearsal_passed
+        and staged_submit_chain_available
+    )
+    if not can_defer_operation_layer_ids:
+        return list(blockers), []
+
+    hard_blockers: list[str] = []
+    deferred_blockers: list[str] = []
+    for blocker in blockers:
+        if blocker in DEFERABLE_OPERATION_LAYER_PROMOTION_BLOCKERS:
+            deferred_blockers.append(blocker)
+            continue
+        hard_blockers.append(blocker)
+    return hard_blockers, deferred_blockers
