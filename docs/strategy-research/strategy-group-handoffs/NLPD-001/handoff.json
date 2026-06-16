@@ -1,0 +1,232 @@
+{
+  "strategy_group_id": "NLPD-001",
+  "version": "2026-06-16-r0",
+  "name": "New Listing Price Discovery",
+  "status": "observe_only_event_study_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "SNDKUSDT",
+    "MUUSDT",
+    "HOODUSDT",
+    "COINUSDT",
+    "MUBUSDT",
+    "SNDKBUSDT",
+    "TSLABUSDT",
+    "NVDABUSDT",
+    "CRCLBUSDT",
+    "SPCXBUSDT"
+  ],
+  "supported_symbol_scope": "research_event_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long",
+    "short_analysis_only"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_listing_event_state_ready",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "listing_event_time",
+      "first_trade_window_state",
+      "post_listing_delay_state",
+      "product_risk_state",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "first_session_continuation_observer",
+      "post_burst_fade_analysis_only",
+      "low_history_event_study"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "first_trade_window_ohlcv",
+      "quote_volume_state",
+      "spread_proxy_state"
+    ],
+    "strategy": [
+      "listing_event_time",
+      "post_listing_delay_state",
+      "low_history_dataset_state",
+      "bstocks_event_cohort_state",
+      "first_session_continuation_state",
+      "post_burst_fade_state",
+      "survivorship_control",
+      "instrument_product_risk_state",
+      "short_executable_state",
+      "session_gap_policy"
+    ],
+    "risk": [
+      "spread_liquidity_state",
+      "product_risk_state",
+      "fill_gap_slippage_state",
+      "real_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "1",
+    "stress_only_leverage": [
+      "2",
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "6h_to_48h_observe_only_event_study_lane"
+  },
+  "hard_stops": [
+    "listing_event_time_missing",
+    "first_trade_window_incomplete",
+    "low_history_dataset_unbounded",
+    "survivorship_control_missing",
+    "spread_liquidity_missing",
+    "spot_short_requested_without_executable_venue",
+    "product_risk_missing",
+    "post_entry_label_used_as_signal",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "listing_hint_symbols": "31",
+    "bstocks_spot_symbols": "6",
+    "tradfi_futures_symbols": "23",
+    "delayed_label_rows": "575",
+    "bstocks_refresh_delayed_labels": "135",
+    "best_bstocks_first_window_24h": "SNDKBUSDT 17.207059%",
+    "best_bstocks_delayed_continuation": "SNDKBUSDT 12h delay / 36h hold 6.846788% net",
+    "best_bstocks_delayed_fade": "CRCLBUSDT 3h delay / 24h hold 5.620422% net",
+    "best_tradfi_continuation": "SNDKUSDT 12h delay / 48h hold 13.7449% net",
+    "best_tradfi_fade": "SNDKUSDT 6h delay / 48h hold 20.1675% net"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/candidate-packets/NLPD-001-new-listing-price-discovery-packet.md",
+    "docs/strategy-research/nlpd-new-listing-event-study/nlpd-new-listing-event-study-summary.md",
+    "docs/strategy-research/bstocks-event-study-refresh/bstocks-event-study-refresh-summary.md",
+    "docs/strategy-research/pmr-target-specific-overlay-classifier/pmr-target-specific-overlay-classifier-summary.md"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "NLPD-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_listing_event_state_ready",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "SNDKUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Listing event has auditable event time and first closed 1h window; observe-only because low-history and product-risk blockers remain.",
+    "invalidation_reason": "Missing listing event time, incomplete first-window OHLCV, low-history blocker, missing survivorship, missing spread/liquidity, or missing product-risk facts.",
+    "required_facts_snapshot": {
+      "listing_event_time": "present",
+      "first_trade_window_ohlcv": "present",
+      "post_listing_delay_state": "present",
+      "low_history_dataset_state": "blocking",
+      "survivorship_control": "missing",
+      "spread_proxy_state": "missing",
+      "short_executable_state": "not_applicable_for_long"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "NLPD-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_listing_event_state",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No listing/event candidate has auditable event time plus enough closed 1h candles for observe-only scoring."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "NLPD-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_listing_event_state",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "SNDKUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or first-window facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "NLPD-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_listing_event_state",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "SNDKUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Event-study label conflicts with PMR disable state, spot short executability, stale product facts, same-symbol exposure, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

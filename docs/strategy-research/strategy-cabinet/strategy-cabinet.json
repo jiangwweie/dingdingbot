@@ -319,13 +319,13 @@
       "strategy_id": "NLPD-001",
       "semantic_name": "New Listing Price Discovery",
       "strategy_family": "new_listing_event",
-      "current_status": "research_candidate",
+      "current_status": "observe_only",
       "default_mode": "observe_only",
       "supported_sides": [
         "long",
         "short_analysis_only"
       ],
-      "research_role": "New listing, contract event, and low-history price-discovery lane",
+      "research_role": "Observe-only new listing, contract event, and low-history price-discovery lane",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -352,8 +352,11 @@
         "docs/strategy-research/nlpd-new-listing-event-study/nlpd-new-listing-event-study-summary.md",
         "docs/strategy-research/bstocks-event-study-refresh/bstocks-event-study-refresh-summary.md"
       ],
-      "handoff_paths": [],
-      "revival_condition": "Advance after listing manifest, delist/status, liquidity, spread, failed-symbol, and product-risk facts are reproducible.",
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/NLPD-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/NLPD-001/handoff.json"
+      ],
+      "revival_condition": "Advance beyond observe-only only after listing manifest, delist/status, liquidity, spread, failed-symbol, survivorship, and product-risk facts are reproducible.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

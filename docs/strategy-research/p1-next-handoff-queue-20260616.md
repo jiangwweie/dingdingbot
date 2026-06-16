@@ -18,7 +18,7 @@ sample packet expectations, and non-execution flags.
 | ---: | --- | --- | --- | --- |
 | 1 | `VCB-001` | `observe_only handoff draft complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/`; broad breakout remains negative and armed observation remains blocked. |
 | 2 | `RSR-001` | `observe_only scorer handoff draft complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
-| 3 | `NLPD-001` | `research_candidate` | Low-history event-study observer draft. | Listing/event windows are interpretable and source-controlled, but sample breadth and survivorship facts block promotion. |
+| 3 | `NLPD-001` | `observe_only event-study handoff draft complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
 | 4 | `LCF-001` | `facts_pipeline_required` | RequiredFacts design packet first. | High-potential liquidation-cascade thesis cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay_candidate` | PMR-adjacent overlay note. | Useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
 
@@ -64,8 +64,9 @@ sample packet expectations, and non-execution flags.
    full-sequence behavior without post-entry labels.
 2. Keep `RSR-001` as observe-only scorer until second-half decay,
    session/fill, product-risk, mark/funding, and margin facts improve.
-3. Keep `NLPD-001` as event-study observer until a broader listing cohort
-   exists.
+3. Keep `NLPD-001` as event-study observer until broader listing cohort,
+   survivorship, spread/liquidity, product-risk, and executable-side facts
+   improve.
 4. Record `LCF-001` as a RequiredFacts design task, not a strategy handoff.
 5. Keep `MDS-001` as overlay research unless it develops a standalone
    activation/disable pair.

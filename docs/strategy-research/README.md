@@ -74,6 +74,8 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-group-handoffs/VCB-001/handoff.json` | System-readable observe-only `VCB-001` handoff contract with true-breakout classifier semantics, RequiredFacts, hard stops, and sample packets. |
 | `strategy-group-handoffs/RSR-001/handoff.md` | Human-readable observe-only `RSR-001` Relative Strength Rotation scorer handoff draft. |
 | `strategy-group-handoffs/RSR-001/handoff.json` | System-readable observe-only `RSR-001` scorer handoff contract with TEQ support semantics, RequiredFacts, hard stops, and sample packets. |
+| `strategy-group-handoffs/NLPD-001/handoff.md` | Human-readable observe-only `NLPD-001` new-listing / event-study handoff draft. |
+| `strategy-group-handoffs/NLPD-001/handoff.json` | System-readable observe-only `NLPD-001` event-study handoff contract with low-history semantics, RequiredFacts, hard stops, and sample packets. |
 | `document-governance-v3.md` | Document authority, supersession rules, and old-document handling. |
 | `owner-direction-log.md` | Owner strategy-research instructions that change search space, evaluation semantics, or evidence governance. |
 | `community-research-plan.md` | GitHub, Freqtrade, QuantConnect, Reddit/forum, and official-data intake plan. |
