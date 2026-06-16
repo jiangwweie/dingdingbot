@@ -18,7 +18,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 工作区 | `/Users/jiangwei/Documents/final-strategy-research` |
 | 分支 | `codex/strategy-research-20260613-goal` |
 | 策略柜版本 | `2026-06-16-r0` |
-| 策略柜登记 | `17` 个策略语义 |
+| 策略柜登记 | `24` 个策略语义 |
 | 主控可 review 的 handoff / observe-only handoff | `11` 个 |
 | 当前主交接入口 | `strategy-group-handoffs/main-control-handoff-index.md` |
 | 当前策略柜入口 | `strategy-cabinet/strategy-cabinet.md` 和 `strategy-cabinet/strategy-cabinet.json` |
@@ -42,6 +42,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 第一批实验候选 | `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, `SOR-001` | 原先 5 个核心 StrategyGroup，已经具备主控 review 所需 handoff pack。 |
 | 新增 observe-only handoff | `VCB-001`, `RSR-001`, `NLPD-001`, `DMI-001`, `SCF-001`, `MASS-001` | 新增 6 个可被主控 review 的观察态草案，不代表可 armed 或可执行。 |
 | 保留但不 handoff 的右尾 / 事实候选 | `LCF-001`, `MDS-001`, `EFI-001` | 有研究价值，但当前缺事实管线、目标配对或回撤控制。 |
+| 新增 P2 研究语义 | `UO-001`, `TRIX-001`, `PSAR-001`, `ICH-001`, `CCI-001`, `AEB-001`, `STOCH-001` | 新增 7 个研究-only 语义；只进入策略柜，不进入 handoff。 |
 | 暂缓 / 复活候选 | `RBR-001`, `HAT-001`, `LSR-001` | 不删除；保留语义、失败证据和复活条件。 |
 
 ## 原先 5 个策略组
@@ -73,6 +74,18 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | `MDS-001` | **金属错位 / session mismatch overlay**。给 NLPD、TEQ、PMR 等目标策略加支持或禁用标签。 | `overlay_candidate` | PMR-adjacent 的目标配对语义有价值。 | 还不是独立 activation/disable pair，目标覆盖不足。 |
 | `EFI-001` | **Elder Force Index 负量价力衰竭后的 long reversal**。 | `right_tail_candidate` | `efi_negative_exhaustion_reversal_long_72h` 分支右尾很强。 | 候选池 DD 2x `-91.431725%`，3x/5x 崩溃，短边失败，缺 disable classifier 和 live-like facts。 |
 
+## 新增 P2 研究语义
+
+| 策略 | 具体语义 | 当前状态 | 为什么保留 | 为什么不 handoff |
+| --- | --- | --- | --- | --- |
+| `UO-001` | **Ultimate Oscillator bullish divergence**。只保留价格走弱后的 bullish divergence long。 | `right_tail_candidate` | full 2x `77.534009%`，best-90d 2x `197.155957%`，DD 2x `-44.564941%`。 | generic midline 和 short-side 都失败，缺 divergence-quality、session/fill、margin facts。 |
+| `TRIX-001` | **TRIX zero-cross long**。三重 EMA 动量从负转正后的薄样本机会。 | `right_tail_candidate` | `8` 个事件，full 2x `117.088679%`，DD 2x `-1.881580%`。 | 样本太薄，集中度和泛化不足，broad persistence 失败。 |
+| `PSAR-001` | **Parabolic SAR bullish flip burst**。只保留 bullish flip 后的短爆发，不做 stop-reverse 系统。 | `right_tail_candidate` | best-90d 2x `124.602670%`，且 `0/0` 2x/5x proxy liquidation。 | DD 2x `-57.821226%`，continuation 和 short-side 失败。 |
+| `ICH-001` | **Ichimoku cloud breakout revival**。明确 no-future-cloud policy。 | `research_candidate` | cloud breakout long 有 best-90d 2x `296.354715%`。 | full 2x `-78.421778%`，DD 2x `-85.398509%`。 |
+| `CCI-001` | **CCI trend escape / failure revival**。重点是 precious-metal +100 failure short。 | `research_candidate` | 金属 failure short full 2x `72.496535%`，best-90d 2x `105.400734%`。 | DD 2x `-74.614868%`，generic CCI 和权益 reclaim 衰减严重。 |
+| `AEB-001` | **ATR expansion breakout short-window revival**。ATR24 equity expansion 的短窗口爆发。 | `research_candidate` | best-30d 2x `218.708454%`。 | best-90d 2x 只有 `31.950523%`，false-breakout 风险大。 |
+| `STOCH-001` | **Stochastic range persistence / whipsaw vocabulary**。 | `parked_or_research_vocab` | 保留 30d/60d bullish range-persistence 语义。 | 90d gate 未过，full 2x `-90.790585%`，DD 2x `-95.696757%`。 |
+
 ## 暂缓 / 复活候选
 
 | 策略 | 具体语义 | 当前状态 | 复活条件 |
@@ -88,7 +101,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 文档治理 | 建立策略研究入口、策略柜 Markdown / JSON、P0/P1/P2 队列、主控 handoff index。 |
 | 原 5 策略组 | 为 `MPG/FBS/TEQ/PMR/SOR` 补了低歧义边界：drawdown、facts readiness、product availability、overlay role、branch/time-stop。 |
 | 新策略接入 | 把 `VCB/RSR/NLPD/DMI/SCF/MASS` 转成 observe-only handoff 草案，可供主控 review。 |
-| 策略池扩展 | 把 `LCF/MDS/EFI/HAT/LSR/RBR` 放入策略柜，明确保留、阻止或复活条件。 |
+| 策略池扩展 | 把 `LCF/MDS/EFI/HAT/LSR/RBR` 以及 `UO/TRIX/PSAR/ICH/CCI/AEB/STOCH` 放入策略柜，明确保留、阻止或复活条件。 |
 | RequiredFacts | 对每个可交付策略固定了需要的 market/account/exchange/strategy facts 和 facts-missing 行为。 |
 | 风险边界 | 统一了 `1x` 默认、`2x` 研究、`3x` stress、`5x` 默认禁用的杠杆语义。 |
 | 证据口径 | 保留右尾窗口，但禁止把窗口收益直接当成全年稳定 alpha 或实盘可执行证明。 |
@@ -121,11 +134,11 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 这次策略线已经从“很多编号和研究片段”推进成一个可以交给主控 review 的策略柜：
 
 ```text
-17 个策略语义登记
+24 个策略语义登记
 11 个 handoff / observe-only handoff
 5 个原始核心策略组补强
 6 个新增观察态策略草案
-6 个保留 / 暂缓 / 复活候选
+13 个保留 / 暂缓 / 复活 / 研究语义候选
 ```
 
 主控可以从这批交付中接走的是 **策略语义、RequiredFacts、hard stops、sample packets、观察态边界和策略柜登记**。主控不应把研究收益数字直接解释为已集成能力或已授权实盘能力。

@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-16-r0",
+  "version": "2026-06-16-r1",
   "scope": "strategy_research_only",
   "last_updated_at": "2026-06-16",
   "non_goal": [
@@ -868,6 +868,331 @@
       ],
       "handoff_paths": [],
       "revival_condition": "Revive only after short upper-range rejection remains prefix-safe and full-sequence collapse, cost/fill, slot/M2M, classifier, and margin blockers improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "UO-001",
+      "semantic_name": "Ultimate Oscillator Bullish Divergence",
+      "strategy_family": "oscillator_divergence",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Ultimate Oscillator bullish-divergence review lane after prior weakness",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "generic_midline_failure",
+        "short_side_failure",
+        "divergence_quality_missing",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/UO-001-ultimate-oscillator-packet.md",
+        "docs/strategy-research/uo-ultimate-oscillator-replay/uo-ultimate-oscillator-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only after bullish-divergence quality, window persistence, product/session/fill, and real margin facts improve while generic midline and short-side rows remain disabled.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "TRIX-001",
+      "semantic_name": "TRIX Zero-Cross Thin-Sample Review",
+      "strategy_family": "triple_ema_momentum",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "TRIX triple-EMA zero-cross long thin-sample review lane",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "thin_sample",
+        "concentration_unresolved",
+        "broad_persistence_failure",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/TRIX-001-triple-ema-momentum-packet.md",
+        "docs/strategy-research/trix-triple-ema-replay/trix-triple-ema-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only after sample size, concentration, zero-cross quality, product/session/fill, and real margin facts improve while broad persistence rows remain disabled.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "PSAR-001",
+      "semantic_name": "Parabolic SAR Bullish Flip Burst",
+      "strategy_family": "stop_reverse_flip",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Parabolic SAR bullish flip burst review lane, not continuous stop-reverse",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "whipsaw_disable_missing",
+        "continuation_failure",
+        "drawdown_unresolved",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/PSAR-001-stop-reverse-packet.md",
+        "docs/strategy-research/psar-stop-reverse-replay/psar-stop-reverse-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only after bullish-flip quality, whipsaw disable, product/session/fill, and real margin facts improve while continuation and short-side PSAR rows remain disabled.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "ICH-001",
+      "semantic_name": "Ichimoku Cloud Breakout Revival",
+      "strategy_family": "cloud_breakout",
+      "current_status": "research_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Ichimoku cloud-breakout window-revival lane with no-future-cloud policy",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "full_sequence_decay",
+        "cloud_breakout_disable_missing",
+        "category_decay",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/ICH-001-ichimoku-cloud-breakout-packet.md",
+        "docs/strategy-research/ichimoku-cloud-breakout-replay/ichimoku-cloud-breakout-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only after no-future-cloud policy remains explicit and cloud-breakout disable, product/session/fill, concentration, and real margin facts improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "CCI-001",
+      "semantic_name": "CCI Trend Escape Failure Revival",
+      "strategy_family": "cci_trend_escape_failure",
+      "current_status": "research_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "short",
+        "long_revival_only"
+      ],
+      "research_role": "CCI trend escape / failure revival lane including precious-metal +100 failure short",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "drawdown_unresolved",
+        "generic_cci_failure",
+        "offhour_mark_index_missing",
+        "fill_gap_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/CCI-001-trend-escape-packet.md",
+        "docs/strategy-research/cci-trend-escape-replay/cci-trend-escape-summary.md",
+        "docs/strategy-research/cci-asset-session-classifier/cci-asset-session-classifier-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only after CCI failure quality, drawdown control, off-hour mark/index, product/session/fill, and real margin facts improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "AEB-001",
+      "semantic_name": "ATR Expansion Breakout Revival",
+      "strategy_family": "atr_expansion_breakout",
+      "current_status": "research_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short_context"
+      ],
+      "research_role": "ATR / True Range expansion breakout short-window revival lane",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x",
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "ninety_day_decay",
+        "false_breakout_disable_missing",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/AEB-001-atr-expansion-breakout-packet.md",
+        "docs/strategy-research/aeb-atr-expansion-breakout-replay/aeb-atr-expansion-breakout-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only after ATR expansion quality, false-breakout disable, 60d/90d persistence, product/session/fill, and real margin facts improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "STOCH-001",
+      "semantic_name": "Stochastic Range Persistence Vocabulary",
+      "strategy_family": "stochastic_range_persistence",
+      "current_status": "parked_or_research_vocab",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short_context"
+      ],
+      "research_role": "Stochastic bullish range-persistence and whipsaw vocabulary, not an active candidate",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x"
+        ],
+        "disabled": [
+          "3x",
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "ninety_day_gate_failure",
+        "full_sequence_collapse",
+        "whipsaw_disable_missing",
+        "high_leverage_proxy_risk",
+        "session_fill_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+        "docs/strategy-research/candidate-packets/STOCH-001-stochastic-momentum-reversal-packet.md",
+        "docs/strategy-research/stoch-momentum-reversal-replay/stoch-momentum-reversal-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only if stochastic range-persistence clears the 90d right-tail gate with materially lower drawdown and a signal-time whipsaw disable classifier.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",
