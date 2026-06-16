@@ -22,6 +22,19 @@ export function HealthChip({ label, state }: { label: string; state: OwnerHealth
   return <StatusBadge tone={healthTone[state]}>{text}</StatusBadge>;
 }
 
+function primaryHealthFor(strategy: StrategyGroupProductRow): { label: string; state: OwnerHealthState } {
+  const items = [
+    { label: "资金", state: strategy.funds },
+    { label: "订单", state: strategy.orders },
+    { label: "持仓", state: strategy.position },
+    { label: "保护", state: strategy.protection },
+  ];
+  return items.find((item) => item.state === "abnormal")
+    ?? items.find((item) => item.state === "processing")
+    ?? items.find((item) => item.state === "unknown")
+    ?? { label: "运行", state: "normal" };
+}
+
 export function MetricTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: Tone }) {
   return (
     <Card className="rounded-2xl bg-[color:var(--background-card-raised)] py-0 shadow-[var(--shadow-card)]">
@@ -132,6 +145,7 @@ export function StrategyGroupList({
           const stateLabel = strategy.automationLabel || automationStateLabels[strategy.automationState];
           const state = stateTone[strategy.automationState];
           const ownerAttention = attentionTone[strategy.ownerAttention];
+          const primaryHealth = primaryHealthFor(strategy);
           return (
             <button
               className={cn(
@@ -152,11 +166,11 @@ export function StrategyGroupList({
               <div className="flex items-center">
                 <StatusBadge tone={state}>{stateLabel}</StatusBadge>
               </div>
-              <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                <HealthChip label="资金" state={strategy.funds} />
-                <HealthChip label="订单" state={strategy.orders} />
-                <HealthChip label="持仓" state={strategy.position} />
-                <HealthChip label="保护" state={strategy.protection} />
+              <div className="flex min-w-0 items-center gap-2">
+                <HealthChip label={primaryHealth.label} state={primaryHealth.state} />
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                  {strategy.automationState === "waiting_for_opportunity" ? "观察中，等待机会" : strategy.availabilityReason || "边界内状态正常"}
+                </span>
               </div>
               <div className={cn("flex min-w-0 items-center justify-start text-sm font-semibold xl:justify-end", toneTextClass(ownerAttention))}>
                 {strategy.ownerAttentionLabel}

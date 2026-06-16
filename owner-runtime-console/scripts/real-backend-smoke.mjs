@@ -268,6 +268,25 @@ async function createRuntimeFixtures() {
       registers_runtime: false,
     },
   });
+  await writeJson(path.join(reportDir, "runtime-dry-run-audit-chain.json"), {
+    scope: "runtime_dry_run_audit_chain",
+    status: "passed",
+    checks: {
+      scenario_count: 4,
+      required_scenarios_present: true,
+      all_scenarios_passed: true,
+      dangerous_effects_absent: true,
+      disabled_smoke_not_real_execution_proof: true,
+    },
+    safety_invariants: {
+      exchange_write_called: false,
+      order_created: false,
+      order_lifecycle_called: false,
+      withdrawal_or_transfer_created: false,
+      disabled_smoke_is_real_execution_proof: false,
+      dangerous_effects: [],
+    },
+  });
   return {
     cleanupPath: dir,
     liveFactsPath,
@@ -420,6 +439,12 @@ async function runConnectedSmoke(browser) {
     if (sourcePayload?.data?.owner_summary?.operation_audit !== "暂无审计动作") {
       throw new Error("Expected source-readiness operation audit to be ready_empty / 暂无审计动作");
     }
+    if (sourcePayload?.data?.owner_summary?.market_opportunity !== "等待机会") {
+      throw new Error("Expected source-readiness market opportunity to show 等待机会");
+    }
+    if (sourcePayload?.data?.owner_summary?.runtime_dry_run_audit !== "审计演练正常") {
+      throw new Error("Expected source-readiness dry-run audit to show 审计演练正常");
+    }
     const page = await context.newPage();
     const consoleIssues = [];
     page.on("console", (message) => {
@@ -431,7 +456,9 @@ async function runConnectedSmoke(browser) {
     await page.goto(frontendUrl, { waitUntil: "networkidle" });
     await expectVisible(page, "BRC Owner Console");
     await expectVisible(page, "后端已连接");
-    await expectVisible(page, "状态证据待刷新");
+    await expectVisible(page, "系统安全运行");
+    await expectVisible(page, "等待机会");
+    await expectVisible(page, "观察中，等待机会");
     await expectVisible(page, "资金正常");
     await expectVisible(page, "暂无订单");
     await expectVisible(page, "暂无持仓");
@@ -443,6 +470,7 @@ async function runConnectedSmoke(browser) {
     await openNav(page, "系统", "只读保证");
     await expectActiveNav(page, "系统");
     await expectVisible(page, "策略组可见");
+    await expectVisible(page, "审计演练正常");
     await expectVisible(page, "owner_console_source_readiness");
     await openNav(page, "订单与持仓", "级联视图");
     await expectActiveNav(page, "订单与持仓");

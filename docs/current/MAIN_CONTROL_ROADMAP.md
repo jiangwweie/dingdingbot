@@ -26,11 +26,11 @@ index.
 
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
 | --- | --- | --- | --- | --- |
-| P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | active | Produce `owner-console-source-readiness.json` and `GET /api/trading-console/owner-console-source-readiness` |
+| P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher packets |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | local implemented | Deploy `runtime_dry_run_audit_chain.py` and refresh `runtime-dry-run-audit-chain.json` after each runtime-code deploy |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
-| P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | mainline integrated | Keep source-readiness API/packet stable while UI refinements continue from the mainline contract |
+| P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | active | Stabilize real-backend UI semantics, source-health display, and responsive visual QA from mainline |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
 | P2 LLM Assistance | LLM supports audit/readiness/notification without changing execution authority | Main runtime window | pending | Start with read-only audit summaries and Feishu notification text only |
@@ -59,6 +59,7 @@ positions
 protection
 reconciliation detail state
 operation audit detail state
+runtime dry-run audit state
 ```
 
 ### Required Artifacts
@@ -80,8 +81,19 @@ operation audit detail state
 | Positions source readable and empty | Source status is `ready_empty`, Owner language is `暂无持仓` |
 | Account facts readable | Source status is `ready`, Owner language is `资金正常` |
 | Watcher waiting for signal | Owner state is `waiting_for_opportunity`, Owner language is `等待机会` |
+| Runtime dry-run audit passed | Source status is `ready`, Owner language is `审计演练正常` |
 | Reconciliation/audit detail missing | Detail degrades without hiding StrategyGroups |
 | Safety | No order, exchange write, FinalGate bypass, Operation Layer bypass, secret mutation, profile expansion, sizing change, withdrawal, or transfer |
+
+### 2026-06-16 Checkpoint
+
+| Item | Result |
+| --- | --- |
+| Source-readiness API | Returns `market_opportunity=等待机会`, `funds=资金正常`, `orders=暂无订单`, `positions=暂无持仓`, `protection=保护正常`, `runtime_dry_run_audit=审计演练正常` in the real-backend smoke fixture |
+| Owner Console UI | Homepage treats readable funds/orders/positions/protection as business-ready even when candidate-prep details are still progressive; StrategyGroup rows show `等待机会` during no-signal observation |
+| System page | Shows `审计演练` as a secondary system-health item, not a homepage gate |
+| Visual governance | Strategy rows show one primary health chip plus one Owner-readable summary sentence instead of a four-chip evidence wall |
+| Verification | Python source-readiness/dry-run tests, frontend build, real-backend smoke, normal smoke, state smoke, and visual QA passed |
 
 ## P0 Subgoal: Runtime Liveness Repair
 

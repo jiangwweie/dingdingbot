@@ -73,6 +73,7 @@ function mapSourceHealth(source: OwnerConsoleSourceReadinessData): OwnerSourceHe
     protection: sourceItem(raw.protection, "unavailable", "保护状态暂不可用"),
     reconciliation: sourceItem(raw.reconciliation, "ready", "对账正常"),
     operationAudit: sourceItem(raw.operation_audit, "ready_empty", "暂无审计动作"),
+    runtimeDryRunAudit: sourceItem(raw.runtime_dry_run_audit, "degraded", "审计演练暂不可用"),
   };
 }
 
@@ -119,7 +120,11 @@ function strategyRows(source: OwnerConsoleSourceReadinessData, health: OwnerSour
   return rows.map((row, index) => {
     const id = row.strategy_group_id || `${splitCode(row.name ?? "")}-001`;
     const code = splitCode(id || row.name || "");
-    const state = stateFromOwnerLabel(row.owner_label || "", row.runtime_state || source.owner_state?.status);
+    const sourceState = source.owner_state?.status;
+    const mappedState = stateFromOwnerLabel(row.owner_label || "", row.runtime_state || sourceState);
+    const state = sourceState === "waiting_for_opportunity" && mappedState === "running"
+      ? "waiting_for_opportunity"
+      : mappedState;
     const reason = row.reason || source.owner_state?.reason || undefined;
     return {
       id,
@@ -151,7 +156,6 @@ function isReadySource(item: OwnerSourceHealthItem) {
 
 function hasUsableBusinessData(source: OwnerConsoleSourceReadinessData, health: OwnerSourceHealth) {
   return source.status === "ready"
-    && isReadySource(health.liveFacts)
     && isReadySource(health.accountFunds)
     && isReadySource(health.orders)
     && isReadySource(health.positions)

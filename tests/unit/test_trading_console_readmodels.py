@@ -5908,6 +5908,25 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "downgrade_mode": "observe_only",
             },
         },
+        "runtime-dry-run-audit-chain.json": {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "checks": {
+                "scenario_count": 4,
+                "required_scenarios_present": True,
+                "all_scenarios_passed": True,
+                "dangerous_effects_absent": True,
+                "disabled_smoke_not_real_execution_proof": True,
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+                "disabled_smoke_is_real_execution_proof": False,
+                "dangerous_effects": [],
+            },
+        },
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
@@ -5932,10 +5951,12 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["protection"] == "保护正常"
     assert payload["data"]["owner_summary"]["reconciliation"] == "对账正常"
     assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
+    assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
     assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
+    assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
     assert len(payload["data"]["strategy_groups"]) == 5
     assert payload["data"]["frontend_contract"] == {
         "single_api_source": True,

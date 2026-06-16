@@ -91,6 +91,10 @@ DEFAULT_STRATEGY_GROUP_LIVE_FACTS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategy-group-live-facts-input.json"
 )
+DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "runtime-dry-run-audit-chain.json"
+)
 DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
 DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
@@ -2026,6 +2030,18 @@ class TradingConsoleReadModelService:
             if live_facts_path_value
             else {}
         )
+        report_dir = Path(
+            os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR", DEFAULT_SIGNAL_WATCHER_REPORT_DIR)
+        ).expanduser()
+        dry_run_audit_path = Path(
+            os.environ.get(
+                "BRC_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH",
+                str(report_dir / "runtime-dry-run-audit-chain.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH,
+            )
+        ).expanduser()
+        dry_run_audit = _read_json_file(dry_run_audit_path)
         packet = _owner_console_source_readiness_packet(
             generated_at_ms=generated_at_ms,
             intake_response=intake_response,
@@ -2034,6 +2050,8 @@ class TradingConsoleReadModelService:
             runtime_response=runtime_response,
             live_facts=live_facts,
             live_facts_path=str(live_facts_path_value or ""),
+            dry_run_audit=dry_run_audit,
+            dry_run_audit_path=str(dry_run_audit_path),
             selected_strategy_group_id=selected_strategy_group_id,
             max_symbols=max_symbols,
             stale_after_seconds=stale_after_seconds,
@@ -7068,6 +7086,8 @@ def _owner_console_source_readiness_packet(
     runtime_response: TradingConsoleReadModelResponse,
     live_facts: dict[str, Any],
     live_facts_path: str,
+    dry_run_audit: dict[str, Any],
+    dry_run_audit_path: str,
     selected_strategy_group_id: str | None,
     max_symbols: int,
     stale_after_seconds: int,
@@ -7146,6 +7166,7 @@ def _owner_console_source_readiness_packet(
         runtime=runtime,
         watcher=watcher,
     )
+    dry_run_audit_source = _owner_console_dry_run_audit_source(dry_run_audit)
     source_health = {
         "strategy_catalog": _owner_console_detail_source(
             status=catalog_status,
@@ -7173,6 +7194,7 @@ def _owner_console_source_readiness_packet(
         "protection": protection_source,
         "reconciliation": reconciliation_source,
         "operation_audit": operation_audit_source,
+        "runtime_dry_run_audit": dry_run_audit_source,
     }
     critical_unavailable = [
         name
@@ -7195,6 +7217,7 @@ def _owner_console_source_readiness_packet(
         },
         "source_paths": {
             "live_facts_path": live_facts_path,
+            "runtime_dry_run_audit_chain_path": dry_run_audit_path,
             "watcher_report_dir": str(
                 os.environ.get(
                     "BRC_SIGNAL_WATCHER_REPORT_DIR",
@@ -7213,6 +7236,7 @@ def _owner_console_source_readiness_packet(
             "protection": protection_source["owner_label"],
             "reconciliation": reconciliation_source["owner_label"],
             "operation_audit": operation_audit_source["owner_label"],
+            "runtime_dry_run_audit": dry_run_audit_source["owner_label"],
         },
         "strategy_groups": rows,
         "source_health": source_health,
@@ -7228,6 +7252,7 @@ def _owner_console_source_readiness_packet(
             "runtime_pilot_status": runtime.get("status"),
             "watcher_status": (watcher.get("watcher") or {}).get("status"),
             "live_facts_readiness_status": live_readiness.get("status"),
+            "runtime_dry_run_audit_status": dry_run_audit.get("status"),
         },
         "safety_invariants": {
             "read_model_only": True,
@@ -7285,7 +7310,13 @@ def _owner_console_strategy_rows(
 def _owner_console_strategy_owner_label(item: dict[str, Any]) -> str:
     signal_state = str(item.get("signal_state") or "")
     runtime_state = str(item.get("runtime_state") or "")
-    if signal_state in {"no_signal", "waiting_for_fresh_signal"}:
+    blocked_reason = str(item.get("blocked_reason") or item.get("reason") or "")
+    if (
+        signal_state in {"no_signal", "waiting_for_fresh_signal", "waiting_for_market"}
+        or runtime_state in {"waiting_for_market", "waiting_for_signal"}
+        or blocked_reason == "no_fresh_strategy_signal"
+        or "strategy_signal_not_ready_for_shadow_candidate_prepare" in blocked_reason
+    ):
         return "等待机会"
     if runtime_state in {"observing", "armed_observation"}:
         return "运行中"
@@ -7508,6 +7539,56 @@ def _owner_console_operation_audit_source(
     )
 
 
+def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[str, Any]:
+    if not dry_run_audit:
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="审计演练暂不可用",
+            reason="runtime_dry_run_audit_chain_missing",
+        )
+    checks = dry_run_audit.get("checks") if isinstance(dry_run_audit.get("checks"), dict) else {}
+    safety = (
+        dry_run_audit.get("safety_invariants")
+        if isinstance(dry_run_audit.get("safety_invariants"), dict)
+        else {}
+    )
+    dangerous_effects = safety.get("dangerous_effects")
+    dangerous_effects_absent = (
+        checks.get("dangerous_effects_absent") is True
+        and (not isinstance(dangerous_effects, list) or len(dangerous_effects) == 0)
+    )
+    scenario_count = _optional_int_value(checks.get("scenario_count"))
+    passed = (
+        dry_run_audit.get("status") == "passed"
+        and checks.get("all_scenarios_passed") is True
+        and checks.get("required_scenarios_present") is True
+        and dangerous_effects_absent
+        and safety.get("exchange_write_called") is False
+        and safety.get("order_created") is False
+        and safety.get("order_lifecycle_called") is False
+        and safety.get("withdrawal_or_transfer_created") is False
+        and safety.get("disabled_smoke_is_real_execution_proof") is False
+    )
+    if passed:
+        return {
+            **_owner_console_detail_source(
+                status="ready",
+                owner_label="审计演练正常",
+                reason="runtime_dry_run_audit_chain_passed",
+            ),
+            "summary": {
+                "scenario_count": scenario_count,
+                "dangerous_effects_absent": True,
+                "disabled_smoke_is_real_execution_proof": False,
+            },
+        }
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="审计演练需检查",
+        reason=str(dry_run_audit.get("status") or "runtime_dry_run_audit_chain_not_passed"),
+    )
+
+
 def _owner_console_forbidden_effect_detected(
     live_facts: dict[str, Any],
     watcher: dict[str, Any],
@@ -7573,7 +7654,13 @@ def _owner_console_owner_state(
         or watcher_owner.get("blocked_reason")
         or "none"
     )
-    if blocked_reason == "no_fresh_strategy_signal":
+    if _owner_console_waiting_for_market(
+        blocked_reason=blocked_reason,
+        runtime_owner=runtime_owner,
+        watcher_owner=watcher_owner,
+        runtime=runtime,
+        watcher=watcher,
+    ):
         return {
             "status": "waiting_for_opportunity",
             "label": "等待机会",
@@ -7600,6 +7687,42 @@ def _owner_console_owner_state(
         ),
         "needs_owner_action": False,
     }
+
+
+def _owner_console_waiting_for_market(
+    *,
+    blocked_reason: str,
+    runtime_owner: dict[str, Any],
+    watcher_owner: dict[str, Any],
+    runtime: dict[str, Any],
+    watcher: dict[str, Any],
+) -> bool:
+    if blocked_reason == "no_fresh_strategy_signal":
+        return True
+    waiting_classes = {"waiting_for_market"}
+    if str(runtime_owner.get("blocker_class") or "") in waiting_classes:
+        return True
+    if str(watcher_owner.get("blocker_class") or "") in waiting_classes:
+        return True
+    waiting_statuses = {
+        "waiting_for_market",
+        "waiting_for_signal",
+        "watching_no_signal",
+    }
+    status_values = {
+        str(runtime.get("status") or ""),
+        str(watcher.get("status") or ""),
+        str((watcher.get("watcher") or {}).get("status") or "")
+        if isinstance(watcher.get("watcher"), dict)
+        else "",
+    }
+    if status_values & waiting_statuses:
+        return True
+    blocker_text = ",".join(
+        str(item)
+        for item in list(runtime.get("blockers") or []) + list(watcher.get("blockers") or [])
+    )
+    return "strategy_signal_not_ready_for_shadow_candidate_prepare" in blocker_text
 
 
 def _mapping_value(mapping: dict[str, Any], *keys: str) -> Optional[str]:

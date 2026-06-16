@@ -88,6 +88,7 @@ export type OwnerSourceHealth = {
   protection: OwnerSourceHealthItem;
   reconciliation: OwnerSourceHealthItem;
   operationAudit: OwnerSourceHealthItem;
+  runtimeDryRunAudit: OwnerSourceHealthItem;
 };
 
 export type OwnerImportantChange = {
@@ -143,6 +144,7 @@ export type OwnerConsoleSourceReadinessData = {
     protection?: string | null;
     reconciliation?: string | null;
     operation_audit?: string | null;
+    runtime_dry_run_audit?: string | null;
   } | null;
   strategy_groups?: OwnerSourceReadinessStrategyGroup[];
   source_health?: Record<string, OwnerSourceHealthItem | undefined>;

@@ -292,6 +292,7 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
             <SystemStateCard label="策略目录" tone={sourceStatusTone[projection.sourceHealth.catalog.status]} value={projection.sourceHealth.catalog.label} />
             <SystemStateCard label="运行状态" tone={sourceStatusTone[projection.sourceHealth.runtime.status]} value={projection.sourceHealth.runtime.label} />
             <SystemStateCard label="账户资金" tone={sourceStatusTone[projection.sourceHealth.accountFunds.status]} value={projection.sourceHealth.accountFunds.label} />
+            <SystemStateCard label="审计演练" tone={sourceStatusTone[projection.sourceHealth.runtimeDryRunAudit.status]} value={projection.sourceHealth.runtimeDryRunAudit.label} />
           </CardContent>
         </Card>
         <Card className="rounded-2xl shadow-[var(--shadow-panel)]">

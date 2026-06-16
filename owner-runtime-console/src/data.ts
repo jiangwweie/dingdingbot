@@ -54,6 +54,7 @@ const baseSourceHealth = {
   protection: { status: "ready", label: "保护正常" },
   reconciliation: { status: "ready", label: "对账正常" },
   operationAudit: { status: "ready", label: "审计详情可用" },
+  runtimeDryRunAudit: { status: "ready", label: "审计演练正常" },
 } as const;
 
 const baseStrategies: StrategyGroupProductRow[] = [
