@@ -537,6 +537,29 @@ the postdeploy channel packet.
 | Owner UI boundary | The deploy-channel item remains a source-health/system detail and does not become a homepage execution gate |
 | Safety | This is read-only state projection; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
+### 2026-06-17 Source Readiness Fallback Deploy Checkpoint
+
+The latest Owner Console source-readiness fallback repair was deployed to Tokyo
+through the standing-authorization git deploy path. Tokyo is current again, and
+the watcher/product-state loop is healthy while waiting for a fresh selected
+StrategyGroup signal.
+
+| Item | Result |
+| --- | --- |
+| Deployed code head | `00847a6f` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-00847a6f-source-readiness-fallback` |
+| Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `00847a6fe8611c2609726d88ce9c7b3fd276fcab` |
+| Watcher timer/service | Timer is enabled and active; latest service tick exited `0/SUCCESS` |
+| Current watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal` |
+| Current goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `fresh_signal_present=false`, `runtime_dry_run_audit_passed=true` |
+| Source readiness | `owner-console-source-readiness.status=ready` |
+| Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed` |
+| Deploy channel | `tokyo-deploy-channel-status.status=postdeploy_accepted`, `blockers=[]` |
+| Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
+| Safety | Deploy, probe, postdeploy, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Owner Console UI Validation Checkpoint
 
 While the selected StrategyGroup runtime is waiting for a fresh signal, the
