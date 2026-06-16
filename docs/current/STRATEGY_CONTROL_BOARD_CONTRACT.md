@@ -26,6 +26,22 @@ tool, or operator workflow for internal execution gates.
 | `reason` | One plain sentence when unavailable or intervention is required |
 | `review_outcome` | `保留`, `调整`, `暂停`, `停用`, or `待复盘` |
 
+### Review Outcome Vocabulary Mapping
+
+Backend/internal English values map to Owner-facing Chinese labels:
+
+| Backend/internal value | Owner-facing label |
+| --- | --- |
+| `promote` | `保留` |
+| `revise` | `调整` |
+| `park` | `暂停` |
+| `kill` | `停用` |
+| `pending` | `待复盘` |
+| `keep_observing` | `待复盘` |
+
+Backend/internal English values are not primary Owner UI labels. The Owner
+surface displays the Chinese vocabulary defined above.
+
 ## Main UI Language
 
 Main Owner screens should use only small, plain product vocabulary:

@@ -137,6 +137,8 @@ them to one terse product sentence, for example:
 | active position conflict | 有持仓处理中，暂不能使用 |
 | missing protection | 保护未就绪，暂不能使用 |
 | reconciliation mismatch | 订单结果不一致，等待系统处理 |
+| `hard_safety_stop` | `需要介入` |
+| `review_only_warning` | `运行中` (audit/detail available, not an Owner blocker) |
 
 ## Watch Branch Intake
 

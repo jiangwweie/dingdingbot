@@ -13,3 +13,8 @@ Last updated: 2026-06-15
 | Account position or open order conflict | Block candidate preparation. |
 | Mark/funding abnormality | Downshift or block armed observation. |
 | Observe-only group against armed group | Observe-only wins until facts pass. |
+
+**Stale facts note:** In the current baseline, "stale facts" means upstream
+freshness status/enum reports such as `stale`, `expired`, `outdated`, or
+`STALE` — not numeric age comparison. Numeric freshness enforcement is a
+deferred hardening option, not current baseline.
