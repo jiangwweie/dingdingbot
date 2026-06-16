@@ -879,12 +879,12 @@
       "strategy_id": "UO-001",
       "semantic_name": "Ultimate Oscillator Bullish Divergence",
       "strategy_family": "oscillator_divergence",
-      "current_status": "right_tail_candidate",
+      "current_status": "observe_only",
       "default_mode": "observe_only",
       "supported_sides": [
         "long"
       ],
-      "research_role": "Ultimate Oscillator bullish-divergence review lane after prior weakness",
+      "research_role": "Ultimate Oscillator bullish-divergence observe-only handoff draft after prior weakness",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -912,8 +912,11 @@
         "docs/strategy-research/candidate-packets/UO-001-ultimate-oscillator-packet.md",
         "docs/strategy-research/uo-ultimate-oscillator-replay/uo-ultimate-oscillator-summary.md"
       ],
-      "handoff_paths": [],
-      "revival_condition": "Convert only after bullish-divergence quality, window persistence, product/session/fill, and real margin facts improve while generic midline and short-side rows remain disabled.",
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/UO-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/UO-001/handoff.json"
+      ],
+      "revival_condition": "Upgrade beyond observe-only only after bullish-divergence quality, window persistence, product/session/fill, and real margin facts improve while generic midline and short-side rows remain disabled.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

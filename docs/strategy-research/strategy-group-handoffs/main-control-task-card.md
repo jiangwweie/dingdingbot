@@ -1,13 +1,13 @@
-# Main-Control Task Card: StrategyGroup Handoff Batch 1
+# Main-Control Task Card: StrategyGroup Handoff Batch
 
 Status: READY_FOR_MAIN_CONTROL_REVIEW
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 ## Goal
 
-Review and consume the first Strategy Research v3 StrategyGroup handoff batch as
-main-control inputs for Strategy Picker, observable runtime admission, watcher
-scope, and RequiredFacts readiness.
+Review and consume the current Strategy Research v3 StrategyGroup handoff batch
+as main-control inputs for Strategy Picker, observable runtime admission,
+watcher scope, RequiredFacts readiness, and observe-only signal review.
 
 ## Why
 
@@ -15,13 +15,24 @@ Owner wants strategy research to become practical strategy-group candidates
 without making the research window responsible for FinalGate, Operation Layer,
 real execution, settlement, or Console implementation.
 
-This batch converts five research candidates into stable handoff contracts:
+This batch converts twelve research candidates into stable handoff contracts.
+The original armed-observation / observe-only group contains:
 
 1. `MPG-001`
 2. `FBS-001`
 3. `TEQ-001`
 4. `PMR-001`
 5. `SOR-001`
+
+The added observe-only handoff drafts contain:
+
+1. `VCB-001`
+2. `RSR-001`
+3. `NLPD-001`
+4. `DMI-001`
+5. `SCF-001`
+6. `MASS-001`
+7. `UO-001`
 
 ## Inputs
 
@@ -53,6 +64,13 @@ This batch converts five research candidates into stable handoff contracts:
 | `TEQ-001` | `armed_observation` | Admit as long-side equity-like momentum observer with concentration and session facts required. |
 | `PMR-001` | `observe_only` | Start as PMR short/overlay observer; upgrade only when session/mark facts are present. |
 | `SOR-001` | `armed_observation` | Admit branch-by-branch; do not treat as broad opening-range alpha. |
+| `VCB-001` | `observe_only` | Start as volume-compression breakout observer; true/false breakout labels remain research targets, not runtime facts. |
+| `RSR-001` | `observe_only` | Start as relative-strength scorer; use as TEQ support context, not standalone execution logic. |
+| `NLPD-001` | `observe_only` | Start as low-history listing/event observer; block executable activation until cohort and product-risk facts improve. |
+| `DMI-001` | `observe_only` | Start as ADX / DMI directional-ignition observer; narrow long-side equity/ETF role only. |
+| `SCF-001` | `observe_only` | Start as session-confluence observer; use as structure-confirmed TEQ momentum support. |
+| `MASS-001` | `observe_only` | Start as range-expansion reversal observer; require bulge-and-reversal confirmation before candidate preparation. |
+| `UO-001` | `observe_only` | Start as Ultimate Oscillator bullish-divergence observer; generic UO, midline persistence, and short-side branches are blocked. |
 
 ## Hard Stop For Main-Control Review
 
@@ -80,10 +98,10 @@ git diff -- src/application/order_lifecycle_service.py src/application/execution
 Expected result:
 
 ```text
-Validated handoffs: 5
-Passed: 5
+Validated handoffs: 12
+Passed: 12
 Failed: 0
-2 passed
+8 passed
 core execution-chain diff is empty
 ```
 
@@ -91,7 +109,8 @@ core execution-chain diff is empty
 
 Main-control has enough information to:
 
-1. Show the five strategy groups as Owner-selectable candidates.
+1. Show the current strategy groups as Owner-selectable or observe-only
+   candidates.
 2. Start observe-only or armed-observation flows without asking Owner to write
    market analysis manually.
 3. Prepare candidate packets only from fresh signal packets.

@@ -1,0 +1,255 @@
+{
+  "strategy_group_id": "UO-001",
+  "version": "2026-06-16-r0",
+  "name": "Ultimate Oscillator Bullish Divergence",
+  "status": "observe_only_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "TSLAUSDT",
+    "AMZNUSDT",
+    "XAUUSDT",
+    "PLTRUSDT",
+    "HOODUSDT",
+    "XPTUSDT",
+    "INTCUSDT",
+    "COPPERUSDT",
+    "GOOGLUSDT",
+    "CRCLUSDT",
+    "MUUSDT",
+    "METAUSDT",
+    "AAPLUSDT",
+    "DISUSDT",
+    "XPDUSDT",
+    "MSTRUSDT",
+    "COINUSDT",
+    "QQQUSDT",
+    "XAGUSDT",
+    "EWJUSDT",
+    "NVDAUSDT",
+    "TSMUSDT",
+    "LITEUSDT",
+    "BRKBUSDT",
+    "VUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_uo_bullish_divergence_candidate_seen",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "ultimate_oscillator_state",
+      "uo_bullish_divergence_quality_state",
+      "uo_prior_price_weakness_state",
+      "uo_window_persistence_state",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "uo_bullish_divergence_long_72h_observe_only"
+    ],
+    "disabled_member_modes": [
+      "uo_midline_persistence_long_72h",
+      "uo_bearish_divergence_short_72h",
+      "uo_overbought_failure_short_48h",
+      "uo_regular_midline_long_24h"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state",
+      "spread_proxy_state"
+    ],
+    "strategy": [
+      "ultimate_oscillator_state",
+      "uo_bullish_divergence_quality_state",
+      "uo_prior_price_weakness_state",
+      "uo_midline_persistence_failure_state",
+      "uo_short_side_failure_state",
+      "uo_window_persistence_state",
+      "uo_asset_role_state",
+      "uo_symbol_concentration_state",
+      "uo_low_history_product_risk_state"
+    ],
+    "risk": [
+      "tradfi_session_gap_state",
+      "fill_gap_slippage_state",
+      "product_risk_state",
+      "real_exchange_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "stress_only_leverage": [
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "72h_observe_only_review_lane"
+  },
+  "hard_stops": [
+    "generic_uo_mode_requested",
+    "midline_persistence_requested",
+    "short_side_requested",
+    "uo_state_missing",
+    "uo_bullish_divergence_quality_missing",
+    "uo_prior_price_weakness_missing",
+    "uo_window_persistence_missing",
+    "uo_asset_role_missing",
+    "product_session_policy_missing",
+    "fill_gap_slippage_missing",
+    "real_margin_model_missing",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "lead_mode": "uo_bullish_divergence_long_72h",
+    "lead_events": "52",
+    "lead_symbols": "25",
+    "lead_full_2x": "77.534009%",
+    "lead_best_90d_2x": "197.155957%",
+    "lead_dd_2x": "-44.564941%",
+    "lead_2x_liq_proxy": "0",
+    "lead_5x_liq_proxy": "0",
+    "negative_midline_full_2x": "-94.765397%",
+    "negative_short_side_full_2x": "-42.897881%",
+    "negative_scope": "generic midline persistence, short-side divergence, and broad category attribution fail current evidence"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
+    "docs/strategy-research/candidate-packets/UO-001-ultimate-oscillator-packet.md",
+    "docs/strategy-research/uo-ultimate-oscillator-replay/uo-ultimate-oscillator-summary.md",
+    "docs/strategy-research/uo-ultimate-oscillator-replay/policy_summary.csv",
+    "docs/strategy-research/uo-ultimate-oscillator-replay/accepted_events.csv"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "UO-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_uo_bullish_divergence_candidate_seen",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "TSLAUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Closed 1h candle shows prior price weakness with improving Ultimate Oscillator behavior inside the UO bullish-divergence observe-only scope.",
+    "invalidation_reason": "Missing divergence-quality facts, stale UO facts, generic midline mode, short-side request, stale product facts, or missing fill/session/margin facts.",
+    "required_facts_snapshot": {
+      "ultimate_oscillator_state": "present",
+      "uo_bullish_divergence_quality_state": "present",
+      "uo_prior_price_weakness_state": "present",
+      "uo_window_persistence_state": "present",
+      "uo_asset_role_state": "present",
+      "fill_gap_slippage_state": "missing",
+      "tradfi_session_gap_state": "missing",
+      "real_exchange_margin_liquidation_model_state": "missing"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "UO-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_uo_bullish_divergence_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No closed-candle symbol clears the UO bullish-divergence observe-only rule."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "UO-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_uo_bullish_divergence_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "TSLAUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or the closed-candle UO / divergence-quality / product facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "UO-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_uo_bullish_divergence_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "TSLAUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "UO observe-only signal conflicts with short-side strategy state, generic midline mode, same-symbol exposure, stale product facts, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

@@ -17,7 +17,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `teq-current-product-availability-refresh-20260616.md` | P0 supplement separating `TEQ-001` cached research evidence from current Binance product visibility. |
 | `pmr-overlay-role-split-20260616.md` | P0 supplement splitting `PMR-001` into NLPD disable overlay, TEQ support tag, XAG short watchlist, metal context, and blocked standalone branches. |
 | `sor-branch-eligibility-time-stop-20260616.md` | P0 supplement splitting `SOR-001` into eligible short 72h branches, revival-only branches, and blocked broad ORB branches. |
-| `p1-next-handoff-queue-20260616.md` | P1 queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
+| `p1-next-handoff-queue-20260616.md` | P1 queue for observe-only handoff drafts, non-handoff RequiredFacts / overlay tasks, and `UO-001` conversion follow-up. |
 | `vcb-signal-time-classifier-boundary-20260616.md` | P1 supplement separating `VCB-001` signal-time breakout facts from post-entry true/false labels. |
 | `rsr-scorer-standalone-boundary-20260616.md` | P1 supplement separating `RSR-001` TEQ support scoring from standalone activation. |
 | `nlpd-low-history-event-boundary-20260616.md` | P1 supplement separating `NLPD-001` low-history event observation from executable listing-strategy activation. |
@@ -27,7 +27,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `mds-target-pairing-boundary-20260616.md` | P1 supplement defining `MDS-001` target-specific overlay pairing, allowed tags, blocked universal filters, and sample overlay packet. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 queue for pool expansion, revival, and parked-strategy governance. |
 | `p2-cabinet-extension-batch1-20260616.md` | First P2 strategy-cabinet expansion batch for `SCF-001`, `DMI-001`, `MASS-001`, `EFI-001`, `HAT-001`, and `LSR-001`; `SCF-001`, `DMI-001`, and `MASS-001` are now observe-only handoff drafts. |
-| `p2-cabinet-extension-batch2-20260616.md` | Second P2 strategy-cabinet expansion batch for `UO-001`, `TRIX-001`, `PSAR-001`, `ICH-001`, `CCI-001`, `AEB-001`, and `STOCH-001`; all remain research-only / observe-only and have no handoff pack. |
+| `p2-cabinet-extension-batch2-20260616.md` | Second P2 strategy-cabinet expansion batch for `UO-001`, `TRIX-001`, `PSAR-001`, `ICH-001`, `CCI-001`, `AEB-001`, and `STOCH-001`; `UO-001` is now an observe-only handoff draft and the rest remain research-only. |
 | `efi-drawdown-disable-boundary-20260616.md` | P2 supplement preserving `EFI-001` negative-force exhaustion reversal as a right-tail candidate while blocking handoff on drawdown, high leverage, short-side failure, product/session/fill, and margin facts. |
 | `strategy-line-handoff-summary-20260616.md` | Owner/main-control-readable strategy-line handoff summary covering current vision, original strategy groups, new observe-only handoff drafts, non-handoff candidates, and strategy semantics. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
@@ -68,7 +68,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `teq-current-product-availability-refresh-20260616.md` | `TEQ-001` current product availability refresh and cached-research-only boundary. |
 | `pmr-overlay-role-split-20260616.md` | `PMR-001` overlay role split for target-specific disable/support/context semantics and standalone branch blockers. |
 | `sor-branch-eligibility-time-stop-20260616.md` | `SOR-001` branch eligibility and 72h time-stop split for narrow session candidates and revival/blocked branches. |
-| `p1-next-handoff-queue-20260616.md` | P1 next handoff queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
+| `p1-next-handoff-queue-20260616.md` | P1 next handoff queue covering observe-only handoff drafts, non-handoff RequiredFacts / overlay tasks, and `UO-001` conversion follow-up. |
 | `vcb-signal-time-classifier-boundary-20260616.md` | `VCB-001` signal-time classifier boundary; keeps true/false breakout labels as research targets, not runtime signal facts. |
 | `rsr-scorer-standalone-boundary-20260616.md` | `RSR-001` scorer boundary; keeps relative-strength ranking as TEQ support context, not standalone activation. |
 | `nlpd-low-history-event-boundary-20260616.md` | `NLPD-001` event boundary; keeps listing labels observe-only until cohort, survivorship, product, liquidity, and executable-side facts improve. |
@@ -78,7 +78,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `mds-target-pairing-boundary-20260616.md` | `MDS-001` target-pairing boundary for NLPD disable tags, TEQ support tags, coverage-missing policies, and standalone blockers. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
 | `p2-cabinet-extension-batch1-20260616.md` | P2 cabinet extension batch preserving six additional right-tail review or revival candidates; `DMI-001`, `SCF-001`, and `MASS-001` have since been converted to observe-only handoff drafts. |
-| `p2-cabinet-extension-batch2-20260616.md` | P2 cabinet extension batch preserving seven more indicator-derived semantics: UO bullish divergence, TRIX zero-cross, PSAR bullish flip, Ichimoku cloud breakout, CCI trend escape/failure, ATR expansion breakout, and stochastic range-persistence vocabulary. |
+| `p2-cabinet-extension-batch2-20260616.md` | P2 cabinet extension batch preserving seven more indicator-derived semantics; `UO-001` has since been converted to an observe-only handoff draft. |
 | `efi-drawdown-disable-boundary-20260616.md` | `EFI-001` boundary that preserves negative-force exhaustion reversal evidence while blocking handoff until drawdown, high-leverage, short-side, product/session/fill, and real-margin blockers improve. |
 | `strategy-line-handoff-summary-20260616.md` | Strategy-line handoff summary for Owner and main control, translating strategy IDs into semantics and current intake decisions. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
@@ -114,6 +114,8 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-group-handoffs/SCF-001/handoff.json` | System-readable observe-only `SCF-001` handoff contract with TEQ structure-confirmed momentum semantics, RequiredFacts, hard stops, and sample packets. |
 | `strategy-group-handoffs/MASS-001/handoff.md` | Human-readable observe-only `MASS-001` Mass Index range-expansion reversal handoff draft. |
 | `strategy-group-handoffs/MASS-001/handoff.json` | System-readable observe-only `MASS-001` handoff contract with bulge-reversal long semantics, RequiredFacts, hard stops, and sample packets. |
+| `strategy-group-handoffs/UO-001/handoff.md` | Human-readable observe-only `UO-001` Ultimate Oscillator bullish-divergence handoff draft. |
+| `strategy-group-handoffs/UO-001/handoff.json` | System-readable observe-only `UO-001` handoff contract with bullish-divergence semantics, RequiredFacts, hard stops, and sample packets. |
 | `document-governance-v3.md` | Document authority, supersession rules, and old-document handling. |
 | `owner-direction-log.md` | Owner strategy-research instructions that change search space, evaluation semantics, or evidence governance. |
 | `community-research-plan.md` | GitHub, Freqtrade, QuantConnect, Reddit/forum, and official-data intake plan. |

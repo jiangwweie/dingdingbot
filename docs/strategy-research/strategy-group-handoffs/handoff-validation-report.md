@@ -22,8 +22,8 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 
 | Strategy Group | Status | Symbols | Sides | Warnings |
 | --- | --- | ---: | --- | ---: |
-| `FBS-001` | `PASS` | `9` | `long,short_disable_or_redesign_only` | `0` |
 | `DMI-001` | `PASS` | `15` | `long` | `0` |
+| `FBS-001` | `PASS` | `9` | `long,short_disable_or_redesign_only` | `0` |
 | `MASS-001` | `PASS` | `15` | `long,short_support_only` | `0` |
 | `MPG-001` | `PASS` | `21` | `long` | `0` |
 | `NLPD-001` | `PASS` | `10` | `long,short_analysis_only` | `0` |
@@ -32,13 +32,14 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 | `SCF-001` | `PASS` | `14` | `long,short_support_only` | `0` |
 | `SOR-001` | `PASS` | `9` | `short,long_revival_only` | `0` |
 | `TEQ-001` | `PASS` | `10` | `long` | `0` |
+| `UO-001` | `PASS` | `25` | `long` | `0` |
 | `VCB-001` | `PASS` | `7` | `long` | `0` |
 
 Summary:
 
 ```text
-Validated handoffs: 11
-Passed: 11
+Validated handoffs: 12
+Passed: 12
 Failed: 0
 ```
 
@@ -46,32 +47,32 @@ Failed: 0
 
 | Required Field | Coverage |
 | --- | ---: |
-| `strategy_group_id` | `11/11` |
-| `version` | `11/11` |
-| `supported_symbols` | `11/11` |
-| `supported_sides` | `11/11` |
-| `signal_ready_rule` | `11/11` |
-| `required_facts` | `11/11` |
-| `risk_defaults` | `11/11` |
-| `hard_stops` | `11/11` |
-| `sample_signal_packet` | `11/11` |
-| `sample_no_signal_packet` | `11/11` |
-| `sample_stale_signal_packet` | `11/11` |
-| `sample_conflict_packet` | `11/11` |
+| `strategy_group_id` | `12/12` |
+| `version` | `12/12` |
+| `supported_symbols` | `12/12` |
+| `supported_sides` | `12/12` |
+| `signal_ready_rule` | `12/12` |
+| `required_facts` | `12/12` |
+| `risk_defaults` | `12/12` |
+| `hard_stops` | `12/12` |
+| `sample_signal_packet` | `12/12` |
+| `sample_no_signal_packet` | `12/12` |
+| `sample_stale_signal_packet` | `12/12` |
+| `sample_conflict_packet` | `12/12` |
 
 ## Commands Run
 
 ```bash
 python3 scripts/validate_strategy_group_handoffs.py --markdown
-/opt/homebrew/bin/pytest tests/unit/test_strategy_group_handoff_validator.py -q
+python3 -m pytest tests/unit/test_strategy_group_handoff_validator.py tests/unit/test_strategygroup_runtime_pilot_overlay_docs.py -q
 python3 -m py_compile scripts/validate_strategy_group_handoffs.py
+git diff --check
 ```
 
 ## Test Result
 
 ```text
-tests/unit/test_strategy_group_handoff_validator.py .. [100%]
-2 passed
+8 passed
 ```
 
 ## Boundary Check

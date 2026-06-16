@@ -17,9 +17,9 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | --- | --- |
 | 工作区 | `/Users/jiangwei/Documents/final-strategy-research` |
 | 分支 | `codex/strategy-research-20260613-goal` |
-| 策略柜版本 | `2026-06-16-r0` |
+| 策略柜版本 | `2026-06-16-r1` |
 | 策略柜登记 | `24` 个策略语义 |
-| 主控可 review 的 handoff / observe-only handoff | `11` 个 |
+| 主控可 review 的 handoff / observe-only handoff | `12` 个 |
 | 当前主交接入口 | `strategy-group-handoffs/main-control-handoff-index.md` |
 | 当前策略柜入口 | `strategy-cabinet/strategy-cabinet.md` 和 `strategy-cabinet/strategy-cabinet.json` |
 | 当前研究入口 | `README.md` 和 `STRATEGY_RESEARCH_GUIDE.md` |
@@ -40,9 +40,9 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 层级 | 策略 | 当前意义 |
 | --- | --- | --- |
 | 第一批实验候选 | `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, `SOR-001` | 原先 5 个核心 StrategyGroup，已经具备主控 review 所需 handoff pack。 |
-| 新增 observe-only handoff | `VCB-001`, `RSR-001`, `NLPD-001`, `DMI-001`, `SCF-001`, `MASS-001` | 新增 6 个可被主控 review 的观察态草案，不代表可 armed 或可执行。 |
+| 新增 observe-only handoff | `VCB-001`, `RSR-001`, `NLPD-001`, `DMI-001`, `SCF-001`, `MASS-001`, `UO-001` | 新增 7 个可被主控 review 的观察态草案，不代表可 armed 或可执行。 |
 | 保留但不 handoff 的右尾 / 事实候选 | `LCF-001`, `MDS-001`, `EFI-001` | 有研究价值，但当前缺事实管线、目标配对或回撤控制。 |
-| 新增 P2 研究语义 | `UO-001`, `TRIX-001`, `PSAR-001`, `ICH-001`, `CCI-001`, `AEB-001`, `STOCH-001` | 新增 7 个研究-only 语义；只进入策略柜，不进入 handoff。 |
+| 新增 P2 研究语义 | `TRIX-001`, `PSAR-001`, `ICH-001`, `CCI-001`, `AEB-001`, `STOCH-001` | 新增 6 个研究-only 语义；只进入策略柜，不进入 handoff。 |
 | 暂缓 / 复活候选 | `RBR-001`, `HAT-001`, `LSR-001` | 不删除；保留语义、失败证据和复活条件。 |
 
 ## 原先 5 个策略组
@@ -55,7 +55,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | `PMR-001` | **贵金属 regime overlay**。主要是 XAG / XAU / 金属弱势或错位对其他策略的支持或禁用，不是常开金属交易策略。 | `observe_only_overlay` | observe-only overlay。 | standalone PMR short 和 broad metal long 均不能直接提升；需要目标策略配对。 |
 | `SOR-001` | **开盘区间 / session 分支策略**。保留狭窄的 TEQ decisive-breakdown short 72h 分支。 | `conditional_observation` | 分支级观察，不做 broad ORB。 | 只有特定 session 分支可观察；宽泛 ORB 和 TEQ long revival 不应混成执行候选。 |
 
-## 新增 6 个可交给主控 review 的观察态草案
+## 新增 7 个可交给主控 review 的观察态草案
 
 | 策略 | 具体语义 | 当前状态 | 交付物 | 关键边界 |
 | --- | --- | --- | --- | --- |
@@ -65,6 +65,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | `DMI-001` | **ADX/DMI 方向点火观察器**。当前最清晰语义是 equity ADX-rising long + 24h time stop。 | `observe_only` | `strategy-group-handoffs/DMI-001/` | 成本敏感、metal 拖累、generic DMI 和 short-side 都不成立。 |
 | `SCF-001` | **session confluence 结构确认器**。给 TEQ 提供 regular-session 强势 + 结构共振确认。 | `observe_only` | `strategy-group-handoffs/SCF-001/` | 需要 prefix-safe confluence、12h/72h time-stop 取舍、fill/session/margin 事实。 |
 | `MASS-001` | **Mass Index 区间扩张后的反转观察器**。Mass Index 本身不带方向，必须绑定方向上下文。 | `observe_only` | `strategy-group-handoffs/MASS-001/` | long reversal 相对干净；continuation、short-side、金属泛化都要降级。 |
+| `UO-001` | **Ultimate Oscillator bullish divergence 观察器**。只保留价格走弱后的 bullish divergence long。 | `observe_only` | `strategy-group-handoffs/UO-001/` | generic midline 和 short-side 都失败；需要 divergence-quality、session/fill/product/margin facts。 |
 
 ## 保留但不交给主控的候选
 
@@ -78,7 +79,6 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 
 | 策略 | 具体语义 | 当前状态 | 为什么保留 | 为什么不 handoff |
 | --- | --- | --- | --- | --- |
-| `UO-001` | **Ultimate Oscillator bullish divergence**。只保留价格走弱后的 bullish divergence long。 | `right_tail_candidate` | full 2x `77.534009%`，best-90d 2x `197.155957%`，DD 2x `-44.564941%`。 | generic midline 和 short-side 都失败，缺 divergence-quality、session/fill、margin facts。 |
 | `TRIX-001` | **TRIX zero-cross long**。三重 EMA 动量从负转正后的薄样本机会。 | `right_tail_candidate` | `8` 个事件，full 2x `117.088679%`，DD 2x `-1.881580%`。 | 样本太薄，集中度和泛化不足，broad persistence 失败。 |
 | `PSAR-001` | **Parabolic SAR bullish flip burst**。只保留 bullish flip 后的短爆发，不做 stop-reverse 系统。 | `right_tail_candidate` | best-90d 2x `124.602670%`，且 `0/0` 2x/5x proxy liquidation。 | DD 2x `-57.821226%`，continuation 和 short-side 失败。 |
 | `ICH-001` | **Ichimoku cloud breakout revival**。明确 no-future-cloud policy。 | `research_candidate` | cloud breakout long 有 best-90d 2x `296.354715%`。 | full 2x `-78.421778%`，DD 2x `-85.398509%`。 |
@@ -100,7 +100,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | --- | --- |
 | 文档治理 | 建立策略研究入口、策略柜 Markdown / JSON、P0/P1/P2 队列、主控 handoff index。 |
 | 原 5 策略组 | 为 `MPG/FBS/TEQ/PMR/SOR` 补了低歧义边界：drawdown、facts readiness、product availability、overlay role、branch/time-stop。 |
-| 新策略接入 | 把 `VCB/RSR/NLPD/DMI/SCF/MASS` 转成 observe-only handoff 草案，可供主控 review。 |
+| 新策略接入 | 把 `VCB/RSR/NLPD/DMI/SCF/MASS/UO` 转成 observe-only handoff 草案，可供主控 review。 |
 | 策略池扩展 | 把 `LCF/MDS/EFI/HAT/LSR/RBR` 以及 `UO/TRIX/PSAR/ICH/CCI/AEB/STOCH` 放入策略柜，明确保留、阻止或复活条件。 |
 | RequiredFacts | 对每个可交付策略固定了需要的 market/account/exchange/strategy facts 和 facts-missing 行为。 |
 | 风险边界 | 统一了 `1x` 默认、`2x` 研究、`3x` stress、`5x` 默认禁用的杠杆语义。 |
@@ -126,7 +126,7 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 | 接入优先级 | 策略 | 建议 |
 | --- | --- | --- |
 | 第一批可接手 | `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, `SOR-001` | 作为实验性 StrategyGroup / overlay / conditional observation 进入主控 review。 |
-| 第二批观察态草案 | `VCB-001`, `RSR-001`, `NLPD-001`, `DMI-001`, `SCF-001`, `MASS-001` | 先进入 Strategy Picker 词汇和 watcher 探索，不直接 armed 或 execute。 |
+| 第二批观察态草案 | `VCB-001`, `RSR-001`, `NLPD-001`, `DMI-001`, `SCF-001`, `MASS-001`, `UO-001` | 先进入 Strategy Picker 词汇和 watcher 探索，不直接 armed 或 execute。 |
 | 只保留研究 | `LCF-001`, `MDS-001`, `EFI-001`, `HAT-001`, `LSR-001`, `RBR-001` | 保留在策略柜，等待事实管线、disable classifier 或语义重构。 |
 
 ## 当前结论
@@ -135,10 +135,10 @@ Operation Layer 输入，不是 deploy 请求，不是实盘授权，也不是�
 
 ```text
 24 个策略语义登记
-11 个 handoff / observe-only handoff
+12 个 handoff / observe-only handoff
 5 个原始核心策略组补强
-6 个新增观察态策略草案
-13 个保留 / 暂缓 / 复活 / 研究语义候选
+7 个新增观察态策略草案
+12 个保留 / 暂缓 / 复活 / 研究语义候选
 ```
 
 主控可以从这批交付中接走的是 **策略语义、RequiredFacts、hard stops、sample packets、观察态边界和策略柜登记**。主控不应把研究收益数字直接解释为已集成能力或已授权实盘能力。
