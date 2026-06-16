@@ -99,6 +99,19 @@ DEFAULT_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategygroup-runtime-goal-status.json"
 )
+OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
+    "required_scenarios_present",
+    "all_scenarios_passed",
+    "dangerous_effects_absent",
+    "disabled_smoke_not_real_execution_proof",
+    "operation_layer_evidence_relay_checked",
+    "fresh_signal_fast_auto_chain_checked",
+    "legacy_local_registration_probe_tolerance_checked",
+    "mock_operation_layer_closed_loop_checked",
+    "operation_layer_blocker_review_policy_checked",
+    "shared_runtime_pipeline_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+}
 DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
 DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
@@ -7607,8 +7620,14 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
         and (not isinstance(dangerous_effects, list) or len(dangerous_effects) == 0)
     )
     scenario_count = _optional_int_value(checks.get("scenario_count"))
+    missing_required_checks = sorted(
+        name
+        for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
+        if checks.get(name) is not True
+    )
     passed = (
         dry_run_audit.get("status") == "passed"
+        and not missing_required_checks
         and checks.get("all_scenarios_passed") is True
         and checks.get("required_scenarios_present") is True
         and dangerous_effects_absent
@@ -7629,12 +7648,18 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 "scenario_count": scenario_count,
                 "dangerous_effects_absent": True,
                 "disabled_smoke_is_real_execution_proof": False,
+                "required_checks_present": True,
             },
         }
     return _owner_console_detail_source(
         status="degraded",
         owner_label="审计演练需检查",
-        reason=str(dry_run_audit.get("status") or "runtime_dry_run_audit_chain_not_passed"),
+        reason=(
+            "runtime_dry_run_missing_required_check:"
+            + ",".join(missing_required_checks)
+            if missing_required_checks
+            else str(dry_run_audit.get("status") or "runtime_dry_run_audit_chain_not_passed")
+        ),
     )
 
 

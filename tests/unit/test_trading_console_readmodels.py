@@ -5912,11 +5912,18 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
             "checks": {
-                "scenario_count": 4,
+                "scenario_count": 7,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
                 "disabled_smoke_not_real_execution_proof": True,
+                "fresh_signal_fast_auto_chain_checked": True,
+                "legacy_local_registration_probe_tolerance_checked": True,
+                "mock_operation_layer_closed_loop_checked": True,
+                "operation_layer_blocker_review_policy_checked": True,
+                "operation_layer_evidence_relay_checked": True,
+                "selected_strategygroup_dispatch_guard_checked": True,
+                "shared_runtime_pipeline_checked": True,
             },
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -6193,6 +6200,50 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         not in facts_blocked_payload["data"]["real_order_readiness"][
             "submit_blocking_keys"
         ]
+    )
+
+
+def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
+    from src.application.readmodels.trading_console import (
+        OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS,
+        _owner_console_dry_run_audit_source,
+    )
+
+    checks = {name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS}
+    checks["scenario_count"] = 7
+    packet = {
+        "status": "passed",
+        "checks": checks,
+        "safety_invariants": {
+            "dangerous_effects": [],
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+            "disabled_smoke_is_real_execution_proof": False,
+        },
+    }
+
+    ready = _owner_console_dry_run_audit_source(packet)
+
+    assert ready["status"] == "ready"
+    assert ready["owner_label"] == "审计演练正常"
+    assert ready["summary"]["scenario_count"] == 7
+    assert ready["summary"]["required_checks_present"] is True
+
+    packet["checks"] = {
+        key: value
+        for key, value in checks.items()
+        if key != "shared_runtime_pipeline_checked"
+    }
+
+    degraded = _owner_console_dry_run_audit_source(packet)
+
+    assert degraded["status"] == "degraded"
+    assert degraded["owner_label"] == "审计演练需检查"
+    assert (
+        degraded["reason"]
+        == "runtime_dry_run_missing_required_check:shared_runtime_pipeline_checked"
     )
 
 
