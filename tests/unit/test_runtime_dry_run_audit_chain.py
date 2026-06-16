@@ -10,12 +10,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["scenario_count"] == 9
-    assert packet["checks"]["scenario_count"] == 9
+    assert packet["scenario_count"] == 10
+    assert packet["checks"]["scenario_count"] == 10
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["summary"] == {
-        "scenario_count": 9,
+        "scenario_count": 10,
         "required_checks_present": True,
         "all_scenarios_passed": True,
         "dangerous_effects_absent": True,
@@ -26,6 +26,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
+        "post_submit_closed_loop_evidence_guard_checked": True,
     }
     assert packet["required_checks"] == {
         "all_scenarios_passed": True,
@@ -38,6 +39,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
+        "post_submit_closed_loop_evidence_guard_checked": True,
         "operation_layer_evidence_relay_checked": True,
         "required_scenarios_present": True,
         "selected_strategygroup_dispatch_guard_checked": True,
@@ -61,6 +63,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "selected_strategygroup_dispatch_guard",
         "expanded_watcher_scope_execution_guard",
         "operation_layer_authorization_chain_guard",
+        "post_submit_closed_loop_evidence_guard",
     }
     assert scenarios["no_signal"]["artifacts"]["resume_dispatch"]["command_plan"] is None
     assert (
@@ -197,6 +200,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     )
     assert packet["checks"]["expanded_watcher_scope_execution_guard_checked"] is True
     assert packet["checks"]["operation_layer_authorization_chain_guard_checked"] is True
+    assert packet["checks"]["post_submit_closed_loop_evidence_guard_checked"] is True
     assert packet["checks"]["shared_runtime_pipeline_checked"] is True
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
@@ -272,6 +276,30 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert authorization_guard["missing_auth_operation_layer"][
         "operation_layer_submit_result"
     ]["called"] is False
+    closed_loop_guard = scenarios["post_submit_closed_loop_evidence_guard"][
+        "artifacts"
+    ]["post_submit_closed_loop_evidence_guard"]
+    assert closed_loop_guard["status"] == "passed"
+    assert closed_loop_guard["simulated_exchange_effects"] is True
+    assert closed_loop_guard["actual_exchange_write_called"] is False
+    assert closed_loop_guard["actual_order_created"] is False
+    assert closed_loop_guard["actual_order_lifecycle_called"] is False
+    assert closed_loop_guard["actual_withdrawal_or_transfer_created"] is False
+    assert closed_loop_guard["checks"] == {
+        "all_incomplete_closed_loop_cases_block_next_attempt": True,
+        "actual_dangerous_effects_absent": True,
+    }
+    assert set(closed_loop_guard["cases"]) == {
+        "missing_budget_settlement",
+        "missing_review",
+        "next_attempt_gate_not_ready",
+    }
+    for result in closed_loop_guard["cases"].values():
+        assert result["packet"]["status"] == "post_submit_finalize_blocked"
+        assert result["packet"]["dispatch_action"] is None
+        assert result["packet"]["owner_state"]["downgrade_mode"] == (
+            "halt_new_entries_until_post_submit_settled"
+        )
     shared = packet["shared_runtime_pipeline_validation"]
     assert shared["status"] == "passed"
     assert shared["judgment"] == {

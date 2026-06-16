@@ -1646,6 +1646,200 @@ def _scenario_mock_operation_layer_closed_loop(output_dir: Path) -> dict[str, An
     )
 
 
+def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
+    submit_body = {
+        "status": "exchange_submit_orders_submitted",
+        "authorization_id": FRESH_AUTHORIZATION_ID,
+        "runtime_instance_id": RUNTIME_ID,
+        "reservation_id": "dry-run-attempt-reservation-1",
+        "execution_mode": "real_gateway_action",
+        "blockers": [],
+        "warnings": ["dry_run_simulated_exchange_submit"],
+        "exchange_called": True,
+        "exchange_order_submitted": True,
+        "order_lifecycle_submit_called": True,
+        "owner_bounded_execution_called": False,
+        "execution_intent_status_changed": False,
+        "withdrawal_or_transfer_created": False,
+        "submitted_exchange_order_ids": ["dry-run-entry-1"],
+        "entry_exchange_order_id": "dry-run-entry-1",
+        "protection_exchange_order_ids": ["dry-run-stop-1"],
+    }
+    base_finalize_body = {
+        "status": "finalized_ready_for_next_attempt",
+        "authorization_id": FRESH_AUTHORIZATION_ID,
+        "runtime_instance_id": RUNTIME_ID,
+        "exchange_submit_execution_result_id": "dry-run-submit-result-1",
+        "submit_outcome_review_id": "dry-run-review-1",
+        "post_submit_budget_settlement_id": "dry-run-settlement-1",
+        "blockers": [],
+        "warnings": ["dry_run_non_executing_finalize_shape"],
+        "next_attempt_gate": {
+            "status": "ready_for_fresh_signal",
+            "blockers": [],
+        },
+        "exchange_called": False,
+        "exchange_order_submitted": False,
+        "order_lifecycle_called": False,
+        "owner_bounded_execution_called": False,
+        "withdrawal_or_transfer_created": False,
+        "position_closed": False,
+        "order_cancelled": False,
+        "order_created": False,
+    }
+    case_bodies = {
+        "missing_budget_settlement": {
+            key: value
+            for key, value in base_finalize_body.items()
+            if key != "post_submit_budget_settlement_id"
+        },
+        "missing_review": {
+            key: value
+            for key, value in base_finalize_body.items()
+            if key != "submit_outcome_review_id"
+        },
+        "next_attempt_gate_not_ready": {
+            **base_finalize_body,
+            "next_attempt_gate": {
+                "status": "blocked",
+                "blockers": ["review_required_before_next_action"],
+            },
+        },
+    }
+    results: dict[str, Any] = {}
+    original_session_cookie = dispatcher._session_cookie
+    original_request_json = dispatcher._request_json
+
+    def session_cookie() -> tuple[str, str | None]:
+        return ("brc_operator_session=dry-run-session", None)
+
+    try:
+        for name, finalize_body in case_bodies.items():
+            calls: list[dict[str, Any]] = []
+
+            def request_json(**kwargs: Any) -> dict[str, Any]:
+                calls.append(
+                    {
+                        "method": kwargs.get("method"),
+                        "url_kind": (
+                            "post_submit_finalize"
+                            if "post-submit-finalize-packets"
+                            in str(kwargs.get("url") or "")
+                            else "operation_layer_submit"
+                        ),
+                    }
+                )
+                if calls[-1]["url_kind"] == "post_submit_finalize":
+                    return {
+                        "http_status": 200,
+                        "error": False,
+                        "body": finalize_body,
+                    }
+                return {
+                    "http_status": 200,
+                    "error": False,
+                    "body": submit_body,
+                }
+
+            dispatcher._session_cookie = session_cookie
+            dispatcher._request_json = request_json
+            packet = dispatcher.build_dispatch_packet(
+                resume_pack=_resume_pack_finalgate_ready(),
+                source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+                api_base="http://dry-run.local",
+                operation_layer_evidence_report=_operation_evidence_report(),
+                operation_layer_evidence_report_path=(
+                    "/tmp/dry-run-operation-layer-evidence.json"
+                ),
+                execute_operation_layer_submit=True,
+                execute_post_submit_finalize=True,
+            )
+            checks = {
+                "blocked_before_next_attempt": (
+                    packet.get("status") == "post_submit_finalize_blocked"
+                    and packet.get("dispatch_status")
+                    == "blocked_by_post_submit_finalize_incomplete_closed_loop"
+                    and packet.get("dispatch_action") is None
+                ),
+                "owner_state_halts_new_entries": (
+                    packet.get("owner_state", {}).get("downgrade_mode")
+                    == "halt_new_entries_until_post_submit_settled"
+                ),
+                "finalize_endpoint_called": (
+                    packet.get("safety_invariants", {}).get(
+                        "official_post_submit_finalize_called"
+                    )
+                    is True
+                ),
+                "no_withdrawal_or_transfer": (
+                    packet.get("safety_invariants", {}).get(
+                        "withdrawal_or_transfer_created"
+                    )
+                    is False
+                ),
+                "no_extra_operation_layer_call": (
+                    len(
+                        [
+                            call
+                            for call in calls
+                            if call["url_kind"] == "operation_layer_submit"
+                        ]
+                    )
+                    == 1
+                ),
+            }
+            results[name] = {
+                "checks": checks,
+                "blockers": packet.get("blockers", []),
+                "packet": packet,
+                "api_calls": calls,
+            }
+    finally:
+        dispatcher._session_cookie = original_session_cookie
+        dispatcher._request_json = original_request_json
+
+    blockers = [
+        f"{case}:{check}"
+        for case, result in results.items()
+        for check, ok in result.get("checks", {}).items()
+        if ok is not True
+    ]
+    return {
+        "scope": "runtime_dry_run_post_submit_closed_loop_evidence_guard",
+        "status": "passed" if not blockers else "failed",
+        "simulated_exchange_effects": True,
+        "actual_exchange_write_called": False,
+        "actual_order_created": False,
+        "actual_order_lifecycle_called": False,
+        "actual_withdrawal_or_transfer_created": False,
+        "cases": results,
+        "checks": {
+            "all_incomplete_closed_loop_cases_block_next_attempt": not blockers,
+            "actual_dangerous_effects_absent": True,
+        },
+        "blockers": blockers,
+    }
+
+
+def _scenario_post_submit_closed_loop_evidence_guard(output_dir: Path) -> dict[str, Any]:
+    guard = _mock_post_submit_closed_loop_evidence_guard()
+    passed = (
+        guard["status"] == "passed"
+        and all(guard.get("checks", {}).values())
+    )
+    return _scenario_packet(
+        name="post_submit_closed_loop_evidence_guard",
+        expected=(
+            "post-submit finalize must include submit result, budget settlement, "
+            "review, and next-attempt gate evidence before the dispatcher returns "
+            "to fresh-signal observation"
+        ),
+        artifacts={"post_submit_closed_loop_evidence_guard": guard},
+        passed=passed,
+        blockers=guard.get("blockers", []),
+    )
+
+
 def _scenario_packet(
     *,
     name: str,
@@ -1732,6 +1926,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_selected_strategygroup_dispatch_guard(output_dir),
         _scenario_expanded_watcher_scope_execution_guard(output_dir),
         _scenario_operation_layer_authorization_chain_guard(output_dir),
+        _scenario_post_submit_closed_loop_evidence_guard(output_dir),
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
     blockers = [
@@ -1747,7 +1942,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 9,
+        "required_scenarios_present": len(scenarios) == 10,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -1872,6 +2067,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).values()
             )
         ),
+        "post_submit_closed_loop_evidence_guard_checked": (
+            _scenario_artifact(
+                scenarios,
+                "post_submit_closed_loop_evidence_guard",
+                "post_submit_closed_loop_evidence_guard",
+            ).get("status")
+            == "passed"
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "post_submit_closed_loop_evidence_guard",
+                    "post_submit_closed_loop_evidence_guard",
+                ).get("checks", {}).values()
+            )
+        ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
     required_checks = {
@@ -1902,6 +2112,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "operation_layer_authorization_chain_guard_checked": checks[
             "operation_layer_authorization_chain_guard_checked"
+        ],
+        "post_submit_closed_loop_evidence_guard_checked": checks[
+            "post_submit_closed_loop_evidence_guard_checked"
         ],
     }
     return {

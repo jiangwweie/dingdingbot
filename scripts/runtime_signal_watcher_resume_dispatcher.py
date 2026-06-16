@@ -2836,6 +2836,22 @@ def _execute_post_submit_finalize(
         ]
     )
     if body_status == "finalized_ready_for_next_attempt":
+        closed_loop_blockers = _post_submit_finalize_closed_loop_blockers(
+            finalize_body
+        )
+        if closed_loop_blockers:
+            return _packet_from_post_submit_finalize(
+                packet=packet,
+                status="post_submit_finalize_blocked",
+                blocker_class=_post_submit_finalize_blocker_class(
+                    closed_loop_blockers
+                ),
+                dispatch_status=(
+                    "blocked_by_post_submit_finalize_incomplete_closed_loop"
+                ),
+                blockers=closed_loop_blockers,
+                finalize_result=finalize_result,
+            )
         return _packet_from_post_submit_finalize(
             packet=packet,
             status="settled",
@@ -2863,6 +2879,31 @@ def _execute_post_submit_finalize(
         ],
         finalize_result=finalize_result,
     )
+
+
+def _post_submit_finalize_closed_loop_blockers(body: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    required_ids = {
+        "exchange_submit_execution_result_id": (
+            "post_submit_finalize_exchange_submit_execution_result_id_missing"
+        ),
+        "post_submit_budget_settlement_id": (
+            "post_submit_finalize_budget_settlement_id_missing"
+        ),
+        "submit_outcome_review_id": "post_submit_finalize_review_id_missing",
+    }
+    for field, blocker in required_ids.items():
+        if not _nonempty(body.get(field)):
+            blockers.append(blocker)
+
+    next_attempt_gate = _dict(body.get("next_attempt_gate"))
+    next_attempt_status = str(next_attempt_gate.get("status") or "").strip()
+    if next_attempt_status != "ready_for_fresh_signal":
+        blockers.append(
+            "post_submit_finalize_next_attempt_gate_not_ready:"
+            f"{next_attempt_status or 'missing'}"
+        )
+    return _dedupe_text(blockers)
 
 
 def _post_submit_finalize_context(packet: dict[str, Any]) -> dict[str, Any]:

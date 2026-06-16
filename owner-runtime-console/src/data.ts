@@ -57,13 +57,14 @@ const dryRunRequiredChecks = {
   operation_layer_hard_safety_blocker_matrix_checked: true,
   expanded_watcher_scope_execution_guard_checked: true,
   operation_layer_authorization_chain_guard_checked: true,
+  post_submit_closed_loop_evidence_guard_checked: true,
   shared_runtime_pipeline_checked: true,
   selected_strategygroup_dispatch_guard_checked: true,
   all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
 };
 
 const dryRunAuditSummary = {
-  scenario_count: 9,
+  scenario_count: 10,
   required_checks_present: true,
   dangerous_effects_absent: true,
   disabled_smoke_is_real_execution_proof: false,
@@ -73,6 +74,7 @@ const dryRunAuditSummary = {
   operation_layer_hard_safety_blocker_matrix_checked: true,
   expanded_watcher_scope_execution_guard_checked: true,
   operation_layer_authorization_chain_guard_checked: true,
+  post_submit_closed_loop_evidence_guard_checked: true,
   required_checks: dryRunRequiredChecks,
 };
 
