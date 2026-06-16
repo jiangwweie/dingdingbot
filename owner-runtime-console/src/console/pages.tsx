@@ -99,9 +99,9 @@ function StrategyGroupsPage({
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <StrategyGroupList onSelect={onSelect} rows={projection.strategies} selectedId={selectedStrategy?.id ?? null} />
         <aside className="grid gap-4">
-          <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+          <Card className="rounded-lg shadow-[var(--shadow-panel)]">
             <CardHeader>
-              <CardTitle>策略族已接入</CardTitle>
+              <CardTitle>策略组已接入</CardTitle>
               <CardDescription>当前只显示 Owner 能理解和处理的产品状态</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
@@ -126,7 +126,7 @@ function FundsPage({ projection }: { projection: OwnerProductProjection }) {
     <PageShell activeView="funds">
       <FundsSafetyPanel fundPool={fundPool} />
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+        <Card className="rounded-lg shadow-[var(--shadow-panel)]">
           <CardHeader>
             <CardTitle>账户只读</CardTitle>
             <CardDescription>本地只读 key 用于读取资金状态，不承担交易动作</CardDescription>
@@ -137,7 +137,7 @@ function FundsPage({ projection }: { projection: OwnerProductProjection }) {
             <ContextRow label="保护" tone={healthTone[projection.strategies[0]?.protection ?? "unknown"]} value={fundPool.protectionLabel} />
           </CardContent>
         </Card>
-        <Card className="rounded-2xl shadow-[var(--shadow-panel)] lg:col-span-2">
+        <Card className="rounded-lg shadow-[var(--shadow-panel)] lg:col-span-2">
           <CardHeader>
             <CardTitle>资金分配</CardTitle>
             <CardDescription>只展示资金池状态，不提供划转、扩额或改仓入口</CardDescription>
@@ -165,21 +165,21 @@ function OrdersPositionsPage({
   return (
     <PageShell activeView="orders">
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+        <Card className="rounded-lg shadow-[var(--shadow-panel)]">
           <CardHeader>
             <CardTitle>策略组</CardTitle>
             <CardDescription>选择后查看对应订单和持仓级联</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2">
             {projection.strategies.length === 0 ? (
-              <div className="grid min-h-[140px] place-items-center rounded-2xl border border-dashed text-sm text-muted-foreground">
+              <div className="grid min-h-[140px] place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">
                 暂无已启用策略组
               </div>
             ) : (
               projection.strategies.map((strategy) => (
                 <button
                   className={cn(
-                    "flex cursor-pointer items-center justify-between rounded-2xl border bg-[color:var(--background-row)] p-3 text-left transition hover:border-[color:var(--border-strong)]",
+                    "flex cursor-pointer items-center justify-between rounded-lg border bg-[color:var(--background-row)] p-3 text-left transition hover:border-[color:var(--border-strong)]",
                     selectedStrategy?.id === strategy.id && "border-[color:var(--border-strong)] shadow-[inset_4px_0_0_var(--accent-primary)]",
                   )}
                   key={strategy.id}
@@ -201,7 +201,7 @@ function OrdersPositionsPage({
             )}
           </CardContent>
         </Card>
-        <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+        <Card className="rounded-lg shadow-[var(--shadow-panel)]">
           <CardHeader>
             <CardTitle>级联视图</CardTitle>
             <CardDescription>持仓、成交单、保护单和对账状态保持同屏可见</CardDescription>
@@ -246,14 +246,14 @@ function RecordsPage({ projection }: { projection: OwnerProductProjection }) {
   return (
     <PageShell activeView="records">
       <ImportantChanges changes={projection.importantChanges} />
-      <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+      <Card className="rounded-lg shadow-[var(--shadow-panel)]">
         <CardHeader>
           <CardTitle>最近记录</CardTitle>
-          <CardDescription>Web 只保留重要变化入口，深度复盘交给 trace 和 AI 解读</CardDescription>
+          <CardDescription>Web 只保留重要变化入口，深度复盘交给记录和 AI 解读</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {projection.importantChanges.map((change) => (
-            <div className="flex items-center gap-3 rounded-2xl border bg-[color:var(--background-row)] p-4" key={change.id}>
+            <div className="flex items-center gap-3 rounded-lg border bg-[color:var(--background-row)] p-4" key={change.id}>
               <span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border", toneClass(change.tone))}>
                 {change.tone === "processing" ? <RefreshCw /> : change.tone === "danger" ? <AlertTriangle /> : <FileText />}
               </span>
@@ -293,7 +293,7 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
   return (
     <PageShell activeView="system">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+        <Card className="rounded-lg shadow-[var(--shadow-panel)]">
           <CardHeader>
             <CardTitle>数据状态</CardTitle>
             <CardDescription>后端连接与业务状态分开显示</CardDescription>
@@ -307,7 +307,7 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
             ))}
           </CardContent>
         </Card>
-        <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+        <Card className="rounded-lg shadow-[var(--shadow-panel)]">
           <CardHeader>
             <CardTitle>只读保证</CardTitle>
             <CardDescription>当前前端只读取状态，不触发交易动作</CardDescription>

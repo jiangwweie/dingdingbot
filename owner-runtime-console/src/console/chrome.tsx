@@ -37,7 +37,7 @@ export function useThemeMode() {
 export function ProductMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="grid size-11 shrink-0 place-items-center rounded-2xl border border-[color:var(--brand-border)] bg-[color:var(--brand-surface)] text-[color:var(--accent-primary)] shadow-[var(--shadow-mark)]">
+      <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-[color:var(--brand-border)] bg-[color:var(--brand-surface)] text-[color:var(--accent-primary)] shadow-[var(--shadow-mark)]">
         <ShieldCheck />
       </div>
       {!compact && (
@@ -182,7 +182,7 @@ export function PageShell({ activeView, children }: { activeView: NavigationKey;
 export function LoadingState() {
   return (
     <main className="flex flex-1 items-center justify-center p-6">
-      <Card className="w-full max-w-md rounded-2xl">
+      <Card className="w-full max-w-md rounded-lg">
         <CardHeader>
           <CardTitle>加载中</CardTitle>
           <CardDescription>正在准备 Owner 控制台</CardDescription>

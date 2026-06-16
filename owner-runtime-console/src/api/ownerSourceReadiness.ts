@@ -19,10 +19,10 @@ const defaultEndpoint = "/api/trading-console/owner-console-source-readiness";
 
 const strategyDescriptions: Record<StrategyGroupProductRow["code"], string> = {
   MPG: "动量趋势",
-  TEQ: "量化轮动套利",
-  FBS: "资金费率套利",
+  TEQ: "美股永续动量",
+  FBS: "资金费率 / 基差压力",
   SOR: "开盘区间结构",
-  PMR: "资金流监控",
+  PMR: "贵金属短线",
 };
 
 const strategyCodes = ["MPG", "TEQ", "FBS", "SOR", "PMR"] as const;

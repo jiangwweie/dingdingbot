@@ -17,7 +17,7 @@ const scenarios = externalUrl
 
 const pages = [
   { key: "home", label: "首页", expected: "策略组状态" },
-  { key: "strategies", label: "策略组", expected: "策略族已接入" },
+  { key: "strategies", label: "策略组", expected: "策略组已接入" },
   { key: "funds", label: "资金", expected: "安全资金池" },
   { key: "orders", label: "订单与持仓", expected: "级联视图" },
   { key: "records", label: "记录", expected: "最近记录" },

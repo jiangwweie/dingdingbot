@@ -80,7 +80,7 @@ try {
   await expectVisible(page, "等待机会");
   await expectVisible(page, "无需操作");
 
-  await openNav(page, "策略组", "策略族已接入");
+  await openNav(page, "策略组", "策略组已接入");
   await expectVisible(page, "运行设置");
   await expectVisible(page, "风险档");
   await expectVisible(page, "观察模式");

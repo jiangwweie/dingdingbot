@@ -22,10 +22,10 @@ export const navigationTitles: Record<NavigationKey, string> = {
 
 export const navigationDescriptions: Record<NavigationKey, string> = {
   home: "系统总览和重要状态",
-  strategies: "策略族可用性与观察状态",
+  strategies: "策略组可用性与观察状态",
   funds: "账户资金与安全资金池",
   orders: "成交单、保护单、持仓和对账",
-  records: "重要变化与 trace 入口",
+  records: "重要变化与复盘入口",
   system: "只读连接、数据状态和安全保证",
 };
 

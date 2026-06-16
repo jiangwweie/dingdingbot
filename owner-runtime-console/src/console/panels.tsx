@@ -36,7 +36,7 @@ function primaryHealthFor(strategy: StrategyGroupProductRow): { label: string; s
 
 export function MetricTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: Tone }) {
   return (
-    <Card className="rounded-2xl bg-[color:var(--background-card-raised)] py-0 shadow-[var(--shadow-card)]">
+    <Card className="rounded-lg bg-[color:var(--background-card-raised)] py-0 shadow-[var(--shadow-card)]">
       <CardContent className="flex min-h-[102px] flex-col justify-between p-4">
         <div className="flex items-center gap-3">
           <span className={cn("grid size-7 place-items-center rounded-full border", toneClass(tone))}>{icon}</span>
@@ -68,10 +68,10 @@ export function SafetyOverviewStrip({ summary }: { summary: OwnerProductSummary 
         : (summary.reason ?? "状态需要确认");
 
   return (
-    <Card className="rounded-2xl bg-[color:var(--background-panel-strong)] shadow-[var(--shadow-panel)]">
+    <Card className="rounded-lg bg-[color:var(--background-panel-strong)] shadow-[var(--shadow-panel)]">
       <CardContent className="flex flex-col gap-4 p-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-4">
-          <div className={cn("grid size-14 place-items-center rounded-2xl border", toneClass(overallTone))}>
+          <div className={cn("grid size-14 place-items-center rounded-lg border", toneClass(overallTone))}>
             {overallTone === "safe" ? <ShieldCheck /> : <AlertTriangle />}
           </div>
           <div>
@@ -118,7 +118,7 @@ export function StrategyGroupList({
 }) {
   if (rows.length === 0) {
     return (
-      <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+      <Card className="rounded-lg shadow-[var(--shadow-panel)]">
         <CardHeader>
           <CardTitle>策略组状态</CardTitle>
           <CardDescription>暂无已启用策略组</CardDescription>
@@ -185,7 +185,7 @@ export function StrategyGroupList({
 export function MiniTrendChart({ tone = "safe" }: { tone?: Tone }) {
   const color = tone === "danger" ? "var(--status-danger)" : tone === "processing" ? "var(--status-processing)" : "var(--status-safe)";
   return (
-    <div className="relative h-28 overflow-hidden rounded-2xl border bg-[color:var(--background-chart)]">
+    <div className="relative h-28 overflow-hidden rounded-lg border bg-[color:var(--background-chart)]">
       <svg aria-hidden="true" className="absolute inset-0 size-full" preserveAspectRatio="none" viewBox="0 0 280 120">
         <defs>
           <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
@@ -203,7 +203,7 @@ export function MiniTrendChart({ tone = "safe" }: { tone?: Tone }) {
 export function CurrentStrategyPanel({ strategy }: { strategy: StrategyGroupProductRow | null }) {
   if (!strategy) {
     return (
-      <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+      <Card className="rounded-lg shadow-[var(--shadow-panel)]">
         <CardHeader>
           <CardTitle>当前策略组</CardTitle>
           <CardDescription>暂无已启用策略组</CardDescription>
@@ -225,7 +225,7 @@ export function CurrentStrategyPanel({ strategy }: { strategy: StrategyGroupProd
       : strategy.availabilityReason || primaryStatusText;
 
   return (
-    <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+    <Card className="rounded-lg shadow-[var(--shadow-panel)]">
       <CardHeader>
         <CardTitle>当前策略组</CardTitle>
       </CardHeader>
@@ -238,7 +238,7 @@ export function CurrentStrategyPanel({ strategy }: { strategy: StrategyGroupProd
           </div>
         </div>
         <MiniTrendChart tone={state} />
-        <div className="rounded-2xl border bg-[color:var(--background-card-raised)] p-4">
+        <div className="rounded-lg border bg-[color:var(--background-card-raised)] p-4">
           <div className="flex items-center justify-between gap-3">
             <StatusBadge tone={state}>{strategy.automationLabel || automationStateLabels[strategy.automationState]}</StatusBadge>
             <span className={cn("text-sm font-semibold", toneTextClass(ownerAttention))}>{strategy.ownerAttentionLabel}</span>
@@ -289,7 +289,7 @@ export function FundsSafetyPanel({ fundPool }: { fundPool: FundPoolSummary }) {
   ];
 
   return (
-    <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+    <Card className="rounded-lg shadow-[var(--shadow-panel)]">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
           <ShieldCheck />
@@ -297,8 +297,8 @@ export function FundsSafetyPanel({ fundPool }: { fundPool: FundPoolSummary }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="grid gap-3 xl:grid-cols-[190px_1fr_160px] xl:items-center">
-        <div className="flex items-center gap-4 rounded-2xl border bg-[color:var(--background-card-raised)] p-3">
-          <div className="grid size-14 place-items-center rounded-2xl border bg-[color:var(--brand-surface)] text-[color:var(--status-safe)]">
+        <div className="flex items-center gap-4 rounded-lg border bg-[color:var(--background-card-raised)] p-3">
+          <div className="grid size-14 place-items-center rounded-lg border bg-[color:var(--brand-surface)] text-[color:var(--status-safe)]">
             <ShieldCheck />
           </div>
           <div>
@@ -323,7 +323,7 @@ export function FundsSafetyPanel({ fundPool }: { fundPool: FundPoolSummary }) {
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-3 rounded-2xl border bg-[color:var(--background-card-raised)] p-3 text-[color:var(--status-safe)]">
+        <div className="flex items-center gap-3 rounded-lg border bg-[color:var(--background-card-raised)] p-3 text-[color:var(--status-safe)]">
           <ShieldCheck />
           <div>
             <div className="text-lg font-semibold">{fundPool.protectionLabel}</div>
@@ -339,13 +339,13 @@ export function ImportantChanges({ changes }: { changes: OwnerImportantChange[] 
   if (changes.length === 0) return null;
 
   return (
-    <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+    <Card className="rounded-lg shadow-[var(--shadow-panel)]">
       <CardHeader>
         <CardTitle>重要变化</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-3">
         {changes.slice(0, 3).map((change) => (
-          <div className="flex gap-3 rounded-2xl border bg-[color:var(--background-row)] p-4" key={change.id}>
+          <div className="flex gap-3 rounded-lg border bg-[color:var(--background-row)] p-4" key={change.id}>
             <span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border", toneClass(change.tone))}>
               {change.tone === "processing" ? <Clock3 /> : change.tone === "danger" ? <AlertTriangle /> : <ShieldCheck />}
             </span>
@@ -363,7 +363,7 @@ export function ImportantChanges({ changes }: { changes: OwnerImportantChange[] 
 
 export function FundMiniCard({ label, value, tone = "neutral" }: { label: string; value: string; tone?: Tone }) {
   return (
-    <div className="rounded-2xl border bg-[color:var(--background-card-raised)] p-4">
+    <div className="rounded-lg border bg-[color:var(--background-card-raised)] p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className={cn("mt-2 text-2xl font-semibold", toneTextClass(tone))}>{value}</div>
     </div>
@@ -381,7 +381,7 @@ export function StrategyRunSettings({ strategy }: { strategy: StrategyGroupProdu
         : "safe";
 
   return (
-    <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
+    <Card className="rounded-lg shadow-[var(--shadow-panel)]">
       <CardHeader>
         <CardTitle>运行设置</CardTitle>
         <CardDescription>只读展示，不修改风险参数</CardDescription>
@@ -397,7 +397,7 @@ export function StrategyRunSettings({ strategy }: { strategy: StrategyGroupProdu
 
 export function CascadePanel({ detail, icon, label, tone, value }: { detail: string; icon: ReactNode; label: string; tone: Tone; value: string }) {
   return (
-    <div className="rounded-2xl border bg-[color:var(--background-card-raised)] p-4">
+    <div className="rounded-lg border bg-[color:var(--background-card-raised)] p-4">
       <div className="flex items-center justify-between gap-3">
         <span className={cn("grid size-10 place-items-center rounded-xl border", toneClass(tone))}>{icon}</span>
         <StatusBadge tone={tone}>{value}</StatusBadge>
@@ -410,7 +410,7 @@ export function CascadePanel({ detail, icon, label, tone, value }: { detail: str
 
 export function SystemStateCard({ label, value, tone }: { label: string; value: string; tone: Tone }) {
   return (
-    <div className="rounded-2xl border bg-[color:var(--background-card-raised)] p-4">
+    <div className="rounded-lg border bg-[color:var(--background-card-raised)] p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className={cn("mt-2 flex items-center gap-2 text-lg font-semibold", toneTextClass(tone))}>
         <span className={cn("size-2 rounded-full", toneDotClass(tone))} />
