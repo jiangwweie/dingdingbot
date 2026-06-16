@@ -404,6 +404,7 @@ function buildDryRunSummaryRows(summary: Record<string, unknown> | undefined) {
     scenarioCount !== null ? { label: "演练场景", value: `${scenarioCount} 项通过` } : null,
     summary.shared_runtime_pipeline_checked === true ? { label: "共性管道", value: "已覆盖" } : null,
     summary.selected_strategygroup_dispatch_guard_checked === true ? { label: "选中范围", value: "已校验" } : null,
+    summary.all_selected_strategygroups_reach_finalgate_dispatch_checked === true ? { label: "五组策略", value: "已覆盖" } : null,
     summary.dangerous_effects_absent === true && summary.disabled_smoke_is_real_execution_proof === false
       ? { label: "危险动作", value: "未发生" }
       : null,

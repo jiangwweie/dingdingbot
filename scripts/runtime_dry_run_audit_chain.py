@@ -1120,13 +1120,31 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
 
 
 def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[str, Any]:
-    selected_dispatch = dispatcher.build_dispatch_packet(
-        resume_pack=_resume_pack_ready_for_finalgate(strategy_group_id="MPG-001"),
-        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
-        api_base="http://dry-run.local",
-        selected_strategy_group_id="MPG-001",
-        execute_preflight=False,
-    )
+    selected_dispatches: dict[str, dict[str, Any]] = {}
+    selected_dispatch_checks: dict[str, bool] = {}
+    for strategy_group_id in sorted(EXPECTED_STRATEGY_GROUPS):
+        runtime_instance_id = (
+            f"dry-run-runtime-{strategy_group_id.lower().replace('_', '-')}"
+        )
+        selected_dispatches[strategy_group_id] = dispatcher.build_dispatch_packet(
+            resume_pack=_resume_pack_ready_for_finalgate(
+                strategy_group_id=strategy_group_id,
+                runtime_instance_id=runtime_instance_id,
+            ),
+            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+            api_base="http://dry-run.local",
+            selected_strategy_group_id=strategy_group_id,
+            execute_preflight=False,
+        )
+        dispatch = selected_dispatches[strategy_group_id]
+        selected_dispatch_checks[strategy_group_id] = (
+            dispatch.get("status") == "ready_for_action_time_final_gate"
+            and dispatch.get("dispatch_action")
+            == "run_official_action_time_final_gate_preflight"
+            and dispatch.get("selected_strategy_group_id") == strategy_group_id
+            and dispatch.get("command_plan", {}).get("method") == "GET"
+        )
+    selected_dispatch = selected_dispatches["MPG-001"]
     out_of_scope_dispatch = dispatcher.build_dispatch_packet(
         resume_pack=_resume_pack_ready_for_finalgate(
             strategy_group_id="SOR-001",
@@ -1144,6 +1162,9 @@ def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[st
             == "run_official_action_time_final_gate_preflight"
             and selected_dispatch.get("selected_strategy_group_id") == "MPG-001"
             and selected_dispatch.get("command_plan", {}).get("method") == "GET"
+        ),
+        "all_selected_strategygroups_reach_finalgate_dispatch": all(
+            selected_dispatch_checks.values()
         ),
         "out_of_scope_signal_blocked_before_finalgate": (
             out_of_scope_dispatch.get("status") == "blocked"
@@ -1181,6 +1202,8 @@ def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[st
         artifacts={
             "checks": checks,
             "selected_mpg_dispatch": selected_dispatch,
+            "selected_strategygroup_dispatches": selected_dispatches,
+            "selected_strategygroup_dispatch_checks": selected_dispatch_checks,
             "out_of_scope_dispatch": out_of_scope_dispatch,
         },
         passed=not blockers,
@@ -1530,6 +1553,14 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).values()
             )
         ),
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
+            _scenario_artifact(
+                scenarios,
+                "selected_strategygroup_dispatch_guard",
+                "checks",
+            ).get("all_selected_strategygroups_reach_finalgate_dispatch")
+            is True
+        ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
     required_checks = {
@@ -1548,6 +1579,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "selected_strategygroup_dispatch_guard_checked": checks[
             "selected_strategygroup_dispatch_guard_checked"
+        ],
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": checks[
+            "all_selected_strategygroups_reach_finalgate_dispatch_checked"
         ],
     }
     return {

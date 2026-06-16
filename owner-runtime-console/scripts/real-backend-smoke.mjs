@@ -283,6 +283,7 @@ async function createRuntimeFixtures() {
       operation_layer_blocker_review_policy_checked: true,
       operation_layer_evidence_relay_checked: true,
       selected_strategygroup_dispatch_guard_checked: true,
+      all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
       shared_runtime_pipeline_checked: true,
     },
     safety_invariants: {
@@ -493,6 +494,9 @@ async function runConnectedSmoke(browser) {
     }
     if (dryRunSummary?.selected_strategygroup_dispatch_guard_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm selected scope guard");
+    }
+    if (dryRunSummary?.all_selected_strategygroups_reach_finalgate_dispatch_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm all selected StrategyGroups reach FinalGate dispatch");
     }
     if (sourcePayload?.data?.owner_summary?.real_order_readiness !== "等待机会") {
       throw new Error("Expected source-readiness real-order readiness to show 等待机会");

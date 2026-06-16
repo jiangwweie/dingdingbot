@@ -92,6 +92,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "operation_layer_blocker_review_policy_checked": True,
                 "shared_runtime_pipeline_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
+                "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
             },
             "safety_invariants": {
                 "dangerous_effects": [],
@@ -250,6 +251,10 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     assert (
         "runtime_dry_run_missing_required_check:"
         "selected_strategygroup_dispatch_guard_checked"
+    ) in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked"
     ) in packet["blockers"]
 
 

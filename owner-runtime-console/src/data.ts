@@ -45,17 +45,18 @@ const baseFundPool: FundPoolSummary = {
 };
 
 const dryRunRequiredChecks = {
-  no_signal_waiting_path: true,
-  fresh_signal_pass_path: true,
-  required_facts_missing_path: true,
-  active_position_conflict_path: true,
-  open_order_conflict_path: true,
-  protection_missing_path: true,
-  budget_missing_path: true,
-  duplicate_submit_risk_path: true,
-  symbol_scope_mismatch_path: true,
-  side_scope_mismatch_path: true,
-  sizing_scope_mismatch_path: true,
+  required_scenarios_present: true,
+  all_scenarios_passed: true,
+  dangerous_effects_absent: true,
+  disabled_smoke_not_real_execution_proof: true,
+  operation_layer_evidence_relay_checked: true,
+  fresh_signal_fast_auto_chain_checked: true,
+  legacy_local_registration_probe_tolerance_checked: true,
+  mock_operation_layer_closed_loop_checked: true,
+  operation_layer_blocker_review_policy_checked: true,
+  shared_runtime_pipeline_checked: true,
+  selected_strategygroup_dispatch_guard_checked: true,
+  all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
 };
 
 const dryRunAuditSummary = {
@@ -65,6 +66,7 @@ const dryRunAuditSummary = {
   disabled_smoke_is_real_execution_proof: false,
   shared_runtime_pipeline_checked: true,
   selected_strategygroup_dispatch_guard_checked: true,
+  all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
   required_checks: dryRunRequiredChecks,
 };
 

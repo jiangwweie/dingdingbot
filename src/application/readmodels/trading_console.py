@@ -111,6 +111,7 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "operation_layer_blocker_review_policy_checked",
     "shared_runtime_pipeline_checked",
     "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
 DEFAULT_STRATEGY_GROUP_HANDOFF_PACKET_GLOB = "strategy-group-handoff-intake-*.json"
 DEFAULT_STRATEGY_GROUP_LIVE_FACTS_GLOB = "strategy-group-live-facts-readonly-*.json"
@@ -7658,6 +7659,12 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 ),
                 "selected_strategygroup_dispatch_guard_checked": (
                     checks.get("selected_strategygroup_dispatch_guard_checked")
+                    is True
+                ),
+                "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
+                    checks.get(
+                        "all_selected_strategygroups_reach_finalgate_dispatch_checked"
+                    )
                     is True
                 ),
                 "required_checks": required_checks,

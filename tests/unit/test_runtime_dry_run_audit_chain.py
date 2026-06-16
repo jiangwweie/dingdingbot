@@ -22,6 +22,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "disabled_smoke_is_real_execution_proof": False,
         "shared_runtime_pipeline_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
     }
     assert packet["required_checks"] == {
         "all_scenarios_passed": True,
@@ -34,6 +35,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_evidence_relay_checked": True,
         "required_scenarios_present": True,
         "selected_strategygroup_dispatch_guard_checked": True,
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
     }
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -176,10 +178,27 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
     assert selected_guard["checks"] == {
         "selected_mpg_dispatch_reaches_finalgate_plan": True,
+        "all_selected_strategygroups_reach_finalgate_dispatch": True,
         "out_of_scope_signal_blocked_before_finalgate": True,
         "out_of_scope_signal_does_not_call_operation_layer": True,
         "no_dangerous_effects": True,
     }
+    assert set(selected_guard["selected_strategygroup_dispatches"]) == {
+        "MPG-001",
+        "TEQ-001",
+        "FBS-001",
+        "SOR-001",
+        "PMR-001",
+    }
+    assert all(selected_guard["selected_strategygroup_dispatch_checks"].values())
+    for strategy_group_id, dispatch in selected_guard[
+        "selected_strategygroup_dispatches"
+    ].items():
+        assert dispatch["status"] == "ready_for_action_time_final_gate"
+        assert dispatch["dispatch_action"] == (
+            "run_official_action_time_final_gate_preflight"
+        )
+        assert dispatch["selected_strategy_group_id"] == strategy_group_id
     assert selected_guard["selected_mpg_dispatch"]["dispatch_action"] == (
         "run_official_action_time_final_gate_preflight"
     )

@@ -79,6 +79,7 @@ REQUIRED_DRY_RUN_CHECKS = {
     "operation_layer_blocker_review_policy_checked",
     "shared_runtime_pipeline_checked",
     "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
 
 
