@@ -158,6 +158,13 @@ def _manifest(path: Path, head: str = HEAD) -> Path:
     return path
 
 
+def _matrix_by_key(packet: dict) -> dict[str, dict]:
+    return {
+        str(item["key"]): item
+        for item in packet.get("real_order_readiness_matrix", [])
+    }
+
+
 def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> None:
     report_dir = tmp_path / "reports"
     _write_base_packets(report_dir)
@@ -176,6 +183,15 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["checks"]["fresh_signal_present"] is False
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    matrix = _matrix_by_key(packet)
+    assert matrix["fresh_signal"]["status"] == "waiting_for_market"
+    assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
+    assert matrix["active_position_open_order"]["status"] == "pass"
+    assert matrix["protection"]["status"] == "pass"
+    assert matrix["budget"]["status"] == "pass"
+    assert matrix["duplicate_submit"]["status"] == "pass"
+    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "pass"
+    assert matrix["hard_safety"]["status"] == "pass"
     assert packet["safety_invariants"]["calls_operation_layer"] is False
 
 
@@ -480,6 +496,16 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     assert packet["owner_state"]["label"] == "处理中"
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is True
+    matrix = _matrix_by_key(packet)
+    assert matrix["fresh_signal"]["status"] == "pass"
+    assert matrix["candidate_authorization"]["status"] == "pass"
+    assert matrix["action_time_finalgate"]["status"] == "pass"
+    assert matrix["official_operation_layer"]["status"] == "pass"
+    assert not [
+        item
+        for item in matrix.values()
+        if item["status"] == "blocked" or item["blocks_real_submit"] is True
+    ]
 
 
 def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
@@ -525,6 +551,14 @@ def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["real_order_boundary"]["selected_strategygroup_scope_ready"] is False
+    matrix = _matrix_by_key(packet)
+    assert matrix["selected_strategygroup_scope"]["status"] == "blocked"
+    assert matrix["selected_strategygroup_scope"]["blocks_real_submit"] is True
+    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "blocked"
+    assert (
+        matrix["symbol_side_notional_leverage_scope"]["blocker_class"]
+        == "hard_safety_stop"
+    )
 
 
 def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
@@ -563,6 +597,10 @@ def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert "live_facts_not_ready" in packet["blockers"]
+    matrix = _matrix_by_key(packet)
+    assert matrix["required_facts"]["status"] == "blocked"
+    assert matrix["required_facts"]["blocker_class"] == "missing_fact"
+    assert matrix["required_facts"]["blocks_real_submit"] is True
 
 
 def test_goal_status_blocks_active_position_conflict_before_real_order_boundary(
@@ -593,6 +631,13 @@ def test_goal_status_blocks_active_position_conflict_before_real_order_boundary(
         "resolve_active_position_or_open_order_conflict"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    matrix = _matrix_by_key(packet)
+    assert matrix["active_position_open_order"]["status"] == "blocked"
+    assert (
+        matrix["active_position_open_order"]["blocker_class"]
+        == "active_position_resolution"
+    )
+    assert matrix["active_position_open_order"]["blocks_real_submit"] is True
 
 
 def test_goal_status_blocks_when_required_packet_is_missing(

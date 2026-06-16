@@ -188,6 +188,221 @@ def _source_owner_summary(packet: dict[str, Any] | None) -> dict[str, Any]:
     return _dict(data.get("owner_summary"))
 
 
+def _combined_blocker_text(
+    packets: dict[str, dict[str, Any] | None],
+    blockers: list[str],
+) -> str:
+    parts = list(blockers)
+    for packet in packets.values():
+        parts.extend(_blockers(packet))
+    return " ".join(parts).lower()
+
+
+def _contains_any(text: str, fragments: tuple[str, ...]) -> bool:
+    return any(fragment in text for fragment in fragments)
+
+
+def _readiness_item(
+    key: str,
+    status: str,
+    blocker_class: str,
+    blocks_real_submit: bool,
+    detail: str,
+    evidence: str,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "status": status,
+        "blocker_class": blocker_class,
+        "blocks_real_submit": blocks_real_submit,
+        "detail": detail,
+        "evidence": evidence,
+    }
+
+
+def _real_order_readiness_matrix(
+    *,
+    status: str,
+    checks: dict[str, bool],
+    packets: dict[str, dict[str, Any] | None],
+    blockers: list[str],
+    dangerous_effects: list[str],
+    real_order_ready: bool,
+) -> list[dict[str, Any]]:
+    blocker_text = _combined_blocker_text(packets, blockers)
+    source_summary = _source_owner_summary(packets.get("source_readiness"))
+    dispatch_status = _dispatch_status(packets.get("resume_dispatch"))
+    resume_status = _status(packets.get("resume_dispatch")) or _status(
+        packets.get("post_signal_resume")
+    )
+
+    has_active_position_blocker = _contains_any(
+        blocker_text,
+        ("active_position", "open_order", "conflicting_open_order"),
+    )
+    has_protection_blocker = _contains_any(
+        blocker_text,
+        ("missing_protection", "protection_missing", "protection_not_ready"),
+    )
+    has_budget_blocker = _contains_any(
+        blocker_text,
+        ("missing_budget", "budget_missing", "budget_not_ready", "budget_exhausted"),
+    )
+    has_duplicate_blocker = _contains_any(
+        blocker_text,
+        ("duplicate_submit", "idempotency", "duplicate_order"),
+    )
+    has_scope_param_blocker = _contains_any(
+        blocker_text,
+        (
+            "scope_mismatch",
+            "outside_selected_strategygroup_scope",
+            "symbol",
+            "side",
+            "notional",
+            "leverage",
+            "max_exposure",
+        ),
+    )
+
+    return [
+        _readiness_item(
+            "selected_strategygroup_scope",
+            "pass" if checks["selected_strategygroup_scope_ready"] else "blocked",
+            "none" if checks["selected_strategygroup_scope_ready"] else "hard_safety_stop",
+            not checks["selected_strategygroup_scope_ready"],
+            (
+                "当前 signal 属于 selected StrategyGroup 范围"
+                if checks["selected_strategygroup_scope_ready"]
+                else "signal 或 runtime scope 不属于当前 selected StrategyGroup"
+            ),
+            "pilot_status.watcher_scope_alignment",
+        ),
+        _readiness_item(
+            "fresh_signal",
+            "pass" if checks["fresh_signal_present"] else "waiting_for_market",
+            "none" if checks["fresh_signal_present"] else "waiting_for_market",
+            not checks["fresh_signal_present"],
+            "已检测到 fresh signal" if checks["fresh_signal_present"] else "当前没有 fresh signal",
+            "latest_summary/post_signal_resume/resume_dispatch",
+        ),
+        _readiness_item(
+            "required_facts",
+            "pass" if checks["live_facts_ready"] else "blocked",
+            "none" if checks["live_facts_ready"] else "missing_fact",
+            not checks["live_facts_ready"],
+            "RequiredFacts / live facts ready" if checks["live_facts_ready"] else "RequiredFacts / live facts 不完整",
+            "strategy-group-live-facts-readiness.json",
+        ),
+        _readiness_item(
+            "candidate_authorization",
+            (
+                "pass"
+                if status in {"action_time_finalgate_ready", "operation_layer_ready"}
+                else "waiting_for_chain"
+                if checks["fresh_signal_present"]
+                else "waiting_for_market"
+            ),
+            (
+                "none"
+                if status in {"action_time_finalgate_ready", "operation_layer_ready"}
+                else "missing_fact"
+                if checks["fresh_signal_present"]
+                else "waiting_for_market"
+            ),
+            status not in {"action_time_finalgate_ready", "operation_layer_ready"},
+            "candidate / authorization evidence 状态",
+            "post-signal-resume-pack.json/resume-dispatch-packet.json",
+        ),
+        _readiness_item(
+            "action_time_finalgate",
+            (
+                "pass"
+                if status == "operation_layer_ready"
+                else "waiting_for_chain"
+                if status == "action_time_finalgate_ready"
+                else "waiting_for_market"
+                if not checks["fresh_signal_present"]
+                else "blocked"
+            ),
+            (
+                "none"
+                if status == "operation_layer_ready"
+                else "waiting_for_market"
+                if not checks["fresh_signal_present"]
+                else "missing_fact"
+            ),
+            status != "operation_layer_ready",
+            "需要 action-time FinalGate pass 后才能真实 submit",
+            f"resume_dispatch.dispatch_status={dispatch_status or resume_status}",
+        ),
+        _readiness_item(
+            "official_operation_layer",
+            "pass" if real_order_ready else "waiting_for_chain",
+            "none" if real_order_ready else "missing_fact",
+            not real_order_ready,
+            "官方 Operation Layer evidence 状态",
+            "resume-dispatch-packet.json",
+        ),
+        _readiness_item(
+            "active_position_open_order",
+            "blocked" if has_active_position_blocker else "pass",
+            "active_position_resolution" if has_active_position_blocker else "none",
+            has_active_position_blocker,
+            (
+                "存在持仓或挂单冲突"
+                if has_active_position_blocker
+                else f"{source_summary.get('orders') or '订单正常'} / {source_summary.get('positions') or '持仓正常'}"
+            ),
+            "live_facts_readiness/resume_dispatch.blockers",
+        ),
+        _readiness_item(
+            "protection",
+            "blocked" if has_protection_blocker else "pass",
+            "missing_fact" if has_protection_blocker else "none",
+            has_protection_blocker,
+            "保护未就绪" if has_protection_blocker else str(source_summary.get("protection") or "保护正常"),
+            "live_facts_readiness/source_readiness",
+        ),
+        _readiness_item(
+            "budget",
+            "blocked" if has_budget_blocker else "pass",
+            "missing_fact" if has_budget_blocker else "none",
+            has_budget_blocker,
+            "预算未就绪" if has_budget_blocker else str(source_summary.get("funds") or "资金正常"),
+            "live_facts_readiness/source_readiness",
+        ),
+        _readiness_item(
+            "duplicate_submit",
+            "blocked" if has_duplicate_blocker else "pass",
+            "hard_safety_stop" if has_duplicate_blocker else "none",
+            has_duplicate_blocker,
+            "存在重复提交风险" if has_duplicate_blocker else "未发现 duplicate-submit blocker",
+            "resume_dispatch.blockers/operation_layer_readiness",
+        ),
+        _readiness_item(
+            "symbol_side_notional_leverage_scope",
+            "blocked" if has_scope_param_blocker else "pass",
+            "hard_safety_stop" if has_scope_param_blocker else "none",
+            has_scope_param_blocker,
+            (
+                "symbol / side / notional / leverage 不在 selected tiny boundary 内"
+                if has_scope_param_blocker
+                else "未发现 symbol / side / notional / leverage scope blocker"
+            ),
+            "resume_dispatch.blockers/selected_scope",
+        ),
+        _readiness_item(
+            "hard_safety",
+            "blocked" if dangerous_effects else "pass",
+            "hard_safety_stop" if dangerous_effects else "none",
+            bool(dangerous_effects),
+            "发现 forbidden-effect 标记" if dangerous_effects else "未发现 forbidden-effect 标记",
+            "dangerous_effects scan",
+        ),
+    ]
+
+
 def _runtime_dry_run_required_checks_passed(checks: dict[str, Any]) -> bool:
     return all(checks.get(name) is True for name in REQUIRED_DRY_RUN_CHECKS)
 
@@ -506,6 +721,14 @@ def build_goal_status_packet(
         *watcher_liveness,
         *([] if checks["dangerous_effects_absent"] else ["dangerous_effects_present"]),
     ]
+    readiness_matrix = _real_order_readiness_matrix(
+        status=status,
+        checks=checks,
+        packets=packets,
+        blockers=blockers,
+        dangerous_effects=dangerous,
+        real_order_ready=real_order_ready,
+    )
     return {
         "scope": "strategygroup_runtime_goal_status",
         "generated_at_ms": int(time.time() * 1000),
@@ -576,6 +799,7 @@ def build_goal_status_packet(
             "requires_action_time_finalgate": True,
             "requires_official_operation_layer": True,
         },
+        "real_order_readiness_matrix": readiness_matrix,
         "safety_invariants": {
             "read_only_packet_builder": True,
             "calls_tokyo_api": False,

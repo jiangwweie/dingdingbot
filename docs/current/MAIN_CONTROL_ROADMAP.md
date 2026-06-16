@@ -387,6 +387,33 @@ produce an auditable review packet and Owner-readable unavailable/intervention
 state, but `real_submit_allowed` must remain false until the blocker is
 resolved through the official path.
 
+### 2026-06-17 Readiness Matrix Checkpoint
+
+`strategygroup-runtime-goal-status.json` now includes
+`real_order_readiness_matrix`. This read-only matrix lets the active goal loop
+and Owner Console detail surfaces distinguish normal market waiting from
+submit-blocking safety conditions.
+
+| Matrix item | Purpose |
+| --- | --- |
+| `selected_strategygroup_scope` | Proves the signal/runtime belongs to the selected StrategyGroup before any real-submit boundary. |
+| `fresh_signal` | Separates normal market waiting from runtime failure. |
+| `required_facts` | Shows whether RequiredFacts / signed live facts are ready. |
+| `candidate_authorization` | Shows whether candidate / authorization evidence has reached the action-time boundary. |
+| `action_time_finalgate` | Shows whether action-time FinalGate has passed in the same chain. |
+| `official_operation_layer` | Shows whether the official Operation Layer path is ready. |
+| `active_position_open_order` | Turns active position or open-order conflicts into explicit blocked evidence. |
+| `protection` | Shows missing protection as a submit blocker, not a project blocker. |
+| `budget` | Shows missing budget as a submit blocker, not a project blocker. |
+| `duplicate_submit` | Keeps duplicate-submit risk as a hard submit blocker. |
+| `symbol_side_notional_leverage_scope` | Keeps symbol, side, notional, leverage, and exposure scope mismatches out of real submit. |
+| `hard_safety` | Summarizes forbidden effects such as exchange write, order creation, bypass flags, withdrawal, or transfer. |
+
+Each item carries `status`, `blocker_class`, `blocks_real_submit`, `detail`,
+and `evidence`. Non-pass states can still allow watcher observation and project
+progress, but any item with `blocks_real_submit=true` keeps
+`ready_for_real_order_action=false`.
+
 ## P0 Subgoal: Common Runtime Pipe Before Strategy-Specific Adapters
 
 ### Current Judgment
