@@ -152,6 +152,33 @@ P0 branch supplement:
 | `sor_broad_orb_block_state` | Broad ORB promotion block | `block_broad_sor_candidate` |
 | `sor_5x_proxy_risk_state` | High-leverage proxy risk state | `block_leverage_promotion` |
 
+### `VCB-001`
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `compression_state` | Closed-candle compression state | `no_signal` |
+| `breakout_strength_state` | Closed-candle breakout strength over prior high | `no_signal` |
+| `relative_volume_state` | Pre-entry participation state | `observe_only` |
+| `pre_entry_classifier_state` | Signal-time classifier state | `observe_only` |
+| `false_breakout_state` | False-breakout disable/downshift state | `block_armed_observation` |
+| `cost_sensitivity_state` | Cost and event-slot M2M state | `block_promotion` |
+| `slot_m2m_equity_state` | Event-slot realized equity state | `block_promotion` |
+| `leverage_ruin_state` | High-leverage stress state | `block_leverage_promotion` |
+
+P1 signal-time boundary supplement:
+`docs/strategy-research/vcb-signal-time-classifier-boundary-20260616.md`.
+
+| Boundary Fact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `vcb_signal_time_fact_state` | Confirms only pre-entry closed-candle facts are used. | `no_signal` |
+| `vcb_post_entry_label_boundary_state` | Confirms true/false labels are analysis-only. | `block_candidate_prepare` |
+| `vcb_pre_entry_classifier_quality_state` | Current classifier quality and full-sequence result. | `observe_only` |
+| `vcb_false_breakout_disable_state` | Bounded or unbounded false-breakout risk. | `block_armed_observation` |
+| `vcb_cost_m2m_state` | Cost and event-slot equity evidence. | `block_promotion` |
+| `vcb_spread_depth_state` | Live-like spread/depth fact availability. | `block_promotion` |
+| `vcb_mark_index_state` | Futures mark/index interpretation. | `block_promotion` |
+| `vcb_leverage_ruin_state` | 3x/5x promotion risk. | `block_leverage_promotion` |
+
 ## Readiness Levels
 
 | Readiness Level | Meaning |

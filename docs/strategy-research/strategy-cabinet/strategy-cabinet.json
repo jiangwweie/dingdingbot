@@ -284,7 +284,7 @@
       "supported_sides": [
         "long"
       ],
-      "research_role": "Observe-only true-breakout classifier handoff draft; broad breakout remains negative evidence",
+      "research_role": "Observe-only true-breakout classifier handoff draft with post-entry label boundary; broad breakout remains negative evidence",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -300,6 +300,7 @@
         ]
       },
       "primary_blockers": [
+        "post_entry_label_not_signal_fact",
         "false_breakout",
         "full_curve_weakness",
         "pre_entry_classifier_weakness",
@@ -308,8 +309,10 @@
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/vcb-signal-time-classifier-boundary-20260616.md",
         "docs/strategy-research/candidate-packets/VCB-001-volatility-breakout-packet.md",
         "docs/strategy-research/oss-vcb-true-false-breakout/oss-vcb-true-false-breakout-summary.md",
+        "docs/strategy-research/oss-vcb-pre-entry-classifier/oss-vcb-pre-entry-classifier-summary.md",
         "docs/strategy-research/oss-vcb-volume-compression-cost-m2m/oss-vcb-volume-compression-cost-m2m-summary.md"
       ],
       "handoff_paths": [

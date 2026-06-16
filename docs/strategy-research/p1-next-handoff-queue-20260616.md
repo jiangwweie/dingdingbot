@@ -16,7 +16,7 @@ sample packet expectations, and non-execution flags.
 
 | Rank | Candidate | Current Status | Handoff Target | Reason |
 | ---: | --- | --- | --- | --- |
-| 1 | `VCB-001` | `observe_only handoff draft complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/`; broad breakout remains negative and armed observation remains blocked. |
+| 1 | `VCB-001` | `observe_only handoff draft plus signal-time boundary complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/` and `vcb-signal-time-classifier-boundary-20260616.md`; broad breakout remains negative and armed observation remains blocked. |
 | 2 | `RSR-001` | `observe_only scorer handoff draft complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
 | 3 | `NLPD-001` | `observe_only event-study handoff draft complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
 | 4 | `LCF-001` | `RequiredFacts design packet complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
@@ -33,6 +33,11 @@ sample packet expectations, and non-execution flags.
 | Main blocker | Pre-entry filters do not reproduce the post-entry true-breakout edge. |
 | RequiredFacts | `compression_state`, `relative_volume_state`, `breakout_strength_state`, `false_breakout_state`, `cost_sensitivity_state`, `slot_m2m_equity_state`, `leverage_ruin_state`. |
 | Handoff mode | `observe_only`; no armed observation until pre-entry classifier improves full-sequence behavior. |
+
+P1 supplement:
+`vcb-signal-time-classifier-boundary-20260616.md` separates signal-time
+breakout facts from post-entry true/false labels. `true_breakout_followthrough`
+is a research target only, not a fresh signal or candidate-preparation fact.
 
 ## RSR-001 Handoff Draft Scope
 
@@ -84,8 +89,10 @@ sample packet expectations, and non-execution flags.
 
 ## P1 Next Actions
 
-1. Keep `VCB-001` observe-only until a signal-time classifier improves
-   full-sequence behavior without post-entry labels.
+1. Keep `VCB-001` observe-only after
+   `vcb-signal-time-classifier-boundary-20260616.md`; next evidence task is
+   classifier redesign that improves full-sequence behavior without post-entry
+   labels.
 2. Keep `RSR-001` as observe-only scorer until second-half decay,
    session/fill, product-risk, mark/funding, and margin facts improve.
 3. Keep `NLPD-001` as event-study observer until broader listing cohort,
