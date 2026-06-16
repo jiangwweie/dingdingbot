@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-16
+last_verified: 2026-06-17
 ---
 
 # Main Control Roadmap
@@ -266,6 +266,27 @@ Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
 | Operation Layer blocker review matrix | Active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets |
 | Selected StrategyGroup dispatch guard | Selected MPG-001 mock fresh signal can reach FinalGate dispatch; out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer |
+
+### 2026-06-17 Goal Status Local Dry-Run Checkpoint
+
+The goal-status packet now accepts the local dry-run audit packet from either
+the Tokyo-style report root or the local audit subdirectory:
+
+```text
+runtime-dry-run-audit-chain.json
+dry-run-audit-chain/runtime-dry-run-audit-chain.json
+```
+
+This keeps local P0 audit runs usable without waiting for a market signal or
+manually copying packet files.
+
+| Item | Result |
+| --- | --- |
+| Local dry-run fallback | `strategygroup-runtime-goal-status` reads nested `dry-run-audit-chain/runtime-dry-run-audit-chain.json` |
+| Fast auto-chain audit | Goal status treats `fresh_signal_fast_auto_chain_checked=true` as a required dry-run check |
+| Submit-blocker review | Active position/open-order conflicts remain submit blockers, but `active_position:missing` and `open_orders:missing` are classified through missing facts instead of fake conflict resolution |
+| Budget/protection missing facts | `budget:missing` and `protection:missing` surface as missing-fact submit blockers |
+| Safety | This remains read-only packet aggregation; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### Evidence Relay Checks
 

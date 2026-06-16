@@ -30,6 +30,11 @@ PACKET_FILES = {
     "pilot_status": "strategygroup-runtime-pilot-status.json",
     "live_facts_readiness": "strategy-group-live-facts-readiness.json",
 }
+PACKET_FILE_FALLBACKS = {
+    "runtime_dry_run_audit": (
+        "dry-run-audit-chain/runtime-dry-run-audit-chain.json",
+    ),
+}
 
 DANGEROUS_TRUE_KEYS = {
     "exchange_write_called",
@@ -98,6 +103,17 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return payload
+
+
+def _read_packet(report_dir: Path, key: str, filename: str) -> dict[str, Any] | None:
+    primary = _read_json(report_dir / filename)
+    if primary is not None:
+        return primary
+    for fallback in PACKET_FILE_FALLBACKS.get(key, ()):
+        packet = _read_json(report_dir / fallback)
+        if packet is not None:
+            return packet
+    return None
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -241,6 +257,16 @@ def _combined_blocker_text(
     return " ".join(parts).lower()
 
 
+def _combined_blockers(
+    packets: dict[str, dict[str, Any] | None],
+    blockers: list[str],
+) -> list[str]:
+    combined = list(blockers)
+    for packet in packets.values():
+        combined.extend(_blockers(packet))
+    return [str(item) for item in combined if str(item)]
+
+
 def _contains_any(text: str, fragments: tuple[str, ...]) -> bool:
     return any(fragment in text for fragment in fragments)
 
@@ -253,6 +279,42 @@ def _contains_blocker_family(text: str, families: tuple[str, ...]) -> bool:
         re.IGNORECASE,
     )
     return bool(pattern.search(text))
+
+
+def _has_active_position_or_open_order_conflict(
+    packets: dict[str, dict[str, Any] | None],
+    blockers: list[str],
+) -> bool:
+    conflict_families = (
+        "active_position",
+        "active_position_conflict",
+        "active_position_exists",
+        "active_position_present",
+        "active_position_resolution",
+        "conflicting_active_position",
+        "conflicting_open_order",
+        "open_order",
+        "open_order_conflict",
+        "open_order_exists",
+        "open_order_present",
+        "open_order_resolution",
+        "open_orders_present",
+    )
+    non_conflict_fragments = (
+        ":missing",
+        "_missing",
+        "missing_",
+        ":not_ready",
+        "_not_ready",
+        "not_ready_",
+    )
+    for blocker in _combined_blockers(packets, blockers):
+        text = blocker.lower()
+        if any(fragment in text for fragment in non_conflict_fragments):
+            continue
+        if _contains_blocker_family(text, conflict_families):
+            return True
+    return False
 
 
 def _readiness_item(
@@ -289,31 +351,28 @@ def _real_order_readiness_matrix(
         packets.get("post_signal_resume")
     )
 
-    has_active_position_blocker = _contains_blocker_family(
-        blocker_text,
-        (
-            "active_position",
-            "active_position_conflict",
-            "active_position_exists",
-            "active_position_present",
-            "active_position_resolution",
-            "conflicting_active_position",
-            "conflicting_open_order",
-            "open_order",
-            "open_order_conflict",
-            "open_order_exists",
-            "open_order_present",
-            "open_order_resolution",
-            "open_orders_present",
-        ),
+    has_active_position_blocker = _has_active_position_or_open_order_conflict(
+        packets,
+        blockers,
     )
     has_protection_blocker = _contains_any(
         blocker_text,
-        ("missing_protection", "protection_missing", "protection_not_ready"),
+        (
+            "missing_protection",
+            "protection_missing",
+            "protection_not_ready",
+            "protection:missing",
+        ),
     )
     has_budget_blocker = _contains_any(
         blocker_text,
-        ("missing_budget", "budget_missing", "budget_not_ready", "budget_exhausted"),
+        (
+            "missing_budget",
+            "budget_missing",
+            "budget_not_ready",
+            "budget_exhausted",
+            "budget:missing",
+        ),
     )
     has_duplicate_blocker = _contains_any(
         blocker_text,
@@ -803,7 +862,7 @@ def build_goal_status_packet(
     expected_head: str | None = None,
 ) -> dict[str, Any]:
     packets = {
-        key: _read_json(report_dir / filename)
+        key: _read_packet(report_dir, key, filename)
         for key, filename in PACKET_FILES.items()
     }
     manifest_packet = _read_json(release_manifest) if release_manifest else None

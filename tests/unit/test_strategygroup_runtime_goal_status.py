@@ -302,6 +302,65 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     ) in packet["blockers"]
 
 
+def test_goal_status_reads_local_nested_dry_run_audit_packet(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    root_packet = report_dir / "runtime-dry-run-audit-chain.json"
+    nested_packet = (
+        report_dir
+        / "dry-run-audit-chain"
+        / "runtime-dry-run-audit-chain.json"
+    )
+    root_payload = json.loads(root_packet.read_text(encoding="utf-8"))
+    root_packet.unlink()
+    nested_packet.parent.mkdir(parents=True)
+    _write(nested_packet, root_payload)
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["checks"]["runtime_dry_run_audit_passed"] is True
+    assert "runtime_dry_run_audit_not_passed" not in packet["blockers"]
+    assert packet["evidence"]["dry_run_scenario_count"] == 12
+    assert packet["status"] == "waiting_for_signal"
+
+
+def test_goal_status_does_not_treat_missing_position_fact_as_conflict(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "strategy-group-live-facts-readiness.json",
+        {
+            "status": "blocked_missing_facts",
+            "blockers": [
+                "MPG-001:account:missing",
+                "MPG-001:active_position:missing",
+                "MPG-001:open_orders:missing",
+                "MPG-001:budget:missing",
+            ],
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    matrix = _matrix_by_key(packet)
+    assert matrix["required_facts"]["status"] == "blocked"
+    assert matrix["active_position_open_order"]["status"] == "pass"
+    assert matrix["active_position_open_order"]["blocker_class"] == "none"
+    assert matrix["budget"]["status"] == "blocked"
+
+
 def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
     tmp_path: Path,
 ) -> None:
