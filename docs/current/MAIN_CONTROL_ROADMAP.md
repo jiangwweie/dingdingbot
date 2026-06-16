@@ -139,15 +139,17 @@ instead of collapsing into a generic readonly-probe failure.
 | Deploy packet | `scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py` catches readonly probe errors and emits a blocked JSON packet |
 | Safety | The diagnostic does not modify remote files, run migrations, restart services, read secrets, create orders, call OrderLifecycle, call exchange APIs, withdraw, or transfer |
 
-Current observed state for the pending `a9e3e0f2` deploy is:
+Historical observed state for the diagnostic `a9e3e0f2` deploy packet was:
 
 ```text
 packet_status=blocked
 tokyo_connectivity_blockers=tokyo_tcp_22_unreachable
 ```
 
-This is a deploy-channel blocker only. It does not imply that the StrategyGroup
-runtime chain, Owner Console source readiness, or dry-run audit chain failed.
+That was a deploy-channel diagnostic blocker only. It did not imply that the
+StrategyGroup runtime chain, Owner Console source readiness, or dry-run audit
+chain failed. Later bounded git deploys reached `postdeploy_accepted`; use the
+latest deploy-channel packet or the newest checkpoint below for current state.
 
 ### 2026-06-17 Owner Console Deploy Channel Source Checkpoint
 
@@ -519,7 +521,7 @@ readiness from treating deployment-channel failures as opaque runtime failures.
 | Public-key failure | `probe_tokyo_runtime_governance_readonly.py --json` returns `status=blocked` with `tokyo_ssh_publickey_denied` |
 | Error preservation | Release-identity fallback preserves underlying SSH stderr so the blocker can be classified |
 | Automation contract | JSON output remains parseable on failure; stderr text is no longer the only evidence |
-| Current observed local result | `status=blocked`, `checks.blockers=["tokyo_ssh_publickey_denied"]` |
+| Historical observed local result | `status=blocked`, `checks.blockers=["tokyo_ssh_publickey_denied"]`; later deploy-channel checks reached `postdeploy_accepted` |
 | Safety | Readonly probe failure handling does not modify remote files, read env/secrets, run migrations, restart services, create orders, call OrderLifecycle, call exchange APIs, withdraw, or transfer |
 
 ### 2026-06-17 Source Readiness Deploy-Channel Fallback Checkpoint
@@ -576,6 +578,25 @@ mainline Owner Console passed the current UI hard gate and real-backend smoke.
 | Real backend product state | `status=ready`; Owner summary reports `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, `保护正常`, `审计演练正常` |
 | UI hard gate | No blank page, framework overlay, forbidden primary engineering terms, accidental horizontal overflow, clipped primary text, or abnormal empty-order/empty-position presentation was reported by the QA scripts |
 | Safety | UI validation did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
+### 2026-06-17 Owner Console Deploy-Channel Smoke Checkpoint
+
+The Owner Console real-backend smoke now covers both the missing deploy-channel
+packet state and the Tokyo `postdeploy_accepted` state. The main branch head was
+deployed again so Tokyo release identity matches the current pushed branch head.
+
+| Item | Result |
+| --- | --- |
+| Deployed code head | `49850e04` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-49850e04-console-smoke-deploy-channel` |
+| Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `49850e04988e414e970dd74d42141a83fdaf9c85` |
+| Readonly probe | `status=ready_for_controlled_deploy_preflight`, `blockers=[]`, health is `ok`, `live_ready=false` |
+| Watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal` |
+| Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `fresh_signal_present=false`, `source_readiness_ready=true`, `live_facts_ready=true` |
+| Owner summary | `部署通道正常`, `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, `保护正常`, `审计演练正常` |
+| Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
+| Safety | Smoke, deploy, probe, postdeploy, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### Mock Dispatcher Close-Loop
 
