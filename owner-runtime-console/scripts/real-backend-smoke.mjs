@@ -291,6 +291,7 @@ async function createRuntimeFixtures() {
       selected_strategygroup_dispatch_guard_checked: true,
       all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
       shared_runtime_pipeline_checked: true,
+      common_execution_chain_reuse_checked: true,
     },
     safety_invariants: {
       exchange_write_called: false,
@@ -498,6 +499,9 @@ async function runConnectedSmoke(browser) {
     if (dryRunSummary?.shared_runtime_pipeline_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm shared runtime pipeline");
     }
+    if (dryRunSummary?.common_execution_chain_reuse_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm common execution-chain reuse");
+    }
     if (dryRunSummary?.selected_strategygroup_dispatch_guard_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm selected scope guard");
     }
@@ -576,6 +580,8 @@ async function runConnectedSmoke(browser) {
     await expectVisible(page, "已校验");
     await expectVisible(page, "共性管道");
     await expectVisible(page, "已覆盖");
+    await expectVisible(page, "执行复用");
+    await expectVisible(page, "已验证");
     await expectVisible(page, "选中范围");
     await expectVisible(page, "已校验");
     await expectVisible(page, "危险动作");

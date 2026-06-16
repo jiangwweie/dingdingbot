@@ -21,6 +21,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "dangerous_effects_absent": True,
         "disabled_smoke_is_real_execution_proof": False,
         "shared_runtime_pipeline_checked": True,
+        "common_execution_chain_reuse_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
@@ -46,6 +47,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "post_submit_finalize_result_identity_guard_checked": True,
         "operation_layer_evidence_relay_checked": True,
         "required_scenarios_present": True,
+        "common_execution_chain_reuse_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
@@ -216,6 +218,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         is True
     )
     assert packet["checks"]["shared_runtime_pipeline_checked"] is True
+    assert packet["checks"]["common_execution_chain_reuse_checked"] is True
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
     assert selected_guard["checks"] == {
@@ -410,6 +413,8 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
             "StrategyGroups provide signal/facts/symbol/side/risk/hard-stop inputs."
         ),
     }
+    assert shared["checks"]["common_execution_chain_reused_by_all_strategygroups"] is True
+    assert shared["checks"]["strategygroup_adapters_are_input_only"] is True
     assert set(shared["found_strategy_groups"]) == {
         "MPG-001",
         "TEQ-001",

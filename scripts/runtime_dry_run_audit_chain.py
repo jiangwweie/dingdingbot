@@ -755,6 +755,22 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         "all_strategy_groups_keep_tiny_risk_boundary": all(
             row.get("checks", {}).get("tiny_risk_boundary") is True for row in rows
         ),
+        "common_execution_chain_reused_by_all_strategygroups": (
+            len(rows) == len(EXPECTED_STRATEGY_GROUPS)
+            and all(
+                row.get("shared_runtime_pipeline_stages")
+                == SHARED_RUNTIME_PIPELINE_STAGES
+                for row in rows
+            )
+        ),
+        "strategygroup_adapters_are_input_only": all(
+            row.get("checks", {}).get("does_not_authorize_execution_boundary") is True
+            and row.get("checks", {}).get("has_signal_ready_rule") is True
+            and row.get("checks", {}).get("has_required_facts") is True
+            and row.get("checks", {}).get("has_risk_defaults") is True
+            and row.get("checks", {}).get("has_hard_stops") is True
+            for row in rows
+        ),
     }
     blockers.extend(name for name, ok in checks.items() if ok is not True)
     return {
@@ -2372,6 +2388,17 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 for value in (shared_pipeline.get("checks") or {}).values()
             )
         ),
+        "common_execution_chain_reuse_checked": (
+            shared_pipeline.get("status") == "passed"
+            and shared_pipeline.get("checks", {}).get(
+                "common_execution_chain_reused_by_all_strategygroups"
+            )
+            is True
+            and shared_pipeline.get("checks", {}).get(
+                "strategygroup_adapters_are_input_only"
+            )
+            is True
+        ),
         "selected_strategygroup_dispatch_guard_checked": (
             _scenario_artifact(
                 scenarios,
@@ -2485,6 +2512,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "disabled_smoke_is_real_execution_proof": False,
         "shared_runtime_pipeline_checked": checks[
             "shared_runtime_pipeline_checked"
+        ],
+        "common_execution_chain_reuse_checked": checks[
+            "common_execution_chain_reuse_checked"
         ],
         "selected_strategygroup_dispatch_guard_checked": checks[
             "selected_strategygroup_dispatch_guard_checked"

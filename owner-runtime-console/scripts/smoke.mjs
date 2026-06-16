@@ -98,6 +98,8 @@ try {
   await expectVisible(page, "12 项通过");
   await expectVisible(page, "共性管道");
   await expectVisible(page, "已覆盖");
+  await expectVisible(page, "执行复用");
+  await expectVisible(page, "已验证");
   await expectVisible(page, "选中范围");
   await expectVisible(page, "已校验");
   await expectVisible(page, "五组策略");

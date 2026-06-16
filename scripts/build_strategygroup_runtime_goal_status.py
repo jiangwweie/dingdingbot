@@ -84,6 +84,7 @@ REQUIRED_DRY_RUN_CHECKS = {
     "operation_layer_submit_result_identity_guard_checked",
     "post_submit_finalize_result_identity_guard_checked",
     "shared_runtime_pipeline_checked",
+    "common_execution_chain_reuse_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
