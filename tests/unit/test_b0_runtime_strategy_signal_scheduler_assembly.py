@@ -113,7 +113,18 @@ def _runtime(
     *,
     family_id: str = "CPM-RO-001",
     version_id: str = "CPM-RO-001-v0",
+    execution_enabled: bool = False,
+    shadow_mode: bool = True,
 ) -> StrategyRuntimeInstance:
+    metadata = {}
+    if execution_enabled and not shadow_mode:
+        metadata = {
+            "live_runtime_enablement_mutation_id": "live-enable-unit-1",
+            "owner_live_runtime_enablement_authorization_id": (
+                "owner-live-runtime-auth-unit-1"
+            ),
+            "owner_real_submit_authorization_id": "owner-real-submit-auth-unit-1",
+        }
     return StrategyRuntimeInstance(
         runtime_instance_id=f"runtime-scheduler-{family_id}",
         trial_binding_id=f"trial-scheduler-{family_id}",
@@ -137,8 +148,9 @@ def _runtime(
             min_liquidation_stop_buffer=Decimal("25"),
             requires_protection=True,
         ),
-        execution_enabled=False,
-        shadow_mode=True,
+        execution_enabled=execution_enabled,
+        shadow_mode=shadow_mode,
+        metadata=metadata,
         created_at_ms=NOW_MS,
         updated_at_ms=NOW_MS,
     )
@@ -267,6 +279,59 @@ def test_scheduler_assembly_can_reach_non_executing_planner_ready_state():
     assert readiness.order_lifecycle_called is False
     assert readiness.exchange_called is False
     assert readiness.not_execution_authority is True
+
+
+def test_scheduler_assembly_hands_live_runtime_to_operation_layer_without_shadow_blockers():
+    readiness = RuntimeStrategySignalSchedulerAssemblyService(
+        runtime=_runtime(execution_enabled=True, shadow_mode=False),
+        fact_sources=_ready_sources(),
+    ).preview(_signal_input(), _output(), candidate_id="CPM-RO-001")
+
+    assert (
+        readiness.status
+        == RuntimeStrategySignalSchedulerReadinessStatus.LIVE_RUNTIME_HANDOFF_PENDING
+    )
+    assert readiness.blockers == []
+    assert "runtime_live_execution_enabled_operation_layer_handoff" in (
+        readiness.warnings
+    )
+    assert readiness.scheduler_can_call_runtime_planner is False
+    assert readiness.planner_call_performed is False
+    assert readiness.order_candidate_created is False
+    assert readiness.execution_intent_created is False
+    assert readiness.order_created is False
+    assert readiness.order_lifecycle_called is False
+    assert readiness.exchange_called is False
+
+
+async def test_scheduler_planning_does_not_call_shadow_planner_for_live_runtime_handoff():
+    planner = _FakeShadowPlanner()
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+        fact_sources=_ready_sources(),
+    ).plan_if_ready(
+        _signal_input(),
+        _output(),
+        runtime=_runtime(execution_enabled=True, shadow_mode=False),
+        candidate_id="CPM-RO-001",
+        allow_shadow_candidate_creation=True,
+    )
+
+    assert result.status == RuntimeStrategySignalSchedulerPlanningStatus.OBSERVE_ONLY
+    assert (
+        result.readiness.status
+        == RuntimeStrategySignalSchedulerReadinessStatus.LIVE_RUNTIME_HANDOFF_PENDING
+    )
+    assert result.blockers == []
+    assert result.planner_call_performed is False
+    assert result.order_candidate_created is False
+    assert result.execution_intent_created is False
+    assert result.order_created is False
+    assert result.exchange_called is False
+    assert planner.calls == []
+    assert result.metadata["planner_call_suppressed_reason"] == (
+        "operation_layer_handoff_pending"
+    )
 
 
 async def test_scheduler_planning_requires_explicit_enablement_before_planner_call():

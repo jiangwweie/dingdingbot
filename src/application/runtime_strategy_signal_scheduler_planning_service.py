@@ -200,7 +200,16 @@ class RuntimeStrategySignalSchedulerPlanningService:
             output,
             candidate_id=candidate_id,
         )
-        if readiness.status == RuntimeStrategySignalSchedulerReadinessStatus.OBSERVE_ONLY:
+        if readiness.status in {
+            RuntimeStrategySignalSchedulerReadinessStatus.OBSERVE_ONLY,
+            RuntimeStrategySignalSchedulerReadinessStatus.LIVE_RUNTIME_HANDOFF_PENDING,
+        }:
+            suppressed_reason = (
+                "operation_layer_handoff_pending"
+                if readiness.status
+                == RuntimeStrategySignalSchedulerReadinessStatus.LIVE_RUNTIME_HANDOFF_PENDING
+                else "scheduler_readiness_observe_only"
+            )
             return self._result(
                 signal_input,
                 runtime=runtime,
@@ -210,7 +219,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
                 blockers=readiness.blockers,
                 warnings=readiness.warnings,
                 metadata={
-                    "planner_call_suppressed_reason": "scheduler_readiness_observe_only",
+                    "planner_call_suppressed_reason": suppressed_reason,
                 },
             )
         if (

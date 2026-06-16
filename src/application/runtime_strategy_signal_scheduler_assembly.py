@@ -35,6 +35,7 @@ class RuntimeStrategySignalSchedulerReadinessStatus(str, Enum):
     OBSERVE_ONLY = "observe_only"
     BLOCKED = "blocked"
     READY_FOR_NON_EXECUTING_PLANNER = "ready_for_non_executing_planner"
+    LIVE_RUNTIME_HANDOFF_PENDING = "live_runtime_handoff_pending"
 
 
 class RuntimeStrategySignalSchedulerFactSources(BaseModel):
@@ -142,6 +143,11 @@ class RuntimeStrategySignalSchedulerAssemblyService:
         if output.signal_type != SignalType.WOULD_ENTER:
             blockers.append("strategy_signal_not_would_enter")
             status = RuntimeStrategySignalSchedulerReadinessStatus.OBSERVE_ONLY
+        elif self._runtime_is_live_operation_layer_handoff(output):
+            status = (
+                RuntimeStrategySignalSchedulerReadinessStatus.LIVE_RUNTIME_HANDOFF_PENDING
+            )
+            warnings.append("runtime_live_execution_enabled_operation_layer_handoff")
         else:
             status = RuntimeStrategySignalSchedulerReadinessStatus.BLOCKED
             self._append_runtime_blockers(signal_input, output, blockers)
@@ -237,3 +243,20 @@ class RuntimeStrategySignalSchedulerAssemblyService:
             and not sources.trusted_market_fact_source_available
         ):
             warnings.append("trusted_market_fact_source_not_configured_optional_only")
+
+    def _runtime_is_live_operation_layer_handoff(
+        self,
+        output: StrategyFamilySignalOutput,
+    ) -> bool:
+        runtime = self._runtime
+        if runtime is None:
+            return False
+        return (
+            runtime.status == StrategyRuntimeInstanceStatus.ACTIVE
+            and runtime.strategy_family_id == output.strategy_family_id
+            and runtime.strategy_family_version_id == output.strategy_family_version_id
+            and runtime.symbol == output.symbol
+            and runtime.side == output.side.value
+            and runtime.shadow_mode is False
+            and runtime.execution_enabled is True
+        )
