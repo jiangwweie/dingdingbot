@@ -16,6 +16,21 @@ def _write(path: Path, payload: dict) -> None:
 def _write_base_packets(report_dir: Path) -> None:
     report_dir.mkdir(parents=True)
     _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "watching_no_signal",
+            "blockers": [
+                "runtime-mpg-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+            ],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
         report_dir / "latest-summary.json",
         {
             "status": "waiting_for_signal",
@@ -63,7 +78,7 @@ def _write_base_packets(report_dir: Path) -> None:
         {
             "status": "passed",
             "checks": {
-                "scenario_count": 5,
+                "scenario_count": 6,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
@@ -225,6 +240,71 @@ def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
     )
     assert packet["checks"]["fresh_signal_present"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+
+
+def test_goal_status_surfaces_watcher_liveness_blockers(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "owner_attention_pending",
+            "blockers": [
+                "loop_command_failed:2",
+                "runtime-mpg-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
+            ],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "latest-summary.json",
+        {
+            "status": "blocked",
+            "active_runtime_count": 11,
+            "selected_runtime_instance_ids": [
+                "runtime-mpg-1",
+                "runtime-teq-1",
+                "runtime-fbs-1",
+            ],
+            "blockers": [
+                "runtime-mpg-1:runtime_attempts_exhausted",
+                "runtime-mpg-1:order_candidate_id_or_authorization_id_required",
+                "runtime-teq-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
+            ],
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "runtime_liveness_degraded"
+    assert packet["owner_state"]["label"] == "需要介入"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "repair_runtime_attempt_renewal_or_scope"
+    )
+    assert packet["checks"]["watcher_liveness_healthy"] is False
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert "watcher_tick:loop_command_failed:2" in packet["blockers"]
+    assert (
+        "latest_summary:runtime-mpg-1:runtime_attempts_exhausted"
+        in packet["blockers"]
+    )
+    assert (
+        "latest_summary:runtime-teq-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+        not in packet["blockers"]
+    )
+    assert packet["evidence"]["active_runtime_count"] == 11
+    assert packet["evidence"]["selected_runtime_instance_count"] == 3
 
 
 def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(

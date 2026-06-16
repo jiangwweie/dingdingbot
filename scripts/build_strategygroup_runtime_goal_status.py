@@ -20,6 +20,7 @@ DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watche
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.json"
 
 PACKET_FILES = {
+    "watcher_tick": "watcher-tick.json",
     "latest_summary": "latest-summary.json",
     "post_signal_resume": "post-signal-resume-pack.json",
     "resume_dispatch": "resume-dispatch-packet.json",
@@ -47,6 +48,12 @@ DANGEROUS_TRUE_KEYS = {
 WAITING_STATUSES = {
     "waiting_for_signal",
     "watching_no_signal",
+    "waiting_for_market",
+}
+
+WAITING_BLOCKER_FRAGMENTS = {
+    "strategy_signal_not_ready_for_shadow_candidate_prepare",
+    "no_fresh_strategy_signal",
     "waiting_for_market",
 }
 
@@ -114,6 +121,16 @@ def _dispatch_status(packet: dict[str, Any] | None) -> str:
 
 def _blockers(packet: dict[str, Any] | None) -> list[str]:
     return [str(item) for item in _list(_data(packet).get("blockers")) if str(item)]
+
+
+def _non_waiting_blockers(packet: dict[str, Any] | None) -> list[str]:
+    blockers: list[str] = []
+    for blocker in _blockers(packet):
+        text = blocker.lower()
+        if any(fragment in text for fragment in WAITING_BLOCKER_FRAGMENTS):
+            continue
+        blockers.append(blocker)
+    return blockers
 
 
 def _blocker_class(packet: dict[str, Any] | None) -> str:
@@ -191,12 +208,29 @@ def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
     return bool(statuses & FRESH_SIGNAL_STATUSES)
 
 
+def _watcher_liveness_blockers(
+    packets: dict[str, dict[str, Any] | None],
+) -> list[str]:
+    blockers: list[str] = []
+    for name in ("watcher_tick", "latest_summary"):
+        packet = packets.get(name)
+        status = _status(packet)
+        blockers.extend(f"{name}:{item}" for item in _non_waiting_blockers(packet))
+        if status and status not in WAITING_STATUSES and status not in FRESH_SIGNAL_STATUSES:
+            if status not in {"blocked", "owner_attention_pending"}:
+                blockers.append(f"{name}:unexpected_status:{status}")
+            elif not _non_waiting_blockers(packet):
+                blockers.append(f"{name}:status:{status}")
+    return sorted(set(blockers))
+
+
 def _current_status(
     *,
     checks: dict[str, bool],
     packets: dict[str, dict[str, Any] | None],
     dangerous_effects: list[str],
     deployment_blockers: list[str],
+    watcher_liveness_blockers: list[str],
 ) -> tuple[str, str, str, bool]:
     if dangerous_effects:
         return (
@@ -246,6 +280,13 @@ def _current_status(
             "missing_fact",
             "refresh_strategy_group_live_facts_readiness",
             "live facts 尚未 ready，不能进入实盘动作边界",
+            False,
+        )
+    if watcher_liveness_blockers:
+        return (
+            "runtime_liveness_degraded",
+            "repair_runtime_attempt_renewal_or_scope",
+            "watcher 已报告 runtime attempt 或 scope 接力异常，先修复自动观察链路",
             False,
         )
     if dispatch_blocker_class == "active_position_resolution":
@@ -348,6 +389,7 @@ def build_goal_status_packet(
     source = _data(packets["source_readiness"])
     live_facts = _data(packets["live_facts_readiness"])
     dangerous = _dangerous_effects(*packets.values())
+    watcher_liveness = _watcher_liveness_blockers(packets)
     missing_packets = [
         key for key, value in packets.items() if value is None
     ]
@@ -366,12 +408,14 @@ def build_goal_status_packet(
         ),
         "dangerous_effects_absent": not dangerous,
         "fresh_signal_present": _has_fresh_signal(packets),
+        "watcher_liveness_healthy": not watcher_liveness,
     }
     status, next_checkpoint, owner_detail, real_order_ready = _current_status(
         checks=checks,
         packets=packets,
         dangerous_effects=dangerous,
         deployment_blockers=deployment_blockers,
+        watcher_liveness_blockers=watcher_liveness,
     )
 
     source_summary = _source_owner_summary(packets["source_readiness"])
@@ -385,6 +429,7 @@ def build_goal_status_packet(
         ],
         *([] if checks["source_readiness_ready"] else ["source_readiness_not_ready"]),
         *([] if checks["live_facts_ready"] else ["live_facts_not_ready"]),
+        *watcher_liveness,
         *([] if checks["dangerous_effects_absent"] else ["dangerous_effects_present"]),
     ]
     return {
@@ -415,6 +460,7 @@ def build_goal_status_packet(
             "expected_head": expected_head,
             "deployed_head": deployed_head,
             "latest_summary_status": _status(packets["latest_summary"]),
+            "watcher_tick_status": _status(packets["watcher_tick"]),
             "post_signal_resume_status": _status(packets["post_signal_resume"]),
             "resume_dispatch_status": _status(packets["resume_dispatch"]),
             "resume_dispatch_action": _data(packets["resume_dispatch"]).get(
@@ -426,6 +472,17 @@ def build_goal_status_packet(
                 name: dry_run_checks.get(name) for name in sorted(REQUIRED_DRY_RUN_CHECKS)
             },
             "dry_run_missing_required_checks": dry_run_missing_required_checks,
+            "watcher_liveness_blockers": watcher_liveness,
+            "active_runtime_count": _data(packets["latest_summary"]).get(
+                "active_runtime_count"
+            ),
+            "selected_runtime_instance_count": len(
+                _list(
+                    _data(packets["latest_summary"]).get(
+                        "selected_runtime_instance_ids"
+                    )
+                )
+            ),
         },
         "real_order_boundary": {
             "ready_for_real_order_action": real_order_ready,
