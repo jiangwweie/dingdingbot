@@ -896,6 +896,11 @@ def build_goal_status_packet(
         key for key, value in packets.items() if value is None
     ]
 
+    dry_run_required_check_status = {
+        name: dry_run_checks.get(name) is True
+        for name in sorted(REQUIRED_DRY_RUN_CHECKS)
+    }
+
     checks = {
         "required_packets_present": all(value is not None for value in packets.values()),
         "deployment_aligned": not deployment_blockers,
@@ -912,6 +917,7 @@ def build_goal_status_packet(
         "fresh_signal_present": fresh_signal_present,
         "selected_strategygroup_scope_ready": not selected_scope_blockers,
         "watcher_liveness_healthy": not watcher_liveness,
+        **dry_run_required_check_status,
     }
     status, next_checkpoint, owner_detail, real_order_ready = _current_status(
         checks=checks,
@@ -1007,9 +1013,7 @@ def build_goal_status_packet(
             ),
             "source_owner_summary": source_summary,
             "dry_run_scenario_count": dry_run_checks.get("scenario_count"),
-            "dry_run_required_checks": {
-                name: dry_run_checks.get(name) for name in sorted(REQUIRED_DRY_RUN_CHECKS)
-            },
+            "dry_run_required_checks": dry_run_required_check_status,
             "dry_run_missing_required_checks": dry_run_missing_required_checks,
             "watcher_liveness_blockers": watcher_liveness,
             "selected_scope_blockers": selected_scope_blockers,

@@ -398,6 +398,21 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | Execution authority proof | Each handoff keeps `candidate_creation_authorized=false`, `final_gate_input=false`, `operation_layer_input=false`, and `real_submit_authorized=false` |
 | Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true`, `common_execution_chain_reuse_checked=true`, `strategygroup_adapter_boundary_checked=true`, and `selected_strategygroup_dispatch_guard_checked=true` before treating dry-run audit as healthy |
 
+### 2026-06-17 Goal-Status Projection Checkpoint
+
+`strategygroup-runtime-goal-status.json` now projects the required dry-run audit
+checks into its top-level `checks` object. Automation and Owner Console
+readmodels can distinguish a live-source gap from a shared-chain gap without
+digging into the raw dry-run packet.
+
+| Item | Result |
+| --- | --- |
+| Fast chain projection | `checks.fresh_signal_fast_auto_chain_checked=true` when the local audit proves fresh signal -> authorization -> FinalGate dispatch -> Operation Layer evidence prep |
+| Shared pipeline projection | `checks.common_execution_chain_reuse_checked=true` and `checks.strategygroup_adapter_boundary_checked=true` when MPG / TEQ / FBS / PMR / SOR reuse the common runtime pipe |
+| Selected-scope projection | `checks.selected_strategygroup_dispatch_guard_checked=true` and `checks.all_selected_strategygroups_reach_finalgate_dispatch_checked=true` when selected StrategyGroup dispatch can reach the action-time FinalGate plan and out-of-scope signals are blocked |
+| Current local effect | Local `goal-status` can report `runtime_dry_run_audit_passed=true` while still blocking real submit on `missing_packet:*`, `source_readiness_not_ready`, or `live_facts_not_ready` |
+| Safety | This is read-only projection only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+
 ### Mock Dispatcher Close-Loop
 
 The dry-run audit chain also includes a local mock dispatcher close-loop. It

@@ -195,6 +195,20 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     )
     assert packet["checks"]["fresh_signal_present"] is False
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
+    assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
+    assert packet["checks"]["common_execution_chain_reuse_checked"] is True
+    assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
+    assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
+    assert (
+        packet["checks"]["all_selected_strategygroups_reach_finalgate_dispatch_checked"]
+        is True
+    )
+    assert packet["evidence"]["dry_run_required_checks"][
+        "common_execution_chain_reuse_checked"
+    ] is True
+    assert packet["evidence"]["dry_run_required_checks"][
+        "strategygroup_adapter_boundary_checked"
+    ] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     matrix = _matrix_by_key(packet)
     assert matrix["fresh_signal"]["status"] == "waiting_for_market"
@@ -247,6 +261,9 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
         "repair_runtime_dry_run_audit_chain"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert packet["checks"]["common_execution_chain_reuse_checked"] is False
+    assert packet["checks"]["strategygroup_adapter_boundary_checked"] is False
+    assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is False
     assert "runtime_dry_run_audit_not_passed" in packet["blockers"]
     assert (
         "runtime_dry_run_missing_required_check:operation_layer_evidence_relay_checked"
