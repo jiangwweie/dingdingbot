@@ -76,6 +76,8 @@ class RuntimePilotBootstrapConfig:
     owner_operator_id: str = "owner-standing-authorization"
     playbook_id: str = DEFAULT_PLAYBOOK_ID
     output_json: str | None = None
+    renew_exhausted_runtimes: bool = False
+    renewal_batch_id: str | None = None
 
 
 def _read_json(path: str | Path | None) -> dict[str, Any]:
@@ -249,6 +251,78 @@ def _active_groups(active_runtimes: list[dict[str, Any]]) -> set[str]:
     }
 
 
+def _active_runtime_id(runtime: dict[str, Any]) -> str | None:
+    value = runtime.get("runtime_instance_id") or runtime.get("runtime_id")
+    return str(value) if value else None
+
+
+def _runtime_attempts_remaining(runtime: dict[str, Any]) -> int | None:
+    candidates: list[Any] = [
+        runtime.get("attempts_remaining"),
+        runtime.get("daily_attempts_remaining"),
+        runtime.get("runtime_attempts_remaining"),
+    ]
+    for key in ("boundary", "runtime_boundary", "fact_coverage"):
+        nested = runtime.get(key)
+        if isinstance(nested, dict):
+            candidates.extend(
+                [
+                    nested.get("attempts_remaining"),
+                    nested.get("daily_attempts_remaining"),
+                    nested.get("runtime_attempts_remaining"),
+                ]
+            )
+            budget = nested.get("budget")
+            if isinstance(budget, dict):
+                candidates.extend(
+                    [
+                        budget.get("attempts_remaining"),
+                        budget.get("daily_attempts_remaining"),
+                    ]
+                )
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            return int(Decimal(str(candidate)))
+        except Exception:
+            continue
+    return None
+
+
+def _runtime_blocker_text(runtime: dict[str, Any]) -> str:
+    fragments: list[str] = []
+    for key in (
+        "blocker",
+        "blocker_class",
+        "blocked_reason",
+        "status_reason",
+        "next_attempt_gate",
+    ):
+        value = runtime.get(key)
+        if isinstance(value, dict):
+            fragments.extend(str(item) for item in value.values())
+        elif value is not None:
+            fragments.append(str(value))
+    for key in ("blockers", "gate_blockers", "runtime_blockers"):
+        values = runtime.get(key)
+        if isinstance(values, list):
+            fragments.extend(str(item) for item in values)
+    return " ".join(fragments).lower()
+
+
+def _runtime_attempts_exhausted(runtime: dict[str, Any]) -> bool:
+    attempts_remaining = _runtime_attempts_remaining(runtime)
+    if attempts_remaining is not None:
+        return attempts_remaining <= 0
+    blocker_text = _runtime_blocker_text(runtime)
+    return (
+        "runtime_attempts_exhausted" in blocker_text
+        or "attempts_exhausted" in blocker_text
+        or "no_attempts_remaining" in blocker_text
+    )
+
+
 def _is_bootstrappable_group(
     group: dict[str, Any],
     *,
@@ -294,6 +368,7 @@ def _bootstrap_config(
     group: dict[str, Any],
     symbol: str,
     side: str,
+    renewal_suffix: str | None = None,
 ) -> BootstrapConfig:
     strategy_group_id = _group_id(group)
     risk_defaults = (
@@ -311,6 +386,24 @@ def _bootstrap_config(
         if _runtime_symbol(item)
     ]
     runtime_symbol = _runtime_symbol(symbol)
+    runtime_carrier_id = (
+        f"strategygroup-runtime-pilot:{strategy_group_id}:"
+        f"{_safe_id(runtime_symbol)}:{side}"
+    )
+    if renewal_suffix:
+        runtime_carrier_id = (
+            f"{runtime_carrier_id}:renewal:{_safe_id(renewal_suffix)}"
+        )
+    reason = (
+        "Owner standing-authorized StrategyGroup runtime pilot bootstrap; "
+        "creates observation runtime only, not order authority."
+    )
+    if renewal_suffix:
+        reason = (
+            "Owner standing-authorized StrategyGroup runtime attempt renewal; "
+            "creates a new observation runtime admission for an exhausted prior "
+            "runtime, not order authority."
+        )
     return BootstrapConfig(
         api_base=config.api_base,
         mode="bootstrap",
@@ -330,14 +423,8 @@ def _bootstrap_config(
         account_facts_source=config.account_facts_source,
         account_facts_json=config.account_facts_json,
         owner_operator_id=config.owner_operator_id,
-        runtime_carrier_id=(
-            f"strategygroup-runtime-pilot:{strategy_group_id}:"
-            f"{_safe_id(runtime_symbol)}:{side}"
-        ),
-        reason=(
-            "Owner standing-authorized StrategyGroup runtime pilot bootstrap; "
-            "creates observation runtime only, not order authority."
-        ),
+        runtime_carrier_id=runtime_carrier_id,
+        reason=reason,
     )
 
 
@@ -350,6 +437,7 @@ def _target_row(
     status: str,
     reason: str,
     runtime_instance_id: str | None = None,
+    renewal_of_runtime_instance_id: str | None = None,
 ) -> dict[str, Any]:
     strategy_group_id = _group_id(group)
     picker = group.get("picker") if isinstance(group.get("picker"), dict) else {}
@@ -367,6 +455,7 @@ def _target_row(
         "status": status,
         "reason": reason,
         "runtime_instance_id": runtime_instance_id,
+        "renewal_of_runtime_instance_id": renewal_of_runtime_instance_id,
     }
 
 
@@ -383,7 +472,10 @@ def build_packet(
     generated_at_ms = int(time.time() * 1000)
     selected_ids = {item.strip() for item in config.strategy_group_ids if item.strip()}
     readiness_map = _readiness_by_group(live_facts_readiness)
-    active_keys = {_active_key(runtime) for runtime in active_runtimes}
+    active_key_map: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for runtime in active_runtimes:
+        active_key_map.setdefault(_active_key(runtime), []).append(runtime)
+    active_keys = set(active_key_map)
     active_group_ids = _active_groups(active_runtimes)
     blockers = list(active_inventory_blockers or [])
     targets: list[dict[str, Any]] = []
@@ -435,7 +527,22 @@ def build_packet(
                 )
             )
             continue
-        if strategy_group_id in active_group_ids and not selected_ids:
+        active_group_runtimes = [
+            runtime
+            for runtime in active_runtimes
+            if str(runtime.get("strategy_family_id") or runtime.get("family") or "")
+            == strategy_group_id
+        ]
+        group_has_exhausted_runtime = any(
+            _runtime_attempts_exhausted(runtime) for runtime in active_group_runtimes
+        )
+        if (
+            strategy_group_id in active_group_ids
+            and not selected_ids
+            and not (
+                config.renew_exhausted_runtimes and group_has_exhausted_runtime
+            )
+        ):
             skipped.append(
                 _target_row(
                     group=group,
@@ -464,7 +571,18 @@ def build_packet(
             continue
         for symbol in selected_symbols:
             key = (strategy_group_id, _exchange_symbol(symbol), side)
-            if key in active_keys:
+            matching_active = active_key_map.get(key, [])
+            exhausted_runtime = next(
+                (
+                    runtime
+                    for runtime in matching_active
+                    if _runtime_attempts_exhausted(runtime)
+                ),
+                None,
+            )
+            if key in active_keys and not (
+                config.renew_exhausted_runtimes and exhausted_runtime is not None
+            ):
                 skipped.append(
                     _target_row(
                         group=group,
@@ -476,6 +594,11 @@ def build_packet(
                     )
                 )
                 continue
+            renewal_runtime_id = (
+                _active_runtime_id(exhausted_runtime)
+                if exhausted_runtime is not None
+                else None
+            )
             if total_new >= config.max_total_new_runtimes:
                 skipped.append(
                     _target_row(
@@ -494,7 +617,12 @@ def build_packet(
                 side=side,
                 readiness=readiness,
                 status="planned",
-                reason="ready_for_runtime_bootstrap",
+                reason=(
+                    "runtime_attempts_exhausted_renewal_ready_for_runtime_bootstrap"
+                    if renewal_runtime_id
+                    else "ready_for_runtime_bootstrap"
+                ),
+                renewal_of_runtime_instance_id=renewal_runtime_id,
             )
             targets.append(row)
             total_new += 1
@@ -519,6 +647,14 @@ def build_packet(
                     group=group,
                     symbol=target["exchange_symbol"],
                     side=target["side"],
+                    renewal_suffix=(
+                        (
+                            config.renewal_batch_id
+                            or f"{generated_at_ms}"
+                        )
+                        if target.get("renewal_of_runtime_instance_id")
+                        else None
+                    ),
                 ),
             )
             report = flow.run()
@@ -677,6 +813,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--account-facts-json")
     parser.add_argument("--owner-operator-id", default="owner-standing-authorization")
     parser.add_argument("--playbook-id", default=DEFAULT_PLAYBOOK_ID)
+    parser.add_argument("--renew-exhausted-runtimes", action="store_true")
+    parser.add_argument("--renewal-batch-id")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     return parser.parse_args(argv)
@@ -717,6 +855,8 @@ def main(argv: list[str] | None = None) -> int:
             owner_operator_id=args.owner_operator_id,
             playbook_id=args.playbook_id,
             output_json=args.output_json,
+            renew_exhausted_runtimes=args.renew_exhausted_runtimes,
+            renewal_batch_id=args.renewal_batch_id,
         ),
         intake_packet=intake,
         live_facts_readiness=live_facts_readiness,

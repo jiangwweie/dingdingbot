@@ -5,6 +5,11 @@ import json
 from scripts.runtime_first_real_submit_api_flow import (
     LOCAL_REGISTRATION_APPROVAL_ENV,
 )
+from src.domain.standing_authorization import (
+    OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+    OWNER_STANDING_AUTHORIZATION_REASON,
+    OWNER_STANDING_AUTHORIZATION_REFERENCE,
+)
 from scripts import runtime_scoped_local_registration_proof_from_evidence as script
 
 
@@ -28,7 +33,7 @@ def test_sample_rehearsal_dry_run_stays_blocked_without_api_calls(tmp_path):
     assert report["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_execute_stops_before_attempt_consumption_without_local_registration(tmp_path):
+def test_execute_records_scoped_local_registration_under_standing_authorization(tmp_path):
     evidence_path = _write_evidence(tmp_path)
     client = _Client()
 
@@ -43,19 +48,23 @@ def test_execute_stops_before_attempt_consumption_without_local_registration(tmp
         client=client,
     )
 
-    assert report["status"] == "blocked_scoped_local_registration_proof"
-    assert (
-        "attempt_consumption_required_before_order_lifecycle_handoff"
-        in report["blockers"]
-    )
+    assert report["status"] == "scoped_local_registration_proof_recorded"
+    assert report["blockers"] == []
+    assert report["local_registration_adapter_result_id"] == "local-result-rtf018"
+    assert report["safety_invariants"]["local_registration_recorded"] is True
+    assert report["safety_invariants"]["exchange_arm_enabled"] is False
+    assert report["safety_invariants"]["exchange_write_called"] is False
     paths = [call["path"] for call in client.calls]
     assert any("runtime-execution-first-real-submit-evidence-preparations" in path for path in paths)
-    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert not any("runtime-execution-exchange-submit" in path for path in paths)
 
 
-def test_execute_with_env_still_does_not_record_scoped_local_registration(tmp_path, monkeypatch):
+def test_execute_scoped_local_registration_does_not_call_exchange_or_submit_action(
+    tmp_path,
+    monkeypatch,
+):
     evidence_path = _write_evidence(tmp_path)
     monkeypatch.setenv(
         LOCAL_REGISTRATION_APPROVAL_ENV,
@@ -74,18 +83,15 @@ def test_execute_with_env_still_does_not_record_scoped_local_registration(tmp_pa
         client=client,
     )
 
-    assert report["status"] == "blocked_scoped_local_registration_proof"
-    assert (
-        "attempt_consumption_required_before_order_lifecycle_handoff"
-        in report["blockers"]
-    )
-    assert report["local_registration_adapter_result_id"] is None
-    assert report["safety_invariants"]["local_registration_recorded"] is False
+    assert report["status"] == "scoped_local_registration_proof_recorded"
+    assert report["blockers"] == []
+    assert report["local_registration_adapter_result_id"] == "local-result-rtf018"
+    assert report["safety_invariants"]["local_registration_recorded"] is True
     assert report["safety_invariants"]["exchange_arm_enabled"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
     paths = [call["path"] for call in client.calls]
-    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
-    assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert not any("runtime-execution-exchange-submit" in path for path in paths)
     assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
 
@@ -238,9 +244,9 @@ def _args(tmp_path, *, evidence_path, **overrides):
         "execute_scoped_local_registration_proof": False,
         "api_base": "http://unit",
         "env_file": None,
-        "owner_operator_id": "owner",
-        "owner_confirmation_reference": "owner-authorized-rtf018",
-        "reason": "owner authorized scoped local registration proof",
+        "owner_operator_id": OWNER_STANDING_AUTHORIZATION_OPERATOR_ID,
+        "owner_confirmation_reference": OWNER_STANDING_AUTHORIZATION_REFERENCE,
+        "reason": OWNER_STANDING_AUTHORIZATION_REASON,
         "outcome_kind": "entry_filled_protection_creation_failed",
         "skip_next_attempt_gate_check": True,
         "output": None,

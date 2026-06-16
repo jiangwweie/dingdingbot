@@ -3630,6 +3630,19 @@ async def runtime_signal_watcher_status(
     )
 
 
+@router.get("/owner-console-source-readiness", response_model=TradingConsoleReadModelResponse)
+async def owner_console_source_readiness(
+    selected_strategy_group_id: Optional[str] = Query(default=None),
+    max_symbols: int = Query(default=3, ge=1, le=3),
+    stale_after_seconds: int = Query(default=180, ge=30, le=3600),
+) -> TradingConsoleReadModelResponse:
+    return _service(include_exchange=False).owner_console_source_readiness(
+        selected_strategy_group_id=selected_strategy_group_id,
+        max_symbols=max_symbols,
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
 @router.get("/strategygroup-runtime-pilot-status", response_model=TradingConsoleReadModelResponse)
 async def strategygroup_runtime_pilot_status(
     selected_strategy_group_id: Optional[str] = Query(default=None),

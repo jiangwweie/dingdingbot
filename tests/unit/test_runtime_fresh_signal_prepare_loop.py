@@ -100,7 +100,7 @@ def _ready_observation_without_records():
         "blockers": [],
         "warnings": [],
         "operator_command_plan": {
-            "next_step": "rerun_with_allow_prepare_records_after_owner_review",
+            "next_step": "rerun_with_allow_prepare_records_under_standing_authorization",
             "creates_shadow_candidate": False,
         },
         "safety_invariants": {
@@ -200,6 +200,9 @@ def test_fresh_signal_loop_reports_ready_without_creating_records(tmp_path):
 
     assert packet["status"] == "ready_for_prepare"
     assert packet["signal_input_json"] == "/tmp/ready-signal.json"
+    assert packet["operator_command_plan"]["next_step"] == (
+        "rerun_with_allow_prepare_records_under_standing_authorization"
+    )
     assert packet["operator_command_plan"]["creates_shadow_candidate"] is False
     assert packet["operator_command_plan"]["places_order"] is False
     assert packet["safety_invariants"]["prepare_records_created"] is False

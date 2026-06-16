@@ -299,6 +299,29 @@ def _brf_down_context_4h() -> list[dict[str, Any]]:
     ]
 
 
+def _sor_breakdown_1h() -> list[dict[str, Any]]:
+    candles = [
+        _candle(0, "106", "107", "104", "105"),
+        _candle(1, "105", "106", "103", "104"),
+        _candle(2, "104", "105", "102", "103"),
+        _candle(3, "103", "104", "101", "102"),
+        _candle(4, "102", "103", "100", "101"),
+        _candle(5, "101", "102", "99", "100"),
+        _candle(6, "100", "101", "98", "99"),
+        _candle(7, "99", "100", "97", "98"),
+        _candle(8, "98", "100", "97", "99"),
+        _candle(0, "102", "104", "100", "103"),
+        _candle(1, "103", "105", "101", "104"),
+        _candle(2, "104", "105", "102", "103"),
+        _candle(3, "103", "104", "100", "101"),
+        _candle(4, "100", "101", "96", "97"),
+    ]
+    return [
+        {**candle, "open_time_ms": NOW_MS - (len(candles) - index) * 3_600_000}
+        for index, candle in enumerate(candles)
+    ]
+
+
 def _btpc_1h() -> list[dict[str, Any]]:
     return [
         _candle(0, "110", "111", "108", "109"),
@@ -745,6 +768,47 @@ async def test_runtime_signal_input_brf_short_creates_shadow_candidate_with_rall
     assert result.candidate.risk_preview.leverage == Decimal("1")
     assert result.candidate.execution_enabled is False
     assert result.candidate.candidate_executable is False
+    assert result.execution_intent_created is False
+    assert result.order_lifecycle_called is False
+    assert result.exchange_called is False
+
+
+async def test_runtime_signal_input_sor_short_uses_opening_range_high_stop():
+    runtime = _runtime_for_strategy(
+        family_id="SOR-001",
+        version_id="SOR-001-v0",
+        side="short",
+    )
+    overlay = StrategyRuntimeFactOverlayService(
+        active_position_source=_TrustedPositionSource(positions=[]),
+        account_facts_source=_ready_account_source(),
+    )
+    service, store = _candidate_planning_service(runtime=runtime, overlay=overlay)
+
+    result = await service.plan_shadow_candidate_from_signal_input(
+        _runtime_signal_input(
+            family_id="SOR-001",
+            version_id="SOR-001-v0",
+            one_hour=_sor_breakdown_1h(),
+            four_hour=_brf_down_context_4h(),
+            last_price=Decimal("97"),
+            atr=Decimal("3"),
+            side="short",
+        ),
+        runtime=runtime,
+        context_id="context-sor-shadow-planning-v1",
+    )
+
+    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+    assert result.evaluation_result.output is not None
+    assert result.evaluation_result.output.side == SignalSide.SHORT
+    assert store.evaluation is not None
+    assert store.candidate is not None
+    assert result.proposal is not None
+    assert result.proposal.entry_price_reference == Decimal("97")
+    assert result.proposal.stop_source == "sor_opening_range_high_reclaim"
+    assert result.proposal.stop_price_reference == Decimal("105")
+    assert result.candidate.protection_preview.stop_price_reference == Decimal("105")
     assert result.execution_intent_created is False
     assert result.order_lifecycle_called is False
     assert result.exchange_called is False

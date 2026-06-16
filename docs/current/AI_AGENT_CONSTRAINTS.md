@@ -15,17 +15,67 @@ pilot. If this file conflicts with historical archive material, this file wins.
 The project objective is:
 
 ```text
-Owner selects a StrategyGroup
--> system admits or rejects it with clear reasons
--> watcher observes the market
--> fresh signal prepares candidate evidence
--> action-time FinalGate runs
--> official Operation Layer is the only real order path
--> post-submit finalize, reconciliation, budget settlement, and review close the loop
+Owner enables a StrategyGroup
+-> system observes market conditions
+-> system runs all required checks inside official safety boundaries
+-> system executes only through the official real-order path when allowed
+-> system protects, reconciles, settles, notifies, and records
+-> Owner supervises status and intervenes only on abnormal states
 ```
 
 The Owner should not need to read raw evidence packets to operate the system.
 Evidence packets are audit artifacts under the Owner-facing control board.
+
+## Owner Supervisor Constraint
+
+The Owner is a supervisor, not an execution operator.
+
+Owner-facing product UI must answer:
+
+- which StrategyGroups are enabled;
+- which are running, waiting, processing, paused, or unavailable;
+- whether funds, orders, positions, protection, and reconciliation are normal;
+- whether the Owner needs to intervene;
+- what one-line reason explains an unavailable or intervention state.
+
+Owner-facing product UI must not make the Owner drive internal execution steps.
+Do not turn these internal names into main UI labels, navigation, table columns,
+primary cards, or action buttons:
+
+```text
+FinalGate
+Operation Layer
+RequiredFacts
+candidate
+authorization
+preflight
+proof
+route
+refId
+blocker code
+runtime grant
+```
+
+Allowed main UI language is deliberately small:
+
+```text
+未启用
+运行中
+等待机会
+处理中
+暂不可用
+需要介入
+已暂停
+已完成
+无需操作
+资金正常
+订单正常
+持仓正常
+保护正常
+```
+
+Internal gate names and evidence details may appear only in audit, detail, or
+developer surfaces after the Owner asks to expand them.
 
 ## Standing Authorization
 
@@ -76,6 +126,17 @@ Every blocker must classify itself as one of:
 
 Gates exist to preserve bounded real-funds safety. They must not become opaque
 all-AND project blockers.
+
+Gate classes are internal safety classifications. The main Owner UI should map
+them to one terse product sentence, for example:
+
+| Internal condition | Owner-facing sentence |
+| --- | --- |
+| stale or missing facts | 事实不可用，暂不能使用 |
+| open order conflict | 有订单处理中，暂不能使用 |
+| active position conflict | 有持仓处理中，暂不能使用 |
+| missing protection | 保护未就绪，暂不能使用 |
+| reconciliation mismatch | 订单结果不一致，等待系统处理 |
 
 ## Watch Branch Intake
 

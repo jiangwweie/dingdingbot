@@ -37,17 +37,19 @@ evidence-packet-as-Owner-interface workflows.
 The Owner goal is:
 
 ```text
-Owner selects a StrategyGroup.
-The server admits it into an observable bounded runtime.
-The watcher monitors market conditions.
-Fresh in-boundary signals can advance through RequiredFacts, candidate evidence,
-FinalGate, and the official Operation Layer.
-The Owner is notified about material state, blockers, execution, reconciliation,
-settlement, and review outcomes.
+Owner enables a StrategyGroup.
+The system observes, checks, executes inside official boundaries, protects,
+reconciles, settles, and records.
+The Owner supervises automation status and intervenes only when the product
+surface says intervention is needed.
 ```
 
 The system is not an institutional quant platform, a raw packet browser, or a
 manual evidence-interpretation workflow.
+
+The Owner is not an operator. Owner-facing product surfaces must not turn
+internal execution gates, evidence objects, API routes, proof chains, or blocker
+codes into the main information architecture.
 
 ## Standing Authorization
 
@@ -118,23 +120,58 @@ StrategyGroup selection
 
 ## Owner Interface
 
-The normal Owner-facing states are:
+The normal Owner-facing states are product states:
 
 ```text
-observing
-signal_ready
-blocked
-candidate_ready
-finalgate_ready
-submitted
-reconciling
-settled
-review
+not_enabled
+running
+waiting_for_opportunity
+processing
+temporarily_unavailable
+needs_intervention
+paused
+completed
 ```
 
 Evidence packets are audit artifacts. Do not ask the Owner to read raw watcher
 packets, manually judge signal freshness, manually assemble RequiredFacts, or
 hand-approve every in-boundary candidate after a bounded runtime is selected.
+
+Main Owner UI must use terse Owner language:
+
+```text
+运行中
+等待机会
+处理中
+暂不可用
+需要介入
+无需操作
+资金正常
+订单正常
+保护正常
+```
+
+The main Owner UI must not expose these as primary labels, menus, cards, or
+actions:
+
+```text
+FinalGate
+Operation Layer
+RequiredFacts
+candidate
+authorization
+preflight
+proof
+route
+refId
+blocker code
+runtime grant
+```
+
+Those names may appear only in audit/detail/developer surfaces. If the system is
+healthy, the UI should say the StrategyGroup is running or waiting and that no
+Owner action is required. Only abnormal states should create Owner actions such
+as pause, adjust risk, or review recovery.
 
 ## Strategy Research Boundary
 

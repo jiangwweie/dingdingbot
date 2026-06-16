@@ -252,6 +252,52 @@ def test_plan_skips_existing_group_and_observe_only_by_default():
     assert packet["safety_invariants"]["creates_order"] is False
 
 
+def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization():
+    packet = build_packet(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            strategy_group_ids=("TEQ-001",),
+            renew_exhausted_runtimes=True,
+            max_symbols_per_group=1,
+            max_total_new_runtimes=1,
+        ),
+        intake_packet={"strategy_picker": [_group("TEQ-001", rank=1)]},
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": "TEQ-001",
+                    "observe_ready": True,
+                    "readiness_status": "observe_ready_armed_candidate_blocked",
+                    "exchange_rules": {"ready_symbols": ["INTCUSDT"]},
+                }
+            ]
+        },
+        active_runtimes=[
+            {
+                "runtime_instance_id": "runtime-teq-exhausted",
+                "strategy_family_id": "TEQ-001",
+                "strategy_family_version_id": "TEQ-001-v0",
+                "symbol": "INTC/USDT:USDT",
+                "side": "long",
+                "status": "active",
+                "attempts_remaining": 0,
+            }
+        ],
+    )
+
+    assert packet["status"] == "planned_runtime_bootstrap"
+    assert len(packet["targets"]) == 1
+    target = packet["targets"][0]
+    assert target["strategy_group_id"] == "TEQ-001"
+    assert target["reason"] == (
+        "runtime_attempts_exhausted_renewal_ready_for_runtime_bootstrap"
+    )
+    assert target["renewal_of_runtime_instance_id"] == "runtime-teq-exhausted"
+    assert packet["safety_invariants"]["creates_candidate"] is False
+    assert packet["safety_invariants"]["creates_execution_intent"] is False
+    assert packet["safety_invariants"]["creates_order"] is False
+
+
 def test_execute_creates_shadow_runtime_without_submit_paths():
     client = _FakeClient()
     packet = build_packet(

@@ -108,8 +108,12 @@ def _followup_command(args: argparse.Namespace, loop_packet_path: Path, followup
         command.extend(["--env-file", args.env_file])
     if args.allow_arm_preview:
         command.append("--allow-arm-preview")
+    if args.allow_attempt_policy_prepare:
+        command.append("--allow-attempt-policy-prepare")
     if args.allow_disabled_smoke:
         command.append("--allow-disabled-smoke")
+    if getattr(args, "allow_standing_operation_layer_evidence_prep", False):
+        command.append("--allow-standing-operation-layer-evidence-prep")
     if args.skip_disabled_smoke_prerequisite_probe:
         command.append("--skip-disabled-smoke-prerequisite-probe")
     return command
@@ -133,7 +137,13 @@ def _run_subprocess(command: list[str], stdout_path: Path) -> CommandResult:
     )
 
 
-def _forbidden_effects(loop_packet: dict[str, Any] | None, followup_packet: dict[str, Any] | None) -> list[str]:
+def _forbidden_effects(
+    loop_packet: dict[str, Any] | None,
+    followup_packet: dict[str, Any] | None,
+    *,
+    allow_attempt_policy_prepare: bool = False,
+    allow_standing_operation_layer_evidence_prep: bool = False,
+) -> list[str]:
     effects: list[str] = []
     for source_name, packet in (
         ("loop", loop_packet),
@@ -144,7 +154,7 @@ def _forbidden_effects(loop_packet: dict[str, Any] | None, followup_packet: dict
         safety = packet.get("safety_invariants")
         if not isinstance(safety, dict):
             continue
-        for key in (
+        forbidden_keys = [
             "exchange_write_called",
             "exchange_called",
             "exchange_order_submitted",
@@ -156,10 +166,30 @@ def _forbidden_effects(loop_packet: dict[str, Any] | None, followup_packet: dict
             "order_created",
             "order_lifecycle_called",
             "order_lifecycle_submit_called",
-            "attempt_counter_mutated",
-            "runtime_budget_mutated",
             "withdrawal_or_transfer_created",
+        ]
+        forbidden_keys.extend(
+            [
+                "attempt_counter_mutated",
+                "runtime_budget_mutated",
+            ]
+        )
+        if (
+            source_name == "followup"
+            and allow_standing_operation_layer_evidence_prep
+            and safety.get("standing_authorized_operation_layer_evidence_prep_called")
+            is True
         ):
+            forbidden_keys = [
+                key
+                for key in forbidden_keys
+                if key
+                not in {
+                    "attempt_counter_mutated",
+                    "runtime_budget_mutated",
+                }
+            ]
+        for key in forbidden_keys:
             if safety.get(key) is True:
                 effects.append(f"{source_name}.{key}")
         for item in safety.get("loop_forbidden_effects") or []:
@@ -234,7 +264,14 @@ def build_supervisor_packet(
         blockers.append("followup_command_not_run")
     if followup_result and followup_packet is None:
         blockers.append("followup_packet_missing")
-    forbidden_effects = _forbidden_effects(loop_packet, followup_packet)
+    forbidden_effects = _forbidden_effects(
+        loop_packet,
+        followup_packet,
+        allow_attempt_policy_prepare=args.allow_attempt_policy_prepare,
+        allow_standing_operation_layer_evidence_prep=bool(
+            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+        ),
+    )
     if forbidden_effects:
         blockers.append("supervisor_detected_forbidden_effects")
 
@@ -271,12 +308,27 @@ def build_supervisor_packet(
             "supervisor_only": True,
             "allow_prepare_records": bool(args.allow_prepare_records),
             "allow_arm_preview": bool(args.allow_arm_preview),
+            "allow_attempt_policy_prepare": bool(args.allow_attempt_policy_prepare),
             "allow_disabled_smoke": bool(args.allow_disabled_smoke),
+            "allow_standing_operation_layer_evidence_prep": bool(
+                getattr(args, "allow_standing_operation_layer_evidence_prep", False)
+            ),
             "real_submit_requested": False,
             "exchange_order_requested": False,
             "order_lifecycle_submit_requested": False,
             "withdrawal_or_transfer_requested": False,
             "forbidden_effects": forbidden_effects,
+            "allowed_official_attempt_policy_prepare": bool(
+                args.allow_attempt_policy_prepare
+                and (followup_packet or {})
+                .get("safety_invariants", {})
+                .get("attempt_policy_preflight_called")
+                is True
+                and (followup_packet or {})
+                .get("safety_invariants", {})
+                .get("attempt_counter_mutated")
+                is not True
+            ),
         },
     }
     _write_json(supervisor_packet_path, packet)
@@ -329,6 +381,7 @@ def _running_supervisor_packet(
             "supervisor_only": True,
             "allow_prepare_records": bool(args.allow_prepare_records),
             "allow_arm_preview": bool(args.allow_arm_preview),
+            "allow_attempt_policy_prepare": bool(args.allow_attempt_policy_prepare),
             "allow_disabled_smoke": bool(args.allow_disabled_smoke),
             "real_submit_requested": False,
             "exchange_order_requested": False,
@@ -390,7 +443,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--allow-prepare-records", action="store_true")
     parser.add_argument("--allow-arm-preview", action="store_true")
+    parser.add_argument("--allow-attempt-policy-prepare", action="store_true")
     parser.add_argument("--allow-disabled-smoke", action="store_true")
+    parser.add_argument(
+        "--allow-standing-operation-layer-evidence-prep",
+        action="store_true",
+    )
     parser.add_argument("--include-packets", action="store_true")
     parser.add_argument("--skip-disabled-smoke-prerequisite-probe", action="store_true")
     return parser.parse_args(argv)

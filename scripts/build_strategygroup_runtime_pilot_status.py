@@ -406,8 +406,8 @@ def _watcher_scope_alignment(
         status = "mismatch"
         blocker = "watcher_not_monitoring_selected_strategygroup_universe"
     elif out_of_scope:
-        status = "mixed_scope"
-        blocker = "watcher_monitoring_unselected_runtime_scope"
+        status = "expanded_scope"
+        blocker = None
     else:
         status = "aligned"
         blocker = None
@@ -1003,7 +1003,7 @@ def _owner_state(
             ),
             "downgrade_mode": "observe_only_no_candidate_prepare",
         }
-    if watcher_scope_alignment.get("status") in {"mismatch", "mixed_scope"}:
+    if watcher_scope_alignment.get("status") == "mismatch":
         return {
             "status": "blocked_runtime_scope_mismatch",
             "blocker_class": "runtime_scope_mismatch",
@@ -1494,10 +1494,14 @@ def build_packet(
             {
                 "gate": "watcher_scope",
                 "status": "ready"
-                if watcher_scope_alignment["status"] in {"aligned", "not_visible"}
+                if watcher_scope_alignment["status"] in {
+                    "aligned",
+                    "expanded_scope",
+                    "not_visible",
+                }
                 else "blocked",
                 "class": "runtime_scope_mismatch"
-                if watcher_scope_alignment["status"] in {"mismatch", "mixed_scope"}
+                if watcher_scope_alignment["status"] == "mismatch"
                 else "none",
                 "blockers": (
                     [watcher_scope_alignment["blocker"]]

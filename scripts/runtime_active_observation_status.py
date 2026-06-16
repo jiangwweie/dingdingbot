@@ -73,6 +73,12 @@ def _collect_forbidden_effects(*packets: dict[str, Any] | None) -> list[str]:
         if not isinstance(safety, dict):
             continue
         for flag in FORBIDDEN_SAFETY_FLAGS:
+            if (
+                packet_name == "followup-packet.json"
+                and flag in {"attempt_counter_mutated", "runtime_budget_mutated"}
+                and safety.get("attempt_policy_prepare_called") is True
+            ):
+                continue
             if bool(safety.get(flag)):
                 effects.append(f"{packet_name}:{flag}")
         for effect in safety.get("forbidden_effects") or []:

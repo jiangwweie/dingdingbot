@@ -301,13 +301,21 @@ def build_packet(
     elif armed_ready_count:
         status = "strategy_group_live_facts_ready_for_armed_observation"
     elif observe_ready_count:
-        status = "strategy_group_observe_ready_armed_blocked"
+        status = "strategy_group_observe_ready_candidate_prerequisites_pending"
     else:
         status = "strategy_group_live_facts_blocked"
-    blockers = sorted(
+    candidate_prepare_blockers = sorted(
         {
             f"{row['strategy_group_id']}:{blocker}"
             for row in rows
+            for blocker in row.get("blockers") or []
+        }
+    )
+    observation_blockers = sorted(
+        {
+            f"{row['strategy_group_id']}:{blocker}"
+            for row in rows
+            if not row.get("observe_ready")
             for blocker in row.get("blockers") or []
         }
     )
@@ -332,7 +340,7 @@ def build_packet(
             rows=rows,
             observe_ready_count=observe_ready_count,
             armed_ready_count=armed_ready_count,
-            blockers=blockers,
+            blockers=candidate_prepare_blockers,
         ),
         "safety_invariants": {
             **{name: False for name in sorted(UNSAFE_FLAGS)},
@@ -343,7 +351,8 @@ def build_packet(
             "places_order": False,
             "mutates_pg": False,
         },
-        "blockers": blockers,
+        "candidate_prepare_blockers": candidate_prepare_blockers,
+        "blockers": observation_blockers,
     }
 
 

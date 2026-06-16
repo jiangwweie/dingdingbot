@@ -241,11 +241,20 @@ def test_owner_deploy_packet_blocks_if_dry_run_would_have_side_effects():
     assert "deploy_dry_run.apply_requested" in packet["checks"]["forbidden_effects"]
 
 
-def test_owner_deploy_packet_requires_remote_probe_and_pre_live_packet():
+def test_owner_deploy_packet_requires_remote_probe_but_allows_pre_live_skip():
     packet = _build_packet(tokyo_probe=None, pre_live_packet=None)
 
     assert packet["status"] == "blocked"
     assert "tokyo_readonly_probe_not_ready" in packet["checks"]["blockers"]
-    assert "pre_live_submit_rehearsal_not_technically_ready" in packet["checks"]["blockers"]
+    assert (
+        "pre_live_submit_rehearsal_not_technically_ready"
+        not in packet["checks"]["blockers"]
+    )
+    assert packet["checks"]["pre_live_packet_skipped"] is True
+    assert packet["checks"]["pre_live_submit_technical_ready"] is True
+    assert packet["checks"]["first_real_submit_still_blocked"] is True
     assert "first_real_submit_not_confirmed_blocked" not in packet["checks"]["blockers"]
-    assert "first_real_submit_not_a_deploy_apply_precondition" in packet["checks"]["warnings"]
+    assert (
+        "first_real_submit_not_a_deploy_apply_precondition"
+        not in packet["checks"]["warnings"]
+    )

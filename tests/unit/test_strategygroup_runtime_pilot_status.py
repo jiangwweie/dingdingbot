@@ -578,6 +578,49 @@ def test_pilot_status_blocks_when_watcher_scope_does_not_match_selected_pilot():
     assert packet["control_board"]["runtime_row"]["watcher_scope"] == "mismatch"
 
 
+def test_pilot_status_allows_expanded_multi_strategygroup_watcher_scope():
+    watcher = _watcher_waiting()
+    watcher["data"]["watcher"]["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": "strategy-runtime-mpg-btc-long",
+            "strategy_family_id": "MPG-001",
+            "strategy_family_version_id": "MPG-001-v0",
+            "symbol": "BTC/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        },
+        {
+            "runtime_instance_id": "strategy-runtime-teq-nvda-long",
+            "strategy_family_id": "TEQ-001",
+            "strategy_family_version_id": "TEQ-001-v0",
+            "symbol": "NVDA/USDT:USDT",
+            "side": "long",
+            "status": "waiting_for_signal",
+        },
+    ]
+
+    packet = build_packet(
+        intake_packet=_intake(),
+        live_facts_readiness=_readiness(),
+        watcher_status=watcher,
+        generated_at_ms=1,
+    )
+
+    assert packet["status"] == "waiting_for_market"
+    assert packet["owner_state"]["blocker_class"] == "waiting_for_market"
+    assert packet["watcher_scope_alignment"]["status"] == "expanded_scope"
+    assert packet["watcher_scope_alignment"]["matched_runtime_signal_summary_count"] == 1
+    assert packet["watcher_scope_alignment"]["out_of_scope_runtime_signal_summary_count"] == 1
+    watcher_scope_gate = next(
+        item for item in packet["gate_failure_ledger"]
+        if item["gate"] == "watcher_scope"
+    )
+    assert watcher_scope_gate["status"] == "ready"
+    assert watcher_scope_gate["blocker_class"] == "none"
+    assert "watcher_scope_not_bound_to_selected_pilot" not in packet["why_not_executable"]
+    assert packet["control_board"]["runtime_row"]["watcher_scope"] == "expanded_scope"
+
+
 def test_pilot_status_hard_stops_on_forbidden_watcher_effect():
     watcher = _watcher_waiting()
     watcher["data"]["safety_invariants"]["exchange_write_called"] = True

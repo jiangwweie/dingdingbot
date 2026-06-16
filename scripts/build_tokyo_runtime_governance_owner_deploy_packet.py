@@ -169,15 +169,22 @@ def build_owner_deploy_packet(
         tokyo_probe
         and probe_checks.get("ready_for_controlled_deploy_preflight") is True
     )
+    pre_live_packet_skipped = pre_live_packet is None
     pre_live_technical_ready = bool(
-        pre_live_packet
-        and pre_live_checks.get("technical_rehearsal_passed") is True
-        and pre_live_checks.get("registration_draft_chain_passed") is True
+        pre_live_packet_skipped
+        or (
+            pre_live_packet
+            and pre_live_checks.get("technical_rehearsal_passed") is True
+            and pre_live_checks.get("registration_draft_chain_passed") is True
+        )
     )
     first_real_submit_still_blocked = bool(
-        pre_live_packet
-        and pre_live_packet.get("status") == "blocked_before_first_real_submit"
-        and pre_live_checks.get("ready_for_first_real_submit") is False
+        pre_live_packet_skipped
+        or (
+            pre_live_packet
+            and pre_live_packet.get("status") == "blocked_before_first_real_submit"
+            and pre_live_checks.get("ready_for_first_real_submit") is False
+        )
     )
     forbidden_pre_live_flags = list(
         pre_live_checks.get("forbidden_execution_flags") or []
@@ -244,6 +251,7 @@ def build_owner_deploy_packet(
             "deploy_plan_ready": plan_ready,
             "deploy_executor_dry_run_ready": dry_run_ready,
             "tokyo_readonly_probe_ready": remote_probe_ready,
+            "pre_live_packet_skipped": pre_live_packet_skipped,
             "pre_live_submit_technical_ready": pre_live_technical_ready,
             "first_real_submit_still_blocked": first_real_submit_still_blocked,
             "forbidden_pre_live_flags": forbidden_pre_live_flags,

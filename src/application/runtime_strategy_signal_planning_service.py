@@ -808,6 +808,14 @@ def _stop_price_reference(
             return structure_stop, "brf_rally_high"
         if atr is not None and atr > Decimal("0"):
             return entry_price + atr, "brf_atr_reference"
+    if output.strategy_family_id == "SOR-001" and output.side == SignalSide.SHORT:
+        structure_stop = _decimal_or_none(
+            _nested(evidence, "session_structure", "range_high_reference")
+        )
+        if structure_stop is not None:
+            return structure_stop, "sor_opening_range_high_reclaim"
+        if atr is not None and atr > Decimal("0"):
+            return entry_price + atr, "sor_atr_reference"
     semantics_stop = _decimal_or_none(
         _nested(evidence, "candidate_semantics", "protection", "stop_price_reference")
     )
