@@ -18,7 +18,7 @@ sample packet expectations, and non-execution flags.
 | ---: | --- | --- | --- | --- |
 | 1 | `VCB-001` | `observe_only handoff draft plus signal-time boundary complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/` and `vcb-signal-time-classifier-boundary-20260616.md`; broad breakout remains negative and armed observation remains blocked. |
 | 2 | `RSR-001` | `observe_only scorer handoff draft plus standalone boundary complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/` and `rsr-scorer-standalone-boundary-20260616.md`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
-| 3 | `NLPD-001` | `observe_only event-study handoff draft complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
+| 3 | `NLPD-001` | `observe_only event-study handoff draft plus low-history boundary complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/` and `nlpd-low-history-event-boundary-20260616.md`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
 | 4 | `LCF-001` | `RequiredFacts design packet complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay note complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md`; useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
 
@@ -68,6 +68,12 @@ activation blockers.
 | RequiredFacts | `listing_event_time`, `first_trade_window_ohlcv`, `low_history_dataset_state`, `quote_volume_floor`, `spread_proxy_state`, `survivorship_control`, `short_executable_state`, `instrument_product_risk_state`. |
 | Handoff mode | `observe_only`; event-study watcher only. |
 
+P1 supplement:
+`nlpd-low-history-event-boundary-20260616.md` separates listing-event
+observation, first-session continuation labels, delayed fade labels, bStocks
+low-history cohort facts, spot-short analysis-only labels, and PMR disable
+overlay context.
+
 ## LCF-001 RequiredFacts Design Scope
 
 | Field | Draft Decision |
@@ -104,7 +110,8 @@ activation blockers.
    `rsr-scorer-standalone-boundary-20260616.md`.
 3. Keep `NLPD-001` as event-study observer until broader listing cohort,
    survivorship, spread/liquidity, product-risk, and executable-side facts
-   improve.
+   improve; current low-history event boundary is
+   `nlpd-low-history-event-boundary-20260616.md`.
 4. Keep `LCF-001` as a RequiredFacts design task after
    `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; do not create a
    handoff until force-order, OI, ratio, depth, and margin facts exist.

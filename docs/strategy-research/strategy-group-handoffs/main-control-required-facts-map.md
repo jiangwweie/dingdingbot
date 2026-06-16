@@ -206,6 +206,35 @@ P1 scorer boundary supplement:
 | `rsr_longer_lookback_negative_state` | 120h broad rotation negative evidence. | `block_broad_rsr` |
 | `rsr_high_leverage_block_state` | 3x/5x stress and disable boundary. | `block_leverage_promotion` |
 
+### `NLPD-001`
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `listing_event_time` | Auditable listing or first-seen event time | `no_event_signal` |
+| `first_trade_window_ohlcv` | First closed 1h window state | `no_event_signal` |
+| `post_listing_delay_state` | Closed-candle delay before label formation | `block_candidate_prepare` |
+| `low_history_dataset_state` | Low-history blocker state | `observe_only` |
+| `quote_volume_floor` | Listing-window volume floor | `observe_only_or_block` |
+| `spread_proxy_state` | Spread and liquidity proxy | `block_promotion` |
+| `survivorship_control` | Failed/missing/renamed symbol control | `block_cohort_claim` |
+| `instrument_product_risk_state` | bStocks, TradFi perps, metal tokens, or normal crypto class | `block_promotion` |
+| `short_executable_state` | Whether short/fade labels are executable or analysis-only | `block_short_candidate` |
+
+P1 low-history boundary supplement:
+`docs/strategy-research/nlpd-low-history-event-boundary-20260616.md`.
+
+| Boundary Fact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `nlpd_event_source_state` | Official or auditable event source. | `no_event_signal` |
+| `nlpd_first_window_completeness_state` | Required first-window candles are complete. | `no_event_signal` |
+| `nlpd_low_history_block_state` | Low-history cohort is not promotion-grade. | `observe_only` |
+| `nlpd_survivorship_control_state` | Missing, failed, or unavailable symbols are accounted for. | `block_cohort_claim` |
+| `nlpd_product_class_state` | Product class is separated. | `block_promotion` |
+| `nlpd_spread_liquidity_state` | Spread and liquidity facts are reproducible. | `block_promotion` |
+| `nlpd_short_executable_state` | Short/fade labels are executable or analysis-only. | `block_short_candidate` |
+| `nlpd_post_entry_label_boundary_state` | Event labels are research targets, not runtime entry facts. | `block_candidate_prepare` |
+| `nlpd_pmr_disable_overlay_state` | PMR downshift/disable context for NLPD continuation labels. | `no_disable_annotation` |
+
 ## Readiness Levels
 
 | Readiness Level | Meaning |

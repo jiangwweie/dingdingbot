@@ -337,7 +337,7 @@
         "long",
         "short_analysis_only"
       ],
-      "research_role": "Observe-only new listing, contract event, and low-history price-discovery lane",
+      "research_role": "Observe-only new listing, contract event, and low-history price-discovery lane with executable-side boundary",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -357,9 +357,11 @@
         "listing_survivorship",
         "spread_liquidity_missing",
         "product_risk",
-        "executable_side_unclear"
+        "executable_side_unclear",
+        "spot_short_analysis_only"
       ],
       "evidence_paths": [
+        "docs/strategy-research/nlpd-low-history-event-boundary-20260616.md",
         "docs/strategy-research/candidate-packets/NLPD-001-new-listing-price-discovery-packet.md",
         "docs/strategy-research/nlpd-new-listing-event-study/nlpd-new-listing-event-study-summary.md",
         "docs/strategy-research/bstocks-event-study-refresh/bstocks-event-study-refresh-summary.md"
