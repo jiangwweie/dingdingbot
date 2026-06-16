@@ -10,7 +10,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["checks"]["scenario_count"] == 4
+    assert packet["checks"]["scenario_count"] == 5
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -23,6 +23,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert set(scenarios) == {
         "no_signal",
         "mock_fresh_signal_dry_run_pass",
+        "mock_operation_layer_submit_finalize_pass",
         "required_facts_missing",
         "active_position_or_open_order_conflict",
     }
@@ -75,6 +76,28 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert closed_loop["reconciliation_result"]["status"] == "clean"
     assert closed_loop["budget_settlement_result"]["status"] == "settled"
     assert closed_loop["review_record_result"]["status"] == "recorded"
+    operation_closed_loop = scenarios["mock_operation_layer_submit_finalize_pass"][
+        "artifacts"
+    ]["mock_operation_layer_closed_loop"]
+    assert operation_closed_loop["status"] == "passed"
+    assert operation_closed_loop["simulated_exchange_effects"] is True
+    assert operation_closed_loop["actual_exchange_write_called"] is False
+    assert operation_closed_loop["actual_order_created"] is False
+    assert operation_closed_loop["actual_order_lifecycle_called"] is False
+    assert operation_closed_loop["actual_withdrawal_or_transfer_created"] is False
+    assert operation_closed_loop["checks"] == {
+        "dispatcher_reached_settled_status": True,
+        "submit_endpoint_called_once": True,
+        "finalize_endpoint_called_once": True,
+        "next_attempt_gate_ready": True,
+        "budget_settlement_recorded": True,
+        "review_recorded": True,
+        "no_withdrawal_or_transfer": True,
+    }
+    assert operation_closed_loop["dispatcher_packet"]["status"] == "settled"
+    assert operation_closed_loop["dispatcher_packet"]["dispatch_status"] == (
+        "post_submit_finalize_completed_next_attempt_ready"
+    )
     assert scenarios["required_facts_missing"]["artifacts"]["readiness_bridge"][
         "status"
     ] == "ready_for_readiness_evidence"
@@ -85,6 +108,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert packet["checks"][
         "legacy_local_registration_probe_tolerance_checked"
     ] is True
+    assert packet["checks"]["mock_operation_layer_closed_loop_checked"] is True
 
 
 def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, capsys):

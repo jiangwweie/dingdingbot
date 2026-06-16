@@ -185,6 +185,7 @@ post-deploy or watcher-adjacent non-executing audit refresh.
 | --- | --- |
 | No signal | `waiting_for_signal`; no candidate, authorization, FinalGate, or Operation Layer |
 | Mock fresh signal pass | Evidence IDs connect; dangerous action flags remain false |
+| Mock Operation Layer submit/finalize pass | Dispatcher reaches settled and next-attempt-ready with mock responses only |
 | RequiredFacts missing | Clear `missing_fact` blocker before Operation Layer |
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
 
@@ -212,6 +213,25 @@ project waits for a real signal:
 | Reconciliation | No active position, no open order, no mismatch blockers |
 | Budget settlement | Reservation is released or accounted |
 | Review record | Runtime outcome is recorded without requiring Owner action |
+
+### Mock Dispatcher Close-Loop
+
+The dry-run audit chain also includes a local mock dispatcher close-loop. It
+uses mocked API responses to exercise the same dispatcher handoff shape:
+
+```text
+Operation Layer submit
+-> post-submit finalize
+-> budget settlement id
+-> review id
+-> next-attempt gate ready
+```
+
+This scenario may contain simulated exchange-effect fields inside its own
+artifact. Those fields are explicitly marked as mock-only and are not accepted
+as real execution proof. The global audit packet must still show no actual
+exchange write, no actual order creation, no actual order-lifecycle call, and
+no withdrawal or transfer.
 
 ### Safety
 

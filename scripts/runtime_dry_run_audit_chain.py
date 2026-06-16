@@ -787,6 +787,177 @@ def _scenario_active_conflict(output_dir: Path) -> dict[str, Any]:
     )
 
 
+def _mock_operation_layer_closed_loop() -> dict[str, Any]:
+    calls: list[dict[str, Any]] = []
+    original_session_cookie = dispatcher._session_cookie
+    original_request_json = dispatcher._request_json
+
+    def session_cookie() -> tuple[str, str | None]:
+        return ("brc_operator_session=dry-run-session", None)
+
+    def request_json(**kwargs: Any) -> dict[str, Any]:
+        calls.append(
+            {
+                "method": kwargs.get("method"),
+                "url_kind": "post_submit_finalize"
+                if "post-submit-finalize-packets" in str(kwargs.get("url") or "")
+                else "operation_layer_submit",
+                "body_keys": sorted((kwargs.get("body") or {}).keys()),
+            }
+        )
+        if "post-submit-finalize-packets" in str(kwargs.get("url") or ""):
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "finalized_ready_for_next_attempt",
+                    "authorization_id": FRESH_AUTHORIZATION_ID,
+                    "runtime_instance_id": RUNTIME_ID,
+                    "exchange_submit_execution_result_id": (
+                        "dry-run-submit-result-1"
+                    ),
+                    "submit_outcome_review_id": "dry-run-review-1",
+                    "post_submit_budget_settlement_id": "dry-run-settlement-1",
+                    "blockers": [],
+                    "warnings": ["dry_run_non_executing_finalize_shape"],
+                    "next_attempt_gate": {
+                        "status": "ready_for_fresh_signal",
+                        "blockers": [],
+                    },
+                    "exchange_called": False,
+                    "exchange_order_submitted": False,
+                    "order_lifecycle_called": False,
+                    "owner_bounded_execution_called": False,
+                    "withdrawal_or_transfer_created": False,
+                    "position_closed": False,
+                    "order_cancelled": False,
+                    "order_created": False,
+                },
+            }
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_orders_submitted",
+                "authorization_id": FRESH_AUTHORIZATION_ID,
+                "runtime_instance_id": RUNTIME_ID,
+                "reservation_id": "dry-run-attempt-reservation-1",
+                "execution_mode": "real_gateway_action",
+                "blockers": [],
+                "warnings": ["dry_run_simulated_exchange_submit"],
+                "exchange_called": True,
+                "exchange_order_submitted": True,
+                "order_lifecycle_submit_called": True,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+                "submitted_exchange_order_ids": ["dry-run-entry-1"],
+                "entry_exchange_order_id": "dry-run-entry-1",
+                "protection_exchange_order_ids": ["dry-run-stop-1"],
+            },
+        }
+
+    dispatcher._session_cookie = session_cookie
+    dispatcher._request_json = request_json
+    try:
+        packet = dispatcher.build_dispatch_packet(
+            resume_pack=_resume_pack_finalgate_ready(),
+            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+            api_base="http://dry-run.local",
+            operation_layer_evidence_report=_operation_evidence_report(),
+            operation_layer_evidence_report_path=(
+                "/tmp/dry-run-operation-layer-evidence.json"
+            ),
+            execute_operation_layer_submit=True,
+            execute_post_submit_finalize=True,
+        )
+    finally:
+        dispatcher._session_cookie = original_session_cookie
+        dispatcher._request_json = original_request_json
+
+    checks = {
+        "dispatcher_reached_settled_status": packet.get("status") == "settled",
+        "submit_endpoint_called_once": (
+            len(
+                [
+                    call
+                    for call in calls
+                    if call["url_kind"] == "operation_layer_submit"
+                ]
+            )
+            == 1
+        ),
+        "finalize_endpoint_called_once": (
+            len([call for call in calls if call["url_kind"] == "post_submit_finalize"])
+            == 1
+        ),
+        "next_attempt_gate_ready": (
+            packet.get("post_submit_finalize_result", {})
+            .get("body", {})
+            .get("next_attempt_gate", {})
+            .get("status")
+            == "ready_for_fresh_signal"
+        ),
+        "budget_settlement_recorded": bool(
+            packet.get("post_submit_finalize_result", {})
+            .get("body", {})
+            .get("post_submit_budget_settlement_id")
+        ),
+        "review_recorded": bool(
+            packet.get("post_submit_finalize_result", {})
+            .get("body", {})
+            .get("submit_outcome_review_id")
+        ),
+        "no_withdrawal_or_transfer": (
+            packet.get("safety_invariants", {}).get(
+                "withdrawal_or_transfer_created"
+            )
+            is False
+        ),
+    }
+    return {
+        "scope": "runtime_dry_run_mock_operation_layer_closed_loop",
+        "status": "passed" if all(checks.values()) else "failed",
+        "simulated_exchange_effects": True,
+        "actual_exchange_write_called": False,
+        "actual_order_created": False,
+        "actual_order_lifecycle_called": False,
+        "actual_withdrawal_or_transfer_created": False,
+        "checks": checks,
+        "api_calls": calls,
+        "dispatcher_packet": packet,
+    }
+
+
+def _scenario_mock_operation_layer_closed_loop(output_dir: Path) -> dict[str, Any]:
+    closed_loop = _mock_operation_layer_closed_loop()
+    passed = (
+        closed_loop["status"] == "passed"
+        and closed_loop["actual_exchange_write_called"] is False
+        and closed_loop["actual_order_created"] is False
+        and closed_loop["actual_order_lifecycle_called"] is False
+        and closed_loop["actual_withdrawal_or_transfer_created"] is False
+    )
+    return _scenario_packet(
+        name="mock_operation_layer_submit_finalize_pass",
+        expected=(
+            "dispatcher submit and post-submit finalize path reaches settled "
+            "with mock responses only; simulated exchange effects are not real "
+            "execution proof"
+        ),
+        artifacts={"mock_operation_layer_closed_loop": closed_loop},
+        passed=passed,
+        blockers=[
+            *closed_loop.get("dispatcher_packet", {}).get("blockers", []),
+            *[
+                f"closed_loop_check_failed:{name}"
+                for name, value in closed_loop["checks"].items()
+                if not value
+            ],
+        ],
+    )
+
+
 def _scenario_packet(
     *,
     name: str,
@@ -838,6 +1009,8 @@ def _dangerous_effects(*values: Any) -> list[str]:
 
     def walk(value: Any, path: str) -> None:
         if isinstance(value, dict):
+            if value.get("simulated_exchange_effects") is True:
+                return
             for key, nested in value.items():
                 nested_path = f"{path}.{key}" if path else str(key)
                 if key in dangerous_true_keys and nested is True:
@@ -864,6 +1037,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     scenarios = [
         _scenario_no_signal(output_dir),
         _scenario_mock_pass(output_dir),
+        _scenario_mock_operation_layer_closed_loop(output_dir),
         _scenario_required_facts_missing(output_dir),
         _scenario_active_conflict(output_dir),
     ]
@@ -876,7 +1050,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 4,
+        "required_scenarios_present": len(scenarios) == 5,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -894,6 +1068,14 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 "legacy_local_registration_probe_tolerance",
             ).get("status")
             == "operation_layer_ready"
+        ),
+        "mock_operation_layer_closed_loop_checked": (
+            _scenario_artifact(
+                scenarios,
+                "mock_operation_layer_submit_finalize_pass",
+                "mock_operation_layer_closed_loop",
+            ).get("status")
+            == "passed"
         ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
