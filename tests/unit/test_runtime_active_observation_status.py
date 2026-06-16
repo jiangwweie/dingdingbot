@@ -122,6 +122,74 @@ def test_status_blocks_on_forbidden_effects(tmp_path):
     ]
 
 
+def test_status_allows_standing_operation_layer_evidence_prep_effects(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "followup-packet.json",
+        {
+            "status": "disabled_smoke_blocked",
+            "operator_command_plan": {
+                "mutating_attempt_consumption_allowed_by_this_packet": True
+            },
+            "safety_invariants": {
+                "standing_authorized_operation_layer_evidence_prep_called": True,
+                "attempt_counter_mutated": True,
+                "runtime_budget_mutated": True,
+                "exchange_called": False,
+                "exchange_order_submitted": False,
+                "order_created": False,
+                "order_lifecycle_submit_called": False,
+                "real_submit_requested": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert packet["status"] == "blocked"
+    assert packet["forbidden_effects"] == []
+    assert "active_observation_forbidden_effects_detected" not in packet["blockers"]
+    assert packet["allowed_operation_layer_evidence_prep_effects"] == [
+        "followup-packet.json:attempt_counter_mutated",
+        "followup-packet.json:runtime_budget_mutated",
+    ]
+    assert packet["safety_invariants"][
+        "allowed_operation_layer_evidence_prep_effects"
+    ] == [
+        "followup-packet.json:attempt_counter_mutated",
+        "followup-packet.json:runtime_budget_mutated",
+    ]
+
+
+def test_status_blocks_evidence_prep_when_dangerous_effect_appears(tmp_path):
+    root = tmp_path / "obs"
+    _write_json(
+        root / "followup-packet.json",
+        {
+            "status": "disabled_smoke_blocked",
+            "operator_command_plan": {
+                "mutating_attempt_consumption_allowed_by_this_packet": True
+            },
+            "safety_invariants": {
+                "standing_authorized_operation_layer_evidence_prep_called": True,
+                "attempt_counter_mutated": True,
+                "runtime_budget_mutated": True,
+                "exchange_order_submitted": True,
+            },
+        },
+    )
+
+    packet = build_status_packet(root, stale_after_seconds=10**15, now_ms=10**15)
+
+    assert packet["status"] == "blocked_forbidden_effect"
+    assert packet["forbidden_effects"] == [
+        "followup-packet.json:exchange_order_submitted",
+        "followup-packet.json:attempt_counter_mutated",
+        "followup-packet.json:runtime_budget_mutated",
+    ]
+
+
 def test_status_marks_prepare_followup_as_attention(tmp_path):
     root = tmp_path / "obs"
     _write_json(

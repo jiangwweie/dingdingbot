@@ -42,6 +42,10 @@ ALLOWED_PREPARE_RECORD_FLAGS = (
     "submit_authorization_created",
     "protection_plan_created",
 )
+ALLOWED_OPERATION_LAYER_EVIDENCE_PREP_FLAGS = (
+    "attempt_counter_mutated",
+    "runtime_budget_mutated",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -73,10 +77,11 @@ def _collect_forbidden_effects(*packets: dict[str, Any] | None) -> list[str]:
         if not isinstance(safety, dict):
             continue
         for flag in FORBIDDEN_SAFETY_FLAGS:
-            if (
-                packet_name == "followup-packet.json"
-                and flag in {"attempt_counter_mutated", "runtime_budget_mutated"}
-                and safety.get("attempt_policy_prepare_called") is True
+            if _allowed_operation_layer_evidence_prep_effect(
+                packet_name=packet_name,
+                packet=packet,
+                safety=safety,
+                flag=flag,
             ):
                 continue
             if bool(safety.get(flag)):
@@ -89,6 +94,66 @@ def _collect_forbidden_effects(*packets: dict[str, Any] | None) -> list[str]:
             effects.append(f"{packet_name}:arm_preview:{effect}")
         for effect in safety.get("disabled_smoke_forbidden_effects") or []:
             effects.append(f"{packet_name}:disabled_smoke:{effect}")
+    return effects
+
+
+def _allowed_operation_layer_evidence_prep_effect(
+    *,
+    packet_name: str,
+    packet: dict[str, Any],
+    safety: dict[str, Any],
+    flag: str,
+) -> bool:
+    if (
+        packet_name != "followup-packet.json"
+        or flag not in ALLOWED_OPERATION_LAYER_EVIDENCE_PREP_FLAGS
+        or not bool(safety.get(flag))
+    ):
+        return False
+    plan = packet.get("operator_command_plan")
+    if not isinstance(plan, dict):
+        plan = {}
+    evidence_prep_allowed = (
+        plan.get("mutating_attempt_consumption_allowed_by_this_packet") is True
+        or safety.get("attempt_policy_prepare_called") is True
+    )
+    evidence_prep_called = (
+        safety.get("standing_authorized_operation_layer_evidence_prep_called") is True
+        or safety.get("attempt_policy_prepare_called") is True
+    )
+    dangerous_flags_absent = all(
+        not bool(safety.get(name))
+        for name in (
+            "exchange_called",
+            "exchange_order_submitted",
+            "order_created",
+            "order_lifecycle_called",
+            "order_lifecycle_submit_called",
+            "real_submit_requested",
+            "withdrawal_or_transfer_created",
+        )
+    )
+    return evidence_prep_allowed and evidence_prep_called and dangerous_flags_absent
+
+
+def _collect_allowed_operation_layer_evidence_prep(
+    *packets: dict[str, Any] | None,
+) -> list[str]:
+    effects: list[str] = []
+    for packet_name, packet in zip(PACKET_NAMES, packets, strict=False):
+        if not packet:
+            continue
+        safety = packet.get("safety_invariants")
+        if not isinstance(safety, dict):
+            continue
+        for flag in ALLOWED_OPERATION_LAYER_EVIDENCE_PREP_FLAGS:
+            if _allowed_operation_layer_evidence_prep_effect(
+                packet_name=packet_name,
+                packet=packet,
+                safety=safety,
+                flag=flag,
+            ):
+                effects.append(f"{packet_name}:{flag}")
     return effects
 
 
@@ -207,6 +272,14 @@ def build_status_packet(
         loop,
         followup,
         latest_summary,
+    )
+    allowed_operation_layer_evidence_prep_effects = (
+        _collect_allowed_operation_layer_evidence_prep(
+            supervisor,
+            loop,
+            followup,
+            latest_summary,
+        )
     )
     blockers: list[str] = []
     warnings: list[str] = []
@@ -328,6 +401,9 @@ def build_status_packet(
         "allowed_prepare_record_effects": [
             flag for flag, observed in allowed_prepare_records.items() if observed
         ],
+        "allowed_operation_layer_evidence_prep_effects": (
+            allowed_operation_layer_evidence_prep_effects
+        ),
         "operator_command_plan": {
             "not_executed": True,
             "latest_summary_next_step": (
@@ -375,6 +451,9 @@ def build_status_packet(
             "mutates_attempt_counter": False,
             "withdrawal_or_transfer_created": False,
             "forbidden_effects": forbidden_effects,
+            "allowed_operation_layer_evidence_prep_effects": (
+                allowed_operation_layer_evidence_prep_effects
+            ),
         },
     }
 
