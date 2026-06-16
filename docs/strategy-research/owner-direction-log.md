@@ -13,6 +13,34 @@ execution authority, exchange-write authority, deploy authority, credential
 authority, live-profile authority, FinalGate authority, OrderLifecycle
 authority, exchange gateway authority, or order-sizing authority.
 
+## 2026-06-16: P0 / P1 / P2 Goal Mode Started
+
+### Instruction
+
+Owner asked the strategy window to use goal mode for P0 / P1 / P2 work.
+
+### Research Interpretation
+
+1. P0 means hardening the current 5 StrategyGroup handoff packs rather than
+   inventing new execution-chain behavior.
+2. P1 means converting the next mature non-handoff candidates into handoff
+   drafts or observer/scorer packets.
+3. P2 means continuing strategy-pool expansion, parked-strategy governance,
+   negative evidence capture, and revival-condition management.
+4. Strategy research should keep progressing without waiting for main-control
+   UI/runtime work, but all outputs remain non-executing research artifacts.
+5. Main-control code, deploy, FinalGate, Operation Layer, exchange gateway,
+   credentials, live profile, and order-sizing defaults remain out of scope.
+
+### Current Evidence Hooks
+
+| Artifact | Current Role |
+| --- | --- |
+| `docs/strategy-research/p0-p1-p2-goal-mode-plan.md` | Active P0 / P1 / P2 goal-mode plan. |
+| `docs/strategy-research/p0-handoff-hardening-matrix-20260616.md` | P0 hardening matrix for the first 5 handoff packs. |
+| `docs/strategy-research/p1-next-handoff-queue-20260616.md` | P1 next handoff conversion queue. |
+| `docs/strategy-research/p2-strategy-pool-expansion-queue-20260616.md` | P2 expansion, parking, and revival queue. |
+
 ## 2026-06-16: Lightweight Strategy Cabinet Governance
 
 ### Instruction

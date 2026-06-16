@@ -1,15 +1,16 @@
 # Main-Control Strategy Group Handoff Index
 
 Status: HANDOFF_READY_FOR_MAIN_CONTROL_REVIEW
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 ## Purpose
 
-This index is the main-control entry point for the first Strategy Research v3
-StrategyGroup handoff batch.
+This index is the main-control entry point for Strategy Research v3
+StrategyGroup handoff packs.
 
-It converts research evidence into five observable experimental StrategyGroup
-candidates. The files below are not runtime registration, exchange-write
+It converts research evidence into observable experimental StrategyGroup
+candidates and observe-only draft candidates. The files below are not runtime
+registration, exchange-write
 authority, FinalGate input, Operation Layer input, deploy requests, credential
 changes, live-profile changes, or order-sizing defaults.
 
@@ -22,6 +23,7 @@ changes, live-profile changes, or order-sizing defaults.
 | `TEQ-001` | `TEQ-001/handoff.md` | `TEQ-001/handoff.json` | Binance 2026 equity-like momentum | `armed_observation` | `long` |
 | `PMR-001` | `PMR-001/handoff.md` | `PMR-001/handoff.json` | Precious-metal short/weakness overlay | `observe_only` | `short`; long as context only |
 | `SOR-001` | `SOR-001/handoff.md` | `SOR-001/handoff.json` | Session opening-range / branch-specific right-tail | `armed_observation` | `short`; long as revival only |
+| `VCB-001` | `VCB-001/handoff.md` | `VCB-001/handoff.json` | Volatility compression true-breakout classifier draft | `observe_only` | `long` |
 
 ## Main-Control Consumption Contract
 
@@ -29,18 +31,18 @@ Each `handoff.json` includes the main-control required fields:
 
 | Field | Present In Batch | Main-Control Use |
 | --- | ---: | --- |
-| `strategy_group_id` | `5/5` | Stable Strategy Picker / admission identifier. |
-| `version` | `5/5` | Traceable signal and handoff source version. |
-| `supported_symbols` | `5/5` | Research observation universe pending exchange-rule validation. |
-| `supported_sides` | `5/5` | Direction scope and disabled/revival-side semantics. |
-| `signal_ready_rule` | `5/5` | Fresh-signal readiness semantics. |
-| `required_facts` | `5/5` | Runtime readiness, account, market, exchange, and strategy fact requirements. |
-| `risk_defaults` | `5/5` | Research risk proposal only; not live order-sizing defaults. |
-| `hard_stops` | `5/5` | Strategy-level blockers before observation/candidate preparation/execution review. |
-| `sample_signal_packet` | `5/5` | Example fresh signal output. |
-| `sample_no_signal_packet` | `5/5` | Example no-signal output. |
+| `strategy_group_id` | `6/6` | Stable Strategy Picker / admission identifier. |
+| `version` | `6/6` | Traceable signal and handoff source version. |
+| `supported_symbols` | `6/6` | Research observation universe pending exchange-rule validation. |
+| `supported_sides` | `6/6` | Direction scope and disabled/revival-side semantics. |
+| `signal_ready_rule` | `6/6` | Fresh-signal readiness semantics. |
+| `required_facts` | `6/6` | Runtime readiness, account, market, exchange, and strategy fact requirements. |
+| `risk_defaults` | `6/6` | Research risk proposal only; not live order-sizing defaults. |
+| `hard_stops` | `6/6` | Strategy-level blockers before observation/candidate preparation/execution review. |
+| `sample_signal_packet` | `6/6` | Example fresh signal output. |
+| `sample_no_signal_packet` | `6/6` | Example no-signal output. |
 
-All five JSON packs also include `sample_stale_signal_packet` and
+All six JSON packs also include `sample_stale_signal_packet` and
 `sample_conflict_packet`.
 
 ## Low-Ambiguity Intake Supplements
@@ -61,6 +63,7 @@ All five JSON packs also include `sample_stale_signal_packet` and
 | `TEQ-001` | Admit as long-side equity-like momentum observer; require concentration, session, mark/funding, and product facts before candidate preparation. |
 | `PMR-001` | Start as observe-only PMR short/overlay candidate; upgrade to armed observation only after session/mark facts are present. |
 | `SOR-001` | Admit branch-by-branch; do not treat it as broad opening-range alpha. |
+| `VCB-001` | Keep observe-only as true-breakout classifier draft; do not admit broad breakout or armed observation until signal-time classifier quality improves. |
 
 ## Shared Main-Control Hard Stops
 
@@ -107,12 +110,14 @@ OK docs/strategy-research/strategy-group-handoffs/MPG-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/TEQ-001/handoff.json
+OK docs/strategy-research/strategy-group-handoffs/VCB-001/handoff.json
 
 FBS-001 complete symbols 9 sides long,short_disable_or_redesign_only
 MPG-001 complete symbols 21 sides long
 PMR-001 complete symbols 7 sides short,long_context_only
 SOR-001 complete symbols 9 sides short,long_revival_only
 TEQ-001 complete symbols 10 sides long
+VCB-001 complete symbols 7 sides long
 ```
 
 ## Boundary Proof

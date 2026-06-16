@@ -270,13 +270,12 @@
       "strategy_id": "VCB-001",
       "semantic_name": "Volatility Compression Breakout",
       "strategy_family": "volatility_compression_breakout",
-      "current_status": "next_handoff_candidate",
+      "current_status": "observe_only",
       "default_mode": "observe_only",
       "supported_sides": [
-        "long",
-        "short"
+        "long"
       ],
-      "research_role": "Next candidate to convert into handoff-ready compression/expansion semantics",
+      "research_role": "Observe-only true-breakout classifier handoff draft; broad breakout remains negative evidence",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -294,6 +293,7 @@
       "primary_blockers": [
         "false_breakout",
         "full_curve_weakness",
+        "pre_entry_classifier_weakness",
         "spread_depth_missing",
         "mark_index_missing",
         "real_margin_model_missing"
@@ -303,8 +303,11 @@
         "docs/strategy-research/oss-vcb-true-false-breakout/oss-vcb-true-false-breakout-summary.md",
         "docs/strategy-research/oss-vcb-volume-compression-cost-m2m/oss-vcb-volume-compression-cost-m2m-summary.md"
       ],
-      "handoff_paths": [],
-      "revival_condition": "Revive toward handoff when true-breakout classifier, false-breakout disable, cost, and spread/depth facts improve.",
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/VCB-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/VCB-001/handoff.json"
+      ],
+      "revival_condition": "Upgrade beyond observe-only only when signal-time true-breakout classifier improves full-sequence behavior without post-entry labels and spread/depth, mark/index, cost, and margin facts improve.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

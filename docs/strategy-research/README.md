@@ -10,6 +10,10 @@ Use these documents as the stable entry points for the strategy research line:
 | Document | Role |
 | --- | --- |
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
+| `p0-p1-p2-goal-mode-plan.md` | Active goal-mode execution plan for P0 handoff hardening, P1 next handoff conversion, and P2 strategy-pool expansion. |
+| `p0-handoff-hardening-matrix-20260616.md` | P0 matrix for the 5 existing StrategyGroup handoff packs. |
+| `p1-next-handoff-queue-20260616.md` | P1 queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
+| `p2-strategy-pool-expansion-queue-20260616.md` | P2 queue for pool expansion, revival, and parked-strategy governance. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
 | `strategy-cabinet/strategy-cabinet.md` | Human-readable Strategy Cabinet, listing active, parked, blocked, and handoff-ready strategy semantics. |
@@ -41,6 +45,10 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | Document | Role |
 | --- | --- |
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
+| `p0-p1-p2-goal-mode-plan.md` | Active P0 / P1 / P2 goal-mode execution plan. |
+| `p0-handoff-hardening-matrix-20260616.md` | P0 handoff hardening matrix for `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, and `SOR-001`. |
+| `p1-next-handoff-queue-20260616.md` | P1 next handoff queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
+| `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
 | `strategy-cabinet/strategy-cabinet.md` | Human-readable Strategy Cabinet, listing active, parked, blocked, and handoff-ready strategy semantics. |
@@ -62,6 +70,8 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-group-handoffs/PMR-001/handoff.json` | System-readable `PMR-001` handoff contract with metal role-split semantics, RequiredFacts, risk proposal, hard stops, and sample packets. |
 | `strategy-group-handoffs/SOR-001/handoff.md` | Human-readable `SOR-001` Session Opening-Range Breakout handoff pack for main-control review. |
 | `strategy-group-handoffs/SOR-001/handoff.json` | System-readable `SOR-001` handoff contract with session-structure semantics, RequiredFacts, risk proposal, hard stops, and sample packets. |
+| `strategy-group-handoffs/VCB-001/handoff.md` | Human-readable observe-only `VCB-001` Volatility Compression Breakout handoff draft. |
+| `strategy-group-handoffs/VCB-001/handoff.json` | System-readable observe-only `VCB-001` handoff contract with true-breakout classifier semantics, RequiredFacts, hard stops, and sample packets. |
 | `document-governance-v3.md` | Document authority, supersession rules, and old-document handling. |
 | `owner-direction-log.md` | Owner strategy-research instructions that change search space, evaluation semantics, or evidence governance. |
 | `community-research-plan.md` | GitHub, Freqtrade, QuantConnect, Reddit/forum, and official-data intake plan. |

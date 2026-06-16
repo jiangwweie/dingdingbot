@@ -1,0 +1,217 @@
+{
+  "strategy_group_id": "VCB-001",
+  "version": "2026-06-16-r0",
+  "name": "Volatility Compression Breakout",
+  "status": "observe_only_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "XRPUSDT",
+    "LINKUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "DOGEUSDT",
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_breakout_candidate_seen",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "compression_state",
+      "breakout_strength_state",
+      "relative_volume_state",
+      "false_breakout_risk",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "observe_only_true_breakout_classifier",
+      "pre_entry_volume_compression_review"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "spread_depth_state",
+      "mark_index_state"
+    ],
+    "strategy": [
+      "compression_state",
+      "breakout_strength_state",
+      "relative_volume_state",
+      "pre_entry_classifier_state",
+      "false_breakout_state",
+      "cost_sensitivity_state",
+      "slot_m2m_equity_state",
+      "leverage_ruin_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "real_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "stress_only_leverage": [
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "24h_observe_only_review_lane"
+  },
+  "hard_stops": [
+    "broad_breakout_mode_requested",
+    "pre_entry_classifier_missing",
+    "false_breakout_state_unbounded",
+    "cost_m2m_negative",
+    "spread_depth_missing",
+    "mark_index_missing",
+    "real_margin_model_missing",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "broad_breakout_full_1x": "-77.092301%",
+    "true_breakout_followthrough_full_1x": "908.444211%",
+    "true_breakout_followthrough_best_90d_2x": "440.884098%",
+    "false_breakout_reversal_full_1x": "-98.261028%",
+    "pre_entry_volume_compression_best_90d_2x": "119.927841%",
+    "volume_compression_cost_m2m_full_2x": "-77.779542%",
+    "volume_compression_cost_m2m_dd_2x": "-91.604461%"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/candidate-packets/VCB-001-volatility-breakout-packet.md",
+    "docs/strategy-research/oss-vcb-true-false-breakout/oss-vcb-true-false-breakout-summary.md",
+    "docs/strategy-research/oss-vcb-pre-entry-classifier/oss-vcb-pre-entry-classifier-summary.md",
+    "docs/strategy-research/oss-vcb-volume-compression-cost-m2m/oss-vcb-volume-compression-cost-m2m-summary.md"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "VCB-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_breakout_candidate_seen",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "XRPUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Closed-candle compression breakout candidate with volume context; observe-only because pre-entry classifier is not promotion-grade.",
+    "invalidation_reason": "False-breakout state, stale facts, cost/M2M negative lane, missing spread/depth, or missing margin facts.",
+    "required_facts_snapshot": {
+      "compression_state": "present",
+      "breakout_strength_state": "present",
+      "relative_volume_state": "present",
+      "false_breakout_state": "unknown",
+      "spread_depth_state": "missing",
+      "real_margin_liquidation_model_state": "missing"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "VCB-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_breakout_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No closed-candle compression breakout candidate that clears the observe-only signal rule."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "VCB-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_breakout_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "XRPUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or closed-candle facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "VCB-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_breakout_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "XRPUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Breakout candidate conflicts with false-breakout, stale market, same-symbol exposure, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

@@ -1,12 +1,12 @@
 # Strategy Group Handoff Validation Report
 
 Status: PASS
-Last updated: 2026-06-14
+Last updated: 2026-06-16
 
 ## Scope
 
-This report validates the first Strategy Research v3 StrategyGroup handoff
-batch for main-control review.
+This report validates the Strategy Research v3 StrategyGroup handoff batch for
+main-control review.
 
 Validated directory:
 
@@ -27,12 +27,13 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 | `PMR-001` | `PASS` | `7` | `short,long_context_only` | `0` |
 | `SOR-001` | `PASS` | `9` | `short,long_revival_only` | `0` |
 | `TEQ-001` | `PASS` | `10` | `long` | `0` |
+| `VCB-001` | `PASS` | `7` | `long` | `0` |
 
 Summary:
 
 ```text
-Validated handoffs: 5
-Passed: 5
+Validated handoffs: 6
+Passed: 6
 Failed: 0
 ```
 
@@ -40,18 +41,18 @@ Failed: 0
 
 | Required Field | Coverage |
 | --- | ---: |
-| `strategy_group_id` | `5/5` |
-| `version` | `5/5` |
-| `supported_symbols` | `5/5` |
-| `supported_sides` | `5/5` |
-| `signal_ready_rule` | `5/5` |
-| `required_facts` | `5/5` |
-| `risk_defaults` | `5/5` |
-| `hard_stops` | `5/5` |
-| `sample_signal_packet` | `5/5` |
-| `sample_no_signal_packet` | `5/5` |
-| `sample_stale_signal_packet` | `5/5` |
-| `sample_conflict_packet` | `5/5` |
+| `strategy_group_id` | `6/6` |
+| `version` | `6/6` |
+| `supported_symbols` | `6/6` |
+| `supported_sides` | `6/6` |
+| `signal_ready_rule` | `6/6` |
+| `required_facts` | `6/6` |
+| `risk_defaults` | `6/6` |
+| `hard_stops` | `6/6` |
+| `sample_signal_packet` | `6/6` |
+| `sample_no_signal_packet` | `6/6` |
+| `sample_stale_signal_packet` | `6/6` |
+| `sample_conflict_packet` | `6/6` |
 
 ## Commands Run
 
@@ -65,7 +66,7 @@ python3 -m py_compile scripts/validate_strategy_group_handoffs.py
 
 ```text
 tests/unit/test_strategy_group_handoff_validator.py .. [100%]
-2 passed in 0.04s
+2 passed
 ```
 
 ## Boundary Check
