@@ -39,6 +39,7 @@ index.
 | P0 First Bounded Live Order Closure | First selected StrategyGroup + tiny risk real order completes through official gates, finalize, reconciliation, settlement, and review | Main runtime window | active, waiting for fresh signal | On fresh signal, pause lower tracks and drive RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer -> real submit -> close loop |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher packets |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
+| P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
@@ -227,6 +228,43 @@ project waits for a real signal:
 | Reconciliation | No active position, no open order, no mismatch blockers |
 | Budget settlement | Reservation is released or accounted |
 | Review record | Runtime outcome is recorded without requiring Owner action |
+
+## P0 Subgoal: Shared Runtime Pipeline Validation
+
+### Purpose
+
+The pilot must prove that current blockers are mostly shared runtime-chain
+issues, not per-strategy execution implementations. StrategyGroups provide
+signal, facts, symbols, side, risk boundary, and hard stops. They must not each
+own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
+
+### Validation Model
+
+| Area | Ownership | Repeated per StrategyGroup |
+| --- | --- | --- |
+| Fresh signal to candidate/auth | Runtime main chain | No |
+| RequiredFacts readiness read | Runtime facts layer | No |
+| Attempt renewal and admission | Runtime admission | No |
+| FinalGate call order | Execution safety | No |
+| Operation Layer evidence relay | Execution layer | No |
+| Active position / open order / protection / budget / duplicate-submit checks | Account, protection, budget, idempotency layers | No |
+| Post-submit finalize / reconciliation / settlement | Closed-loop layer | No |
+| Owner Console source state | Product readmodel | No |
+| Supported symbols and sides | StrategyGroup handoff | Yes |
+| Signal-ready rule | StrategyGroup handoff | Yes |
+| Strategy RequiredFacts definition | StrategyGroup handoff | Yes |
+| Risk defaults and hard stops | StrategyGroup handoff | Yes |
+| Conflict policy | StrategyGroup handoff plus portfolio policy | Yes |
+
+### Acceptance
+
+| Requirement | Expected result |
+| --- | --- |
+| Shared chain | MPG / TEQ / FBS / PMR / SOR enter the same runtime admission, candidate/auth, FinalGate, Operation Layer, finalize, reconcile, and settle code path |
+| Strategy-specific inputs | Each StrategyGroup only changes handoff contract inputs: signal packet, RequiredFacts, symbol, side, risk defaults, hard stops, and conflict rules |
+| Dry-run coverage | The dry-run audit chain includes at least one pass-like fixture and one blocked fixture that are not SOR-only |
+| No execution fork | No StrategyGroup adds a custom FinalGate, Operation Layer, order lifecycle, exchange gateway, or settlement implementation |
+| Owner Console | The UI/readmodel shows StrategyGroup differences as product state, not separate packet-reading workflows |
 
 ### Mock Dispatcher Close-Loop
 
