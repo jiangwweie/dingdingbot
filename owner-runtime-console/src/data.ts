@@ -44,6 +44,30 @@ const baseFundPool: FundPoolSummary = {
   fundsLocked: true,
 };
 
+const dryRunRequiredChecks = {
+  no_signal_waiting_path: true,
+  fresh_signal_pass_path: true,
+  required_facts_missing_path: true,
+  active_position_conflict_path: true,
+  open_order_conflict_path: true,
+  protection_missing_path: true,
+  budget_missing_path: true,
+  duplicate_submit_risk_path: true,
+  symbol_scope_mismatch_path: true,
+  side_scope_mismatch_path: true,
+  sizing_scope_mismatch_path: true,
+};
+
+const dryRunAuditSummary = {
+  scenario_count: 7,
+  required_checks_present: true,
+  dangerous_effects_absent: true,
+  disabled_smoke_is_real_execution_proof: false,
+  shared_runtime_pipeline_checked: true,
+  selected_strategygroup_dispatch_guard_checked: true,
+  required_checks: dryRunRequiredChecks,
+};
+
 const baseSourceHealth = {
   catalog: { status: "ready", label: "策略组目录可用" },
   runtime: { status: "ready", label: "运行状态可用" },
@@ -55,7 +79,7 @@ const baseSourceHealth = {
   protection: { status: "ready", label: "保护正常" },
   reconciliation: { status: "ready", label: "对账正常" },
   operationAudit: { status: "ready", label: "审计详情可用" },
-  runtimeDryRunAudit: { status: "ready", label: "审计演练正常" },
+  runtimeDryRunAudit: { status: "ready", label: "审计演练正常", summary: dryRunAuditSummary },
   realOrderReadiness: { status: "ready_empty", label: "等待机会" },
 } as const;
 
@@ -374,7 +398,12 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
     protection: { status: ready ? "ready" : "unavailable", label: ready ? "保护正常" : "保护状态暂不可用", detail: "mock_protection" },
     reconciliation: { status: ready ? "ready" : "degraded", label: ready ? "对账正常" : "对账详情暂不可用", detail: "mock_reconciliation" },
     operation_audit: { status: ready ? "ready_empty" : "degraded", label: ready ? "暂无审计动作" : "审计详情暂不可用", detail: "mock_operation_audit" },
-    runtime_dry_run_audit: { status: ready ? "ready" : "degraded", label: ready ? "审计演练正常" : "审计演练暂不可用", detail: "mock_runtime_dry_run_audit" },
+    runtime_dry_run_audit: {
+      status: ready ? "ready" : "degraded",
+      label: ready ? "审计演练正常" : "审计演练暂不可用",
+      detail: "mock_runtime_dry_run_audit",
+      summary: ready ? dryRunAuditSummary : undefined,
+    },
     real_order_readiness: { status: ready ? "ready_empty" : "degraded", label: ready ? "等待机会" : "实盘边界待刷新", detail: "mock_real_order_readiness" },
   } as const;
 
