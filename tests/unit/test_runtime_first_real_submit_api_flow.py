@@ -27,6 +27,8 @@ class _FakeClient:
         candidate_usage_status: str = "unused",
         evidence_blockers: list[str] | None = None,
         shadow_plan_blockers: list[str] | None = None,
+        local_result_status: str = "registered_created_local_orders",
+        local_result_blockers: list[str] | None = None,
         handoff_http_status: int = 200,
         handoff_blockers: list[str] | None = None,
         disabled_action_http_status: int = 200,
@@ -40,6 +42,8 @@ class _FakeClient:
         self.candidate_usage_status = candidate_usage_status
         self.evidence_blockers = evidence_blockers or []
         self.shadow_plan_blockers = shadow_plan_blockers or []
+        self.local_result_status = local_result_status
+        self.local_result_blockers = local_result_blockers or []
         self.handoff_http_status = handoff_http_status
         self.handoff_blockers = handoff_blockers or []
         self.disabled_action_http_status = disabled_action_http_status
@@ -200,7 +204,14 @@ class _FakeClient:
         if "runtime-execution-local-registration-enablements" in path:
             return {"http_status": 200, "body": {"decision_id": "local-enable-1", "status": "ready_for_local_registration_action"}}
         if "runtime-execution-order-lifecycle-adapter-results" in path:
-            return {"http_status": 200, "body": {"adapter_result_id": "local-result-1", "status": "registered_created_local_orders"}}
+            return {
+                "http_status": 200,
+                "body": {
+                    "adapter_result_id": "local-result-1",
+                    "status": self.local_result_status,
+                    "blockers": self.local_result_blockers,
+                },
+            }
         if "runtime-execution-exchange-gateway-readiness" in path:
             return {"http_status": 200, "body": {"readiness_id": "gateway-ready-1", "status": "ready_for_manual_gateway_binding"}}
         if "runtime-execution-exchange-submit-action-authorizations" in path:
@@ -625,6 +636,42 @@ def test_arm_standing_authorized_scoped_evidence_prep_records_operation_layer_id
     assert any("runtime-execution-attempt-mutations" in path for path in paths)
     assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
+
+
+def test_arm_stops_before_exchange_evidence_when_local_registration_is_blocked():
+    client = _FakeClient(
+        local_result_status="blocked",
+        local_result_blockers=[
+            "trusted_submit_fact_snapshot_not_fresh_enough",
+            "persistent_duplicate_submit_lock_required",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert "local_registration_result_not_ready_for_exchange_submit" in report["blockers"]
+    assert "trusted_submit_fact_snapshot_not_fresh_enough" in report["blockers"]
+    assert "persistent_duplicate_submit_lock_required" in report["blockers"]
+    assert report["ids"]["local_registration_adapter_result_id"] == "local-result-1"
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any(
+        "runtime-execution-exchange-submit-action-authorizations" in path
+        for path in paths
+    )
+    assert not any("runtime-execution-exchange-submit-enablements" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
     assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
 
 

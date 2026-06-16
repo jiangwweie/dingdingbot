@@ -793,6 +793,15 @@ class FirstRealSubmitApiFlow:
             "local_registration_adapter_result_id",
             _body(local_result).get("adapter_result_id"),
         )
+        local_result_body = _body(local_result)
+        if (
+            local_result_body.get("status") != "registered_created_local_orders"
+            or local_result_body.get("blockers")
+        ):
+            self.state.add_blockers(
+                ["local_registration_result_not_ready_for_exchange_submit"]
+            )
+            return
         if not self._config.arm_exchange_submit_adapter:
             return
         if (

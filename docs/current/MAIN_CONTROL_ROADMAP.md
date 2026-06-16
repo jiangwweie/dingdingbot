@@ -136,10 +136,21 @@ fresh signal
 | --- | --- |
 | Default arm preview | Still stops before attempt consumption |
 | Standing evidence prep | Records bounded attempt/local-registration/exchange-arm evidence only when explicitly enabled |
+| Local registration blocked | Stops before exchange-submit evidence calls and emits a reviewable blocker instead of noisy `RuntimeExecutionOrderLifecycleAdapterResult not found` 404s |
 | Disabled smoke | Can prove the action endpoint without exchange write |
 | FinalGate | Must rerun at action time before real Operation Layer action |
 | Operation Layer | Must use official endpoint and required evidence IDs |
 | Safety | No secret mutation, profile expansion, sizing change, withdrawal, transfer, stale-fact execution, duplicate submit, or conflicting position/order execution |
+
+### 2026-06-16 Checkpoint
+
+| Item | Result |
+| --- | --- |
+| Runtime renewal RCA | New profile-confirmation runtime drafts now reset `attempts_used=0` and `budget_reserved=0` instead of inheriting exhausted proposal counters |
+| Fresh signal chain | Tokyo reached `ready_for_action_time_final_gate` for the fresh SOR signal after bounded runtime renewal |
+| Operation Layer RCA | Exchange-submit evidence prep was incorrectly continuing after local registration remained blocked; the downstream 404 was a symptom, not the root blocker |
+| Flow repair | Arm flow now stops before exchange-submit action/enablement/adapter calls when local registration result is not `registered_created_local_orders` |
+| Safety | Blocked local registration remains reviewable project progress, but it is not treated as a real-order green light |
 
 ## P0 Subgoal: Runtime Dry-Run Audit Chain
 
