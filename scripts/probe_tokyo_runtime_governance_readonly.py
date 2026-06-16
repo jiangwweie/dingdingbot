@@ -48,15 +48,27 @@ SocketConnector = Callable[[str, int, float], None]
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    report = build_tokyo_probe_report(
-        host=args.host,
-        deploy_root=args.deploy_root,
-        api_base=args.api_base,
-        expected_current_head=args.expected_current_head,
-        expected_migration_count=args.expected_migration_count,
-        expected_latest_migration=args.expected_latest_migration,
-        connect_timeout_seconds=args.connect_timeout_seconds,
-    )
+    try:
+        report = build_tokyo_probe_report(
+            host=args.host,
+            deploy_root=args.deploy_root,
+            api_base=args.api_base,
+            expected_current_head=args.expected_current_head,
+            expected_migration_count=args.expected_migration_count,
+            expected_latest_migration=args.expected_latest_migration,
+            connect_timeout_seconds=args.connect_timeout_seconds,
+        )
+    except TokyoProbeError as exc:
+        report = build_tokyo_probe_error_report(
+            host=args.host,
+            deploy_root=args.deploy_root,
+            api_base=args.api_base,
+            expected_current_head=args.expected_current_head,
+            expected_migration_count=args.expected_migration_count,
+            expected_latest_migration=args.expected_latest_migration,
+            connect_timeout_seconds=args.connect_timeout_seconds,
+            error=exc,
+        )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
@@ -270,6 +282,66 @@ def build_tokyo_connectivity_probe(
     }
 
 
+def build_tokyo_probe_error_report(
+    *,
+    host: str,
+    deploy_root: str,
+    api_base: str,
+    expected_current_head: str | None,
+    expected_migration_count: int | None,
+    expected_latest_migration: str | None,
+    connect_timeout_seconds: int,
+    error: Exception,
+) -> dict[str, Any]:
+    error_text = str(error)
+    blockers = [_classify_probe_error(error_text)]
+    return {
+        "status": "blocked",
+        "scope": "tokyo_runtime_governance_readonly_probe",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "inputs": {
+            "host": host,
+            "deploy_root": deploy_root,
+            "api_base": api_base,
+            "expected_current_head": expected_current_head,
+            "expected_migration_count": expected_migration_count,
+            "expected_latest_migration": expected_latest_migration,
+            "connect_timeout_seconds": connect_timeout_seconds,
+        },
+        "facts": {
+            "host": None,
+            "user": None,
+            "current_realpath": None,
+            "release_identity_source": None,
+            "release_manifest": None,
+            "current_head": None,
+            "current_status": None,
+            "migration_count": None,
+            "latest_migration": None,
+            "health": {"http_status": None, "body": "", "body_json": None},
+            "process_snapshot": "",
+            "probe_error": error_text,
+        },
+        "checks": {
+            "ready_for_controlled_deploy_preflight": False,
+            "blockers": blockers,
+            "warnings": [],
+            "dirty_status_lines": [],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
+
+
 def evaluate_probe_checks(
     *,
     facts: dict[str, Any],
@@ -337,6 +409,19 @@ def evaluate_probe_checks(
         "warnings": warnings,
         "dirty_status_lines": dirty_lines,
     }
+
+
+def _classify_probe_error(error_text: str) -> str:
+    normalized = error_text.lower()
+    if "permission denied" in normalized and "publickey" in normalized:
+        return "tokyo_ssh_publickey_denied"
+    if "could not resolve hostname" in normalized or "name or service not known" in normalized:
+        return "tokyo_dns_resolution_failed"
+    if "timed out" in normalized or "operation timed out" in normalized:
+        return "tokyo_ssh_timeout"
+    if "connection refused" in normalized:
+        return "tokyo_ssh_connection_refused"
+    return "tokyo_readonly_probe_failed"
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -466,9 +551,21 @@ def _remote_release_identity(
         runner=runner,
     )
     if manifest_result.returncode != 0 or not manifest_result.stdout.strip():
+        detail = "; ".join(
+            item
+            for item in [
+                f"git_error={head_result.stderr or head_result.stdout}".strip(),
+                (
+                    "manifest_error="
+                    f"{manifest_result.stderr or manifest_result.stdout}"
+                ).strip(),
+            ]
+            if item and not item.endswith("=")
+        )
         raise TokyoProbeError(
             "remote release identity unavailable: git rev-parse failed and "
             ".brc-release-manifest.json was not readable"
+            + (f"; {detail}" if detail else "")
         )
     try:
         manifest = json.loads(manifest_result.stdout)
@@ -596,6 +693,8 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(f"latest_migration={facts['latest_migration']}")
     print(f"health_http_status={health['http_status']}")
     print(f"health_body={health['body']}")
+    if facts.get("probe_error"):
+        print(f"probe_error={facts['probe_error']}")
     if checks["blockers"]:
         print("blockers=" + ",".join(checks["blockers"]))
     if checks["warnings"]:
@@ -607,8 +706,4 @@ def _print_human_report(report: dict[str, Any]) -> None:
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except TokyoProbeError as exc:
-        print(f"tokyo_probe_error={exc}", file=sys.stderr)
-        raise SystemExit(2)
+    raise SystemExit(main())

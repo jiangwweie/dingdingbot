@@ -169,6 +169,84 @@ def test_tokyo_connectivity_probe_classifies_reachable_tcp_port():
     assert calls == [("127.0.0.1", 22, 2.0)]
 
 
+def test_tokyo_probe_error_report_classifies_publickey_denied_without_side_effects():
+    module = _load_module()
+
+    report = module.build_tokyo_probe_error_report(
+        host="ubuntu@43.133.176.150",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head="abc123",
+        expected_migration_count=84,
+        expected_latest_migration="latest.py",
+        connect_timeout_seconds=8,
+        error=module.TokyoProbeError(
+            "remote command failed: ubuntu@43.133.176.150: "
+            "Permission denied (publickey)."
+        ),
+    )
+
+    assert report["status"] == "blocked"
+    assert report["checks"]["ready_for_controlled_deploy_preflight"] is False
+    assert report["checks"]["blockers"] == ["tokyo_ssh_publickey_denied"]
+    assert "Permission denied (publickey)" in report["facts"]["probe_error"]
+    assert all(value is False for value in report["safety_invariants"].values())
+
+
+def test_tokyo_probe_json_cli_emits_structured_packet_when_probe_fails(
+    monkeypatch,
+    capsys,
+):
+    module = _load_module()
+
+    def fail_probe(**kwargs):
+        raise module.TokyoProbeError(
+            "remote command failed: Permission denied (publickey)."
+        )
+
+    monkeypatch.setattr(module, "build_tokyo_probe_report", fail_probe)
+
+    rc = module.main(["--json", "--host", "tokyo", "--connect-timeout-seconds", "1"])
+
+    captured = capsys.readouterr()
+    packet = json.loads(captured.out)
+    assert captured.err == ""
+    assert rc == 2
+    assert packet["scope"] == "tokyo_runtime_governance_readonly_probe"
+    assert packet["status"] == "blocked"
+    assert packet["checks"]["blockers"] == ["tokyo_ssh_publickey_denied"]
+    assert packet["facts"]["probe_error"] == (
+        "remote command failed: Permission denied (publickey)."
+    )
+
+
+def test_tokyo_probe_preserves_release_identity_ssh_errors_for_classification():
+    module = _load_module()
+
+    def runner(command):
+        return module.CommandResult("", "Permission denied (publickey).\n", 255)
+
+    try:
+        module.build_tokyo_probe_report(
+            host="tokyo",
+            deploy_root="~/brc-deploy",
+            api_base="http://127.0.0.1:18080",
+            expected_current_head="abc123",
+            expected_migration_count=84,
+            expected_latest_migration="latest.py",
+            connect_timeout_seconds=1,
+            runner=runner,
+        )
+    except module.TokyoProbeError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected TokyoProbeError")
+
+    assert "remote release identity unavailable" in error
+    assert "Permission denied (publickey)" in error
+    assert module._classify_probe_error(error) == "tokyo_ssh_publickey_denied"
+
+
 def test_tokyo_probe_builds_report_with_fake_runner_and_home_expanding_paths():
     module = _load_module()
     commands = []

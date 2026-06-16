@@ -508,6 +508,20 @@ showing `部署通道未检查` immediately after a successful bounded deploy.
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Deploy-channel status publication is a report-packet write only; deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Readonly Probe Structured Failure Checkpoint
+
+The Tokyo readonly probe now emits a structured JSON packet even when SSH
+read-only collection fails. This keeps automation and Owner Console source
+readiness from treating deployment-channel failures as opaque runtime failures.
+
+| Item | Result |
+| --- | --- |
+| Public-key failure | `probe_tokyo_runtime_governance_readonly.py --json` returns `status=blocked` with `tokyo_ssh_publickey_denied` |
+| Error preservation | Release-identity fallback preserves underlying SSH stderr so the blocker can be classified |
+| Automation contract | JSON output remains parseable on failure; stderr text is no longer the only evidence |
+| Current observed local result | `status=blocked`, `checks.blockers=["tokyo_ssh_publickey_denied"]` |
+| Safety | Readonly probe failure handling does not modify remote files, read env/secrets, run migrations, restart services, create orders, call OrderLifecycle, call exchange APIs, withdraw, or transfer |
+
 ### 2026-06-17 Owner Console UI Validation Checkpoint
 
 While the selected StrategyGroup runtime is waiting for a fresh signal, the
