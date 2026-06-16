@@ -5927,6 +5927,98 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "dangerous_effects": [],
             },
         },
+        "strategygroup-runtime-goal-status.json": {
+            "scope": "strategygroup_runtime_goal_status",
+            "status": "waiting_for_signal",
+            "owner_state": {
+                "label": "等待机会",
+                "detail": "系统健康，当前等待市场机会",
+                "next_safe_checkpoint": "continue_watcher_observation",
+            },
+            "blockers": [],
+            "checks": {
+                "fresh_signal_present": False,
+                "live_facts_ready": True,
+                "selected_strategygroup_scope_ready": True,
+            },
+            "real_order_boundary": {
+                "ready_for_real_order_action": False,
+            },
+            "real_order_readiness_matrix": [
+                {
+                    "key": "selected_strategygroup_scope",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "fresh_signal",
+                    "status": "waiting_for_market",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "required_facts",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "candidate_authorization",
+                    "status": "waiting_for_market",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "action_time_finalgate",
+                    "status": "waiting_for_market",
+                    "blocker_class": "waiting_for_market",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "official_operation_layer",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "active_position_open_order",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "protection",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "budget",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "duplicate_submit",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "symbol_side_notional_leverage_scope",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "hard_safety",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+            ],
+        },
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
@@ -5952,11 +6044,25 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["reconciliation"] == "对账正常"
     assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
     assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
+    assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
     assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
+    assert payload["data"]["source_health"]["real_order_readiness"]["status"] == "ready_empty"
+    assert payload["data"]["real_order_readiness"]["status"] == "waiting_for_market"
+    assert payload["data"]["real_order_readiness"]["ready_for_real_order_action"] is False
+    assert payload["data"]["real_order_readiness"]["pass_count"] == 8
+    assert payload["data"]["real_order_readiness"]["waiting_count"] == 4
+    assert payload["data"]["real_order_readiness"]["blocked_count"] == 0
+    assert payload["data"]["real_order_readiness"]["submit_blocking_keys"] == [
+        "fresh_signal",
+        "candidate_authorization",
+        "action_time_finalgate",
+        "official_operation_layer",
+    ]
+    assert len(payload["data"]["real_order_readiness"]["matrix"]) == 12
     assert len(payload["data"]["strategy_groups"]) == 5
     assert payload["data"]["frontend_contract"] == {
         "single_api_source": True,
@@ -5988,6 +6094,14 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "real_order_boundary": {
                     "ready_for_real_order_action": False,
                 },
+                "real_order_readiness_matrix": [
+                    {
+                        "key": "hard_safety",
+                        "status": "pass",
+                        "blocker_class": "none",
+                        "blocks_real_submit": False,
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -6021,6 +6135,12 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "strategygroup_runtime_goal_real_order_ready"
         ]
         is False
+    )
+    assert (
+        degraded_payload["data"]["raw_status_refs"][
+            "strategygroup_runtime_goal_readiness_matrix_count"
+        ]
+        == 1
     )
 
 

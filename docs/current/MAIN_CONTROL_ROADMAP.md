@@ -74,6 +74,7 @@ reconciliation detail state
 operation audit detail state
 runtime dry-run audit state
 StrategyGroup runtime goal status
+real-order readiness detail state
 ```
 
 ### Required Artifacts
@@ -97,6 +98,7 @@ StrategyGroup runtime goal status
 | Watcher waiting for signal | Owner state is `waiting_for_opportunity`, Owner language is `等待机会` |
 | Runtime dry-run audit passed | Source status is `ready`, Owner language is `审计演练正常` |
 | Runtime goal status reports liveness or safety degradation | Owner state is `needs_intervention` or `temporarily_unavailable`, not `waiting_for_opportunity` |
+| Real-order readiness matrix available | `real_order_readiness` summarizes pass/waiting/blocked counts and submit-blocking keys without requiring raw packet reading |
 | Reconciliation/audit detail missing | Detail degrades without hiding StrategyGroups |
 | Safety | No order, exchange write, FinalGate bypass, Operation Layer bypass, secret mutation, profile expansion, sizing change, withdrawal, or transfer |
 
@@ -110,6 +112,7 @@ StrategyGroup runtime goal status
 | Visual governance | Strategy rows show one primary health chip plus one Owner-readable summary sentence instead of a four-chip evidence wall |
 | Verification | Python source-readiness/dry-run tests, frontend build, real-backend smoke, normal smoke, state smoke, and visual QA passed |
 | Runtime goal overlay | Source-readiness API now reads `strategygroup-runtime-goal-status.json`; `runtime_liveness_degraded` overrides the Owner state to `需要介入` so the console does not mislabel liveness repair as market waiting |
+| Real-order readiness detail | Source-readiness API now forwards `real_order_readiness` from goal-status so the console can distinguish waiting-for-market from submit-blocking safety conditions through one API |
 
 ### 2026-06-17 Selected Scope Refresh Checkpoint
 

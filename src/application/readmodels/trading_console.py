@@ -7187,6 +7187,9 @@ def _owner_console_source_readiness_packet(
     runtime_goal_status_source = _owner_console_runtime_goal_status_source(
         runtime_goal_status
     )
+    real_order_readiness = _owner_console_real_order_readiness(
+        runtime_goal_status
+    )
     source_health = {
         "strategy_catalog": _owner_console_detail_source(
             status=catalog_status,
@@ -7216,6 +7219,7 @@ def _owner_console_source_readiness_packet(
         "operation_audit": operation_audit_source,
         "runtime_dry_run_audit": dry_run_audit_source,
         "strategygroup_runtime_goal_status": runtime_goal_status_source,
+        "real_order_readiness": real_order_readiness["source_health"],
     }
     critical_unavailable = [
         name
@@ -7264,9 +7268,11 @@ def _owner_console_source_readiness_packet(
             "operation_audit": operation_audit_source["owner_label"],
             "runtime_dry_run_audit": dry_run_audit_source["owner_label"],
             "runtime_goal_status": runtime_goal_status_source["owner_label"],
+            "real_order_readiness": real_order_readiness["owner_label"],
         },
         "strategy_groups": rows,
         "source_health": source_health,
+        "real_order_readiness": real_order_readiness,
         "critical_unavailable_sources": critical_unavailable,
         "frontend_contract": {
             "single_api_source": True,
@@ -7291,6 +7297,11 @@ def _owner_console_source_readiness_packet(
                 if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
                 else None
             ),
+            "strategygroup_runtime_goal_readiness_matrix_count": len(
+                runtime_goal_status.get("real_order_readiness_matrix") or []
+            )
+            if isinstance(runtime_goal_status.get("real_order_readiness_matrix"), list)
+            else 0,
         },
         "safety_invariants": {
             "read_model_only": True,
@@ -7688,6 +7699,109 @@ def _owner_console_runtime_goal_status_source(
         owner_label="暂不可用",
         reason=status or "strategygroup_runtime_goal_status_unknown",
     )
+
+
+def _owner_console_real_order_readiness(
+    runtime_goal_status: dict[str, Any],
+) -> dict[str, Any]:
+    if not runtime_goal_status:
+        return {
+            "status": "unavailable",
+            "owner_label": "实盘边界暂不可用",
+            "owner_detail": "目标状态源不可用",
+            "ready_for_real_order_action": False,
+            "pass_count": 0,
+            "waiting_count": 0,
+            "blocked_count": 0,
+            "submit_blocking_keys": [],
+            "next_safe_checkpoint": "refresh_runtime_goal_status",
+            "matrix": [],
+            "source_health": _owner_console_detail_source(
+                status="unavailable",
+                owner_label="实盘边界暂不可用",
+                reason="strategygroup_runtime_goal_status_missing",
+            ),
+        }
+
+    matrix = runtime_goal_status.get("real_order_readiness_matrix")
+    matrix_rows = [item for item in matrix if isinstance(item, dict)] if isinstance(matrix, list) else []
+    ready_for_real_order = bool(
+        (runtime_goal_status.get("real_order_boundary") or {}).get(
+            "ready_for_real_order_action"
+        )
+        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+        else False
+    )
+    owner_state = (
+        runtime_goal_status.get("owner_state")
+        if isinstance(runtime_goal_status.get("owner_state"), dict)
+        else {}
+    )
+    next_checkpoint = str(
+        owner_state.get("next_safe_checkpoint")
+        or owner_state.get("next_action")
+        or "review_runtime_goal_status"
+    )
+    submit_blocking_keys = [
+        str(item.get("key"))
+        for item in matrix_rows
+        if item.get("blocks_real_submit") is True
+    ]
+    blocked_count = sum(1 for item in matrix_rows if item.get("status") == "blocked")
+    waiting_count = sum(
+        1
+        for item in matrix_rows
+        if str(item.get("status") or "").startswith("waiting")
+    )
+    pass_count = sum(1 for item in matrix_rows if item.get("status") == "pass")
+    if ready_for_real_order:
+        status = "ready"
+        owner_label = "实盘边界通过"
+        owner_detail = "官方链路已到达实盘动作边界"
+        source_status = "ready_nonempty"
+    elif not matrix_rows:
+        status = "degraded"
+        owner_label = "实盘边界待刷新"
+        owner_detail = "readiness matrix 尚未生成"
+        source_status = "degraded"
+    elif submit_blocking_keys == ["fresh_signal"] or (
+        "fresh_signal" in submit_blocking_keys
+        and not blocked_count
+        and str(runtime_goal_status.get("status") or "")
+        in {"waiting_for_signal", "waiting_for_market", "watching_no_signal"}
+    ):
+        status = "waiting_for_market"
+        owner_label = "等待机会"
+        owner_detail = "实盘边界健康，等待 fresh signal"
+        source_status = "ready_empty"
+    elif blocked_count:
+        status = "blocked"
+        owner_label = "暂不可用"
+        owner_detail = "存在提交前阻断项"
+        source_status = "degraded"
+    else:
+        status = "waiting_for_chain"
+        owner_label = "处理中"
+        owner_detail = "实盘边界尚未完成自动链路"
+        source_status = "ready_nonempty"
+
+    return {
+        "status": status,
+        "owner_label": owner_label,
+        "owner_detail": owner_detail,
+        "ready_for_real_order_action": ready_for_real_order,
+        "pass_count": pass_count,
+        "waiting_count": waiting_count,
+        "blocked_count": blocked_count,
+        "submit_blocking_keys": submit_blocking_keys,
+        "next_safe_checkpoint": next_checkpoint,
+        "matrix": matrix_rows,
+        "source_health": _owner_console_detail_source(
+            status=source_status,
+            owner_label=owner_label,
+            reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
+        ),
+    }
 
 
 def _owner_console_apply_runtime_goal_status_overlay(

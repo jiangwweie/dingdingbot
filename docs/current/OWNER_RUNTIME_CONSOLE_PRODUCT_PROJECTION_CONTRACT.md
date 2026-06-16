@@ -64,6 +64,7 @@ The frontend should not bind to the older endpoint as its product surface.
 | `ownerAttention` | Whether the Owner needs to act |
 | `fundPool` | Safe budget pool shown to the Owner |
 | `sourceHealth` | Backend-source readiness mapped into product states |
+| `realOrderReadiness` | Detail/readmodel surface for real-order boundary pass/waiting/blocked counts |
 | `importantChanges` | Short product events worth showing on the homepage |
 | `noActionGuarantee` | Explicit read-only and no-action guarantees |
 
