@@ -57,6 +57,7 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     text = DROPIN_PATH.read_text(encoding="utf-8")
 
     assert "runtime_signal_watcher_resume_dispatcher.py" in text
+    assert "--selected-strategy-group-id ${BRC_SELECTED_STRATEGY_GROUP_ID}" in text
     assert "--execute-preflight" in text
     assert "--execute-operation-layer-submit" in text
     assert "--execute-post-submit-finalize" in text

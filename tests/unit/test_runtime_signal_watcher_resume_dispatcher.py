@@ -63,6 +63,27 @@ def _resume_pack(status: str = "waiting_for_market") -> dict:
     }
 
 
+def _with_runtime_summary(
+    resume: dict,
+    *,
+    strategy_group_id: str = "MPG-001",
+    runtime_instance_id: str = "runtime-mpg-1",
+) -> dict:
+    resume["runtime_instance_id"] = runtime_instance_id
+    resume["runtime_signal_summaries"] = [
+        {
+            "runtime_instance_id": runtime_instance_id,
+            "strategy_family_id": strategy_group_id,
+            "strategy_family_version_id": f"{strategy_group_id}-v0",
+            "signal_input_json": resume.get("signal_input_json"),
+            "shadow_candidate_id": resume.get("shadow_candidate_id"),
+            "prepared_authorization_id": resume.get("prepared_authorization_id"),
+            "status": resume.get("status"),
+        }
+    ]
+    return resume
+
+
 def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
     handoff_path = tmp_path / "handoff.json"
     handoff_path.write_text(
@@ -71,6 +92,8 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
                 "api_payload": {
                     "handoff_id": "handoff-runtime-mpg-1",
                     "runtime_instance_id": "runtime-mpg-1",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_group_id": "MPG-001",
                     "readiness_packet_id": "readiness-1",
                     "status": "ready_for_official_submit_call",
                 }
@@ -231,6 +254,7 @@ def test_dispatcher_waiting_for_market_is_no_action():
     packet = build_dispatch_packet(
         resume_pack=_resume_pack(),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
+        selected_strategy_group_id="MPG-001",
     )
 
     assert packet["status"] == "waiting_for_market"
@@ -238,14 +262,18 @@ def test_dispatcher_waiting_for_market_is_no_action():
     assert packet["dispatch_action"] == "continue_watcher_observation"
     assert packet["dispatch_status"] == "no_action_continue_observation"
     assert packet["command_plan"] is None
+    assert packet["selected_strategy_group_id"] == "MPG-001"
     assert packet["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     packet = build_dispatch_packet(
-        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
+        selected_strategy_group_id="MPG-001",
     )
 
     assert packet["status"] == "ready_for_action_time_final_gate"
@@ -265,11 +293,55 @@ def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     assert command["exchange_write_called"] is False
 
 
+def test_dispatcher_blocks_actionable_resume_outside_selected_strategygroup_scope():
+    resume = _with_runtime_summary(
+        _resume_pack("ready_for_action_time_final_gate"),
+        strategy_group_id="SOR-001",
+        runtime_instance_id="runtime-sor-1",
+    )
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        selected_strategy_group_id="MPG-001",
+        execute_preflight=True,
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
+    assert packet["command_plan"] is None
+    assert packet["selected_strategy_group_id"] == "MPG-001"
+    assert packet["owner_state"]["blocked_at"] == "selected_strategygroup_scope"
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is False
+    assert packet["blockers"] == [
+        "selected_strategy_group_mismatch:expected=MPG-001:actual=SOR-001"
+    ]
+
+
+def test_dispatcher_blocks_actionable_resume_when_selected_scope_cannot_be_proven():
+    resume = _resume_pack("ready_for_action_time_final_gate")
+    resume["runtime_instance_id"] = None
+    resume["selected_runtime_instance_ids"] = ["runtime-mpg-1", "runtime-sor-1"]
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["dispatch_status"] == "blocked_by_selected_strategygroup_scope"
+    assert packet["blockers"] == ["missing_fact:selected_strategy_group_id_for_action"]
+    assert packet["command_plan"] is None
+
+
 def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
     packet = build_dispatch_packet(
         resume_pack=_fresh_authorization_resume_pack(tmp_path),
         source_path=Path("/tmp/post-signal-resume-pack.json"),
         api_base="http://127.0.0.1:18080",
+        selected_strategy_group_id="MPG-001",
     )
 
     assert packet["status"] == "ready_for_fresh_submit_authorization"

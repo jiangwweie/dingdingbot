@@ -203,6 +203,134 @@ def _missing_ready_fields(
     ]
 
 
+def _action_runtime_instance_ids(
+    *,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+) -> list[str]:
+    ids: list[str] = []
+    for value in (
+        action_time_resume.get("runtime_instance_id"),
+        resume_pack.get("runtime_instance_id"),
+        _dict(resume_pack.get("command_plan")).get("runtime_instance_id"),
+        _dict(resume_pack.get("operation_layer_command_plan")).get(
+            "runtime_instance_id"
+        ),
+    ):
+        text = str(value or "").strip()
+        if text and text not in ids:
+            ids.append(text)
+
+    selected_ids = [
+        str(item or "").strip()
+        for item in _list(resume_pack.get("selected_runtime_instance_ids"))
+        if str(item or "").strip()
+    ]
+    if not ids and len(selected_ids) == 1:
+        ids.append(selected_ids[0])
+    return ids
+
+
+def _action_strategy_group_ids(
+    *,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+) -> list[str]:
+    runtime_ids = set(
+        _action_runtime_instance_ids(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        )
+    )
+    signal_input_json = _first_text(
+        action_time_resume.get("signal_input_json"),
+        resume_pack.get("signal_input_json"),
+    )
+    prepared_authorization_id = _first_text(
+        action_time_resume.get("prepared_authorization_id"),
+        resume_pack.get("prepared_authorization_id"),
+        _dict(resume_pack.get("command_plan")).get("prepared_authorization_id"),
+        _dict(resume_pack.get("command_plan")).get("authorization_id"),
+    )
+    shadow_candidate_id = _first_text(
+        action_time_resume.get("shadow_candidate_id"),
+        resume_pack.get("shadow_candidate_id"),
+    )
+    ids: list[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in ids:
+            ids.append(text)
+
+    for source in (action_time_resume, resume_pack):
+        add(source.get("strategy_group_id"))
+        add(source.get("strategy_family_id"))
+
+    for item in _list(resume_pack.get("runtime_signal_summaries")):
+        if not isinstance(item, dict):
+            continue
+        matches_runtime = (
+            bool(runtime_ids)
+            and str(item.get("runtime_instance_id") or "").strip() in runtime_ids
+        )
+        matches_signal = (
+            bool(signal_input_json)
+            and str(item.get("signal_input_json") or "").strip() == signal_input_json
+        )
+        matches_authorization = (
+            bool(prepared_authorization_id)
+            and str(item.get("prepared_authorization_id") or "").strip()
+            == prepared_authorization_id
+        )
+        matches_candidate = (
+            bool(shadow_candidate_id)
+            and str(item.get("shadow_candidate_id") or "").strip()
+            == shadow_candidate_id
+        )
+        if matches_runtime or matches_signal or matches_authorization or matches_candidate:
+            add(item.get("strategy_group_id"))
+            add(item.get("strategy_family_id"))
+    return ids
+
+
+def _selected_scope_action_blockers(
+    *,
+    selected_strategy_group_id: str | None,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+) -> list[str]:
+    selected = str(selected_strategy_group_id or "").strip()
+    if not selected:
+        return []
+    action_groups = _action_strategy_group_ids(
+        resume_pack=resume_pack,
+        action_time_resume=action_time_resume,
+    )
+    return _selected_scope_group_blockers(
+        selected_strategy_group_id=selected,
+        action_groups=action_groups,
+    )
+
+
+def _selected_scope_group_blockers(
+    *,
+    selected_strategy_group_id: str | None,
+    action_groups: list[str],
+) -> list[str]:
+    selected = str(selected_strategy_group_id or "").strip()
+    if not selected:
+        return []
+    if not action_groups:
+        return ["missing_fact:selected_strategy_group_id_for_action"]
+    if selected not in action_groups:
+        return [
+            "selected_strategy_group_mismatch:"
+            f"expected={selected}:actual={','.join(action_groups)}"
+        ]
+    return []
+
+
 def _preflight_command_plan(
     *,
     api_base: str,
@@ -831,6 +959,7 @@ def build_dispatch_packet(
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
+    selected_strategy_group_id: str | None = None,
 ) -> dict[str, Any]:
     action_time_resume = _dict(resume_pack.get("action_time_resume"))
     owner_state = _dict(resume_pack.get("owner_state"))
@@ -880,6 +1009,39 @@ def build_dispatch_packet(
             dispatch_status="no_action_continue_observation",
             blockers=[],
             command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
+        )
+
+    selected_scope_blockers = (
+        []
+        if status in FRESH_AUTHORIZATION_STATUSES
+        else _selected_scope_action_blockers(
+            selected_strategy_group_id=selected_strategy_group_id,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        )
+    )
+    if selected_scope_blockers:
+        return _packet(
+            label=label,
+            source_path=source_path,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            owner_state={
+                "status": "needs_intervention",
+                "blocker_class": "hard_safety_stop",
+                "blocked_at": "selected_strategygroup_scope",
+                "blocked_reason": ",".join(selected_scope_blockers),
+                "next_safe_checkpoint": "review_selected_strategygroup_scope",
+                "downgrade_mode": "continue_watcher_observation_no_submit",
+            },
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_action=None,
+            dispatch_status="blocked_by_selected_strategygroup_scope",
+            blockers=base_blockers + selected_scope_blockers,
+            command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
         )
 
     if status in FRESH_AUTHORIZATION_STATUSES:
@@ -901,6 +1063,7 @@ def build_dispatch_packet(
                     "allowed_auto_actions_missing_fresh_authorization_binding"
                 ],
                 command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
             )
         handoff_json = _fresh_authorization_handoff_json_path(
             resume_pack=resume_pack,
@@ -924,6 +1087,7 @@ def build_dispatch_packet(
                 dispatch_status="blocked_by_missing_handoff_json",
                 blockers=base_blockers + ["missing_fact:handoff_json"],
                 command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
             )
         handoff_packet, handoff_error = _load_handoff_packet(handoff_json)
         if handoff_error:
@@ -944,6 +1108,44 @@ def build_dispatch_packet(
                 dispatch_status="blocked_by_invalid_handoff_json",
                 blockers=base_blockers + [handoff_error],
                 command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
+            )
+        handoff_groups = _action_strategy_group_ids(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        )
+        for value in (
+            handoff_packet.get("strategy_group_id"),
+            handoff_packet.get("strategy_family_id"),
+        ):
+            text = str(value or "").strip()
+            if text and text not in handoff_groups:
+                handoff_groups.append(text)
+        selected_scope_blockers = _selected_scope_group_blockers(
+            selected_strategy_group_id=selected_strategy_group_id,
+            action_groups=handoff_groups,
+        )
+        if selected_scope_blockers:
+            return _packet(
+                label=label,
+                source_path=source_path,
+                resume_pack=resume_pack,
+                action_time_resume=action_time_resume,
+                owner_state={
+                    "status": "needs_intervention",
+                    "blocker_class": "hard_safety_stop",
+                    "blocked_at": "selected_strategygroup_scope",
+                    "blocked_reason": ",".join(selected_scope_blockers),
+                    "next_safe_checkpoint": "review_selected_strategygroup_scope",
+                    "downgrade_mode": "continue_watcher_observation_no_submit",
+                },
+                status="blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_action=None,
+                dispatch_status="blocked_by_selected_strategygroup_scope",
+                blockers=base_blockers + selected_scope_blockers,
+                command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
             )
         runtime_instance_id = _first_text(
             handoff_packet.get("runtime_instance_id"),
@@ -968,6 +1170,7 @@ def build_dispatch_packet(
                 dispatch_status="blocked_by_missing_runtime_instance_id",
                 blockers=base_blockers + ["missing_fact:runtime_instance_id"],
                 command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
             )
         requested_authorization_id = _first_text(
             action_time_resume.get("requested_fresh_submit_authorization_id"),
@@ -995,6 +1198,7 @@ def build_dispatch_packet(
                 handoff_json=handoff_json,
                 requested_fresh_submit_authorization_id=requested_authorization_id,
             ),
+            selected_strategy_group_id=selected_strategy_group_id,
         )
         if not execute_preflight:
             return packet
@@ -1044,6 +1248,7 @@ def build_dispatch_packet(
                         resume_pack.get("finalgate_preflight_result")
                     ) or None,
                     operation_layer_command_plan=None,
+                    selected_strategy_group_id=selected_strategy_group_id,
                 )
             operation_layer_command_plan = _operation_layer_command_plan(
                 authorization_id=authorization_id,
@@ -1069,6 +1274,7 @@ def build_dispatch_packet(
                 resume_pack.get("finalgate_preflight_result")
             ) or None,
             operation_layer_command_plan=operation_layer_command_plan,
+            selected_strategy_group_id=selected_strategy_group_id,
         )
         packet = _packet_with_operation_layer_readiness(
             packet=packet,
@@ -1098,6 +1304,7 @@ def build_dispatch_packet(
                     "allowed_auto_actions_missing_finalgate_preflight"
                 ],
                 command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
             )
         missing = _missing_ready_fields(resume_pack, action_time_resume)
         if missing:
@@ -1113,6 +1320,7 @@ def build_dispatch_packet(
                 dispatch_status="blocked_by_missing_preflight_evidence",
                 blockers=base_blockers + [f"missing_fact:{name}" for name in missing],
                 command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
             )
 
         authorization_id = _first_text(
@@ -1144,6 +1352,7 @@ def build_dispatch_packet(
                 signal_input_json=signal_input_json,
                 shadow_candidate_id=shadow_candidate_id,
             ),
+            selected_strategy_group_id=selected_strategy_group_id,
         )
         if not execute_preflight:
             return packet
@@ -1170,6 +1379,7 @@ def build_dispatch_packet(
         dispatch_status="blocked_by_unknown_resume_status",
         blockers=base_blockers + [f"unknown_resume_status:{status or 'missing'}"],
         command_plan=None,
+        selected_strategy_group_id=selected_strategy_group_id,
     )
 
 
@@ -1188,6 +1398,7 @@ def _packet(
     command_plan: dict[str, Any] | None,
     finalgate_preflight_result: dict[str, Any] | None = None,
     operation_layer_command_plan: dict[str, Any] | None = None,
+    selected_strategy_group_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "scope": "runtime_signal_watcher_resume_dispatcher",
@@ -1198,6 +1409,11 @@ def _packet(
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
         "dispatch_action": dispatch_action,
+        "selected_strategy_group_id": (
+            str(selected_strategy_group_id).strip()
+            if str(selected_strategy_group_id or "").strip()
+            else None
+        ),
         "owner_state": owner_state,
         "selected_runtime_instance_ids": list(
             resume_pack.get("selected_runtime_instance_ids") or []
@@ -3024,6 +3240,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--label", default="tokyo-runtime-signal-watcher")
     parser.add_argument(
+        "--selected-strategy-group-id",
+        default=os.environ.get("BRC_SELECTED_STRATEGY_GROUP_ID")
+        or os.environ.get("BRC_STRATEGYGROUP_SELECTED_ID"),
+        help=(
+            "Optional selected StrategyGroup scope. When set, actionable "
+            "fresh-authorization, FinalGate, or Operation Layer dispatch is "
+            "blocked unless the resume packet proves the action belongs to "
+            "that StrategyGroup."
+        ),
+    )
+    parser.add_argument(
         "--execute-preflight",
         action="store_true",
         help=(
@@ -3077,6 +3304,7 @@ def main(argv: list[str] | None = None) -> int:
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
         execute_operation_layer_submit=args.execute_operation_layer_submit,
         execute_post_submit_finalize=args.execute_post_submit_finalize,
+        selected_strategy_group_id=args.selected_strategy_group_id,
     )
     _write_json(Path(args.output_json).expanduser(), packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
