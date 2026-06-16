@@ -470,6 +470,25 @@ git-based standing-authorization deploy path.
 | Next checkpoint | `continue_watcher_observation` until a fresh selected StrategyGroup signal appears |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Local Refresh Evidence Relay Deploy Checkpoint
+
+The local product-state refresh evidence relay fix was pushed and deployed to
+Tokyo through the git-based standing-authorization deploy path.
+
+| Item | Result |
+| --- | --- |
+| Deployed code head | `f8f5482a` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-f8f5482a-local-refresh-evidence-relay` |
+| Deploy apply | `status=applied`, `commands_executed=18`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `f8f5482aedcf3777fe10ce84a4d2420781d88d7c` |
+| Watcher timer | `brc-runtime-signal-watcher.timer` is enabled and active |
+| Current Tokyo goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `runtime_dry_run_audit_passed=true` |
+| Source readiness | `owner-console-source-readiness.status=ready`; Owner summary reports `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, and `保护正常` |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=12`, fast-auto-chain/shared-pipeline/adapter-boundary checks are true |
+| Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
+| Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
+| Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Owner Console UI Validation Checkpoint
 
 While the selected StrategyGroup runtime is waiting for a fresh signal, the
