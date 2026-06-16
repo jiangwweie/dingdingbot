@@ -10,7 +10,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["checks"]["scenario_count"] == 6
+    assert packet["checks"]["scenario_count"] == 7
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -27,6 +27,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "required_facts_missing",
         "active_position_or_open_order_conflict",
         "operation_layer_blocker_review_matrix",
+        "selected_strategygroup_dispatch_guard",
     }
     assert scenarios["no_signal"]["artifacts"]["resume_dispatch"]["command_plan"] is None
     assert (
@@ -148,6 +149,21 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert packet["checks"]["mock_operation_layer_closed_loop_checked"] is True
     assert packet["checks"]["operation_layer_blocker_review_policy_checked"] is True
     assert packet["checks"]["shared_runtime_pipeline_checked"] is True
+    assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
+    selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
+    assert selected_guard["checks"] == {
+        "selected_mpg_dispatch_reaches_finalgate_plan": True,
+        "out_of_scope_signal_blocked_before_finalgate": True,
+        "out_of_scope_signal_does_not_call_operation_layer": True,
+        "no_dangerous_effects": True,
+    }
+    assert selected_guard["selected_mpg_dispatch"]["dispatch_action"] == (
+        "run_official_action_time_final_gate_preflight"
+    )
+    assert selected_guard["out_of_scope_dispatch"]["dispatch_status"] == (
+        "blocked_by_selected_strategygroup_scope"
+    )
+    assert selected_guard["out_of_scope_dispatch"]["command_plan"] is None
     shared = packet["shared_runtime_pipeline_validation"]
     assert shared["status"] == "passed"
     assert shared["judgment"] == {

@@ -209,7 +209,7 @@ The local script is:
 scripts/runtime_dry_run_audit_chain.py
 ```
 
-It currently runs five fixture-backed scenarios and treats expected blocked
+It currently runs seven fixture-backed scenarios and treats expected blocked
 states as successful audit coverage when they stop before dangerous actions.
 Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
 
@@ -222,6 +222,8 @@ Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
 | Mock Operation Layer submit/finalize pass | Dispatcher reaches settled and next-attempt-ready with mock responses only |
 | RequiredFacts missing | Clear `missing_fact` blocker before Operation Layer |
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
+| Operation Layer blocker review matrix | Active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets |
+| Selected StrategyGroup dispatch guard | Selected MPG-001 mock fresh signal can reach FinalGate dispatch; out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer |
 
 ### Evidence Relay Checks
 
@@ -289,12 +291,12 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 
 | Item | Result |
 | --- | --- |
-| Dry-run audit artifact | `runtime-dry-run-audit-chain.json` now includes `shared_runtime_pipeline_validation` |
+| Dry-run audit artifact | `runtime-dry-run-audit-chain.json` now includes `shared_runtime_pipeline_validation` and `selected_strategygroup_dispatch_guard_checked` |
 | StrategyGroups covered | MPG / TEQ / FBS / PMR / SOR |
 | Common-chain proof | All five StrategyGroups share the same runtime stages: admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, account/protection/budget/idempotency checks, submit, finalize/reconcile/settle/review, and Owner readmodel |
 | Strategy-specific proof | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, risk defaults, hard stops, and sample packets |
 | Execution authority proof | Each handoff keeps `candidate_creation_authorized=false`, `final_gate_input=false`, `operation_layer_input=false`, and `real_submit_authorized=false` |
-| Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true` before treating dry-run audit as healthy |
+| Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true` and `selected_strategygroup_dispatch_guard_checked=true` before treating dry-run audit as healthy |
 
 ### Mock Dispatcher Close-Loop
 
@@ -376,6 +378,7 @@ healthy:
 | `legacy_local_registration_probe_tolerance_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
 | `mock_operation_layer_closed_loop_checked` | Confirms fake submit/finalize/reconcile/budget/review shape remains covered without exchange write. |
 | `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets rather than project-stopping chat confirmations, while real submit remains forbidden. |
+| `selected_strategygroup_dispatch_guard_checked` | Confirms selected MPG-001 mock fresh signal can reach FinalGate dispatch while an out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer. |
 
 Operation Layer blockers such as active position, open order, missing protection,
 missing budget, duplicate-submit risk, and symbol/side/notional/leverage scope

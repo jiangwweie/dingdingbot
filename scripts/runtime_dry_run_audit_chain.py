@@ -436,16 +436,36 @@ def _resume_pack_waiting() -> dict[str, Any]:
     }
 
 
-def _resume_pack_ready_for_finalgate() -> dict[str, Any]:
+def _resume_pack_ready_for_finalgate(
+    *,
+    strategy_group_id: str = "MPG-001",
+    runtime_instance_id: str = RUNTIME_ID,
+) -> dict[str, Any]:
     return {
         "scope": "runtime_signal_watcher_post_signal_resume_pack",
         "status": "ready_for_action_time_final_gate",
-        "selected_runtime_instance_ids": [RUNTIME_ID],
+        "runtime_instance_id": runtime_instance_id,
+        "selected_runtime_instance_ids": [runtime_instance_id],
         "signal_input_json": "/tmp/dry-run-signal-input.json",
         "shadow_candidate_id": "dry-run-shadow-candidate-1",
         "prepared_authorization_id": AUTHORIZATION_ID,
+        "runtime_signal_summaries": [
+            {
+                "runtime_instance_id": runtime_instance_id,
+                "strategy_family_id": strategy_group_id,
+                "strategy_family_version_id": f"{strategy_group_id}-v0",
+                "symbol": "MSTR/USDT:USDT",
+                "side": "long",
+                "signal_input_json": "/tmp/dry-run-signal-input.json",
+                "shadow_candidate_id": "dry-run-shadow-candidate-1",
+                "prepared_authorization_id": AUTHORIZATION_ID,
+                "status": "ready_for_action_time_final_gate",
+            }
+        ],
         "action_time_resume": {
             "status": "ready_for_action_time_final_gate",
+            "runtime_instance_id": runtime_instance_id,
+            "strategy_family_id": strategy_group_id,
             "next_step": "run_official_action_time_final_gate_preflight",
             "allowed_auto_actions": [
                 "run_official_action_time_final_gate_preflight"
@@ -1099,6 +1119,75 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
     )
 
 
+def _scenario_selected_strategygroup_dispatch_guard(output_dir: Path) -> dict[str, Any]:
+    selected_dispatch = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_ready_for_finalgate(strategy_group_id="MPG-001"),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        selected_strategy_group_id="MPG-001",
+        execute_preflight=False,
+    )
+    out_of_scope_dispatch = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_ready_for_finalgate(
+            strategy_group_id="SOR-001",
+            runtime_instance_id="dry-run-runtime-sor-001",
+        ),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        selected_strategy_group_id="MPG-001",
+        execute_preflight=True,
+    )
+    checks = {
+        "selected_mpg_dispatch_reaches_finalgate_plan": (
+            selected_dispatch.get("status") == "ready_for_action_time_final_gate"
+            and selected_dispatch.get("dispatch_action")
+            == "run_official_action_time_final_gate_preflight"
+            and selected_dispatch.get("selected_strategy_group_id") == "MPG-001"
+            and selected_dispatch.get("command_plan", {}).get("method") == "GET"
+        ),
+        "out_of_scope_signal_blocked_before_finalgate": (
+            out_of_scope_dispatch.get("status") == "blocked"
+            and out_of_scope_dispatch.get("dispatch_status")
+            == "blocked_by_selected_strategygroup_scope"
+            and out_of_scope_dispatch.get("command_plan") is None
+            and out_of_scope_dispatch.get("safety_invariants", {}).get(
+                "official_finalgate_preflight_called"
+            )
+            is False
+        ),
+        "out_of_scope_signal_does_not_call_operation_layer": (
+            out_of_scope_dispatch.get("safety_invariants", {}).get(
+                "official_operation_layer_submit_called"
+            )
+            is False
+        ),
+        "no_dangerous_effects": not _dangerous_effects(
+            selected_dispatch,
+            out_of_scope_dispatch,
+        ),
+    }
+    blockers = [
+        f"selected_strategygroup_dispatch_guard:{name}"
+        for name, value in checks.items()
+        if value is not True
+    ]
+    return _scenario_packet(
+        name="selected_strategygroup_dispatch_guard",
+        expected=(
+            "selected MPG-001 mock fresh signal can reach FinalGate dispatch, "
+            "while an out-of-scope StrategyGroup signal is blocked before "
+            "FinalGate or Operation Layer"
+        ),
+        artifacts={
+            "checks": checks,
+            "selected_mpg_dispatch": selected_dispatch,
+            "out_of_scope_dispatch": out_of_scope_dispatch,
+        },
+        passed=not blockers,
+        blockers=blockers,
+    )
+
+
 def _mock_operation_layer_closed_loop() -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     original_session_cookie = dispatcher._session_cookie
@@ -1353,6 +1442,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_required_facts_missing(output_dir),
         _scenario_active_conflict(output_dir),
         _scenario_operation_layer_blocker_review_matrix(output_dir),
+        _scenario_selected_strategygroup_dispatch_guard(output_dir),
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
     blockers = [
@@ -1368,7 +1458,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 6,
+        "required_scenarios_present": len(scenarios) == 7,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -1423,6 +1513,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             and all(
                 value is True
                 for value in (shared_pipeline.get("checks") or {}).values()
+            )
+        ),
+        "selected_strategygroup_dispatch_guard_checked": (
+            _scenario_artifact(
+                scenarios,
+                "selected_strategygroup_dispatch_guard",
+                "checks",
+            )
+            != {}
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "selected_strategygroup_dispatch_guard",
+                    "checks",
+                ).values()
             )
         ),
     }
