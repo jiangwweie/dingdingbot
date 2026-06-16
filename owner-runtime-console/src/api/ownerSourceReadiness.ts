@@ -78,6 +78,7 @@ function mapSourceHealth(source: OwnerConsoleSourceReadinessData): OwnerSourceHe
     operationAudit: sourceItem(raw.operation_audit, "ready_empty", "暂无审计动作"),
     runtimeDryRunAudit: sourceItem(raw.runtime_dry_run_audit, "degraded", "审计演练暂不可用"),
     realOrderReadiness: sourceItem(raw.real_order_readiness, "degraded", "实盘边界待刷新"),
+    deployChannel: sourceItem(raw.deploy_channel, "ready_empty", "部署通道未检查"),
   };
 }
 

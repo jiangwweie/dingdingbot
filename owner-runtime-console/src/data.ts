@@ -99,6 +99,7 @@ const baseSourceHealth = {
   operationAudit: { status: "ready", label: "审计详情可用" },
   runtimeDryRunAudit: { status: "ready", label: "审计演练正常", summary: dryRunAuditSummary },
   realOrderReadiness: { status: "ready_empty", label: "等待机会" },
+  deployChannel: { status: "ready_empty", label: "部署通道未检查" },
 } as const;
 
 const baseRealOrderReadiness: OwnerRealOrderReadiness = {
@@ -423,6 +424,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
       summary: ready ? dryRunAuditSummary : undefined,
     },
     real_order_readiness: { status: ready ? "ready_empty" : "degraded", label: ready ? "等待机会" : "实盘边界待刷新", detail: "mock_real_order_readiness" },
+    deploy_channel: { status: "ready_empty", label: "部署通道未检查", detail: "mock_deploy_channel" },
   } as const;
 
   return {
@@ -456,6 +458,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
         operation_audit: ready ? "暂无审计动作" : "审计详情暂不可用",
         runtime_dry_run_audit: ready ? "审计演练正常" : "审计演练暂不可用",
         real_order_readiness: ready ? "等待机会" : "实盘边界待刷新",
+        deploy_channel: "部署通道未检查",
       },
       strategy_groups: ["MPG", "TEQ", "FBS", "SOR", "PMR"].map((code, index) => {
         const isProcessing = scenario === "processing" && code === "SOR";

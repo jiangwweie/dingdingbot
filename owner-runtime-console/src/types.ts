@@ -91,6 +91,7 @@ export type OwnerSourceHealth = {
   operationAudit: OwnerSourceHealthItem;
   runtimeDryRunAudit: OwnerSourceHealthItem;
   realOrderReadiness: OwnerSourceHealthItem;
+  deployChannel: OwnerSourceHealthItem;
 };
 
 export type OwnerReadinessMatrixItem = {
@@ -171,6 +172,7 @@ export type OwnerConsoleSourceReadinessData = {
     operation_audit?: string | null;
     runtime_dry_run_audit?: string | null;
     real_order_readiness?: string | null;
+    deploy_channel?: string | null;
   } | null;
   strategy_groups?: OwnerSourceReadinessStrategyGroup[];
   source_health?: Record<string, OwnerSourceHealthItem | undefined>;

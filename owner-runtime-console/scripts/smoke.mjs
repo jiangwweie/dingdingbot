@@ -93,6 +93,8 @@ try {
   await expectVisible(page, "保护单");
   await openNav(page, "记录", "最近记录");
   await openNav(page, "系统", "只读保证");
+  await expectVisible(page, "部署通道");
+  await expectVisible(page, "部署通道未检查");
   await expectVisible(page, "审计演练摘要");
   await expectVisible(page, "演练场景");
   await expectVisible(page, "12 项通过");

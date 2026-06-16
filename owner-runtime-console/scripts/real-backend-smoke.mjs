@@ -493,6 +493,9 @@ async function runConnectedSmoke(browser) {
     if (sourcePayload?.data?.owner_summary?.runtime_dry_run_audit !== "审计演练正常") {
       throw new Error("Expected source-readiness dry-run audit to show 审计演练正常");
     }
+    if (sourcePayload?.data?.owner_summary?.deploy_channel !== "部署通道未检查") {
+      throw new Error("Expected source-readiness deploy channel to default to 部署通道未检查");
+    }
     const dryRunSummary = sourcePayload?.data?.source_health?.runtime_dry_run_audit?.summary;
     if (dryRunSummary?.scenario_count !== 12) {
       throw new Error("Expected source-readiness dry-run audit summary to include 12 scenarios");
@@ -591,6 +594,8 @@ async function runConnectedSmoke(browser) {
     await expectVisible(page, "危险动作");
     await expectVisible(page, "未发生");
     await expectVisible(page, "实盘边界");
+    await expectVisible(page, "部署通道");
+    await expectVisible(page, "部署通道未检查");
     await expectVisible(page, "owner_console_source_readiness");
     await page.screenshot({
       path: path.join(artifactDir, "real-backend-system.png"),

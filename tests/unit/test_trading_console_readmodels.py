@@ -6061,11 +6061,13 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
     assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
     assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
+    assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道未检查"
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
     assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
+    assert payload["data"]["source_health"]["deploy_channel"]["status"] == "ready_empty"
     dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
         "summary"
     ]
@@ -6266,6 +6268,33 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "submit_blocking_keys"
         ]
     )
+
+
+def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation():
+    from src.application.readmodels.trading_console import (
+        _owner_console_deploy_channel_source,
+    )
+
+    source = _owner_console_deploy_channel_source(
+        {
+            "status": "blocked",
+            "checks": {
+                "tokyo_connectivity_probe_ready": False,
+                "tokyo_connectivity_blockers": ["tokyo_tcp_22_unreachable"],
+                "tokyo_probe_blockers": ["tokyo_readonly_probe_error"],
+                "blockers": [
+                    "tokyo_probe:tokyo_readonly_probe_error",
+                    "tokyo_connectivity:tokyo_tcp_22_unreachable",
+                ],
+            },
+        }
+    )
+
+    assert source["status"] == "degraded"
+    assert source["owner_label"] == "部署通道暂不可用"
+    assert source["summary"]["connectivity_ready"] is False
+    assert "tokyo_tcp_22_unreachable" in source["reason"]
+    assert "tokyo_readonly_probe_error" in source["summary"]["blockers"]
 
 
 def test_owner_console_dry_run_audit_source_requires_current_chain_checks():

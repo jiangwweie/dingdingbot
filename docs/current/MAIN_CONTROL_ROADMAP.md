@@ -149,6 +149,20 @@ tokyo_connectivity_blockers=tokyo_tcp_22_unreachable
 This is a deploy-channel blocker only. It does not imply that the StrategyGroup
 runtime chain, Owner Console source readiness, or dry-run audit chain failed.
 
+### 2026-06-17 Owner Console Deploy Channel Source Checkpoint
+
+Owner Console source readiness now carries deploy-channel health as a
+non-critical `sourceHealth` item. This keeps deployment connectivity distinct
+from market opportunity, runtime liveness, live facts, and real-order safety.
+
+| Item | Result |
+| --- | --- |
+| Backend source | `owner-console-source-readiness` reads `BRC_TOKYO_DEPLOY_CHANNEL_STATUS_PATH` or `tokyo-deploy-channel-status.json` under the watcher report directory |
+| Default state | Missing deploy-channel packet maps to `ready_empty` / `部署通道未检查` |
+| Degraded state | Blocked deploy packet with `tokyo_tcp_22_unreachable` maps to `degraded` / `部署通道暂不可用` |
+| Owner UI | The status appears only on the system/source-health page, not as a homepage primary gate |
+| Safety | Deploy-channel degradation does not hide StrategyGroups, create orders, call exchange write APIs, bypass FinalGate, or bypass Operation Layer |
+
 ## P0 Subgoal: Runtime Liveness Repair
 
 ### Current State

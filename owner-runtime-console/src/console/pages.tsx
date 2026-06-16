@@ -334,6 +334,7 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
     { label: "审计记录", item: projection.sourceHealth.operationAudit },
     { label: "审计演练", item: projection.sourceHealth.runtimeDryRunAudit },
     { label: "实盘边界", item: projection.sourceHealth.realOrderReadiness },
+    { label: "部署通道", item: projection.sourceHealth.deployChannel },
   ];
 
   return (

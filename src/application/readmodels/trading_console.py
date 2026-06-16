@@ -99,6 +99,10 @@ DEFAULT_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "strategygroup-runtime-goal-status.json"
 )
+DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "tokyo-deploy-channel-status.json"
+)
 OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "required_scenarios_present",
     "all_scenarios_passed",
@@ -2077,6 +2081,15 @@ class TradingConsoleReadModelService:
             )
         ).expanduser()
         runtime_goal_status = _read_json_file(runtime_goal_status_path)
+        deploy_channel_path = Path(
+            os.environ.get(
+                "BRC_TOKYO_DEPLOY_CHANNEL_STATUS_PATH",
+                str(report_dir / "tokyo-deploy-channel-status.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH,
+            )
+        ).expanduser()
+        deploy_channel = _read_json_file(deploy_channel_path)
         packet = _owner_console_source_readiness_packet(
             generated_at_ms=generated_at_ms,
             intake_response=intake_response,
@@ -2089,6 +2102,8 @@ class TradingConsoleReadModelService:
             dry_run_audit_path=str(dry_run_audit_path),
             runtime_goal_status=runtime_goal_status,
             runtime_goal_status_path=str(runtime_goal_status_path),
+            deploy_channel=deploy_channel,
+            deploy_channel_path=str(deploy_channel_path),
             selected_strategy_group_id=selected_strategy_group_id,
             max_symbols=max_symbols,
             stale_after_seconds=stale_after_seconds,
@@ -7127,6 +7142,8 @@ def _owner_console_source_readiness_packet(
     dry_run_audit_path: str,
     runtime_goal_status: dict[str, Any],
     runtime_goal_status_path: str,
+    deploy_channel: dict[str, Any],
+    deploy_channel_path: str,
     selected_strategy_group_id: str | None,
     max_symbols: int,
     stale_after_seconds: int,
@@ -7212,6 +7229,7 @@ def _owner_console_source_readiness_packet(
     real_order_readiness = _owner_console_real_order_readiness(
         runtime_goal_status
     )
+    deploy_channel_source = _owner_console_deploy_channel_source(deploy_channel)
     source_health = {
         "strategy_catalog": _owner_console_detail_source(
             status=catalog_status,
@@ -7242,6 +7260,7 @@ def _owner_console_source_readiness_packet(
         "runtime_dry_run_audit": dry_run_audit_source,
         "strategygroup_runtime_goal_status": runtime_goal_status_source,
         "real_order_readiness": real_order_readiness["source_health"],
+        "deploy_channel": deploy_channel_source,
     }
     critical_unavailable = [
         name
@@ -7270,6 +7289,7 @@ def _owner_console_source_readiness_packet(
             "live_facts_path": live_facts_path,
             "runtime_dry_run_audit_chain_path": dry_run_audit_path,
             "strategygroup_runtime_goal_status_path": runtime_goal_status_path,
+            "tokyo_deploy_channel_status_path": deploy_channel_path,
             "watcher_report_dir": str(
                 os.environ.get(
                     "BRC_SIGNAL_WATCHER_REPORT_DIR",
@@ -7291,6 +7311,7 @@ def _owner_console_source_readiness_packet(
             "runtime_dry_run_audit": dry_run_audit_source["owner_label"],
             "runtime_goal_status": runtime_goal_status_source["owner_label"],
             "real_order_readiness": real_order_readiness["owner_label"],
+            "deploy_channel": deploy_channel_source["owner_label"],
         },
         "strategy_groups": rows,
         "source_health": source_health,
@@ -7319,6 +7340,20 @@ def _owner_console_source_readiness_packet(
                 if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
                 else None
             ),
+            "tokyo_deploy_channel_status": deploy_channel.get("status"),
+            "tokyo_deploy_channel_blockers": list(
+                (deploy_channel.get("checks") or {}).get("blockers") or []
+            )[:20]
+            if isinstance(deploy_channel.get("checks"), dict)
+            else [],
+            "tokyo_deploy_channel_connectivity_blockers": list(
+                (deploy_channel.get("checks") or {}).get(
+                    "tokyo_connectivity_blockers"
+                )
+                or []
+            )[:20]
+            if isinstance(deploy_channel.get("checks"), dict)
+            else [],
             "strategygroup_runtime_goal_readiness_matrix_count": len(
                 runtime_goal_status.get("real_order_readiness_matrix") or []
             )
@@ -7608,6 +7643,88 @@ def _owner_console_operation_audit_source(
         owner_label="审计详情暂不可用",
         reason=status or "operation_audit_status_unknown",
     )
+
+
+def _owner_console_deploy_channel_source(
+    deploy_channel: dict[str, Any],
+) -> dict[str, Any]:
+    if not deploy_channel:
+        return {
+            **_owner_console_detail_source(
+                status="ready_empty",
+                owner_label="部署通道未检查",
+                reason="tokyo_deploy_channel_status_missing",
+            ),
+            "summary": {
+                "checked": False,
+                "connectivity_ready": None,
+                "blockers": [],
+            },
+        }
+
+    checks = (
+        deploy_channel.get("checks")
+        if isinstance(deploy_channel.get("checks"), dict)
+        else {}
+    )
+    blocker_values: list[str] = []
+    for key in (
+        "blockers",
+        "tokyo_probe_blockers",
+        "tokyo_connectivity_blockers",
+    ):
+        value = checks.get(key)
+        if isinstance(value, list):
+            blocker_values.extend(str(item) for item in value if str(item))
+    blockers = sorted(set(blocker_values))
+    connectivity_ready = checks.get("tokyo_connectivity_probe_ready")
+    status = str(deploy_channel.get("status") or "")
+
+    if blockers or connectivity_ready is False or status == "blocked":
+        return {
+            **_owner_console_detail_source(
+                status="degraded",
+                owner_label="部署通道暂不可用",
+                reason=",".join(blockers) if blockers else status or "tokyo_deploy_channel_blocked",
+            ),
+            "summary": {
+                "checked": True,
+                "connectivity_ready": connectivity_ready,
+                "blockers": blockers[:20],
+            },
+        }
+
+    if status in {
+        "ready",
+        "ready_for_owner_git_deploy_decision",
+        "ready_for_deploy_apply",
+        "postdeploy_accepted",
+    } or connectivity_ready is True:
+        return {
+            **_owner_console_detail_source(
+                status="ready",
+                owner_label="部署通道正常",
+                reason=status or "tokyo_deploy_channel_ready",
+            ),
+            "summary": {
+                "checked": True,
+                "connectivity_ready": connectivity_ready,
+                "blockers": [],
+            },
+        }
+
+    return {
+        **_owner_console_detail_source(
+            status="degraded",
+            owner_label="部署通道需检查",
+            reason=status or "tokyo_deploy_channel_status_unknown",
+        ),
+        "summary": {
+            "checked": True,
+            "connectivity_ready": connectivity_ready,
+            "blockers": blockers[:20],
+        },
+    }
 
 
 def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[str, Any]:
