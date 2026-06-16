@@ -388,7 +388,7 @@ def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():
     assert packet["safety_invariants"]["real_submit_requested"] is False
 
 
-def test_followup_prepares_attempt_policy_before_arm_when_allowed():
+def test_followup_preflights_attempt_policy_without_mutation_when_allowed():
     calls = []
 
     def attempt_preparer(auth_id, args):
@@ -422,20 +422,23 @@ def test_followup_prepares_attempt_policy_before_arm_when_allowed():
     assert packet["status"] == "disabled_smoke_completed"
     assert calls == [
         ("preflight", "auth-1", "http://unit"),
-        ("attempt", "auth-1", "http://unit"),
         ("arm", "auth-1", "http://unit"),
         ("disabled", "auth-1", "http://unit"),
     ]
     assert packet["operator_command_plan"]["attempt_policy_preflight_called"] is True
-    assert packet["operator_command_plan"]["attempt_policy_prepare_called"] is True
+    assert packet["operator_command_plan"]["attempt_policy_prepare_called"] is False
     assert (
         packet["operator_command_plan"][
             "mutating_attempt_consumption_allowed_by_this_packet"
         ]
-        is True
+        is False
     )
-    assert packet["safety_invariants"]["attempt_counter_mutated"] is True
-    assert packet["safety_invariants"]["runtime_budget_mutated"] is True
+    assert packet["attempt_policy_prepare_report"] is None
+    assert "attempt_policy_prepare_deferred_until_operation_layer_submit" in (
+        packet["warnings"]
+    )
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
 
 

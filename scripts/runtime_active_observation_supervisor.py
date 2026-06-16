@@ -165,13 +165,12 @@ def _forbidden_effects(
             "order_lifecycle_submit_called",
             "withdrawal_or_transfer_created",
         ]
-        if not (source_name == "followup" and allow_attempt_policy_prepare):
-            forbidden_keys.extend(
-                [
-                    "attempt_counter_mutated",
-                    "runtime_budget_mutated",
-                ]
-            )
+        forbidden_keys.extend(
+            [
+                "attempt_counter_mutated",
+                "runtime_budget_mutated",
+            ]
+        )
         for key in forbidden_keys:
             if safety.get(key) is True:
                 effects.append(f"{source_name}.{key}")
@@ -299,8 +298,12 @@ def build_supervisor_packet(
                 args.allow_attempt_policy_prepare
                 and (followup_packet or {})
                 .get("safety_invariants", {})
-                .get("attempt_counter_mutated")
+                .get("attempt_policy_preflight_called")
                 is True
+                and (followup_packet or {})
+                .get("safety_invariants", {})
+                .get("attempt_counter_mutated")
+                is not True
             ),
         },
     }

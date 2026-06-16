@@ -730,23 +730,9 @@ def build_followup_packet(
                     )
                     blockers.append("attempt_policy_preflight_not_passed")
                 else:
-                    preparer = attempt_policy_preparer or (
-                        lambda auth_id, parsed_args: _prepare_attempt_policy(
-                            authorization_id=auth_id,
-                            args=parsed_args,
-                        )
+                    warnings.append(
+                        "attempt_policy_prepare_deferred_until_operation_layer_submit"
                     )
-                    attempt_policy_report = preparer(authorization_id, args)
-                    blockers.extend(
-                        f"attempt_policy_prepare:{item}"
-                        for item in attempt_policy_report.get("blockers") or []
-                    )
-                    warnings.extend(
-                        f"attempt_policy_prepare:{item}"
-                        for item in attempt_policy_report.get("warnings") or []
-                    )
-                    if attempt_policy_report.get("status") != ATTEMPT_POLICY_PREPARED_STATUS:
-                        blockers.append("attempt_policy_prepare_not_ready")
             if not blockers:
                 arm_runner = arm_preview_runner or (
                     lambda auth_id, parsed_args: _run_arm_preview(
@@ -836,8 +822,7 @@ def build_followup_packet(
                 else None
             ),
             "mutating_attempt_consumption_allowed_by_this_packet": (
-                attempt_policy_report is not None
-                and attempt_policy_report.get("status") == ATTEMPT_POLICY_PREPARED_STATUS
+                False
             ),
             "requires_fresh_real_signal_revalidation_before_mutation": (
                 local_registration_readiness.get(
@@ -969,8 +954,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--allow-attempt-policy-prepare",
         action="store_true",
         help=(
-            "For a fresh prepared authorization, record the official attempt "
-            "reservation, attempt mutation, and outcome policy before arm preview."
+            "For a fresh prepared authorization, run the official controlled-submit "
+            "preflight before arm preview. Attempt reservation/mutation is deferred "
+            "until the official Operation Layer submit path."
         ),
     )
     parser.add_argument(

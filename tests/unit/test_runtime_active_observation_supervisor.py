@@ -284,7 +284,7 @@ def test_supervisor_blocks_when_child_packets_report_forbidden_effect(tmp_path):
     ]
 
 
-def test_supervisor_allows_official_attempt_policy_prepare_when_flagged(tmp_path):
+def test_supervisor_allows_attempt_policy_preflight_when_flagged(tmp_path):
     calls = []
 
     def runner(command, stdout_path):
@@ -312,8 +312,9 @@ def test_supervisor_allows_official_attempt_policy_prepare_when_flagged(tmp_path
                     "safety_invariants": {
                         "exchange_order_submitted": False,
                         "real_submit_requested": False,
-                        "attempt_counter_mutated": True,
-                        "runtime_budget_mutated": True,
+                        "attempt_policy_preflight_called": True,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
                         "withdrawal_or_transfer_created": False,
                         "arm_preview_forbidden_effects": [],
                         "disabled_smoke_forbidden_effects": [],
@@ -336,6 +337,62 @@ def test_supervisor_allows_official_attempt_policy_prepare_when_flagged(tmp_path
     assert "--allow-attempt-policy-prepare" in calls[1]
     assert packet["safety_invariants"]["forbidden_effects"] == []
     assert packet["safety_invariants"]["allowed_official_attempt_policy_prepare"] is True
+
+
+def test_supervisor_blocks_attempt_policy_mutation_even_when_flagged(tmp_path):
+    def runner(command, stdout_path):
+        if "runtime_active_observation_loop.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "loop-packet.json",
+                {
+                    "status": "ready_for_final_gate_preflight",
+                    "safety_invariants": {
+                        "exchange_write_called": False,
+                        "order_created": False,
+                        "order_lifecycle_called": False,
+                        "attempt_counter_mutated": False,
+                        "runtime_budget_mutated": False,
+                        "withdrawal_or_transfer_created": False,
+                    },
+                },
+            )
+        if "runtime_active_observation_followup.py" in command[1]:
+            _write_json(
+                tmp_path / "supervisor" / "followup-packet.json",
+                {
+                    "status": "disabled_smoke_completed",
+                    "safety_invariants": {
+                        "exchange_order_submitted": False,
+                        "real_submit_requested": False,
+                        "attempt_policy_preflight_called": True,
+                        "attempt_counter_mutated": True,
+                        "runtime_budget_mutated": True,
+                        "withdrawal_or_transfer_created": False,
+                        "arm_preview_forbidden_effects": [],
+                        "disabled_smoke_forbidden_effects": [],
+                    },
+                },
+            )
+        return runtime_active_observation_supervisor.CommandResult(
+            command=command,
+            stdout_path=str(stdout_path),
+            returncode=0,
+            stderr_tail="",
+        )
+
+    packet = runtime_active_observation_supervisor.build_supervisor_packet(
+        _args(tmp_path, allow_attempt_policy_prepare=True),
+        runner=runner,
+    )
+
+    assert packet["status"] == "supervisor_blocked"
+    assert "supervisor_detected_forbidden_effects" in packet["blockers"]
+    assert "followup.attempt_counter_mutated" in packet["safety_invariants"][
+        "forbidden_effects"
+    ]
+    assert "followup.runtime_budget_mutated" in packet["safety_invariants"][
+        "forbidden_effects"
+    ]
 
 
 def test_supervisor_blocks_when_followup_reports_arm_preview_forbidden_effect(tmp_path):
