@@ -276,6 +276,19 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
   const guaranteeRows = Object.entries(projection.noActionGuarantee)
     .filter(([, value]) => value === false)
     .map(([key]) => noActionGuaranteeLabels[key] ?? key);
+  const sourceRows = [
+    { label: "策略目录", item: projection.sourceHealth.catalog },
+    { label: "运行状态", item: projection.sourceHealth.runtime },
+    { label: "观察服务", item: projection.sourceHealth.watcher },
+    { label: "事实状态", item: projection.sourceHealth.liveFacts },
+    { label: "账户资金", item: projection.sourceHealth.accountFunds },
+    { label: "订单", item: projection.sourceHealth.orders },
+    { label: "持仓", item: projection.sourceHealth.positions },
+    { label: "保护", item: projection.sourceHealth.protection },
+    { label: "对账", item: projection.sourceHealth.reconciliation },
+    { label: "审计记录", item: projection.sourceHealth.operationAudit },
+    { label: "审计演练", item: projection.sourceHealth.runtimeDryRunAudit },
+  ];
 
   return (
     <PageShell activeView="system">
@@ -289,10 +302,9 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
             <SystemStateCard label="后端连接" tone={connected ? "safe" : "danger"} value={connected ? "已连接" : "不可用"} />
             <SystemStateCard label="业务数据" tone={businessDataUnavailable ? "danger" : "safe"} value={businessDataUnavailable ? "状态证据待刷新" : "正常"} />
             <SystemStateCard label="刷新时间" tone="neutral" value={context.refreshedAt ? new Date(context.refreshedAt).toLocaleTimeString("zh-CN", { hour12: false }) : "加载中"} />
-            <SystemStateCard label="策略目录" tone={sourceStatusTone[projection.sourceHealth.catalog.status]} value={projection.sourceHealth.catalog.label} />
-            <SystemStateCard label="运行状态" tone={sourceStatusTone[projection.sourceHealth.runtime.status]} value={projection.sourceHealth.runtime.label} />
-            <SystemStateCard label="账户资金" tone={sourceStatusTone[projection.sourceHealth.accountFunds.status]} value={projection.sourceHealth.accountFunds.label} />
-            <SystemStateCard label="审计演练" tone={sourceStatusTone[projection.sourceHealth.runtimeDryRunAudit.status]} value={projection.sourceHealth.runtimeDryRunAudit.label} />
+            {sourceRows.map(({ label, item }) => (
+              <SystemStateCard key={label} label={label} tone={sourceStatusTone[item.status]} value={item.label} />
+            ))}
           </CardContent>
         </Card>
         <Card className="rounded-2xl shadow-[var(--shadow-panel)]">

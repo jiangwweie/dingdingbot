@@ -96,6 +96,28 @@ async function navigateToPage(page, target, viewport) {
   await button.first().click();
 }
 
+async function waitForDesktopNavigationActiveStyle(page, target, viewport) {
+  if (viewport.width < 1024) return;
+  await page.waitForFunction(
+    (expectedLabel) => {
+      const nav = document.querySelector('aside nav[aria-label="主导航"]');
+      if (!nav) return false;
+      const active = nav.querySelector('button[aria-current="page"]');
+      if (!active || active.textContent?.trim() !== expectedLabel) return false;
+      const rootStyle = window.getComputedStyle(document.documentElement);
+      const primary = rootStyle.getPropertyValue("--sidebar-primary").trim();
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = primary;
+      document.body.appendChild(probe);
+      const primaryRgb = window.getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return window.getComputedStyle(active).backgroundColor === primaryRgb;
+    },
+    target.label,
+    { timeout: 1_500 },
+  );
+}
+
 async function collectChecks(page, target, viewport, consoleIssues) {
   const issues = [];
 
@@ -232,6 +254,41 @@ async function collectChecks(page, target, viewport, consoleIssues) {
     if (activeNavText.trim() !== target.label) {
       issues.push(`active navigation mismatch: expected ${target.label}, got ${activeNavText.trim() || "none"}`);
     }
+    const navStyleIssues = await page.evaluate((expectedLabel) => {
+      const nav = document.querySelector('aside nav[aria-label="主导航"]');
+      if (!nav) return ["desktop navigation missing"];
+      const buttons = Array.from(nav.querySelectorAll("button"));
+      const rootStyle = window.getComputedStyle(document.documentElement);
+      const primary = rootStyle.getPropertyValue("--sidebar-primary").trim();
+      const active = buttons.find((button) => button.getAttribute("aria-current") === "page");
+      const normalize = (value) => value.replace(/\s+/g, "").toLowerCase();
+      const activeText = active?.textContent?.trim() ?? "";
+      const activeBg = active ? window.getComputedStyle(active).backgroundColor : "";
+      const primaryProbe = document.createElement("span");
+      primaryProbe.style.backgroundColor = primary;
+      document.body.appendChild(primaryProbe);
+      const primaryRgb = window.getComputedStyle(primaryProbe).backgroundColor;
+      primaryProbe.remove();
+
+      const failures = [];
+      if (!active) {
+        failures.push("active navigation visual state missing");
+      } else if (activeText !== expectedLabel) {
+        failures.push(`active navigation visual text mismatch: expected ${expectedLabel}, got ${activeText || "none"}`);
+      } else if (normalize(activeBg) !== normalize(primaryRgb)) {
+        failures.push(`active navigation background mismatch: expected ${primaryRgb}, got ${activeBg || "none"}`);
+      }
+
+      const inactivePrimary = buttons
+        .filter((button) => button !== active)
+        .filter((button) => normalize(window.getComputedStyle(button).backgroundColor) === normalize(primaryRgb))
+        .map((button) => button.textContent?.trim() || "unknown");
+      if (inactivePrimary.length > 0) {
+        failures.push(`inactive navigation uses active background: ${inactivePrimary.join(", ")}`);
+      }
+      return failures;
+    }, target.label);
+    issues.push(...navStyleIssues);
   }
 
   return issues;
@@ -258,6 +315,7 @@ async function runCase(browser, scenario, target, theme, viewport) {
     await page.goto(`${baseUrl}/${scenarioQuery}`, { waitUntil: "networkidle" });
     await navigateToPage(page, target, viewport);
     await page.getByText(target.expected, { exact: false }).first().waitFor({ state: "visible", timeout: 6_000 });
+    await waitForDesktopNavigationActiveStyle(page, target, viewport);
 
     const issues = await collectChecks(page, target, viewport, consoleIssues);
     const screenshotName = `${scenario}-${theme}-${viewport.name}-${target.key}.png`;

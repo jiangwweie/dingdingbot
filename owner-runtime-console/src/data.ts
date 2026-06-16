@@ -358,6 +358,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
     protection: { status: ready ? "ready" : "unavailable", label: ready ? "保护正常" : "保护状态暂不可用", detail: "mock_protection" },
     reconciliation: { status: ready ? "ready" : "degraded", label: ready ? "对账正常" : "对账详情暂不可用", detail: "mock_reconciliation" },
     operation_audit: { status: ready ? "ready_empty" : "degraded", label: ready ? "暂无审计动作" : "审计详情暂不可用", detail: "mock_operation_audit" },
+    runtime_dry_run_audit: { status: ready ? "ready" : "degraded", label: ready ? "审计演练正常" : "审计演练暂不可用", detail: "mock_runtime_dry_run_audit" },
   } as const;
 
   return {
@@ -389,6 +390,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
         protection: ready ? "保护正常" : "保护状态暂不可用",
         reconciliation: ready ? "对账正常" : "对账详情暂不可用",
         operation_audit: ready ? "暂无审计动作" : "审计详情暂不可用",
+        runtime_dry_run_audit: ready ? "审计演练正常" : "审计演练暂不可用",
       },
       strategy_groups: ["MPG", "TEQ", "FBS", "SOR", "PMR"].map((code, index) => {
         const isProcessing = scenario === "processing" && code === "SOR";
