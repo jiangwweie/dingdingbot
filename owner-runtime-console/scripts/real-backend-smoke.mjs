@@ -83,7 +83,7 @@ async function writeJson(filePath, payload) {
   await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-async function createRuntimeFixtures() {
+async function createRuntimeFixtures({ deployChannelReady = false } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "owner-console-mainline-"));
   const reportDir = path.join(dir, "runtime-signal-watcher");
   const liveFactsPath = path.join(dir, "strategy-group-live-facts.json");
@@ -303,6 +303,31 @@ async function createRuntimeFixtures() {
       dangerous_effects: [],
     },
   });
+  if (deployChannelReady) {
+    await writeJson(path.join(reportDir, "tokyo-deploy-channel-status.json"), {
+      scope: "tokyo_runtime_governance_deploy_channel_status",
+      status: "postdeploy_accepted",
+      deployed_head: "owner-console-mainline-smoke",
+      release_path: "/home/ubuntu/brc-deploy/releases/owner-console-mainline-smoke",
+      checks: {
+        blockers: [],
+        tokyo_probe_blockers: [],
+        tokyo_connectivity_blockers: [],
+        tokyo_connectivity_probe_ready: true,
+        postdeploy_acceptance_passed: true,
+      },
+      safety_invariants: {
+        deploy_channel_status_only: true,
+        places_order: false,
+        calls_order_lifecycle: false,
+        exchange_write_called: false,
+        withdrawal_or_transfer_created: false,
+        mutates_secrets: false,
+        mutates_live_profile: false,
+        mutates_order_sizing: false,
+      },
+    });
+  }
   await writeJson(path.join(reportDir, "strategygroup-runtime-goal-status.json"), {
     scope: "strategygroup_runtime_goal_status",
     status: "waiting_for_signal",
@@ -464,8 +489,9 @@ async function login(context) {
   }
 }
 
-async function runConnectedSmoke(browser) {
-  const fixtures = await createRuntimeFixtures();
+async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
+  const expectedDeployChannel = deployChannelReady ? "部署通道正常" : "部署通道未检查";
+  const fixtures = await createRuntimeFixtures({ deployChannelReady });
   const backend = startBackend(fixtures);
   const frontend = startFrontend();
   try {
@@ -493,8 +519,8 @@ async function runConnectedSmoke(browser) {
     if (sourcePayload?.data?.owner_summary?.runtime_dry_run_audit !== "审计演练正常") {
       throw new Error("Expected source-readiness dry-run audit to show 审计演练正常");
     }
-    if (sourcePayload?.data?.owner_summary?.deploy_channel !== "部署通道未检查") {
-      throw new Error("Expected source-readiness deploy channel to default to 部署通道未检查");
+    if (sourcePayload?.data?.owner_summary?.deploy_channel !== expectedDeployChannel) {
+      throw new Error(`Expected source-readiness deploy channel to show ${expectedDeployChannel}`);
     }
     const dryRunSummary = sourcePayload?.data?.source_health?.runtime_dry_run_audit?.summary;
     if (dryRunSummary?.scenario_count !== 12) {
@@ -595,10 +621,15 @@ async function runConnectedSmoke(browser) {
     await expectVisible(page, "未发生");
     await expectVisible(page, "实盘边界");
     await expectVisible(page, "部署通道");
-    await expectVisible(page, "部署通道未检查");
+    await expectVisible(page, expectedDeployChannel);
     await expectVisible(page, "owner_console_source_readiness");
     await page.screenshot({
-      path: path.join(artifactDir, "real-backend-system.png"),
+      path: path.join(
+        artifactDir,
+        deployChannelReady
+          ? "real-backend-system-deploy-channel-ready.png"
+          : "real-backend-system.png",
+      ),
       fullPage: true,
     });
     await openNav(page, "订单与持仓", "级联视图");
@@ -611,7 +642,12 @@ async function runConnectedSmoke(browser) {
     }
 
     await page.screenshot({
-      path: path.join(artifactDir, "real-backend-connected.png"),
+      path: path.join(
+        artifactDir,
+        deployChannelReady
+          ? "real-backend-connected-deploy-channel-ready.png"
+          : "real-backend-connected.png",
+      ),
       fullPage: true,
     });
     await context.close();
@@ -654,6 +690,7 @@ await mkdir(artifactDir, { recursive: true });
 const browser = await chromium.launch();
 try {
   await runConnectedSmoke(browser);
+  await runConnectedSmoke(browser, { deployChannelReady: true });
   await runUnavailableSmoke(browser);
 } finally {
   await browser.close();
