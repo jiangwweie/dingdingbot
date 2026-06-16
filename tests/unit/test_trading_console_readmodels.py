@@ -5912,7 +5912,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
             "checks": {
-                "scenario_count": 8,
+                "scenario_count": 9,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
@@ -5923,6 +5923,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "operation_layer_blocker_review_policy_checked": True,
                 "operation_layer_hard_safety_blocker_matrix_checked": True,
                 "expanded_watcher_scope_execution_guard_checked": True,
+                "operation_layer_authorization_chain_guard_checked": True,
                 "operation_layer_evidence_relay_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
@@ -6063,7 +6064,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
         "summary"
     ]
-    assert dry_run_summary["scenario_count"] == 8
+    assert dry_run_summary["scenario_count"] == 9
     assert dry_run_summary["required_checks_present"] is True
     assert dry_run_summary["shared_runtime_pipeline_checked"] is True
     assert dry_run_summary["selected_strategygroup_dispatch_guard_checked"] is True
@@ -6078,6 +6079,10 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         is True
     )
     assert dry_run_summary["expanded_watcher_scope_execution_guard_checked"] is True
+    assert (
+        dry_run_summary["operation_layer_authorization_chain_guard_checked"]
+        is True
+    )
     assert dry_run_summary["disabled_smoke_is_real_execution_proof"] is False
     assert set(dry_run_summary["required_checks"]) == {
         "required_scenarios_present",
@@ -6091,6 +6096,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "operation_layer_blocker_review_policy_checked",
         "operation_layer_hard_safety_blocker_matrix_checked",
         "expanded_watcher_scope_execution_guard_checked",
+        "operation_layer_authorization_chain_guard_checked",
         "shared_runtime_pipeline_checked",
         "selected_strategygroup_dispatch_guard_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
@@ -6248,7 +6254,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     )
 
     checks = {name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS}
-    checks["scenario_count"] = 8
+    checks["scenario_count"] = 9
     packet = {
         "status": "passed",
         "checks": checks,
@@ -6266,7 +6272,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
 
     assert ready["status"] == "ready"
     assert ready["owner_label"] == "审计演练正常"
-    assert ready["summary"]["scenario_count"] == 8
+    assert ready["summary"]["scenario_count"] == 9
     assert ready["summary"]["required_checks_present"] is True
     assert ready["summary"]["shared_runtime_pipeline_checked"] is True
     assert ready["summary"]["selected_strategygroup_dispatch_guard_checked"] is True
@@ -6281,6 +6287,10 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         is True
     )
     assert ready["summary"]["expanded_watcher_scope_execution_guard_checked"] is True
+    assert (
+        ready["summary"]["operation_layer_authorization_chain_guard_checked"]
+        is True
+    )
     assert ready["summary"]["required_checks"] == {
         name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
     }

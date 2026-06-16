@@ -1378,6 +1378,103 @@ def _scenario_expanded_watcher_scope_execution_guard(output_dir: Path) -> dict[s
     )
 
 
+def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dict[str, Any]:
+    stale_report = _operation_evidence_report()
+    stale_report["ids"]["authorization_id"] = "dry-run-stale-auth-previous-attempt"
+    stale_report["steps"][0]["id_summary"]["authorization_id"] = (
+        "dry-run-stale-auth-previous-attempt"
+    )
+    stale_operation_layer = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_finalgate_ready(),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        operation_layer_evidence_report=stale_report,
+        operation_layer_evidence_report_path=(
+            "/tmp/dry-run-stale-operation-layer-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+    )
+
+    missing_auth_report = _operation_evidence_report()
+    missing_auth_report["ids"].pop("authorization_id", None)
+    missing_auth_report["steps"][0]["id_summary"].pop("authorization_id", None)
+    missing_auth_operation_layer = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_finalgate_ready(),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        operation_layer_evidence_report=missing_auth_report,
+        operation_layer_evidence_report_path=(
+            "/tmp/dry-run-missing-authorization-operation-layer-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+    )
+
+    checks = {
+        "stale_authorization_evidence_blocked": (
+            stale_operation_layer.get("status") == "operation_layer_submit_blocked"
+            and stale_operation_layer.get("dispatch_status")
+            == "blocked_before_official_operation_layer_submit"
+            and stale_operation_layer.get("operation_layer_readiness", {}).get(
+                "blocker_class"
+            )
+            == "hard_safety_stop"
+            and any(
+                str(blocker).startswith(
+                    "operation_layer_authorization_id_mismatch:"
+                )
+                for blocker in stale_operation_layer.get(
+                    "operation_layer_readiness", {}
+                ).get("blockers", [])
+            )
+        ),
+        "missing_authorization_evidence_blocked": (
+            missing_auth_operation_layer.get("status")
+            == "operation_layer_submit_blocked"
+            and missing_auth_operation_layer.get("dispatch_status")
+            == "blocked_before_official_operation_layer_submit"
+            and "operation_layer_authorization_id_missing"
+            in missing_auth_operation_layer.get("operation_layer_readiness", {}).get(
+                "blockers", []
+            )
+        ),
+        "stale_evidence_does_not_call_operation_layer": (
+            stale_operation_layer.get("safety_invariants", {}).get(
+                "official_operation_layer_submit_called"
+            )
+            is False
+        ),
+        "missing_auth_does_not_call_operation_layer": (
+            missing_auth_operation_layer.get("safety_invariants", {}).get(
+                "official_operation_layer_submit_called"
+            )
+            is False
+        ),
+        "no_dangerous_effects": not _dangerous_effects(
+            stale_operation_layer,
+            missing_auth_operation_layer,
+        ),
+    }
+    blockers = [
+        f"operation_layer_authorization_chain_guard:{name}"
+        for name, value in checks.items()
+        if value is not True
+    ]
+    return _scenario_packet(
+        name="operation_layer_authorization_chain_guard",
+        expected=(
+            "stale or missing Operation Layer authorization evidence blocks "
+            "before official submit and does not call the gateway action"
+        ),
+        artifacts={
+            "checks": checks,
+            "stale_operation_layer": stale_operation_layer,
+            "missing_auth_operation_layer": missing_auth_operation_layer,
+        },
+        passed=not blockers,
+        blockers=blockers,
+    )
+
+
 def _mock_operation_layer_closed_loop() -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     original_session_cookie = dispatcher._session_cookie
@@ -1634,6 +1731,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_operation_layer_blocker_review_matrix(output_dir),
         _scenario_selected_strategygroup_dispatch_guard(output_dir),
         _scenario_expanded_watcher_scope_execution_guard(output_dir),
+        _scenario_operation_layer_authorization_chain_guard(output_dir),
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
     blockers = [
@@ -1649,7 +1747,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 8,
+        "required_scenarios_present": len(scenarios) == 9,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -1759,6 +1857,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).values()
             )
         ),
+        "operation_layer_authorization_chain_guard_checked": (
+            _scenario_artifact(
+                scenarios,
+                "operation_layer_authorization_chain_guard",
+                "checks",
+            )
+            != {}
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "operation_layer_authorization_chain_guard",
+                    "checks",
+                ).values()
+            )
+        ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
     required_checks = {
@@ -1786,6 +1899,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "expanded_watcher_scope_execution_guard_checked": checks[
             "expanded_watcher_scope_execution_guard_checked"
+        ],
+        "operation_layer_authorization_chain_guard_checked": checks[
+            "operation_layer_authorization_chain_guard_checked"
         ],
     }
     return {

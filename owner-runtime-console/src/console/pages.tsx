@@ -407,6 +407,7 @@ function buildDryRunSummaryRows(summary: Record<string, unknown> | undefined) {
     summary.all_selected_strategygroups_reach_finalgate_dispatch_checked === true ? { label: "五组策略", value: "已覆盖" } : null,
     summary.operation_layer_hard_safety_blocker_matrix_checked === true ? { label: "安全矩阵", value: "已覆盖" } : null,
     summary.expanded_watcher_scope_execution_guard_checked === true ? { label: "观察范围", value: "已隔离" } : null,
+    summary.operation_layer_authorization_chain_guard_checked === true ? { label: "证据接力", value: "已校验" } : null,
     summary.dangerous_effects_absent === true && summary.disabled_smoke_is_real_execution_proof === false
       ? { label: "危险动作", value: "未发生" }
       : null,

@@ -272,7 +272,7 @@ async function createRuntimeFixtures() {
     scope: "runtime_dry_run_audit_chain",
     status: "passed",
     checks: {
-      scenario_count: 8,
+      scenario_count: 9,
       required_scenarios_present: true,
       all_scenarios_passed: true,
       dangerous_effects_absent: true,
@@ -283,6 +283,7 @@ async function createRuntimeFixtures() {
       operation_layer_blocker_review_policy_checked: true,
       operation_layer_hard_safety_blocker_matrix_checked: true,
       expanded_watcher_scope_execution_guard_checked: true,
+      operation_layer_authorization_chain_guard_checked: true,
       operation_layer_evidence_relay_checked: true,
       selected_strategygroup_dispatch_guard_checked: true,
       all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
@@ -488,8 +489,8 @@ async function runConnectedSmoke(browser) {
       throw new Error("Expected source-readiness dry-run audit to show 审计演练正常");
     }
     const dryRunSummary = sourcePayload?.data?.source_health?.runtime_dry_run_audit?.summary;
-    if (dryRunSummary?.scenario_count !== 8) {
-      throw new Error("Expected source-readiness dry-run audit summary to include 8 scenarios");
+    if (dryRunSummary?.scenario_count !== 9) {
+      throw new Error("Expected source-readiness dry-run audit summary to include 9 scenarios");
     }
     if (dryRunSummary?.shared_runtime_pipeline_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm shared runtime pipeline");
@@ -505,6 +506,9 @@ async function runConnectedSmoke(browser) {
     }
     if (dryRunSummary?.expanded_watcher_scope_execution_guard_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm expanded watcher scope execution guard");
+    }
+    if (dryRunSummary?.operation_layer_authorization_chain_guard_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm operation evidence relay chain guard");
     }
     if (sourcePayload?.data?.owner_summary?.real_order_readiness !== "等待机会") {
       throw new Error("Expected source-readiness real-order readiness to show 等待机会");
@@ -547,9 +551,11 @@ async function runConnectedSmoke(browser) {
     await expectVisible(page, "审计演练正常");
     await expectVisible(page, "审计演练摘要");
     await expectVisible(page, "演练场景");
-    await expectVisible(page, "8 项通过");
+    await expectVisible(page, "9 项通过");
     await expectVisible(page, "观察范围");
     await expectVisible(page, "已隔离");
+    await expectVisible(page, "证据接力");
+    await expectVisible(page, "已校验");
     await expectVisible(page, "共性管道");
     await expectVisible(page, "已覆盖");
     await expectVisible(page, "选中范围");
