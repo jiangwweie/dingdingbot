@@ -47,7 +47,7 @@ The first P2 cabinet extension is recorded in
 | `SCF-001` | Session-confluence observe-only handoff draft. | Converted to `strategy-group-handoffs/SCF-001/`; armed observation remains blocked until fill/gap, product-risk, time-stop, and margin facts improve. |
 | `DMI-001` | ADX/DMI directional ignition observe-only handoff draft. | Converted to `strategy-group-handoffs/DMI-001/`; generic DMI, short-side, and metals branches stay blocked. |
 | `MASS-001` | Mass Index range-expansion reversal observe-only handoff draft. | Converted to `strategy-group-handoffs/MASS-001/`; armed observation remains blocked until direction-context, decay, concentration, fill/product-risk, and margin facts improve. |
-| `EFI-001` | Elder Force Index exhaustion-reversal right-tail candidate. | Review only until drawdown, short-side failure, high-leverage, fill/product-risk, and margin blockers improve. |
+| `EFI-001` | Elder Force Index exhaustion-reversal right-tail candidate. | Boundary fixed in `efi-drawdown-disable-boundary-20260616.md`; review only until drawdown, short-side failure, high-leverage, fill/product-risk, and margin blockers improve. |
 | `HAT-001` | Heikin-Ashi stop-reslot revival candidate. | Revival only until drawdown, stop-fill/gap, exit/disable, session/product, and margin facts improve. |
 | `LSR-001` | Liquidity-sweep upper-range revival candidate. | Revival only until full-sequence collapse, cost/fill, slot/M2M, classifier, and margin blockers improve. |
 
@@ -71,6 +71,7 @@ The first P2 cabinet extension is recorded in
 | `NLPD-001` spot fade labels | Analysis-only. | Revive only with executable venue facts and survivorship/liquidity controls. |
 | `PMR-001` standalone short | Observe-only overlay. | Revive only after role split, session mapping, fill, mark/funding, and margin facts improve. |
 | `MDS-001` universal metal overlay | Overlay candidate. | Revive only with target-specific coverage, PMR-state freshness, session/fill/margin facts, and a stable activation/disable pair. |
+| `EFI-001` broad Force Index | Right-tail candidate, not handoff. | Revive only through negative-force exhaustion isolation, signal-time drawdown disable, product/session/fill facts, and real margin evidence. |
 | `SOR-001` broad branch | Conditional. | Revive only through named branch eligibility and time-stop evidence. |
 
 ## P2 Next Actions

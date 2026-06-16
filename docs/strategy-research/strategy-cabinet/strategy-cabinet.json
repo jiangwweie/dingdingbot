@@ -759,18 +759,20 @@
         "candidate_level_drawdown",
         "short_side_failure",
         "high_leverage_breakdown",
+        "disable_classifier_missing",
         "session_fill_missing",
         "product_risk_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/efi-drawdown-disable-boundary-20260616.md",
         "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
         "docs/strategy-research/candidate-packets/EFI-001-elder-force-index-packet.md",
         "docs/strategy-research/efi-elder-force-index-replay/efi-elder-force-index-summary.md",
         "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Convert only after negative-force exhaustion is isolated from candidate-level drawdown, short-side failure, high-leverage breakdown, session/fill, product-risk, and margin blockers.",
+      "revival_condition": "Convert only after negative-force exhaustion is isolated from candidate-level drawdown by signal-time facts, short-side and simple-impulse branches remain disabled, high-leverage breakdown is bounded, and session/fill, product-risk, and margin blockers improve.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

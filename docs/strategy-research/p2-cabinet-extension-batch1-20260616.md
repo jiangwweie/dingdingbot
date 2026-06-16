@@ -30,7 +30,7 @@ Batch 1 selects candidates that already have:
 | `SCF-001` | `observe_only handoff draft` | Session confluence / TEQ structure confirmation. | 12h TEQ confluence row has positive full 2x, lower drawdown than 72h, and no 2x/5x proxy liquidation; converted to `strategy-group-handoffs/SCF-001/`. | Fill/gap, product-risk, real margin, and time-stop tradeoff facts. |
 | `DMI-001` | `observe_only handoff draft` | ADX / DMI directional ignition. | Equity ADX-rising 24h row has strong full 2x, best-90d 2x, and positive second-half behavior; converted to `strategy-group-handoffs/DMI-001/`. | Cost sensitivity, product/session/fill, metal drag, and real margin facts. |
 | `MASS-001` | `observe_only handoff draft` | Mass Index range-expansion reversal / continuation. | Mass bulge reversal long has a cleaner drawdown profile than most right-tail review rows; converted to `strategy-group-handoffs/MASS-001/`. | Direction context, decay, concentration, session/fill, product-risk, and real margin facts. |
-| `EFI-001` | `right_tail_candidate` | Price-volume negative-force exhaustion reversal. | Negative-force exhaustion reversal has very large right-tail windows and positive full 2x. | Candidate-level drawdown, short-side failure, high-leverage breakdown, session/fill, product-risk, and real margin facts. |
+| `EFI-001` | `right_tail_candidate` | Price-volume negative-force exhaustion reversal. | Negative-force exhaustion reversal has very large right-tail windows and positive full 2x; boundary fixed in `efi-drawdown-disable-boundary-20260616.md`. | Candidate-level drawdown, missing disable classifier, short-side failure, high-leverage breakdown, session/fill, product-risk, and real margin facts. |
 | `HAT-001` | `research_candidate` | Heikin-Ashi smoothed trend / stop-reslot revival. | Clean-combo and stop-reslot rows preserve large right-tail windows. | Drawdown, stop-fill/gap, exit/disable quality, session/product transferability, and real margin facts. |
 | `LSR-001` | `research_candidate` | Liquidity sweep upper-range rejection. | Unbiased rewrite and signal-time classifier preserve a short-side upper-range right-tail window. | Full-sequence collapse, cost/fill, slot/M2M, classifier quality, and real margin facts. |
 
@@ -63,9 +63,10 @@ Their current use is:
 1. Treat `DMI-001`, `SCF-001`, and `MASS-001` as converted Batch 1 observe-only
    handoff drafts; their current use is Strategy Picker vocabulary, watcher
    exploration, and future P1 follow-up, not armed observation.
-2. Keep `EFI-001` in right-tail review, but do not handoff until drawdown,
-   short-side failure, high-leverage breakdown, fill, and real margin facts
-   improve.
+2. Keep `EFI-001` in right-tail review after
+   `efi-drawdown-disable-boundary-20260616.md`, but do not handoff until
+   drawdown, signal-time disable, short-side failure, high-leverage breakdown,
+   fill, product/session, and real margin facts improve.
 3. Keep `HAT-001` and `LSR-001` as revival candidates until their drawdown and
    full-sequence problems have materially stronger disable or exit facts.
 4. Do not compare these rows as a return leaderboard; their evidence models are

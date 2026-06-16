@@ -24,6 +24,7 @@ sample packet expectations, and non-execution flags.
 | 6 | `DMI-001` | `observe_only handoff draft complete from P2 batch` | Equity ADX-rising directional-ignition observer draft. | Completed in `strategy-group-handoffs/DMI-001/`; converted from P2 cabinet extension after exit-horizon and cost-sensitivity evidence clarified a narrow long-only 24h semantic. |
 | 7 | `SCF-001` | `observe_only handoff draft complete from P2 batch` | TEQ session-confluence structure-confirmation observer draft. | Completed in `strategy-group-handoffs/SCF-001/`; converted from P2 cabinet extension after exit-horizon evidence clarified a narrow TEQ long 12h semantic. |
 | 8 | `MASS-001` | `observe_only handoff draft complete from P2 batch` | Mass Index bulge-reversal observer draft. | Completed in `strategy-group-handoffs/MASS-001/`; converted from P2 cabinet extension because its reversal-long branch is cleaner than EFI's current drawdown profile. |
+| 9 | `EFI-001` | `right_tail candidate; drawdown/disable boundary complete; no handoff` | No handoff yet. Preserve negative-force exhaustion reversal as a review lane. | Added `efi-drawdown-disable-boundary-20260616.md`; branch-level right tail is strong, but candidate-level drawdown, high-leverage breakdown, short-side failure, product/session/fill, and margin facts block handoff. |
 
 ## VCB-001 Handoff Draft Scope
 
@@ -195,3 +196,7 @@ product/margin blockers.
    `strategy-group-handoffs/MASS-001/handoff.md`; next evidence task is
    direction-context hardening, symbol-concentration review, monthly decay
    disable, and fill/session/product/margin fact attachment.
+9. Keep `EFI-001` out of handoff after
+   `efi-drawdown-disable-boundary-20260616.md`; next evidence task is a
+   signal-time disable classifier for `efi_negative_exhaustion_reversal_long_72h`
+   plus product/session/fill and real-margin fact attachment.
