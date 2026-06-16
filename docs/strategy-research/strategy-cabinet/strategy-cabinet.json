@@ -436,6 +436,7 @@
       },
       "primary_blockers": [
         "force_order_capture_missing",
+        "liquidation_cluster_state_missing",
         "historical_oi_missing",
         "top_trader_ratio_missing",
         "adl_risk_missing",
@@ -443,12 +444,13 @@
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/lcf-liquidation-cascade-requiredfacts-design-20260616.md",
         "docs/strategy-research/derivatives-leverage-requiredfacts-data-plan.md",
         "docs/strategy-research/btpc-derivatives-reviewability/btpc-derivatives-reviewability-summary.md",
         "docs/strategy-research/external-data/binance-futures-context-20260613/futures-context-summary.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Build reproducible forceOrder, OI, funding, top-trader, ADL, depth, and margin capture before handoff work.",
+      "revival_condition": "Build reproducible forceOrder, liquidation-cluster, OI, funding, top-trader, ADL, depth, and margin capture before handoff work.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

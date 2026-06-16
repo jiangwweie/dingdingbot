@@ -19,7 +19,7 @@ sample packet expectations, and non-execution flags.
 | 1 | `VCB-001` | `observe_only handoff draft complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/`; broad breakout remains negative and armed observation remains blocked. |
 | 2 | `RSR-001` | `observe_only scorer handoff draft complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
 | 3 | `NLPD-001` | `observe_only event-study handoff draft complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
-| 4 | `LCF-001` | `facts_pipeline_required` | RequiredFacts design packet first. | High-potential liquidation-cascade thesis cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
+| 4 | `LCF-001` | `RequiredFacts design packet complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay_candidate` | PMR-adjacent overlay note. | Useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
 
 ## VCB-001 Handoff Draft Scope
@@ -58,6 +58,18 @@ sample packet expectations, and non-execution flags.
 | RequiredFacts | `listing_event_time`, `first_trade_window_ohlcv`, `low_history_dataset_state`, `quote_volume_floor`, `spread_proxy_state`, `survivorship_control`, `short_executable_state`, `instrument_product_risk_state`. |
 | Handoff mode | `observe_only`; event-study watcher only. |
 
+## LCF-001 RequiredFacts Design Scope
+
+| Field | Draft Decision |
+| --- | --- |
+| Strategy role | Liquidation-cascade follow-through RequiredFacts design task. |
+| Supported side | Long and short remain research hypotheses only. |
+| Positive evidence | Forced-flow cascade thesis is high-potential for small-capital right-tail windows; derivatives endpoint field shapes are capturable in current public snapshots. |
+| Negative evidence | No local force-order stream, historical OI, historical long-short, top-trader, ADL, depth/slippage, or exchange-margin dataset is attached. |
+| Main blocker | It cannot distinguish true liquidation cascade from ordinary price volatility without `force_order_event_stream` and `liquidation_cluster_state`. |
+| RequiredFacts | `force_order_event_stream`, `liquidation_cluster_state`, `historical_open_interest_window`, `global_long_short_ratio_window`, `top_trader_position_ratio_window`, `adl_quantile_state`, `orderbook_depth_slippage_state`, `real_exchange_margin_liquidation_model`. |
+| Handoff mode | No handoff yet; keep as `facts_pipeline_required` until the data pipeline exists. |
+
 ## P1 Next Actions
 
 1. Keep `VCB-001` observe-only until a signal-time classifier improves
@@ -67,6 +79,8 @@ sample packet expectations, and non-execution flags.
 3. Keep `NLPD-001` as event-study observer until broader listing cohort,
    survivorship, spread/liquidity, product-risk, and executable-side facts
    improve.
-4. Record `LCF-001` as a RequiredFacts design task, not a strategy handoff.
+4. Keep `LCF-001` as a RequiredFacts design task after
+   `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; do not create a
+   handoff until force-order, OI, ratio, depth, and margin facts exist.
 5. Keep `MDS-001` as overlay research unless it develops a standalone
    activation/disable pair.
