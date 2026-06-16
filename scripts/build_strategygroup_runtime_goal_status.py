@@ -210,6 +210,61 @@ def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
     return bool(statuses & FRESH_SIGNAL_STATUSES)
 
 
+def _selected_runtime_instance_ids(packet: dict[str, Any] | None) -> list[str]:
+    return [
+        str(item)
+        for item in _list(_data(packet).get("selected_runtime_instance_ids"))
+        if str(item)
+    ]
+
+
+def _pilot_matched_runtime_instance_ids(packet: dict[str, Any] | None) -> list[str]:
+    alignment = _dict(_data(packet).get("watcher_scope_alignment"))
+    rows = _list(alignment.get("matched_runtime_signal_summaries"))
+    return [
+        str(_dict(item).get("runtime_instance_id"))
+        for item in rows
+        if str(_dict(item).get("runtime_instance_id") or "")
+    ]
+
+
+def _selected_scope_blockers(
+    *,
+    packets: dict[str, dict[str, Any] | None],
+    fresh_signal_present: bool,
+) -> list[str]:
+    if not fresh_signal_present:
+        return []
+
+    pilot = _data(packets.get("pilot_status"))
+    alignment = _dict(pilot.get("watcher_scope_alignment"))
+    if not alignment:
+        return []
+
+    if alignment.get("status") == "mismatch":
+        return ["selected_strategygroup_scope_mismatch"]
+
+    matched_ids = set(_pilot_matched_runtime_instance_ids(packets.get("pilot_status")))
+    if not matched_ids:
+        return ["selected_strategygroup_matched_runtime_ids_missing"]
+
+    candidate_ids = (
+        _selected_runtime_instance_ids(packets.get("resume_dispatch"))
+        or _selected_runtime_instance_ids(packets.get("post_signal_resume"))
+        or _selected_runtime_instance_ids(packets.get("latest_summary"))
+    )
+    if not candidate_ids:
+        return ["fresh_signal_runtime_instance_id_missing"]
+
+    out_of_scope_ids = sorted(set(candidate_ids) - matched_ids)
+    if out_of_scope_ids:
+        return [
+            f"fresh_signal_outside_selected_strategygroup_scope:{runtime_id}"
+            for runtime_id in out_of_scope_ids
+        ]
+    return []
+
+
 def _watcher_liveness_blockers(
     packets: dict[str, dict[str, Any] | None],
 ) -> list[str]:
@@ -233,6 +288,7 @@ def _current_status(
     dangerous_effects: list[str],
     deployment_blockers: list[str],
     watcher_liveness_blockers: list[str],
+    selected_scope_blockers: list[str],
 ) -> tuple[str, str, str, bool]:
     if dangerous_effects:
         return (
@@ -282,6 +338,13 @@ def _current_status(
             "missing_fact",
             "refresh_strategy_group_live_facts_readiness",
             "live facts 尚未 ready，不能进入实盘动作边界",
+            False,
+        )
+    if selected_scope_blockers:
+        return (
+            "runtime_scope_mismatch",
+            "ignore_out_of_scope_signal_and_continue_selected_scope_observation",
+            "fresh signal 不属于当前 selected StrategyGroup 范围，不能靠近实盘动作",
             False,
         )
     if dispatch_blocker_class == "active_position_resolution":
@@ -392,6 +455,11 @@ def build_goal_status_packet(
     live_facts = _data(packets["live_facts_readiness"])
     dangerous = _dangerous_effects(*packets.values())
     watcher_liveness = _watcher_liveness_blockers(packets)
+    fresh_signal_present = _has_fresh_signal(packets)
+    selected_scope_blockers = _selected_scope_blockers(
+        packets=packets,
+        fresh_signal_present=fresh_signal_present,
+    )
     missing_packets = [
         key for key, value in packets.items() if value is None
     ]
@@ -409,7 +477,8 @@ def build_goal_status_packet(
             "strategy_group_live_facts_ready"
         ),
         "dangerous_effects_absent": not dangerous,
-        "fresh_signal_present": _has_fresh_signal(packets),
+        "fresh_signal_present": fresh_signal_present,
+        "selected_strategygroup_scope_ready": not selected_scope_blockers,
         "watcher_liveness_healthy": not watcher_liveness,
     }
     status, next_checkpoint, owner_detail, real_order_ready = _current_status(
@@ -418,6 +487,7 @@ def build_goal_status_packet(
         dangerous_effects=dangerous,
         deployment_blockers=deployment_blockers,
         watcher_liveness_blockers=watcher_liveness,
+        selected_scope_blockers=selected_scope_blockers,
     )
 
     source_summary = _source_owner_summary(packets["source_readiness"])
@@ -431,6 +501,7 @@ def build_goal_status_packet(
         ],
         *([] if checks["source_readiness_ready"] else ["source_readiness_not_ready"]),
         *([] if checks["live_facts_ready"] else ["live_facts_not_ready"]),
+        *selected_scope_blockers,
         *watcher_liveness,
         *([] if checks["dangerous_effects_absent"] else ["dangerous_effects_present"]),
     ]
@@ -475,6 +546,13 @@ def build_goal_status_packet(
             },
             "dry_run_missing_required_checks": dry_run_missing_required_checks,
             "watcher_liveness_blockers": watcher_liveness,
+            "selected_scope_blockers": selected_scope_blockers,
+            "pilot_matched_runtime_instance_ids": _pilot_matched_runtime_instance_ids(
+                packets["pilot_status"]
+            ),
+            "resume_dispatch_selected_runtime_instance_ids": (
+                _selected_runtime_instance_ids(packets["resume_dispatch"])
+            ),
             "active_runtime_count": _data(packets["latest_summary"]).get(
                 "active_runtime_count"
             ),
@@ -489,6 +567,7 @@ def build_goal_status_packet(
         "real_order_boundary": {
             "ready_for_real_order_action": real_order_ready,
             "requires_selected_strategygroup": True,
+            "selected_strategygroup_scope_ready": not selected_scope_blockers,
             "requires_tiny_risk": True,
             "requires_fresh_signal": True,
             "requires_required_facts": True,

@@ -116,7 +116,24 @@ def _write_base_packets(report_dir: Path) -> None:
     )
     _write(
         report_dir / "strategygroup-runtime-pilot-status.json",
-        {"status": "waiting_for_market", "blockers": []},
+        {
+            "status": "waiting_for_market",
+            "blockers": [],
+            "watcher_scope_alignment": {
+                "status": "aligned",
+                "selected_strategy_group_id": "MPG-001",
+                "matched_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-mpg-1",
+                        "strategy_family_id": "MPG-001",
+                        "symbol": "MSTR/USDT:USDT",
+                        "side": "long",
+                        "status": "waiting_for_signal",
+                    }
+                ],
+                "out_of_scope_runtime_signal_summaries": [],
+            },
+        },
     )
     _write(
         report_dir / "strategy-group-live-facts-readiness.json",
@@ -156,6 +173,7 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         "continue_watcher_observation"
     )
     assert packet["checks"]["fresh_signal_present"] is False
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["safety_invariants"]["calls_operation_layer"] is False
 
@@ -318,6 +336,27 @@ def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
     report_dir = tmp_path / "reports"
     _write_base_packets(report_dir)
     _write(
+        report_dir / "strategygroup-runtime-pilot-status.json",
+        {
+            "status": "ready_for_action_time_final_gate",
+            "blockers": [],
+            "watcher_scope_alignment": {
+                "status": "aligned",
+                "selected_strategy_group_id": "MPG-001",
+                "matched_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-fresh-1",
+                        "strategy_family_id": "MPG-001",
+                        "symbol": "MSTR/USDT:USDT",
+                        "side": "long",
+                        "status": "ready_for_action_time_final_gate",
+                    }
+                ],
+                "out_of_scope_runtime_signal_summaries": [],
+            },
+        },
+    )
+    _write(
         report_dir / "watcher-tick.json",
         {
             "status": "watcher_attention",
@@ -434,7 +473,53 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
 
     assert packet["status"] == "operation_layer_ready"
     assert packet["owner_state"]["label"] == "处理中"
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is True
+
+
+def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "ready_for_operation_layer",
+            "dispatch_status": "official_operation_layer_evidence_ready",
+            "dispatch_action": "call_official_operation_layer_submit",
+            "blocker_class": "none",
+            "selected_runtime_instance_ids": ["runtime-teq-1"],
+            "ready_runtime_signals": 1,
+            "blockers": [],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "runtime_scope_mismatch"
+    assert packet["owner_state"]["label"] == "需要介入"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "ignore_out_of_scope_signal_and_continue_selected_scope_observation"
+    )
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is False
+    assert (
+        "fresh_signal_outside_selected_strategygroup_scope:runtime-teq-1"
+        in packet["blockers"]
+    )
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert packet["real_order_boundary"]["selected_strategygroup_scope_ready"] is False
 
 
 def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
