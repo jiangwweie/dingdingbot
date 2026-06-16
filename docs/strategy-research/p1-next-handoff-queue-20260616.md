@@ -20,7 +20,7 @@ sample packet expectations, and non-execution flags.
 | 2 | `RSR-001` | `observe_only scorer handoff draft complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
 | 3 | `NLPD-001` | `observe_only event-study handoff draft complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
 | 4 | `LCF-001` | `RequiredFacts design packet complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
-| 5 | `MDS-001` | `overlay_candidate` | PMR-adjacent overlay note. | Useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
+| 5 | `MDS-001` | `overlay note complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md`; useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
 
 ## VCB-001 Handoff Draft Scope
 
@@ -70,6 +70,18 @@ sample packet expectations, and non-execution flags.
 | RequiredFacts | `force_order_event_stream`, `liquidation_cluster_state`, `historical_open_interest_window`, `global_long_short_ratio_window`, `top_trader_position_ratio_window`, `adl_quantile_state`, `orderbook_depth_slippage_state`, `real_exchange_margin_liquidation_model`. |
 | Handoff mode | No handoff yet; keep as `facts_pipeline_required` until the data pipeline exists. |
 
+## MDS-001 Overlay Note Scope
+
+| Field | Draft Decision |
+| --- | --- |
+| Strategy role | PMR-adjacent metals dislocation and session-mismatch overlay. |
+| Supported side | `long_context` and `short_context`; not standalone long/short execution. |
+| Positive evidence | `pmr_metal_relative_breakdown_short_72h` has full 2x `61.335549%`, best-30d 2x `74.904336%`, and best-90d 2x `52.642224%`; PMR regular-session short has right-tail windows but high drawdown. |
+| Negative evidence | Broad metal long momentum fails; PMR has `0` 1x/2x right-tail gate rows in expanded-universe review; useful 5x rows are observation-only. |
+| Main blocker | It is target-specific overlay vocabulary, not a stable activation/disable pair. |
+| RequiredFacts | `instrument_type`, `metal_role_split_state`, `xag_dominance_state`, `commodity_session_gap_state`, `mark_deviation_bound_state`, `funding_rate_window`, `spread_fill_state`, `overlay_target_pairing_coverage_state`, `target_specific_overlay_effect_state`, `real_margin_model_state`. |
+| Handoff mode | No handoff yet; keep as `overlay_candidate` until target-specific overlay coverage and activation/disable semantics improve. |
+
 ## P1 Next Actions
 
 1. Keep `VCB-001` observe-only until a signal-time classifier improves
@@ -83,4 +95,5 @@ sample packet expectations, and non-execution flags.
    `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; do not create a
    handoff until force-order, OI, ratio, depth, and margin facts exist.
 5. Keep `MDS-001` as overlay research unless it develops a standalone
-   activation/disable pair.
+   activation/disable pair; current overlay note is
+   `mds-metals-dislocation-overlay-note-20260616.md`.

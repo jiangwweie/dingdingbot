@@ -14,6 +14,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `p0-handoff-hardening-matrix-20260616.md` | P0 matrix for the 5 existing StrategyGroup handoff packs. |
 | `p1-next-handoff-queue-20260616.md` | P1 queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | Research-only RequiredFacts design packet for `LCF-001`; not a handoff and not runtime intake. |
+| `mds-metals-dislocation-overlay-note-20260616.md` | Research-only overlay note for `MDS-001`; preserves metals dislocation and session-mismatch semantics without runtime intake. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 queue for pool expansion, revival, and parked-strategy governance. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
@@ -50,6 +51,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `p0-handoff-hardening-matrix-20260616.md` | P0 handoff hardening matrix for `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, and `SOR-001`. |
 | `p1-next-handoff-queue-20260616.md` | P1 next handoff queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | `LCF-001` liquidation-cascade RequiredFacts design packet and facts-missing no-signal shape. |
+| `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |

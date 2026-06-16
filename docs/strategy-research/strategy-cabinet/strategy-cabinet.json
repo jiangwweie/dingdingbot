@@ -536,15 +536,17 @@
         "settlement_window_missing",
         "current_product_availability_missing",
         "spread_fill_missing",
+        "target_specific_overlay_coverage_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/mds-metals-dislocation-overlay-note-20260616.md",
         "docs/strategy-research/pmr-metal-dislocation-refresh/pmr-metal-dislocation-refresh-summary.md",
         "docs/strategy-research/pmr-metal-relative-spread-replay/pmr-metal-relative-spread-summary.md",
         "docs/strategy-research/extended-universe-us-equity-metals-refresh-20260613.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Advance after external session, settlement, current availability, spread/fill, and margin facts are captured.",
+      "revival_condition": "Advance after external session, settlement, current availability, spread/fill, target-specific overlay coverage, and margin facts are captured.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",
