@@ -359,6 +359,44 @@ produce an auditable review packet and Owner-readable unavailable/intervention
 state, but `real_submit_allowed` must remain false until the blocker is
 resolved through the official path.
 
+## P0 Subgoal: Common Runtime Pipe Before Strategy-Specific Adapters
+
+### Current Judgment
+
+The current first-real-submit blocker mix is treated as:
+
+| Share | Scope | Meaning |
+| --- | --- | --- |
+| 80% | Common runtime pipe | Fresh signal, RequiredFacts readiness, candidate/auth, FinalGate, Operation Layer evidence, live boundary enablement, submit, finalize, reconcile, settle, and Owner readmodel are shared infrastructure. |
+| 20% | StrategyGroup adapter | Each StrategyGroup supplies signal semantics, RequiredFacts definitions, supported symbol/side, tiny risk defaults, hard stops, and conflict policy. |
+
+### 2026-06-16 Runtime Boundary Repair
+
+The resume dispatcher now includes a bounded runtime live-enablement relay after
+same-run action-time FinalGate pass:
+
+```text
+FinalGate PASS
+-> prepare Operation Layer evidence
+-> if blocked only by runtime shadow boundary
+-> official live-enablement preview / mutation
+-> re-prepare Operation Layer evidence
+-> official Operation Layer submit only when evidence is ready
+```
+
+This is a common-chain repair. It must apply to MPG / TEQ / FBS / SOR / PMR
+through the same dispatcher path and must not be copied into StrategyGroup
+specific code.
+
+### Guardrails
+
+| Guardrail | Required behavior |
+| --- | --- |
+| Hard safety blockers | Active position, open order, duplicate submit, scope mismatch, withdrawal, transfer, and bypass tokens block live enablement relay. |
+| Live enablement mutation | May mutate runtime execution state only through the official API; it must not create orders, call OrderLifecycle, call exchange, mutate budget, or create withdrawal/transfer actions. |
+| Operation Layer readiness | Missing evidence is never fabricated; after live enablement the dispatcher must re-run evidence prep and re-check readiness. |
+| Strategy adapters | StrategyGroup code remains limited to signal/facts/risk/hard-stop inputs. It must not implement custom FinalGate, Operation Layer, gateway, or settlement paths. |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline until reviewed, but the Owner Console

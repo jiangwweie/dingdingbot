@@ -58,6 +58,7 @@ OPERATION_LAYER_SUBMIT_ACTION = "call_official_operation_layer_submit"
 POST_SUBMIT_FINALIZE_ACTION = "post_submit_finalize_reconciliation_budget_settlement"
 FRESH_AUTHORIZATION_ACTION = "bind_or_resolve_fresh_submit_authorization"
 FRESH_AUTHORIZATION_BINDING_ACTION = "run_official_fresh_submit_authorization_binding"
+RUNTIME_LIVE_ENABLEMENT_ACTION = "apply_bounded_runtime_live_enablement"
 FRESH_AUTHORIZATION_ALLOWED_ACTIONS = {
     FRESH_AUTHORIZATION_ACTION,
     "bind_or_resolve_fresh_authorization",
@@ -101,6 +102,24 @@ POST_SUBMIT_FINALIZE_OPTIONAL_EVIDENCE_IDS = (
 LEGACY_LOCAL_REGISTRATION_PROBE_BLOCKER_FRAGMENTS = (
     "runtimeexecutionorderlifecycleadapterresult_not_found",
     "runtime_execution_order_lifecycle_adapter_result_not_found",
+)
+SHADOW_RUNTIME_BOUNDARY_BLOCKERS = (
+    "runtime_execution_enabled_false_current_shadow_boundary",
+    "runtime_shadow_mode_current_boundary",
+)
+LIVE_ENABLEMENT_HARD_STOP_TOKENS = (
+    "withdraw",
+    "transfer",
+    "bypass",
+    "duplicate",
+    "idempotency",
+    "active_position",
+    "open_order",
+    "symbol_scope",
+    "side_scope",
+    "notional_scope",
+    "leverage_scope",
+    "authorization_id_mismatch",
 )
 
 
@@ -809,6 +828,7 @@ def build_dispatch_packet(
     operation_layer_evidence_report_path: str | None = None,
     operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
     | None = None,
+    runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
@@ -985,6 +1005,7 @@ def build_dispatch_packet(
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
             operation_layer_evidence_preparer=operation_layer_evidence_preparer,
+            runtime_live_enabler=runtime_live_enabler,
             execute_operation_layer_submit=execute_operation_layer_submit,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
@@ -1132,6 +1153,7 @@ def build_dispatch_packet(
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
             operation_layer_evidence_preparer=operation_layer_evidence_preparer,
+            runtime_live_enabler=runtime_live_enabler,
             execute_operation_layer_submit=execute_operation_layer_submit,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
@@ -1242,6 +1264,348 @@ def _maybe_prepare_operation_layer_evidence(
     return report
 
 
+def _shadow_runtime_boundary_blockers(blockers: list[str]) -> list[str]:
+    result: list[str] = []
+    for blocker in blockers:
+        text = str(blocker)
+        if any(token in text for token in SHADOW_RUNTIME_BOUNDARY_BLOCKERS):
+            result.append(text)
+    return _dedupe_text(result)
+
+
+def _runtime_live_enablement_hard_stops(blockers: list[str]) -> list[str]:
+    hard_stops: list[str] = []
+    for blocker in blockers:
+        text = str(blocker).lower()
+        if any(token in text for token in LIVE_ENABLEMENT_HARD_STOP_TOKENS):
+            hard_stops.append(str(blocker))
+    return _dedupe_text(hard_stops)
+
+
+def _operation_layer_needs_runtime_live_enablement(
+    *,
+    evidence_report: dict[str, Any] | None,
+    command_plan: dict[str, Any],
+) -> bool:
+    if evidence_report is None:
+        return False
+    readiness = _operation_layer_readiness(
+        evidence_report=evidence_report,
+        evidence_report_path=None,
+        command_plan=command_plan,
+    )
+    if readiness is None or readiness.get("ready_for_official_operation_layer_submit"):
+        return False
+    blockers = _dedupe_text(readiness.get("blockers") or [])
+    if not _shadow_runtime_boundary_blockers(blockers):
+        return False
+    return not _runtime_live_enablement_hard_stops(blockers)
+
+
+def _runtime_instance_id_for_live_enablement(
+    *,
+    packet: dict[str, Any],
+    evidence_report: dict[str, Any] | None,
+) -> str | None:
+    ids = _operation_layer_ids(evidence_report or {})
+    selected_runtime_ids = [
+        str(item)
+        for item in _list(packet.get("selected_runtime_instance_ids"))
+        if str(item or "").strip()
+    ]
+    return _first_text(
+        ids.get("runtime_instance_id"),
+        selected_runtime_ids[0] if len(selected_runtime_ids) == 1 else None,
+        _dict(packet.get("action_time_resume")).get("runtime_instance_id"),
+    )
+
+
+def _standing_live_enablement_authorization_id(
+    *,
+    runtime_instance_id: str,
+    authorization_id: str,
+) -> str:
+    raw = f"standing-live-enable-{runtime_instance_id}-{authorization_id}"
+    return raw[:180]
+
+
+def _runtime_live_enablement_query(
+    *,
+    authorization_id: str,
+    evidence_report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    ids = _operation_layer_ids(evidence_report or {})
+    return {
+        "strategy_family_confirmed": True,
+        "implementation_source_confirmed": True,
+        "required_facts_confirmed": True,
+        "entry_policy_confirmed": True,
+        "exit_policy_confirmed": True,
+        "protection_policy_confirmed": True,
+        "eligible_for_runtime_execution_confirmed": True,
+        "right_tail_review_metrics_confirmed": True,
+        "runtime_profile_confirmed": True,
+        "owner_confirmation_mode_confirmed": True,
+        "symbol_side_boundary_confirmed": True,
+        "max_loss_budget_confirmed": True,
+        "max_notional_boundary_confirmed": True,
+        "max_active_positions_boundary_confirmed": True,
+        "max_leverage_boundary_confirmed": True,
+        "margin_usage_boundary_confirmed": True,
+        "liquidation_buffer_boundary_confirmed": True,
+        "protection_readiness_source_confirmed": True,
+        "stale_fact_behavior_confirmed": True,
+        "attempt_consumption_rule_confirmed": True,
+        "budget_reservation_rule_confirmed": True,
+        "trusted_active_position_source_confirmed": True,
+        "trusted_account_fact_source_confirmed": True,
+        "short_side_conservative_profile_confirmed": True,
+        "budget_release_or_consume_rule_confirmed": True,
+        "protection_creation_failure_policy_confirmed": True,
+        "duplicate_submit_policy_confirmed": True,
+        "deployment_readiness_confirmed": True,
+        "explicit_owner_real_submit_authorization": True,
+        "current_head_deployed": True,
+        "owner_live_runtime_enablement_authorized": True,
+        "owner_real_submit_authorization_present": True,
+        "submit_technical_rehearsal_passed": True,
+        "submit_adapter_implemented": True,
+        "staged_submit_chain_available": True,
+        "post_submit_budget_settlement_persistence_evidence_id": ids.get(
+            "post_submit_budget_settlement_persistence_evidence_id"
+        ),
+        "attempt_outcome_policy_id": ids.get("attempt_outcome_policy_id"),
+        "protection_creation_failure_policy_id": ids.get(
+            "protection_creation_failure_policy_id"
+        ),
+        "submit_idempotency_policy_id": ids.get("submit_idempotency_policy_id"),
+        "trusted_submit_fact_snapshot_id": ids.get("trusted_submit_fact_snapshot_id"),
+        "local_registration_enablement_decision_id": ids.get(
+            "local_registration_enablement_decision_id"
+        ),
+        "exchange_submit_enablement_decision_id": ids.get(
+            "exchange_submit_enablement_decision_id"
+        ),
+        "exchange_submit_execution_result_id": ids.get(
+            "exchange_submit_execution_result_id"
+        ),
+        "runtime_submit_rehearsal_id": ids.get("runtime_submit_rehearsal_id"),
+        "deployment_readiness_evidence_id": ids.get("deployment_readiness_evidence_id"),
+        "owner_real_submit_authorization_id": ids.get(
+            "owner_real_submit_authorization_id"
+        )
+        or authorization_id,
+        "forbidden_execution_flags": [],
+    }
+
+
+def _runtime_live_enablement_forbidden_effects(body: dict[str, Any]) -> list[str]:
+    checks = {
+        "execution_intent_created": False,
+        "order_created": False,
+        "exchange_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_instruction_created": False,
+        "transfer_instruction_created": False,
+    }
+    effects: list[str] = []
+    for name, expected in checks.items():
+        if body.get(name) not in {expected, None, "", 0}:
+            effects.append(f"runtime_live_enablement_effect:{name}")
+    return effects
+
+
+def _run_runtime_live_enablement(
+    *,
+    runtime_instance_id: str,
+    authorization_id: str,
+    command_plan: dict[str, Any],
+    evidence_report: dict[str, Any] | None,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    cookie, cookie_error = _session_cookie()
+    if not cookie:
+        return {
+            "called": False,
+            "status": "blocked",
+            "blockers": [cookie_error or "operator_session_unavailable"],
+            "mutation_applied": False,
+            "runtime_state_mutated": False,
+            "order_created": False,
+            "exchange_called": False,
+            "order_lifecycle_called": False,
+        }
+    api_base = str(command_plan.get("api_base") or DEFAULT_API_BASE).rstrip("/")
+    query = _runtime_live_enablement_query(
+        authorization_id=authorization_id,
+        evidence_report=evidence_report,
+    )
+    preview_path = (
+        "/api/trading-console/strategy-runtimes/"
+        f"{urllib.parse.quote(runtime_instance_id, safe='')}/live-enablement-preview"
+    )
+    preview_url = api_base + preview_path + "?" + urllib.parse.urlencode(query, doseq=True)
+    preview_response = _request_json(
+        method="GET",
+        url=preview_url,
+        cookie=cookie,
+        timeout_seconds=timeout_seconds,
+    )
+    preview_body = _dict(preview_response.get("body"))
+    result: dict[str, Any] = {
+        "called": True,
+        "preview": {
+            "called": True,
+            "method": "GET",
+            "path": preview_path,
+            "http_status": preview_response.get("http_status"),
+            "body": preview_response.get("body"),
+            "error": bool(preview_response.get("error")),
+        },
+        "mutation": None,
+        "status": "blocked",
+        "blockers": [],
+        "mutation_applied": False,
+        "runtime_state_mutated": False,
+        "order_created": False,
+        "exchange_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+    }
+    if preview_response.get("error"):
+        result["blockers"] = [
+            f"runtime_live_enablement_preview_http_status:{preview_response.get('http_status') or 'unavailable'}"
+        ]
+        return result
+    if preview_body.get("status") != "ready_for_live_runtime_enablement_mutation_design":
+        result["blockers"] = [
+            f"runtime_live_enablement_preview_{item}"
+            for item in _list(preview_body.get("blockers"))
+        ] or ["runtime_live_enablement_preview_not_ready"]
+        return result
+    forbidden_effects = _runtime_live_enablement_forbidden_effects(preview_body)
+    if forbidden_effects:
+        result["blockers"] = forbidden_effects
+        return result
+
+    owner_real_submit_authorization_id = str(
+        query.get("owner_real_submit_authorization_id") or authorization_id
+    )
+    owner_live_runtime_enablement_authorization_id = (
+        _standing_live_enablement_authorization_id(
+            runtime_instance_id=runtime_instance_id,
+            authorization_id=authorization_id,
+        )
+    )
+    mutation_path = (
+        "/api/trading-console/strategy-runtimes/"
+        f"{urllib.parse.quote(runtime_instance_id, safe='')}/live-enablement-mutations"
+    )
+    mutation_response = _request_json(
+        method="POST",
+        url=api_base + mutation_path,
+        cookie=cookie,
+        timeout_seconds=timeout_seconds,
+        body={
+            "preview": preview_body,
+            "owner_live_runtime_enablement_authorization_id": (
+                owner_live_runtime_enablement_authorization_id
+            ),
+            "owner_real_submit_authorization_id": owner_real_submit_authorization_id,
+            "actor": "runtime_signal_watcher_resume_dispatcher",
+        },
+    )
+    mutation_body = _dict(mutation_response.get("body"))
+    result["mutation"] = {
+        "called": True,
+        "method": "POST",
+        "path": mutation_path,
+        "http_status": mutation_response.get("http_status"),
+        "body": mutation_response.get("body"),
+        "error": bool(mutation_response.get("error")),
+    }
+    if mutation_response.get("error"):
+        result["blockers"] = [
+            f"runtime_live_enablement_mutation_http_status:{mutation_response.get('http_status') or 'unavailable'}"
+        ]
+        return result
+    forbidden_effects = _runtime_live_enablement_forbidden_effects(mutation_body)
+    if forbidden_effects:
+        result["blockers"] = forbidden_effects
+        return result
+    mutation_applied = mutation_body.get("status") == "applied"
+    result.update(
+        {
+            "status": (
+                "live_runtime_enablement_mutation_applied"
+                if mutation_applied
+                else "blocked"
+            ),
+            "blockers": _dedupe_text(mutation_body.get("blockers") or [])
+            if not mutation_applied
+            else [],
+            "mutation_applied": mutation_applied,
+            "runtime_state_mutated": bool(mutation_body.get("runtime_state_mutated")),
+            "order_created": bool(mutation_body.get("order_created")),
+            "exchange_called": bool(mutation_body.get("exchange_called")),
+            "order_lifecycle_called": bool(mutation_body.get("order_lifecycle_called")),
+            "withdrawal_or_transfer_created": bool(
+                mutation_body.get("withdrawal_instruction_created")
+                or mutation_body.get("transfer_instruction_created")
+            ),
+        }
+    )
+    return result
+
+
+def _maybe_apply_runtime_live_enablement(
+    *,
+    packet: dict[str, Any],
+    command_plan: dict[str, Any],
+    evidence_report: dict[str, Any] | None,
+    execute_operation_layer_submit: bool,
+    timeout_seconds: int,
+    live_enabler: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    if not execute_operation_layer_submit:
+        return None
+    if not _operation_layer_needs_runtime_live_enablement(
+        evidence_report=evidence_report,
+        command_plan=command_plan,
+    ):
+        return None
+    authorization_id = str(command_plan.get("authorization_id") or "").strip()
+    runtime_instance_id = _runtime_instance_id_for_live_enablement(
+        packet=packet,
+        evidence_report=evidence_report,
+    )
+    if not authorization_id or not runtime_instance_id:
+        return {
+            "called": False,
+            "status": "blocked",
+            "blockers": [
+                "runtime_live_enablement_authorization_id_missing"
+                if not authorization_id
+                else "runtime_live_enablement_runtime_instance_id_missing"
+            ],
+            "mutation_applied": False,
+            "runtime_state_mutated": False,
+            "order_created": False,
+            "exchange_called": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+        }
+    runner = live_enabler or _run_runtime_live_enablement
+    return runner(
+        runtime_instance_id=runtime_instance_id,
+        authorization_id=authorization_id,
+        command_plan=command_plan,
+        evidence_report=evidence_report,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _run_operation_layer_evidence_prep(
     authorization_id: str,
     command_plan: dict[str, Any],
@@ -1275,6 +1639,7 @@ def _execute_finalgate_preflight(
     operation_layer_evidence_report_path: str | None = None,
     operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
     | None = None,
+    runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
@@ -1386,6 +1751,23 @@ def _execute_finalgate_preflight(
         execute_operation_layer_submit=execute_operation_layer_submit,
         evidence_preparer=operation_layer_evidence_preparer,
     )
+    runtime_live_enablement_result = _maybe_apply_runtime_live_enablement(
+        packet=packet,
+        command_plan=operation_layer_command_plan,
+        evidence_report=operation_layer_evidence_report,
+        execute_operation_layer_submit=execute_operation_layer_submit,
+        timeout_seconds=timeout_seconds,
+        live_enabler=runtime_live_enabler,
+    )
+    if _dict(runtime_live_enablement_result).get("mutation_applied") is True:
+        operation_layer_evidence_report = _maybe_prepare_operation_layer_evidence(
+            authorization_id=packet["command_plan"]["prepared_authorization_id"],
+            command_plan=operation_layer_command_plan,
+            current_report=operation_layer_evidence_report,
+            current_report_path=operation_layer_evidence_report_path,
+            execute_operation_layer_submit=execute_operation_layer_submit,
+            evidence_preparer=operation_layer_evidence_preparer,
+        )
     result_packet = _packet_from_preflight(
         packet=packet,
         status="finalgate_ready",
@@ -1395,6 +1777,11 @@ def _execute_finalgate_preflight(
         preflight_result=preflight_result,
         operation_layer_command_plan=operation_layer_command_plan,
     )
+    if runtime_live_enablement_result is not None:
+        result_packet = _packet_with_runtime_live_enablement_result(
+            packet=result_packet,
+            runtime_live_enablement_result=runtime_live_enablement_result,
+        )
     result_packet = _packet_with_operation_layer_readiness(
         packet=result_packet,
         evidence_report=operation_layer_evidence_report,
@@ -1417,6 +1804,7 @@ def _execute_fresh_authorization_binding(
     operation_layer_evidence_report_path: str | None = None,
     operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
     | None = None,
+    runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
@@ -1561,6 +1949,7 @@ def _execute_fresh_authorization_binding(
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
         operation_layer_evidence_preparer=operation_layer_evidence_preparer,
+        runtime_live_enabler=runtime_live_enabler,
         execute_operation_layer_submit=execute_operation_layer_submit,
         execute_post_submit_finalize=execute_post_submit_finalize,
     )
@@ -1736,6 +2125,53 @@ def _packet_from_preflight(
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
             "official_operation_layer_submit_called": False,
+        },
+    }
+
+
+def _packet_with_runtime_live_enablement_result(
+    *,
+    packet: dict[str, Any],
+    runtime_live_enablement_result: dict[str, Any],
+) -> dict[str, Any]:
+    result = _dict(runtime_live_enablement_result)
+    blockers = _dedupe_text(
+        [
+            *list(packet.get("blockers") or []),
+            *[
+                f"runtime_live_enablement:{item}"
+                for item in list(result.get("blockers") or [])
+            ],
+        ]
+    )
+    mutation_applied = result.get("mutation_applied") is True
+    runtime_state_mutated = result.get("runtime_state_mutated") is True
+    return {
+        **packet,
+        "runtime_live_enablement_result": result,
+        "dispatch_status": (
+            "runtime_live_enablement_applied_after_finalgate"
+            if mutation_applied
+            else packet.get("dispatch_status")
+        ),
+        "blockers": blockers,
+        "safety_invariants": {
+            **_dict(packet.get("safety_invariants")),
+            "dispatcher_only": False,
+            "runtime_live_enablement_called": bool(result.get("called")),
+            "runtime_live_enablement_mutation_applied": mutation_applied,
+            "runtime_state_mutated": runtime_state_mutated,
+            "mutates_pg": bool(
+                runtime_state_mutated
+                or _dict(packet.get("safety_invariants")).get("mutates_pg")
+            ),
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": bool(
+                result.get("withdrawal_or_transfer_created")
+            ),
         },
     }
 

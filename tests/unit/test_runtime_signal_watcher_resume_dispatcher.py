@@ -176,6 +176,31 @@ def _operation_layer_blocked_report() -> dict:
     return report
 
 
+def _operation_layer_shadow_boundary_report() -> dict:
+    ids = {
+        "authorization_id": "auth-ready-1",
+        "runtime_instance_id": "runtime-mpg-1",
+        "trusted_submit_fact_snapshot_id": "trusted-facts-1",
+        "submit_idempotency_policy_id": "submit-idempotency-1",
+        "protection_creation_failure_policy_id": "protection-policy-1",
+    }
+    return {
+        "ids": ids,
+        "blockers": [
+            "pre_attempt_evidence_not_ready:"
+            "runtime_execution_enabled_false_current_shadow_boundary",
+            "pre_attempt_evidence_not_ready:runtime_shadow_mode_current_boundary",
+        ],
+        "warnings": [],
+        "steps": [],
+        "safety": {
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "exchange_order_submitted": False,
+        },
+    }
+
+
 def _operation_layer_report_with_satisfied_legacy_probe_blocker() -> dict:
     report = _operation_layer_ready_report()
     report["ids"]["local_registration_adapter_result_id"] = "local-result-1"
@@ -605,6 +630,106 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
     assert submit_query["exchange_submit_action_authorization_id"] == [
         "exchange_submit_action_authorization_id-value"
     ]
+
+
+def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operation_layer(
+    monkeypatch,
+):
+    calls: list[dict] = []
+    prepared: list[tuple[str, dict]] = []
+    live_enablement_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        if kwargs["method"] == "GET":
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "ready_for_controlled_submit_adapter",
+                    "final_gate_verdict": "PASS",
+                    "blockers": [],
+                    "warnings": [],
+                    "submit_executed": False,
+                    "order_created": False,
+                    "exchange_called": False,
+                    "owner_bounded_execution_called": False,
+                    "order_lifecycle_called": False,
+                },
+            }
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_orders_submitted",
+                "execution_mode": "real_gateway_action",
+                "blockers": [],
+                "warnings": [],
+                "exchange_called": True,
+                "exchange_order_submitted": True,
+                "order_lifecycle_submit_called": True,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    def _prepare_evidence(authorization_id, command_plan):
+        prepared.append((authorization_id, command_plan))
+        return (
+            _operation_layer_shadow_boundary_report()
+            if len(prepared) == 1
+            else _operation_layer_ready_report()
+        )
+
+    def _live_enable_runtime(**kwargs):
+        live_enablement_calls.append(kwargs)
+        return {
+            "called": True,
+            "status": "live_runtime_enablement_mutation_applied",
+            "blockers": [],
+            "mutation_applied": True,
+            "runtime_state_mutated": True,
+            "order_created": False,
+            "exchange_called": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        execute_operation_layer_submit=True,
+        operation_layer_evidence_report=_operation_layer_shadow_boundary_report(),
+        operation_layer_evidence_preparer=_prepare_evidence,
+        runtime_live_enabler=_live_enable_runtime,
+    )
+
+    assert len(prepared) == 2
+    assert len(live_enablement_calls) == 1
+    assert live_enablement_calls[0]["runtime_instance_id"] == "runtime-mpg-1"
+    assert live_enablement_calls[0]["authorization_id"] == "auth-ready-1"
+    assert packet["status"] == "submitted"
+    assert packet["runtime_live_enablement_result"]["mutation_applied"] is True
+    assert packet["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert packet["operation_layer_submit_result"]["called"] is True
+    assert packet["safety_invariants"]["runtime_live_enablement_called"] is True
+    assert packet["safety_invariants"]["runtime_live_enablement_mutation_applied"] is True
+    assert packet["safety_invariants"]["runtime_state_mutated"] is True
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert packet["safety_invariants"]["places_order"] is True
+    assert packet["safety_invariants"]["exchange_write_called"] is True
+    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
 def test_dispatcher_translates_operation_layer_evidence_blocker():
