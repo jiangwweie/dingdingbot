@@ -80,6 +80,16 @@ P0 readiness supplement:
 | `product_eligibility_state` | Exchange/product policy | `observe_only` |
 | `mark_funding_review_state` | Mark and funding facts | `block_armed_observation_for_perps` |
 
+P0 availability supplement:
+`docs/strategy-research/teq-current-product-availability-refresh-20260616.md`.
+
+| Availability State | Main-Control Meaning | Candidate Prepare |
+| --- | --- | --- |
+| `teq_current_product_visible` | Research symbol is visible in current exchangeInfo and exchange rules are present. | Can be considered after all other RequiredFacts pass. |
+| `teq_cached_research_only` | Cached 2026 research symbol is not visible in current exchangeInfo. | Block candidate prepare; keep research/strategy-picker context only. |
+| `teq_symbol_mapping_unclear` | Cached symbol may have changed or cannot be mapped to current symbol. | Block watcher binding until mapping review. |
+| `teq_low_history_event_only` | bStocks or recent symbols have low history. | Observe event-study only; block promotion. |
+
 ### `PMR-001`
 
 | RequiredFact | Normalized Fact | Missing Behavior |

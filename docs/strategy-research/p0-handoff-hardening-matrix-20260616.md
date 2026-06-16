@@ -27,7 +27,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | --- | --- | --- | --- | --- |
 | `MPG-001` | Group-pool momentum persistence and bounded impulse rows preserve high right-tail windows; 12h and 72h horizons have different tradeoffs. | Full-sequence drawdown and late-cycle decay. | `mpg_late_cycle_disable_state`, `mpg_member_drawdown_contribution_state`, `mpg_exit_horizon_state`, `fill_gap_slippage_state`, `real_margin_liquidation_model_state`. | Build a member-level drawdown-to-disable table that does not use future attribution as signal input. |
 | `FBS-001` | TEQ negative-funding squeeze lane remains the strongest FBS lead. | Funding settlement, OI/long-short/top-trader facts, and concentration. | `negative_funding_crowding_state`, `funding_settlement_timing_state`, `open_interest_state`, `long_short_ratio_state`, `funding_squeeze_concentration_state`, `real_exchange_margin_liquidation_model`. | Completed `fbs-derivatives-facts-readiness-split-20260616.md`: fresh facts can keep armed observation, partial/stale facts downshift, missing facts block candidate prepare. |
-| `TEQ-001` | Binance 2026 equity-like universe supports momentum and relative-strength discovery. | Low history, product availability, session gap, concentration, and real margin. | `expanded_tradfi_universe_manifest_state`, `product_eligibility_state`, `low_history_dataset_state`, `session_gap_context`, `mark_funding_review_state`, `exchange_margin_liquidation_state`. | Refresh current exchangeInfo/product availability and map cached symbols to current symbols before further promotion language. |
+| `TEQ-001` | Binance 2026 equity-like universe supports momentum and relative-strength discovery. | Low history, product availability, session gap, concentration, and real margin. | `expanded_tradfi_universe_manifest_state`, `product_eligibility_state`, `low_history_dataset_state`, `session_gap_context`, `mark_funding_review_state`, `exchange_margin_liquidation_state`. | Completed `teq-current-product-availability-refresh-20260616.md`: current TEQ handoff symbols are not visible in the refreshed USD-S exchangeInfo response, so cached evidence stays research-only until symbol availability is refreshed. |
 | `PMR-001` | XAG-led short/weakness and PMR target-specific overlay can disable some continuation labels and support metal context. | Role split, XAG concentration, external session/settlement, fill, and margin. | `xag_dominance_state`, `metal_role_split_state`, `commodity_session_gap_state`, `mark_deviation_bound_state`, `real_margin_model_state`. | Separate PMR into disable-overlay, support-tag, and standalone-short branches. |
 | `SOR-001` | Opening-range/session-transfer branches preserve narrow right-tail windows. | Second-half decay, branch narrowness, and session/fill ambiguity. | `session_open_range_state`, `post_open_decay_disable_state`, `time_stop_exit_horizon_state`, `tradfi_session_mapping_state`, `mark_funding_session_review_state`, `exchange_margin_liquidation_state`. | Produce branch eligibility table: TEQ short 72h, PMR short support, long revival-only, and disable branches. |
 
@@ -51,6 +51,15 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `fbs_derivatives_facts_missing` | Primary funding, mark, or exchange symbol facts are missing. | Emit no-signal or facts-missing packet and block candidate prepare. |
 | `fbs_margin_model_missing` | Real margin/liquidation model is absent. | Keep 1x default and block leverage promotion. |
 
+## TEQ-001 Current Availability Split
+
+| State | Meaning | Main-Control Behavior |
+| --- | --- | --- |
+| `teq_current_product_visible` | Research symbol is visible in current exchangeInfo and exchange rules are present. | Allow armed observation only after all other RequiredFacts pass. |
+| `teq_cached_research_only` | Research symbol has cached 2026 evidence but is not visible in current exchangeInfo. | Keep in strategy picker/research context; block candidate prepare. |
+| `teq_symbol_mapping_unclear` | Cached symbol may have changed or is not directly mappable to a current symbol. | Require mapping review before watcher binding. |
+| `teq_low_history_event_only` | bStocks or recent symbols have too little history for promotion. | Event-study observation only. |
+
 ## Leverage Boundary
 
 | StrategyGroup | Default | Allowed Research Lane | Disabled / Stress Lane |
@@ -69,8 +78,9 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 2. Keep `FBS-001` readiness split current after
    `fbs-derivatives-facts-readiness-split-20260616.md`; next evidence task is
    historical OI/ratio capture rather than new runtime logic.
-3. Add a `TEQ-001` current-product availability refresh task before any further
-   right-tail interpretation.
+3. Keep `TEQ-001` current-product availability refresh active after
+   `teq-current-product-availability-refresh-20260616.md`; do not treat cached
+   2026 symbols as current runtime symbols without exchangeInfo visibility.
 4. Add a `PMR-001` overlay role split between disable, support, and standalone
    branches.
 5. Add a `SOR-001` branch table for session eligibility and time-stop behavior.
