@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 import sys
 import time
-from typing import Any
+from typing import Any, Callable
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -807,6 +807,8 @@ def build_dispatch_packet(
     preflight_timeout_seconds: int = 120,
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
+    operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
+    | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
@@ -982,6 +984,7 @@ def build_dispatch_packet(
             timeout_seconds=preflight_timeout_seconds,
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+            operation_layer_evidence_preparer=operation_layer_evidence_preparer,
             execute_operation_layer_submit=execute_operation_layer_submit,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
@@ -1128,6 +1131,7 @@ def build_dispatch_packet(
             timeout_seconds=preflight_timeout_seconds,
             operation_layer_evidence_report=operation_layer_evidence_report,
             operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+            operation_layer_evidence_preparer=operation_layer_evidence_preparer,
             execute_operation_layer_submit=execute_operation_layer_submit,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
@@ -1196,12 +1200,81 @@ def _packet(
     }
 
 
+def _operation_layer_evidence_needs_preparation(
+    *,
+    evidence_report: dict[str, Any] | None,
+    command_plan: dict[str, Any],
+) -> bool:
+    readiness = _operation_layer_readiness(
+        evidence_report=evidence_report,
+        evidence_report_path=None,
+        command_plan=command_plan,
+    )
+    if readiness is None:
+        return True
+    if readiness.get("ready_for_official_operation_layer_submit") is True:
+        return False
+    missing_ids = list(readiness.get("missing_evidence_ids") or [])
+    blockers = list(readiness.get("blockers") or [])
+    return bool(missing_ids or blockers)
+
+
+def _maybe_prepare_operation_layer_evidence(
+    *,
+    authorization_id: str,
+    command_plan: dict[str, Any],
+    current_report: dict[str, Any] | None,
+    current_report_path: str | None,
+    execute_operation_layer_submit: bool,
+    evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    if not execute_operation_layer_submit:
+        return current_report
+    if not _operation_layer_evidence_needs_preparation(
+        evidence_report=current_report,
+        command_plan=command_plan,
+    ):
+        return current_report
+    preparer = evidence_preparer or _run_operation_layer_evidence_prep
+    report = preparer(authorization_id, command_plan)
+    if current_report_path:
+        _write_json(Path(current_report_path).expanduser(), report)
+    return report
+
+
+def _run_operation_layer_evidence_prep(
+    authorization_id: str,
+    command_plan: dict[str, Any],
+) -> dict[str, Any]:
+    from scripts.runtime_first_real_submit_api_flow import (  # noqa: WPS433
+        FirstRealSubmitApiFlow,
+        FlowConfig,
+        UrlLibApiClient,
+    )
+
+    api_base = str(command_plan.get("api_base") or DEFAULT_API_BASE)
+    config = FlowConfig(
+        api_base=api_base,
+        mode="arm",
+        authorization_id=authorization_id,
+        record_attempt_consumption=True,
+        standing_authorized_scoped_evidence_preparation=True,
+        preview_disabled_first_real_submit_action=False,
+    )
+    return FirstRealSubmitApiFlow(
+        client=UrlLibApiClient(api_base=config.api_base),
+        config=config,
+    ).run()
+
+
 def _execute_finalgate_preflight(
     *,
     packet: dict[str, Any],
     timeout_seconds: int,
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
+    operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
+    | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
@@ -1305,6 +1378,14 @@ def _execute_finalgate_preflight(
     operation_layer_command_plan = _operation_layer_command_plan(
         authorization_id=packet["command_plan"]["prepared_authorization_id"],
     )
+    operation_layer_evidence_report = _maybe_prepare_operation_layer_evidence(
+        authorization_id=packet["command_plan"]["prepared_authorization_id"],
+        command_plan=operation_layer_command_plan,
+        current_report=operation_layer_evidence_report,
+        current_report_path=operation_layer_evidence_report_path,
+        execute_operation_layer_submit=execute_operation_layer_submit,
+        evidence_preparer=operation_layer_evidence_preparer,
+    )
     result_packet = _packet_from_preflight(
         packet=packet,
         status="finalgate_ready",
@@ -1334,6 +1415,8 @@ def _execute_fresh_authorization_binding(
     timeout_seconds: int,
     operation_layer_evidence_report: dict[str, Any] | None = None,
     operation_layer_evidence_report_path: str | None = None,
+    operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
+    | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
@@ -1477,6 +1560,7 @@ def _execute_fresh_authorization_binding(
         timeout_seconds=timeout_seconds,
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+        operation_layer_evidence_preparer=operation_layer_evidence_preparer,
         execute_operation_layer_submit=execute_operation_layer_submit,
         execute_post_submit_finalize=execute_post_submit_finalize,
     )
@@ -1672,6 +1756,13 @@ def _packet_with_operation_layer_readiness(
         return packet
 
     ready = readiness.get("status") == "ready"
+    evidence_safety = _dict((evidence_report or {}).get("safety"))
+    evidence_attempt_counter_mutated = (
+        evidence_safety.get("attempt_counter_mutated") is True
+    )
+    evidence_runtime_budget_mutated = (
+        evidence_safety.get("runtime_budget_mutated") is True
+    )
     owner_state = _dict(readiness.get("owner_state"))
     blocker_class = str(readiness.get("blocker_class") or "missing_fact")
     blockers = _dedupe_text(
@@ -1709,10 +1800,17 @@ def _packet_with_operation_layer_readiness(
             **_dict(packet.get("safety_invariants")),
             "official_operation_layer_submit_called": False,
             "operation_layer_evidence_report_read": True,
+            "operation_layer_evidence_attempt_counter_mutated": (
+                evidence_attempt_counter_mutated
+            ),
+            "operation_layer_evidence_runtime_budget_mutated": (
+                evidence_runtime_budget_mutated
+            ),
             "places_order": False,
             "calls_order_lifecycle": False,
             "exchange_write_called": False,
-            "runtime_budget_mutated": False,
+            "attempt_counter_mutated": evidence_attempt_counter_mutated,
+            "runtime_budget_mutated": evidence_runtime_budget_mutated,
             "withdrawal_or_transfer_created": False,
         },
     }

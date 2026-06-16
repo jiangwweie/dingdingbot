@@ -505,6 +505,108 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
+    monkeypatch,
+):
+    calls: list[dict] = []
+    prepared: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        if kwargs["method"] == "GET":
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "ready_for_controlled_submit_adapter",
+                    "final_gate_verdict": "PASS",
+                    "blockers": [],
+                    "warnings": [],
+                    "submit_executed": False,
+                    "order_created": False,
+                    "exchange_called": False,
+                    "owner_bounded_execution_called": False,
+                    "order_lifecycle_called": False,
+                },
+            }
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_orders_submitted",
+                "execution_mode": "real_gateway_action",
+                "blockers": [],
+                "warnings": [],
+                "exchange_called": True,
+                "exchange_order_submitted": True,
+                "order_lifecycle_submit_called": True,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    def _prepare_evidence(authorization_id, command_plan):
+        prepared.append((authorization_id, command_plan))
+        report = _operation_layer_ready_report()
+        report["safety"] = {
+            "attempt_counter_mutated": True,
+            "runtime_budget_mutated": True,
+            "exchange_order_submitted": False,
+        }
+        return report
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        execute_operation_layer_submit=True,
+        operation_layer_evidence_report=_operation_layer_blocked_report(),
+        operation_layer_evidence_preparer=_prepare_evidence,
+    )
+
+    assert prepared == [
+        (
+            "auth-ready-1",
+            {
+                **dispatcher._operation_layer_command_plan(
+                    authorization_id="auth-ready-1"
+                )
+            },
+        )
+    ]
+    assert packet["status"] == "submitted"
+    assert packet["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert packet["operation_layer_submit_result"]["called"] is True
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert packet["safety_invariants"][
+        "operation_layer_evidence_attempt_counter_mutated"
+    ] is True
+    assert packet["safety_invariants"][
+        "operation_layer_evidence_runtime_budget_mutated"
+    ] is True
+    assert len(calls) == 2
+    assert calls[0]["method"] == "GET"
+    assert calls[1]["method"] == "POST"
+    submit_query = parse_qs(urlparse(calls[1]["url"]).query)
+    assert submit_query["attempt_outcome_policy_id"] == [
+        "attempt_outcome_policy_id-value"
+    ]
+    assert submit_query["exchange_submit_action_authorization_id"] == [
+        "exchange_submit_action_authorization_id-value"
+    ]
+
+
 def test_dispatcher_translates_operation_layer_evidence_blocker():
     packet = build_dispatch_packet(
         resume_pack=_finalgate_ready_dispatch_packet(),
