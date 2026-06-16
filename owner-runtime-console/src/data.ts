@@ -62,6 +62,7 @@ const dryRunRequiredChecks = {
   post_submit_finalize_result_identity_guard_checked: true,
   shared_runtime_pipeline_checked: true,
   common_execution_chain_reuse_checked: true,
+  strategygroup_adapter_boundary_checked: true,
   selected_strategygroup_dispatch_guard_checked: true,
   all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
 };
@@ -73,6 +74,7 @@ const dryRunAuditSummary = {
   disabled_smoke_is_real_execution_proof: false,
   shared_runtime_pipeline_checked: true,
   common_execution_chain_reuse_checked: true,
+  strategygroup_adapter_boundary_checked: true,
   selected_strategygroup_dispatch_guard_checked: true,
   all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
   operation_layer_hard_safety_blocker_matrix_checked: true,

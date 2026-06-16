@@ -292,6 +292,7 @@ async function createRuntimeFixtures() {
       all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
       shared_runtime_pipeline_checked: true,
       common_execution_chain_reuse_checked: true,
+      strategygroup_adapter_boundary_checked: true,
     },
     safety_invariants: {
       exchange_write_called: false,
@@ -501,6 +502,9 @@ async function runConnectedSmoke(browser) {
     }
     if (dryRunSummary?.common_execution_chain_reuse_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm common execution-chain reuse");
+    }
+    if (dryRunSummary?.strategygroup_adapter_boundary_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm StrategyGroup adapter boundary");
     }
     if (dryRunSummary?.selected_strategygroup_dispatch_guard_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm selected scope guard");

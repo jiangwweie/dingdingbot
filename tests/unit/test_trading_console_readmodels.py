@@ -5932,6 +5932,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
                 "shared_runtime_pipeline_checked": True,
                 "common_execution_chain_reuse_checked": True,
+                "strategygroup_adapter_boundary_checked": True,
             },
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -6072,6 +6073,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert dry_run_summary["required_checks_present"] is True
     assert dry_run_summary["shared_runtime_pipeline_checked"] is True
     assert dry_run_summary["common_execution_chain_reuse_checked"] is True
+    assert dry_run_summary["strategygroup_adapter_boundary_checked"] is True
     assert dry_run_summary["selected_strategygroup_dispatch_guard_checked"] is True
     assert (
         dry_run_summary[
@@ -6116,6 +6118,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "post_submit_finalize_result_identity_guard_checked",
         "shared_runtime_pipeline_checked",
         "common_execution_chain_reuse_checked",
+        "strategygroup_adapter_boundary_checked",
         "selected_strategygroup_dispatch_guard_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     }
@@ -6294,6 +6297,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     assert ready["summary"]["required_checks_present"] is True
     assert ready["summary"]["shared_runtime_pipeline_checked"] is True
     assert ready["summary"]["common_execution_chain_reuse_checked"] is True
+    assert ready["summary"]["strategygroup_adapter_boundary_checked"] is True
     assert ready["summary"]["selected_strategygroup_dispatch_guard_checked"] is True
     assert (
         ready["summary"][
@@ -6328,6 +6332,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         for key, value in checks.items()
         if key != "shared_runtime_pipeline_checked"
         and key != "common_execution_chain_reuse_checked"
+        and key != "strategygroup_adapter_boundary_checked"
     }
 
     degraded = _owner_console_dry_run_audit_source(packet)
@@ -6337,6 +6342,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     assert degraded["reason"].startswith("runtime_dry_run_missing_required_check:")
     assert "common_execution_chain_reuse_checked" in degraded["reason"]
     assert "shared_runtime_pipeline_checked" in degraded["reason"]
+    assert "strategygroup_adapter_boundary_checked" in degraded["reason"]
 
 
 def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(

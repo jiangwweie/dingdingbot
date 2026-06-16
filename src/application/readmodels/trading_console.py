@@ -117,6 +117,7 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "post_submit_finalize_result_identity_guard_checked",
     "shared_runtime_pipeline_checked",
     "common_execution_chain_reuse_checked",
+    "strategygroup_adapter_boundary_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
@@ -7666,6 +7667,9 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 ),
                 "common_execution_chain_reuse_checked": (
                     checks.get("common_execution_chain_reuse_checked") is True
+                ),
+                "strategygroup_adapter_boundary_checked": (
+                    checks.get("strategygroup_adapter_boundary_checked") is True
                 ),
                 "selected_strategygroup_dispatch_guard_checked": (
                     checks.get("selected_strategygroup_dispatch_guard_checked")

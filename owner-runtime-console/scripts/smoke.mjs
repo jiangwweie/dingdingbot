@@ -100,6 +100,8 @@ try {
   await expectVisible(page, "已覆盖");
   await expectVisible(page, "执行复用");
   await expectVisible(page, "已验证");
+  await expectVisible(page, "策略适配");
+  await expectVisible(page, "边界清晰");
   await expectVisible(page, "选中范围");
   await expectVisible(page, "已校验");
   await expectVisible(page, "五组策略");

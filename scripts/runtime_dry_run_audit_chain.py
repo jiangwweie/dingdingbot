@@ -2399,6 +2399,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "strategygroup_adapter_boundary_checked": (
+            shared_pipeline.get("status") == "passed"
+            and shared_pipeline.get("checks", {}).get(
+                "all_strategy_groups_limit_to_input_contract"
+            )
+            is True
+            and shared_pipeline.get("checks", {}).get(
+                "all_strategy_groups_deny_direct_execution_authority"
+            )
+            is True
+            and shared_pipeline.get("checks", {}).get(
+                "all_strategy_groups_keep_tiny_risk_boundary"
+            )
+            is True
+        ),
         "selected_strategygroup_dispatch_guard_checked": (
             _scenario_artifact(
                 scenarios,
@@ -2515,6 +2530,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "common_execution_chain_reuse_checked": checks[
             "common_execution_chain_reuse_checked"
+        ],
+        "strategygroup_adapter_boundary_checked": checks[
+            "strategygroup_adapter_boundary_checked"
         ],
         "selected_strategygroup_dispatch_guard_checked": checks[
             "selected_strategygroup_dispatch_guard_checked"
