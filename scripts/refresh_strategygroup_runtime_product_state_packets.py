@@ -214,6 +214,7 @@ def _source_readiness_fallback_packet(
         )
     goal_status = _read_json_if_exists(output_dir / "strategygroup-runtime-goal-status.json")
     live_facts = _read_json_if_exists(output_dir / "strategy-group-live-facts-readiness.json")
+    deploy_channel = _deploy_channel_fallback_source(output_dir)
 
     dry_run_ready = dry_run.get("status") == "passed" and (
         (dry_run.get("checks") or {}).get("dangerous_effects_absent") is True
@@ -298,12 +299,7 @@ def _source_readiness_fallback_packet(
             reason=str(goal_status.get("status") or "strategygroup_runtime_goal_status_missing"),
         ),
         "real_order_readiness": real_order_readiness["source_health"],
-        "deploy_channel": _detail_source(
-            status="ready_empty",
-            owner_label="部署通道未检查",
-            reason="tokyo_deploy_channel_status_missing",
-            summary={"checked": False, "connectivity_ready": None, "blockers": []},
-        ),
+        "deploy_channel": deploy_channel,
     }
     critical_unavailable = [
         name
@@ -329,6 +325,12 @@ def _source_readiness_fallback_packet(
             ),
             "strategygroup_runtime_goal_status_path": str(
                 output_dir / "strategygroup-runtime-goal-status.json"
+            ),
+            "tokyo_deploy_channel_status_path": str(
+                output_dir / "tokyo-deploy-channel-status.json"
+            ),
+            "tokyo_readonly_probe_status_path": str(
+                output_dir / "tokyo-readonly-probe-current.json"
             ),
             "watcher_report_dir": str(output_dir),
         },
@@ -374,6 +376,12 @@ def _source_readiness_fallback_packet(
             "runtime_dry_run_audit_status": dry_run.get("status"),
             "strategygroup_runtime_goal_status": goal_status.get("status"),
             "live_facts_readiness_status": live_facts_status,
+            "tokyo_deploy_channel_status": deploy_channel.get("summary", {}).get(
+                "source_status"
+            ),
+            "tokyo_deploy_channel_blockers": list(
+                deploy_channel.get("summary", {}).get("blockers") or []
+            )[:20],
             "fallback_reason": reason,
         },
         "safety_invariants": {
@@ -390,6 +398,74 @@ def _source_readiness_fallback_packet(
             "secrets_printed": False,
         },
     }
+
+
+def _deploy_channel_fallback_source(output_dir: Path) -> dict[str, Any]:
+    deploy_channel = _read_json_if_exists(output_dir / "tokyo-deploy-channel-status.json")
+    if not deploy_channel:
+        readonly_probe = _read_json_if_exists(output_dir / "tokyo-readonly-probe-current.json")
+        if readonly_probe.get("scope") == "tokyo_runtime_governance_readonly_probe":
+            deploy_channel = readonly_probe
+
+    checks = (
+        deploy_channel.get("checks")
+        if isinstance(deploy_channel.get("checks"), dict)
+        else {}
+    )
+    blockers = sorted(
+        {
+            str(item)
+            for key in ("blockers", "tokyo_probe_blockers", "tokyo_connectivity_blockers")
+            for item in (checks.get(key) or [])
+            if str(item)
+        }
+    )
+    source_status = str(deploy_channel.get("status") or "")
+    connectivity_ready = checks.get("tokyo_connectivity_probe_ready")
+    if blockers or source_status == "blocked" or connectivity_ready is False:
+        return _detail_source(
+            status="degraded",
+            owner_label="部署通道暂不可用",
+            reason=(
+                ",".join(blockers)
+                if blockers
+                else source_status or "tokyo_deploy_channel_blocked"
+            ),
+            summary={
+                "checked": True,
+                "connectivity_ready": connectivity_ready,
+                "blockers": blockers[:20],
+                "source_status": source_status,
+            },
+        )
+    if source_status in {
+        "ready",
+        "ready_for_owner_git_deploy_decision",
+        "ready_for_deploy_apply",
+        "postdeploy_accepted",
+    } or connectivity_ready is True:
+        return _detail_source(
+            status="ready",
+            owner_label="部署通道正常",
+            reason=source_status or "tokyo_deploy_channel_ready",
+            summary={
+                "checked": True,
+                "connectivity_ready": connectivity_ready,
+                "blockers": [],
+                "source_status": source_status,
+            },
+        )
+    return _detail_source(
+        status="ready_empty",
+        owner_label="部署通道未检查",
+        reason="tokyo_deploy_channel_status_missing",
+        summary={
+            "checked": False,
+            "connectivity_ready": None,
+            "blockers": [],
+            "source_status": source_status,
+        },
+    )
 
 
 def refresh_packets(

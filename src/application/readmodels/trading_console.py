@@ -103,6 +103,10 @@ DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH = (
     "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
     "tokyo-deploy-channel-status.json"
 )
+DEFAULT_TOKYO_READONLY_PROBE_STATUS_PATH = (
+    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
+    "tokyo-readonly-probe-current.json"
+)
 OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "required_scenarios_present",
     "all_scenarios_passed",
@@ -2090,6 +2094,23 @@ class TradingConsoleReadModelService:
             )
         ).expanduser()
         deploy_channel = _read_json_file(deploy_channel_path)
+        readonly_probe_path = Path(
+            os.environ.get(
+                "BRC_TOKYO_READONLY_PROBE_STATUS_PATH",
+                str(report_dir / "tokyo-readonly-probe-current.json")
+                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
+                else DEFAULT_TOKYO_READONLY_PROBE_STATUS_PATH,
+            )
+        ).expanduser()
+        readonly_probe = _read_json_file(readonly_probe_path)
+        effective_deploy_channel, effective_deploy_channel_path = (
+            _owner_console_effective_deploy_channel_packet(
+                deploy_channel=deploy_channel,
+                deploy_channel_path=str(deploy_channel_path),
+                readonly_probe=readonly_probe,
+                readonly_probe_path=str(readonly_probe_path),
+            )
+        )
         packet = _owner_console_source_readiness_packet(
             generated_at_ms=generated_at_ms,
             intake_response=intake_response,
@@ -2102,8 +2123,9 @@ class TradingConsoleReadModelService:
             dry_run_audit_path=str(dry_run_audit_path),
             runtime_goal_status=runtime_goal_status,
             runtime_goal_status_path=str(runtime_goal_status_path),
-            deploy_channel=deploy_channel,
-            deploy_channel_path=str(deploy_channel_path),
+            deploy_channel=effective_deploy_channel,
+            deploy_channel_path=effective_deploy_channel_path,
+            readonly_probe_path=str(readonly_probe_path),
             selected_strategy_group_id=selected_strategy_group_id,
             max_symbols=max_symbols,
             stale_after_seconds=stale_after_seconds,
@@ -7144,6 +7166,7 @@ def _owner_console_source_readiness_packet(
     runtime_goal_status_path: str,
     deploy_channel: dict[str, Any],
     deploy_channel_path: str,
+    readonly_probe_path: str,
     selected_strategy_group_id: str | None,
     max_symbols: int,
     stale_after_seconds: int,
@@ -7290,6 +7313,7 @@ def _owner_console_source_readiness_packet(
             "runtime_dry_run_audit_chain_path": dry_run_audit_path,
             "strategygroup_runtime_goal_status_path": runtime_goal_status_path,
             "tokyo_deploy_channel_status_path": deploy_channel_path,
+            "tokyo_readonly_probe_status_path": readonly_probe_path,
             "watcher_report_dir": str(
                 os.environ.get(
                     "BRC_SIGNAL_WATCHER_REPORT_DIR",
@@ -7643,6 +7667,25 @@ def _owner_console_operation_audit_source(
         owner_label="审计详情暂不可用",
         reason=status or "operation_audit_status_unknown",
     )
+
+
+def _owner_console_effective_deploy_channel_packet(
+    *,
+    deploy_channel: dict[str, Any],
+    deploy_channel_path: str,
+    readonly_probe: dict[str, Any],
+    readonly_probe_path: str,
+) -> tuple[dict[str, Any], str]:
+    if deploy_channel:
+        return deploy_channel, deploy_channel_path
+    if readonly_probe.get("scope") == "tokyo_runtime_governance_readonly_probe":
+        return {
+            **readonly_probe,
+            "scope": "tokyo_runtime_governance_deploy_channel_status",
+            "source_scope": readonly_probe.get("scope"),
+            "source_path": readonly_probe_path,
+        }, readonly_probe_path
+    return {}, deploy_channel_path
 
 
 def _owner_console_deploy_channel_source(

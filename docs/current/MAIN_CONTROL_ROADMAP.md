@@ -522,6 +522,21 @@ readiness from treating deployment-channel failures as opaque runtime failures.
 | Current observed local result | `status=blocked`, `checks.blockers=["tokyo_ssh_publickey_denied"]` |
 | Safety | Readonly probe failure handling does not modify remote files, read env/secrets, run migrations, restart services, create orders, call OrderLifecycle, call exchange APIs, withdraw, or transfer |
 
+### 2026-06-17 Source Readiness Deploy-Channel Fallback Checkpoint
+
+Owner Console source readiness now uses the readonly probe packet as a
+deploy-channel fallback when `tokyo-deploy-channel-status.json` is absent. This
+keeps the product surface specific even before the next successful deploy writes
+the postdeploy channel packet.
+
+| Item | Result |
+| --- | --- |
+| Readmodel fallback | `owner-console-source-readiness` reads `BRC_TOKYO_READONLY_PROBE_STATUS_PATH` or `tokyo-readonly-probe-current.json` under the watcher report directory when the deploy-channel packet is missing |
+| Product status | `tokyo_ssh_publickey_denied` maps to `deploy_channel=部署通道暂不可用` |
+| Local fallback packet | `refresh_strategygroup_runtime_product_state_packets.py` mirrors the same deploy-channel language in source-readiness fallback output |
+| Owner UI boundary | The deploy-channel item remains a source-health/system detail and does not become a homepage execution gate |
+| Safety | This is read-only state projection; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+
 ### 2026-06-17 Owner Console UI Validation Checkpoint
 
 While the selected StrategyGroup runtime is waiting for a fresh signal, the

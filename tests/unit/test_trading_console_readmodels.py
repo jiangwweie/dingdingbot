@@ -6035,6 +6035,23 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 },
             ],
         },
+        "tokyo-readonly-probe-current.json": {
+            "scope": "tokyo_runtime_governance_readonly_probe",
+            "status": "blocked",
+            "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
+            "facts": {"probe_error": "Permission denied (publickey)."},
+            "safety_invariants": {
+                "remote_files_modified": False,
+                "env_files_read": False,
+                "secrets_read": False,
+                "migrations_run": False,
+                "services_restarted": False,
+                "execution_intent_created": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "exchange_called": False,
+            },
+        },
     }.items():
         (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
@@ -6061,13 +6078,22 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
     assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
     assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
-    assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道未检查"
+    assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道暂不可用"
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
     assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
-    assert payload["data"]["source_health"]["deploy_channel"]["status"] == "ready_empty"
+    assert payload["data"]["source_health"]["deploy_channel"]["status"] == "degraded"
+    assert payload["data"]["source_health"]["deploy_channel"]["reason"] == (
+        "tokyo_ssh_publickey_denied"
+    )
+    assert payload["data"]["source_health"]["deploy_channel"]["summary"][
+        "blockers"
+    ] == ["tokyo_ssh_publickey_denied"]
+    assert payload["data"]["source_paths"]["tokyo_readonly_probe_status_path"] == (
+        str(report_dir / "tokyo-readonly-probe-current.json")
+    )
     dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
         "summary"
     ]
@@ -6295,6 +6321,38 @@ def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation()
     assert source["summary"]["connectivity_ready"] is False
     assert "tokyo_tcp_22_unreachable" in source["reason"]
     assert "tokyo_readonly_probe_error" in source["summary"]["blockers"]
+
+
+def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_missing():
+    from src.application.readmodels.trading_console import (
+        _owner_console_deploy_channel_source,
+        _owner_console_effective_deploy_channel_packet,
+    )
+
+    packet, path = _owner_console_effective_deploy_channel_packet(
+        deploy_channel={},
+        deploy_channel_path="/reports/tokyo-deploy-channel-status.json",
+        readonly_probe={
+            "scope": "tokyo_runtime_governance_readonly_probe",
+            "status": "blocked",
+            "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
+            "facts": {"probe_error": "Permission denied (publickey)."},
+        },
+        readonly_probe_path="/reports/tokyo-readonly-probe-current.json",
+    )
+    source = _owner_console_deploy_channel_source(packet)
+
+    assert path == "/reports/tokyo-readonly-probe-current.json"
+    assert packet["scope"] == "tokyo_runtime_governance_deploy_channel_status"
+    assert packet["source_scope"] == "tokyo_runtime_governance_readonly_probe"
+    assert source["status"] == "degraded"
+    assert source["owner_label"] == "部署通道暂不可用"
+    assert source["reason"] == "tokyo_ssh_publickey_denied"
+    assert source["summary"] == {
+        "checked": True,
+        "connectivity_ready": None,
+        "blockers": ["tokyo_ssh_publickey_denied"],
+    }
 
 
 def test_owner_console_deploy_channel_source_surfaces_postdeploy_ready():

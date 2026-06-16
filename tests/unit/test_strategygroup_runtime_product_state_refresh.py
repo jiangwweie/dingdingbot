@@ -456,6 +456,17 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
         }
 
     monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
+    (tmp_path / "tokyo-readonly-probe-current.json").write_text(
+        json.dumps(
+            {
+                "scope": "tokyo_runtime_governance_readonly_probe",
+                "status": "blocked",
+                "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
+                "facts": {"probe_error": "Permission denied (publickey)."},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     packet = refresh_packets(
         api_base="http://unit",
@@ -499,10 +510,20 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
     assert source_readiness["source_health"]["runtime_source"]["status"] == "unavailable"
     assert source_readiness["source_health"]["watcher"]["status"] == "unavailable"
     assert source_readiness["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
+    assert source_readiness["source_health"]["deploy_channel"]["status"] == "degraded"
+    assert source_readiness["source_health"]["deploy_channel"]["owner_label"] == (
+        "部署通道暂不可用"
+    )
+    assert source_readiness["source_health"]["deploy_channel"]["summary"][
+        "blockers"
+    ] == ["tokyo_ssh_publickey_denied"]
     assert (
         source_readiness["raw_status_refs"]["strategygroup_runtime_goal_status"]
         == "missing_fact"
     )
+    assert source_readiness["raw_status_refs"]["tokyo_deploy_channel_blockers"] == [
+        "tokyo_ssh_publickey_denied"
+    ]
     assert source_readiness["safety_invariants"]["fallback_packet_only"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
