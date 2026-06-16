@@ -1,0 +1,545 @@
+{
+  "version": "2026-06-16-r0",
+  "scope": "strategy_research_only",
+  "last_updated_at": "2026-06-16",
+  "non_goal": [
+    "not_runtime_registry",
+    "not_strategy_picker_implementation",
+    "not_return_leaderboard",
+    "not_execution_authority"
+  ],
+  "status_enum": [
+    "idea_pool",
+    "research_candidate",
+    "right_tail_candidate",
+    "observe_only",
+    "observe_only_overlay",
+    "conditional_observation",
+    "handoff_ready",
+    "handoff_ready_facts_heavy",
+    "handoff_ready_low_history_blocked",
+    "next_handoff_candidate",
+    "facts_pipeline_required",
+    "observe_only_scorer",
+    "overlay_candidate",
+    "parked_or_research_vocab",
+    "killed"
+  ],
+  "entries": [
+    {
+      "strategy_id": "MPG-001",
+      "semantic_name": "Momentum Persistence Group",
+      "strategy_family": "momentum_persistence",
+      "current_status": "handoff_ready",
+      "default_mode": "armed_observation",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "P1 core research and handoff family",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "drawdown_not_controlled",
+        "late_cycle_disable_incomplete",
+        "session_fill_product_risk",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/strategy-groups/MPG-001-momentum-persistence-group.md",
+        "docs/strategy-research/candidate-packets/WPR-001-williams-percent-range-packet.md",
+        "docs/strategy-research/candidate-packets/DMI-001-adx-directional-ignition-packet.md"
+      ],
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/MPG-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/MPG-001/handoff.json"
+      ],
+      "revival_condition": "Improve prefix-safe late-cycle disable, exit horizon, or real-margin/fill evidence without enabling high leverage.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "FBS-001",
+      "semantic_name": "Funding Basis Stress",
+      "strategy_family": "funding_crowding_stress",
+      "current_status": "handoff_ready_facts_heavy",
+      "default_mode": "armed_observation",
+      "supported_sides": [
+        "long",
+        "short_disable_or_redesign_only"
+      ],
+      "research_role": "P1 direct funding-stress candidate and derivatives stress observer",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "funding_settlement_missing",
+        "historical_oi_long_short_top_trader_missing",
+        "fill_gap_missing",
+        "real_margin_model_missing",
+        "concentration_risk"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/FBS-001-funding-basis-stress-packet.md",
+        "docs/strategy-research/fbs-funding-stress-reversal/fbs-funding-stress-reversal-summary.md",
+        "docs/strategy-research/fbs-funding-stress-robustness/fbs-funding-stress-robustness-summary.md"
+      ],
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/FBS-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/FBS-001/handoff.json"
+      ],
+      "revival_condition": "Refresh derivatives facts and prove funding, OI, crowding, fill, and margin readiness at signal time.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "TEQ-001",
+      "semantic_name": "Tokenized Equity Momentum",
+      "strategy_family": "tradfi_equity_like_momentum",
+      "current_status": "handoff_ready_low_history_blocked",
+      "default_mode": "armed_observation",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Short-history first-class discovery lane for Binance equity-like and bStocks momentum",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "low_history",
+        "current_product_availability_missing",
+        "session_gap_risk",
+        "concentration_risk",
+        "fill_and_real_margin_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/TEQ-001-tokenized-equity-momentum-packet.md",
+        "docs/strategy-research/extended-universe-us-equity-metals-refresh-20260613.md",
+        "docs/strategy-research/teq-relative-strength-rotation/teq-relative-strength-rotation-summary.md"
+      ],
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/TEQ-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/TEQ-001/handoff.json"
+      ],
+      "revival_condition": "Keep researching while product availability, current symbol mapping, session, fill, and margin facts mature.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "PMR-001",
+      "semantic_name": "Precious Metal Regime Overlay",
+      "strategy_family": "precious_metal_overlay",
+      "current_status": "observe_only_overlay",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "short",
+        "long_context_only"
+      ],
+      "research_role": "XAG-led precious-metal short/weakness overlay and filter",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x",
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "role_split_incomplete",
+        "xag_concentration",
+        "session_fill_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/PMR-001-precious-metal-regime-overlay-packet.md",
+        "docs/strategy-research/pmr-metal-dislocation-refresh/pmr-metal-dislocation-refresh-summary.md",
+        "docs/strategy-research/pmr-metal-relative-spread-replay/pmr-metal-relative-spread-summary.md"
+      ],
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.json"
+      ],
+      "revival_condition": "Upgrade only after PMR role split, session facts, mark/funding, fill, and margin evidence improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "SOR-001",
+      "semantic_name": "Session Opening Range",
+      "strategy_family": "session_structure",
+      "current_status": "conditional_observation",
+      "default_mode": "armed_observation",
+      "supported_sides": [
+        "short",
+        "long_revival_only"
+      ],
+      "research_role": "Conditional session-opening and session-transfer branch",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "narrow_branch",
+        "second_half_decay",
+        "session_fill_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/SOR-001-session-opening-range-breakout-packet.md",
+        "docs/strategy-research/sor-session-classifier-sweep/sor-session-classifier-sweep-summary.md",
+        "docs/strategy-research/sor-exit-reslot-replay/sor-exit-reslot-replay-summary.md"
+      ],
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.json"
+      ],
+      "revival_condition": "Admit branch-by-branch only when session, decay, fill, and real-margin facts are current.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "VCB-001",
+      "semantic_name": "Volatility Compression Breakout",
+      "strategy_family": "volatility_compression_breakout",
+      "current_status": "next_handoff_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short"
+      ],
+      "research_role": "Next candidate to convert into handoff-ready compression/expansion semantics",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "false_breakout",
+        "full_curve_weakness",
+        "spread_depth_missing",
+        "mark_index_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/VCB-001-volatility-breakout-packet.md",
+        "docs/strategy-research/oss-vcb-true-false-breakout/oss-vcb-true-false-breakout-summary.md",
+        "docs/strategy-research/oss-vcb-volume-compression-cost-m2m/oss-vcb-volume-compression-cost-m2m-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive toward handoff when true-breakout classifier, false-breakout disable, cost, and spread/depth facts improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "NLPD-001",
+      "semantic_name": "New Listing Price Discovery",
+      "strategy_family": "new_listing_event",
+      "current_status": "research_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short_analysis_only"
+      ],
+      "research_role": "New listing, contract event, and low-history price-discovery lane",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x",
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "low_history",
+        "listing_survivorship",
+        "spread_liquidity_missing",
+        "product_risk",
+        "executable_side_unclear"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/NLPD-001-new-listing-price-discovery-packet.md",
+        "docs/strategy-research/nlpd-new-listing-event-study/nlpd-new-listing-event-study-summary.md",
+        "docs/strategy-research/bstocks-event-study-refresh/bstocks-event-study-refresh-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Advance after listing manifest, delist/status, liquidity, spread, failed-symbol, and product-risk facts are reproducible.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "RBR-001",
+      "semantic_name": "Range Boundary Reversion",
+      "strategy_family": "range_boundary",
+      "current_status": "parked_or_research_vocab",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short"
+      ],
+      "research_role": "Range vocabulary and anti-pattern evidence until semantics are redesigned",
+      "required_facts_level": "low",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x"
+        ],
+        "disabled": [
+          "3x",
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "calm_range_replay_failed",
+        "m2m_weakness",
+        "trend_break_tail_risk",
+        "needs_materially_different_classifier"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/RBR-001-range-boundary-reversion-packet.md",
+        "docs/strategy-research/oss-rbr-calm-range/oss-rbr-calm-range-summary.md",
+        "docs/strategy-research/negative-evidence.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only with materially different reclaim/range classifier and hard stop/fill proof.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "LCF-001",
+      "semantic_name": "Liquidation Cascade Follow-through",
+      "strategy_family": "liquidation_cascade",
+      "current_status": "facts_pipeline_required",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short"
+      ],
+      "research_role": "High-potential forced-flow follow-through thesis, blocked by fact capture requirements",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x",
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "force_order_capture_missing",
+        "historical_oi_missing",
+        "top_trader_ratio_missing",
+        "adl_risk_missing",
+        "depth_slippage_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/derivatives-leverage-requiredfacts-data-plan.md",
+        "docs/strategy-research/btpc-derivatives-reviewability/btpc-derivatives-reviewability-summary.md",
+        "docs/strategy-research/external-data/binance-futures-context-20260613/futures-context-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Build reproducible forceOrder, OI, funding, top-trader, ADL, depth, and margin capture before handoff work.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "RSR-001",
+      "semantic_name": "Relative Strength Rotation",
+      "strategy_family": "relative_strength_rotation",
+      "current_status": "observe_only_scorer",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Relative-strength scorer for TEQ and cross-basket interpretation",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "second_half_decay",
+        "session_fill_missing",
+        "product_risk",
+        "mark_funding_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/candidate-packets/RSR-001-relative-strength-rotation-packet.md",
+        "docs/strategy-research/rsr-decay-disable-classifier/rsr-decay-disable-classifier-summary.md",
+        "docs/strategy-research/teq-relative-strength-rotation/teq-relative-strength-rotation-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Advance only after second-half decay, session/fill, product-risk, mark/funding, and margin facts improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "MDS-001",
+      "semantic_name": "Metals Dislocation Session Mismatch",
+      "strategy_family": "metals_dislocation",
+      "current_status": "overlay_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long_context",
+        "short_context"
+      ],
+      "research_role": "PMR-adjacent metals dislocation and session mismatch overlay",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x"
+        ],
+        "stress_only": [
+          "2x",
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "external_session_mapping_missing",
+        "settlement_window_missing",
+        "current_product_availability_missing",
+        "spread_fill_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/pmr-metal-dislocation-refresh/pmr-metal-dislocation-refresh-summary.md",
+        "docs/strategy-research/pmr-metal-relative-spread-replay/pmr-metal-relative-spread-summary.md",
+        "docs/strategy-research/extended-universe-us-equity-metals-refresh-20260613.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Advance after external session, settlement, current availability, spread/fill, and margin facts are captured.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    }
+  ]
+}
