@@ -1129,7 +1129,7 @@
         "long",
         "short_context"
       ],
-      "research_role": "ATR / True Range expansion breakout short-window revival lane",
+      "research_role": "ATR24 equity expansion breakout short-window revival lane; not broad ATR breakout",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -1145,19 +1145,21 @@
         ]
       },
       "primary_blockers": [
-        "ninety_day_decay",
+        "sixty_day_ninety_day_decay",
         "false_breakout_disable_missing",
-        "session_fill_missing",
+        "broad_atr_category_failure",
+        "equity_like_product_session_fill_missing",
         "product_risk_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/aeb-atr-expansion-false-breakout-boundary-20260616.md",
         "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
         "docs/strategy-research/candidate-packets/AEB-001-atr-expansion-breakout-packet.md",
         "docs/strategy-research/aeb-atr-expansion-breakout-replay/aeb-atr-expansion-breakout-summary.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Revive only after ATR expansion quality, false-breakout disable, 60d/90d persistence, product/session/fill, and real margin facts improve.",
+      "revival_condition": "Revive only after ATR expansion quality, false-breakout disable, 60d/90d persistence, current equity-like product availability, session/fill, and real margin facts improve.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",
