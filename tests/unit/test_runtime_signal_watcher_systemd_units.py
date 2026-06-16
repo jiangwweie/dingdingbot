@@ -11,6 +11,13 @@ DROPIN_PATH = (
     / "brc-runtime-signal-watcher.service.d"
     / "40-resume-dispatcher.conf"
 )
+DRY_RUN_AUDIT_DROPIN_PATH = (
+    REPO_ROOT
+    / "deploy"
+    / "systemd"
+    / "brc-runtime-signal-watcher.service.d"
+    / "60-dry-run-audit-chain.conf"
+)
 SERVICE_PATH = (
     REPO_ROOT
     / "deploy"
@@ -38,6 +45,16 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "OwnerBoundedExecution" not in text
     assert "withdrawal" not in text
     assert "transfer" not in text
+
+
+def test_signal_watcher_dry_run_audit_dropin_is_non_executing():
+    text = DRY_RUN_AUDIT_DROPIN_PATH.read_text(encoding="utf-8")
+
+    assert "runtime_dry_run_audit_chain.py" in text
+    assert "runtime-dry-run-audit-chain.json" in text
+    assert "exchange write" in text
+    assert "withdrawals" in text
+    assert "transfers" in text
 
 
 def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
@@ -91,6 +108,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "brc-runtime-signal-watcher.service" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "40-resume-dispatcher.conf" in commands
+    assert "60-dry-run-audit-chain.conf" in commands
     assert "30-strategygroup-runtime-pilot-scope.conf" in commands
     assert "rm -f" in commands
     assert "systemctl daemon-reload" in commands

@@ -61,6 +61,9 @@ RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/40-resume-dispatcher.conf"
 )
+RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf"
+)
 
 
 class DeployPlanError(RuntimeError):
@@ -532,6 +535,7 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
     )
     service_dropin_path = f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    dry_run_audit_dropin_path = f"{service_dropin_dir}/60-dry-run-audit-chain.conf"
     stale_scope_dropin_path = (
         f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
     )
@@ -550,17 +554,23 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
     )
+    release_dry_run_audit_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH}"
+    )
     return (
         f"set -eu; "
         f"test -f {q(release_service_path)}; "
         f"test -f {q(release_timer_path)}; "
         f"test -f {q(release_dropin_path)}; "
+        f"test -f {q(release_dry_run_audit_dropin_path)}; "
         f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
         f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
         f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
-        f"sudo -n chmod 0644 {q(service_dropin_path)}; "
+        f"sudo -n cp {q(release_dry_run_audit_dropin_path)} {q(dry_run_audit_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)}; "
         f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
         "sudo -n systemctl daemon-reload; "
