@@ -433,9 +433,9 @@ def _disabled_smoke_args(path: Path) -> argparse.Namespace:
     )
 
 
-def _fake_post_submit_finalize_shape() -> dict[str, Any]:
+def _fake_closed_loop_shape() -> dict[str, Any]:
     return {
-        "scope": "runtime_dry_run_fake_post_submit_finalize_shape",
+        "scope": "runtime_dry_run_fake_closed_loop_shape",
         "status": "shape_checked",
         "called_official_endpoint": False,
         "non_executing": True,
@@ -447,6 +447,38 @@ def _fake_post_submit_finalize_shape() -> dict[str, Any]:
                 "status": "ready_for_fresh_signal",
                 "blockers": [],
             },
+        },
+        "reconciliation_result": {
+            "status": "clean",
+            "runtime_instance_id": RUNTIME_ID,
+            "authorization_id": FRESH_AUTHORIZATION_ID,
+            "active_position_count": 0,
+            "open_order_count": 0,
+            "mismatches": [],
+            "blockers": [],
+        },
+        "budget_settlement_result": {
+            "status": "settled",
+            "runtime_instance_id": RUNTIME_ID,
+            "authorization_id": FRESH_AUTHORIZATION_ID,
+            "attempt_reservation_id": "dry-run-attempt-reservation-1",
+            "budget_released_or_accounted": True,
+            "blockers": [],
+        },
+        "review_record_result": {
+            "status": "recorded",
+            "runtime_instance_id": RUNTIME_ID,
+            "authorization_id": FRESH_AUTHORIZATION_ID,
+            "review_outcome": "keep_observing",
+            "owner_action_required": False,
+            "blockers": [],
+        },
+        "closed_loop_checks": {
+            "finalize_shape_present": True,
+            "reconciliation_shape_present": True,
+            "budget_settlement_shape_present": True,
+            "review_record_shape_present": True,
+            "next_attempt_gate_shape_present": True,
         },
         "safety_invariants": {
             "exchange_write_called": False,
@@ -528,7 +560,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         _disabled_smoke_args(handoff_path),
         client=_DisabledSmokeClient(),
     )
-    finalize_shape = _fake_post_submit_finalize_shape()
+    closed_loop_shape = _fake_closed_loop_shape()
     passed = (
         readiness["status"] == "ready_for_fresh_submit_authorization"
         and finalgate_plan["status"] == "ready_for_action_time_final_gate"
@@ -536,18 +568,22 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         == "run_official_action_time_final_gate_preflight"
         and operation_layer["status"] == "operation_layer_ready"
         and disabled_report["status"] == "disabled_smoke_passed"
-        and finalize_shape["status"] == "shape_checked"
-        and not _dangerous_effects(readiness, finalgate_plan, operation_layer, disabled_report, finalize_shape)
+        and closed_loop_shape["status"] == "shape_checked"
+        and all(closed_loop_shape["closed_loop_checks"].values())
+        and not _dangerous_effects(readiness, finalgate_plan, operation_layer, disabled_report, closed_loop_shape)
     )
     return _scenario_packet(
         name="mock_fresh_signal_dry_run_pass",
-        expected="evidence IDs connect and dangerous action flags remain false",
+        expected=(
+            "evidence IDs connect, disabled submit stays non-executing, and "
+            "finalize/reconciliation/budget/review shapes are present"
+        ),
         artifacts={
             "readiness_bridge": readiness,
             "finalgate_dispatch_plan": finalgate_plan,
             "operation_layer_evidence_prep": operation_layer,
             "disabled_submit_smoke": disabled_report,
-            "post_submit_finalize_shape": finalize_shape,
+            "closed_loop_shape": closed_loop_shape,
         },
         passed=passed,
         blockers=[

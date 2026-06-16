@@ -19,6 +19,16 @@ The system observes, checks, executes inside official boundaries, protects,
 reconciles, settles, records, and reports Owner-readable state.
 ```
 
+The first-stage acceptance target is narrower and more operational:
+
+```text
+Complete the first selected StrategyGroup + tiny risk bounded real-order loop
+when a fresh signal exists and all official runtime gates pass.
+```
+
+Dry-run audit, source readiness, and UI work are support tracks for that target.
+They are not substitutes for the first bounded live-order closure.
+
 This file is not a research backlog, frontend design spec, or historical packet
 index.
 
@@ -26,9 +36,10 @@ index.
 
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
 | --- | --- | --- | --- | --- |
+| P0 First Bounded Live Order Closure | First selected StrategyGroup + tiny risk real order completes through official gates, finalize, reconciliation, settlement, and review | Main runtime window | active, waiting for fresh signal | On fresh signal, pause lower tracks and drive RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer -> real submit -> close loop |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher packets |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
-| P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | local implemented | Deploy `runtime_dry_run_audit_chain.py` and refresh `runtime-dry-run-audit-chain.json` after each runtime-code deploy |
+| P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | active | Stabilize real-backend UI semantics, source-health display, and responsive visual QA from mainline |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
@@ -144,7 +155,7 @@ mock fresh signal
 -> action-time FinalGate dry-run / preflight
 -> Operation Layer evidence prep
 -> disabled submit smoke
--> fake or non-executing post-submit finalize shape check
+-> fake or non-executing post-submit finalize / reconciliation / budget settlement / review shape check
 -> unified audit packet
 ```
 
@@ -176,6 +187,18 @@ post-deploy or watcher-adjacent non-executing audit refresh.
 | Mock fresh signal pass | Evidence IDs connect; dangerous action flags remain false |
 | RequiredFacts missing | Clear `missing_fact` blocker before Operation Layer |
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
+
+### Full Close-Loop Shape
+
+The dry-run pass scenario must prove these non-executing shapes exist before the
+project waits for a real signal:
+
+| Shape | Expected result |
+| --- | --- |
+| Post-submit finalize | Runtime can return to a fresh-signal next-attempt gate |
+| Reconciliation | No active position, no open order, no mismatch blockers |
+| Budget settlement | Reservation is released or accounted |
+| Review record | Runtime outcome is recorded without requiring Owner action |
 
 ### Safety
 

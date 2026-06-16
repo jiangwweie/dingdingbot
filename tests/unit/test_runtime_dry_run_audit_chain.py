@@ -39,6 +39,20 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         ]["status"]
         == "disabled_smoke_passed"
     )
+    closed_loop = scenarios["mock_fresh_signal_dry_run_pass"]["artifacts"][
+        "closed_loop_shape"
+    ]
+    assert closed_loop["status"] == "shape_checked"
+    assert closed_loop["closed_loop_checks"] == {
+        "finalize_shape_present": True,
+        "reconciliation_shape_present": True,
+        "budget_settlement_shape_present": True,
+        "review_record_shape_present": True,
+        "next_attempt_gate_shape_present": True,
+    }
+    assert closed_loop["reconciliation_result"]["status"] == "clean"
+    assert closed_loop["budget_settlement_result"]["status"] == "settled"
+    assert closed_loop["review_record_result"]["status"] == "recorded"
     assert scenarios["required_facts_missing"]["artifacts"]["readiness_bridge"][
         "status"
     ] == "ready_for_readiness_evidence"
