@@ -277,6 +277,101 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
     assert packet["selected_runtime_instance_ids"] == ["runtime-mpg", "runtime-teq"]
 
 
+def test_active_monitor_downgrades_non_actionable_historical_observation_blockers(
+    tmp_path,
+):
+    client = _FakeClient(
+        [
+            _runtime("runtime-old-exhausted", strategy_family_id="MPG-001"),
+            _runtime("runtime-waiting", strategy_family_id="TEQ-001"),
+        ]
+    )
+
+    def builder(args):
+        if args.runtime_instance_id == "runtime-old-exhausted":
+            return {
+                "status": "blocked",
+                "ready_for_prepare": False,
+                "ready_for_final_gate_preflight": False,
+                "blockers": [
+                    "runtime_attempts_exhausted",
+                    "order_candidate_id_or_authorization_id_required",
+                ],
+                "warnings": [],
+                "operator_command_plan": {"next_step": "resolve"},
+                "safety_invariants": {
+                    "prepare_records_created": False,
+                    "exchange_write_called": False,
+                    "order_created": False,
+                    "order_lifecycle_called": False,
+                    "attempt_counter_mutated": False,
+                    "runtime_budget_mutated": False,
+                },
+            }
+        return {
+            "status": "waiting_for_signal",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "wait"},
+            "safety_invariants": {
+                "prepare_records_created": False,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(output_dir=str(tmp_path)),
+        client=client,
+        monitor_builder=builder,
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["blockers"] == []
+    old_summary = packet["runtime_summaries"][0]
+    assert old_summary["status"] == "waiting_for_signal"
+    assert old_summary["blockers"] == []
+    assert (
+        "non_actionable_observation_blocker:runtime_attempts_exhausted"
+        in old_summary["warnings"]
+    )
+    assert packet["operator_command_plan"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_active_monitor_keeps_non_actionable_blocker_hard_after_prepare_side_effect(
+    tmp_path,
+):
+    client = _FakeClient([_runtime("runtime-prepared", strategy_family_id="MPG-001")])
+
+    packet = runtime_active_observation_monitor._build_packet(
+        _args(output_dir=str(tmp_path)),
+        client=client,
+        monitor_builder=lambda args: {
+            "status": "blocked",
+            "ready_for_prepare": False,
+            "ready_for_final_gate_preflight": False,
+            "blockers": ["order_candidate_id_or_authorization_id_required"],
+            "warnings": [],
+            "operator_command_plan": {"next_step": "resolve"},
+            "safety_invariants": {
+                "prepare_records_created": True,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blockers"] == [
+        "runtime-prepared:order_candidate_id_or_authorization_id_required"
+    ]
+
+
 def test_active_monitor_reports_missing_requested_runtime_as_warning(tmp_path):
     client = _FakeClient([_runtime("runtime-ada", symbol="ADA/USDT:USDT")])
 
