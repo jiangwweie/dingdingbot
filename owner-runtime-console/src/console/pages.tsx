@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { automationStateLabels, healthLabels } from "../data";
 import type { OwnerProductProjection, StrategyGroupProductRow } from "../types";
 import { PageShell } from "./chrome";
-import { healthTone, isBusinessDataUnavailable, noActionGuaranteeLabels, sourceKindLabels, sourceStatusTone, stateTone, toneClass, type ConsoleContext, type NavigationKey } from "./model";
+import { healthTone, isBusinessDataUnavailable, noActionGuaranteeLabels, sourceKindLabels, sourceStatusTone, stateTone, toneClass, toneTextClass, type ConsoleContext, type NavigationKey } from "./model";
 import { CascadePanel, ContextRow, CurrentStrategyPanel, FundMiniCard, FundsSafetyPanel, ImportantChanges, MetricTile, SafetyOverviewStrip, StatusBadge, StrategyAvatar, StrategyGroupList, StrategyRunSettings, SystemStateCard } from "./panels";
 
 export function ConsoleContent({
@@ -60,10 +60,53 @@ function HomePage({
         </div>
         <aside className="grid min-w-0 gap-4">
           <CurrentStrategyPanel strategy={selectedStrategy} />
+          <RealOrderReadinessCard projection={projection} />
           <ImportantChanges changes={projection.importantChanges} />
         </aside>
       </div>
     </PageShell>
+  );
+}
+
+function realOrderTone(projection: OwnerProductProjection) {
+  const readiness = projection.realOrderReadiness;
+  if (readiness.blockedCount > 0 || projection.sourceHealth.realOrderReadiness.status === "unavailable") return "danger" as const;
+  if (readiness.readyForRealOrderAction) return "processing" as const;
+  if (readiness.waitingCount > 0) return "waiting" as const;
+  return sourceStatusTone[projection.sourceHealth.realOrderReadiness.status];
+}
+
+function RealOrderReadinessCard({ projection }: { projection: OwnerProductProjection }) {
+  const readiness = projection.realOrderReadiness;
+  const tone = realOrderTone(projection);
+  const actionText = readiness.readyForRealOrderAction
+    ? "系统已到达实盘动作边界"
+    : readiness.blockedCount > 0
+      ? "真实动作保持关闭"
+      : "正常等待市场机会";
+
+  return (
+    <Card className="rounded-lg shadow-[var(--shadow-panel)]">
+      <CardHeader>
+        <CardTitle>实盘边界</CardTitle>
+        <CardDescription>只显示是否能靠近真实订单，不展示内部证据名</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <StatusBadge tone={tone}>{readiness.ownerLabel}</StatusBadge>
+          <span className={cn("text-sm font-semibold", toneTextClass(tone))}>{actionText}</span>
+        </div>
+        <div className="rounded-lg border bg-[color:var(--background-card-raised)] p-4">
+          <div className="text-lg font-semibold">
+            {readiness.passCount} 项正常 / {readiness.waitingCount} 项等待 / {readiness.blockedCount} 项阻断
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {readiness.blockedCount > 0 ? "系统会保持关闭，直到阻断解除" : "市场没有机会时，系统继续观察"}
+          </div>
+        </div>
+        <ContextRow label="资金动作" tone={tone} value={readiness.readyForRealOrderAction ? "可进入官方路径" : "保持关闭"} />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -288,6 +331,7 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
     { label: "对账", item: projection.sourceHealth.reconciliation },
     { label: "审计记录", item: projection.sourceHealth.operationAudit },
     { label: "审计演练", item: projection.sourceHealth.runtimeDryRunAudit },
+    { label: "实盘边界", item: projection.sourceHealth.realOrderReadiness },
   ];
 
   return (

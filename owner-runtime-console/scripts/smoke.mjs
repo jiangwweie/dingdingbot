@@ -75,6 +75,8 @@ try {
   await expectVisible(page, "系统安全运行");
   await expectVisible(page, "策略组状态");
   await expectVisible(page, "当前策略组");
+  await expectVisible(page, "实盘边界");
+  await expectVisible(page, "8 项正常");
   await expectVisible(page, "安全资金池");
   await expectVisible(page, "重要变化");
   await expectVisible(page, "等待机会");

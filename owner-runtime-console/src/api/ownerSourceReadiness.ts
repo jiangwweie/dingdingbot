@@ -8,6 +8,7 @@ import type {
   OwnerMockScenario,
   OwnerProductProjection,
   OwnerProductSummary,
+  OwnerRealOrderReadiness,
   OwnerSourceHealth,
   OwnerSourceHealthItem,
   OwnerSourceReadinessStrategyGroup,
@@ -74,6 +75,45 @@ function mapSourceHealth(source: OwnerConsoleSourceReadinessData): OwnerSourceHe
     reconciliation: sourceItem(raw.reconciliation, "ready", "对账正常"),
     operationAudit: sourceItem(raw.operation_audit, "ready_empty", "暂无审计动作"),
     runtimeDryRunAudit: sourceItem(raw.runtime_dry_run_audit, "degraded", "审计演练暂不可用"),
+    realOrderReadiness: sourceItem(raw.real_order_readiness, "degraded", "实盘边界待刷新"),
+  };
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function asStringList(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function mapReadinessMatrix(value: OwnerConsoleSourceReadinessData["real_order_readiness"]) {
+  const matrix = Array.isArray(value?.matrix) ? value.matrix : [];
+  return matrix.map((item) => ({
+    key: item.key || "unknown",
+    status: item.status || "unknown",
+    blockerClass: item.blocker_class ?? null,
+    blocksRealSubmit: item.blocks_real_submit === true,
+    detail: item.detail ?? null,
+    evidence: item.evidence,
+  }));
+}
+
+function mapRealOrderReadiness(source: OwnerConsoleSourceReadinessData, health: OwnerSourceHealth): OwnerRealOrderReadiness {
+  const raw = source.real_order_readiness;
+  const ownerLabel = raw?.owner_label || source.owner_summary?.real_order_readiness || health.realOrderReadiness.label;
+  const ownerDetail = raw?.owner_detail || health.realOrderReadiness.detail || "等待状态刷新";
+  return {
+    status: raw?.status || health.realOrderReadiness.status,
+    ownerLabel,
+    ownerDetail,
+    readyForRealOrderAction: raw?.ready_for_real_order_action === true,
+    passCount: asNumber(raw?.pass_count),
+    waitingCount: asNumber(raw?.waiting_count),
+    blockedCount: asNumber(raw?.blocked_count),
+    submitBlockingKeys: asStringList(raw?.submit_blocking_keys),
+    nextSafeCheckpoint: raw?.next_safe_checkpoint || "等待系统刷新",
+    matrix: mapReadinessMatrix(raw),
   };
 }
 
@@ -203,6 +243,7 @@ function fundPool(source: OwnerConsoleSourceReadinessData, health: OwnerSourceHe
 export function sourceReadinessToProjection(response: OwnerConsoleSourceReadinessResponse, scenario?: OwnerMockScenario): OwnerProductProjection {
   const source = response.data;
   const health = mapSourceHealth(source);
+  const realOrderReadiness = mapRealOrderReadiness(source, health);
   const rows = strategyRows(source, health);
   const selected = rows.find((row) => row.selected) ?? rows[0] ?? null;
   const safeOrWaiting = source.owner_state?.label || source.owner_summary?.market_opportunity || "等待机会";
@@ -225,6 +266,7 @@ export function sourceReadinessToProjection(response: OwnerConsoleSourceReadines
     selectedStrategyId: selected?.id ?? null,
     fundPool: fundPool(source, health),
     sourceHealth: health,
+    realOrderReadiness,
     importantChanges: [
       {
         id: "source-readiness-state",
@@ -232,6 +274,13 @@ export function sourceReadinessToProjection(response: OwnerConsoleSourceReadines
         detail: ready ? `${source.owner_summary?.funds || "资金正常"}，${source.owner_summary?.orders || "暂无订单"}，${source.owner_summary?.positions || "暂无持仓"}` : source.owner_state?.reason || "等待状态恢复",
         tone: ready ? "safe" : "danger",
         sourceKind: "system",
+      },
+      {
+        id: "real-order-readiness-state",
+        title: `实盘边界${realOrderReadiness.ownerLabel}`,
+        detail: `${realOrderReadiness.passCount} 项正常，${realOrderReadiness.waitingCount} 项等待，${realOrderReadiness.blockedCount} 项阻断`,
+        tone: realOrderReadiness.blockedCount > 0 ? "danger" : realOrderReadiness.readyForRealOrderAction ? "processing" : "waiting",
+        sourceKind: "safety_state",
       },
       ...rowChanges,
     ],

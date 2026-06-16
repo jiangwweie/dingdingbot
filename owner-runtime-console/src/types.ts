@@ -89,6 +89,29 @@ export type OwnerSourceHealth = {
   reconciliation: OwnerSourceHealthItem;
   operationAudit: OwnerSourceHealthItem;
   runtimeDryRunAudit: OwnerSourceHealthItem;
+  realOrderReadiness: OwnerSourceHealthItem;
+};
+
+export type OwnerReadinessMatrixItem = {
+  key: string;
+  status: string;
+  blockerClass?: string | null;
+  blocksRealSubmit: boolean;
+  detail?: string | null;
+  evidence?: unknown;
+};
+
+export type OwnerRealOrderReadiness = {
+  status: string;
+  ownerLabel: string;
+  ownerDetail: string;
+  readyForRealOrderAction: boolean;
+  passCount: number;
+  waitingCount: number;
+  blockedCount: number;
+  submitBlockingKeys: string[];
+  nextSafeCheckpoint: string;
+  matrix: OwnerReadinessMatrixItem[];
 };
 
 export type OwnerImportantChange = {
@@ -108,6 +131,7 @@ export type OwnerProductProjection = {
   selectedStrategyId: string | null;
   fundPool: FundPoolSummary;
   sourceHealth: OwnerSourceHealth;
+  realOrderReadiness: OwnerRealOrderReadiness;
   importantChanges: OwnerImportantChange[];
   noActionGuarantee: Record<string, boolean>;
 };
@@ -145,9 +169,29 @@ export type OwnerConsoleSourceReadinessData = {
     reconciliation?: string | null;
     operation_audit?: string | null;
     runtime_dry_run_audit?: string | null;
+    real_order_readiness?: string | null;
   } | null;
   strategy_groups?: OwnerSourceReadinessStrategyGroup[];
   source_health?: Record<string, OwnerSourceHealthItem | undefined>;
+  real_order_readiness?: {
+    status?: string | null;
+    owner_label?: string | null;
+    owner_detail?: string | null;
+    ready_for_real_order_action?: boolean | null;
+    pass_count?: number | null;
+    waiting_count?: number | null;
+    blocked_count?: number | null;
+    submit_blocking_keys?: string[] | null;
+    next_safe_checkpoint?: string | null;
+    matrix?: Array<{
+      key?: string | null;
+      status?: string | null;
+      blocker_class?: string | null;
+      blocks_real_submit?: boolean | null;
+      detail?: string | null;
+      evidence?: unknown;
+    }> | null;
+  } | null;
   critical_unavailable_sources?: string[];
   frontend_contract?: Record<string, boolean>;
   safety_invariants?: Record<string, boolean>;

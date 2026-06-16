@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 const basePort = Number(process.env.PORT ?? "5177");
 const artifactDir = path.resolve("artifacts", "state-smoke");
 const scenarios = [
-  { name: "normal", expected: ["系统安全运行", "无需操作", "等待机会"] },
+  { name: "normal", expected: ["系统安全运行", "无需操作", "等待机会", "实盘边界", "8 项正常"] },
   { name: "processing", expected: ["系统安全运行", "处理中", "SOR 正在处理订单"] },
   { name: "paused", expected: ["系统安全运行", "已暂停", "Owner 已暂停"] },
   { name: "intervention", expected: ["需要介入", "事实不可用，暂不能使用"] },

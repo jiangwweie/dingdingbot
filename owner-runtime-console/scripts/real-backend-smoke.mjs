@@ -287,6 +287,37 @@ async function createRuntimeFixtures() {
       dangerous_effects: [],
     },
   });
+  await writeJson(path.join(reportDir, "strategygroup-runtime-goal-status.json"), {
+    scope: "strategygroup_runtime_goal_status",
+    status: "waiting_for_signal",
+    owner_state: {
+      status: "waiting_for_opportunity",
+      label: "等待机会",
+      next_safe_checkpoint: "continue_watcher_observation",
+      needs_owner_action: false,
+    },
+    real_order_boundary: {
+      ready_for_real_order_action: false,
+    },
+    real_order_readiness_matrix: [
+      { key: "selected_strategygroup_scope", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "fresh_signal", status: "waiting_for_market", blocker_class: "waiting_for_market", blocks_real_submit: true },
+      { key: "required_facts", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "candidate_authorization", status: "waiting_for_market", blocker_class: "waiting_for_market", blocks_real_submit: true },
+      { key: "action_time_finalgate", status: "waiting_for_market", blocker_class: "waiting_for_market", blocks_real_submit: true },
+      { key: "official_operation_layer", status: "waiting_for_chain", blocker_class: "missing_fact", blocks_real_submit: true },
+      { key: "active_position_open_order", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "protection", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "budget", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "duplicate_submit", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "symbol_side_notional_leverage_scope", status: "pass", blocker_class: "none", blocks_real_submit: false },
+      { key: "hard_safety", status: "pass", blocker_class: "none", blocks_real_submit: false },
+    ],
+    safety_invariants: {
+      ...noWriteSafety,
+      reads_existing_evidence_only: true,
+    },
+  });
   return {
     cleanupPath: dir,
     liveFactsPath,
@@ -445,6 +476,12 @@ async function runConnectedSmoke(browser) {
     if (sourcePayload?.data?.owner_summary?.runtime_dry_run_audit !== "审计演练正常") {
       throw new Error("Expected source-readiness dry-run audit to show 审计演练正常");
     }
+    if (sourcePayload?.data?.owner_summary?.real_order_readiness !== "等待机会") {
+      throw new Error("Expected source-readiness real-order readiness to show 等待机会");
+    }
+    if (sourcePayload?.data?.real_order_readiness?.pass_count !== 8) {
+      throw new Error("Expected source-readiness real-order readiness to include 8 passing checks");
+    }
     const page = await context.newPage();
     const consoleIssues = [];
     page.on("console", (message) => {
@@ -459,6 +496,8 @@ async function runConnectedSmoke(browser) {
     await expectVisible(page, "系统安全运行");
     await expectVisible(page, "等待机会");
     await expectVisible(page, "观察中，等待机会");
+    await expectVisible(page, "实盘边界");
+    await expectVisible(page, "8 项正常");
     await expectVisible(page, "资金正常");
     await expectVisible(page, "暂无订单");
     await expectVisible(page, "暂无持仓");
@@ -471,6 +510,7 @@ async function runConnectedSmoke(browser) {
     await expectActiveNav(page, "系统");
     await expectVisible(page, "策略组可见");
     await expectVisible(page, "审计演练正常");
+    await expectVisible(page, "实盘边界");
     await expectVisible(page, "owner_console_source_readiness");
     await openNav(page, "订单与持仓", "级联视图");
     await expectActiveNav(page, "订单与持仓");

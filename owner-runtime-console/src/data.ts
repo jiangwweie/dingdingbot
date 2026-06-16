@@ -7,6 +7,7 @@ import type {
   OwnerConsoleSourceReadinessResponse,
   OwnerProductProjection,
   OwnerProductSummary,
+  OwnerRealOrderReadiness,
   StrategyGroupProductRow,
 } from "./types";
 
@@ -55,7 +56,21 @@ const baseSourceHealth = {
   reconciliation: { status: "ready", label: "对账正常" },
   operationAudit: { status: "ready", label: "审计详情可用" },
   runtimeDryRunAudit: { status: "ready", label: "审计演练正常" },
+  realOrderReadiness: { status: "ready_empty", label: "等待机会" },
 } as const;
+
+const baseRealOrderReadiness: OwnerRealOrderReadiness = {
+  status: "waiting_for_market",
+  ownerLabel: "等待机会",
+  ownerDetail: "实盘边界健康，等待 fresh signal",
+  readyForRealOrderAction: false,
+  passCount: 8,
+  waitingCount: 4,
+  blockedCount: 0,
+  submitBlockingKeys: ["fresh_signal", "candidate_authorization", "action_time_finalgate", "official_operation_layer"],
+  nextSafeCheckpoint: "continue_watcher_observation",
+  matrix: [],
+};
 
 const baseStrategies: StrategyGroupProductRow[] = [
   {
@@ -208,6 +223,7 @@ function buildProjection(
     selectedStrategyId: selected?.id ?? null,
     fundPool,
     sourceHealth: baseSourceHealth,
+    realOrderReadiness: baseRealOrderReadiness,
     importantChanges,
     noActionGuarantee: {
       places_order: false,
@@ -359,6 +375,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
     reconciliation: { status: ready ? "ready" : "degraded", label: ready ? "对账正常" : "对账详情暂不可用", detail: "mock_reconciliation" },
     operation_audit: { status: ready ? "ready_empty" : "degraded", label: ready ? "暂无审计动作" : "审计详情暂不可用", detail: "mock_operation_audit" },
     runtime_dry_run_audit: { status: ready ? "ready" : "degraded", label: ready ? "审计演练正常" : "审计演练暂不可用", detail: "mock_runtime_dry_run_audit" },
+    real_order_readiness: { status: ready ? "ready_empty" : "degraded", label: ready ? "等待机会" : "实盘边界待刷新", detail: "mock_real_order_readiness" },
   } as const;
 
   return {
@@ -391,6 +408,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
         reconciliation: ready ? "对账正常" : "对账详情暂不可用",
         operation_audit: ready ? "暂无审计动作" : "审计详情暂不可用",
         runtime_dry_run_audit: ready ? "审计演练正常" : "审计演练暂不可用",
+        real_order_readiness: ready ? "等待机会" : "实盘边界待刷新",
       },
       strategy_groups: ["MPG", "TEQ", "FBS", "SOR", "PMR"].map((code, index) => {
         const isProcessing = scenario === "processing" && code === "SOR";
@@ -409,6 +427,18 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
         };
       }),
       source_health: baseHealth,
+      real_order_readiness: {
+        status: ready ? "waiting_for_market" : "degraded",
+        owner_label: ready ? "等待机会" : "实盘边界待刷新",
+        owner_detail: ready ? "实盘边界健康，等待 fresh signal" : "目标状态源不可用",
+        ready_for_real_order_action: false,
+        pass_count: ready ? 8 : 0,
+        waiting_count: ready ? 4 : 0,
+        blocked_count: 0,
+        submit_blocking_keys: ready ? ["fresh_signal", "candidate_authorization", "action_time_finalgate", "official_operation_layer"] : [],
+        next_safe_checkpoint: ready ? "continue_watcher_observation" : "refresh_runtime_goal_status",
+        matrix: [],
+      },
       critical_unavailable_sources: ready ? [] : ["runtime_source"],
       frontend_contract: {
         single_api_source: true,

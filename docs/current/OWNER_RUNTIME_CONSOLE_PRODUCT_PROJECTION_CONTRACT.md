@@ -68,6 +68,26 @@ The frontend should not bind to the older endpoint as its product surface.
 | `importantChanges` | Short product events worth showing on the homepage |
 | `noActionGuarantee` | Explicit read-only and no-action guarantees |
 
+## Real-Order Readiness Projection
+
+`realOrderReadiness` is a product projection over the shared runtime pipeline.
+It exists so the Owner can see whether the system is merely waiting for market
+opportunity, processing the chain, or blocked before any real order.
+
+Main UI rules:
+
+| Field | Main UI behavior |
+| --- | --- |
+| `ownerLabel` | Display as terse Owner text, for example `等待机会`, `处理中`, or `暂不可用` |
+| `passCount` / `waitingCount` / `blockedCount` | Display as counts, not raw internal gate names |
+| `readyForRealOrderAction` | May show whether the real-order boundary has been reached |
+| `submitBlockingKeys` / matrix keys | Audit/detail data only; not homepage labels or actions |
+
+This projection must not make active position, open order, missing protection,
+missing budget, duplicate-submit risk, or scope mismatch disappear. Those
+conditions remain real-submit blockers, but they should be shown as product
+state instead of raw packet-reading work.
+
 ## State Split
 
 StrategyGroup state is split into two dimensions.

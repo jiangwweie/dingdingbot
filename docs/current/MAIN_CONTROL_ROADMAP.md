@@ -113,6 +113,7 @@ real-order readiness detail state
 | Verification | Python source-readiness/dry-run tests, frontend build, real-backend smoke, normal smoke, state smoke, and visual QA passed |
 | Runtime goal overlay | Source-readiness API now reads `strategygroup-runtime-goal-status.json`; `runtime_liveness_degraded` overrides the Owner state to `需要介入` so the console does not mislabel liveness repair as market waiting |
 | Real-order readiness detail | Source-readiness API now forwards `real_order_readiness` from goal-status so the console can distinguish waiting-for-market from submit-blocking safety conditions through one API |
+| Owner Console real-order card | Mainline UI now consumes `real_order_readiness` and shows `实盘边界`, pass/waiting/blocked counts, and one Owner-readable action state without exposing internal gate names on the homepage |
 
 ### 2026-06-17 Selected Scope Refresh Checkpoint
 
