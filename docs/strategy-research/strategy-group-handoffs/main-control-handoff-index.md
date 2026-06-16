@@ -55,6 +55,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `main-control-required-facts-map.md` | Maps strategy RequiredFacts to main-control runtime fact categories and missing-fact behavior. |
 | `main-control-conflict-policy.md` | Defines same-symbol, direction, mode, facts, stale, and multi-strategy conflict handling. |
 | `main-control-watcher-cadence.md` | Recommends watcher poll cadence, business signal validity, and stale behavior by strategy group. |
+| `../fbs-derivatives-facts-readiness-split-20260616.md` | P0 supplement for `FBS-001` fresh, partial, stale, missing, and margin-missing derivatives fact behavior. |
 
 ## Admission Interpretation
 

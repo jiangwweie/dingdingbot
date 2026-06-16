@@ -12,6 +12,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
 | `p0-p1-p2-goal-mode-plan.md` | Active goal-mode execution plan for P0 handoff hardening, P1 next handoff conversion, and P2 strategy-pool expansion. |
 | `p0-handoff-hardening-matrix-20260616.md` | P0 matrix for the 5 existing StrategyGroup handoff packs. |
+| `fbs-derivatives-facts-readiness-split-20260616.md` | P0 supplement splitting `FBS-001` fresh, partial, stale, missing, and margin-missing derivatives fact behavior. |
 | `p1-next-handoff-queue-20260616.md` | P1 queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | Research-only RequiredFacts design packet for `LCF-001`; not a handoff and not runtime intake. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | Research-only overlay note for `MDS-001`; preserves metals dislocation and session-mismatch semantics without runtime intake. |
@@ -49,6 +50,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
 | `p0-p1-p2-goal-mode-plan.md` | Active P0 / P1 / P2 goal-mode execution plan. |
 | `p0-handoff-hardening-matrix-20260616.md` | P0 handoff hardening matrix for `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, and `SOR-001`. |
+| `fbs-derivatives-facts-readiness-split-20260616.md` | `FBS-001` derivatives readiness split for fresh/partial/stale/missing facts and margin-model absence. |
 | `p1-next-handoff-queue-20260616.md` | P1 next handoff queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | `LCF-001` liquidation-cascade RequiredFacts design packet and facts-missing no-signal shape. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |

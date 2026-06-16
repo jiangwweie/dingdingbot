@@ -58,6 +58,17 @@ FinalGate checks, Operation Layer calls, or order sizing.
 | `funding_settlement_timing_state` | Funding timing policy | `block_candidate_prepare` |
 | `mark_deviation_state` | `mark_price_state` | `block_armed_observation_for_perps` |
 
+P0 readiness supplement:
+`docs/strategy-research/fbs-derivatives-facts-readiness-split-20260616.md`.
+
+| Readiness State | Main-Control Meaning | Candidate Prepare |
+| --- | --- | --- |
+| `fbs_derivatives_facts_fresh` | Funding, mark, premium/basis, OI, global long-short, top-trader ratio, and symbol rules are current. | Can be considered after all main-control account, exchange, protection, runtime, and freshness gates pass. |
+| `fbs_derivatives_facts_partial` | Funding and mark are current, but OI or crowding ratios are absent or field-shape-only. | Block from research semantics alone; keep observe-only context. |
+| `fbs_derivatives_facts_stale` | Funding, mark, OI, or crowding facts are outside freshness policy. | Block and emit stale packet. |
+| `fbs_derivatives_facts_missing` | Primary funding, mark, or exchange symbol facts are missing. | Block and emit no-signal or facts-missing packet. |
+| `fbs_margin_model_missing` | Real exchange margin/liquidation model is absent. | Block leverage promotion. |
+
 ### `TEQ-001`
 
 | RequiredFact | Normalized Fact | Missing Behavior |

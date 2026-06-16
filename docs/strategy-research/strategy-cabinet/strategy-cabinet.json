@@ -106,6 +106,7 @@
         "concentration_risk"
       ],
       "evidence_paths": [
+        "docs/strategy-research/fbs-derivatives-facts-readiness-split-20260616.md",
         "docs/strategy-research/candidate-packets/FBS-001-funding-basis-stress-packet.md",
         "docs/strategy-research/fbs-funding-stress-reversal/fbs-funding-stress-reversal-summary.md",
         "docs/strategy-research/fbs-funding-stress-robustness/fbs-funding-stress-robustness-summary.md"
