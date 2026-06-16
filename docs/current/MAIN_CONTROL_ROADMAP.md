@@ -433,6 +433,22 @@ git-based standing-authorization deploy path.
 | Next checkpoint | `continue_watcher_observation` until a fresh selected StrategyGroup signal appears |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Owner Console UI Validation Checkpoint
+
+While the selected StrategyGroup runtime is waiting for a fresh signal, the
+mainline Owner Console passed the current UI hard gate and real-backend smoke.
+
+| Item | Result |
+| --- | --- |
+| Build | `owner-runtime-console: npm run build` passed |
+| Mock smoke | `npm run smoke` passed for the normal scenario |
+| State smoke | `npm run smoke:states` passed for 7 scenarios |
+| Visual QA | `npm run visual:qa` passed for normal/stale, dark/light, 6 pages, and 5 viewport sizes |
+| Real backend smoke | `npm run smoke:real` passed against `GET /api/trading-console/owner-console-source-readiness` |
+| Real backend product state | `status=ready`; Owner summary reports `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, `保护正常`, `审计演练正常` |
+| UI hard gate | No blank page, framework overlay, forbidden primary engineering terms, accidental horizontal overflow, clipped primary text, or abnormal empty-order/empty-position presentation was reported by the QA scripts |
+| Safety | UI validation did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### Mock Dispatcher Close-Loop
 
 The dry-run audit chain also includes a local mock dispatcher close-loop. It
