@@ -1,6 +1,6 @@
 # Claude Team
 
-This team is configured for the Live-safe v1 workflow.
+This team is configured for the current StrategyGroup runtime-governance workflow.
 
 ## Operating Model
 
@@ -10,12 +10,12 @@ Use Claude roles only when the work has a clear task card, file boundary, test e
 
 ## Active Docs
 
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-findings.md`
-- `docs/ops/live-safe-v1-progress.md`
-- `docs/ops/agent-working-rules.md`
-- `docs/adr/`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
 
 Archived historical docs are not active instructions.
 
@@ -47,4 +47,4 @@ Implementation tasks must include:
 
 ## Memory MCP
 
-Use Memory MCP for durable decisions and rules only. Use program files for progress.
+Use Memory MCP for durable decisions and rules only. Use current docs only when a task card requires a durable artifact.

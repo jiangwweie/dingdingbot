@@ -5,7 +5,9 @@ Use this command for root-cause analysis and evidence gathering.
 Read:
 - `CLAUDE.md`
 - `.claude/team/diagnostic-analyst/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
+- `AGENTS.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
 
 User task:
 `{{arguments}}`

@@ -1,13 +1,14 @@
 # Project Manager
 
-Use this command to coordinate a Codex-issued task card or inspect Live-safe v1 task status.
+Use this command to coordinate a Codex-issued task card or inspect current runtime-governance task status.
 
 Read:
 - `CLAUDE.md`
 - `.claude/team/project-manager/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
 
 User task:
 `{{arguments}}`

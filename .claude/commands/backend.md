@@ -5,8 +5,10 @@ Use this command for scoped backend implementation from a Codex task card.
 Read:
 - `CLAUDE.md`
 - `.claude/team/backend-dev/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
 User task:
 `{{arguments}}`

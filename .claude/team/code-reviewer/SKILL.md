@@ -13,8 +13,9 @@ Review changes and report risks. Do not modify code unless explicitly asked.
 ## Required Context
 
 - `CLAUDE.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
 - Relevant task card
 
 ## Review Checklist

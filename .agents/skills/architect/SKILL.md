@@ -9,25 +9,21 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
-- `docs/ops/agent-current-brc-baseline.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
-- `docs/canon/PROJECT_BASELINE_CURRENT.md`
-- `docs/canon/BRC_TARGET_SEMANTICS.md`
-- `docs/canon/AGENT_WORKSPACE_RULES.md`
-- `docs/canon/RUNTIME_SAFETY_BOUNDARY.md`
-- `docs/canon/TECH_DEBT_BASELINE.md`
-- `docs/canon/DOCUMENT_GOVERNANCE.md`
-- Relevant `docs/adr/`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
+- Relevant files under `docs/current/strategy-group-handoffs/`
 
-Current required context is `docs/canon/*`.
-`docs/gpt/*` is historical reference only and must not be used as current project truth.
+Current required context is `AGENTS.md` plus `docs/current/*`.
+Historical archive material is recovery/provenance only and must not be used as current project truth.
 
 ## Role
 
 Codex owns architecture decisions. Provide options and trade-offs when the decision is meaningful, then wait for user confirmation before implementing high-impact changes.
 
-For Live-safe v1, prefer ADRs in `docs/adr/` over old product-contract documents.
+Prefer current tracked code, `docs/current/*`, and accepted Owner decisions over historical ADR or archive material.
 
 ## Deliverables
 

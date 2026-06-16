@@ -9,16 +9,14 @@ user-invocable: true
 ## Read
 
 - `AGENTS.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/live-safe-v1-progress.md`
-- `docs/ops/live-safe-v1-findings.md`
+- `CLAUDE.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
+- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
 
 ## Do
 
-- Update `docs/ops/live-safe-v1-progress.md` with session progress.
-- Update `docs/ops/live-safe-v1-findings.md` if there are program-local findings.
-- Update `docs/ops/live-safe-v1-task-board.md` if task status changed.
+- Update current docs only when explicitly asked or when the task card requires a durable artifact.
 - Write Memory MCP only for durable rules or accepted decisions.
 - Return a concise handoff note in chat.
 
-Do not recreate old `docs/planning/*` files.
+Do not recreate removed `docs/ops/*`, `docs/canon/*`, or `docs/planning/*` files.

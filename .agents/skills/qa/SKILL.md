@@ -9,13 +9,15 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 - The relevant task card or ADR
 
 ## Role
 
-QA designs and implements scoped tests. Historical tests were archived; new tests should be tied to Live-safe v1 acceptance criteria.
+QA designs and implements scoped tests. New tests should be tied to the current StrategyGroup runtime-governance pilot and Owner supervisor model.
 
 If QA finds a business logic bug, report it and let Codex decide whether to patch or create a new task card.
 

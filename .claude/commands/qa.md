@@ -5,8 +5,10 @@ Use this command for scoped test work from a Codex task card.
 Read:
 - `CLAUDE.md`
 - `.claude/team/qa-tester/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/agent-working-rules.md`
+- `AGENTS.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
 User task:
 `{{arguments}}`

@@ -5,7 +5,9 @@ Use this command for bounded requirement clarification requested by Codex.
 Read:
 - `CLAUDE.md`
 - `.claude/team/product-manager/SKILL.md`
-- `docs/ops/live-safe-v1-program.md`
+- `AGENTS.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 
 User task:
 `{{arguments}}`

@@ -9,10 +9,12 @@ user-invocable: true
 ## Read First
 
 - `AGENTS.md`
-- `docs/ops/agent-current-brc-baseline.md`
-- `docs/ops/live-safe-v1-program.md`
-- `docs/ops/live-safe-v1-task-board.md`
-- `docs/ops/agent-working-rules.md`
+- `CLAUDE.md`
+- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/AI_AGENT_CONSTRAINTS.md`
+- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/MAIN_CONTROL_ROADMAP.md`
+- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
 
 ## Role
 
@@ -22,11 +24,11 @@ Do not default to broad parallel implementation. Identify possible parallel work
 
 ## Planning
 
-Use program-scoped plan-with-files:
+Use current-doc scoped planning:
 
-- Update `docs/ops/live-safe-v1-task-board.md` when task status changes.
-- Update `docs/ops/live-safe-v1-findings.md` for program-local findings.
-- Update `docs/ops/live-safe-v1-progress.md` for session progress.
+- Treat `docs/current/MAIN_CONTROL_ROADMAP.md` as the current roadmap surface.
+- Treat `docs/current/strategy-group-handoffs/` as StrategyGroup handoff intake.
+- Do not recreate removed `docs/ops/*` tracking files.
 - Use Memory MCP only for durable rules and accepted decisions.
 
 ## Output For Claude Handoff
