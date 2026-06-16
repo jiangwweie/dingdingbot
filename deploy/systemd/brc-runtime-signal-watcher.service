@@ -21,6 +21,7 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --status-stale-after-seconds 900 \
   --allow-prepare-records \
   --allow-arm-preview \
+  --allow-attempt-policy-prepare \
   --allow-disabled-smoke \
   --allow-standing-operation-layer-evidence-prep \
   --strategy-family-id MPG-001 \

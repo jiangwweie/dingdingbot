@@ -28,6 +28,7 @@ index.
 | --- | --- | --- | --- | --- |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | active | Produce `owner-console-source-readiness.json` and `GET /api/trading-console/owner-console-source-readiness` |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
+| P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | queued | Produce `runtime-dry-run-audit-chain.json` after deploy liveness repair |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | mainline integrated | Keep source-readiness API/packet stable while UI refinements continue from the mainline contract |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
@@ -112,6 +113,50 @@ fresh signal
 | FinalGate | Must rerun at action time before real Operation Layer action |
 | Operation Layer | Must use official endpoint and required evidence IDs |
 | Safety | No secret mutation, profile expansion, sizing change, withdrawal, transfer, stale-fact execution, duplicate submit, or conflicting position/order execution |
+
+## P0 Subgoal: Runtime Dry-Run Audit Chain
+
+### Purpose
+
+The real market path should not be the only way to discover evidence relay,
+FinalGate, Operation Layer, or source-readiness breakage. A dry-run audit chain
+must exercise the same semantics without creating real orders or exchange
+writes.
+
+### Target Chain
+
+```text
+mock fresh signal
+-> RequiredFacts readiness
+-> candidate / authorization evidence
+-> action-time FinalGate dry-run / preflight
+-> Operation Layer evidence prep
+-> disabled submit smoke
+-> fake or non-executing post-submit finalize shape check
+-> unified audit packet
+```
+
+### Required Artifact
+
+| Artifact | Path |
+| --- | --- |
+| Unified audit packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-dry-run-audit-chain.json` |
+
+### Scenario Matrix
+
+| Scenario | Expected result |
+| --- | --- |
+| No signal | `waiting_for_signal`; no candidate, authorization, FinalGate, or Operation Layer |
+| Mock fresh signal pass | Evidence IDs connect; dangerous action flags remain false |
+| RequiredFacts missing | Clear `missing_fact` blocker before Operation Layer |
+| Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
+
+### Safety
+
+The dry-run chain must not call exchange write, create real orders, mutate
+secrets, mutate live profile, expand order sizing, create withdrawals or
+transfers, treat disabled smoke as real execution proof, or mark missing
+evidence as ready.
 
 ## Boundaries
 
