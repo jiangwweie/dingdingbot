@@ -449,6 +449,12 @@ missing budget, duplicate-submit risk, and symbol/side/notional/leverage
 mismatch therefore become reviewable evidence and Owner-readable status, not
 per-strategy execution forks or opaque project-wide chat confirmations.
 
+Regression coverage now exercises the full submit-blocker family while the
+packet is otherwise `official_operation_layer_evidence_ready`: active position,
+open order, missing protection, missing budget, duplicate submit, and
+symbol/side/notional/leverage mismatch all keep
+`ready_for_real_order_action=false` and emit `matrix_submit_blocker:<key>`.
+
 ## P0 Subgoal: Common Runtime Pipe Before Strategy-Specific Adapters
 
 ### Current Judgment

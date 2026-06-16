@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.build_strategygroup_runtime_goal_status import build_goal_status_packet
 
 
@@ -508,7 +510,75 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     ]
 
 
+@pytest.mark.parametrize(
+    (
+        "blocker",
+        "expected_status",
+        "expected_next_checkpoint",
+        "expected_matrix_key",
+    ),
+    [
+        (
+            "conflicting_active_position",
+            "active_position_resolution",
+            "record_submit_blocker_review_and_resolve_active_position",
+            "active_position_open_order",
+        ),
+        (
+            "conflicting_open_order",
+            "active_position_resolution",
+            "record_submit_blocker_review_and_resolve_active_position",
+            "active_position_open_order",
+        ),
+        (
+            "protection_missing",
+            "missing_fact",
+            "record_submit_blocker_review_and_refresh_required_facts",
+            "protection",
+        ),
+        (
+            "budget_missing",
+            "missing_fact",
+            "record_submit_blocker_review_and_refresh_required_facts",
+            "budget",
+        ),
+        (
+            "duplicate_submit_risk",
+            "hard_safety_stop",
+            "record_submit_blocker_review_packet",
+            "duplicate_submit",
+        ),
+        (
+            "symbol_scope_mismatch",
+            "hard_safety_stop",
+            "record_submit_blocker_review_packet",
+            "symbol_side_notional_leverage_scope",
+        ),
+        (
+            "side_scope_mismatch",
+            "hard_safety_stop",
+            "record_submit_blocker_review_packet",
+            "symbol_side_notional_leverage_scope",
+        ),
+        (
+            "notional_scope_mismatch",
+            "hard_safety_stop",
+            "record_submit_blocker_review_packet",
+            "symbol_side_notional_leverage_scope",
+        ),
+        (
+            "leverage_scope_mismatch",
+            "hard_safety_stop",
+            "record_submit_blocker_review_packet",
+            "symbol_side_notional_leverage_scope",
+        ),
+    ],
+)
 def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
+    blocker: str,
+    expected_status: str,
+    expected_next_checkpoint: str,
+    expected_matrix_key: str,
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
@@ -522,7 +592,7 @@ def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
             "blocker_class": "none",
             "selected_runtime_instance_ids": ["runtime-mpg-1"],
             "ready_runtime_signals": 1,
-            "blockers": ["duplicate_submit_risk"],
+            "blockers": [blocker],
             "safety_invariants": {
                 "exchange_write_called": False,
                 "order_created": False,
@@ -538,18 +608,16 @@ def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
         expected_head=HEAD,
     )
 
-    assert packet["status"] == "hard_safety_stop"
-    assert packet["owner_state"]["next_safe_checkpoint"] == (
-        "record_submit_blocker_review_packet"
-    )
+    assert packet["status"] == expected_status
+    assert packet["owner_state"]["next_safe_checkpoint"] == expected_next_checkpoint
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert "matrix_submit_blocker:duplicate_submit" in packet["blockers"]
-    assert packet["evidence"]["matrix_submit_blockers"] == ["duplicate_submit"]
+    assert f"matrix_submit_blocker:{expected_matrix_key}" in packet["blockers"]
+    assert packet["evidence"]["matrix_submit_blockers"] == [expected_matrix_key]
     matrix = _matrix_by_key(packet)
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
     assert matrix["official_operation_layer"]["blocks_real_submit"] is True
-    assert matrix["duplicate_submit"]["status"] == "blocked"
-    assert matrix["duplicate_submit"]["blocks_real_submit"] is True
+    assert matrix[expected_matrix_key]["status"] == "blocked"
+    assert matrix[expected_matrix_key]["blocks_real_submit"] is True
 
 
 def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
