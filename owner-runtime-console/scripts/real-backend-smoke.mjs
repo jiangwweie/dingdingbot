@@ -272,11 +272,18 @@ async function createRuntimeFixtures() {
     scope: "runtime_dry_run_audit_chain",
     status: "passed",
     checks: {
-      scenario_count: 4,
+      scenario_count: 7,
       required_scenarios_present: true,
       all_scenarios_passed: true,
       dangerous_effects_absent: true,
       disabled_smoke_not_real_execution_proof: true,
+      fresh_signal_fast_auto_chain_checked: true,
+      legacy_local_registration_probe_tolerance_checked: true,
+      mock_operation_layer_closed_loop_checked: true,
+      operation_layer_blocker_review_policy_checked: true,
+      operation_layer_evidence_relay_checked: true,
+      selected_strategygroup_dispatch_guard_checked: true,
+      shared_runtime_pipeline_checked: true,
     },
     safety_invariants: {
       exchange_write_called: false,
@@ -497,7 +504,10 @@ async function runConnectedSmoke(browser) {
     await expectVisible(page, "等待机会");
     await expectVisible(page, "观察中，等待机会");
     await expectVisible(page, "实盘边界");
+    await expectVisible(page, "实盘状态等待机会");
     await expectVisible(page, "8 项正常");
+    await expectVisible(page, "4 项等待");
+    await expectVisible(page, "0 项不可用");
     await expectVisible(page, "资金正常");
     await expectVisible(page, "暂无订单");
     await expectVisible(page, "暂无持仓");
@@ -505,6 +515,8 @@ async function runConnectedSmoke(browser) {
     for (const strategy of ["MPG", "TEQ", "FBS", "SOR", "PMR"]) {
       await expectVisible(page, strategy);
     }
+    await expectAbsent(page, "实盘状态暂不可用");
+    await expectAbsent(page, "需要介入 1");
 
     await openNav(page, "系统", "只读保证");
     await expectActiveNav(page, "系统");
