@@ -578,6 +578,291 @@
         "not_order_authority"
       ],
       "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "SCF-001",
+      "semantic_name": "Session Confluence Classifier",
+      "strategy_family": "session_confluence",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long",
+        "short_context"
+      ],
+      "research_role": "TEQ session-confluence right-tail candidate with time-stop tradeoff review",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "fill_gap_slippage_missing",
+        "product_risk_missing",
+        "real_margin_model_missing",
+        "time_stop_tradeoff_unresolved",
+        "session_confluence_drawdown_state_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+        "docs/strategy-research/candidate-packets/SCF-001-session-confluence-classifier-packet.md",
+        "docs/strategy-research/session-confluence-classifier/session-confluence-classifier-summary.md",
+        "docs/strategy-research/scf-exit-horizon-reslot/scf-exit-horizon-reslot-summary.md",
+        "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only after fill/gap, product-risk, session-confluence drawdown, time-stop tradeoff, and real margin facts are attached.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "DMI-001",
+      "semantic_name": "ADX Directional Ignition",
+      "strategy_family": "directional_movement_ignition",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "ADX/DMI equity ADX-rising long review lane with 24h exit-horizon evidence",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "cost_sensitivity_unresolved",
+        "product_session_fill_missing",
+        "metal_drag_blocks_broad_claim",
+        "generic_dmi_overreach_blocked",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+        "docs/strategy-research/candidate-packets/DMI-001-adx-directional-ignition-packet.md",
+        "docs/strategy-research/dmi-adx-directional-ignition-replay/dmi-adx-directional-ignition-summary.md",
+        "docs/strategy-research/dmi-exit-horizon-reslot/dmi-exit-horizon-reslot-summary.md",
+        "docs/strategy-research/dmi-fill-gap-slippage-sensitivity/dmi-fill-gap-slippage-sensitivity-summary.md",
+        "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only as equity ADX-rising long semantics after live-like cost/fill, product/session, metal-role split, and real margin facts improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "MASS-001",
+      "semantic_name": "Mass Index Range Expansion Reversal",
+      "strategy_family": "range_expansion_reversal",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Mass Index range-expansion reversal and continuation review lane",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "direction_context_missing",
+        "window_decay_unresolved",
+        "symbol_concentration_unresolved",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+        "docs/strategy-research/candidate-packets/MASS-001-mass-index-reversal-packet.md",
+        "docs/strategy-research/mass-index-reversal-replay/mass-index-reversal-summary.md",
+        "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only after direction-context, decay, concentration, session/fill, product-risk, and real margin facts are attached.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "EFI-001",
+      "semantic_name": "Elder Force Index Exhaustion Reversal",
+      "strategy_family": "price_volume_exhaustion",
+      "current_status": "right_tail_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Negative-force exhaustion reversal review lane with price-volume force semantics",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "candidate_level_drawdown",
+        "short_side_failure",
+        "high_leverage_breakdown",
+        "session_fill_missing",
+        "product_risk_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+        "docs/strategy-research/candidate-packets/EFI-001-elder-force-index-packet.md",
+        "docs/strategy-research/efi-elder-force-index-replay/efi-elder-force-index-summary.md",
+        "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Convert only after negative-force exhaustion is isolated from candidate-level drawdown, short-side failure, high-leverage breakdown, session/fill, product-risk, and margin blockers.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "HAT-001",
+      "semantic_name": "Heikin-Ashi Trend Revival",
+      "strategy_family": "heikin_ashi_trend",
+      "current_status": "research_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "long"
+      ],
+      "research_role": "Heikin-Ashi smoothed trend revival lane with classifier and fixed-stop reslot evidence",
+      "required_facts_level": "medium",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "drawdown_unresolved",
+        "stop_fill_gap_missing",
+        "exit_disable_quality_missing",
+        "session_product_transferability_missing",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+        "docs/strategy-research/candidate-packets/HAT-001-heikin-ashi-trend-packet.md",
+        "docs/strategy-research/hat-decay-asset-role-classifier/hat-decay-asset-role-classifier-summary.md",
+        "docs/strategy-research/hat-stop-reslot/hat-stop-reslot-summary.md",
+        "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only after drawdown, stop-fill/gap, exit/disable, session/product transferability, and real margin facts materially improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
+    },
+    {
+      "strategy_id": "LSR-001",
+      "semantic_name": "Liquidity Sweep Upper-Range Rejection",
+      "strategy_family": "liquidity_sweep_reversal",
+      "current_status": "research_candidate",
+      "default_mode": "observe_only",
+      "supported_sides": [
+        "short",
+        "long_revival_only"
+      ],
+      "research_role": "Liquidity sweep short upper-range revival lane after unbiased rewrite and signal-time classifier replay",
+      "required_facts_level": "high",
+      "leverage_boundary": {
+        "default": "1x",
+        "research_allowed": [
+          "1x",
+          "2x"
+        ],
+        "stress_only": [
+          "3x"
+        ],
+        "disabled": [
+          "5x"
+        ]
+      },
+      "primary_blockers": [
+        "full_sequence_collapse",
+        "cost_fill_missing",
+        "slot_m2m_required",
+        "classifier_quality_unresolved",
+        "real_margin_model_missing"
+      ],
+      "evidence_paths": [
+        "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md",
+        "docs/strategy-research/candidate-packets/LSR-001-liquidity-sweep-reversal-packet.md",
+        "docs/strategy-research/lsr-unbiased-rewrite/lsr-unbiased-rewrite-summary.md",
+        "docs/strategy-research/lsr-disable-classifier/lsr-disable-classifier-summary.md",
+        "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
+      ],
+      "handoff_paths": [],
+      "revival_condition": "Revive only after short upper-range rejection remains prefix-safe and full-sequence collapse, cost/fill, slot/M2M, classifier, and margin blockers improve.",
+      "non_execution_flags": [
+        "not_runtime_registration",
+        "not_finalgate_input",
+        "not_order_authority"
+      ],
+      "last_reviewed_at": "2026-06-16"
     }
   ]
 }

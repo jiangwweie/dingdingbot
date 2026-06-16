@@ -37,6 +37,20 @@ or parked vocabulary.
 | New listing / event | `NLPD-001`, bStocks event studies | Low-history event observer. | Broaden event cohort and survivorship controls. |
 | Parked vocabulary | `RBR-001`, failed calm-range variants | Negative evidence and future redesign vocabulary. | Revive only with materially different reclaim/range classifier. |
 
+## Cabinet Extension Batch 1
+
+The first P2 cabinet extension is recorded in
+`p2-cabinet-extension-batch1-20260616.md`.
+
+| Strategy | Added Role | Current Boundary |
+| --- | --- | --- |
+| `SCF-001` | Session-confluence right-tail candidate. | Observe/research only until fill/gap, product-risk, time-stop, and margin facts improve. |
+| `DMI-001` | ADX/DMI directional ignition right-tail candidate. | Observe/research only; generic DMI, short-side, and metals branches stay blocked. |
+| `MASS-001` | Mass Index range-expansion reversal right-tail candidate. | Review only until direction-context, decay, concentration, fill/product-risk, and margin facts improve. |
+| `EFI-001` | Elder Force Index exhaustion-reversal right-tail candidate. | Review only until drawdown, short-side failure, high-leverage, fill/product-risk, and margin blockers improve. |
+| `HAT-001` | Heikin-Ashi stop-reslot revival candidate. | Revival only until drawdown, stop-fill/gap, exit/disable, session/product, and margin facts improve. |
+| `LSR-001` | Liquidity-sweep upper-range revival candidate. | Revival only until full-sequence collapse, cost/fill, slot/M2M, classifier, and margin blockers improve. |
+
 ## Candidate Intake Criteria
 
 | Criterion | Required Interpretation |
