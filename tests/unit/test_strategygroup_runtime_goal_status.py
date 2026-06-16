@@ -188,6 +188,9 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     matrix = _matrix_by_key(packet)
     assert matrix["fresh_signal"]["status"] == "waiting_for_market"
     assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
+    assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
+    assert matrix["official_operation_layer"]["blocker_class"] == "waiting_for_market"
+    assert matrix["official_operation_layer"]["blocks_real_submit"] is True
     assert matrix["active_position_open_order"]["status"] == "pass"
     assert matrix["protection"]["status"] == "pass"
     assert matrix["budget"]["status"] == "pass"

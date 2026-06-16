@@ -378,7 +378,13 @@ def _real_order_readiness_matrix(
         _readiness_item(
             "official_operation_layer",
             "pass" if real_order_ready else "waiting_for_chain",
-            "none" if real_order_ready else "missing_fact",
+            (
+                "none"
+                if real_order_ready
+                else "missing_fact"
+                if checks["fresh_signal_present"]
+                else "waiting_for_market"
+            ),
             not real_order_ready,
             "官方 Operation Layer evidence 状态",
             "resume-dispatch-packet.json",

@@ -5985,7 +5985,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 {
                     "key": "official_operation_layer",
                     "status": "waiting_for_chain",
-                    "blocker_class": "missing_fact",
+                    "blocker_class": "waiting_for_market",
                     "blocks_real_submit": True,
                 },
                 {
