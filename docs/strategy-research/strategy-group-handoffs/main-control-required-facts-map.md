@@ -179,6 +179,33 @@ P1 signal-time boundary supplement:
 | `vcb_mark_index_state` | Futures mark/index interpretation. | `block_promotion` |
 | `vcb_leverage_ruin_state` | 3x/5x promotion risk. | `block_leverage_promotion` |
 
+### `RSR-001`
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `relative_strength_rotation_state` | Closed-candle relative-strength rank state | `no_score` |
+| `reference_index_mapping_state` | QQQ/SPY reference mapping | `no_score` |
+| `rank_priority_reslot_state` | Signal-time rank priority and slot competition | `observe_only` |
+| `rotation_concentration_state` | Basket concentration and top-symbol share | `observe_only` |
+| `rotation_decay_disable_state` | Second-half and post-window decay state | `block_candidate_prepare` |
+| `index_confirmed_rotation_state` | QQQ/SPY non-negative confirmation state | `observe_only` |
+| `equity_session_gap_state` | 24/7 Binance versus equity-session gap state | `block_promotion` |
+| `exchange_margin_liquidation_state` | Real margin and liquidation interpretation | `block_leverage_promotion` |
+
+P1 scorer boundary supplement:
+`docs/strategy-research/rsr-scorer-standalone-boundary-20260616.md`.
+
+| Boundary Fact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `rsr_role_state` | Support scorer, picker rank hint, classifier candidate, or standalone blocked. | `observe_only` |
+| `rsr_primary_strategy_binding_state` | Primary strategy RSR supports, usually `TEQ-001`. | `no_support_annotation` |
+| `rsr_standalone_block_state` | Confirms RSR is not the primary activation source. | `block_candidate_prepare` |
+| `rsr_decay_classifier_state` | Second-half decay and classifier quality. | `observe_only` |
+| `rsr_index_reference_state` | QQQ/SPY reference freshness and mapping. | `no_score` |
+| `rsr_rank_priority_state` | Signal-time rank and slot priority. | `no_score` |
+| `rsr_longer_lookback_negative_state` | 120h broad rotation negative evidence. | `block_broad_rsr` |
+| `rsr_high_leverage_block_state` | 3x/5x stress and disable boundary. | `block_leverage_promotion` |
+
 ## Readiness Levels
 
 | Readiness Level | Meaning |

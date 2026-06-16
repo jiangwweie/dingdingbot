@@ -17,7 +17,7 @@ sample packet expectations, and non-execution flags.
 | Rank | Candidate | Current Status | Handoff Target | Reason |
 | ---: | --- | --- | --- | --- |
 | 1 | `VCB-001` | `observe_only handoff draft plus signal-time boundary complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/` and `vcb-signal-time-classifier-boundary-20260616.md`; broad breakout remains negative and armed observation remains blocked. |
-| 2 | `RSR-001` | `observe_only scorer handoff draft complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
+| 2 | `RSR-001` | `observe_only scorer handoff draft plus standalone boundary complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/` and `rsr-scorer-standalone-boundary-20260616.md`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
 | 3 | `NLPD-001` | `observe_only event-study handoff draft complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
 | 4 | `LCF-001` | `RequiredFacts design packet complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay note complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md`; useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
@@ -50,6 +50,11 @@ is a research target only, not a fresh signal or candidate-preparation fact.
 | Main blocker | Late-sample decay, session/fill, product risk, mark/funding, and real margin. |
 | RequiredFacts | `relative_strength_rotation_state`, `reference_index_mapping_state`, `rotation_decay_disable_state`, `rank_priority_reslot_state`, `index_confirmed_rotation_state`, `equity_session_gap_state`, `exchange_margin_liquidation_state`. |
 | Handoff mode | `observe_only_scorer`; it may support TEQ but should not be standalone armed observation yet. |
+
+P1 supplement:
+`rsr-scorer-standalone-boundary-20260616.md` separates TEQ support scoring,
+Strategy Picker ranking language, decay-classifier research, and standalone
+activation blockers.
 
 ## NLPD-001 Handoff Draft Scope
 
@@ -94,7 +99,9 @@ is a research target only, not a fresh signal or candidate-preparation fact.
    classifier redesign that improves full-sequence behavior without post-entry
    labels.
 2. Keep `RSR-001` as observe-only scorer until second-half decay,
-   session/fill, product-risk, mark/funding, and margin facts improve.
+   session/fill, product-risk, mark/funding, and margin facts improve; current
+   scorer/standalone boundary is
+   `rsr-scorer-standalone-boundary-20260616.md`.
 3. Keep `NLPD-001` as event-study observer until broader listing cohort,
    survivorship, spread/liquidity, product-risk, and executable-side facts
    improve.

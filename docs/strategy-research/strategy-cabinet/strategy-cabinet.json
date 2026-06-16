@@ -479,7 +479,7 @@
       "supported_sides": [
         "long"
       ],
-      "research_role": "Relative-strength scorer for TEQ and cross-basket interpretation",
+      "research_role": "Relative-strength scorer for TEQ support and Strategy Picker ranking language",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -495,6 +495,7 @@
         ]
       },
       "primary_blockers": [
+        "standalone_activation_blocked",
         "second_half_decay",
         "session_fill_missing",
         "product_risk",
@@ -502,6 +503,7 @@
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/rsr-scorer-standalone-boundary-20260616.md",
         "docs/strategy-research/candidate-packets/RSR-001-relative-strength-rotation-packet.md",
         "docs/strategy-research/rsr-decay-disable-classifier/rsr-decay-disable-classifier-summary.md",
         "docs/strategy-research/teq-relative-strength-rotation/teq-relative-strength-rotation-summary.md"
@@ -510,7 +512,7 @@
         "docs/strategy-research/strategy-group-handoffs/RSR-001/handoff.md",
         "docs/strategy-research/strategy-group-handoffs/RSR-001/handoff.json"
       ],
-      "revival_condition": "Advance beyond observe-only scorer only after second-half decay, session/fill, product-risk, mark/funding, and margin facts improve.",
+      "revival_condition": "Advance beyond observe-only scorer only after standalone activation remains blocked until second-half decay, session/fill, product-risk, mark/funding, and margin facts improve.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",
