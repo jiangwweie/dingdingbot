@@ -22,6 +22,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `rsr-scorer-standalone-boundary-20260616.md` | P1 supplement separating `RSR-001` TEQ support scoring from standalone activation. |
 | `nlpd-low-history-event-boundary-20260616.md` | P1 supplement separating `NLPD-001` low-history event observation from executable listing-strategy activation. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | Research-only RequiredFacts design packet for `LCF-001`; not a handoff and not runtime intake. |
+| `lcf-facts-pipeline-boundary-20260616.md` | P1 supplement defining `LCF-001` facts-pipeline states, missing-fact behavior, and no-signal packet boundary. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | Research-only overlay note for `MDS-001`; preserves metals dislocation and session-mismatch semantics without runtime intake. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 queue for pool expansion, revival, and parked-strategy governance. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
@@ -67,6 +68,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `rsr-scorer-standalone-boundary-20260616.md` | `RSR-001` scorer boundary; keeps relative-strength ranking as TEQ support context, not standalone activation. |
 | `nlpd-low-history-event-boundary-20260616.md` | `NLPD-001` event boundary; keeps listing labels observe-only until cohort, survivorship, product, liquidity, and executable-side facts improve. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | `LCF-001` liquidation-cascade RequiredFacts design packet and facts-missing no-signal shape. |
+| `lcf-facts-pipeline-boundary-20260616.md` | `LCF-001` facts-pipeline boundary for force-order, liquidation-cluster, OI, positioning, depth, ADL, margin, and no-signal behavior. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |

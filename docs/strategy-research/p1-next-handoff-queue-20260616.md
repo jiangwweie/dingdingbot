@@ -19,7 +19,7 @@ sample packet expectations, and non-execution flags.
 | 1 | `VCB-001` | `observe_only handoff draft plus signal-time boundary complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/` and `vcb-signal-time-classifier-boundary-20260616.md`; broad breakout remains negative and armed observation remains blocked. |
 | 2 | `RSR-001` | `observe_only scorer handoff draft plus standalone boundary complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/` and `rsr-scorer-standalone-boundary-20260616.md`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
 | 3 | `NLPD-001` | `observe_only event-study handoff draft plus low-history boundary complete` | Low-history event-study observer draft. | Completed in `strategy-group-handoffs/NLPD-001/` and `nlpd-low-history-event-boundary-20260616.md`; event labels are useful but low-history, survivorship, spread/liquidity, and executable-side facts block armed observation. |
-| 4 | `LCF-001` | `RequiredFacts design packet complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
+| 4 | `LCF-001` | `RequiredFacts design plus facts-pipeline boundary complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md` and `lcf-facts-pipeline-boundary-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay note complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md`; useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
 
 ## VCB-001 Handoff Draft Scope
@@ -82,9 +82,15 @@ overlay context.
 | Supported side | Long and short remain research hypotheses only. |
 | Positive evidence | Forced-flow cascade thesis is high-potential for small-capital right-tail windows; derivatives endpoint field shapes are capturable in current public snapshots. |
 | Negative evidence | No local force-order stream, historical OI, historical long-short, top-trader, ADL, depth/slippage, or exchange-margin dataset is attached. |
-| Main blocker | It cannot distinguish true liquidation cascade from ordinary price volatility without `force_order_event_stream` and `liquidation_cluster_state`. |
+| Main blocker | It cannot distinguish true liquidation cascade from ordinary price volatility without `force_order_event_stream`, `liquidation_cluster_state`, historical OI, positioning ratios, depth/slippage, ADL, and margin-model facts. |
 | RequiredFacts | `force_order_event_stream`, `liquidation_cluster_state`, `historical_open_interest_window`, `global_long_short_ratio_window`, `top_trader_position_ratio_window`, `adl_quantile_state`, `orderbook_depth_slippage_state`, `real_exchange_margin_liquidation_model`. |
 | Handoff mode | No handoff yet; keep as `facts_pipeline_required` until the data pipeline exists. |
+
+P1 supplement:
+`lcf-facts-pipeline-boundary-20260616.md` defines `lcf_facts_absent`,
+`lcf_field_shape_observed`, `lcf_minimum_observable`, `lcf_replay_ready`, and
+`lcf_handoff_candidate`. Missing facts must emit `facts_missing_no_signal`,
+not weak signal or candidate preparation.
 
 ## MDS-001 Overlay Note Scope
 
@@ -112,9 +118,11 @@ overlay context.
    survivorship, spread/liquidity, product-risk, and executable-side facts
    improve; current low-history event boundary is
    `nlpd-low-history-event-boundary-20260616.md`.
-4. Keep `LCF-001` as a RequiredFacts design task after
-   `lcf-liquidation-cascade-requiredfacts-design-20260616.md`; do not create a
-   handoff until force-order, OI, ratio, depth, and margin facts exist.
+4. Keep `LCF-001` as a RequiredFacts and facts-pipeline design task after
+   `lcf-liquidation-cascade-requiredfacts-design-20260616.md` and
+   `lcf-facts-pipeline-boundary-20260616.md`; do not create a handoff until
+   force-order, liquidation-cluster, OI, ratio, depth, ADL, and margin facts
+   exist in replay-aligned form.
 5. Keep `MDS-001` as overlay research unless it develops a standalone
    activation/disable pair; current overlay note is
    `mds-metals-dislocation-overlay-note-20260616.md`.

@@ -433,7 +433,7 @@
         "long",
         "short"
       ],
-      "research_role": "High-potential forced-flow follow-through thesis, blocked by fact capture requirements",
+      "research_role": "High-potential forced-flow follow-through facts-pipeline design lane; facts-missing must output no-signal",
       "required_facts_level": "high",
       "leverage_boundary": {
         "default": "1x",
@@ -452,19 +452,23 @@
         "force_order_capture_missing",
         "liquidation_cluster_state_missing",
         "historical_oi_missing",
+        "historical_positioning_ratio_missing",
         "top_trader_ratio_missing",
         "adl_risk_missing",
         "depth_slippage_missing",
+        "facts_pipeline_not_replay_ready",
+        "handoff_blocked_until_force_order_oi_depth_margin",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/lcf-facts-pipeline-boundary-20260616.md",
         "docs/strategy-research/lcf-liquidation-cascade-requiredfacts-design-20260616.md",
         "docs/strategy-research/derivatives-leverage-requiredfacts-data-plan.md",
         "docs/strategy-research/btpc-derivatives-reviewability/btpc-derivatives-reviewability-summary.md",
         "docs/strategy-research/external-data/binance-futures-context-20260613/futures-context-summary.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Build reproducible forceOrder, liquidation-cluster, OI, funding, top-trader, ADL, depth, and margin capture before handoff work.",
+      "revival_condition": "Advance only after the facts pipeline reaches replay_ready with forceOrder, liquidation-cluster, OI, positioning ratio, funding, mark, ADL, depth, and margin capture.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

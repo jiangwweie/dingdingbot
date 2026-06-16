@@ -63,6 +63,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `../vcb-signal-time-classifier-boundary-20260616.md` | P1 supplement for `VCB-001` signal-time breakout facts, post-entry label boundary, and observe-only classifier behavior. |
 | `../rsr-scorer-standalone-boundary-20260616.md` | P1 supplement for `RSR-001` TEQ support scoring, Strategy Picker rank hints, and standalone activation blockers. |
 | `../nlpd-low-history-event-boundary-20260616.md` | P1 supplement for `NLPD-001` listing-event observation, low-history blockers, product class, executable-side, and PMR disable context. |
+| `../lcf-facts-pipeline-boundary-20260616.md` | P1 non-handoff supplement for `LCF-001` force-order, liquidation-cluster, OI, positioning, depth, ADL, margin, and facts-missing no-signal behavior. |
 
 ## Admission Interpretation
 
@@ -76,6 +77,11 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `VCB-001` | Keep observe-only as true-breakout classifier draft; post-entry true/false labels are research targets only, and broad breakout or armed observation stays blocked until signal-time classifier quality improves. |
 | `RSR-001` | Keep observe-only as TEQ support scorer and Strategy Picker rank hint; standalone activation remains blocked until decay, session/fill, product, mark/funding, and margin facts improve. |
 | `NLPD-001` | Keep observe-only as low-history event observer; listing labels remain research-only and armed observation stays blocked until cohort breadth, survivorship, spread/liquidity, product-risk, and executable-side facts improve. |
+
+Non-handoff P1 interpretation: `LCF-001` should stay in the Strategy Cabinet as
+`facts_pipeline_required`. Main control should not treat it as a runtime intake
+candidate until force-order, liquidation-cluster, OI, positioning, depth, ADL,
+and margin facts reach replay-ready form and a separate handoff pack exists.
 
 ## Shared Main-Control Hard Stops
 

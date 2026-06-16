@@ -235,6 +235,37 @@ P1 low-history boundary supplement:
 | `nlpd_post_entry_label_boundary_state` | Event labels are research targets, not runtime entry facts. | `block_candidate_prepare` |
 | `nlpd_pmr_disable_overlay_state` | PMR downshift/disable context for NLPD continuation labels. | `no_disable_annotation` |
 
+### `LCF-001`
+
+`LCF-001` is not a handoff pack. This mapping exists only to preserve the
+facts-pipeline boundary for future main-control review.
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `force_order_event_stream` | Forced-liquidation event stream or archive. | `no_lcf_signal` |
+| `liquidation_cluster_state` | Clustered liquidation pressure derived from force-order events. | `block_handoff` |
+| `historical_open_interest_window` | Replay-aligned historical OI window. | `block_handoff` |
+| `global_long_short_ratio_window` | Replay-aligned broad account-side positioning window. | `block_handoff` |
+| `top_trader_position_ratio_window` | Replay-aligned top-trader positioning window. | `block_handoff` |
+| `adl_quantile_state` | ADL or liquidation-engine stress proxy. | `observe_only_no_handoff` |
+| `orderbook_depth_slippage_state` | Depth, spread, and slippage around cascade periods. | `block_promotion` |
+| `real_exchange_margin_liquidation_model` | Venue-specific margin and liquidation behavior. | `block_leverage_promotion` |
+
+P1 facts-pipeline supplement:
+`docs/strategy-research/lcf-facts-pipeline-boundary-20260616.md`.
+
+| Pipeline Fact | Main-Control Meaning | Missing Behavior |
+| --- | --- | --- |
+| `lcf_fact_pipeline_state` | Overall LCF fact-pipeline readiness state. | `no_lcf_signal` |
+| `lcf_force_order_stream_state` | Force-order stream or archive is reproducibly captured. | `block_handoff` |
+| `lcf_liquidation_cluster_state` | Clustered liquidation pressure is generated from force-order events. | `block_handoff` |
+| `lcf_historical_oi_state` | Historical OI windows align to candidate candles. | `block_handoff` |
+| `lcf_positioning_ratio_state` | Global and top-trader positioning windows align to candidate candles. | `block_handoff` |
+| `lcf_adl_stress_state` | ADL or equivalent liquidation stress proxy exists. | `observe_only_no_handoff` |
+| `lcf_depth_slippage_state` | Depth, spread, and slippage facts are present. | `block_promotion` |
+| `lcf_margin_model_state` | Exchange margin and liquidation model is present. | `block_leverage_promotion` |
+| `lcf_no_signal_when_facts_missing_state` | Missing facts emit no-signal rather than weak signal. | `block_handoff_if_absent` |
+
 ## Readiness Levels
 
 | Readiness Level | Meaning |
