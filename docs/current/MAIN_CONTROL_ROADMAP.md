@@ -285,13 +285,22 @@ healthy:
 
 | Dry-run sub-check | Purpose |
 | --- | --- |
-| `required_scenarios_present` | Confirms the no-signal, mock signal, missing fact, conflict, and closed-loop scenarios are all represented. |
+| `required_scenarios_present` | Confirms the no-signal, mock signal, missing fact, conflict, blocker-review, and closed-loop scenarios are all represented. |
 | `all_scenarios_passed` | Confirms every dry-run scenario passed. |
 | `dangerous_effects_absent` | Confirms no forbidden effect flag escaped the dry-run packet. |
 | `disabled_smoke_not_real_execution_proof` | Prevents disabled smoke from being mistaken for real execution evidence. |
 | `operation_layer_evidence_relay_checked` | Confirms evidence IDs connect through the Operation Layer handoff shape. |
+| `fresh_signal_fast_auto_chain_checked` | Confirms mock fresh signal reaches candidate/authorization readiness, FinalGate dispatch, and Operation Layer evidence readiness without calling real submit. |
 | `legacy_local_registration_probe_tolerance_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
 | `mock_operation_layer_closed_loop_checked` | Confirms fake submit/finalize/reconcile/budget/review shape remains covered without exchange write. |
+| `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets rather than project-stopping chat confirmations, while real submit remains forbidden. |
+
+Operation Layer blockers such as active position, open order, missing protection,
+missing budget, duplicate-submit risk, and symbol/side/notional/leverage scope
+mismatch must not stop project progress or watcher observation. They must
+produce an auditable review packet and Owner-readable unavailable/intervention
+state, but `real_submit_allowed` must remain false until the blocker is
+resolved through the official path.
 
 ## Boundaries
 

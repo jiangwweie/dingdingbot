@@ -658,6 +658,24 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         operation_layer=operation_layer,
         closed_loop_shape=closed_loop_shape,
     )
+    fast_auto_chain_checks = {
+        "fresh_signal_to_authorization_ready": (
+            readiness["status"] == "ready_for_fresh_submit_authorization"
+        ),
+        "authorization_to_finalgate_dispatch_ready": (
+            finalgate_plan["status"] == "ready_for_action_time_final_gate"
+            and finalgate_plan["dispatch_action"]
+            == "run_official_action_time_final_gate_preflight"
+        ),
+        "finalgate_to_operation_layer_evidence_ready": (
+            operation_layer["status"] == "operation_layer_ready"
+            and operation_layer["dispatch_action"]
+            == "prepare_official_operation_layer_submit"
+        ),
+        "operation_layer_real_submit_still_not_called": (
+            _operation_layer_submit_called(operation_layer) is False
+        ),
+    }
     legacy_probe = dispatcher.build_dispatch_packet(
         resume_pack=_resume_pack_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
@@ -707,6 +725,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         ),
         artifacts={
             "readiness_bridge": readiness,
+            "fast_auto_chain_checks": fast_auto_chain_checks,
             "finalgate_dispatch_plan": finalgate_plan,
             "operation_layer_evidence_prep": operation_layer,
             "operation_layer_relay_checks": relay_checks,
@@ -719,6 +738,11 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             *readiness.get("blockers", []),
             *finalgate_plan.get("blockers", []),
             *operation_layer.get("blockers", []),
+            *[
+                f"fast_auto_chain_check_failed:{name}"
+                for name, value in fast_auto_chain_checks.items()
+                if not value
+            ],
             *(legacy_probe.get("blockers", []) if not legacy_probe_passed else []),
             *[
                 f"relay_check_failed:{name}"
@@ -784,6 +808,118 @@ def _scenario_active_conflict(output_dir: Path) -> dict[str, Any]:
         artifacts={"resume_dispatch": conflict},
         passed=passed,
         blockers=conflict.get("blockers", []),
+    )
+
+
+def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[str, Any]:
+    blocker_cases = {
+        "active_position": {
+            "blocker": "active_position_conflict:dry-run-runtime-mpg-001",
+            "expected_class": "active_position_resolution",
+            "expected_owner_state": "needs_intervention",
+        },
+        "open_order": {
+            "blocker": "open_order_conflict:dry-run-runtime-mpg-001",
+            "expected_class": "active_position_resolution",
+            "expected_owner_state": "needs_intervention",
+        },
+        "protection_missing": {
+            "blocker": "protection_missing:entry_stop_required",
+            "expected_class": "missing_fact",
+            "expected_owner_state": "temporarily_unavailable",
+        },
+        "budget_missing": {
+            "blocker": "budget_missing:attempt_reservation_required",
+            "expected_class": "missing_fact",
+            "expected_owner_state": "temporarily_unavailable",
+        },
+        "duplicate_submit_risk": {
+            "blocker": "duplicate_submit_risk:idempotency_lock_required",
+            "expected_class": "hard_safety_stop",
+            "expected_owner_state": "needs_intervention",
+        },
+        "symbol_scope_mismatch": {
+            "blocker": "symbol_scope_mismatch:expected=MSTR/USDT:USDT",
+            "expected_class": "hard_safety_stop",
+            "expected_owner_state": "needs_intervention",
+        },
+        "side_scope_mismatch": {
+            "blocker": "side_scope_mismatch:expected=long",
+            "expected_class": "hard_safety_stop",
+            "expected_owner_state": "needs_intervention",
+        },
+        "notional_scope_mismatch": {
+            "blocker": "notional_scope_mismatch:tiny_boundary_exceeded",
+            "expected_class": "hard_safety_stop",
+            "expected_owner_state": "needs_intervention",
+        },
+        "leverage_scope_mismatch": {
+            "blocker": "leverage_scope_mismatch:expected=1x",
+            "expected_class": "hard_safety_stop",
+            "expected_owner_state": "needs_intervention",
+        },
+    }
+    results: dict[str, Any] = {}
+    blockers: list[str] = []
+    for name, spec in blocker_cases.items():
+        packet = dispatcher.build_dispatch_packet(
+            resume_pack=_resume_pack_finalgate_ready(),
+            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+            api_base="http://dry-run.local",
+            operation_layer_evidence_report=_operation_evidence_report(
+                blockers=[spec["blocker"]]
+            ),
+            operation_layer_evidence_report_path=(
+                f"/tmp/dry-run-operation-layer-{name}.json"
+            ),
+            execute_operation_layer_submit=False,
+        )
+        review = packet.get("operation_layer_blocker_review") or {}
+        checks = {
+            "submit_blocked": packet.get("status") == "operation_layer_blocked",
+            "class_matches": packet.get("blocker_class") == spec["expected_class"],
+            "review_packet_ready": (
+                review.get("status") == "submit_blocked_review_packet_ready"
+            ),
+            "project_progress_allowed": (
+                review.get("project_progress_allowed") is True
+            ),
+            "continue_observation_allowed": (
+                review.get("continue_observation_allowed") is True
+            ),
+            "real_submit_forbidden": review.get("real_submit_allowed") is False,
+            "owner_state_matches": (
+                review.get("owner_console_state") == spec["expected_owner_state"]
+            ),
+            "operation_layer_not_called": _operation_layer_submit_called(packet) is False,
+            "no_dangerous_effects": not _dangerous_effects(packet),
+        }
+        results[name] = {
+            "blocker": spec["blocker"],
+            "expected_class": spec["expected_class"],
+            "packet_status": packet.get("status"),
+            "blocker_class": packet.get("blocker_class"),
+            "owner_console_state": review.get("owner_console_state"),
+            "owner_sentence": review.get("owner_sentence"),
+            "checks": checks,
+            "packet": packet,
+        }
+        blockers.extend(
+            f"{name}:{check_name}"
+            for check_name, ok in checks.items()
+            if ok is not True
+        )
+    passed = not blockers
+    return _scenario_packet(
+        name="operation_layer_blocker_review_matrix",
+        expected=(
+            "active position, open order, protection, budget, duplicate submit, "
+            "and scope mismatches produce reviewable blocked packets while "
+            "keeping real submit forbidden"
+        ),
+        artifacts={"review_matrix": results},
+        passed=passed,
+        blockers=blockers,
     )
 
 
@@ -1040,6 +1176,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_mock_operation_layer_closed_loop(output_dir),
         _scenario_required_facts_missing(output_dir),
         _scenario_active_conflict(output_dir),
+        _scenario_operation_layer_blocker_review_matrix(output_dir),
     ]
     blockers = [
         f"{scenario['name']}:{blocker}"
@@ -1050,7 +1187,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 5,
+        "required_scenarios_present": len(scenarios) == 6,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -1059,6 +1196,13 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 scenarios,
                 "mock_fresh_signal_dry_run_pass",
                 "operation_layer_relay_checks",
+            ).values()
+        ),
+        "fresh_signal_fast_auto_chain_checked": all(
+            _scenario_artifact(
+                scenarios,
+                "mock_fresh_signal_dry_run_pass",
+                "fast_auto_chain_checks",
             ).values()
         ),
         "legacy_local_registration_probe_tolerance_checked": (
@@ -1076,6 +1220,22 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 "mock_operation_layer_closed_loop",
             ).get("status")
             == "passed"
+        ),
+        "operation_layer_blocker_review_policy_checked": (
+            _scenario_artifact(
+                scenarios,
+                "operation_layer_blocker_review_matrix",
+                "review_matrix",
+            )
+            != {}
+            and all(
+                all(case.get("checks", {}).values())
+                for case in _scenario_artifact(
+                    scenarios,
+                    "operation_layer_blocker_review_matrix",
+                    "review_matrix",
+                ).values()
+            )
         ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"

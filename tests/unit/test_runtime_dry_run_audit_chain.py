@@ -10,7 +10,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["checks"]["scenario_count"] == 5
+    assert packet["checks"]["scenario_count"] == 6
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -26,6 +26,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "mock_operation_layer_submit_finalize_pass",
         "required_facts_missing",
         "active_position_or_open_order_conflict",
+        "operation_layer_blocker_review_matrix",
     }
     assert scenarios["no_signal"]["artifacts"]["resume_dispatch"]["command_plan"] is None
     assert (
@@ -43,6 +44,15 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     relay_checks = scenarios["mock_fresh_signal_dry_run_pass"]["artifacts"][
         "operation_layer_relay_checks"
     ]
+    fast_auto_chain_checks = scenarios["mock_fresh_signal_dry_run_pass"][
+        "artifacts"
+    ]["fast_auto_chain_checks"]
+    assert fast_auto_chain_checks == {
+        "fresh_signal_to_authorization_ready": True,
+        "authorization_to_finalgate_dispatch_ready": True,
+        "finalgate_to_operation_layer_evidence_ready": True,
+        "operation_layer_real_submit_still_not_called": True,
+    }
     assert relay_checks == {
         "required_evidence_ids_present": True,
         "no_missing_evidence_ids": True,
@@ -104,11 +114,39 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert scenarios["active_position_or_open_order_conflict"]["artifacts"][
         "resume_dispatch"
     ]["blocker_class"] == "active_position_resolution"
+    matrix = scenarios["operation_layer_blocker_review_matrix"]["artifacts"][
+        "review_matrix"
+    ]
+    assert set(matrix) == {
+        "active_position",
+        "open_order",
+        "protection_missing",
+        "budget_missing",
+        "duplicate_submit_risk",
+        "symbol_scope_mismatch",
+        "side_scope_mismatch",
+        "notional_scope_mismatch",
+        "leverage_scope_mismatch",
+    }
+    for case in matrix.values():
+        assert all(case["checks"].values())
+        assert case["packet"]["status"] == "operation_layer_blocked"
+        assert case["packet"]["operation_layer_blocker_review"][
+            "project_progress_allowed"
+        ] is True
+        assert case["packet"]["operation_layer_blocker_review"][
+            "continue_observation_allowed"
+        ] is True
+        assert case["packet"]["operation_layer_blocker_review"][
+            "real_submit_allowed"
+        ] is False
     assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
+    assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
     assert packet["checks"][
         "legacy_local_registration_probe_tolerance_checked"
     ] is True
     assert packet["checks"]["mock_operation_layer_closed_loop_checked"] is True
+    assert packet["checks"]["operation_layer_blocker_review_policy_checked"] is True
 
 
 def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, capsys):

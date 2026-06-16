@@ -520,9 +520,12 @@ def _operation_layer_readiness(
     blockers = _dedupe_text([*blockers, *authorization_blockers])
     warnings = _operation_layer_warnings(evidence_report, ids=ids)
     ready = not missing_ids and not blockers
+    blocker_class = (
+        "none" if ready else _operation_layer_blocker_class(blockers, missing_ids)
+    )
     return {
         "status": "ready" if ready else "blocked",
-        "blocker_class": "none" if ready else _operation_layer_blocker_class(blockers, missing_ids),
+        "blocker_class": blocker_class,
         "source_report": evidence_report_path,
         "required_evidence_ids": required_ids,
         "available_evidence_ids": {
@@ -538,6 +541,11 @@ def _operation_layer_readiness(
         "blockers": blockers,
         "warnings": warnings,
         "ready_for_official_operation_layer_submit": ready,
+        "blocker_review_policy": _operation_layer_blocker_review_policy(
+            blocker_class=blocker_class,
+            blockers=blockers,
+            missing_ids=missing_ids,
+        ),
         "places_order": False,
         "exchange_write_called": False,
         "order_lifecycle_called": False,
@@ -545,7 +553,7 @@ def _operation_layer_readiness(
             _owner_state_for_operation_layer_ready()
             if ready
             else _owner_state_for_operation_layer_blocked(
-                blocker_class=_operation_layer_blocker_class(blockers, missing_ids),
+                blocker_class=blocker_class,
                 blockers=blockers,
                 missing_ids=missing_ids,
             )
@@ -659,11 +667,67 @@ def _operation_layer_blocker_class(
         return "hard_safety_stop"
     if any(token in combined for token in ("active_position", "open_order_conflict")):
         return "active_position_resolution"
+    if any(token in combined for token in ("symbol_scope", "side_scope")):
+        return "hard_safety_stop"
+    if any(token in combined for token in ("notional_scope", "leverage_scope")):
+        return "hard_safety_stop"
     if "deployment" in combined or "gateway_readiness" in combined:
         return "deployment_issue"
     if "owner_runtime_" in combined and "env_confirmation" in combined:
         return "deployment_issue"
     return "missing_fact"
+
+
+def _operation_layer_blocker_review_policy(
+    *,
+    blocker_class: str,
+    blockers: list[str],
+    missing_ids: list[str],
+) -> dict[str, Any]:
+    reason = blockers[0] if blockers else (
+        f"missing_evidence_id:{missing_ids[0]}"
+        if missing_ids
+        else "operation_layer_evidence_not_ready"
+    )
+    if blocker_class == "none":
+        return {
+            "scope": "operation_layer_blocker_review_policy",
+            "status": "ready",
+            "project_progress_allowed": True,
+            "continue_observation_allowed": True,
+            "review_packet_recommended": False,
+            "real_submit_allowed": True,
+            "owner_console_state": "processing",
+            "owner_sentence": "系统自动处理中",
+            "reason": "none",
+        }
+    owner_console_state = (
+        "needs_intervention"
+        if blocker_class in {"active_position_resolution", "hard_safety_stop"}
+        else "temporarily_unavailable"
+    )
+    owner_sentence_by_class = {
+        "active_position_resolution": "有持仓或订单处理中，暂不能使用",
+        "deployment_issue": "部署状态不可用，等待系统处理",
+        "hard_safety_stop": "安全边界不满足，禁止提交",
+        "missing_fact": "事实不可用，暂不能使用",
+        "review_only_warning": "需要复核，但不影响观察",
+        "waiting_for_market": "等待机会",
+    }
+    return {
+        "scope": "operation_layer_blocker_review_policy",
+        "status": "submit_blocked_review_packet_ready",
+        "project_progress_allowed": True,
+        "continue_observation_allowed": True,
+        "review_packet_recommended": True,
+        "real_submit_allowed": False,
+        "owner_console_state": owner_console_state,
+        "owner_sentence": owner_sentence_by_class.get(
+            blocker_class,
+            "暂不可用，等待系统处理",
+        ),
+        "reason": reason,
+    }
 
 
 def _owner_state_for_operation_layer_ready() -> dict[str, Any]:
@@ -1631,6 +1695,9 @@ def _packet_with_operation_layer_readiness(
         "dispatch_action": OPERATION_LAYER_ACTION if ready else None,
         "owner_state": owner_state,
         "operation_layer_readiness": readiness,
+        "operation_layer_blocker_review": _dict(
+            readiness.get("blocker_review_policy")
+        ),
         "blockers": [] if ready else blockers,
         "warnings": _dedupe_text(
             [

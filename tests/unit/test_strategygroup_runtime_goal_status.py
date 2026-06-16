@@ -69,8 +69,10 @@ def _write_base_packets(report_dir: Path) -> None:
                 "dangerous_effects_absent": True,
                 "disabled_smoke_not_real_execution_proof": True,
                 "operation_layer_evidence_relay_checked": True,
+                "fresh_signal_fast_auto_chain_checked": True,
                 "legacy_local_registration_probe_tolerance_checked": True,
                 "mock_operation_layer_closed_loop_checked": True,
+                "operation_layer_blocker_review_policy_checked": True,
             },
             "safety_invariants": {
                 "dangerous_effects": [],
