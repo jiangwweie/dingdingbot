@@ -60,6 +60,14 @@ class CommandResult:
     returncode: int
 
 
+@dataclass(frozen=True)
+class RemoteBranchProbeResult:
+    head: str | None
+    status: str
+    blocker: str | None
+    attempts: list[dict[str, Any]]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = _repo_root()
@@ -148,10 +156,17 @@ def build_git_deploy_plan(
         blockers.append("target_commit_not_found_locally")
 
     remote_ref_head = None
+    remote_ref_probe = RemoteBranchProbeResult(
+        head=None,
+        status="skipped",
+        blocker=None,
+        attempts=[],
+    )
     if repo_url.strip() and git_ref.strip() and not git_ref.startswith("refs/"):
-        remote_ref_head = _remote_branch_head(repo_url=repo_url, branch=git_ref)
-        if not remote_ref_head:
-            blockers.append("target_git_ref_missing_on_remote")
+        remote_ref_probe = _remote_branch_probe(repo_url=repo_url, branch=git_ref)
+        remote_ref_head = remote_ref_probe.head
+        if remote_ref_probe.blocker:
+            blockers.append(remote_ref_probe.blocker)
         elif remote_ref_head != target:
             blockers.append("target_commit_not_remote_branch_head")
 
@@ -269,6 +284,11 @@ def build_git_deploy_plan(
             ),
             "remote_mutation_confirmation_phrase_required": False,
             "remote_mutation_requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "remote_ref_probe": {
+                "status": remote_ref_probe.status,
+                "blocker": remote_ref_probe.blocker,
+                "attempts": remote_ref_probe.attempts,
+            },
         },
         "plan_phases": plan_phases,
         "safety_invariants": {
@@ -335,6 +355,13 @@ def _plan_phases(
     head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
     expected_gap_count = max(migration_gap_revision_count, 0)
     remote_fetch_ref = f"refs/heads/{git_ref}:refs/remotes/origin/{git_ref}"
+    remote_ref_probe_command = (
+        "set -eu; "
+        f"REMOTE_HEAD=$(timeout 45 git ls-remote {q(repo_url)} "
+        f"{q('refs/heads/' + git_ref)} | awk '{{print $1; exit}}'); "
+        'test -n "$REMOTE_HEAD"; '
+        f'test "$REMOTE_HEAD" = {q(target_commit)}'
+    )
     remote_export_command = (
         f"set -eu; mkdir -p {q(source_root)} {q(reports_dir)} {q(backups_dir)}; "
         f"if [ ! -d {q(source_repo_path)}/.git ]; then "
@@ -393,10 +420,13 @@ def _plan_phases(
                 f"--expected-current-head {q(expected_deployed_head)} "
                 f"--expected-migration-count {expected_remote_migration_count} "
                 f"--expected-latest-migration {q(expected_remote_latest_migration)}",
+                _ssh(host, remote_ref_probe_command),
             ],
             "stop_if": [
                 "remote current head differs from expected baseline",
                 "remote migration state differs from expected baseline",
+                "Tokyo cannot reach the GitHub branch head",
+                "Tokyo branch head differs from the target commit",
                 "health live_ready is true",
             ],
         },
@@ -540,12 +570,95 @@ def _release_manifest_payload(
     }
 
 
+def _remote_branch_probe(*, repo_url: str, branch: str) -> RemoteBranchProbeResult:
+    attempts: list[dict[str, Any]] = []
+    ref = f"refs/heads/{branch}"
+    commands = [
+        ("default", ("git", "ls-remote", repo_url, ref)),
+        ("retry", ("git", "ls-remote", repo_url, ref)),
+        (
+            "http1",
+            ("git", "-c", "http.version=HTTP/1.1", "ls-remote", repo_url, ref),
+        ),
+    ]
+    for transport, command in commands:
+        result = _run(command, cwd=Path.cwd())
+        attempts.append(
+            {
+                "transport": transport,
+                "returncode": result.returncode,
+                "stdout_tail": _text_tail(result.stdout),
+            }
+        )
+        if result.returncode != 0:
+            continue
+        head = _parse_ls_remote_head(result.stdout)
+        if head:
+            return RemoteBranchProbeResult(
+                head=head,
+                status="head_resolved",
+                blocker=None,
+                attempts=attempts,
+            )
+        return RemoteBranchProbeResult(
+            head=None,
+            status="branch_missing",
+            blocker="target_git_ref_missing_on_remote",
+            attempts=attempts,
+        )
+
+    return RemoteBranchProbeResult(
+        head=None,
+        status="probe_failed",
+        blocker=_remote_probe_failure_blocker(attempts),
+        attempts=attempts,
+    )
+
+
 def _remote_branch_head(*, repo_url: str, branch: str) -> str | None:
-    result = _run(("git", "ls-remote", repo_url, f"refs/heads/{branch}"), cwd=Path.cwd())
-    if result.returncode != 0 or not result.stdout.strip():
+    return _remote_branch_probe(repo_url=repo_url, branch=branch).head
+
+
+def _parse_ls_remote_head(text: str) -> str | None:
+    if not text.strip():
         return None
-    first = result.stdout.strip().splitlines()[0].split()[0]
+    first = text.strip().splitlines()[0].split()[0]
     return first if first else None
+
+
+def _remote_probe_failure_blocker(attempts: list[dict[str, Any]]) -> str:
+    combined = "\n".join(
+        str(attempt.get("stdout_tail", "")) for attempt in attempts
+    ).lower()
+    timeout_markers = (
+        "operation timed out",
+        "timed out",
+        "timeout",
+    )
+    if any(marker in combined for marker in timeout_markers):
+        return "git_remote_probe_timed_out"
+    network_markers = (
+        "http2 framing",
+        "failed to connect",
+        "couldn't connect",
+        "could not resolve host",
+        "connection reset",
+        "network is unreachable",
+        "unable to access",
+        "the requested url returned error",
+        "tls",
+        "ssl",
+    )
+    if any(marker in combined for marker in network_markers):
+        return "git_remote_probe_network_failed"
+    return "git_remote_probe_failed"
+
+
+def _text_tail(text: str, *, max_chars: int = 500) -> str:
+    stripped = text.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    return stripped[-max_chars:]
 
 
 def _ssh(host: str, remote_command: str) -> str:

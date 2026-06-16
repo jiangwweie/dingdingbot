@@ -62,7 +62,20 @@ def _ready_git_plan():
     module = _load_plan_module()
     head = _git("rev-parse", "HEAD")
     module._tracked_dirty = lambda repo_root: False
-    module._remote_branch_head = lambda *, repo_url, branch: head
+    module._remote_branch_probe = (
+        lambda *, repo_url, branch: module.RemoteBranchProbeResult(
+            head=head,
+            status="head_resolved",
+            blocker=None,
+            attempts=[
+                {
+                    "transport": "test",
+                    "returncode": 0,
+                    "stdout_tail": f"{head}\trefs/heads/{branch}",
+                }
+            ],
+        )
+    )
     return module.build_git_deploy_plan(
         repo_root=REPO_ROOT,
         repo_url="https://github.com/example/dingdingbot.git",
@@ -161,7 +174,20 @@ def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
     module = _load_plan_module()
     head = _git("rev-parse", "HEAD")
     module._tracked_dirty = lambda repo_root: False
-    module._remote_branch_head = lambda *, repo_url, branch: "remote-other-head"
+    module._remote_branch_probe = (
+        lambda *, repo_url, branch: module.RemoteBranchProbeResult(
+            head="remote-other-head",
+            status="head_resolved",
+            blocker=None,
+            attempts=[
+                {
+                    "transport": "test",
+                    "returncode": 0,
+                    "stdout_tail": f"remote-other-head\trefs/heads/{branch}",
+                }
+            ],
+        )
+    )
 
     report = module.build_git_deploy_plan(
         repo_root=REPO_ROOT,
@@ -185,8 +211,100 @@ def test_git_deploy_plan_blocks_when_target_commit_is_not_remote_branch_head():
 
     assert report["status"] == "blocked"
     assert "target_commit_not_remote_branch_head" in report["checks"]["blockers"]
+    assert report["checks"]["remote_ref_probe"]["status"] == "head_resolved"
     assert report["safety_invariants"]["ssh_called"] is False
     assert report["safety_invariants"]["remote_files_modified"] is False
+
+
+def test_git_deploy_plan_classifies_remote_probe_network_failure():
+    module = _load_plan_module()
+    head = _git("rev-parse", "HEAD")
+    module._tracked_dirty = lambda repo_root: False
+    module._remote_branch_probe = (
+        lambda *, repo_url, branch: module.RemoteBranchProbeResult(
+            head=None,
+            status="probe_failed",
+            blocker="git_remote_probe_network_failed",
+            attempts=[
+                {
+                    "transport": "default",
+                    "returncode": 128,
+                    "stdout_tail": (
+                        "RPC failed; curl 92 HTTP/2 stream was not closed cleanly: "
+                        "INTERNAL_ERROR"
+                    ),
+                },
+                {
+                    "transport": "http1",
+                    "returncode": 128,
+                    "stdout_tail": "fatal: unable to access repository",
+                },
+            ],
+        )
+    )
+
+    report = module.build_git_deploy_plan(
+        repo_root=REPO_ROOT,
+        repo_url="https://github.com/example/dingdingbot.git",
+        git_ref="release/test",
+        target_commit=head,
+        release_name="brc-runtime-governance-test",
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python",
+        api_base="http://127.0.0.1:18080",
+        previous_release="/home/ubuntu/brc-deploy/releases/current-baseline",
+        expected_deployed_head="baseline-head",
+        expected_remote_migration_count=81,
+        expected_remote_latest_migration=(
+            "2026-06-11-081_create_llm_advisory_plane.py"
+        ),
+    )
+
+    assert report["status"] == "blocked"
+    assert "git_remote_probe_network_failed" in report["checks"]["blockers"]
+    assert "target_git_ref_missing_on_remote" not in report["checks"]["blockers"]
+    assert report["checks"]["remote_ref_probe"]["status"] == "probe_failed"
+
+
+def test_remote_branch_probe_falls_back_to_http1():
+    module = _load_plan_module()
+    head = "1" * 40
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(command: tuple[str, ...], *, cwd: Path):
+        commands.append(command)
+        if "-c" in command and "http.version=HTTP/1.1" in command:
+            return module.CommandResult(
+                stdout=f"{head}\trefs/heads/release/test",
+                returncode=0,
+            )
+        return module.CommandResult(
+            stdout=(
+                "fatal: unable to access repository: "
+                "Error in the HTTP2 framing layer"
+            ),
+            returncode=128,
+        )
+
+    module._run = fake_run
+
+    result = module._remote_branch_probe(
+        repo_url="https://github.com/example/dingdingbot.git",
+        branch="release/test",
+    )
+
+    assert result.head == head
+    assert result.status == "head_resolved"
+    assert result.blocker is None
+    assert [attempt["transport"] for attempt in result.attempts] == [
+        "default",
+        "retry",
+        "http1",
+    ]
+    assert commands[-1][:4] == ("git", "-c", "http.version=HTTP/1.1", "ls-remote")
 
 
 def test_git_deploy_default_ref_is_live_safe_program_branch():
@@ -233,6 +351,7 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
         for command in phase["commands"]
     )
     assert "scp " not in all_commands
+    assert "timeout 45 git ls-remote" in all_commands
     assert "git clone --no-checkout" in all_commands
     assert "git fetch --prune origin" in all_commands
     assert "git archive" in all_commands
@@ -250,7 +369,20 @@ def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_chec
     module = _load_plan_module()
     head = _git("rev-parse", "HEAD")
     module._tracked_dirty = lambda repo_root: False
-    module._remote_branch_head = lambda *, repo_url, branch: head
+    module._remote_branch_probe = (
+        lambda *, repo_url, branch: module.RemoteBranchProbeResult(
+            head=head,
+            status="head_resolved",
+            blocker=None,
+            attempts=[
+                {
+                    "transport": "test",
+                    "returncode": 0,
+                    "stdout_tail": f"{head}\trefs/heads/{branch}",
+                }
+            ],
+        )
+    )
 
     report = module.build_git_deploy_plan(
         repo_root=REPO_ROOT,
