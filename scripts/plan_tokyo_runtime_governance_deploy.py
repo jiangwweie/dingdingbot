@@ -64,6 +64,9 @@ RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
 RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf"
 )
+RUNTIME_SIGNAL_WATCHER_GOAL_STATUS_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/70-goal-status.conf"
+)
 
 
 class DeployPlanError(RuntimeError):
@@ -536,6 +539,7 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     )
     service_dropin_path = f"{service_dropin_dir}/40-resume-dispatcher.conf"
     dry_run_audit_dropin_path = f"{service_dropin_dir}/60-dry-run-audit-chain.conf"
+    goal_status_dropin_path = f"{service_dropin_dir}/70-goal-status.conf"
     stale_scope_dropin_path = (
         f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
     )
@@ -558,19 +562,25 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH}"
     )
+    release_goal_status_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_GOAL_STATUS_DROPIN_REPO_PATH}"
+    )
     return (
         f"set -eu; "
         f"test -f {q(release_service_path)}; "
         f"test -f {q(release_timer_path)}; "
         f"test -f {q(release_dropin_path)}; "
         f"test -f {q(release_dry_run_audit_dropin_path)}; "
+        f"test -f {q(release_goal_status_dropin_path)}; "
         f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
         f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
         f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
         f"sudo -n cp {q(release_dry_run_audit_dropin_path)} {q(dry_run_audit_dropin_path)}; "
-        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)}; "
+        f"sudo -n cp {q(release_goal_status_dropin_path)} {q(goal_status_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)} {q(goal_status_dropin_path)}; "
         f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
         "sudo -n systemctl daemon-reload; "

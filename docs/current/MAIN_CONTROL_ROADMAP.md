@@ -41,6 +41,7 @@ index.
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
+| P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
 | P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | active | Stabilize real-backend UI semantics, source-health display, and responsive visual QA from mainline |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
@@ -174,10 +175,9 @@ The local script is:
 scripts/runtime_dry_run_audit_chain.py
 ```
 
-It currently runs four fixture-backed scenarios and treats expected blocked
+It currently runs five fixture-backed scenarios and treats expected blocked
 states as successful audit coverage when they stop before dangerous actions.
-The next runtime deploy should install this script on Tokyo and wire it as a
-post-deploy or watcher-adjacent non-executing audit refresh.
+Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
 
 ### Scenario Matrix
 
@@ -239,6 +239,44 @@ The dry-run chain must not call exchange write, create real orders, mutate
 secrets, mutate live profile, expand order sizing, create withdrawals or
 transfers, treat disabled smoke as real execution proof, or mark missing
 evidence as ready.
+
+## P0 Subgoal: Runtime Goal Status Summary
+
+### Purpose
+
+The active goal loop should not require manually reading several watcher
+packets before deciding whether to keep observing or advance toward the first
+bounded real order. A read-only summary packet now classifies the current
+runtime state from already-written evidence.
+
+### Required Artifact
+
+| Artifact | Path |
+| --- | --- |
+| Local/generated packet | `output/strategygroup-runtime-pilot/goal-status/strategygroup-runtime-goal-status.json` |
+| Tokyo watcher packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` |
+| Builder | `scripts/build_strategygroup_runtime_goal_status.py` |
+| Watcher drop-in | `deploy/systemd/brc-runtime-signal-watcher.service.d/70-goal-status.conf` |
+
+### Classification
+
+| Status | Meaning | Next safe checkpoint |
+| --- | --- | --- |
+| `waiting_for_signal` | Runtime is healthy and no fresh StrategyGroup signal exists | `continue_watcher_observation` |
+| `fresh_signal_processing` | Fresh signal exists but candidate/authorization evidence is not complete | `prepare_candidate_grant_authorization_evidence` |
+| `action_time_finalgate_ready` | Candidate/authorization reached action-time gate boundary | `run_official_action_time_finalgate` |
+| `operation_layer_ready` | Required evidence is ready for the official Operation Layer path | `call_official_operation_layer_submit_after_action_time_recheck` |
+| `deployment_issue` | Tokyo release does not match expected runtime head | Align deployment before runtime action |
+| `hard_safety_stop` | Forbidden effect evidence is present | Stop and investigate |
+
+### Safety
+
+The builder only reads local JSON packets. It does not call Tokyo APIs,
+FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawals,
+transfers, secrets, live profile, or order sizing. It must never mark a real
+order action ready unless selected StrategyGroup, tiny risk, fresh signal,
+RequiredFacts, candidate/grant/authorization evidence, action-time FinalGate,
+and official Operation Layer evidence are all represented by current packets.
 
 ## Boundaries
 
