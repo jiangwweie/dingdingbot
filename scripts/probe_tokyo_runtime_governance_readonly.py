@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -42,6 +43,7 @@ class CommandResult:
 
 
 Runner = Callable[[tuple[str, ...]], CommandResult]
+SocketConnector = Callable[[str, int, float], None]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,6 +184,90 @@ def build_tokyo_probe_report(
     if checks["blockers"]:
         report["status"] = "blocked"
     return report
+
+
+def build_tokyo_connectivity_probe(
+    *,
+    host: str,
+    ports: tuple[int, ...] = (22,),
+    connect_timeout_seconds: int = 6,
+    connector: SocketConnector | None = None,
+) -> dict[str, Any]:
+    """Classify local-to-Tokyo network reachability without remote mutation."""
+
+    connect = connector or _socket_connect
+    dns_error: str | None = None
+    resolved_addresses: list[str] = []
+    try:
+        infos = socket.getaddrinfo(host, None)
+        resolved_addresses = sorted(
+            {
+                str(item[4][0])
+                for item in infos
+                if len(item) >= 5 and item[4] and item[4][0]
+            }
+        )
+    except OSError as exc:
+        dns_error = f"{type(exc).__name__}:{exc}"
+
+    port_results: dict[str, dict[str, Any]] = {}
+    blockers: list[str] = []
+    if dns_error:
+        blockers.append("tokyo_dns_resolution_failed")
+
+    for port in ports:
+        key = str(port)
+        started_at = datetime.now(timezone.utc)
+        try:
+            connect(host, port, float(connect_timeout_seconds))
+        except OSError as exc:
+            port_results[key] = {
+                "reachable": False,
+                "error": f"{type(exc).__name__}:{exc}",
+                "started_at_utc": started_at.isoformat(),
+            }
+            blockers.append(f"tokyo_tcp_{port}_unreachable")
+        else:
+            port_results[key] = {
+                "reachable": True,
+                "error": None,
+                "started_at_utc": started_at.isoformat(),
+            }
+
+    checks = {
+        "dns_resolved": dns_error is None,
+        "tcp_ports_reachable": all(
+            item.get("reachable") is True for item in port_results.values()
+        ),
+        "blockers": _dedupe(blockers),
+    }
+    return {
+        "status": "ready" if not checks["blockers"] else "blocked",
+        "scope": "tokyo_runtime_governance_connectivity_probe",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "inputs": {
+            "host": host,
+            "ports": list(ports),
+            "connect_timeout_seconds": connect_timeout_seconds,
+        },
+        "facts": {
+            "resolved_addresses": resolved_addresses,
+            "dns_error": dns_error,
+            "ports": port_results,
+        },
+        "checks": checks,
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
 
 
 def evaluate_probe_checks(
@@ -474,11 +560,26 @@ def _run(command: tuple[str, ...]) -> CommandResult:
     )
 
 
+def _socket_connect(host: str, port: int, timeout: float) -> None:
+    with socket.create_connection((host, port), timeout=timeout):
+        return None
+
+
 def _int_or_none(value: Any) -> int | None:
     try:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 
 def _print_human_report(report: dict[str, Any]) -> None:

@@ -128,6 +128,47 @@ def test_tokyo_probe_blocks_unexpected_remote_head_and_schema_drift():
     assert "remote_latest_migration_mismatch" in checks["blockers"]
 
 
+def test_tokyo_connectivity_probe_classifies_tcp_unreachable_without_side_effects():
+    module = _load_module()
+
+    def connector(host: str, port: int, timeout: float) -> None:
+        raise TimeoutError("timed out")
+
+    report = module.build_tokyo_connectivity_probe(
+        host="54.199.90.212",
+        ports=(22,),
+        connect_timeout_seconds=1,
+        connector=connector,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["checks"]["dns_resolved"] is True
+    assert report["checks"]["tcp_ports_reachable"] is False
+    assert report["checks"]["blockers"] == ["tokyo_tcp_22_unreachable"]
+    assert report["facts"]["ports"]["22"]["reachable"] is False
+    assert all(value is False for value in report["safety_invariants"].values())
+
+
+def test_tokyo_connectivity_probe_classifies_reachable_tcp_port():
+    module = _load_module()
+    calls: list[tuple[str, int, float]] = []
+
+    def connector(host: str, port: int, timeout: float) -> None:
+        calls.append((host, port, timeout))
+
+    report = module.build_tokyo_connectivity_probe(
+        host="127.0.0.1",
+        ports=(22,),
+        connect_timeout_seconds=2,
+        connector=connector,
+    )
+
+    assert report["status"] == "ready"
+    assert report["checks"]["blockers"] == []
+    assert report["facts"]["ports"]["22"]["reachable"] is True
+    assert calls == [("127.0.0.1", 22, 2.0)]
+
+
 def test_tokyo_probe_builds_report_with_fake_runner_and_home_expanding_paths():
     module = _load_module()
     commands = []

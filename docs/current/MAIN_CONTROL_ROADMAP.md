@@ -125,6 +125,30 @@ real-order readiness detail state
 | Resume dispatcher guard | `40-resume-dispatcher.conf` passes the selected StrategyGroup scope to `runtime_signal_watcher_resume_dispatcher.py`; actionable fresh-authorization, FinalGate, or Operation Layer dispatch is blocked unless the packet proves the action belongs to the selected StrategyGroup |
 | Safety | This remains readmodel/live-facts GET-only work; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Deploy Channel Diagnostic Checkpoint
+
+Tokyo deploy readiness now distinguishes deployment channel failures from
+runtime gate failures. When the local-to-Tokyo path cannot reach SSH/TCP, the
+git owner deploy packet remains blocked and surfaces explicit channel blockers
+instead of collapsing into a generic readonly-probe failure.
+
+| Item | Result |
+| --- | --- |
+| Connectivity probe | `scripts/probe_tokyo_runtime_governance_readonly.py` can build a non-mutating `tokyo_runtime_governance_connectivity_probe` |
+| TCP blocker | Unreachable SSH/TCP produces `tokyo_tcp_22_unreachable` |
+| Deploy packet | `scripts/build_tokyo_runtime_governance_git_owner_deploy_packet.py` catches readonly probe errors and emits a blocked JSON packet |
+| Safety | The diagnostic does not modify remote files, run migrations, restart services, read secrets, create orders, call OrderLifecycle, call exchange APIs, withdraw, or transfer |
+
+Current observed state for the pending `a9e3e0f2` deploy is:
+
+```text
+packet_status=blocked
+tokyo_connectivity_blockers=tokyo_tcp_22_unreachable
+```
+
+This is a deploy-channel blocker only. It does not imply that the StrategyGroup
+runtime chain, Owner Console source readiness, or dry-run audit chain failed.
+
 ## P0 Subgoal: Runtime Liveness Repair
 
 ### Current State

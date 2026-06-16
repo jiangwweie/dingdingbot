@@ -684,6 +684,78 @@ def test_git_owner_deploy_packet_can_skip_pre_live_packet_for_deploy_only():
     assert "pre_live_packet_skipped_for_deploy_only" in packet["checks"]["warnings"]
 
 
+def test_git_owner_deploy_packet_surfaces_tokyo_connectivity_blocker():
+    module = _load_packet_module()
+    plan, deploy_dry_run, release_report, _tokyo_probe = (
+        _owner_deploy_packet_inputs()
+    )
+    connectivity_probe = {
+        "status": "blocked",
+        "checks": {
+            "dns_resolved": True,
+            "tcp_ports_reachable": False,
+            "blockers": ["tokyo_tcp_22_unreachable"],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
+    tokyo_probe = {
+        "status": "blocked",
+        "checks": {
+            "ready_for_controlled_deploy_preflight": False,
+            "blockers": [
+                "tokyo_readonly_probe_error",
+                "tokyo_tcp_22_unreachable",
+            ],
+            "warnings": [],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
+        },
+    }
+
+    packet = module.build_git_owner_deploy_packet(
+        release_report=release_report,
+        deploy_plan=plan,
+        deploy_dry_run=deploy_dry_run,
+        tokyo_probe=tokyo_probe,
+        pre_live_packet=None,
+        connectivity_probe=connectivity_probe,
+    )
+
+    assert packet["status"] == "blocked"
+    assert "tokyo_readonly_probe_not_ready" in packet["checks"]["blockers"]
+    assert (
+        "tokyo_probe:tokyo_readonly_probe_error" in packet["checks"]["blockers"]
+    )
+    assert (
+        "tokyo_connectivity:tokyo_tcp_22_unreachable"
+        in packet["checks"]["blockers"]
+    )
+    assert packet["checks"]["tokyo_connectivity_probe_ready"] is False
+    assert packet["checks"]["tokyo_connectivity_blockers"] == [
+        "tokyo_tcp_22_unreachable"
+    ]
+    assert packet["safety_invariants"]["deploy_apply_requested"] is False
+
+
 def test_git_deploy_executor_allows_deploy_only_packet_when_pre_live_skipped():
     module = _load_execute_module()
     plan = _ready_git_plan()

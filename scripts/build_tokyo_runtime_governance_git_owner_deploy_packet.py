@@ -40,6 +40,8 @@ from scripts.prepare_tokyo_runtime_governance_release import (
     build_release_readiness_report,
 )
 from scripts.probe_tokyo_runtime_governance_readonly import (
+    TokyoProbeError,
+    build_tokyo_connectivity_probe,
     build_tokyo_probe_report,
 )
 from scripts.verify_runtime_submit_rehearsal_pre_live_packet import (
@@ -99,16 +101,31 @@ async def _build_owner_deploy_packet_from_args(
         confirmation_phrase=None,
     )
     tokyo_probe = None
+    connectivity_probe = None
     if not args.skip_remote_probe:
-        tokyo_probe = build_tokyo_probe_report(
+        connectivity_probe = build_tokyo_connectivity_probe(
             host=args.host,
-            deploy_root=args.remote_probe_deploy_root,
-            api_base=args.api_base,
-            expected_current_head=args.expected_deployed_head,
-            expected_migration_count=args.expected_remote_migration_count,
-            expected_latest_migration=args.expected_remote_latest_migration,
+            ports=(22,),
             connect_timeout_seconds=args.connect_timeout_seconds,
         )
+        try:
+            tokyo_probe = build_tokyo_probe_report(
+                host=args.host,
+                deploy_root=args.remote_probe_deploy_root,
+                api_base=args.api_base,
+                expected_current_head=args.expected_deployed_head,
+                expected_migration_count=args.expected_remote_migration_count,
+                expected_latest_migration=args.expected_remote_latest_migration,
+                connect_timeout_seconds=args.connect_timeout_seconds,
+            )
+        except TokyoProbeError as exc:
+            tokyo_probe = _blocked_tokyo_probe_report(
+                host=args.host,
+                deploy_root=args.remote_probe_deploy_root,
+                api_base=args.api_base,
+                error=str(exc),
+                connectivity_probe=connectivity_probe,
+            )
     pre_live_packet = None
     if not args.skip_pre_live_packet:
         pre_live_packet = await build_pre_live_packet(
@@ -124,6 +141,7 @@ async def _build_owner_deploy_packet_from_args(
         deploy_dry_run=deploy_dry_run,
         tokyo_probe=tokyo_probe,
         pre_live_packet=pre_live_packet,
+        connectivity_probe=connectivity_probe,
     )
 
 
@@ -134,11 +152,13 @@ def build_git_owner_deploy_packet(
     deploy_dry_run: dict[str, Any],
     tokyo_probe: dict[str, Any] | None,
     pre_live_packet: dict[str, Any] | None,
+    connectivity_probe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     release_checks = release_report.get("release_checks", {})
     plan_checks = deploy_plan.get("checks", {})
     dry_run_checks = deploy_dry_run.get("checks", {})
     probe_checks = (tokyo_probe or {}).get("checks", {})
+    connectivity_checks = (connectivity_probe or {}).get("checks", {})
     pre_live_checks = (pre_live_packet or {}).get("checks", {})
 
     release_ready = bool(release_checks.get("ready_for_packaging"))
@@ -189,6 +209,13 @@ def build_git_owner_deploy_packet(
         blockers.append("git_deploy_executor_dry_run_not_ready")
     if not remote_probe_ready:
         blockers.append("tokyo_readonly_probe_not_ready")
+        blockers.extend(
+            f"tokyo_probe:{item}" for item in list(probe_checks.get("blockers") or [])
+        )
+        blockers.extend(
+            f"tokyo_connectivity:{item}"
+            for item in list(connectivity_checks.get("blockers") or [])
+        )
     if not pre_live_technical_ready:
         blockers.append("pre_live_submit_rehearsal_not_technically_ready")
     if forbidden_pre_live_flags:
@@ -235,6 +262,15 @@ def build_git_owner_deploy_packet(
             "git_deploy_plan_ready": plan_ready,
             "git_deploy_executor_dry_run_ready": dry_run_ready,
             "tokyo_readonly_probe_ready": remote_probe_ready,
+            "tokyo_connectivity_probe_ready": (
+                connectivity_probe.get("status") == "ready"
+                if connectivity_probe is not None
+                else None
+            ),
+            "tokyo_probe_blockers": list(probe_checks.get("blockers") or []),
+            "tokyo_connectivity_blockers": list(
+                connectivity_checks.get("blockers") or []
+            ),
             "pre_live_submit_technical_ready": pre_live_technical_ready,
             "first_real_submit_still_blocked": first_real_submit_still_blocked,
             "pre_live_packet_skipped": pre_live_packet_skipped,
@@ -273,6 +309,50 @@ def build_git_owner_deploy_packet(
             "withdrawal_or_transfer_created": False,
             "secrets_read": False,
             "packet_build_only": True,
+        },
+    }
+
+
+def _blocked_tokyo_probe_report(
+    *,
+    host: str,
+    deploy_root: str,
+    api_base: str,
+    error: str,
+    connectivity_probe: dict[str, Any] | None,
+) -> dict[str, Any]:
+    connectivity_blockers = list(
+        ((connectivity_probe or {}).get("checks") or {}).get("blockers") or []
+    )
+    blockers = ["tokyo_readonly_probe_error", *connectivity_blockers]
+    return {
+        "status": "blocked",
+        "scope": "tokyo_runtime_governance_readonly_probe",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "inputs": {
+            "host": host,
+            "deploy_root": deploy_root,
+            "api_base": api_base,
+        },
+        "facts": {
+            "probe_error": error,
+            "connectivity_probe": connectivity_probe,
+        },
+        "checks": {
+            "ready_for_controlled_deploy_preflight": False,
+            "blockers": _dedupe(blockers),
+            "warnings": [],
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_called": False,
         },
     }
 
