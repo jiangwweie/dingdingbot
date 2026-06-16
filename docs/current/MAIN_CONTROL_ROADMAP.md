@@ -28,7 +28,7 @@ index.
 | --- | --- | --- | --- | --- |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | active | Produce `owner-console-source-readiness.json` and `GET /api/trading-console/owner-console-source-readiness` |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
-| P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | queued | Produce `runtime-dry-run-audit-chain.json` after deploy liveness repair |
+| P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | local implemented | Deploy `runtime_dry_run_audit_chain.py` and refresh `runtime-dry-run-audit-chain.json` after each runtime-code deploy |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | mainline integrated | Keep source-readiness API/packet stable while UI refinements continue from the mainline contract |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
@@ -140,7 +140,21 @@ mock fresh signal
 
 | Artifact | Path |
 | --- | --- |
-| Unified audit packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-dry-run-audit-chain.json` |
+| Local audit packet | `output/strategygroup-runtime-pilot/dry-run-audit-chain/runtime-dry-run-audit-chain.json` |
+| Tokyo audit packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-dry-run-audit-chain.json` |
+
+### Current Implementation
+
+The local script is:
+
+```text
+scripts/runtime_dry_run_audit_chain.py
+```
+
+It currently runs four fixture-backed scenarios and treats expected blocked
+states as successful audit coverage when they stop before dangerous actions.
+The next runtime deploy should install this script on Tokyo and wire it as a
+post-deploy or watcher-adjacent non-executing audit refresh.
 
 ### Scenario Matrix
 
