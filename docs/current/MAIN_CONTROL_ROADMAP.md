@@ -489,6 +489,25 @@ Tokyo through the git-based standing-authorization deploy path.
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Deploy Channel Status Publish Checkpoint
+
+The git-based deploy plan now writes the watcher-facing deploy-channel status
+packet after postdeploy verification succeeds. This prevents Owner Console from
+showing `部署通道未检查` immediately after a successful bounded deploy.
+
+| Item | Result |
+| --- | --- |
+| Deployed code head | `cd61c69d` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-cd61c69d-deploy-channel-status` |
+| Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `cd61c69d3421abe23d43c6ab4953403ac72e6258` |
+| Deploy-channel packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/tokyo-deploy-channel-status.json` exists with `status=postdeploy_accepted`, `blockers=[]` |
+| Owner Console source readiness | `deploy_channel=部署通道正常`, source status `ready`, `connectivity_ready=true` |
+| Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `deploy_channel_blockers=[]`, `fresh_signal_present=false` |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed` |
+| Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
+| Safety | Deploy-channel status publication is a report-packet write only; deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Owner Console UI Validation Checkpoint
 
 While the selected StrategyGroup runtime is waiting for a fresh signal, the
