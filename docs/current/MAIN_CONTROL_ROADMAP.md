@@ -398,6 +398,43 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | Execution authority proof | Each handoff keeps `candidate_creation_authorized=false`, `final_gate_input=false`, `operation_layer_input=false`, and `real_submit_authorized=false` |
 | Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true`, `common_execution_chain_reuse_checked=true`, `strategygroup_adapter_boundary_checked=true`, and `selected_strategygroup_dispatch_guard_checked=true` before treating dry-run audit as healthy |
 
+### 2026-06-17 80/20 Verification Checkpoint
+
+The current architecture judgment is verified as a runtime audit invariant:
+
+| Share | Scope | Verification result |
+| --- | --- | --- |
+| 80% | Common runtime pipe | `runtime-dry-run-audit-chain.json` proves MPG / TEQ / FBS / PMR / SOR share the same admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, submit, finalize, reconciliation, settlement, review, and Owner readmodel stages |
+| 20% | StrategyGroup adapter | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, tiny risk defaults, hard stops, and sample packets |
+
+Current local validation:
+
+```text
+python3 scripts/runtime_dry_run_audit_chain.py \
+  --output-dir output/strategygroup-runtime-pilot/dry-run-audit-chain \
+  --output-json output/strategygroup-runtime-pilot/dry-run-audit-chain/runtime-dry-run-audit-chain.json
+
+pytest tests/unit/test_runtime_dry_run_audit_chain.py \
+  tests/unit/test_strategygroup_runtime_goal_status.py -q
+```
+
+Result:
+
+```text
+runtime-dry-run-audit-chain.status=passed
+scenario_count=12
+shared_runtime_pipeline_checked=true
+common_execution_chain_reuse_checked=true
+strategygroup_adapter_boundary_checked=true
+selected_strategygroup_dispatch_guard_checked=true
+29 passed
+```
+
+This means active position, open order, missing protection, missing budget,
+duplicate-submit risk, and symbol/side/notional/leverage mismatch remain
+real-submit blockers, but they do not require StrategyGroup-specific execution
+forks and do not stop watcher observation or common-chain project progress.
+
 ### 2026-06-17 Goal-Status Projection Checkpoint
 
 `strategygroup-runtime-goal-status.json` now projects the required dry-run audit
