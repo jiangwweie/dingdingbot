@@ -232,7 +232,7 @@
         "short",
         "long_revival_only"
       ],
-      "research_role": "Conditional session-opening and session-transfer branch",
+      "research_role": "Branch-specific session-opening and 72h time-stop observer",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -248,12 +248,15 @@
         ]
       },
       "primary_blockers": [
-        "narrow_branch",
-        "second_half_decay",
+        "teq_short_72h_branch_narrow",
+        "pmr_short_decay_unresolved",
+        "teq_long_revival_only",
+        "broad_orb_blocked",
         "session_fill_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/sor-branch-eligibility-time-stop-20260616.md",
         "docs/strategy-research/candidate-packets/SOR-001-session-opening-range-breakout-packet.md",
         "docs/strategy-research/sor-session-classifier-sweep/sor-session-classifier-sweep-summary.md",
         "docs/strategy-research/sor-exit-reslot-replay/sor-exit-reslot-replay-summary.md"
@@ -262,7 +265,7 @@
         "docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.md",
         "docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.json"
       ],
-      "revival_condition": "Admit branch-by-branch only when session, decay, fill, and real-margin facts are current.",
+      "revival_condition": "Admit only named eligible branches when closed range/trigger, 72h time-stop, session, fill, mark/funding, and real-margin facts are current; broad ORB remains blocked.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

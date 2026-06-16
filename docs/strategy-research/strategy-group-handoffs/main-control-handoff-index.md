@@ -58,6 +58,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `../fbs-derivatives-facts-readiness-split-20260616.md` | P0 supplement for `FBS-001` fresh, partial, stale, missing, and margin-missing derivatives fact behavior. |
 | `../teq-current-product-availability-refresh-20260616.md` | P0 supplement for `TEQ-001` current Binance product visibility and cached-research-only behavior. |
 | `../pmr-overlay-role-split-20260616.md` | P0 supplement for `PMR-001` target-specific disable/support/context roles and blocked standalone branches. |
+| `../sor-branch-eligibility-time-stop-20260616.md` | P0 supplement for `SOR-001` eligible short 72h branches, revival-only branches, and blocked broad ORB branches. |
 
 ## Admission Interpretation
 
@@ -67,7 +68,7 @@ All eight JSON packs also include `sample_stale_signal_packet` and
 | `FBS-001` | Admit as derivatives stress observer plus TEQ negative-funding long candidate; treat positive-funding shorts as disable/redesign evidence. |
 | `TEQ-001` | Admit as long-side equity-like momentum observer; require concentration, session, mark/funding, and product facts before candidate preparation. |
 | `PMR-001` | Start as observe-only PMR overlay; allow target-specific disable/support annotations, but keep standalone PMR short and broad metal-long promotion blocked. |
-| `SOR-001` | Admit branch-by-branch; do not treat it as broad opening-range alpha. |
+| `SOR-001` | Admit branch-by-branch only; keep TEQ decisive-breakdown short 72h as the narrow candidate lane, PMR short as conditional support, TEQ long as revival-only, and broad ORB blocked. |
 | `VCB-001` | Keep observe-only as true-breakout classifier draft; do not admit broad breakout or armed observation until signal-time classifier quality improves. |
 | `RSR-001` | Keep observe-only as TEQ support scorer; do not admit standalone armed observation until decay, session/fill, product, mark/funding, and margin facts improve. |
 | `NLPD-001` | Keep observe-only as low-history event observer; do not admit armed observation until cohort breadth, survivorship, spread/liquidity, product-risk, and executable-side facts improve. |

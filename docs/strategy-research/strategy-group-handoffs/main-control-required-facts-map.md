@@ -126,6 +126,20 @@ P0 role-split supplement:
 | `post_open_decay_disable_state` | Strategy disable state | `block_or_downshift` |
 | `mark_funding_session_review_state` | Mark and funding facts | `block_armed_observation_for_perps` |
 
+P0 branch supplement:
+`docs/strategy-research/sor-branch-eligibility-time-stop-20260616.md`.
+
+| Branch Fact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `sor_branch_eligibility_state` | Branch-specific SOR classifier state | `block_candidate_prepare` |
+| `sor_time_stop_72h_state` | Versioned 72h time-stop state | `block_candidate_prepare` |
+| `sor_teq_short_decisive_breakdown_state` | TEQ short decisive-breakdown branch classifier | `no_signal` |
+| `sor_teq_short_volume_downgrade_state` | TEQ short volume-confirmed downgrade after raw-pool reslot | `revival_only` |
+| `sor_teq_long_revival_state` | TEQ long ORB revival-only state | `block_long_candidate_prepare` |
+| `sor_pmr_short_decay_state` | PMR short second-half and post-open decay state | `conditional_observation_only` |
+| `sor_broad_orb_block_state` | Broad ORB promotion block | `block_broad_sor_candidate` |
+| `sor_5x_proxy_risk_state` | High-leverage proxy risk state | `block_leverage_promotion` |
+
 ## Readiness Levels
 
 | Readiness Level | Meaning |

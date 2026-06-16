@@ -29,7 +29,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `FBS-001` | TEQ negative-funding squeeze lane remains the strongest FBS lead. | Funding settlement, OI/long-short/top-trader facts, and concentration. | `negative_funding_crowding_state`, `funding_settlement_timing_state`, `open_interest_state`, `long_short_ratio_state`, `funding_squeeze_concentration_state`, `real_exchange_margin_liquidation_model`. | Completed `fbs-derivatives-facts-readiness-split-20260616.md`: fresh facts can keep armed observation, partial/stale facts downshift, missing facts block candidate prepare. |
 | `TEQ-001` | Binance 2026 equity-like universe supports momentum and relative-strength discovery. | Low history, product availability, session gap, concentration, and real margin. | `expanded_tradfi_universe_manifest_state`, `product_eligibility_state`, `low_history_dataset_state`, `session_gap_context`, `mark_funding_review_state`, `exchange_margin_liquidation_state`. | Completed `teq-current-product-availability-refresh-20260616.md`: current TEQ handoff symbols are not visible in the refreshed USD-S exchangeInfo response, so cached evidence stays research-only until symbol availability is refreshed. |
 | `PMR-001` | XAG-led short/weakness and PMR target-specific overlay can disable some continuation labels and support metal context. | Target-specific overlay policy, XAG concentration, external session/settlement, fill, and margin. | `pmr_role_branch_state`, `pmr_target_overlay_policy_state`, `xag_dominance_state`, `commodity_session_gap_state`, `mark_deviation_bound_state`, `real_margin_model_state`. | Completed `pmr-overlay-role-split-20260616.md`: PMR is split into NLPD disable overlay, TEQ support tag, XAG short watchlist, metal context, and blocked standalone branches. |
-| `SOR-001` | Opening-range/session-transfer branches preserve narrow right-tail windows. | Second-half decay, branch narrowness, and session/fill ambiguity. | `session_open_range_state`, `post_open_decay_disable_state`, `time_stop_exit_horizon_state`, `tradfi_session_mapping_state`, `mark_funding_session_review_state`, `exchange_margin_liquidation_state`. | Produce branch eligibility table: TEQ short 72h, PMR short support, long revival-only, and disable branches. |
+| `SOR-001` | Opening-range/session-transfer branches preserve narrow right-tail windows. | Second-half decay, branch narrowness, and session/fill ambiguity. | `sor_branch_eligibility_state`, `sor_time_stop_72h_state`, `session_open_range_state`, `post_open_decay_disable_state`, `tradfi_session_mapping_state`, `mark_funding_session_review_state`, `exchange_margin_liquidation_state`. | Completed `sor-branch-eligibility-time-stop-20260616.md`: SOR is split into TEQ short 72h candidate, PMR short support, TEQ long revival-only, PMR long blocked, and broad ORB blocked branches. |
 
 ## Admission Guidance For Main Control
 
@@ -39,7 +39,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `FBS-001` | First-batch but facts-heavy. | `armed_observation` when derivatives facts are fresh; degrade to observe-only when stale. | Do not prepare without current funding/mark/OI context. |
 | `TEQ-001` | First-batch low-history lane. | `armed_observation` with low-history warning. | Do not treat cached 2026 data as current product eligibility. |
 | `PMR-001` | Overlay / context. | `observe_only`. | Do not prepare standalone candidates; allow target-specific disable/support annotation only after PMR role branch and target policy facts are explicit. |
-| `SOR-001` | Conditional branch. | `conditional_observation`. | Prepare only for named branches with session and time-stop facts. |
+| `SOR-001` | Conditional branch. | `conditional_observation`. | Prepare only for named eligible branches with closed range/trigger, 72h time-stop, session, mark/funding, fill, margin, and protection facts. |
 
 ## FBS-001 Readiness Split
 
@@ -71,6 +71,17 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `pmr_standalone_short_blocked` | Broad standalone PMR short promotion remains blocked. | Block candidate prepare. |
 | `pmr_broad_long_blocked` | Broad metal-long momentum is negative evidence. | Block long-side metal momentum claims. |
 
+## SOR-001 Branch Eligibility Split
+
+| State | Meaning | Main-Control Behavior |
+| --- | --- | --- |
+| `sorcls_teq_short_decisive_breakdown_72h` | Narrow TEQ short branch that survived raw-pool reslot with a 72h exit. | Eligible for armed observation only after all RequiredFacts pass. |
+| `sor_pmr_us_open_short_72h` | PMR short opening-range breakdown support branch with right-tail windows but decay unresolved. | Conditional observation/support; no broad PMR short promotion. |
+| `sor_teq_long_revival_only` | TEQ long ORB has large best windows but negative full sequence. | Keep revival-only; block long candidate prepare. |
+| `sor_teq_short_volume_revival_only` | TEQ short volume-confirmed row degraded after raw-pool reslot. | Keep as window revival evidence only. |
+| `sor_pmr_long_blocked` | PMR long ORB full sequence is negative. | Block long-side metal session claims. |
+| `sor_broad_orb_blocked` | Broad opening-range alpha is not supported. | Block broad SOR candidate prepare. |
+
 ## Leverage Boundary
 
 | StrategyGroup | Default | Allowed Research Lane | Disabled / Stress Lane |
@@ -95,4 +106,6 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 4. Keep `PMR-001` overlay role split current after
    `pmr-overlay-role-split-20260616.md`; next evidence task is target-specific
    overlay policy testing with current session, fill, mark, and margin facts.
-5. Add a `SOR-001` branch table for session eligibility and time-stop behavior.
+5. Keep `SOR-001` branch eligibility split current after
+   `sor-branch-eligibility-time-stop-20260616.md`; next evidence task is
+   current session/fill/mark/margin readiness for the TEQ short 72h branch.

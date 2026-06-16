@@ -15,6 +15,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `fbs-derivatives-facts-readiness-split-20260616.md` | P0 supplement splitting `FBS-001` fresh, partial, stale, missing, and margin-missing derivatives fact behavior. |
 | `teq-current-product-availability-refresh-20260616.md` | P0 supplement separating `TEQ-001` cached research evidence from current Binance product visibility. |
 | `pmr-overlay-role-split-20260616.md` | P0 supplement splitting `PMR-001` into NLPD disable overlay, TEQ support tag, XAG short watchlist, metal context, and blocked standalone branches. |
+| `sor-branch-eligibility-time-stop-20260616.md` | P0 supplement splitting `SOR-001` into eligible short 72h branches, revival-only branches, and blocked broad ORB branches. |
 | `p1-next-handoff-queue-20260616.md` | P1 queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | Research-only RequiredFacts design packet for `LCF-001`; not a handoff and not runtime intake. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | Research-only overlay note for `MDS-001`; preserves metals dislocation and session-mismatch semantics without runtime intake. |
@@ -55,6 +56,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `fbs-derivatives-facts-readiness-split-20260616.md` | `FBS-001` derivatives readiness split for fresh/partial/stale/missing facts and margin-model absence. |
 | `teq-current-product-availability-refresh-20260616.md` | `TEQ-001` current product availability refresh and cached-research-only boundary. |
 | `pmr-overlay-role-split-20260616.md` | `PMR-001` overlay role split for target-specific disable/support/context semantics and standalone branch blockers. |
+| `sor-branch-eligibility-time-stop-20260616.md` | `SOR-001` branch eligibility and 72h time-stop split for narrow session candidates and revival/blocked branches. |
 | `p1-next-handoff-queue-20260616.md` | P1 next handoff queue for `VCB-001`, `RSR-001`, `NLPD-001`, `LCF-001`, and `MDS-001`. |
 | `lcf-liquidation-cascade-requiredfacts-design-20260616.md` | `LCF-001` liquidation-cascade RequiredFacts design packet and facts-missing no-signal shape. |
 | `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |
