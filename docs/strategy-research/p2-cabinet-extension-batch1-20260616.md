@@ -27,7 +27,7 @@ Batch 1 selects candidates that already have:
 
 | Strategy | Cabinet Status | Market Structure | Preserve Because | Main Blocker |
 | --- | --- | --- | --- | --- |
-| `SCF-001` | `right_tail_candidate` | Session confluence / TEQ structure confirmation. | 12h TEQ confluence row has positive full 2x, lower drawdown than 72h, and no 2x/5x proxy liquidation. | Fill/gap, product-risk, real margin, and time-stop tradeoff facts. |
+| `SCF-001` | `observe_only handoff draft` | Session confluence / TEQ structure confirmation. | 12h TEQ confluence row has positive full 2x, lower drawdown than 72h, and no 2x/5x proxy liquidation; converted to `strategy-group-handoffs/SCF-001/`. | Fill/gap, product-risk, real margin, and time-stop tradeoff facts. |
 | `DMI-001` | `observe_only handoff draft` | ADX / DMI directional ignition. | Equity ADX-rising 24h row has strong full 2x, best-90d 2x, and positive second-half behavior; converted to `strategy-group-handoffs/DMI-001/`. | Cost sensitivity, product/session/fill, metal drag, and real margin facts. |
 | `MASS-001` | `right_tail_candidate` | Mass Index range-expansion reversal / continuation. | Mass bulge reversal long has a cleaner drawdown profile than most right-tail review rows. | Direction context, decay, concentration, session/fill, product-risk, and real margin facts. |
 | `EFI-001` | `right_tail_candidate` | Price-volume negative-force exhaustion reversal. | Negative-force exhaustion reversal has very large right-tail windows and positive full 2x. | Candidate-level drawdown, short-side failure, high-leverage breakdown, session/fill, product-risk, and real margin facts. |
@@ -37,8 +37,9 @@ Batch 1 selects candidates that already have:
 ## Not Handoff-Ready
 
 None of the Batch 1 entries should be handed to main control as executable
-StrategyGroups yet. `DMI-001` now has an observe-only handoff draft, but it is
-still not armed observation or execution intake. Their current use is:
+StrategyGroups yet. `DMI-001` and `SCF-001` now have observe-only handoff
+drafts, but they are still not armed observation or execution intake. Their
+current use is:
 
 1. preserve strategy vocabulary;
 2. preserve right-tail evidence and negative evidence;
@@ -59,10 +60,9 @@ still not armed observation or execution intake. Their current use is:
 
 ## Next Work
 
-1. Treat `DMI-001` as the first converted Batch 1 observe-only handoff draft;
-   convert `SCF-001` next if main control needs another observe-only candidate,
-   because its session-confluence semantics are cleaner than broad
-   window-revival rows.
+1. Treat `DMI-001` and `SCF-001` as converted Batch 1 observe-only handoff
+   drafts; their current use is Strategy Picker vocabulary, watcher exploration,
+   and future P1 follow-up, not armed observation.
 2. Keep `MASS-001` and `EFI-001` in right-tail review, but do not handoff until
    concentration, decay, fill, and real margin facts improve.
 3. Keep `HAT-001` and `LSR-001` as revival candidates until their drawdown and

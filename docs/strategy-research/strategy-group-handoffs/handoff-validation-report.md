@@ -28,6 +28,7 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 | `NLPD-001` | `PASS` | `10` | `long,short_analysis_only` | `0` |
 | `PMR-001` | `PASS` | `7` | `short,long_context_only` | `0` |
 | `RSR-001` | `PASS` | `15` | `long` | `0` |
+| `SCF-001` | `PASS` | `14` | `long,short_support_only` | `0` |
 | `SOR-001` | `PASS` | `9` | `short,long_revival_only` | `0` |
 | `TEQ-001` | `PASS` | `10` | `long` | `0` |
 | `VCB-001` | `PASS` | `7` | `long` | `0` |
@@ -35,8 +36,8 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 Summary:
 
 ```text
-Validated handoffs: 9
-Passed: 9
+Validated handoffs: 10
+Passed: 10
 Failed: 0
 ```
 
@@ -44,18 +45,18 @@ Failed: 0
 
 | Required Field | Coverage |
 | --- | ---: |
-| `strategy_group_id` | `9/9` |
-| `version` | `9/9` |
-| `supported_symbols` | `9/9` |
-| `supported_sides` | `9/9` |
-| `signal_ready_rule` | `9/9` |
-| `required_facts` | `9/9` |
-| `risk_defaults` | `9/9` |
-| `hard_stops` | `9/9` |
-| `sample_signal_packet` | `9/9` |
-| `sample_no_signal_packet` | `9/9` |
-| `sample_stale_signal_packet` | `9/9` |
-| `sample_conflict_packet` | `9/9` |
+| `strategy_group_id` | `10/10` |
+| `version` | `10/10` |
+| `supported_symbols` | `10/10` |
+| `supported_sides` | `10/10` |
+| `signal_ready_rule` | `10/10` |
+| `required_facts` | `10/10` |
+| `risk_defaults` | `10/10` |
+| `hard_stops` | `10/10` |
+| `sample_signal_packet` | `10/10` |
+| `sample_no_signal_packet` | `10/10` |
+| `sample_stale_signal_packet` | `10/10` |
+| `sample_conflict_packet` | `10/10` |
 
 ## Commands Run
 

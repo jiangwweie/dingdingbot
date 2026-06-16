@@ -1,0 +1,252 @@
+{
+  "strategy_group_id": "SCF-001",
+  "version": "2026-06-16-r0",
+  "name": "Session Confluence Classifier",
+  "status": "observe_only_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "INTCUSDT",
+    "SNDKUSDT",
+    "MUUSDT",
+    "CRCLUSDT",
+    "MRVLUSDT",
+    "MSTRUSDT",
+    "HOODUSDT",
+    "COINUSDT",
+    "NVDAUSDT",
+    "TSLAUSDT",
+    "XAGUSDT",
+    "XAUUSDT",
+    "XPTUSDT",
+    "XPDUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long",
+    "short_support_only"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_session_confluence_candidate_seen",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "primary_side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "base_session_transfer_state",
+      "session_confluence_state",
+      "structure_confluence_count_state",
+      "confluence_prefix_state",
+      "scf_exit_horizon_state",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "teq_regular_strong_any_structure_12h_observe_only",
+      "teq_regular_fvg_gap_confirmed_12h_support",
+      "teq_regular_multi_structure_12h_support",
+      "pmr_regular_xag_confluence_support_only"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "mark_price_state",
+      "funding_rate_state",
+      "spread_proxy_state"
+    ],
+    "strategy": [
+      "base_session_transfer_state",
+      "session_confluence_state",
+      "session_vwap_or_opening_range_state",
+      "session_imbalance_gap_state",
+      "pmr_session_breakdown_structure_state",
+      "session_multi_structure_state",
+      "structure_confluence_count_state",
+      "confluence_prefix_state",
+      "teq_strong_momentum_state",
+      "session_confluence_drawdown_state",
+      "scf_exit_horizon_state",
+      "scf_time_stop_tradeoff_state",
+      "scf_raw_pool_reslot_state",
+      "high_leverage_confluence_disable_state",
+      "scf_high_leverage_exit_disable_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "scf_fill_gap_slippage_state",
+      "product_risk_state",
+      "session_gap_state",
+      "real_exchange_margin_liquidation_model_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "stress_only_leverage": [
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "12h_observe_only_review_lane"
+  },
+  "hard_stops": [
+    "base_session_transfer_missing",
+    "session_confluence_missing",
+    "confluence_not_prefix_safe",
+    "confluence_older_than_24h",
+    "structure_confluence_count_zero",
+    "teq_strong_momentum_missing",
+    "pmr_support_promoted_as_right_tail",
+    "scf_exit_horizon_missing",
+    "fill_gap_slippage_missing",
+    "product_session_policy_missing",
+    "real_margin_model_missing",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "lead_mode": "teq_regular_strong_any_structure_12h",
+    "lead_events": "71",
+    "lead_full_2x": "318.065867%",
+    "lead_full_3x": "649.103170%",
+    "lead_full_5x": "1835.326912%",
+    "lead_best_90d_2x": "216.167925%",
+    "lead_dd_2x": "-22.978941%",
+    "lead_2x_liq_proxy": "0",
+    "lead_5x_liq_proxy": "0",
+    "contrast_72h_best_90d_2x": "853.468427%",
+    "contrast_72h_dd_2x": "-68.722679%",
+    "contrast_72h_5x_liq_proxy": "1",
+    "pmr_support_row": "pmr_regular_xag_confluence_12h full 2x 36.181618%, best 90d 2x 24.605620%",
+    "negative_scope": "PMR confluence is support-only and broad confluence rows remain drawdown or full-curve blocked"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/candidate-packets/SCF-001-session-confluence-classifier-packet.md",
+    "docs/strategy-research/session-confluence-classifier/session-confluence-classifier-summary.md",
+    "docs/strategy-research/scf-exit-horizon-reslot/scf-exit-horizon-reslot-summary.md",
+    "docs/strategy-research/p2-cabinet-extension-batch1-20260616.md"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "SCF-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_session_confluence_candidate_seen",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Closed 1h TEQ session-transfer momentum is strong, at least one same-symbol same-direction SOR/VWAP/session-gap/FVG confluence was known within the prior 24h, and the 12h time-stop review lane remains inside the SCF observe-only scope.",
+    "invalidation_reason": "Missing prefix-safe confluence, stale session-transfer facts, missing fill/gap/session/product/margin facts, PMR support-only scope, or high-leverage request.",
+    "required_facts_snapshot": {
+      "base_session_transfer_state": "present",
+      "session_confluence_state": "present",
+      "structure_confluence_count_state": "present",
+      "confluence_prefix_state": "present",
+      "scf_exit_horizon_state": "12h_present",
+      "scf_fill_gap_slippage_state": "missing",
+      "product_risk_state": "missing",
+      "real_exchange_margin_liquidation_model_state": "missing"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "SCF-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_session_confluence_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No closed-candle TEQ session-transfer signal has same-symbol same-direction prefix-safe structure confluence inside the 24h lookback."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "SCF-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_session_confluence_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or base session-transfer / confluence / exit-horizon facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "SCF-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_session_confluence_candidate",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "CRCLUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "SCF observe-only signal conflicts with TEQ blocker state, non-prefix-safe confluence, PMR support-only scope, same-symbol exposure, stale product facts, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

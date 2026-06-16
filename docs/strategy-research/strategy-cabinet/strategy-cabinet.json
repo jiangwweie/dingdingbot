@@ -583,13 +583,13 @@
       "strategy_id": "SCF-001",
       "semantic_name": "Session Confluence Classifier",
       "strategy_family": "session_confluence",
-      "current_status": "right_tail_candidate",
+      "current_status": "observe_only",
       "default_mode": "observe_only",
       "supported_sides": [
         "long",
         "short_context"
       ],
-      "research_role": "TEQ session-confluence right-tail candidate with time-stop tradeoff review",
+      "research_role": "Observe-only TEQ session-confluence handoff draft with 12h time-stop tradeoff review",
       "required_facts_level": "high",
       "leverage_boundary": {
         "default": "1x",
@@ -618,8 +618,11 @@
         "docs/strategy-research/scf-exit-horizon-reslot/scf-exit-horizon-reslot-summary.md",
         "docs/strategy-research/leverage-aware-candidate-shortlist/leverage-aware-candidate-shortlist-summary.md"
       ],
-      "handoff_paths": [],
-      "revival_condition": "Convert only after fill/gap, product-risk, session-confluence drawdown, time-stop tradeoff, and real margin facts are attached.",
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/SCF-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/SCF-001/handoff.json"
+      ],
+      "revival_condition": "Upgrade beyond observe-only only after fill/gap, product-risk, session-confluence drawdown, time-stop tradeoff, and real margin facts are attached.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

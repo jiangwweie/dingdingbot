@@ -22,6 +22,7 @@ sample packet expectations, and non-execution flags.
 | 4 | `LCF-001` | `RequiredFacts design plus facts-pipeline boundary complete; facts still missing` | RequiredFacts design packet only. | Added `lcf-liquidation-cascade-requiredfacts-design-20260616.md` and `lcf-facts-pipeline-boundary-20260616.md`; still cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay note plus target-pairing boundary complete; not standalone` | PMR-adjacent overlay note. | Added `mds-metals-dislocation-overlay-note-20260616.md` and `mds-target-pairing-boundary-20260616.md`; useful for target-specific disable/support tags, but not yet a standalone strategy group. |
 | 6 | `DMI-001` | `observe_only handoff draft complete from P2 batch` | Equity ADX-rising directional-ignition observer draft. | Completed in `strategy-group-handoffs/DMI-001/`; converted from P2 cabinet extension after exit-horizon and cost-sensitivity evidence clarified a narrow long-only 24h semantic. |
+| 7 | `SCF-001` | `observe_only handoff draft complete from P2 batch` | TEQ session-confluence structure-confirmation observer draft. | Completed in `strategy-group-handoffs/SCF-001/`; converted from P2 cabinet extension after exit-horizon evidence clarified a narrow TEQ long 12h semantic. |
 
 ## VCB-001 Handoff Draft Scope
 
@@ -123,6 +124,23 @@ as `overlay_context_only` with `decision=no_candidate`.
 | RequiredFacts | `dmi_adx_trend_strength_state`, `dmi_directional_spread_state`, `dmi_asset_role_state`, `dmi_exit_horizon_state`, `dmi_fill_gap_slippage_sensitivity_state`, `fill_gap_slippage_state`, `real_exchange_margin_liquidation_model`. |
 | Handoff mode | `observe_only`; no armed observation until live-like cost/fill/session/product and margin facts improve. |
 
+## SCF-001 Observe-Only Handoff Draft Scope
+
+| Field | Draft Decision |
+| --- | --- |
+| Strategy role | Session confluence / structure-confirmed TEQ observer. |
+| Supported side | TEQ long first; PMR short remains support-only context. |
+| Positive evidence | `teq_regular_strong_any_structure` at `12h` has full 2x `318.065867%`, best 90d 2x `216.167925%`, DD 2x `-22.978941%`, and `0` 2x/5x proxy liquidation events. |
+| Negative evidence | 72h row has larger best-window but worse DD and 5x proxy liquidation; PMR confluence does not clear the right-tail gate. |
+| Main blocker | Prefix-safe fact binding, fill/gap/session/product risk, time-stop tradeoff, and real margin. |
+| RequiredFacts | `base_session_transfer_state`, `session_confluence_state`, `structure_confluence_count_state`, `confluence_prefix_state`, `teq_strong_momentum_state`, `scf_exit_horizon_state`, `scf_fill_gap_slippage_state`, `real_exchange_margin_liquidation_model`. |
+| Handoff mode | `observe_only`; no armed observation until live-like fill/session/product and margin facts improve. |
+
+P1 supplement:
+`strategy-group-handoffs/SCF-001/handoff.md` separates prefix-safe confluence
+facts, TEQ long lead semantics, PMR support-only context, 12h/72h time-stop
+tradeoff, and high-leverage disable semantics.
+
 ## P1 Next Actions
 
 1. Keep `VCB-001` observe-only after
@@ -150,3 +168,7 @@ as `overlay_context_only` with `decision=no_candidate`.
    `strategy-group-handoffs/DMI-001/handoff.md`; next evidence task is
    live-like spread/gap/session/product and real-margin fact attachment before
    any armed-observation discussion.
+7. Keep `SCF-001` as observe-only after
+   `strategy-group-handoffs/SCF-001/handoff.md`; next evidence task is
+   live-like fill/gap/session/product, prefix-safe confluence fact binding, and
+   real-margin review before any armed-observation discussion.

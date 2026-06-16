@@ -26,12 +26,12 @@ Use these documents as the stable entry points for the strategy research line:
 | `mds-metals-dislocation-overlay-note-20260616.md` | Research-only overlay note for `MDS-001`; preserves metals dislocation and session-mismatch semantics without runtime intake. |
 | `mds-target-pairing-boundary-20260616.md` | P1 supplement defining `MDS-001` target-specific overlay pairing, allowed tags, blocked universal filters, and sample overlay packet. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 queue for pool expansion, revival, and parked-strategy governance. |
-| `p2-cabinet-extension-batch1-20260616.md` | First P2 strategy-cabinet expansion batch for `SCF-001`, `DMI-001`, `MASS-001`, `EFI-001`, `HAT-001`, and `LSR-001`. |
+| `p2-cabinet-extension-batch1-20260616.md` | First P2 strategy-cabinet expansion batch for `SCF-001`, `DMI-001`, `MASS-001`, `EFI-001`, `HAT-001`, and `LSR-001`; `SCF-001` and `DMI-001` are now observe-only handoff drafts. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
 | `strategy-cabinet/strategy-cabinet.md` | Human-readable Strategy Cabinet, listing active, parked, blocked, and handoff-ready strategy semantics. |
 | `strategy-cabinet/strategy-cabinet.json` | System-readable Strategy Cabinet for future validators, main-control intake, or Strategy Picker preparation. |
-| `strategy-group-handoffs/main-control-handoff-index.md` | Main-control entry point for the first five StrategyGroup handoff packs. |
+| `strategy-group-handoffs/main-control-handoff-index.md` | Main-control entry point for current StrategyGroup handoff packs. |
 | `candidate-packets/candidate-packet-index.md` | Research packet index for all V3 candidate packets. |
 | `activation-disable-boundary-map.md` | Activation, disable, parking, and revival boundaries. |
 | `negative-evidence.md` | Failed, downgraded, biased, cost-sensitive, or parked evidence ledger. |
@@ -74,7 +74,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `mds-metals-dislocation-overlay-note-20260616.md` | `MDS-001` PMR-adjacent overlay note for metals dislocation, XAG dominance, and session mismatch. |
 | `mds-target-pairing-boundary-20260616.md` | `MDS-001` target-pairing boundary for NLPD disable tags, TEQ support tags, coverage-missing policies, and standalone blockers. |
 | `p2-strategy-pool-expansion-queue-20260616.md` | P2 strategy-pool expansion and revival queue. |
-| `p2-cabinet-extension-batch1-20260616.md` | P2 cabinet extension batch preserving six additional right-tail review or revival candidates; `DMI-001` has since been converted to observe-only handoff draft. |
+| `p2-cabinet-extension-batch1-20260616.md` | P2 cabinet extension batch preserving six additional right-tail review or revival candidates; `DMI-001` and `SCF-001` have since been converted to observe-only handoff drafts. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
 | `strategy-cabinet/strategy-cabinet.md` | Human-readable Strategy Cabinet, listing active, parked, blocked, and handoff-ready strategy semantics. |
@@ -84,7 +84,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-group-experimental-candidate-admission.md` | Owner correction for converting research into experimental StrategyGroup candidates; known flaws may be acceptable when bounded, while execution-chain mutation remains out of scope. |
 | `strategy-group-handoffs/README.md` | Strategy Group Handoff Pack contract for main-control consumption; defines required fields, packet semantics, and non-execution boundaries. |
 | `strategy-group-handoffs/main-control-handoff-index.md` | Main-control entry point for current StrategyGroup handoff packs, including verification commands and boundary proof. |
-| `strategy-group-handoffs/handoff-validation-report.md` | Validation report proving the first five handoff JSON packs satisfy the main-control field contract. |
+| `strategy-group-handoffs/handoff-validation-report.md` | Validation report proving current handoff JSON packs satisfy the main-control field contract. |
 | `strategy-group-handoffs/main-control-task-card.md` | Main-control task card for reviewing and consuming StrategyGroup handoff batch 1. |
 | `strategy-group-handoffs/MPG-001/handoff.md` | Human-readable `MPG-001` Momentum Persistence StrategyGroup handoff pack for main-control review. |
 | `strategy-group-handoffs/MPG-001/handoff.json` | System-readable `MPG-001` handoff contract with supported symbols, signal-ready rule, RequiredFacts, risk proposal, hard stops, and sample packets. |
@@ -104,6 +104,8 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `strategy-group-handoffs/NLPD-001/handoff.json` | System-readable observe-only `NLPD-001` event-study handoff contract with low-history semantics, RequiredFacts, hard stops, and sample packets. |
 | `strategy-group-handoffs/DMI-001/handoff.md` | Human-readable observe-only `DMI-001` ADX / DMI directional-ignition handoff draft. |
 | `strategy-group-handoffs/DMI-001/handoff.json` | System-readable observe-only `DMI-001` handoff contract with equity ADX-rising long semantics, RequiredFacts, hard stops, and sample packets. |
+| `strategy-group-handoffs/SCF-001/handoff.md` | Human-readable observe-only `SCF-001` session-confluence handoff draft. |
+| `strategy-group-handoffs/SCF-001/handoff.json` | System-readable observe-only `SCF-001` handoff contract with TEQ structure-confirmed momentum semantics, RequiredFacts, hard stops, and sample packets. |
 | `document-governance-v3.md` | Document authority, supersession rules, and old-document handling. |
 | `owner-direction-log.md` | Owner strategy-research instructions that change search space, evaluation semantics, or evidence governance. |
 | `community-research-plan.md` | GitHub, Freqtrade, QuantConnect, Reddit/forum, and official-data intake plan. |

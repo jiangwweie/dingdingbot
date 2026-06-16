@@ -260,6 +260,35 @@ short-side DMI, or metal rows as executable evidence.
 DMI handoff pack:
 `docs/strategy-research/strategy-group-handoffs/DMI-001/handoff.md`.
 
+### `SCF-001`
+
+`SCF-001` is an observe-only handoff draft. This mapping exists to let main
+control evaluate prefix-safe session-confluence watcher semantics without
+treating later structure labels, PMR support rows, or high-leverage stress rows
+as executable evidence.
+
+| RequiredFact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `base_session_transfer_state` | Existing session-transfer raw-pool signal state. | `no_scf_signal` |
+| `session_confluence_state` | Same-symbol same-direction structure confirmation state. | `no_scf_signal` |
+| `session_vwap_or_opening_range_state` | VWAP or SOR structure available before the base signal. | `observe_only_or_no_signal` |
+| `session_imbalance_gap_state` | Session-gap or FVG structure available before the base signal. | `observe_only_or_no_signal` |
+| `pmr_session_breakdown_structure_state` | PMR / XAG short-confluence context state. | `support_only_no_candidate` |
+| `session_multi_structure_state` | Multiple structure sources are present and prefix-safe. | `observe_only` |
+| `structure_confluence_count_state` | Count of prior confluence structures inside the 24h lookback. | `no_scf_signal` |
+| `confluence_prefix_state` | Confirms confluence timestamp is not after the base signal. | `block_candidate_prepare` |
+| `teq_strong_momentum_state` | TEQ prior 24h and 72h strength state for current lead. | `no_scf_signal` |
+| `session_confluence_drawdown_state` | Drawdown and window-risk interpretation. | `observe_only` |
+| `scf_exit_horizon_state` | 12h time-stop state for the current lead row. | `block_candidate_prepare` |
+| `scf_time_stop_tradeoff_state` | 12h cleaner row versus 72h higher-window/higher-risk row. | `observe_only` |
+| `scf_raw_pool_reslot_state` | Raw-pool and slot reslot provenance. | `block_promotion` |
+| `high_leverage_confluence_disable_state` | 3x/5x stress and high-leverage disable state. | `block_leverage_promotion` |
+| `scf_fill_gap_slippage_state` | Next-open and session fill/gap/slippage state. | `block_promotion` |
+| `real_exchange_margin_liquidation_model` | Venue-specific margin and liquidation behavior. | `block_leverage_promotion` |
+
+SCF handoff pack:
+`docs/strategy-research/strategy-group-handoffs/SCF-001/handoff.md`.
+
 ### `LCF-001`
 
 `LCF-001` is not a handoff pack. This mapping exists only to preserve the
