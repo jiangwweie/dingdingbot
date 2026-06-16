@@ -269,9 +269,7 @@ def _run_arm_preview(
         mode="arm",
         env_file=args.env_file,
         authorization_id=authorization_id,
-        record_attempt_consumption=bool(
-            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
-        ),
+        record_attempt_consumption=False,
         standing_authorized_scoped_evidence_preparation=bool(
             getattr(args, "allow_standing_operation_layer_evidence_prep", False)
         ),
@@ -768,10 +766,13 @@ def build_followup_packet(
                 )
                 arm_report = arm_runner(authorization_id, args)
                 arm_forbidden = _arm_preview_forbidden_effects(arm_report)
-                warnings.extend(
-                    f"arm_preview:{item}"
-                    for item in arm_report.get("blockers") or []
-                )
+                arm_preview_blockers = [
+                    f"arm_preview:{item}" for item in arm_report.get("blockers") or []
+                ]
+                if getattr(args, "allow_standing_operation_layer_evidence_prep", False):
+                    blockers.extend(arm_preview_blockers)
+                else:
+                    warnings.extend(arm_preview_blockers)
                 warnings.extend(
                     f"arm_preview:{item}"
                     for item in arm_report.get("warnings") or []
@@ -849,13 +850,7 @@ def build_followup_packet(
                 getattr(args, "allow_standing_operation_layer_evidence_prep", False)
             ),
             "mutating_attempt_consumption_allowed_by_this_packet": (
-                bool(
-                    getattr(
-                        args,
-                        "allow_standing_operation_layer_evidence_prep",
-                        False,
-                    )
-                )
+                False
             ),
             "requires_fresh_real_signal_revalidation_before_mutation": (
                 local_registration_readiness.get(

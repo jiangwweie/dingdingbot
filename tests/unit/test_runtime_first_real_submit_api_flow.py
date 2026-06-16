@@ -26,6 +26,7 @@ class _FakeClient:
         candidate_reusable: bool | None = True,
         candidate_usage_status: str = "unused",
         evidence_blockers: list[str] | None = None,
+        evidence_warnings: list[str] | None = None,
         shadow_plan_blockers: list[str] | None = None,
         local_result_status: str = "registered_created_local_orders",
         local_result_blockers: list[str] | None = None,
@@ -41,6 +42,7 @@ class _FakeClient:
         self.candidate_reusable = candidate_reusable
         self.candidate_usage_status = candidate_usage_status
         self.evidence_blockers = evidence_blockers or []
+        self.evidence_warnings = evidence_warnings or []
         self.shadow_plan_blockers = shadow_plan_blockers or []
         self.local_result_status = local_result_status
         self.local_result_blockers = local_result_blockers or []
@@ -177,6 +179,7 @@ class _FakeClient:
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ]
                     + self.evidence_blockers,
+                    "warnings": self.evidence_warnings,
                 },
             }
         if "runtime-execution-attempt-reservations" in path:
@@ -637,6 +640,48 @@ def test_arm_standing_authorized_scoped_evidence_prep_records_operation_layer_id
     assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert any("runtime-execution-exchange-submit-adapter-results" in path for path in paths)
     assert not any("runtime-execution-first-real-submit-actions" in path for path in paths)
+
+
+def test_arm_standing_prep_stops_before_attempt_mutation_when_evidence_not_live_ready():
+    client = _FakeClient(
+        evidence_warnings=[
+            "runtime_execution_enabled_false_current_shadow_boundary",
+            "runtime_shadow_mode_current_boundary",
+            "trusted_submit_fact_snapshot_not_fresh_enough",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert (
+        "pre_attempt_evidence_not_ready:"
+        "runtime_execution_enabled_false_current_shadow_boundary"
+    ) in report["blockers"]
+    assert (
+        "pre_attempt_evidence_not_ready:runtime_shadow_mode_current_boundary"
+        in report["blockers"]
+    )
+    assert (
+        "pre_attempt_evidence_not_ready:"
+        "trusted_submit_fact_snapshot_not_fresh_enough"
+    ) in report["blockers"]
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-first-real-submit-evidence-preparations" in path for path in paths)
+    assert not any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit-action-authorizations" in path for path in paths)
+    assert report["safety"]["runtime_budget_mutated"] is False
 
 
 def test_arm_stops_before_exchange_evidence_when_local_registration_is_blocked():

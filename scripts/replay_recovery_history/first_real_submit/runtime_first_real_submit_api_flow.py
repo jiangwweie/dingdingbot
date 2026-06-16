@@ -682,8 +682,6 @@ class FirstRealSubmitApiFlow:
             return
         evidence_body = self._record_evidence_preparation(collect_body_blockers=False)
         self.state.add_blockers(_pre_adapter_evidence_blockers(evidence_body))
-        if any(blocker.endswith("_http_404") for blocker in self.state.blockers):
-            return
         if self.state.blockers:
             return
         if (
@@ -1294,6 +1292,19 @@ class FirstRealSubmitApiFlow:
                 "standing_authorized_scoped_evidence_preparation": (
                     self._config.standing_authorized_scoped_evidence_preparation
                 ),
+                "attempt_counter_mutated": _report_has_step_path(
+                    self.state.steps,
+                    "runtime-execution-attempt-mutations",
+                ),
+                "runtime_budget_mutated": _report_has_step_path(
+                    self.state.steps,
+                    "runtime-execution-attempt-mutations",
+                ),
+                "exchange_order_submitted": _report_has_step_path(
+                    self.state.steps,
+                    "runtime-execution-first-real-submit-actions",
+                )
+                and self._config.execute_real_submit,
                 "no_withdrawal_or_transfer": True,
             },
         }
@@ -1334,6 +1345,10 @@ def _id_summary(value: Any) -> dict[str, Any]:
     return {key: value.get(key) for key in keys if value.get(key)}
 
 
+def _report_has_step_path(steps: list[dict[str, Any]], fragment: str) -> bool:
+    return any(fragment in str(step.get("path") or "") for step in steps)
+
+
 def _extract_next_attempt_gate(body: dict[str, Any]) -> dict[str, Any]:
     data = body.get("data")
     if isinstance(data, dict):
@@ -1351,18 +1366,32 @@ def _extract_next_attempt_gate(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pre_adapter_evidence_blockers(body: dict[str, Any]) -> list[str]:
-    """Block arm on submit facts while tolerating the expected missing adapter result."""
+    """Block arm before attempt mutation unless live submit evidence is ready."""
     tolerated_fragments = (
         "runtimeexecutionorderlifecycleadapterresult_not_found",
         "runtime_execution_order_lifecycle_adapter_result_not_found",
     )
+    blocking_warning_fragments = (
+        "trusted_submit_fact_snapshot_not_ready",
+        "trusted_submit_fact_snapshot_not_fresh_enough",
+        "runtime_execution_enabled_false_current_shadow_boundary",
+        "runtime_shadow_mode_current_boundary",
+        "deployment_readiness_evidence_id_missing",
+        "gateway_not_injected_by_readiness_evidence",
+        "not_live_action_authorization",
+    )
     blockers = body.get("blockers") if isinstance(body, dict) else None
+    warnings = body.get("warnings") if isinstance(body, dict) else None
     result: list[str] = []
     for blocker in blockers or []:
         text = str(blocker)
         if any(fragment in text for fragment in tolerated_fragments):
             continue
         result.append(text)
+    for warning in warnings or []:
+        text = str(warning)
+        if any(fragment in text for fragment in blocking_warning_fragments):
+            result.append(f"pre_attempt_evidence_not_ready:{text}")
     return result
 
 

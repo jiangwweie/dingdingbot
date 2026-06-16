@@ -171,6 +171,12 @@ def _arm_preview_report(*, blockers=None, warnings=None, forbidden=False, standi
     }
 
 
+def _standing_non_mutating_arm_preview_report():
+    report = _arm_preview_report()
+    report["safety"]["standing_authorized_scoped_evidence_preparation"] = True
+    return report
+
+
 def _attempt_policy_report():
     return {
         "scope": "runtime_attempt_policy_preparation",
@@ -575,7 +581,7 @@ def test_followup_classifies_expected_local_registration_boundary():
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
 
 
-def test_followup_allows_standing_operation_layer_evidence_prep_effects():
+def test_followup_keeps_standing_operation_layer_evidence_prep_non_mutating():
     packet = runtime_active_observation_followup.build_followup_packet(
         _args(
             allow_arm_preview=True,
@@ -583,29 +589,27 @@ def test_followup_allows_standing_operation_layer_evidence_prep_effects():
             allow_standing_operation_layer_evidence_prep=True,
         ),
         loop_packet=_loop_packet("ready_for_final_gate_preflight"),
-        arm_preview_runner=lambda auth_id, args: _arm_preview_report(
-            blockers=[],
-            warnings=[],
-            standing=True,
-        ),
+        arm_preview_runner=lambda auth_id, args: _standing_non_mutating_arm_preview_report(),
         disabled_smoke_runner=lambda auth_id, args: _disabled_smoke_report(),
     )
 
-    assert packet["status"] == "disabled_smoke_completed"
-    assert packet["blockers"] == []
+    assert packet["status"] == "disabled_smoke_blocked"
+    assert packet["blockers"] == [
+        "arm_preview:attempt_consumption_required_before_order_lifecycle_handoff",
+    ]
     assert packet["operator_command_plan"][
         "standing_authorized_operation_layer_evidence_prep_allowed"
     ] is True
     assert packet["operator_command_plan"][
         "mutating_attempt_consumption_allowed_by_this_packet"
-    ] is True
+    ] is False
     assert packet["safety_invariants"][
         "standing_authorized_operation_layer_evidence_prep_called"
     ] is True
-    assert packet["safety_invariants"]["attempt_counter_mutated"] is True
-    assert packet["safety_invariants"]["runtime_budget_mutated"] is True
-    assert packet["safety_invariants"]["local_registration_recorded"] is True
-    assert packet["safety_invariants"]["exchange_submit_adapter_armed"] is True
+    assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+    assert packet["safety_invariants"]["runtime_budget_mutated"] is False
+    assert packet["safety_invariants"]["local_registration_recorded"] is False
+    assert packet["safety_invariants"]["exchange_submit_adapter_armed"] is False
     assert packet["safety_invariants"]["arm_preview_forbidden_effects"] == []
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
