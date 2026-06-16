@@ -80,7 +80,7 @@ def _write_base_packets(report_dir: Path) -> None:
         {
             "status": "passed",
             "checks": {
-                "scenario_count": 10,
+                "scenario_count": 11,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
@@ -94,6 +94,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "expanded_watcher_scope_execution_guard_checked": True,
                 "operation_layer_authorization_chain_guard_checked": True,
                 "post_submit_closed_loop_evidence_guard_checked": True,
+                "operation_layer_submit_result_identity_guard_checked": True,
                 "shared_runtime_pipeline_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
@@ -275,6 +276,10 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     assert (
         "runtime_dry_run_missing_required_check:"
         "post_submit_closed_loop_evidence_guard_checked"
+    ) in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "operation_layer_submit_result_identity_guard_checked"
     ) in packet["blockers"]
 
 

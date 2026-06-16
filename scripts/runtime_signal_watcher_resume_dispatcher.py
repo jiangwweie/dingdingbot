@@ -810,6 +810,10 @@ def _operation_layer_blocker_class(
         return "hard_safety_stop"
     if "authorization_id_mismatch" in combined:
         return "hard_safety_stop"
+    if "runtime_instance_id_mismatch" in combined:
+        return "hard_safety_stop"
+    if "reservation_id_mismatch" in combined:
+        return "hard_safety_stop"
     if any(token in combined for token in ("duplicate", "idempotency")):
         return "hard_safety_stop"
     if any(token in combined for token in ("active_position", "open_order_conflict")):
@@ -2606,6 +2610,21 @@ def _execute_operation_layer_submit(
     body_status = str(body.get("status") or "")
     body_blockers = _dedupe_text(body.get("blockers") or [])
     if body_status == "exchange_submit_orders_submitted":
+        identity_blockers = _operation_layer_submit_result_identity_blockers(
+            packet=packet,
+            body=body,
+        )
+        if identity_blockers:
+            return _packet_from_operation_layer_submit(
+                packet=packet,
+                status="operation_layer_submit_failed",
+                blocker_class=_operation_layer_blocker_class(identity_blockers, []),
+                dispatch_status=(
+                    "official_operation_layer_submit_result_identity_mismatch"
+                ),
+                blockers=identity_blockers,
+                submit_result=submit_result,
+            )
         submit_packet = _packet_from_operation_layer_submit(
             packet=packet,
             status="submitted",
@@ -2663,6 +2682,66 @@ def _operation_layer_submit_forbidden_effects(body: dict[str, Any]) -> list[str]
         if body.get("order_lifecycle_submit_called") is not True:
             effects.append("operation_layer_submit_missing_order_lifecycle_submit")
     return effects
+
+
+def _operation_layer_submit_result_identity_blockers(
+    *,
+    packet: dict[str, Any],
+    body: dict[str, Any],
+) -> list[str]:
+    command_plan = _dict(packet.get("operation_layer_command_plan"))
+    readiness = _dict(packet.get("operation_layer_readiness"))
+    ids = _dict(readiness.get("available_evidence_ids"))
+    selected_runtime_ids = [
+        str(item)
+        for item in _list(packet.get("selected_runtime_instance_ids"))
+        if str(item or "").strip()
+    ]
+    expected_authorization_id = _first_text(
+        command_plan.get("authorization_id"),
+        ids.get("authorization_id"),
+    )
+    actual_authorization_id = _first_text(body.get("authorization_id"))
+    expected_runtime_instance_id = _first_text(
+        ids.get("runtime_instance_id"),
+        selected_runtime_ids[0] if len(selected_runtime_ids) == 1 else None,
+    )
+    actual_runtime_instance_id = _first_text(body.get("runtime_instance_id"))
+    expected_reservation_id = _first_text(
+        ids.get("reservation_id"),
+        ids.get("attempt_reservation_id"),
+        ids.get("attempt_reservation"),
+    )
+    actual_reservation_id = _first_text(
+        body.get("reservation_id"),
+        body.get("attempt_reservation_id"),
+        body.get("attempt_reservation"),
+    )
+    blockers: list[str] = []
+    if not actual_authorization_id:
+        blockers.append("operation_layer_submit_authorization_id_missing")
+    elif expected_authorization_id and actual_authorization_id != expected_authorization_id:
+        blockers.append(
+            "operation_layer_submit_authorization_id_mismatch:"
+            f"expected={expected_authorization_id}:actual={actual_authorization_id}"
+        )
+    if not actual_runtime_instance_id:
+        blockers.append("operation_layer_submit_runtime_instance_id_missing")
+    elif expected_runtime_instance_id and actual_runtime_instance_id != expected_runtime_instance_id:
+        blockers.append(
+            "operation_layer_submit_runtime_instance_id_mismatch:"
+            f"expected={expected_runtime_instance_id}:actual={actual_runtime_instance_id}"
+        )
+    if (
+        actual_reservation_id
+        and expected_reservation_id
+        and actual_reservation_id != expected_reservation_id
+    ):
+        blockers.append(
+            "operation_layer_submit_reservation_id_mismatch:"
+            f"expected={expected_reservation_id}:actual={actual_reservation_id}"
+        )
+    return _dedupe_text(blockers)
 
 
 def _packet_from_operation_layer_submit(
@@ -2835,6 +2914,19 @@ def _execute_post_submit_finalize(
             *list(_dict(finalize_body.get("next_attempt_gate")).get("blockers") or []),
         ]
     )
+    identity_blockers = _post_submit_finalize_result_identity_blockers(
+        context=context,
+        body=finalize_body,
+    )
+    if identity_blockers:
+        return _packet_from_post_submit_finalize(
+            packet=packet,
+            status="post_submit_finalize_blocked",
+            blocker_class=_post_submit_finalize_blocker_class(identity_blockers),
+            dispatch_status="post_submit_finalize_result_identity_mismatch",
+            blockers=identity_blockers,
+            finalize_result=finalize_result,
+        )
     if body_status == "finalized_ready_for_next_attempt":
         closed_loop_blockers = _post_submit_finalize_closed_loop_blockers(
             finalize_body
@@ -2902,6 +2994,48 @@ def _post_submit_finalize_closed_loop_blockers(body: dict[str, Any]) -> list[str
         blockers.append(
             "post_submit_finalize_next_attempt_gate_not_ready:"
             f"{next_attempt_status or 'missing'}"
+        )
+    return _dedupe_text(blockers)
+
+
+def _post_submit_finalize_result_identity_blockers(
+    *,
+    context: dict[str, Any],
+    body: dict[str, Any],
+) -> list[str]:
+    expected_authorization_id = _first_text(context.get("authorization_id"))
+    actual_authorization_id = _first_text(body.get("authorization_id"))
+    expected_runtime_instance_id = _first_text(context.get("runtime_instance_id"))
+    actual_runtime_instance_id = _first_text(body.get("runtime_instance_id"))
+    expected_reservation_id = _first_text(context.get("reservation_id"))
+    actual_reservation_id = _first_text(
+        body.get("reservation_id"),
+        body.get("attempt_reservation_id"),
+        body.get("attempt_reservation"),
+    )
+    blockers: list[str] = []
+    if not actual_authorization_id:
+        blockers.append("post_submit_finalize_authorization_id_missing")
+    elif expected_authorization_id and actual_authorization_id != expected_authorization_id:
+        blockers.append(
+            "post_submit_finalize_authorization_id_mismatch:"
+            f"expected={expected_authorization_id}:actual={actual_authorization_id}"
+        )
+    if not actual_runtime_instance_id:
+        blockers.append("post_submit_finalize_runtime_instance_id_missing")
+    elif expected_runtime_instance_id and actual_runtime_instance_id != expected_runtime_instance_id:
+        blockers.append(
+            "post_submit_finalize_runtime_instance_id_mismatch:"
+            f"expected={expected_runtime_instance_id}:actual={actual_runtime_instance_id}"
+        )
+    if (
+        actual_reservation_id
+        and expected_reservation_id
+        and actual_reservation_id != expected_reservation_id
+    ):
+        blockers.append(
+            "post_submit_finalize_reservation_id_mismatch:"
+            f"expected={expected_reservation_id}:actual={actual_reservation_id}"
         )
     return _dedupe_text(blockers)
 
