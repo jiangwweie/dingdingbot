@@ -5759,6 +5759,190 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
 
 
+def test_owner_console_source_readiness_returns_single_frontend_contract(
+    monkeypatch,
+    tmp_path,
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    handoff_dir = tmp_path / "strategy-group-handoffs"
+    for strategy_group_id in ["MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"]:
+        _write_strategy_group_handoff(
+            handoff_dir / strategy_group_id / "handoff.json",
+            strategy_group_id,
+            default_mode=(
+                "observe_only" if strategy_group_id == "PMR-001" else "armed_observation"
+            ),
+        )
+    _write_strategy_group_handoff_supplements(handoff_dir)
+    live_facts_path = tmp_path / "strategy-group-live-facts.json"
+    live_facts_path.write_text(
+        json.dumps(
+            {
+                "status": "ready",
+                "account": {
+                    "status": "fresh",
+                    "available_balance_present": True,
+                    "available_balance_positive": True,
+                    "total_wallet_balance_present": True,
+                    "can_trade": True,
+                },
+                "active_position": {
+                    "status": "no_active_position",
+                    "active_count": 0,
+                    "active_symbols": [],
+                },
+                "open_orders": {
+                    "status": "no_open_orders",
+                    "open_order_count": 0,
+                    "open_order_symbols": [],
+                },
+                "protection": {
+                    "status": "ready_for_candidate_specific_plan",
+                },
+                "budget": {
+                    "status": "available_for_candidate_specific_reservation",
+                    "reason": "account_available_balance_covers_strategygroup_tiny_notional",
+                    "max_notional_requirement_usdt": "8",
+                },
+                "next_attempt_gate": {
+                    "status": "ready_for_strategy_signal",
+                },
+                "exchange_rules": {
+                    "symbols": {
+                        "BTCUSDT": {"status": "TRADING"},
+                        "ETHUSDT": {"status": "TRADING"},
+                    }
+                },
+                "safety_invariants": {
+                    "signed_get_only": True,
+                    "exchange_write_called": False,
+                    "order_created": False,
+                    "withdrawal_or_transfer_created": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    report_dir = tmp_path / "runtime-signal-watcher"
+    report_dir.mkdir()
+    auto_resume = {
+        "status": "waiting_for_market",
+        "blocked_at": "watcher_signal",
+        "blocked_reason": "no_fresh_strategy_signal",
+        "next_recover_condition": (
+            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+        ),
+        "automatic_recovery_action": "continue_watcher_observation",
+        "downgrade_mode": "observe_only",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+    }
+    action_time_resume = {
+        "status": "waiting_for_market",
+        "next_step": "continue_watcher_observation",
+        "signal_input_json": None,
+        "shadow_candidate_id": None,
+        "prepared_authorization_id": None,
+        "allowed_auto_actions": ["continue_watcher_observation"],
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+    }
+    tick = {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "watching_no_signal",
+        "wakeup_status": "operator_packet_needs_review",
+        "operator_status": "operator_review",
+        "status_packet_status": "ok",
+        "blockers": [
+            "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+        ],
+        "warnings": [],
+        "notification": {
+            "required": False,
+            "configured": True,
+            "attempted": False,
+            "sent": False,
+            "duplicate_suppressed": False,
+            "skipped_reason": "no_owner_attention_needed",
+        },
+        "safety_invariants": {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+        },
+        "post_signal_auto_resume": auto_resume,
+    }
+    for name, packet in {
+        "watcher-tick.json": tick,
+        "wakeup-packet.json": {"status": "operator_packet_needs_review"},
+        "operator-packet.json": {"status": "operator_review"},
+        "status-packet.json": {
+            "status": "ok",
+            "blockers": tick["blockers"],
+            "warnings": [],
+            "runtime_signal_summaries": [],
+        },
+        "notification-state.json": {},
+        "post-signal-resume-pack.json": {
+            "status": "waiting_for_market",
+            "post_signal_auto_resume": auto_resume,
+            "action_time_resume": action_time_resume,
+            "owner_state": {
+                "status": "waiting_for_market",
+                "blocker_class": "waiting_for_market",
+                "blocked_at": "watcher_signal",
+                "blocked_reason": "no_fresh_strategy_signal",
+                "next_recover_condition": (
+                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+                ),
+                "automatic_recovery_action": "continue_watcher_observation",
+                "downgrade_mode": "observe_only",
+            },
+        },
+    }.items():
+        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
+    monkeypatch.setenv("BRC_STRATEGY_GROUP_LIVE_FACTS_PATH", str(live_facts_path))
+    monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-console-source-readiness")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["read_model"] == "owner_console_source_readiness"
+    assert payload["data"]["status"] == "ready"
+    assert payload["data"]["owner_state"]["status"] == "waiting_for_opportunity"
+    assert payload["data"]["owner_summary"]["market_opportunity"] == "等待机会"
+    assert payload["data"]["owner_summary"]["funds"] == "资金正常"
+    assert payload["data"]["owner_summary"]["orders"] == "暂无订单"
+    assert payload["data"]["owner_summary"]["positions"] == "暂无持仓"
+    assert payload["data"]["owner_summary"]["protection"] == "保护正常"
+    assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
+    assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
+    assert len(payload["data"]["strategy_groups"]) == 5
+    assert payload["data"]["frontend_contract"] == {
+        "single_api_source": True,
+        "hide_strategy_groups_when_runtime_degraded": False,
+        "ready_empty_is_not_unavailable": True,
+        "owner_homepage_internal_gate_terms_allowed": False,
+    }
+    assert payload["data"]["safety_invariants"]["places_order"] is False
+    assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
+
+
 def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     monkeypatch,
     tmp_path,

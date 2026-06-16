@@ -36,6 +36,19 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
                 "candidate_prepare_blockers": ["MPG-001:budget:missing"],
             },
         },
+        "/api/trading-console/owner-console-source-readiness": {
+            "freshness_status": "warning",
+            "blockers": [],
+            "warnings": [{"code": "owner_console_source_readiness_degraded"}],
+            "data": {
+                "status": "ready",
+                "owner_state": {"status": "waiting_for_opportunity"},
+                "source_health": {
+                    "orders": {"status": "ready_empty"},
+                    "positions": {"status": "ready_empty"},
+                },
+            },
+        },
         "/api/trading-console/strategygroup-runtime-pilot-status": {
             "freshness_status": "warning",
             "blockers": [],
@@ -65,9 +78,11 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
     assert packet["status"] == "refreshed"
     assert [item["status"] for item in packet["packets"]] == [
         "strategy_group_observe_ready_candidate_prerequisites_pending",
+        "ready",
         "waiting_for_market",
     ]
     assert (tmp_path / "strategy-group-live-facts-readiness.json").exists()
+    assert (tmp_path / "owner-console-source-readiness.json").exists()
     assert (tmp_path / "strategygroup-runtime-pilot-status.json").exists()
     assert all(call[1] == 7 for call in calls)
     assert all(call[2] == "session=test" for call in calls)
@@ -96,6 +111,12 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
                 "blockers": [],
                 "candidate_prepare_blockers": [],
             },
+        },
+        "/api/trading-console/owner-console-source-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "ready"},
         },
         "/api/trading-console/strategygroup-runtime-pilot-status": {
             "freshness_status": "warning",
@@ -166,6 +187,22 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
             "data": {"status": "ready", "blockers": []},
         },
         (
+            "/api/trading-console/owner-console-source-readiness"
+            "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"
+        ): {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {
+                "status": "ready",
+                "selected_scope_config": {
+                    "selected_strategy_group_id": "SOR-001",
+                    "max_symbols": 2,
+                    "stale_after_seconds": 240,
+                },
+            },
+        },
+        (
             "/api/trading-console/strategygroup-runtime-pilot-status"
             "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"
         ): {
@@ -204,6 +241,10 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
         "stale_after_seconds": 240,
         "source": "cli_or_env",
     }
+    assert calls[-2] == (
+        "/api/trading-console/owner-console-source-readiness"
+        "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"
+    )
     assert calls[-1] == (
         "/api/trading-console/strategygroup-runtime-pilot-status"
         "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"

@@ -1473,6 +1473,7 @@ class TradingConsoleReadModelService:
                     "GET /api/trading-console/budget-recommendation",
                     "GET /api/trading-console/signal-marker-feed",
                     "GET /api/trading-console/runtime-signal-watcher-status",
+                    "GET /api/trading-console/owner-console-source-readiness",
                     "GET /api/trading-console/strategygroup-runtime-pilot-status",
                     "GET /api/trading-console/strategy-group-handoff-intake",
                     "GET /api/trading-console/strategy-group-live-facts-readiness",
@@ -1988,6 +1989,89 @@ class TradingConsoleReadModelService:
             freshness_status = "warning"
         return TradingConsoleReadModelResponse(
             read_model="strategygroup_runtime_pilot_status",
+            generated_at_ms=generated_at_ms,
+            freshness_status=freshness_status,
+            warnings=warnings,
+            blockers=blockers,
+            unavailable=[],
+            data=packet,
+            live_ready=False,
+        )
+
+    def owner_console_source_readiness(
+        self,
+        *,
+        selected_strategy_group_id: Optional[str] = None,
+        max_symbols: int = 3,
+        stale_after_seconds: int = 180,
+    ) -> TradingConsoleReadModelResponse:
+        generated_at_ms = _now_ms()
+        intake_response = self.strategy_group_handoff_intake()
+        live_facts_response = self.strategy_group_live_facts_readiness()
+        watcher_response = self.runtime_signal_watcher_status(
+            stale_after_seconds=stale_after_seconds,
+        )
+        runtime_response = self.strategygroup_runtime_pilot_status(
+            selected_strategy_group_id=selected_strategy_group_id,
+            max_symbols=max_symbols,
+            stale_after_seconds=stale_after_seconds,
+        )
+        live_facts_path_value = (
+            (live_facts_response.data.get("live_facts_source") or {}).get("path")
+            if isinstance(live_facts_response.data, dict)
+            else None
+        )
+        live_facts = (
+            _read_json_file(Path(str(live_facts_path_value)).expanduser())
+            if live_facts_path_value
+            else {}
+        )
+        packet = _owner_console_source_readiness_packet(
+            generated_at_ms=generated_at_ms,
+            intake_response=intake_response,
+            live_facts_response=live_facts_response,
+            watcher_response=watcher_response,
+            runtime_response=runtime_response,
+            live_facts=live_facts,
+            live_facts_path=str(live_facts_path_value or ""),
+            selected_strategy_group_id=selected_strategy_group_id,
+            max_symbols=max_symbols,
+            stale_after_seconds=stale_after_seconds,
+        )
+        source_statuses = [
+            str(item.get("status") or "")
+            for item in (packet.get("source_health") or {}).values()
+            if isinstance(item, dict)
+        ]
+        blockers: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if packet.get("status") == "source_unavailable":
+            blockers.append(
+                {
+                    "code": "owner_console_source_readiness_unavailable",
+                    "message": "Owner Console source readiness cannot be built from current main runtime sources.",
+                    "affected_area": ",".join(packet.get("critical_unavailable_sources") or []),
+                }
+            )
+        degraded_count = sum(1 for status in source_statuses if status == "degraded")
+        if degraded_count:
+            warnings.append(
+                {
+                    "code": "owner_console_source_readiness_degraded",
+                    "severity": "warning",
+                    "message": "Some detail sources are degraded but core StrategyGroup visibility can continue.",
+                    "count": degraded_count,
+                }
+            )
+        freshness_status = (
+            "not_live_connected"
+            if blockers
+            else "warning"
+            if warnings
+            else "fresh"
+        )
+        return TradingConsoleReadModelResponse(
+            read_model="owner_console_source_readiness",
             generated_at_ms=generated_at_ms,
             freshness_status=freshness_status,
             warnings=warnings,
@@ -6972,6 +7056,415 @@ def _migration_drift_summary(startup_summary: dict[str, Any]) -> dict[str, Any]:
         "current_revision": current_revision or "not_available",
         "expected_head": expected_head or "not_available",
         "missing_evidence": [] if detectable else _missing_migration_evidence(current_revision, expected_head),
+    }
+
+
+def _owner_console_source_readiness_packet(
+    *,
+    generated_at_ms: int,
+    intake_response: TradingConsoleReadModelResponse,
+    live_facts_response: TradingConsoleReadModelResponse,
+    watcher_response: TradingConsoleReadModelResponse,
+    runtime_response: TradingConsoleReadModelResponse,
+    live_facts: dict[str, Any],
+    live_facts_path: str,
+    selected_strategy_group_id: str | None,
+    max_symbols: int,
+    stale_after_seconds: int,
+) -> dict[str, Any]:
+    intake = intake_response.data if isinstance(intake_response.data, dict) else {}
+    live_readiness = (
+        live_facts_response.data if isinstance(live_facts_response.data, dict) else {}
+    )
+    watcher = watcher_response.data if isinstance(watcher_response.data, dict) else {}
+    runtime = runtime_response.data if isinstance(runtime_response.data, dict) else {}
+    rows = _owner_console_strategy_rows(intake=intake, runtime=runtime)
+    catalog_status = "ready" if rows else "unavailable"
+    runtime_rows = list((runtime.get("control_board") or {}).get("strategy_group_rows") or [])
+    runtime_status = (
+        "ready"
+        if runtime_rows
+        else "degraded"
+        if rows and runtime_response.freshness_status != "not_live_connected"
+        else "unavailable"
+    )
+    watcher_status = _owner_console_watcher_source_status(watcher_response, watcher)
+    live_facts_status = (
+        "ready"
+        if not live_facts_response.blockers
+        and live_readiness.get("status")
+        in {
+            "strategy_group_live_facts_ready_for_armed_observation",
+            "strategy_group_observe_ready_candidate_prerequisites_pending",
+        }
+        else "degraded"
+        if live_readiness
+        else "unavailable"
+    )
+    account = live_facts.get("account") if isinstance(live_facts.get("account"), dict) else {}
+    open_orders = (
+        live_facts.get("open_orders")
+        if isinstance(live_facts.get("open_orders"), dict)
+        else {}
+    )
+    active_position = (
+        live_facts.get("active_position")
+        if isinstance(live_facts.get("active_position"), dict)
+        else {}
+    )
+    protection = (
+        live_facts.get("protection")
+        if isinstance(live_facts.get("protection"), dict)
+        else {}
+    )
+    budget = live_facts.get("budget") if isinstance(live_facts.get("budget"), dict) else {}
+    funds = _owner_console_funds_source(account=account, budget=budget)
+    orders = _owner_console_count_source(
+        source=open_orders,
+        count_key="open_order_count",
+        empty_statuses={"no_open_orders"},
+        nonempty_label="有订单处理中",
+        empty_label="暂无订单",
+        unavailable_label="订单状态暂不可用",
+    )
+    positions = _owner_console_count_source(
+        source=active_position,
+        count_key="active_count",
+        empty_statuses={"no_active_position"},
+        nonempty_label="有持仓处理中",
+        empty_label="暂无持仓",
+        unavailable_label="持仓状态暂不可用",
+    )
+    protection_source = _owner_console_protection_source(protection)
+    reconciliation_source = _owner_console_detail_source(
+        status="degraded",
+        owner_label="对账详情暂不可用",
+        reason=(
+            "latest_reconciliation_summary_not_in_source_readiness_packet"
+            if orders["status"] == "ready_empty" and positions["status"] == "ready_empty"
+            else "reconciliation_detail_source_not_wired"
+        ),
+    )
+    operation_audit_source = _owner_console_detail_source(
+        status="degraded",
+        owner_label="审计详情暂不可用",
+        reason="operation_audit_list_probe_not_wired_to_source_readiness_packet",
+    )
+    source_health = {
+        "strategy_catalog": _owner_console_detail_source(
+            status=catalog_status,
+            owner_label="策略组可见" if catalog_status == "ready" else "策略组暂不可用",
+            reason="strategy_group_handoff_catalog",
+        ),
+        "runtime_source": _owner_console_detail_source(
+            status=runtime_status,
+            owner_label="运行状态正常" if runtime_status == "ready" else "运行状态源未连接",
+            reason=str((runtime.get("owner_state") or {}).get("blocked_reason") or "runtime_readmodel"),
+        ),
+        "watcher": _owner_console_detail_source(
+            status=watcher_status,
+            owner_label="运行中" if watcher_status == "ready" else "观察状态暂不可用",
+            reason=str((watcher.get("owner_state") or {}).get("blocked_reason") or "watcher_readmodel"),
+        ),
+        "live_facts": _owner_console_detail_source(
+            status=live_facts_status,
+            owner_label="事实正常" if live_facts_status == "ready" else "事实状态暂不可用",
+            reason=str((live_readiness.get("owner_state") or {}).get("blocked_reason") or "live_facts_readiness"),
+        ),
+        "funds": funds,
+        "orders": orders,
+        "positions": positions,
+        "protection": protection_source,
+        "reconciliation": reconciliation_source,
+        "operation_audit": operation_audit_source,
+    }
+    critical_unavailable = [
+        name
+        for name in ("strategy_catalog", "runtime_source", "watcher", "live_facts")
+        if source_health[name]["status"] == "unavailable"
+    ]
+    owner_state = _owner_console_owner_state(
+        critical_unavailable=critical_unavailable,
+        watcher=watcher,
+        runtime=runtime,
+    )
+    return {
+        "scope": "owner_console_source_readiness",
+        "status": "source_unavailable" if critical_unavailable else "ready",
+        "generated_at_ms": generated_at_ms,
+        "selected_scope_config": {
+            "selected_strategy_group_id": selected_strategy_group_id,
+            "max_symbols": max_symbols,
+            "stale_after_seconds": stale_after_seconds,
+        },
+        "source_paths": {
+            "live_facts_path": live_facts_path,
+            "watcher_report_dir": str(
+                os.environ.get(
+                    "BRC_SIGNAL_WATCHER_REPORT_DIR",
+                    DEFAULT_SIGNAL_WATCHER_REPORT_DIR,
+                )
+            ),
+        },
+        "owner_state": owner_state,
+        "owner_summary": {
+            "strategy_groups": "可见" if rows else "暂不可用",
+            "watcher": source_health["watcher"]["owner_label"],
+            "market_opportunity": owner_state["label"],
+            "funds": funds["owner_label"],
+            "orders": orders["owner_label"],
+            "positions": positions["owner_label"],
+            "protection": protection_source["owner_label"],
+            "reconciliation": reconciliation_source["owner_label"],
+            "operation_audit": operation_audit_source["owner_label"],
+        },
+        "strategy_groups": rows,
+        "source_health": source_health,
+        "critical_unavailable_sources": critical_unavailable,
+        "frontend_contract": {
+            "single_api_source": True,
+            "hide_strategy_groups_when_runtime_degraded": False,
+            "ready_empty_is_not_unavailable": True,
+            "owner_homepage_internal_gate_terms_allowed": False,
+        },
+        "raw_status_refs": {
+            "handoff_intake_status": intake.get("status"),
+            "runtime_pilot_status": runtime.get("status"),
+            "watcher_status": (watcher.get("watcher") or {}).get("status"),
+            "live_facts_readiness_status": live_readiness.get("status"),
+        },
+        "safety_invariants": {
+            "read_model_only": True,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "runtime_budget_mutated": False,
+            "creates_candidate": False,
+            "creates_authorization": False,
+            "withdrawal_or_transfer_created": False,
+            "mutates_pg": False,
+            "secrets_printed": False,
+        },
+    }
+
+
+def _owner_console_strategy_rows(
+    *,
+    intake: dict[str, Any],
+    runtime: dict[str, Any],
+) -> list[dict[str, Any]]:
+    runtime_rows = list((runtime.get("control_board") or {}).get("strategy_group_rows") or [])
+    if runtime_rows:
+        return [
+            {
+                "strategy_group_id": str(item.get("strategy_group_id") or ""),
+                "name": item.get("name"),
+                "runtime_state": item.get("runtime_state"),
+                "signal_state": item.get("signal_state"),
+                "source_health": "ready",
+                "owner_label": _owner_console_strategy_owner_label(item),
+                "reason": item.get("blocked_reason"),
+                "selected": bool(item.get("selected")),
+            }
+            for item in runtime_rows
+            if item.get("strategy_group_id")
+        ]
+    picker = list(intake.get("strategy_picker") or [])
+    return [
+        {
+            "strategy_group_id": str(item.get("strategy_group_id") or ""),
+            "name": item.get("name"),
+            "runtime_state": "temporarily_unavailable",
+            "signal_state": "unknown",
+            "source_health": "degraded",
+            "owner_label": "暂不可用",
+            "reason": "运行状态源未连接",
+            "selected": False,
+        }
+        for item in picker
+        if item.get("strategy_group_id")
+    ]
+
+
+def _owner_console_strategy_owner_label(item: dict[str, Any]) -> str:
+    signal_state = str(item.get("signal_state") or "")
+    runtime_state = str(item.get("runtime_state") or "")
+    if signal_state in {"no_signal", "waiting_for_fresh_signal"}:
+        return "等待机会"
+    if runtime_state in {"observing", "armed_observation"}:
+        return "运行中"
+    return "暂不可用" if "unavailable" in runtime_state else "运行中"
+
+
+def _owner_console_watcher_source_status(
+    response: TradingConsoleReadModelResponse,
+    watcher: dict[str, Any],
+) -> str:
+    deployment = watcher.get("deployment_readiness") or {}
+    if response.blockers or deployment.get("status") in {"evidence_missing", "unsafe_watcher_effect_detected"}:
+        return "unavailable"
+    if response.warnings or deployment.get("status") == "evidence_stale":
+        return "degraded"
+    return "ready"
+
+
+def _owner_console_funds_source(
+    *,
+    account: dict[str, Any],
+    budget: dict[str, Any],
+) -> dict[str, Any]:
+    if not account:
+        return _owner_console_detail_source(
+            status="unavailable",
+            owner_label="资金状态暂不可用",
+            reason="account_facts_missing",
+        )
+    if str(account.get("status") or "") != "fresh":
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label="资金状态暂不可用",
+            reason=str(account.get("status") or "account_not_fresh"),
+        )
+    return {
+        **_owner_console_detail_source(
+            status="ready",
+            owner_label="资金正常",
+            reason=str(budget.get("reason") or "readonly_account_facts_fresh"),
+        ),
+        "summary": {
+            "available_balance_present": bool(account.get("available_balance_present")),
+            "available_balance_positive": bool(account.get("available_balance_positive")),
+            "total_wallet_balance_present": bool(account.get("total_wallet_balance_present")),
+            "can_trade": bool(account.get("can_trade")),
+            "budget_status": budget.get("status"),
+            "max_notional_requirement_usdt": budget.get("max_notional_requirement_usdt"),
+        },
+    }
+
+
+def _owner_console_count_source(
+    *,
+    source: dict[str, Any],
+    count_key: str,
+    empty_statuses: set[str],
+    nonempty_label: str,
+    empty_label: str,
+    unavailable_label: str,
+) -> dict[str, Any]:
+    if not source:
+        return _owner_console_detail_source(
+            status="unavailable",
+            owner_label=unavailable_label,
+            reason=f"{count_key}_source_missing",
+        )
+    count = _optional_int_value(source.get(count_key))
+    status = str(source.get("status") or "")
+    if count is None:
+        return _owner_console_detail_source(
+            status="degraded",
+            owner_label=unavailable_label,
+            reason=f"{count_key}_missing",
+        )
+    if count == 0 or status in empty_statuses:
+        return {
+            **_owner_console_detail_source(
+                status="ready_empty",
+                owner_label=empty_label,
+                reason=status or "source_readable_empty",
+            ),
+            "count": count,
+        }
+    return {
+        **_owner_console_detail_source(
+            status="ready_nonempty",
+            owner_label=nonempty_label,
+            reason=status or "source_readable_nonempty",
+        ),
+        "count": count,
+    }
+
+
+def _owner_console_protection_source(protection: dict[str, Any]) -> dict[str, Any]:
+    if not protection:
+        return _owner_console_detail_source(
+            status="unavailable",
+            owner_label="保护状态暂不可用",
+            reason="protection_source_missing",
+        )
+    status = str(protection.get("status") or "")
+    if status in {"ready_for_candidate_specific_plan", "protected", "flat_no_open_protection_required"}:
+        return _owner_console_detail_source(
+            status="ready",
+            owner_label="保护正常",
+            reason=status,
+        )
+    return _owner_console_detail_source(
+        status="degraded",
+        owner_label="保护未就绪",
+        reason=status or "protection_status_unknown",
+    )
+
+
+def _owner_console_detail_source(
+    *,
+    status: str,
+    owner_label: str,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "owner_label": owner_label,
+        "reason": reason,
+    }
+
+
+def _owner_console_owner_state(
+    *,
+    critical_unavailable: list[str],
+    watcher: dict[str, Any],
+    runtime: dict[str, Any],
+) -> dict[str, Any]:
+    if critical_unavailable:
+        return {
+            "status": "temporarily_unavailable",
+            "label": "暂不可用",
+            "reason": "critical_source_unavailable",
+            "next_action": "wait_for_source_recovery",
+            "needs_owner_action": False,
+        }
+    runtime_owner = runtime.get("owner_state") if isinstance(runtime.get("owner_state"), dict) else {}
+    watcher_owner = watcher.get("owner_state") if isinstance(watcher.get("owner_state"), dict) else {}
+    blocked_reason = str(
+        runtime_owner.get("blocked_reason")
+        or watcher_owner.get("blocked_reason")
+        or "none"
+    )
+    if blocked_reason == "no_fresh_strategy_signal":
+        return {
+            "status": "waiting_for_opportunity",
+            "label": "等待机会",
+            "reason": blocked_reason,
+            "next_action": "continue_watcher_observation",
+            "needs_owner_action": False,
+        }
+    if blocked_reason in {"none", ""}:
+        return {
+            "status": "running",
+            "label": "运行中",
+            "reason": "sources_ready",
+            "next_action": "continue_watcher_observation",
+            "needs_owner_action": False,
+        }
+    return {
+        "status": "temporarily_unavailable",
+        "label": "暂不可用",
+        "reason": blocked_reason,
+        "next_action": str(
+            runtime_owner.get("automatic_recovery_action")
+            or watcher_owner.get("automatic_recovery_action")
+            or "continue_watcher_observation"
+        ),
+        "needs_owner_action": False,
     }
 
 

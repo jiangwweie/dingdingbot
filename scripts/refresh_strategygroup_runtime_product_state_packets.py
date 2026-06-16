@@ -34,6 +34,10 @@ ENDPOINTS = (
         "strategy-group-live-facts-readiness.json",
     ),
     (
+        "/api/trading-console/owner-console-source-readiness",
+        "owner-console-source-readiness.json",
+    ),
+    (
         "/api/trading-console/strategygroup-runtime-pilot-status",
         "strategygroup-runtime-pilot-status.json",
     ),
@@ -180,7 +184,10 @@ def refresh_packets(
     api_root = api_base.rstrip("/")
     for endpoint, filename in ENDPOINTS:
         query = ""
-        if endpoint == "/api/trading-console/strategygroup-runtime-pilot-status":
+        if endpoint in {
+            "/api/trading-console/strategygroup-runtime-pilot-status",
+            "/api/trading-console/owner-console-source-readiness",
+        }:
             query = _runtime_pilot_status_query(
                 selected_strategy_group_id=selected_strategy_group_id,
                 max_symbols=max_symbols,
