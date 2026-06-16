@@ -1,0 +1,230 @@
+{
+  "strategy_group_id": "RSR-001",
+  "version": "2026-06-16-r0",
+  "name": "Relative Strength Rotation",
+  "status": "observe_only_scorer_handoff_draft_for_main_control_review",
+  "execution_boundary": {
+    "research_only": true,
+    "runtime_registration": false,
+    "exchange_write": false,
+    "order_intent": false,
+    "final_gate_authority": false,
+    "operation_layer_authority": false,
+    "order_lifecycle_authority": false,
+    "order_sizing_authority": false
+  },
+  "supported_symbols": [
+    "QQQUSDT",
+    "SPYUSDT",
+    "MSTRUSDT",
+    "COINUSDT",
+    "CRCLUSDT",
+    "HOODUSDT",
+    "PLTRUSDT",
+    "MUUSDT",
+    "SNDKUSDT",
+    "TSLAUSDT",
+    "NVDAUSDT",
+    "METAUSDT",
+    "GOOGLUSDT",
+    "AVGOUSDT",
+    "SOXLUSDT"
+  ],
+  "supported_symbol_scope": "research_observation_candidates_pending_main_control_exchange_rule_check",
+  "supported_sides": [
+    "long"
+  ],
+  "mode_recommendation": {
+    "default": "observe_only",
+    "allowed": [
+      "observe_only"
+    ],
+    "not_allowed_by_research_window": [
+      "armed_observation",
+      "auto_execute_after_gate"
+    ]
+  },
+  "signal_ready_rule": {
+    "status_name": "observe_only_relative_strength_scorer_ready",
+    "freshness_window_seconds": 120,
+    "timeframe": "1h",
+    "closed_candle_only": true,
+    "confidence_min": "0.70",
+    "side": "long",
+    "must_include": [
+      "direction",
+      "symbol",
+      "strategy_group_id",
+      "strategy_group_version",
+      "relative_strength_score",
+      "reference_index_state",
+      "rank_priority_state",
+      "decay_disable_state",
+      "entry_reason",
+      "invalidation_reason",
+      "required_facts_snapshot",
+      "freshness"
+    ],
+    "accepted_member_modes": [
+      "teq_rsr_72h_top4_hold72_rank_priority",
+      "teq_rsr_72h_strict_top2_hold72_index_confirmed"
+    ],
+    "stale_behavior": "emit_stale_signal_packet_and_block_candidate_prepare",
+    "conflict_behavior": "emit_conflict_packet_and_block_candidate_prepare"
+  },
+  "required_facts": {
+    "market": [
+      "latest_price",
+      "recent_1h_candles",
+      "closed_candle_timestamp",
+      "quote_volume_state",
+      "reference_index_price_state",
+      "mark_price_state",
+      "funding_rate_state"
+    ],
+    "strategy": [
+      "relative_strength_rotation_state",
+      "reference_index_mapping_state",
+      "rotation_concentration_state",
+      "rotation_decay_disable_state",
+      "rank_priority_reslot_state",
+      "index_confirmed_rotation_state",
+      "equity_session_gap_state",
+      "product_eligibility_state"
+    ],
+    "risk": [
+      "fill_gap_slippage_state",
+      "mark_funding_review_state",
+      "exchange_margin_liquidation_state",
+      "protection_plan_state",
+      "exit_plan_state"
+    ],
+    "account": [
+      "available_balance",
+      "active_position",
+      "open_orders",
+      "same_symbol_position_state"
+    ],
+    "exchange": [
+      "symbol_availability",
+      "min_notional",
+      "qty_step",
+      "price_tick",
+      "leverage_limit"
+    ]
+  },
+  "risk_defaults": {
+    "interpretation": "research_proposal_only_not_live_order_sizing_default",
+    "risk_tier": "tiny",
+    "max_notional_per_action_usdt": "8",
+    "max_active_positions": 1,
+    "default_leverage": "1",
+    "max_research_leverage": "2",
+    "stress_only_leverage": [
+      "3"
+    ],
+    "disabled_leverage": [
+      "5"
+    ],
+    "requires_sl": true,
+    "requires_tp_or_exit_plan": true,
+    "default_exit_horizon": "72h_observe_only_scorer_lane"
+  },
+  "hard_stops": [
+    "standalone_execution_requested",
+    "reference_index_mapping_missing",
+    "rank_priority_reslot_missing",
+    "rotation_decay_unbounded",
+    "session_gap_policy_missing",
+    "mark_funding_missing",
+    "real_margin_model_missing",
+    "high_leverage_requested",
+    "active_position_same_symbol",
+    "open_order_same_symbol",
+    "stale_market_facts",
+    "missing_exchange_rules",
+    "no_stop_loss_plan"
+  ],
+  "evidence_summary": {
+    "universe_symbols": "62 including QQQUSDT and SPYUSDT references",
+    "raw_signals": "6869",
+    "baseline_72h_top4_full_2x": "95.623394%",
+    "baseline_72h_top4_best_30d_2x": "650.990499%",
+    "rank_priority_baseline_full_2x": "334.274599%",
+    "rank_priority_baseline_best_30d_2x": "892.836220%",
+    "rank_priority_baseline_dd_2x": "-72.703589%",
+    "strict_top2_index_confirmed_full_2x": "146.393744%",
+    "strict_top2_index_confirmed_best_30d_2x": "330.020006%",
+    "strict_top2_index_confirmed_second_half_2x": "-27.303456%",
+    "negative_120h_top4_full_2x": "-80.027481%"
+  },
+  "evidence_paths": [
+    "docs/strategy-research/candidate-packets/RSR-001-relative-strength-rotation-packet.md",
+    "docs/strategy-research/teq-relative-strength-rotation/teq-relative-strength-rotation-summary.md",
+    "docs/strategy-research/rsr-decay-disable-classifier/rsr-decay-disable-classifier-summary.md"
+  ],
+  "sample_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "RSR-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "observe_only_relative_strength_scorer_ready",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "COINUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "entry_reason": "Closed-candle 72h relative-strength rank is high versus QQQ/SPY; observe-only because RSR is currently a TEQ support scorer.",
+    "invalidation_reason": "Decay state, stale facts, missing reference mapping, missing session/fill, missing mark/funding, or missing margin facts.",
+    "required_facts_snapshot": {
+      "relative_strength_rotation_state": "present",
+      "reference_index_mapping_state": "present",
+      "rank_priority_reslot_state": "present",
+      "rotation_decay_disable_state": "unresolved",
+      "equity_session_gap_state": "missing",
+      "exchange_margin_liquidation_state": "missing"
+    }
+  },
+  "sample_no_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "RSR-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "no_observe_only_relative_strength_scorer",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "MULTI",
+    "direction": "none",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "No closed-candle relative-strength rank clears the observe-only scorer rule."
+  },
+  "sample_stale_signal_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "RSR-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "stale_observe_only_relative_strength_scorer",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "COINUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "Freshness window exceeded or closed-candle/reference facts are stale."
+  },
+  "sample_conflict_packet": {
+    "packet_type": "strategy_group_signal",
+    "strategy_group_id": "RSR-001",
+    "strategy_group_version": "2026-06-16-r0",
+    "status": "conflict_observe_only_relative_strength_scorer",
+    "generated_at": "2026-06-16T00:00:00Z",
+    "symbol": "COINUSDT",
+    "direction": "long",
+    "candidate_prepare_allowed_by_research": false,
+    "execution_allowed_by_research": false,
+    "reason": "RSR scorer conflicts with TEQ blocker, stale reference mapping, same-symbol exposure, or another StrategyGroup direction."
+  },
+  "non_execution_flags": [
+    "not_runtime_registration",
+    "not_finalgate_input",
+    "not_operation_layer_input",
+    "not_order_authority",
+    "not_order_sizing_default"
+  ]
+}

@@ -25,6 +25,7 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 | `FBS-001` | `PASS` | `9` | `long,short_disable_or_redesign_only` | `0` |
 | `MPG-001` | `PASS` | `21` | `long` | `0` |
 | `PMR-001` | `PASS` | `7` | `short,long_context_only` | `0` |
+| `RSR-001` | `PASS` | `15` | `long` | `0` |
 | `SOR-001` | `PASS` | `9` | `short,long_revival_only` | `0` |
 | `TEQ-001` | `PASS` | `10` | `long` | `0` |
 | `VCB-001` | `PASS` | `7` | `long` | `0` |
@@ -32,8 +33,8 @@ OrderLifecycle, exchange gateway, or order-sizing authority.
 Summary:
 
 ```text
-Validated handoffs: 6
-Passed: 6
+Validated handoffs: 7
+Passed: 7
 Failed: 0
 ```
 
@@ -41,18 +42,18 @@ Failed: 0
 
 | Required Field | Coverage |
 | --- | ---: |
-| `strategy_group_id` | `6/6` |
-| `version` | `6/6` |
-| `supported_symbols` | `6/6` |
-| `supported_sides` | `6/6` |
-| `signal_ready_rule` | `6/6` |
-| `required_facts` | `6/6` |
-| `risk_defaults` | `6/6` |
-| `hard_stops` | `6/6` |
-| `sample_signal_packet` | `6/6` |
-| `sample_no_signal_packet` | `6/6` |
-| `sample_stale_signal_packet` | `6/6` |
-| `sample_conflict_packet` | `6/6` |
+| `strategy_group_id` | `7/7` |
+| `version` | `7/7` |
+| `supported_symbols` | `7/7` |
+| `supported_sides` | `7/7` |
+| `signal_ready_rule` | `7/7` |
+| `required_facts` | `7/7` |
+| `risk_defaults` | `7/7` |
+| `hard_stops` | `7/7` |
+| `sample_signal_packet` | `7/7` |
+| `sample_no_signal_packet` | `7/7` |
+| `sample_stale_signal_packet` | `7/7` |
+| `sample_conflict_packet` | `7/7` |
 
 ## Commands Run
 

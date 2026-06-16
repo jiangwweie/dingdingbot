@@ -489,8 +489,11 @@
         "docs/strategy-research/rsr-decay-disable-classifier/rsr-decay-disable-classifier-summary.md",
         "docs/strategy-research/teq-relative-strength-rotation/teq-relative-strength-rotation-summary.md"
       ],
-      "handoff_paths": [],
-      "revival_condition": "Advance only after second-half decay, session/fill, product-risk, mark/funding, and margin facts improve.",
+      "handoff_paths": [
+        "docs/strategy-research/strategy-group-handoffs/RSR-001/handoff.md",
+        "docs/strategy-research/strategy-group-handoffs/RSR-001/handoff.json"
+      ],
+      "revival_condition": "Advance beyond observe-only scorer only after second-half decay, session/fill, product-risk, mark/funding, and margin facts improve.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

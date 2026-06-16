@@ -17,7 +17,7 @@ sample packet expectations, and non-execution flags.
 | Rank | Candidate | Current Status | Handoff Target | Reason |
 | ---: | --- | --- | --- | --- |
 | 1 | `VCB-001` | `observe_only handoff draft complete` | Observe-only true-breakout classifier handoff draft. | Completed in `strategy-group-handoffs/VCB-001/`; broad breakout remains negative and armed observation remains blocked. |
-| 2 | `RSR-001` | `observe_only_scorer` | TEQ support scorer packet or conditional scorer handoff draft. | Strong 2026 TEQ relative-strength right-tail windows exist, but second-half decay and margin/session facts block standalone action. |
+| 2 | `RSR-001` | `observe_only scorer handoff draft complete` | TEQ support scorer packet or conditional scorer handoff draft. | Completed in `strategy-group-handoffs/RSR-001/`; it supports TEQ interpretation but remains blocked as standalone armed observation. |
 | 3 | `NLPD-001` | `research_candidate` | Low-history event-study observer draft. | Listing/event windows are interpretable and source-controlled, but sample breadth and survivorship facts block promotion. |
 | 4 | `LCF-001` | `facts_pipeline_required` | RequiredFacts design packet first. | High-potential liquidation-cascade thesis cannot be handoff-ready until force-order, OI, long-short, depth, ADL, and margin facts exist. |
 | 5 | `MDS-001` | `overlay_candidate` | PMR-adjacent overlay note. | Useful for metals dislocation and session mismatch, but not yet a standalone strategy group. |
@@ -62,8 +62,8 @@ sample packet expectations, and non-execution flags.
 
 1. Keep `VCB-001` observe-only until a signal-time classifier improves
    full-sequence behavior without post-entry labels.
-2. Draft `RSR-001` scorer packet only after deciding whether main control
-   wants scorers in the same handoff directory as StrategyGroups.
+2. Keep `RSR-001` as observe-only scorer until second-half decay,
+   session/fill, product-risk, mark/funding, and margin facts improve.
 3. Keep `NLPD-001` as event-study observer until a broader listing cohort
    exists.
 4. Record `LCF-001` as a RequiredFacts design task, not a strategy handoff.

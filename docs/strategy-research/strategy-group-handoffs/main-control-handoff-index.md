@@ -24,6 +24,7 @@ changes, live-profile changes, or order-sizing defaults.
 | `PMR-001` | `PMR-001/handoff.md` | `PMR-001/handoff.json` | Precious-metal short/weakness overlay | `observe_only` | `short`; long as context only |
 | `SOR-001` | `SOR-001/handoff.md` | `SOR-001/handoff.json` | Session opening-range / branch-specific right-tail | `armed_observation` | `short`; long as revival only |
 | `VCB-001` | `VCB-001/handoff.md` | `VCB-001/handoff.json` | Volatility compression true-breakout classifier draft | `observe_only` | `long` |
+| `RSR-001` | `RSR-001/handoff.md` | `RSR-001/handoff.json` | Relative-strength rotation TEQ support scorer draft | `observe_only` | `long` |
 
 ## Main-Control Consumption Contract
 
@@ -31,18 +32,18 @@ Each `handoff.json` includes the main-control required fields:
 
 | Field | Present In Batch | Main-Control Use |
 | --- | ---: | --- |
-| `strategy_group_id` | `6/6` | Stable Strategy Picker / admission identifier. |
-| `version` | `6/6` | Traceable signal and handoff source version. |
-| `supported_symbols` | `6/6` | Research observation universe pending exchange-rule validation. |
-| `supported_sides` | `6/6` | Direction scope and disabled/revival-side semantics. |
-| `signal_ready_rule` | `6/6` | Fresh-signal readiness semantics. |
-| `required_facts` | `6/6` | Runtime readiness, account, market, exchange, and strategy fact requirements. |
-| `risk_defaults` | `6/6` | Research risk proposal only; not live order-sizing defaults. |
-| `hard_stops` | `6/6` | Strategy-level blockers before observation/candidate preparation/execution review. |
-| `sample_signal_packet` | `6/6` | Example fresh signal output. |
-| `sample_no_signal_packet` | `6/6` | Example no-signal output. |
+| `strategy_group_id` | `7/7` | Stable Strategy Picker / admission identifier. |
+| `version` | `7/7` | Traceable signal and handoff source version. |
+| `supported_symbols` | `7/7` | Research observation universe pending exchange-rule validation. |
+| `supported_sides` | `7/7` | Direction scope and disabled/revival-side semantics. |
+| `signal_ready_rule` | `7/7` | Fresh-signal readiness semantics. |
+| `required_facts` | `7/7` | Runtime readiness, account, market, exchange, and strategy fact requirements. |
+| `risk_defaults` | `7/7` | Research risk proposal only; not live order-sizing defaults. |
+| `hard_stops` | `7/7` | Strategy-level blockers before observation/candidate preparation/execution review. |
+| `sample_signal_packet` | `7/7` | Example fresh signal output. |
+| `sample_no_signal_packet` | `7/7` | Example no-signal output. |
 
-All six JSON packs also include `sample_stale_signal_packet` and
+All seven JSON packs also include `sample_stale_signal_packet` and
 `sample_conflict_packet`.
 
 ## Low-Ambiguity Intake Supplements
@@ -64,6 +65,7 @@ All six JSON packs also include `sample_stale_signal_packet` and
 | `PMR-001` | Start as observe-only PMR short/overlay candidate; upgrade to armed observation only after session/mark facts are present. |
 | `SOR-001` | Admit branch-by-branch; do not treat it as broad opening-range alpha. |
 | `VCB-001` | Keep observe-only as true-breakout classifier draft; do not admit broad breakout or armed observation until signal-time classifier quality improves. |
+| `RSR-001` | Keep observe-only as TEQ support scorer; do not admit standalone armed observation until decay, session/fill, product, mark/funding, and margin facts improve. |
 
 ## Shared Main-Control Hard Stops
 
@@ -111,6 +113,7 @@ OK docs/strategy-research/strategy-group-handoffs/PMR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/SOR-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/TEQ-001/handoff.json
 OK docs/strategy-research/strategy-group-handoffs/VCB-001/handoff.json
+OK docs/strategy-research/strategy-group-handoffs/RSR-001/handoff.json
 
 FBS-001 complete symbols 9 sides long,short_disable_or_redesign_only
 MPG-001 complete symbols 21 sides long
@@ -118,6 +121,7 @@ PMR-001 complete symbols 7 sides short,long_context_only
 SOR-001 complete symbols 9 sides short,long_revival_only
 TEQ-001 complete symbols 10 sides long
 VCB-001 complete symbols 7 sides long
+RSR-001 complete symbols 15 sides long
 ```
 
 ## Boundary Proof
