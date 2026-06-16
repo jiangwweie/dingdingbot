@@ -60,7 +60,7 @@ The second P2 cabinet extension is recorded in
 | `TRIX-001` | TRIX zero-cross thin-sample right-tail review. | Boundary fixed in `trix-thin-sample-concentration-boundary-20260616.md`; preserve zero-cross long only while sample, concentration, broad persistence, session/fill, product-risk, and margin blockers remain. |
 | `PSAR-001` | Parabolic SAR bullish-flip burst review. | Boundary fixed in `psar-whipsaw-stop-reverse-boundary-20260616.md`; preserve bullish flip only while continuous stop-reverse, continuation, short-side, drawdown, session/fill, product-risk, and margin blockers remain. |
 | `ICH-001` | Ichimoku cloud-breakout window-revival vocabulary. | Boundary fixed in `ich-no-future-cloud-decay-boundary-20260616.md`; preserve no-future-cloud breakout only while full-sequence decay, component leakage, drawdown, session/fill, product-risk, and margin blockers remain. |
-| `CCI-001` | CCI trend escape / precious-metal failure-short revival. | Preserve metal +100 failure short and equity reclaim vocabulary; drawdown and off-hour facts block promotion. |
+| `CCI-001` | CCI trend escape / precious-metal failure-short revival. | Boundary fixed in `cci-asset-role-failure-boundary-20260616.md`; preserve metal +100 failure short and equity reclaim vocabulary while drawdown, asset-role, off-hour mark/index, fill, product-risk, and margin blockers remain. |
 | `AEB-001` | ATR expansion breakout short-window revival. | Preserve ATR24 equity expansion as 30d revival only; 90d decay and false-breakout risk block handoff. |
 | `STOCH-001` | Stochastic range-persistence / whipsaw vocabulary. | Park as vocabulary because 90d right-tail gate and full sequence fail. |
 

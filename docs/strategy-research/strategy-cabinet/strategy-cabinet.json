@@ -1096,12 +1096,15 @@
       "primary_blockers": [
         "drawdown_unresolved",
         "generic_cci_failure",
+        "asset_role_split_required",
+        "precious_metal_failure_quality_missing",
         "offhour_mark_index_missing",
         "fill_gap_missing",
         "product_risk_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/cci-asset-role-failure-boundary-20260616.md",
         "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
         "docs/strategy-research/candidate-packets/CCI-001-trend-escape-packet.md",
         "docs/strategy-research/cci-trend-escape-replay/cci-trend-escape-summary.md",

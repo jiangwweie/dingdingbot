@@ -32,6 +32,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `trix-thin-sample-concentration-boundary-20260616.md` | P2 supplement preserving `TRIX-001` zero-cross long as a thin-sample right-tail candidate while blocking handoff on sample size, concentration, broad TRIX decay, product/session/fill, and margin facts. |
 | `psar-whipsaw-stop-reverse-boundary-20260616.md` | P2 supplement preserving `PSAR-001` bullish flip burst as a right-tail candidate while blocking handoff on whipsaw, stop-reverse decay, drawdown, product/session/fill, and margin facts. |
 | `ich-no-future-cloud-decay-boundary-20260616.md` | P2 supplement preserving `ICH-001` no-future-cloud breakout as window-revival vocabulary while blocking handoff on full-sequence decay, drawdown, component leakage, product/session/fill, and margin facts. |
+| `cci-asset-role-failure-boundary-20260616.md` | P2 supplement preserving `CCI-001` precious-metal +100 failure short as window-revival vocabulary while blocking handoff on drawdown, asset-role split, off-hour mark/index, fill, and margin facts. |
 | `strategy-line-handoff-summary-20260616.md` | Owner/main-control-readable strategy-line handoff summary covering current vision, original strategy groups, new observe-only handoff drafts, non-handoff candidates, and strategy semantics. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
@@ -86,6 +87,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `trix-thin-sample-concentration-boundary-20260616.md` | `TRIX-001` boundary that preserves zero-cross long right-tail evidence while blocking handoff until sample size, concentration, zero-cross quality, product/session/fill, and real-margin blockers improve. |
 | `psar-whipsaw-stop-reverse-boundary-20260616.md` | `PSAR-001` boundary that preserves bullish flip burst evidence while blocking handoff until whipsaw, stop-reverse decay, drawdown, product/session/fill, and real-margin blockers improve. |
 | `ich-no-future-cloud-decay-boundary-20260616.md` | `ICH-001` boundary that preserves no-future-cloud breakout revival evidence while blocking handoff until leakage policy, cloud-breakout disable, window-decay, product/session/fill, and real-margin blockers improve. |
+| `cci-asset-role-failure-boundary-20260616.md` | `CCI-001` boundary that preserves precious-metal +100 failure short evidence while blocking handoff until asset-role split, drawdown, off-hour mark/index, fill/gap, and real-margin blockers improve. |
 | `strategy-line-handoff-summary-20260616.md` | Strategy-line handoff summary for Owner and main control, translating strategy IDs into semantics and current intake decisions. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
