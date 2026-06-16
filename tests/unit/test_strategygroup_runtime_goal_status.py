@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
+from scripts import build_strategygroup_runtime_goal_status as goal_status
 from scripts.build_strategygroup_runtime_goal_status import build_goal_status_packet
 
 
@@ -1001,3 +1003,32 @@ def test_goal_status_surfaces_deploy_channel_degraded_from_source_readiness(
     assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["evidence"][
         "deploy_channel_blockers"
     ]
+
+
+def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--report-dir",
+            str(report_dir),
+            "--json",
+        ],
+    )
+
+    assert goal_status.main() == 0
+
+    output_path = report_dir / "strategygroup-runtime-goal-status.json"
+    assert output_path.exists()
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["status"] == "waiting_for_signal"
+    stdout_packet = json.loads(capsys.readouterr().out)
+    assert stdout_packet["status"] == "waiting_for_signal"

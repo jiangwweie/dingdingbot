@@ -345,32 +345,19 @@ def _real_order_readiness_matrix(
             "max_exposure_scope_mismatch",
         ),
     )
+    deployment_channel_blocked = status == "deployment_issue" or any(
+        str(item).startswith("deploy_channel:") for item in blockers
+    )
 
     return [
         _readiness_item(
             "deployment_channel",
-            "blocked" if "deployment_issue" in status or any(
-                str(item).startswith("deploy_channel:")
-                for item in blockers
-            ) else "pass",
-            "deployment_issue" if "deployment_issue" in status or any(
-                str(item).startswith("deploy_channel:")
-                for item in blockers
-            ) else "none",
-            bool(
-                "deployment_issue" in status
-                or any(
-                    str(item).startswith("deploy_channel:")
-                    for item in blockers
-                )
-            ),
+            "blocked" if deployment_channel_blocked else "pass",
+            "deployment_issue" if deployment_channel_blocked else "none",
+            deployment_channel_blocked,
             (
                 "部署通道暂不可用"
-                if "deployment_issue" in status
-                or any(
-                    str(item).startswith("deploy_channel:")
-                    for item in blockers
-                )
+                if deployment_channel_blocked
                 else "部署通道未阻断当前链路"
             ),
             "owner-console-source-readiness.source_health.deploy_channel",
@@ -554,6 +541,19 @@ def _status_from_submit_blockers(
         "record_submit_blocker_review_and_refresh_required_facts",
         "Operation Layer evidence 已到边界，但仍有事实、保护或预算缺口，真实提交保持关闭",
     )
+
+
+def _resolve_output_json(
+    *,
+    report_dir: Path,
+    output_json: Path | None,
+    report_dir_explicit: bool,
+) -> Path:
+    if output_json is not None:
+        return output_json
+    if report_dir_explicit:
+        return report_dir / DEFAULT_OUTPUT_JSON.name
+    return DEFAULT_OUTPUT_JSON
 
 
 def _runtime_dry_run_required_checks_passed(checks: dict[str, Any]) -> bool:
@@ -1007,19 +1007,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build a read-only StrategyGroup runtime goal status packet."
     )
-    parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
+    parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--release-manifest", type=Path)
     parser.add_argument("--expected-head")
-    parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
+    parser.add_argument("--output-json", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
+    report_dir = args.report_dir or DEFAULT_REPORT_DIR
+    output_json = _resolve_output_json(
+        report_dir=report_dir,
+        output_json=args.output_json,
+        report_dir_explicit=args.report_dir is not None,
+    )
     packet = build_goal_status_packet(
-        report_dir=args.report_dir,
+        report_dir=report_dir,
         release_manifest=args.release_manifest,
         expected_head=args.expected_head,
     )
-    _write_json(args.output_json, packet)
+    _write_json(output_json, packet)
     if args.json:
         print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if packet["status"] not in {"hard_safety_stop", "deployment_issue"} else 2
