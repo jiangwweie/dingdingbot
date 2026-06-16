@@ -1,8 +1,7 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { automationStateLabels, healthLabels } from "../data";
@@ -215,6 +214,15 @@ export function CurrentStrategyPanel({ strategy }: { strategy: StrategyGroupProd
 
   const state = stateTone[strategy.automationState];
   const ownerAttention = attentionTone[strategy.ownerAttention];
+  const primaryHealth = primaryHealthFor(strategy);
+  const primaryStatusText =
+    primaryHealth.state === "normal"
+      ? "边界内状态正常"
+      : `${primaryHealth.label}${healthLabels[primaryHealth.state]}`;
+  const situationText =
+    strategy.automationState === "waiting_for_opportunity"
+      ? "系统正在观察，等待市场机会"
+      : strategy.availabilityReason || primaryStatusText;
 
   return (
     <Card className="rounded-2xl shadow-[var(--shadow-panel)]">
@@ -230,12 +238,19 @@ export function CurrentStrategyPanel({ strategy }: { strategy: StrategyGroupProd
           </div>
         </div>
         <MiniTrendChart tone={state} />
+        <div className="rounded-2xl border bg-[color:var(--background-card-raised)] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <StatusBadge tone={state}>{strategy.automationLabel || automationStateLabels[strategy.automationState]}</StatusBadge>
+            <span className={cn("text-sm font-semibold", toneTextClass(ownerAttention))}>{strategy.ownerAttentionLabel}</span>
+          </div>
+          <div className="mt-3 text-lg font-semibold">{situationText}</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {primaryHealth.state === "normal" ? "资金、订单、持仓和保护保持在可观察边界内" : "详细状态已收起到资金和订单页面"}
+          </div>
+        </div>
         <div className="flex flex-col gap-3">
           <ContextRow label="状态" tone={state} value={strategy.automationLabel || automationStateLabels[strategy.automationState]} />
-          <ContextRow label="资金" tone={healthTone[strategy.funds]} value={healthLabels[strategy.funds]} />
-          <ContextRow label="订单" tone={healthTone[strategy.orders]} value={healthLabels[strategy.orders]} />
-          <ContextRow label="持仓" tone={healthTone[strategy.position]} value={healthLabels[strategy.position]} />
-          <ContextRow label="保护" tone={healthTone[strategy.protection]} value={healthLabels[strategy.protection]} />
+          <ContextRow label={primaryHealth.label} tone={healthTone[primaryHealth.state]} value={primaryStatusText} />
           <ContextRow label="处理" tone={ownerAttention} value={strategy.ownerAttentionLabel} />
         </div>
         {strategy.availabilityReason && (
@@ -245,10 +260,6 @@ export function CurrentStrategyPanel({ strategy }: { strategy: StrategyGroupProd
             <AlertDescription className="text-[color:var(--status-danger)]">{strategy.availabilityReason}</AlertDescription>
           </Alert>
         )}
-        <Button className="w-full justify-between" variant="outline">
-          查看记录
-          <ChevronRight />
-        </Button>
       </CardContent>
     </Card>
   );
