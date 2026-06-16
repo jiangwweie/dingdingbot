@@ -181,6 +181,7 @@ def build_git_deploy_plan(
     source_repo_path = f"{source_root}/dingdingbot"
     releases_dir = f"{deploy_root}/releases"
     reports_dir = f"{deploy_root}/reports/{final_release_name}"
+    watcher_reports_dir = f"{deploy_root}/reports/runtime-signal-watcher"
     backups_dir = f"{deploy_root}/backups"
     app_current = f"{deploy_root}/app/current"
     remote_release_path = f"{releases_dir}/{final_release_name}"
@@ -208,6 +209,7 @@ def build_git_deploy_plan(
         source_root=source_root,
         source_repo_path=source_repo_path,
         reports_dir=reports_dir,
+        watcher_reports_dir=watcher_reports_dir,
         backups_dir=backups_dir,
         app_current=app_current,
         remote_release_path=remote_release_path,
@@ -320,6 +322,7 @@ def _plan_phases(
     source_root: str,
     source_repo_path: str,
     reports_dir: str,
+    watcher_reports_dir: str,
     backups_dir: str,
     app_current: str,
     remote_release_path: str,
@@ -344,6 +347,33 @@ def _plan_phases(
     q = shlex.quote
     local_python = "/opt/homebrew/bin/python3"
     manifest_json = json.dumps(manifest_payload, indent=2, sort_keys=True)
+    deploy_channel_status_json = json.dumps(
+        {
+            "scope": "tokyo_runtime_governance_deploy_channel_status",
+            "status": "postdeploy_accepted",
+            "deployed_head": target_commit,
+            "release_path": remote_release_path,
+            "checks": {
+                "blockers": [],
+                "tokyo_probe_blockers": [],
+                "tokyo_connectivity_blockers": [],
+                "tokyo_connectivity_probe_ready": True,
+                "postdeploy_acceptance_passed": True,
+            },
+            "safety_invariants": {
+                "deploy_channel_status_only": True,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+                "exchange_write_called": False,
+                "withdrawal_or_transfer_created": False,
+                "mutates_secrets": False,
+                "mutates_live_profile": False,
+                "mutates_order_sizing": False,
+            },
+        },
+        indent=2,
+        sort_keys=True,
+    )
     health_url = api_base.rstrip("/") + "/api/health"
     health_wait_command = (
         f"set -eu; HEALTH_URL={q(health_url)}; "
@@ -529,6 +559,14 @@ def _plan_phases(
                     f"--expected-current-head {q(target_commit)} "
                     f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
+                ),
+                _ssh(
+                    host,
+                    (
+                        f"set -eu; mkdir -p {q(watcher_reports_dir)}; "
+                        f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
+                        f"{deploy_channel_status_json}\nJSON\n"
+                    ),
                 ),
                 _ssh(
                     host,

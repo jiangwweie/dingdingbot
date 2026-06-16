@@ -356,6 +356,9 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "git fetch --prune origin" in all_commands
     assert "git archive" in all_commands
     assert ".brc-release-manifest.json" in all_commands
+    assert "tokyo-deploy-channel-status.json" in all_commands
+    assert "tokyo_runtime_governance_deploy_channel_status" in all_commands
+    assert '"status": "postdeploy_accepted"' in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
     assert "--expected-min-migrations 84" in all_commands
