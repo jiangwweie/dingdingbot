@@ -125,8 +125,16 @@ def refresh_packets(
     selected_strategy_group_id: str | None = None,
     max_symbols: int | None = None,
     stale_after_seconds: int | None = None,
+    refresh_dry_run_audit_chain: bool = False,
+    dry_run_output_dir: Path | None = None,
+    dry_run_output_json: Path | None = None,
+    dry_run_builder: Callable[..., dict[str, Any]] | None = None,
+    refresh_goal_status: bool = False,
+    goal_status_output_json: Path | None = None,
+    release_manifest: Path | None = None,
+    expected_head: str | None = None,
+    goal_status_builder: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    cookie = cookie or _operator_cookie()
     generated_at_ms = generated_at_ms or int(time.time() * 1000)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,46 +189,163 @@ def refresh_packets(
                 "output_json": str(resolved_live_facts_output),
             }
 
-    api_root = api_base.rstrip("/")
-    for endpoint, filename in ENDPOINTS:
-        query = ""
-        if endpoint in {
-            "/api/trading-console/strategygroup-runtime-pilot-status",
-            "/api/trading-console/owner-console-source-readiness",
-        }:
-            query = _runtime_pilot_status_query(
-                selected_strategy_group_id=selected_strategy_group_id,
-                max_symbols=max_symbols,
-                stale_after_seconds=stale_after_seconds,
-            )
-        url = f"{api_root}{endpoint}" + (f"?{query}" if query else "")
-        output_path = output_dir / filename
+    dry_run_audit_refresh: dict[str, Any] = {
+        "enabled": refresh_dry_run_audit_chain,
+        "status": "skipped",
+    }
+    if refresh_dry_run_audit_chain:
+        from scripts.runtime_dry_run_audit_chain import (
+            DEFAULT_OUTPUT_JSON as DEFAULT_DRY_RUN_OUTPUT_JSON,
+            build_audit_chain,
+        )
+
+        builder = dry_run_builder or build_audit_chain
+        resolved_dry_run_output_dir = dry_run_output_dir or output_dir / "dry-run-audit-chain"
+        resolved_dry_run_output_json = (
+            dry_run_output_json or output_dir / DEFAULT_DRY_RUN_OUTPUT_JSON.name
+        )
         try:
-            response = _request_json(
-                url=url,
-                cookie=cookie,
-                timeout_seconds=timeout_seconds,
-                opener=opener,
-            )
-            packet = (
-                response.get("data")
-                if isinstance(response.get("data"), dict)
-                else response
-            )
-            _write_json(output_path, packet)
+            dry_run_packet = builder(resolved_dry_run_output_dir)
+            _write_json(resolved_dry_run_output_json, dry_run_packet)
+            dry_run_audit_refresh = {
+                "enabled": True,
+                "status": dry_run_packet.get("status"),
+                "output_json": str(resolved_dry_run_output_json),
+                "output_dir": str(resolved_dry_run_output_dir),
+                "scenario_count": dry_run_packet.get("scenario_count"),
+                "dangerous_effects_absent": (
+                    (dry_run_packet.get("checks") or {}).get(
+                        "dangerous_effects_absent"
+                    )
+                    is True
+                ),
+            }
+            if dry_run_packet.get("status") != "passed":
+                blockers.append("runtime_dry_run_audit_chain_not_passed")
+        except Exception as exc:
+            blockers.append(f"runtime_dry_run_audit_chain_failed:{type(exc).__name__}")
+            warnings.append(str(exc))
+            dry_run_audit_refresh = {
+                "enabled": True,
+                "status": "failed",
+                "output_json": str(resolved_dry_run_output_json),
+                "output_dir": str(resolved_dry_run_output_dir),
+            }
+
+    if cookie is None:
+        try:
+            cookie = _operator_cookie()
+        except Exception as exc:
+            blockers.append(f"operator_cookie_unavailable:{type(exc).__name__}")
+            warnings.append(str(exc))
+
+    api_root = api_base.rstrip("/")
+    if cookie is None:
+        for endpoint, filename in ENDPOINTS:
+            output_path = output_dir / filename
+            blockers.append(f"{filename}:refresh_skipped:operator_cookie_unavailable")
             packets.append(
                 {
                     "endpoint": endpoint,
                     "output_json": str(output_path),
-                    "status": packet.get("status"),
-                    "api_freshness_status": response.get("freshness_status"),
-                    "api_blocker_count": len(response.get("blockers") or []),
-                    "api_warning_count": len(response.get("warnings") or []),
+                    "status": "skipped_operator_cookie_unavailable",
+                    "api_freshness_status": None,
+                    "api_blocker_count": 1,
+                    "api_warning_count": 1,
                 }
             )
+    else:
+        for endpoint, filename in ENDPOINTS:
+            query = ""
+            if endpoint in {
+                "/api/trading-console/strategygroup-runtime-pilot-status",
+                "/api/trading-console/owner-console-source-readiness",
+            }:
+                query = _runtime_pilot_status_query(
+                    selected_strategy_group_id=selected_strategy_group_id,
+                    max_symbols=max_symbols,
+                    stale_after_seconds=stale_after_seconds,
+                )
+            url = f"{api_root}{endpoint}" + (f"?{query}" if query else "")
+            output_path = output_dir / filename
+            try:
+                response = _request_json(
+                    url=url,
+                    cookie=cookie,
+                    timeout_seconds=timeout_seconds,
+                    opener=opener,
+                )
+                packet = (
+                    response.get("data")
+                    if isinstance(response.get("data"), dict)
+                    else response
+                )
+                _write_json(output_path, packet)
+                packets.append(
+                    {
+                        "endpoint": endpoint,
+                        "output_json": str(output_path),
+                        "status": packet.get("status"),
+                        "api_freshness_status": response.get("freshness_status"),
+                        "api_blocker_count": len(response.get("blockers") or []),
+                        "api_warning_count": len(response.get("warnings") or []),
+                    }
+                )
+            except Exception as exc:
+                blockers.append(f"{filename}:refresh_failed:{type(exc).__name__}")
+                warnings.append(str(exc))
+
+    goal_status_refresh: dict[str, Any] = {
+        "enabled": refresh_goal_status,
+        "status": "skipped",
+    }
+    if refresh_goal_status:
+        from scripts.build_strategygroup_runtime_goal_status import (
+            DEFAULT_OUTPUT_JSON as DEFAULT_GOAL_STATUS_OUTPUT_JSON,
+            build_goal_status_packet,
+        )
+
+        builder = goal_status_builder or build_goal_status_packet
+        resolved_goal_status_output_json = (
+            goal_status_output_json or output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
+        )
+        try:
+            goal_status_packet = builder(
+                report_dir=output_dir,
+                release_manifest=release_manifest,
+                expected_head=expected_head,
+            )
+            _write_json(resolved_goal_status_output_json, goal_status_packet)
+            goal_status_refresh = {
+                "enabled": True,
+                "status": goal_status_packet.get("status"),
+                "output_json": str(resolved_goal_status_output_json),
+                "next_safe_checkpoint": (
+                    (goal_status_packet.get("owner_state") or {}).get(
+                        "next_safe_checkpoint"
+                    )
+                ),
+                "runtime_dry_run_audit_passed": (
+                    (goal_status_packet.get("checks") or {}).get(
+                        "runtime_dry_run_audit_passed"
+                    )
+                    is True
+                ),
+                "ready_for_real_order_action": (
+                    (goal_status_packet.get("real_order_boundary") or {}).get(
+                        "ready_for_real_order_action"
+                    )
+                    is True
+                ),
+            }
         except Exception as exc:
-            blockers.append(f"{filename}:refresh_failed:{type(exc).__name__}")
+            blockers.append(f"strategygroup_runtime_goal_status_failed:{type(exc).__name__}")
             warnings.append(str(exc))
+            goal_status_refresh = {
+                "enabled": True,
+                "status": "failed",
+                "output_json": str(resolved_goal_status_output_json),
+            }
 
     status = "refreshed" if not blockers else "refresh_blocked"
     return {
@@ -230,6 +355,8 @@ def refresh_packets(
         "generated_at_ms": generated_at_ms,
         "packets": packets,
         "live_facts_precollect": live_facts_precollect,
+        "dry_run_audit_refresh": dry_run_audit_refresh,
+        "goal_status_refresh": goal_status_refresh,
         "blockers": blockers,
         "warnings": warnings,
         "selected_scope_config": {
@@ -241,6 +368,8 @@ def refresh_packets(
         "safety_invariants": {
             "readmodel_refresh_only": True,
             "optional_signed_get_live_facts_precollect": collect_live_facts_before_refresh,
+            "optional_dry_run_audit_chain_refresh": refresh_dry_run_audit_chain,
+            "optional_goal_status_refresh": refresh_goal_status,
             "exchange_write_called": False,
             "order_created": False,
             "order_lifecycle_called": False,
@@ -267,6 +396,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env-file")
     parser.add_argument("--live-facts-output")
     parser.add_argument("--live-facts-base-url")
+    parser.add_argument("--refresh-dry-run-audit-chain", action="store_true")
+    parser.add_argument("--dry-run-output-dir")
+    parser.add_argument("--dry-run-output-json")
+    parser.add_argument("--refresh-goal-status", action="store_true")
+    parser.add_argument("--goal-status-output-json")
+    parser.add_argument("--release-manifest")
+    parser.add_argument("--expected-head")
     parser.add_argument(
         "--selected-strategy-group-id",
         default=os.environ.get("BRC_SELECTED_STRATEGY_GROUP_ID")
@@ -312,6 +448,29 @@ def main(argv: list[str] | None = None) -> int:
         selected_strategy_group_id=args.selected_strategy_group_id,
         max_symbols=args.max_symbols,
         stale_after_seconds=args.stale_after_seconds,
+        refresh_dry_run_audit_chain=args.refresh_dry_run_audit_chain,
+        dry_run_output_dir=(
+            Path(args.dry_run_output_dir).expanduser()
+            if args.dry_run_output_dir
+            else None
+        ),
+        dry_run_output_json=(
+            Path(args.dry_run_output_json).expanduser()
+            if args.dry_run_output_json
+            else None
+        ),
+        refresh_goal_status=args.refresh_goal_status,
+        goal_status_output_json=(
+            Path(args.goal_status_output_json).expanduser()
+            if args.goal_status_output_json
+            else None
+        ),
+        release_manifest=(
+            Path(args.release_manifest).expanduser()
+            if args.release_manifest
+            else None
+        ),
+        expected_head=args.expected_head,
     )
     if args.output_json:
         _write_json(Path(args.output_json).expanduser(), packet)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from scripts.refresh_strategygroup_runtime_product_state_packets import refresh_packets
+from scripts import refresh_strategygroup_runtime_product_state_packets as refresh_script
 
 
 class _FakeResponse:
@@ -89,6 +90,8 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
     assert packet["safety_invariants"] == {
         "readmodel_refresh_only": True,
         "optional_signed_get_live_facts_precollect": False,
+        "optional_dry_run_audit_chain_refresh": False,
+        "optional_goal_status_refresh": False,
         "exchange_write_called": False,
         "order_created": False,
         "order_lifecycle_called": False,
@@ -173,6 +176,8 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
         "signed_get_only": True,
     }
     assert packet["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
+    assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is False
+    assert packet["safety_invariants"]["optional_goal_status_refresh"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
 
@@ -249,3 +254,161 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
         "/api/trading-console/strategygroup-runtime-pilot-status"
         "?selected_strategy_group_id=SOR-001&max_symbols=2&stale_after_seconds=240"
     )
+
+
+def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
+    payloads = {
+        "/api/trading-console/strategy-group-live-facts-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "strategy_group_live_facts_ready_for_armed_observation"},
+        },
+        "/api/trading-console/owner-console-source-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "ready"},
+        },
+        "/api/trading-console/strategygroup-runtime-pilot-status": {
+            "freshness_status": "warning",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "waiting_for_market"},
+        },
+    }
+
+    def opener(request, timeout):
+        path = request.full_url.replace("http://unit", "")
+        return _FakeResponse(payloads[path])
+
+    def dry_run_builder(output_dir):
+        assert output_dir == tmp_path / "dry"
+        return {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "scenario_count": 12,
+            "checks": {"dangerous_effects_absent": True},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    def goal_status_builder(**kwargs):
+        assert kwargs["report_dir"] == tmp_path
+        assert kwargs["release_manifest"] == tmp_path / "manifest.json"
+        assert kwargs["expected_head"] == "abc123"
+        return {
+            "scope": "strategygroup_runtime_goal_status",
+            "status": "waiting_for_signal",
+            "checks": {"runtime_dry_run_audit_passed": True},
+            "owner_state": {"next_safe_checkpoint": "continue_watcher_observation"},
+            "real_order_boundary": {"ready_for_real_order_action": False},
+        }
+
+    packet = refresh_packets(
+        api_base="http://unit",
+        output_dir=tmp_path,
+        label="unit",
+        timeout_seconds=7,
+        cookie="session=test",
+        opener=opener,
+        generated_at_ms=1,
+        refresh_dry_run_audit_chain=True,
+        dry_run_output_dir=tmp_path / "dry",
+        dry_run_output_json=tmp_path / "runtime-dry-run-audit-chain.json",
+        dry_run_builder=dry_run_builder,
+        refresh_goal_status=True,
+        goal_status_output_json=tmp_path / "strategygroup-runtime-goal-status.json",
+        release_manifest=tmp_path / "manifest.json",
+        expected_head="abc123",
+        goal_status_builder=goal_status_builder,
+    )
+
+    assert packet["status"] == "refreshed"
+    assert packet["dry_run_audit_refresh"] == {
+        "enabled": True,
+        "status": "passed",
+        "output_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
+        "output_dir": str(tmp_path / "dry"),
+        "scenario_count": 12,
+        "dangerous_effects_absent": True,
+    }
+    assert packet["goal_status_refresh"] == {
+        "enabled": True,
+        "status": "waiting_for_signal",
+        "output_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
+        "next_safe_checkpoint": "continue_watcher_observation",
+        "runtime_dry_run_audit_passed": True,
+        "ready_for_real_order_action": False,
+    }
+    assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
+    assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
+    assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
+    assert packet["safety_invariants"]["optional_goal_status_refresh"] is True
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
+    tmp_path,
+    monkeypatch,
+):
+    def missing_cookie():
+        raise RuntimeError("operator auth missing")
+
+    def dry_run_builder(output_dir):
+        return {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "scenario_count": 12,
+            "checks": {"dangerous_effects_absent": True},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    def goal_status_builder(**kwargs):
+        return {
+            "scope": "strategygroup_runtime_goal_status",
+            "status": "missing_fact",
+            "checks": {"runtime_dry_run_audit_passed": True},
+            "owner_state": {
+                "next_safe_checkpoint": "refresh_or_repair_owner_console_source_readiness"
+            },
+            "real_order_boundary": {"ready_for_real_order_action": False},
+        }
+
+    monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
+
+    packet = refresh_packets(
+        api_base="http://unit",
+        output_dir=tmp_path,
+        label="unit",
+        timeout_seconds=7,
+        generated_at_ms=1,
+        refresh_dry_run_audit_chain=True,
+        dry_run_output_dir=tmp_path / "dry",
+        dry_run_output_json=tmp_path / "runtime-dry-run-audit-chain.json",
+        dry_run_builder=dry_run_builder,
+        refresh_goal_status=True,
+        goal_status_output_json=tmp_path / "strategygroup-runtime-goal-status.json",
+        goal_status_builder=goal_status_builder,
+    )
+
+    assert packet["status"] == "refresh_blocked"
+    assert packet["dry_run_audit_refresh"]["status"] == "passed"
+    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert "operator_cookie_unavailable:RuntimeError" in packet["blockers"]
+    assert (
+        "owner-console-source-readiness.json:refresh_skipped:"
+        "operator_cookie_unavailable"
+    ) in packet["blockers"]
+    assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
+    assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False

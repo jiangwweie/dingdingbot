@@ -288,6 +288,26 @@ manually copying packet files.
 | Budget/protection missing facts | `budget:missing` and `protection:missing` surface as missing-fact submit blockers |
 | Safety | This remains read-only packet aggregation; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
+### 2026-06-17 Local Product-State Refresh Checkpoint
+
+`scripts/refresh_strategygroup_runtime_product_state_packets.py` can now be
+used as a local main-control refresh wrapper. When explicitly requested, it
+refreshes the non-executing dry-run audit chain and then rebuilds
+`strategygroup-runtime-goal-status.json` from the same report directory.
+
+If local operator auth is missing, API readmodel refresh is recorded as a
+reviewable blocker, but local dry-run audit and goal-status packets are still
+written. This prevents no-signal development turns from stopping only because
+the local console server/auth environment is not running.
+
+| Item | Result |
+| --- | --- |
+| Optional dry-run refresh | `--refresh-dry-run-audit-chain` writes `runtime-dry-run-audit-chain.json` |
+| Optional goal-status refresh | `--refresh-goal-status` writes `strategygroup-runtime-goal-status.json` |
+| Local auth missing | Records `operator_cookie_unavailable` and skips API packets instead of aborting the local audit refresh |
+| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=12`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
+| Safety | The wrapper remains readmodel/local-packet only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+
 ### Evidence Relay Checks
 
 The mock fresh signal pass scenario must prove these handoff checks before a
