@@ -1399,6 +1399,23 @@ def _runtime_live_enablement_query(
     }
 
 
+def _clean_query_params(query: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in query.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, list):
+            items = [item for item in value if str(item or "").strip()]
+            if not items:
+                continue
+            cleaned[key] = items
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
 def _runtime_live_enablement_forbidden_effects(body: dict[str, Any]) -> list[str]:
     checks = {
         "execution_intent_created": False,
@@ -1445,7 +1462,12 @@ def _run_runtime_live_enablement(
         "/api/trading-console/strategy-runtimes/"
         f"{urllib.parse.quote(runtime_instance_id, safe='')}/live-enablement-preview"
     )
-    preview_url = api_base + preview_path + "?" + urllib.parse.urlencode(query, doseq=True)
+    preview_url = (
+        api_base
+        + preview_path
+        + "?"
+        + urllib.parse.urlencode(_clean_query_params(query), doseq=True)
+    )
     preview_response = _request_json(
         method="GET",
         url=preview_url,

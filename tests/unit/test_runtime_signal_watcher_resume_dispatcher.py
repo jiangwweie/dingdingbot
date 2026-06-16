@@ -732,6 +732,75 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
     assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
+def test_runtime_live_enablement_query_omits_missing_optional_evidence_ids(
+    monkeypatch,
+):
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        if kwargs["method"] == "GET":
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": {
+                    "status": "ready_for_live_runtime_enablement_mutation_design",
+                    "blockers": [],
+                    "warnings": [],
+                    "execution_intent_created": False,
+                    "order_created": False,
+                    "exchange_called": False,
+                    "owner_bounded_execution_called": False,
+                    "order_lifecycle_called": False,
+                    "withdrawal_instruction_created": False,
+                    "transfer_instruction_created": False,
+                },
+            }
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "applied",
+                "blockers": [],
+                "warnings": [],
+                "runtime_state_mutated": True,
+                "execution_intent_created": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+                "withdrawal_instruction_created": False,
+                "transfer_instruction_created": False,
+            },
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    result = dispatcher._run_runtime_live_enablement(
+        runtime_instance_id="runtime-mpg-1",
+        authorization_id="auth-ready-1",
+        command_plan=dispatcher._operation_layer_command_plan(
+            authorization_id="auth-ready-1",
+        ),
+        evidence_report=_operation_layer_shadow_boundary_report(),
+        timeout_seconds=30,
+    )
+
+    assert result["mutation_applied"] is True
+    preview_query = parse_qs(urlparse(calls[0]["url"]).query)
+    assert "exchange_submit_execution_result_id" not in preview_query
+    assert "runtime_submit_rehearsal_id" not in preview_query
+    assert "deployment_readiness_evidence_id" not in preview_query
+    assert preview_query["trusted_submit_fact_snapshot_id"] == ["trusted-facts-1"]
+    assert calls[1]["method"] == "POST"
+    assert calls[1]["body"]["owner_real_submit_authorization_id"] == "auth-ready-1"
+
+
 def test_dispatcher_translates_operation_layer_evidence_blocker():
     packet = build_dispatch_packet(
         resume_pack=_finalgate_ready_dispatch_packet(),
