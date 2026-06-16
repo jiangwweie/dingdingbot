@@ -308,6 +308,23 @@ the local console server/auth environment is not running.
 | Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=12`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
 | Safety | The wrapper remains readmodel/local-packet only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
+### 2026-06-17 Source-Readiness Fallback Checkpoint
+
+When local operator auth is missing, product-state refresh now writes a
+degraded `owner-console-source-readiness.json` fallback packet instead of
+leaving the source-readiness file absent. The fallback keeps the Owner Console
+contract shape but marks account, orders, positions, protection, runtime source,
+and watcher as unavailable.
+
+| Item | Result |
+| --- | --- |
+| Fallback trigger | `operator_cookie_unavailable` while refreshing readmodel APIs |
+| Fallback packet | `owner-console-source-readiness.json.status=source_unavailable` |
+| Preserved health | `runtime_dry_run_audit=审计演练正常` when the local dry-run audit passed |
+| Goal-status effect | `strategygroup-runtime-goal-status` no longer reports `missing_packet:source_readiness`; it still reports `source_readiness_not_ready` and `live_facts_not_ready` until real readmodels/facts are available |
+| No fake readiness | Funds, orders, positions, protection, runtime source, and watcher remain unavailable in the fallback |
+| Safety | Fallback packet generation is local/read-only and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
+
 ### Evidence Relay Checks
 
 The mock fresh signal pass scenario must prove these handoff checks before a

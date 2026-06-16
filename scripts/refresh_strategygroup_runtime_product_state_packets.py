@@ -107,6 +107,291 @@ def _runtime_pilot_status_query(
     return urllib.parse.urlencode(query)
 
 
+def _read_json_if_exists(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
+def _detail_source(
+    *,
+    status: str,
+    owner_label: str,
+    reason: str,
+    summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": status,
+        "owner_label": owner_label,
+        "reason": reason,
+    }
+    if summary is not None:
+        payload["summary"] = summary
+    return payload
+
+
+def _real_order_readiness_fallback(
+    runtime_goal_status: dict[str, Any],
+) -> dict[str, Any]:
+    matrix = runtime_goal_status.get("real_order_readiness_matrix")
+    rows = [item for item in matrix if isinstance(item, dict)] if isinstance(matrix, list) else []
+    boundary = (
+        runtime_goal_status.get("real_order_boundary")
+        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+        else {}
+    )
+    owner_state = (
+        runtime_goal_status.get("owner_state")
+        if isinstance(runtime_goal_status.get("owner_state"), dict)
+        else {}
+    )
+    submit_blocking_keys = [
+        str(item.get("key"))
+        for item in rows
+        if item.get("blocks_real_submit") is True and item.get("key")
+    ]
+    waiting_count = sum(
+        1
+        for item in rows
+        if str(item.get("status") or "").startswith("waiting")
+    )
+    blocked_count = sum(
+        1 for item in rows if str(item.get("status") or "") == "blocked"
+    )
+    pass_count = sum(1 for item in rows if str(item.get("status") or "") == "pass")
+    ready = boundary.get("ready_for_real_order_action") is True
+    status = (
+        "ready_for_real_order"
+        if ready
+        else "waiting_for_market"
+        if submit_blocking_keys == ["fresh_signal"] or waiting_count
+        else "blocked"
+        if blocked_count
+        else "unavailable"
+    )
+    owner_label = (
+        "可进入实盘动作"
+        if ready
+        else "等待机会"
+        if status == "waiting_for_market"
+        else "实盘边界暂不可用"
+    )
+    return {
+        "status": status,
+        "owner_label": owner_label,
+        "owner_detail": str(owner_state.get("detail") or owner_label),
+        "ready_for_real_order_action": ready,
+        "pass_count": pass_count,
+        "waiting_count": waiting_count,
+        "blocked_count": blocked_count,
+        "submit_blocking_keys": submit_blocking_keys,
+        "next_safe_checkpoint": str(
+            owner_state.get("next_safe_checkpoint") or "refresh_runtime_goal_status"
+        ),
+        "matrix": rows,
+        "source_health": _detail_source(
+            status="ready_empty" if status == "waiting_for_market" else "degraded",
+            owner_label=owner_label,
+            reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
+        ),
+    }
+
+
+def _source_readiness_fallback_packet(
+    *,
+    output_dir: Path,
+    generated_at_ms: int,
+    selected_strategy_group_id: str | None,
+    max_symbols: int | None,
+    stale_after_seconds: int | None,
+    reason: str,
+) -> dict[str, Any]:
+    dry_run = _read_json_if_exists(output_dir / "runtime-dry-run-audit-chain.json")
+    if not dry_run:
+        dry_run = _read_json_if_exists(
+            output_dir / "dry-run-audit-chain" / "runtime-dry-run-audit-chain.json"
+        )
+    goal_status = _read_json_if_exists(output_dir / "strategygroup-runtime-goal-status.json")
+    live_facts = _read_json_if_exists(output_dir / "strategy-group-live-facts-readiness.json")
+
+    dry_run_ready = dry_run.get("status") == "passed" and (
+        (dry_run.get("checks") or {}).get("dangerous_effects_absent") is True
+    )
+    live_facts_status = str(live_facts.get("status") or "")
+    live_facts_source = _detail_source(
+        status="degraded" if live_facts else "unavailable",
+        owner_label="事实状态暂不可用",
+        reason=live_facts_status or "live_facts_readiness_source_missing",
+        summary={
+            "blocker_count": len(live_facts.get("blockers") or []),
+        }
+        if live_facts
+        else None,
+    )
+    real_order_readiness = _real_order_readiness_fallback(goal_status)
+    source_health = {
+        "strategy_catalog": _detail_source(
+            status="degraded",
+            owner_label="策略组暂不可用",
+            reason="source_readiness_api_unavailable",
+        ),
+        "runtime_source": _detail_source(
+            status="unavailable",
+            owner_label="运行状态源未连接",
+            reason=reason,
+        ),
+        "watcher": _detail_source(
+            status="unavailable",
+            owner_label="观察状态暂不可用",
+            reason=reason,
+        ),
+        "live_facts": live_facts_source,
+        "funds": _detail_source(
+            status="unavailable",
+            owner_label="资金状态暂不可用",
+            reason="account_readmodel_not_refreshed",
+        ),
+        "orders": _detail_source(
+            status="unavailable",
+            owner_label="订单状态暂不可用",
+            reason="orders_readmodel_not_refreshed",
+        ),
+        "positions": _detail_source(
+            status="unavailable",
+            owner_label="持仓状态暂不可用",
+            reason="positions_readmodel_not_refreshed",
+        ),
+        "protection": _detail_source(
+            status="unavailable",
+            owner_label="保护状态暂不可用",
+            reason="protection_readmodel_not_refreshed",
+        ),
+        "reconciliation": _detail_source(
+            status="degraded",
+            owner_label="对账详情暂不可用",
+            reason="source_readiness_api_unavailable",
+        ),
+        "operation_audit": _detail_source(
+            status="unavailable",
+            owner_label="审计详情暂不可用",
+            reason="source_readiness_api_unavailable",
+        ),
+        "runtime_dry_run_audit": _detail_source(
+            status="ready" if dry_run_ready else "degraded",
+            owner_label="审计演练正常" if dry_run_ready else "审计演练需检查",
+            reason=str(dry_run.get("status") or "runtime_dry_run_audit_missing"),
+            summary={
+                "scenario_count": dry_run.get("scenario_count"),
+                "dangerous_effects_absent": (
+                    (dry_run.get("checks") or {}).get("dangerous_effects_absent")
+                    is True
+                ),
+            },
+        ),
+        "strategygroup_runtime_goal_status": _detail_source(
+            status="degraded" if goal_status else "unavailable",
+            owner_label=str(
+                (goal_status.get("owner_state") or {}).get("label")
+                or "目标状态暂不可用"
+            ),
+            reason=str(goal_status.get("status") or "strategygroup_runtime_goal_status_missing"),
+        ),
+        "real_order_readiness": real_order_readiness["source_health"],
+        "deploy_channel": _detail_source(
+            status="ready_empty",
+            owner_label="部署通道未检查",
+            reason="tokyo_deploy_channel_status_missing",
+            summary={"checked": False, "connectivity_ready": None, "blockers": []},
+        ),
+    }
+    critical_unavailable = [
+        name
+        for name in ("runtime_source", "watcher")
+        if source_health[name]["status"] == "unavailable"
+    ]
+    owner_label = str(
+        (goal_status.get("owner_state") or {}).get("label")
+        or "暂不可用"
+    )
+    return {
+        "scope": "owner_console_source_readiness",
+        "status": "source_unavailable",
+        "generated_at_ms": generated_at_ms,
+        "selected_scope_config": {
+            "selected_strategy_group_id": selected_strategy_group_id,
+            "max_symbols": max_symbols,
+            "stale_after_seconds": stale_after_seconds,
+        },
+        "source_paths": {
+            "runtime_dry_run_audit_chain_path": str(
+                output_dir / "runtime-dry-run-audit-chain.json"
+            ),
+            "strategygroup_runtime_goal_status_path": str(
+                output_dir / "strategygroup-runtime-goal-status.json"
+            ),
+            "watcher_report_dir": str(output_dir),
+        },
+        "owner_state": {
+            "status": "temporarily_unavailable",
+            "label": owner_label,
+            "blocked_reason": reason,
+            "next_safe_checkpoint": str(
+                (goal_status.get("owner_state") or {}).get("next_safe_checkpoint")
+                or "restore_owner_console_readmodel_api"
+            ),
+        },
+        "owner_summary": {
+            "strategy_groups": "暂不可用",
+            "watcher": source_health["watcher"]["owner_label"],
+            "market_opportunity": owner_label,
+            "funds": source_health["funds"]["owner_label"],
+            "orders": source_health["orders"]["owner_label"],
+            "positions": source_health["positions"]["owner_label"],
+            "protection": source_health["protection"]["owner_label"],
+            "reconciliation": source_health["reconciliation"]["owner_label"],
+            "operation_audit": source_health["operation_audit"]["owner_label"],
+            "runtime_dry_run_audit": source_health["runtime_dry_run_audit"][
+                "owner_label"
+            ],
+            "runtime_goal_status": source_health["strategygroup_runtime_goal_status"][
+                "owner_label"
+            ],
+            "real_order_readiness": real_order_readiness["owner_label"],
+            "deploy_channel": source_health["deploy_channel"]["owner_label"],
+        },
+        "strategy_groups": [],
+        "source_health": source_health,
+        "real_order_readiness": real_order_readiness,
+        "critical_unavailable_sources": critical_unavailable,
+        "frontend_contract": {
+            "single_api_source": True,
+            "hide_strategy_groups_when_runtime_degraded": False,
+            "ready_empty_is_not_unavailable": True,
+            "owner_homepage_internal_gate_terms_allowed": False,
+        },
+        "raw_status_refs": {
+            "runtime_dry_run_audit_status": dry_run.get("status"),
+            "strategygroup_runtime_goal_status": goal_status.get("status"),
+            "live_facts_readiness_status": live_facts_status,
+            "fallback_reason": reason,
+        },
+        "safety_invariants": {
+            "read_model_only": True,
+            "fallback_packet_only": True,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "runtime_budget_mutated": False,
+            "creates_candidate": False,
+            "creates_authorization": False,
+            "withdrawal_or_transfer_created": False,
+            "mutates_pg": False,
+            "secrets_printed": False,
+        },
+    }
+
+
 def refresh_packets(
     *,
     api_base: str,
@@ -240,10 +525,30 @@ def refresh_packets(
             warnings.append(str(exc))
 
     api_root = api_base.rstrip("/")
+    source_readiness_fallback: dict[str, Any] = {
+        "enabled": False,
+        "status": "skipped",
+    }
     if cookie is None:
         for endpoint, filename in ENDPOINTS:
             output_path = output_dir / filename
             blockers.append(f"{filename}:refresh_skipped:operator_cookie_unavailable")
+            if filename == "owner-console-source-readiness.json":
+                fallback_packet = _source_readiness_fallback_packet(
+                    output_dir=output_dir,
+                    generated_at_ms=generated_at_ms,
+                    selected_strategy_group_id=selected_strategy_group_id,
+                    max_symbols=max_symbols,
+                    stale_after_seconds=stale_after_seconds,
+                    reason="operator_cookie_unavailable",
+                )
+                _write_json(output_path, fallback_packet)
+                source_readiness_fallback = {
+                    "enabled": True,
+                    "status": fallback_packet.get("status"),
+                    "output_json": str(output_path),
+                    "reason": "operator_cookie_unavailable",
+                }
             packets.append(
                 {
                     "endpoint": endpoint,
@@ -347,6 +652,29 @@ def refresh_packets(
                 "output_json": str(resolved_goal_status_output_json),
             }
 
+    if cookie is None:
+        fallback_path = output_dir / "owner-console-source-readiness.json"
+        fallback_packet = _source_readiness_fallback_packet(
+            output_dir=output_dir,
+            generated_at_ms=generated_at_ms,
+            selected_strategy_group_id=selected_strategy_group_id,
+            max_symbols=max_symbols,
+            stale_after_seconds=stale_after_seconds,
+            reason="operator_cookie_unavailable",
+        )
+        _write_json(fallback_path, fallback_packet)
+        source_readiness_fallback = {
+            "enabled": True,
+            "status": fallback_packet.get("status"),
+            "output_json": str(fallback_path),
+            "reason": "operator_cookie_unavailable",
+            "goal_status_included": bool(
+                fallback_packet.get("raw_status_refs", {}).get(
+                    "strategygroup_runtime_goal_status"
+                )
+            ),
+        }
+
     status = "refreshed" if not blockers else "refresh_blocked"
     return {
         "scope": "strategygroup_runtime_product_state_refresh",
@@ -357,6 +685,7 @@ def refresh_packets(
         "live_facts_precollect": live_facts_precollect,
         "dry_run_audit_refresh": dry_run_audit_refresh,
         "goal_status_refresh": goal_status_refresh,
+        "source_readiness_fallback": source_readiness_fallback,
         "blockers": blockers,
         "warnings": warnings,
         "selected_scope_config": {
@@ -370,6 +699,10 @@ def refresh_packets(
             "optional_signed_get_live_facts_precollect": collect_live_facts_before_refresh,
             "optional_dry_run_audit_chain_refresh": refresh_dry_run_audit_chain,
             "optional_goal_status_refresh": refresh_goal_status,
+            "optional_source_readiness_fallback": source_readiness_fallback.get(
+                "enabled"
+            )
+            is True,
             "exchange_write_called": False,
             "order_created": False,
             "order_lifecycle_called": False,

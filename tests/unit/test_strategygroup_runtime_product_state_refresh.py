@@ -92,6 +92,7 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
         "optional_signed_get_live_facts_precollect": False,
         "optional_dry_run_audit_chain_refresh": False,
         "optional_goal_status_refresh": False,
+        "optional_source_readiness_fallback": False,
         "exchange_write_called": False,
         "order_created": False,
         "order_lifecycle_called": False,
@@ -178,6 +179,7 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
     assert packet["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
     assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is False
     assert packet["safety_invariants"]["optional_goal_status_refresh"] is False
+    assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
 
@@ -348,6 +350,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
     assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
     assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
     assert packet["safety_invariants"]["optional_goal_status_refresh"] is True
+    assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
 
@@ -403,6 +406,13 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
     assert packet["status"] == "refresh_blocked"
     assert packet["dry_run_audit_refresh"]["status"] == "passed"
     assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert packet["source_readiness_fallback"] == {
+        "enabled": True,
+        "status": "source_unavailable",
+        "output_json": str(tmp_path / "owner-console-source-readiness.json"),
+        "reason": "operator_cookie_unavailable",
+        "goal_status_included": True,
+    }
     assert "operator_cookie_unavailable:RuntimeError" in packet["blockers"]
     assert (
         "owner-console-source-readiness.json:refresh_skipped:"
@@ -410,5 +420,21 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
     ) in packet["blockers"]
     assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
     assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
+    source_readiness = json.loads(
+        (tmp_path / "owner-console-source-readiness.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert source_readiness["status"] == "source_unavailable"
+    assert source_readiness["owner_state"]["status"] == "temporarily_unavailable"
+    assert source_readiness["source_health"]["runtime_source"]["status"] == "unavailable"
+    assert source_readiness["source_health"]["watcher"]["status"] == "unavailable"
+    assert source_readiness["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
+    assert (
+        source_readiness["raw_status_refs"]["strategygroup_runtime_goal_status"]
+        == "missing_fact"
+    )
+    assert source_readiness["safety_invariants"]["fallback_packet_only"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["optional_source_readiness_fallback"] is True
