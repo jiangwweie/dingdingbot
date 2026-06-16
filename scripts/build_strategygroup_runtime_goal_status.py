@@ -198,6 +198,39 @@ def _source_owner_summary(packet: dict[str, Any] | None) -> dict[str, Any]:
     return _dict(data.get("owner_summary"))
 
 
+def _source_health_item(
+    packet: dict[str, Any] | None,
+    key: str,
+) -> dict[str, Any]:
+    data = _data(packet)
+    return _dict(_dict(data.get("source_health")).get(key))
+
+
+def _source_deploy_channel_blockers(
+    packet: dict[str, Any] | None,
+) -> list[str]:
+    item = _source_health_item(packet, "deploy_channel")
+    status = str(item.get("status") or "").strip()
+    if status in {"", "ready", "ready_empty"}:
+        return []
+    summary = _dict(item.get("summary"))
+    blockers = [
+        str(value)
+        for value in _list(summary.get("blockers"))
+        if str(value)
+    ]
+    reason = str(item.get("reason") or item.get("detail") or "").strip()
+    if reason:
+        blockers.extend(
+            part.strip()
+            for part in reason.split(",")
+            if part.strip()
+        )
+    if not blockers:
+        blockers.append(status)
+    return sorted({f"deploy_channel:{item}" for item in blockers})
+
+
 def _combined_blocker_text(
     packets: dict[str, dict[str, Any] | None],
     blockers: list[str],
@@ -314,6 +347,34 @@ def _real_order_readiness_matrix(
     )
 
     return [
+        _readiness_item(
+            "deployment_channel",
+            "blocked" if "deployment_issue" in status or any(
+                str(item).startswith("deploy_channel:")
+                for item in blockers
+            ) else "pass",
+            "deployment_issue" if "deployment_issue" in status or any(
+                str(item).startswith("deploy_channel:")
+                for item in blockers
+            ) else "none",
+            bool(
+                "deployment_issue" in status
+                or any(
+                    str(item).startswith("deploy_channel:")
+                    for item in blockers
+                )
+            ),
+            (
+                "部署通道暂不可用"
+                if "deployment_issue" in status
+                or any(
+                    str(item).startswith("deploy_channel:")
+                    for item in blockers
+                )
+                else "部署通道未阻断当前链路"
+            ),
+            "owner-console-source-readiness.source_health.deploy_channel",
+        ),
         _readiness_item(
             "selected_strategygroup_scope",
             "pass" if checks["selected_strategygroup_scope_ready"] else "blocked",
@@ -616,8 +677,8 @@ def _current_status(
     if deployment_blockers:
         return (
             "deployment_issue",
-            "align_tokyo_deployment_before_runtime_action",
-            "Tokyo 部署与目标 commit 不一致",
+            "repair_deploy_channel_while_continuing_watcher_observation",
+            "部署通道或目标部署状态不可用，watcher 可继续观察，真实提交保持关闭",
             False,
         )
     if not checks["required_packets_present"]:
@@ -760,6 +821,10 @@ def build_goal_status_packet(
         dry_run_checks
     )
     source = _data(packets["source_readiness"])
+    source_deploy_channel_blockers = _source_deploy_channel_blockers(
+        packets["source_readiness"]
+    )
+    deployment_blockers.extend(source_deploy_channel_blockers)
     live_facts = _data(packets["live_facts_readiness"])
     dangerous = _dangerous_effects(*packets.values())
     watcher_liveness = _watcher_liveness_blockers(packets)
@@ -869,6 +934,11 @@ def build_goal_status_packet(
             "release_manifest": str(release_manifest) if release_manifest else None,
             "expected_head": expected_head,
             "deployed_head": deployed_head,
+            "deploy_channel_blockers": source_deploy_channel_blockers,
+            "deploy_channel_source_health": _source_health_item(
+                packets["source_readiness"],
+                "deploy_channel",
+            ),
             "latest_summary_status": _status(packets["latest_summary"]),
             "watcher_tick_status": _status(packets["watcher_tick"]),
             "post_signal_resume_status": _status(packets["post_signal_resume"]),

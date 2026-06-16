@@ -392,7 +392,7 @@ runtime state from already-written evidence.
 | `fresh_signal_processing` | Fresh signal exists but candidate/authorization evidence is not complete | `prepare_candidate_grant_authorization_evidence` |
 | `action_time_finalgate_ready` | Candidate/authorization reached action-time gate boundary | `run_official_action_time_finalgate` |
 | `operation_layer_ready` | Required evidence is ready for the official Operation Layer path | `call_official_operation_layer_submit_after_action_time_recheck` |
-| `deployment_issue` | Tokyo release does not match expected runtime head | Align deployment before runtime action |
+| `deployment_issue` | Tokyo release, deploy channel, or target runtime head is not ready | Repair deploy channel while continuing watcher observation |
 | `hard_safety_stop` | Forbidden effect evidence is present | Stop and investigate |
 
 ### Safety

@@ -200,6 +200,8 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
     assert matrix["official_operation_layer"]["blocker_class"] == "waiting_for_market"
     assert matrix["official_operation_layer"]["blocks_real_submit"] is True
+    assert matrix["deployment_channel"]["status"] == "pass"
+    assert matrix["deployment_channel"]["blocks_real_submit"] is False
     assert matrix["active_position_open_order"]["status"] == "pass"
     assert matrix["protection"]["status"] == "pass"
     assert matrix["budget"]["status"] == "pass"
@@ -938,6 +940,64 @@ def test_goal_status_blocks_when_deployed_head_is_not_expected(
     assert packet["status"] == "deployment_issue"
     assert packet["blockers"] == ["deployed_head_mismatch"]
     assert packet["owner_state"]["next_safe_checkpoint"] == (
-        "align_tokyo_deployment_before_runtime_action"
+        "repair_deploy_channel_while_continuing_watcher_observation"
     )
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+
+
+def test_goal_status_surfaces_deploy_channel_degraded_from_source_readiness(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "owner-console-source-readiness.json",
+        {
+            "status": "ready",
+            "owner_summary": {
+                "market_opportunity": "等待机会",
+                "funds": "资金正常",
+                "orders": "暂无订单",
+                "positions": "暂无持仓",
+                "protection": "保护正常",
+                "runtime_dry_run_audit": "审计演练正常",
+                "deploy_channel": "部署通道暂不可用",
+            },
+            "source_health": {
+                "deploy_channel": {
+                    "status": "degraded",
+                    "owner_label": "部署通道暂不可用",
+                    "reason": "tokyo_connectivity:tokyo_tcp_22_unreachable",
+                    "summary": {
+                        "checked": True,
+                        "connectivity_ready": False,
+                        "blockers": ["tokyo_tcp_22_unreachable"],
+                    },
+                }
+            },
+            "blockers": [],
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "deployment_issue"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "repair_deploy_channel_while_continuing_watcher_observation"
+    )
+    assert packet["checks"]["source_readiness_ready"] is True
+    assert packet["checks"]["fresh_signal_present"] is False
+    assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["blockers"]
+    matrix = _matrix_by_key(packet)
+    assert matrix["deployment_channel"]["status"] == "blocked"
+    assert matrix["deployment_channel"]["blocker_class"] == "deployment_issue"
+    assert matrix["deployment_channel"]["blocks_real_submit"] is True
+    assert matrix["fresh_signal"]["status"] == "waiting_for_market"
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["evidence"][
+        "deploy_channel_blockers"
+    ]
