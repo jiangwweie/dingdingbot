@@ -50,6 +50,15 @@ ARM_ATTEMPT_CONSUMPTION_BLOCKER = (
 ARM_ATTEMPT_CONSUMPTION_WARNING = (
     "operation_layer_arm_must_not_mutate_runtime_attempt_budget"
 )
+PRE_ATTEMPT_BLOCKING_WARNING_FRAGMENTS = (
+    "trusted_submit_fact_snapshot_not_ready",
+    "trusted_submit_fact_snapshot_not_fresh_enough",
+    "runtime_execution_enabled_false_current_shadow_boundary",
+    "runtime_shadow_mode_current_boundary",
+    "deployment_readiness_evidence_id_missing",
+    "gateway_not_injected_by_readiness_evidence",
+    "not_live_action_authorization",
+)
 
 
 class ApiClient(Protocol):
@@ -621,6 +630,7 @@ class FirstRealSubmitApiFlow:
         )
         reservation_body = _body(reservation)
         self.state.remember("reservation_id", reservation_body.get("reservation_id"))
+        self.state.add_blockers(_pre_attempt_warning_blockers(reservation_body))
         if self.state.blockers:
             return
 
@@ -1371,26 +1381,23 @@ def _pre_adapter_evidence_blockers(body: dict[str, Any]) -> list[str]:
         "runtimeexecutionorderlifecycleadapterresult_not_found",
         "runtime_execution_order_lifecycle_adapter_result_not_found",
     )
-    blocking_warning_fragments = (
-        "trusted_submit_fact_snapshot_not_ready",
-        "trusted_submit_fact_snapshot_not_fresh_enough",
-        "runtime_execution_enabled_false_current_shadow_boundary",
-        "runtime_shadow_mode_current_boundary",
-        "deployment_readiness_evidence_id_missing",
-        "gateway_not_injected_by_readiness_evidence",
-        "not_live_action_authorization",
-    )
     blockers = body.get("blockers") if isinstance(body, dict) else None
-    warnings = body.get("warnings") if isinstance(body, dict) else None
     result: list[str] = []
     for blocker in blockers or []:
         text = str(blocker)
         if any(fragment in text for fragment in tolerated_fragments):
             continue
         result.append(text)
+    result.extend(_pre_attempt_warning_blockers(body))
+    return result
+
+
+def _pre_attempt_warning_blockers(body: dict[str, Any]) -> list[str]:
+    warnings = body.get("warnings") if isinstance(body, dict) else None
+    result: list[str] = []
     for warning in warnings or []:
         text = str(warning)
-        if any(fragment in text for fragment in blocking_warning_fragments):
+        if any(fragment in text for fragment in PRE_ATTEMPT_BLOCKING_WARNING_FRAGMENTS):
             result.append(f"pre_attempt_evidence_not_ready:{text}")
     return result
 

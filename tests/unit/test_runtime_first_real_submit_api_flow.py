@@ -27,6 +27,7 @@ class _FakeClient:
         candidate_usage_status: str = "unused",
         evidence_blockers: list[str] | None = None,
         evidence_warnings: list[str] | None = None,
+        reservation_warnings: list[str] | None = None,
         shadow_plan_blockers: list[str] | None = None,
         local_result_status: str = "registered_created_local_orders",
         local_result_blockers: list[str] | None = None,
@@ -43,6 +44,7 @@ class _FakeClient:
         self.candidate_usage_status = candidate_usage_status
         self.evidence_blockers = evidence_blockers or []
         self.evidence_warnings = evidence_warnings or []
+        self.reservation_warnings = reservation_warnings or []
         self.shadow_plan_blockers = shadow_plan_blockers or []
         self.local_result_status = local_result_status
         self.local_result_blockers = local_result_blockers or []
@@ -183,7 +185,14 @@ class _FakeClient:
                 },
             }
         if "runtime-execution-attempt-reservations" in path:
-            return {"http_status": 200, "body": {"reservation_id": "reserve-1", "status": "pending_runtime_mutation"}}
+            return {
+                "http_status": 200,
+                "body": {
+                    "reservation_id": "reserve-1",
+                    "status": "pending_runtime_mutation",
+                    "warnings": self.reservation_warnings,
+                },
+            }
         if "runtime-execution-attempt-mutations" in path:
             return {"http_status": 200, "body": {"mutation_id": "mutation-1", "status": "applied"}}
         if "runtime-execution-attempt-outcome-policies" in path:
@@ -681,6 +690,45 @@ def test_arm_standing_prep_stops_before_attempt_mutation_when_evidence_not_live_
     assert not any("runtime-execution-attempt-mutations" in path for path in paths)
     assert not any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
     assert not any("runtime-execution-exchange-submit-action-authorizations" in path for path in paths)
+    assert report["safety"]["runtime_budget_mutated"] is False
+
+
+def test_arm_standing_prep_stops_before_mutation_on_reservation_shadow_warning():
+    client = _FakeClient(
+        reservation_warnings=[
+            "runtime_execution_enabled_false_current_shadow_boundary",
+            "runtime_shadow_mode_current_boundary",
+        ],
+    )
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="arm",
+            order_candidate_id="candidate-1",
+            record_attempt_consumption=True,
+            standing_authorized_scoped_evidence_preparation=True,
+        ),
+    )
+
+    report = flow.run()
+
+    assert (
+        "pre_attempt_evidence_not_ready:"
+        "runtime_execution_enabled_false_current_shadow_boundary"
+    ) in report["blockers"]
+    assert (
+        "pre_attempt_evidence_not_ready:runtime_shadow_mode_current_boundary"
+        in report["blockers"]
+    )
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-attempt-reservations" in path for path in paths)
+    assert not any("runtime-execution-attempt-mutations" in path for path in paths)
+    assert not any("runtime-execution-attempt-outcome-policies" in path for path in paths)
+    assert not any(
+        "runtime-execution-order-lifecycle-handoff-drafts" in path for path in paths
+    )
+    assert report["safety"]["attempt_counter_mutated"] is False
     assert report["safety"]["runtime_budget_mutated"] is False
 
 
