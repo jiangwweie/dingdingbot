@@ -307,6 +307,96 @@ def test_goal_status_surfaces_watcher_liveness_blockers(
     assert packet["evidence"]["selected_runtime_instance_count"] == 3
 
 
+def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "watcher_attention",
+            "blockers": [
+                "disabled_smoke:preview_disabled_first_real_submit_action_http_404",
+                "runtime-old-1:runtime_attempts_exhausted",
+                "runtime-old-1:order_candidate_id_or_authorization_id_required",
+                "runtime-waiting-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
+            ],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "latest-summary.json",
+        {
+            "status": "ready_for_final_gate_preflight",
+            "active_runtime_count": 12,
+            "selected_runtime_instance_ids": [
+                "runtime-fresh-1",
+                "runtime-old-1",
+                "runtime-waiting-1",
+            ],
+            "blockers": [
+                "runtime-old-1:runtime_attempts_exhausted",
+                "runtime-old-1:order_candidate_id_or_authorization_id_required",
+                "runtime-waiting-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
+            ],
+        },
+    )
+    _write(
+        report_dir / "post-signal-resume-pack.json",
+        {
+            "status": "ready_for_action_time_final_gate",
+            "selected_runtime_instance_ids": ["runtime-fresh-1"],
+            "ready_runtime_signals": 1,
+            "action_time_resume": {
+                "prepared_authorization_id": "auth-1",
+                "status": "ready_for_action_time_final_gate",
+            },
+        },
+    )
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "operation_layer_submit_blocked",
+            "dispatch_status": "operation_layer_submit_blocked",
+            "blocker_class": "missing_fact",
+            "selected_runtime_instance_ids": ["runtime-fresh-1"],
+            "ready_runtime_signals": 1,
+            "blockers": [
+                "operation_layer_not_ready:operation_layer_blocked",
+                "missing_evidence_id:exchange_submit_action_authorization_id",
+            ],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "missing_fact"
+    assert packet["owner_state"]["label"] == "需要介入"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "repair_missing_operation_layer_evidence"
+    )
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["checks"]["watcher_liveness_healthy"] is False
+    assert "watcher_tick:runtime-old-1:runtime_attempts_exhausted" in packet["blockers"]
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+
+
 def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     tmp_path: Path,
 ) -> None:

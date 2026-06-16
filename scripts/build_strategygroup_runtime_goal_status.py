@@ -62,6 +62,7 @@ FRESH_SIGNAL_STATUSES = {
     "ready_for_fresh_submit_authorization",
     "waiting_for_fresh_authorization",
     "ready_for_action_time_final_gate",
+    "ready_for_final_gate_preflight",
     "finalgate_ready",
 }
 
@@ -282,13 +283,6 @@ def _current_status(
             "live facts 尚未 ready，不能进入实盘动作边界",
             False,
         )
-    if watcher_liveness_blockers:
-        return (
-            "runtime_liveness_degraded",
-            "repair_runtime_attempt_renewal_or_scope",
-            "watcher 已报告 runtime attempt 或 scope 接力异常，先修复自动观察链路",
-            False,
-        )
     if dispatch_blocker_class == "active_position_resolution":
         return (
             "active_position_resolution",
@@ -301,6 +295,13 @@ def _current_status(
             "missing_fact",
             "repair_missing_operation_layer_evidence",
             "Operation Layer 接力证据不完整，先补齐缺失 evidence",
+            False,
+        )
+    if watcher_liveness_blockers:
+        return (
+            "runtime_liveness_degraded",
+            "repair_runtime_attempt_renewal_or_scope",
+            "watcher 已报告 runtime attempt 或 scope 接力异常，先修复自动观察链路",
             False,
         )
 
