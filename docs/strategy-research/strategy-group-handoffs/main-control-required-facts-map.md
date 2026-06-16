@@ -47,6 +47,18 @@ FinalGate checks, Operation Layer calls, or order sizing.
 | `mpg_high_leverage_disable_state` | Leverage readiness state | `block_leverage_promotion` |
 | `tradfi_offhour_mark_index_state` | Session plus mark state | `downshift_or_block` |
 
+P0 drawdown supplement:
+`docs/strategy-research/mpg-member-drawdown-disable-addendum-20260616.md`.
+
+| Drawdown Fact | Normalized Fact | Missing Behavior |
+| --- | --- | --- |
+| `mpg_member_drawdown_forensic_state` | Retrospective member/symbol/month attribution | `review_only_warning` |
+| `mpg_member_disable_candidate_state` | Versioned prefix-safe member disable hypothesis | `do_not_member_filter` |
+| `mpg_member_recent_loss_cluster_state` | Rolling member loss cluster from already-known outcomes | `no_member_downshift` |
+| `mpg_signal_extension_state` | Signal-time body/prior-return impulse extension | `block_late_cycle_candidate_prepare` |
+| `mpg_drawdown_phase_watch_state` | Realized observation drawdown watch state | `observe_only_or_pause_review` |
+| `mpg_exit_horizon_tradeoff_state` | 12h tradeoff versus 72h revival selection | `block_candidate_prepare` |
+
 ### `FBS-001`
 
 | RequiredFact | Normalized Fact | Missing Behavior |

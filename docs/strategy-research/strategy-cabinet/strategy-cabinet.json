@@ -35,7 +35,7 @@
       "supported_sides": [
         "long"
       ],
-      "research_role": "P1 core research and handoff family",
+      "research_role": "P1 core research and handoff family with prefix-safe member-disable requirements",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -53,10 +53,12 @@
       "primary_blockers": [
         "drawdown_not_controlled",
         "late_cycle_disable_incomplete",
+        "member_drawdown_forensic_not_prefix_safe",
         "session_fill_product_risk",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/mpg-member-drawdown-disable-addendum-20260616.md",
         "docs/strategy-research/strategy-groups/MPG-001-momentum-persistence-group.md",
         "docs/strategy-research/candidate-packets/WPR-001-williams-percent-range-packet.md",
         "docs/strategy-research/candidate-packets/DMI-001-adx-directional-ignition-packet.md"
@@ -65,7 +67,7 @@
         "docs/strategy-research/strategy-group-handoffs/MPG-001/handoff.md",
         "docs/strategy-research/strategy-group-handoffs/MPG-001/handoff.json"
       ],
-      "revival_condition": "Improve prefix-safe late-cycle disable, exit horizon, or real-margin/fill evidence without enabling high leverage.",
+      "revival_condition": "Improve prefix-safe member-disable, late-cycle, exit-horizon, or real-margin/fill evidence without converting retrospective attribution into member blacklists or enabling high leverage.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

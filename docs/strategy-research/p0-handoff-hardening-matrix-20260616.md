@@ -25,7 +25,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 
 | StrategyGroup | Strongest Evidence | Primary Blocker | RequiredFacts Gap | Next Evidence Task |
 | --- | --- | --- | --- | --- |
-| `MPG-001` | Group-pool momentum persistence and bounded impulse rows preserve high right-tail windows; 12h and 72h horizons have different tradeoffs. | Full-sequence drawdown and late-cycle decay. | `mpg_late_cycle_disable_state`, `mpg_member_drawdown_contribution_state`, `mpg_exit_horizon_state`, `fill_gap_slippage_state`, `real_margin_liquidation_model_state`. | Build a member-level drawdown-to-disable table that does not use future attribution as signal input. |
+| `MPG-001` | Group-pool momentum persistence and bounded impulse rows preserve high right-tail windows; 12h and 72h horizons have different tradeoffs. | Full-sequence drawdown and late-cycle decay. | `mpg_late_cycle_disable_state`, `mpg_member_drawdown_forensic_state`, `mpg_member_disable_candidate_state`, `mpg_exit_horizon_tradeoff_state`, `fill_gap_slippage_state`, `real_margin_liquidation_model_state`. | Completed `mpg-member-drawdown-disable-addendum-20260616.md`: retrospective member drawdown attribution is separated from prefix-safe disable candidates. |
 | `FBS-001` | TEQ negative-funding squeeze lane remains the strongest FBS lead. | Funding settlement, OI/long-short/top-trader facts, and concentration. | `negative_funding_crowding_state`, `funding_settlement_timing_state`, `open_interest_state`, `long_short_ratio_state`, `funding_squeeze_concentration_state`, `real_exchange_margin_liquidation_model`. | Completed `fbs-derivatives-facts-readiness-split-20260616.md`: fresh facts can keep armed observation, partial/stale facts downshift, missing facts block candidate prepare. |
 | `TEQ-001` | Binance 2026 equity-like universe supports momentum and relative-strength discovery. | Low history, product availability, session gap, concentration, and real margin. | `expanded_tradfi_universe_manifest_state`, `product_eligibility_state`, `low_history_dataset_state`, `session_gap_context`, `mark_funding_review_state`, `exchange_margin_liquidation_state`. | Completed `teq-current-product-availability-refresh-20260616.md`: current TEQ handoff symbols are not visible in the refreshed USD-S exchangeInfo response, so cached evidence stays research-only until symbol availability is refreshed. |
 | `PMR-001` | XAG-led short/weakness and PMR target-specific overlay can disable some continuation labels and support metal context. | Target-specific overlay policy, XAG concentration, external session/settlement, fill, and margin. | `pmr_role_branch_state`, `pmr_target_overlay_policy_state`, `xag_dominance_state`, `commodity_session_gap_state`, `mark_deviation_bound_state`, `real_margin_model_state`. | Completed `pmr-overlay-role-split-20260616.md`: PMR is split into NLPD disable overlay, TEQ support tag, XAG short watchlist, metal context, and blocked standalone branches. |
@@ -35,7 +35,7 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 
 | StrategyGroup | Default Display | Observation Mode | Candidate Preparation Guidance |
 | --- | --- | --- | --- |
-| `MPG-001` | First-batch candidate. | `armed_observation` after RequiredFacts pass. | Prepare candidate only when late-cycle, member drawdown, exit horizon, and protection facts are present. |
+| `MPG-001` | First-batch candidate. | `armed_observation` after RequiredFacts pass. | Prepare candidate only when late-cycle, prefix-safe member disable, exit horizon, and protection facts are present; do not blacklist members from forensic attribution alone. |
 | `FBS-001` | First-batch but facts-heavy. | `armed_observation` when derivatives facts are fresh; degrade to observe-only when stale. | Do not prepare without current funding/mark/OI context. |
 | `TEQ-001` | First-batch low-history lane. | `armed_observation` with low-history warning. | Do not treat cached 2026 data as current product eligibility. |
 | `PMR-001` | Overlay / context. | `observe_only`. | Do not prepare standalone candidates; allow target-specific disable/support annotation only after PMR role branch and target policy facts are explicit. |
@@ -50,6 +50,17 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 | `fbs_derivatives_facts_stale` | Funding, mark, OI, or crowding facts are outside the watcher freshness policy. | Emit stale packet and block candidate prepare. |
 | `fbs_derivatives_facts_missing` | Primary funding, mark, or exchange symbol facts are missing. | Emit no-signal or facts-missing packet and block candidate prepare. |
 | `fbs_margin_model_missing` | Real margin/liquidation model is absent. | Keep 1x default and block leverage promotion. |
+
+## MPG-001 Member Drawdown Disable Split
+
+| State | Meaning | Main-Control Behavior |
+| --- | --- | --- |
+| `mpg_member_drawdown_forensic_state` | WPR/TSI/Junes/symbol attribution explains historical drawdown after the fact. | Review-only warning; do not blacklist members or symbols. |
+| `mpg_member_disable_candidate_state` | A member-level disable hypothesis is present and versioned. | Can be reviewed, but cannot filter until it is prefix-safe and tested. |
+| `mpg_member_recent_loss_cluster_state` | Rolling loss cluster from already-known outcomes. | Downshift member only after current realized records support it. |
+| `mpg_signal_extension_state` | Signal-time body/prior-return impulse extension. | Block late-cycle candidate prepare when the current closed-candle signal is overextended. |
+| `mpg_exit_horizon_tradeoff_state` | Separates 12h cleaner tradeoff from 72h right-tail revival. | Block candidate prepare if horizon is missing or ambiguous. |
+| `mpg_high_leverage_disable_state` | 5x disabled and 3x stress-only. | Block leverage promotion. |
 
 ## TEQ-001 Current Availability Split
 
@@ -94,9 +105,9 @@ It does not promote, deploy, register, or authorize any StrategyGroup.
 
 ## P0 Next Actions
 
-1. Add a small P0 evidence addendum for `MPG-001` that maps member drawdown
-   attribution to disable candidates without turning retrospective attribution
-   into an entry signal.
+1. Keep `MPG-001` member drawdown disable addendum current after
+   `mpg-member-drawdown-disable-addendum-20260616.md`; next evidence task is
+   testing prefix-safe member loss-cluster and signal-extension disable facts.
 2. Keep `FBS-001` readiness split current after
    `fbs-derivatives-facts-readiness-split-20260616.md`; next evidence task is
    historical OI/ratio capture rather than new runtime logic.

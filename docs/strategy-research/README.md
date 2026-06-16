@@ -12,6 +12,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
 | `p0-p1-p2-goal-mode-plan.md` | Active goal-mode execution plan for P0 handoff hardening, P1 next handoff conversion, and P2 strategy-pool expansion. |
 | `p0-handoff-hardening-matrix-20260616.md` | P0 matrix for the 5 existing StrategyGroup handoff packs. |
+| `mpg-member-drawdown-disable-addendum-20260616.md` | P0 supplement separating `MPG-001` retrospective drawdown attribution from prefix-safe member disable facts. |
 | `fbs-derivatives-facts-readiness-split-20260616.md` | P0 supplement splitting `FBS-001` fresh, partial, stale, missing, and margin-missing derivatives fact behavior. |
 | `teq-current-product-availability-refresh-20260616.md` | P0 supplement separating `TEQ-001` cached research evidence from current Binance product visibility. |
 | `pmr-overlay-role-split-20260616.md` | P0 supplement splitting `PMR-001` into NLPD disable overlay, TEQ support tag, XAG short watchlist, metal context, and blocked standalone branches. |
@@ -53,6 +54,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
 | `p0-p1-p2-goal-mode-plan.md` | Active P0 / P1 / P2 goal-mode execution plan. |
 | `p0-handoff-hardening-matrix-20260616.md` | P0 handoff hardening matrix for `MPG-001`, `FBS-001`, `TEQ-001`, `PMR-001`, and `SOR-001`. |
+| `mpg-member-drawdown-disable-addendum-20260616.md` | `MPG-001` member drawdown addendum that keeps WPR/TSI attribution forensic-only until prefix-safe disable facts are tested. |
 | `fbs-derivatives-facts-readiness-split-20260616.md` | `FBS-001` derivatives readiness split for fresh/partial/stale/missing facts and margin-model absence. |
 | `teq-current-product-availability-refresh-20260616.md` | `TEQ-001` current product availability refresh and cached-research-only boundary. |
 | `pmr-overlay-role-split-20260616.md` | `PMR-001` overlay role split for target-specific disable/support/context semantics and standalone branch blockers. |
