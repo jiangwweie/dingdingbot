@@ -335,6 +335,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "status": "passed",
         "output_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
         "output_dir": str(tmp_path / "dry"),
+        "goal_status_input_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
         "scenario_count": 12,
         "dangerous_effects_absent": True,
     }
@@ -342,6 +343,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "enabled": True,
         "status": "waiting_for_signal",
         "output_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
+        "fallback_input_json": str(tmp_path / "strategygroup-runtime-goal-status.json"),
         "next_safe_checkpoint": "continue_watcher_observation",
         "runtime_dry_run_audit_passed": True,
         "ready_for_real_order_action": False,
@@ -351,6 +353,73 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
     assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
     assert packet["safety_invariants"]["optional_goal_status_refresh"] is True
     assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_refresh_packets_mirrors_external_dry_run_packet_for_goal_status(
+    tmp_path,
+    monkeypatch,
+):
+    from scripts.build_strategygroup_runtime_goal_status import (
+        REQUIRED_DRY_RUN_CHECKS,
+    )
+
+    output_dir = tmp_path / "reports"
+    external_dry_run_json = tmp_path / "external" / "runtime-dry-run-audit-chain.json"
+    external_goal_status_json = (
+        tmp_path / "external" / "strategygroup-runtime-goal-status.json"
+    )
+
+    def missing_cookie():
+        raise RuntimeError("operator auth missing")
+
+    def dry_run_builder(output_dir):
+        return {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "scenario_count": 12,
+            "checks": {name: True for name in REQUIRED_DRY_RUN_CHECKS},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
+
+    packet = refresh_packets(
+        api_base="http://unit",
+        output_dir=output_dir,
+        label="unit",
+        timeout_seconds=7,
+        generated_at_ms=1,
+        refresh_dry_run_audit_chain=True,
+        dry_run_output_dir=tmp_path / "dry",
+        dry_run_output_json=external_dry_run_json,
+        dry_run_builder=dry_run_builder,
+        refresh_goal_status=True,
+        goal_status_output_json=external_goal_status_json,
+    )
+
+    mirrored_dry_run_json = output_dir / "runtime-dry-run-audit-chain.json"
+    mirrored_goal_status_json = output_dir / "strategygroup-runtime-goal-status.json"
+    assert external_dry_run_json.exists()
+    assert mirrored_dry_run_json.exists()
+    assert external_goal_status_json.exists()
+    assert mirrored_goal_status_json.exists()
+    assert packet["dry_run_audit_refresh"]["output_json"] == str(external_dry_run_json)
+    assert packet["dry_run_audit_refresh"]["goal_status_input_json"] == str(
+        mirrored_dry_run_json
+    )
+    assert packet["goal_status_refresh"]["output_json"] == str(external_goal_status_json)
+    assert packet["goal_status_refresh"]["fallback_input_json"] == str(
+        mirrored_goal_status_json
+    )
+    assert packet["dry_run_audit_refresh"]["status"] == "passed"
+    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert packet["source_readiness_fallback"]["goal_status_included"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
 

@@ -492,11 +492,18 @@ def refresh_packets(
         try:
             dry_run_packet = builder(resolved_dry_run_output_dir)
             _write_json(resolved_dry_run_output_json, dry_run_packet)
+            goal_status_dry_run_json = output_dir / DEFAULT_DRY_RUN_OUTPUT_JSON.name
+            if (
+                resolved_dry_run_output_json.resolve()
+                != goal_status_dry_run_json.resolve()
+            ):
+                _write_json(goal_status_dry_run_json, dry_run_packet)
             dry_run_audit_refresh = {
                 "enabled": True,
                 "status": dry_run_packet.get("status"),
                 "output_json": str(resolved_dry_run_output_json),
                 "output_dir": str(resolved_dry_run_output_dir),
+                "goal_status_input_json": str(goal_status_dry_run_json),
                 "scenario_count": dry_run_packet.get("scenario_count"),
                 "dangerous_effects_absent": (
                     (dry_run_packet.get("checks") or {}).get(
@@ -621,10 +628,17 @@ def refresh_packets(
                 expected_head=expected_head,
             )
             _write_json(resolved_goal_status_output_json, goal_status_packet)
+            fallback_goal_status_json = output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
+            if (
+                resolved_goal_status_output_json.resolve()
+                != fallback_goal_status_json.resolve()
+            ):
+                _write_json(fallback_goal_status_json, goal_status_packet)
             goal_status_refresh = {
                 "enabled": True,
                 "status": goal_status_packet.get("status"),
                 "output_json": str(resolved_goal_status_output_json),
+                "fallback_input_json": str(fallback_goal_status_json),
                 "next_safe_checkpoint": (
                     (goal_status_packet.get("owner_state") or {}).get(
                         "next_safe_checkpoint"
