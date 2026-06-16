@@ -62,7 +62,7 @@ The second P2 cabinet extension is recorded in
 | `ICH-001` | Ichimoku cloud-breakout window-revival vocabulary. | Boundary fixed in `ich-no-future-cloud-decay-boundary-20260616.md`; preserve no-future-cloud breakout only while full-sequence decay, component leakage, drawdown, session/fill, product-risk, and margin blockers remain. |
 | `CCI-001` | CCI trend escape / precious-metal failure-short revival. | Boundary fixed in `cci-asset-role-failure-boundary-20260616.md`; preserve metal +100 failure short and equity reclaim vocabulary while drawdown, asset-role, off-hour mark/index, fill, product-risk, and margin blockers remain. |
 | `AEB-001` | ATR expansion breakout short-window revival. | Boundary fixed in `aeb-atr-expansion-false-breakout-boundary-20260616.md`; preserve ATR24 equity expansion as 30d revival only while 60d/90d decay, false-breakout risk, session/fill, product-risk, and margin blockers remain. |
-| `STOCH-001` | Stochastic range-persistence / whipsaw vocabulary. | Park as vocabulary because 90d right-tail gate and full sequence fail. |
+| `STOCH-001` | Stochastic range-persistence / whipsaw vocabulary. | Boundary fixed in `stoch-whipsaw-range-persistence-boundary-20260616.md`; park as vocabulary because 90d right-tail gate, full sequence, short-side rows, session/fill, and margin facts fail. |
 
 ## Candidate Intake Criteria
 
@@ -86,7 +86,7 @@ The second P2 cabinet extension is recorded in
 | `MDS-001` universal metal overlay | Overlay candidate. | Revive only with target-specific coverage, PMR-state freshness, session/fill/margin facts, and a stable activation/disable pair. |
 | `EFI-001` broad Force Index | Right-tail candidate, not handoff. | Revive only through negative-force exhaustion isolation, signal-time drawdown disable, product/session/fill facts, and real margin evidence. |
 | `ICH-001` broad cloud breakout | Research candidate. | Revive only with no-future-cloud policy intact, cloud-breakout disable, explicit window-decay facts, and materially better full-sequence behavior. |
-| `STOCH-001` broad stochastic oscillator | Parked vocabulary. | Revive only if 90d right-tail and full sequence improve with a signal-time whipsaw disable classifier. |
+| `STOCH-001` broad stochastic oscillator | Parked vocabulary. | Revive only if 90d right-tail and full sequence improve with a signal-time whipsaw disable classifier, branch-specific asset role split, and product/session/fill/margin facts. |
 | `SOR-001` broad branch | Conditional. | Revive only through named branch eligibility and time-stop evidence. |
 
 ## P2 Next Actions

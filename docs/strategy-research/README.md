@@ -34,6 +34,7 @@ Use these documents as the stable entry points for the strategy research line:
 | `ich-no-future-cloud-decay-boundary-20260616.md` | P2 supplement preserving `ICH-001` no-future-cloud breakout as window-revival vocabulary while blocking handoff on full-sequence decay, drawdown, component leakage, product/session/fill, and margin facts. |
 | `cci-asset-role-failure-boundary-20260616.md` | P2 supplement preserving `CCI-001` precious-metal +100 failure short as window-revival vocabulary while blocking handoff on drawdown, asset-role split, off-hour mark/index, fill, and margin facts. |
 | `aeb-atr-expansion-false-breakout-boundary-20260616.md` | P2 supplement preserving `AEB-001` ATR24 equity expansion as a 30d revival handle while blocking handoff on 60d/90d decay, false-breakout risk, session/fill, product, and margin facts. |
+| `stoch-whipsaw-range-persistence-boundary-20260616.md` | P2 supplement preserving `STOCH-001` as oscillator whipsaw / range-persistence vocabulary while blocking handoff on 90d gate failure, full-sequence collapse, short-side failure, session/fill, and margin facts. |
 | `strategy-line-handoff-summary-20260616.md` | Owner/main-control-readable strategy-line handoff summary covering current vision, original strategy groups, new observe-only handoff drafts, non-handoff candidates, and strategy semantics. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |
@@ -90,6 +91,7 @@ liquidity, session-gap, mark/funding, and margin facts are attached.
 | `ich-no-future-cloud-decay-boundary-20260616.md` | `ICH-001` boundary that preserves no-future-cloud breakout revival evidence while blocking handoff until leakage policy, cloud-breakout disable, window-decay, product/session/fill, and real-margin blockers improve. |
 | `cci-asset-role-failure-boundary-20260616.md` | `CCI-001` boundary that preserves precious-metal +100 failure short evidence while blocking handoff until asset-role split, drawdown, off-hour mark/index, fill/gap, and real-margin blockers improve. |
 | `aeb-atr-expansion-false-breakout-boundary-20260616.md` | `AEB-001` boundary that preserves ATR24 equity expansion as 30d revival evidence while blocking handoff until false-breakout disable, 60d/90d persistence, product/session/fill, and real-margin blockers improve. |
+| `stoch-whipsaw-range-persistence-boundary-20260616.md` | `STOCH-001` boundary that parks stochastic range-persistence as whipsaw / decay vocabulary until 90d persistence, full-sequence behavior, session/fill, and real-margin blockers improve. |
 | `strategy-line-handoff-summary-20260616.md` | Strategy-line handoff summary for Owner and main control, translating strategy IDs into semantics and current intake decisions. |
 | `strategy-window-cognition-20260616.md` | Current cognition for project return semantics, evidence quality, and strategy-pool expansion. |
 | `strategy-cabinet/README.md` | Strategy Cabinet purpose and non-goals. |

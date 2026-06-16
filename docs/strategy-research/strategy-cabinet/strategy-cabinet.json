@@ -1177,7 +1177,7 @@
         "long",
         "short_context"
       ],
-      "research_role": "Stochastic bullish range-persistence and whipsaw vocabulary, not an active candidate",
+      "research_role": "Stochastic bullish range-persistence and whipsaw / decay vocabulary, not broad oscillator activation",
       "required_facts_level": "medium",
       "leverage_boundary": {
         "default": "1x",
@@ -1195,18 +1195,21 @@
       "primary_blockers": [
         "ninety_day_gate_failure",
         "full_sequence_collapse",
+        "short_side_failure",
         "whipsaw_disable_missing",
         "high_leverage_proxy_risk",
         "session_fill_missing",
+        "product_risk_missing",
         "real_margin_model_missing"
       ],
       "evidence_paths": [
+        "docs/strategy-research/stoch-whipsaw-range-persistence-boundary-20260616.md",
         "docs/strategy-research/p2-cabinet-extension-batch2-20260616.md",
         "docs/strategy-research/candidate-packets/STOCH-001-stochastic-momentum-reversal-packet.md",
         "docs/strategy-research/stoch-momentum-reversal-replay/stoch-momentum-reversal-summary.md"
       ],
       "handoff_paths": [],
-      "revival_condition": "Revive only if stochastic range-persistence clears the 90d right-tail gate with materially lower drawdown and a signal-time whipsaw disable classifier.",
+      "revival_condition": "Revive only if stochastic range-persistence clears the 90d right-tail gate with materially better full-sequence behavior, branch-specific asset-role split, product/session/fill facts, real margin facts, and a signal-time whipsaw disable classifier.",
       "non_execution_flags": [
         "not_runtime_registration",
         "not_finalgate_input",

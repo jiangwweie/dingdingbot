@@ -33,7 +33,7 @@ Batch 2 selects candidates that already have:
 | `ICH-001` | `research_candidate` | Ichimoku cloud breakout with no-future-cloud policy. | `ich_cloud_breakout_long_48h` has best-90d 2x `296.354715%` and a clear leakage-safe cloud-breakout vocabulary; boundary fixed in `ich-no-future-cloud-decay-boundary-20260616.md`. | Full 2x `-78.421778%`, DD 2x `-85.398509%`, category decay, no-future-cloud enforcement, product/session/fill, and margin facts. |
 | `CCI-001` | `research_candidate` | CCI trend escape / failure and precious-metal +100 failure short. | `cci_failure_short_precious_metal_only` has full 2x `72.496535%`, best-90d 2x `105.400734%`, and `0` 2x proxy liquidation events; boundary fixed in `cci-asset-role-failure-boundary-20260616.md`. | DD 2x `-74.614868%`, generic CCI failure, equity reclaim decay, off-hour mark/index, fill/gap, and real margin facts. |
 | `AEB-001` | `research_candidate` | ATR / True Range expansion breakout, short-window equity branch. | `aeb_atr24_equity_expansion_long_48h` has best-30d 2x `218.708454%` and positive full 2x `2.502514%`; boundary fixed in `aeb-atr-expansion-false-breakout-boundary-20260616.md`. | Best-90d 2x only `31.950523%`, false-breakout risk, 90d decay, product/session/fill, and margin facts. |
-| `STOCH-001` | `parked_or_research_vocab` | Stochastic bullish range persistence and whipsaw vocabulary. | `stoch_bullish_range_persistence_long_72h` preserves short-window 30d/60d 2x evidence. | No 100%+ best-90d 2x row, full 2x `-90.790585%`, DD 2x `-95.696757%`, and 5x proxy risk. |
+| `STOCH-001` | `parked_or_research_vocab` | Stochastic bullish range persistence and whipsaw vocabulary. | `stoch_bullish_range_persistence_long_72h` preserves short-window 30d/60d 2x evidence; boundary fixed in `stoch-whipsaw-range-persistence-boundary-20260616.md`. | No 100%+ best-90d 2x row, full 2x `-90.790585%`, DD 2x `-95.696757%`, short-side failure, and 5x proxy risk. |
 
 ## Semantic Split
 
@@ -69,7 +69,9 @@ Batch 2 selects candidates that already have:
    `AEB-001` has an ATR-expansion / false-breakout boundary, but none has a
    handoff.
 4. Keep `STOCH-001` as parked / research vocabulary because the best 90d gate
-   fails and the full sequence is deeply negative.
+   fails and the full sequence is deeply negative; the whipsaw /
+   range-persistence boundary is fixed in
+   `stoch-whipsaw-range-persistence-boundary-20260616.md`.
 5. Do not compare Batch 2 returns as a leaderboard; evidence types include
    thin sample, window-revival, broad negative attribution, and branch-specific
    support.
@@ -91,4 +93,6 @@ Batch 2 selects candidates that already have:
    disable, session/fill, product-availability, and real-margin facts before
    any handoff discussion.
 4. Use `STOCH-001` primarily as stochastic whipsaw / decay RequiredFacts
-   vocabulary for other oscillator or range-persistence candidates.
+   vocabulary after `stoch-whipsaw-range-persistence-boundary-20260616.md`;
+   do not discuss handoff until a 90d-valid branch survives full-sequence,
+   session/fill, product-risk, and real-margin checks.
