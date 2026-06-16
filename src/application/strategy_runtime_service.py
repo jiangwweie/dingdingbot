@@ -225,7 +225,13 @@ class StrategyRuntimeInstanceService:
             )
 
         now_ms = _now_ms()
-        boundary = proposal.boundary.model_copy(deep=True)
+        boundary = proposal.boundary.model_copy(
+            deep=True,
+            update={
+                "attempts_used": 0,
+                "budget_reserved": Decimal("0"),
+            },
+        )
         policy_snapshot = StrategyRuntimePolicySnapshot(
             risk_policy_snapshot={
                 "source": "runtime_profile_promotion_confirmation",
