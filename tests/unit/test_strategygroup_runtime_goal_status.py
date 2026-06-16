@@ -88,6 +88,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "legacy_local_registration_probe_tolerance_checked": True,
                 "mock_operation_layer_closed_loop_checked": True,
                 "operation_layer_blocker_review_policy_checked": True,
+                "shared_runtime_pipeline_checked": True,
             },
             "safety_invariants": {
                 "dangerous_effects": [],
@@ -200,6 +201,10 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     )
     assert (
         "runtime_dry_run_missing_required_check:mock_operation_layer_closed_loop_checked"
+        in packet["blockers"]
+    )
+    assert (
+        "runtime_dry_run_missing_required_check:shared_runtime_pipeline_checked"
         in packet["blockers"]
     )
 

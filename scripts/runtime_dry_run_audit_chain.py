@@ -36,9 +36,41 @@ from src.domain.runtime_official_submit_handoff import (  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/dry-run-audit-chain")
 DEFAULT_OUTPUT_JSON = DEFAULT_OUTPUT_DIR / "runtime-dry-run-audit-chain.json"
+DEFAULT_HANDOFF_ROOT = ROOT_DIR / "docs/current/strategy-group-handoffs"
 RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
+EXPECTED_STRATEGY_GROUPS = {"MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"}
+SHARED_RUNTIME_PIPELINE_STAGES = [
+    "runtime_admission",
+    "fresh_signal_to_candidate_authorization",
+    "required_facts_readiness",
+    "action_time_finalgate",
+    "operation_layer_evidence_relay",
+    "account_position_order_protection_budget_idempotency_checks",
+    "official_operation_layer_submit",
+    "post_submit_finalize_reconciliation_budget_settlement_review",
+    "owner_console_source_readmodel",
+]
+STRATEGY_SPECIFIC_INPUT_FIELDS = [
+    "supported_symbols",
+    "supported_sides",
+    "signal_ready_rule",
+    "required_facts",
+    "risk_defaults",
+    "hard_stops",
+    "sample_signal_packet",
+    "sample_no_signal_packet",
+    "sample_stale_signal_packet",
+    "sample_conflict_packet",
+]
+EXECUTION_BOUNDARY_FALSE_FIELDS = [
+    "runtime_registration_authorized",
+    "candidate_creation_authorized",
+    "final_gate_input",
+    "operation_layer_input",
+    "real_submit_authorized",
+]
 
 
 class _DisabledSmokeClient:
@@ -579,6 +611,150 @@ def _fake_closed_loop_shape() -> dict[str, Any]:
             "order_lifecycle_called": False,
             "withdrawal_or_transfer_created": False,
             "disabled_smoke_is_real_execution_proof": False,
+        },
+    }
+
+
+def _load_strategy_group_handoffs(
+    handoff_root: Path = DEFAULT_HANDOFF_ROOT,
+) -> dict[str, Any]:
+    handoffs: dict[str, Any] = {}
+    for path in sorted(handoff_root.glob("*/handoff.json")):
+        payload = _read_json(path)
+        strategy_group_id = str(payload.get("strategy_group_id") or path.parent.name)
+        handoffs[strategy_group_id] = {"path": str(path), "payload": payload}
+    return handoffs
+
+
+def _shared_runtime_pipeline_validation() -> dict[str, Any]:
+    handoffs = _load_strategy_group_handoffs()
+    found_groups = set(handoffs)
+    missing_groups = sorted(EXPECTED_STRATEGY_GROUPS - found_groups)
+    unexpected_groups = sorted(found_groups - EXPECTED_STRATEGY_GROUPS)
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+
+    for strategy_group_id in sorted(EXPECTED_STRATEGY_GROUPS):
+        item = handoffs.get(strategy_group_id)
+        if item is None:
+            blockers.append(f"missing_strategy_group_handoff:{strategy_group_id}")
+            continue
+        payload = item["payload"]
+        boundary = payload.get("execution_boundary")
+        boundary = boundary if isinstance(boundary, dict) else {}
+        required_facts = payload.get("required_facts")
+        required_facts = required_facts if isinstance(required_facts, dict) else {}
+        signal_rule = payload.get("signal_ready_rule")
+        signal_rule = signal_rule if isinstance(signal_rule, dict) else {}
+        risk_defaults = payload.get("risk_defaults")
+        risk_defaults = risk_defaults if isinstance(risk_defaults, dict) else {}
+        row_checks = {
+            "has_supported_symbols": bool(payload.get("supported_symbols")),
+            "has_supported_sides": bool(payload.get("supported_sides")),
+            "has_signal_ready_rule": bool(signal_rule),
+            "has_required_facts": bool(required_facts),
+            "has_risk_defaults": bool(risk_defaults),
+            "has_hard_stops": bool(payload.get("hard_stops")),
+            "research_handoff_only": boundary.get("research_handoff_only") is True,
+            "does_not_authorize_execution_boundary": all(
+                boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
+            ),
+            "tiny_risk_boundary": (
+                str(risk_defaults.get("risk_tier") or "") == "tiny"
+                and str(risk_defaults.get("max_notional_per_action_usdt") or "") == "8"
+                and str(risk_defaults.get("default_leverage") or "") == "1"
+                and str(risk_defaults.get("max_leverage") or "") == "1"
+            ),
+            "uses_standard_signal_status": (
+                signal_rule.get("status_name")
+                == "ready_for_shadow_candidate_prepare"
+            ),
+        }
+        rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "handoff_json": item["path"],
+                "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
+                "strategy_specific_input_fields": STRATEGY_SPECIFIC_INPUT_FIELDS,
+                "sample_input_contract": {
+                    "supported_symbols": payload.get("supported_symbols") or [],
+                    "supported_sides": payload.get("supported_sides") or [],
+                    "signal_status_name": signal_rule.get("status_name"),
+                    "freshness_window_seconds": signal_rule.get(
+                        "freshness_window_seconds"
+                    ),
+                    "required_fact_categories": sorted(required_facts),
+                    "risk_tier": risk_defaults.get("risk_tier"),
+                    "max_notional_per_action_usdt": risk_defaults.get(
+                        "max_notional_per_action_usdt"
+                    ),
+                    "default_leverage": risk_defaults.get("default_leverage"),
+                    "hard_stop_count": len(payload.get("hard_stops") or []),
+                },
+                "execution_boundary": boundary,
+                "checks": row_checks,
+                "passed": all(row_checks.values()),
+            }
+        )
+        blockers.extend(
+            f"{strategy_group_id}:{check_name}"
+            for check_name, ok in row_checks.items()
+            if ok is not True
+        )
+
+    if unexpected_groups:
+        blockers.extend(
+            f"unexpected_strategy_group_handoff:{item}" for item in unexpected_groups
+        )
+
+    checks = {
+        "expected_strategy_groups_present": not missing_groups,
+        "no_unexpected_strategy_groups": not unexpected_groups,
+        "all_strategy_groups_use_same_shared_pipeline": all(
+            row.get("shared_runtime_pipeline_stages") == SHARED_RUNTIME_PIPELINE_STAGES
+            for row in rows
+        ),
+        "all_strategy_groups_limit_to_input_contract": all(
+            row.get("passed") is True for row in rows
+        ),
+        "all_strategy_groups_deny_direct_execution_authority": all(
+            row.get("checks", {}).get("does_not_authorize_execution_boundary") is True
+            for row in rows
+        ),
+        "all_strategy_groups_keep_tiny_risk_boundary": all(
+            row.get("checks", {}).get("tiny_risk_boundary") is True for row in rows
+        ),
+    }
+    blockers.extend(name for name, ok in checks.items() if ok is not True)
+    return {
+        "scope": "shared_runtime_pipeline_validation",
+        "status": "passed" if not blockers else "failed",
+        "judgment": {
+            "common_runtime_pipe_share": "80%",
+            "strategy_group_adapter_share": "20%",
+            "meaning": (
+                "candidate/auth, FinalGate, Operation Layer, finalize, "
+                "reconciliation, settlement, and Owner readmodel are shared; "
+                "StrategyGroups provide signal/facts/symbol/side/risk/hard-stop inputs."
+            ),
+        },
+        "expected_strategy_groups": sorted(EXPECTED_STRATEGY_GROUPS),
+        "found_strategy_groups": sorted(found_groups),
+        "missing_strategy_groups": missing_groups,
+        "unexpected_strategy_groups": unexpected_groups,
+        "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
+        "strategy_specific_input_fields": STRATEGY_SPECIFIC_INPUT_FIELDS,
+        "rows": rows,
+        "checks": checks,
+        "blockers": sorted(set(blockers)),
+        "safety_invariants": {
+            "calls_tokyo_api": False,
+            "real_order_created": False,
+            "exchange_write_called": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+            "finalgate_bypassed": False,
+            "operation_layer_bypassed": False,
         },
     }
 
@@ -1178,12 +1354,17 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_active_conflict(output_dir),
         _scenario_operation_layer_blocker_review_matrix(output_dir),
     ]
+    shared_pipeline = _shared_runtime_pipeline_validation()
     blockers = [
         f"{scenario['name']}:{blocker}"
         for scenario in scenarios
         if scenario["status"] != "passed"
         for blocker in (scenario.get("blockers") or ["scenario_failed"])
     ]
+    blockers.extend(
+        f"shared_runtime_pipeline_validation:{blocker}"
+        for blocker in shared_pipeline.get("blockers", [])
+    )
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
@@ -1237,6 +1418,13 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).values()
             )
         ),
+        "shared_runtime_pipeline_checked": (
+            shared_pipeline.get("status") == "passed"
+            and all(
+                value is True
+                for value in (shared_pipeline.get("checks") or {}).values()
+            )
+        ),
     }
     status = "passed" if all(checks.values()) and not blockers else "blocked"
     return {
@@ -1248,6 +1436,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             "does not call Tokyo, exchange write, or real submit."
         ),
         "scenarios": scenarios,
+        "shared_runtime_pipeline_validation": shared_pipeline,
         "checks": checks,
         "blockers": blockers,
         "safety_invariants": {

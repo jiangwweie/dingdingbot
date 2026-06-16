@@ -147,6 +147,35 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     ] is True
     assert packet["checks"]["mock_operation_layer_closed_loop_checked"] is True
     assert packet["checks"]["operation_layer_blocker_review_policy_checked"] is True
+    assert packet["checks"]["shared_runtime_pipeline_checked"] is True
+    shared = packet["shared_runtime_pipeline_validation"]
+    assert shared["status"] == "passed"
+    assert shared["judgment"] == {
+        "common_runtime_pipe_share": "80%",
+        "strategy_group_adapter_share": "20%",
+        "meaning": (
+            "candidate/auth, FinalGate, Operation Layer, finalize, "
+            "reconciliation, settlement, and Owner readmodel are shared; "
+            "StrategyGroups provide signal/facts/symbol/side/risk/hard-stop inputs."
+        ),
+    }
+    assert set(shared["found_strategy_groups"]) == {
+        "MPG-001",
+        "TEQ-001",
+        "FBS-001",
+        "PMR-001",
+        "SOR-001",
+    }
+    for row in shared["rows"]:
+        assert row["passed"] is True
+        assert row["checks"]["does_not_authorize_execution_boundary"] is True
+        assert row["checks"]["tiny_risk_boundary"] is True
+        assert row["checks"]["uses_standard_signal_status"] is True
+        assert row["shared_runtime_pipeline_stages"] == shared[
+            "shared_runtime_pipeline_stages"
+        ]
+        assert "final_gate_input" in row["execution_boundary"]
+        assert row["execution_boundary"]["final_gate_input"] is False
 
 
 def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, capsys):

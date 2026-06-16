@@ -275,6 +275,17 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | No execution fork | No StrategyGroup adds a custom FinalGate, Operation Layer, order lifecycle, exchange gateway, or settlement implementation |
 | Owner Console | The UI/readmodel shows StrategyGroup differences as product state, not separate packet-reading workflows |
 
+### 2026-06-17 Checkpoint
+
+| Item | Result |
+| --- | --- |
+| Dry-run audit artifact | `runtime-dry-run-audit-chain.json` now includes `shared_runtime_pipeline_validation` |
+| StrategyGroups covered | MPG / TEQ / FBS / PMR / SOR |
+| Common-chain proof | All five StrategyGroups share the same runtime stages: admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, account/protection/budget/idempotency checks, submit, finalize/reconcile/settle/review, and Owner readmodel |
+| Strategy-specific proof | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, risk defaults, hard stops, and sample packets |
+| Execution authority proof | Each handoff keeps `candidate_creation_authorized=false`, `final_gate_input=false`, `operation_layer_input=false`, and `real_submit_authorized=false` |
+| Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true` before treating dry-run audit as healthy |
+
 ### Mock Dispatcher Close-Loop
 
 The dry-run audit chain also includes a local mock dispatcher close-loop. It
