@@ -18,7 +18,9 @@ viewer.
 
 Any UI-impact change must preserve:
 
-- the accepted dark and light visual references in `docs/current/assets/`;
+- the accepted dark and light visual references:
+  - `docs/current/assets/owner-runtime-console-home-dark-v1.png`;
+  - `docs/current/assets/owner-runtime-console-home-light-v1.png`;
 - the multi-page Owner console structure;
 - the terse Owner-facing language in `docs/current/OWNER_RUNTIME_CONSOLE_UI_ELEMENT_CONTRACT.md`;
 - screenshot-based validation through `npm run visual:qa`.
@@ -30,7 +32,7 @@ When visual or product rules conflict, follow this order:
 | Rank | Authority | Meaning |
 | --- | --- | --- |
 | 1 | Owner explicit correction | Latest Owner decision wins. |
-| 2 | Accepted visual references | `owner-runtime-console-home-dark-v1.png` and `owner-runtime-console-home-light-v1.png`. |
+| 2 | Accepted visual references | `docs/current/assets/owner-runtime-console-home-dark-v1.png` and `docs/current/assets/owner-runtime-console-home-light-v1.png`. |
 | 3 | `docs/current/*` | Current product, source, and UI contracts. |
 | 4 | Product Design / Build Web Apps / Browser verification | Workflow and fidelity checks. |
 | 5 | Code implementation | Code must follow the rules above. |
