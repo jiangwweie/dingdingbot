@@ -478,10 +478,6 @@ def _downgrade_non_actionable_observation_blockers(
     if any(
         bool(safety.get(flag))
         for flag in (
-            "prepare_records_created",
-            "shadow_candidate_created",
-            "runtime_execution_intent_draft_created",
-            "recorded_execution_intent_created",
             "submit_authorization_created",
             "protection_plan_created",
             "executable_execution_intent_created",

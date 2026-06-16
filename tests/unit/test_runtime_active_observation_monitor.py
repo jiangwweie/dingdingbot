@@ -342,7 +342,7 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_active_monitor_keeps_non_actionable_blocker_hard_after_prepare_side_effect(
+def test_active_monitor_keeps_non_actionable_blocker_hard_after_order_side_effect(
     tmp_path,
 ):
     client = _FakeClient([_runtime("runtime-prepared", strategy_family_id="MPG-001")])
@@ -359,8 +359,9 @@ def test_active_monitor_keeps_non_actionable_blocker_hard_after_prepare_side_eff
             "operator_command_plan": {"next_step": "resolve"},
             "safety_invariants": {
                 "prepare_records_created": True,
+                "shadow_candidate_created": True,
                 "exchange_write_called": False,
-                "order_created": False,
+                "order_created": True,
                 "order_lifecycle_called": False,
             },
         },
