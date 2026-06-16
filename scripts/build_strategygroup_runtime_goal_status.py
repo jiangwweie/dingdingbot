@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -202,6 +203,16 @@ def _contains_any(text: str, fragments: tuple[str, ...]) -> bool:
     return any(fragment in text for fragment in fragments)
 
 
+def _contains_blocker_family(text: str, families: tuple[str, ...]) -> bool:
+    if not text:
+        return False
+    pattern = re.compile(
+        r"(?<![a-z0-9_])(" + "|".join(re.escape(family) for family in families) + r")(?![a-z0-9_])",
+        re.IGNORECASE,
+    )
+    return bool(pattern.search(text))
+
+
 def _readiness_item(
     key: str,
     status: str,
@@ -236,9 +247,23 @@ def _real_order_readiness_matrix(
         packets.get("post_signal_resume")
     )
 
-    has_active_position_blocker = _contains_any(
+    has_active_position_blocker = _contains_blocker_family(
         blocker_text,
-        ("active_position", "open_order", "conflicting_open_order"),
+        (
+            "active_position",
+            "active_position_conflict",
+            "active_position_exists",
+            "active_position_present",
+            "active_position_resolution",
+            "conflicting_active_position",
+            "conflicting_open_order",
+            "open_order",
+            "open_order_conflict",
+            "open_order_exists",
+            "open_order_present",
+            "open_order_resolution",
+            "open_orders_present",
+        ),
     )
     has_protection_blocker = _contains_any(
         blocker_text,
@@ -252,16 +277,30 @@ def _real_order_readiness_matrix(
         blocker_text,
         ("duplicate_submit", "idempotency", "duplicate_order"),
     )
-    has_scope_param_blocker = _contains_any(
+    has_scope_param_blocker = _contains_blocker_family(
         blocker_text,
         (
-            "scope_mismatch",
+            "fresh_signal_outside_selected_strategygroup_scope",
             "outside_selected_strategygroup_scope",
+            "outside_side_scope",
+            "outside_symbol_scope",
+            "selected_strategygroup_scope_mismatch",
+            "scope_mismatch",
             "symbol",
+            "symbol_mismatch",
+            "symbol_scope_mismatch",
             "side",
+            "side_mismatch",
+            "side_scope_mismatch",
             "notional",
+            "notional_mismatch",
+            "notional_scope_mismatch",
             "leverage",
+            "leverage_mismatch",
+            "leverage_scope_mismatch",
             "max_exposure",
+            "max_exposure_mismatch",
+            "max_exposure_scope_mismatch",
         ),
     )
 

@@ -601,6 +601,108 @@ def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
     assert matrix["required_facts"]["status"] == "blocked"
     assert matrix["required_facts"]["blocker_class"] == "missing_fact"
     assert matrix["required_facts"]["blocks_real_submit"] is True
+    assert matrix["active_position_open_order"]["status"] == "pass"
+    assert matrix["active_position_open_order"]["blocks_real_submit"] is False
+
+
+def test_goal_status_open_order_facts_stale_does_not_block_active_position_open_order(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "strategy-group-live-facts-readiness.json",
+        {
+            "status": "strategy_group_live_facts_blocked",
+            "blockers": ["open_order_facts_stale"],
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    matrix = _matrix_by_key(packet)
+    assert packet["status"] == "missing_fact"
+    assert matrix["required_facts"]["status"] == "blocked"
+    assert matrix["required_facts"]["blocker_class"] == "missing_fact"
+    assert matrix["active_position_open_order"]["status"] == "pass"
+    assert matrix["active_position_open_order"]["blocker_class"] == "none"
+    assert matrix["active_position_open_order"]["blocks_real_submit"] is False
+
+
+def test_goal_status_scope_matching_ignores_benign_symbol_read_errors(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "waiting_for_market",
+            "dispatch_status": "no_action_continue_observation",
+            "dispatch_action": "continue_watcher_observation",
+            "blocker_class": "waiting_for_market",
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "blockers": ["symbol_read_error"],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    matrix = _matrix_by_key(packet)
+    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "pass"
+    assert matrix["symbol_side_notional_leverage_scope"]["blocks_real_submit"] is False
+
+
+def test_goal_status_scope_matching_preserves_true_scope_mismatch_blocker(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "waiting_for_market",
+            "dispatch_status": "no_action_continue_observation",
+            "dispatch_action": "continue_watcher_observation",
+            "blocker_class": "waiting_for_market",
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "blockers": ["scope_mismatch"],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    matrix = _matrix_by_key(packet)
+    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "blocked"
+    assert (
+        matrix["symbol_side_notional_leverage_scope"]["blocker_class"]
+        == "hard_safety_stop"
+    )
+    assert matrix["symbol_side_notional_leverage_scope"]["blocks_real_submit"] is True
 
 
 def test_goal_status_blocks_active_position_conflict_before_real_order_boundary(

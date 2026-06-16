@@ -6143,6 +6143,58 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         == 1
     )
 
+    (report_dir / "strategygroup-runtime-goal-status.json").write_text(
+        json.dumps(
+            {
+                "scope": "strategygroup_runtime_goal_status",
+                "status": "missing_fact",
+                "owner_state": {
+                    "label": "需要介入",
+                    "detail": "live facts 尚未 ready，不能进入实盘动作边界",
+                    "next_safe_checkpoint": "refresh_strategy_group_live_facts_readiness",
+                },
+                "blockers": ["live_facts_not_ready"],
+                "real_order_boundary": {
+                    "ready_for_real_order_action": False,
+                },
+                "real_order_readiness_matrix": [
+                    {
+                        "key": "required_facts",
+                        "status": "blocked",
+                        "blocker_class": "missing_fact",
+                        "blocks_real_submit": True,
+                    },
+                    {
+                        "key": "active_position_open_order",
+                        "status": "pass",
+                        "blocker_class": "none",
+                        "blocks_real_submit": False,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/owner-console-source-readiness")
+        assert response.status_code == 200
+        facts_blocked_payload = response.json()
+
+    assert (
+        facts_blocked_payload["data"]["real_order_readiness"][
+            "submit_blocking_keys"
+        ]
+        == ["required_facts"]
+    )
+    assert (
+        "active_position_open_order"
+        not in facts_blocked_payload["data"]["real_order_readiness"][
+            "submit_blocking_keys"
+        ]
+    )
+
 
 def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
     monkeypatch,

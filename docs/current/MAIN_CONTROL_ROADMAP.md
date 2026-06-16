@@ -418,6 +418,16 @@ and `evidence`. Non-pass states can still allow watcher observation and project
 progress, but any item with `blocks_real_submit=true` keeps
 `ready_for_real_order_action=false`.
 
+### 2026-06-17 False-Positive Hardening Checkpoint
+
+The readiness matrix now uses explicit blocker-family matching for active
+position, open order, and symbol/side/notional/leverage scope rows. Stale fact
+names such as `open_order_facts_stale` block `required_facts` only; they must
+not be misclassified as active position or open-order conflicts. Benign source
+errors such as `symbol_read_error` also must not become scope blockers, while
+true `scope_mismatch` and out-of-scope StrategyGroup signals still block real
+submit.
+
 ## P0 Subgoal: Common Runtime Pipe Before Strategy-Specific Adapters
 
 ### Current Judgment
