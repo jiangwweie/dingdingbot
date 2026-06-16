@@ -57,7 +57,9 @@ function sourceItem(value: OwnerSourceHealthItem | undefined, fallbackStatus: Ow
   return {
     status: asSourceStatus(value?.status, fallbackStatus),
     label: value?.owner_label || value?.label || fallbackLabel,
+    owner_label: value?.owner_label,
     detail: value?.reason ?? value?.detail ?? null,
+    summary: value?.summary,
   };
 }
 

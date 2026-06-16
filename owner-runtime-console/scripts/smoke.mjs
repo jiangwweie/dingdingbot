@@ -54,6 +54,7 @@ async function expectAbsent(page, text) {
 async function openNav(page, label, expectedText) {
   await page.getByRole("button", { name: label, exact: true }).click();
   await expectVisible(page, expectedText);
+  await page.waitForTimeout(250);
 }
 
 let server = null;

@@ -415,6 +415,7 @@ async function expectAbsent(page, text) {
 async function openNav(page, label, expectedText) {
   await page.getByRole("button", { name: label, exact: true }).click();
   await expectVisible(page, expectedText);
+  await page.waitForTimeout(250);
 }
 
 async function expectActiveNav(page, label) {
@@ -483,6 +484,16 @@ async function runConnectedSmoke(browser) {
     if (sourcePayload?.data?.owner_summary?.runtime_dry_run_audit !== "审计演练正常") {
       throw new Error("Expected source-readiness dry-run audit to show 审计演练正常");
     }
+    const dryRunSummary = sourcePayload?.data?.source_health?.runtime_dry_run_audit?.summary;
+    if (dryRunSummary?.scenario_count !== 7) {
+      throw new Error("Expected source-readiness dry-run audit summary to include 7 scenarios");
+    }
+    if (dryRunSummary?.shared_runtime_pipeline_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm shared runtime pipeline");
+    }
+    if (dryRunSummary?.selected_strategygroup_dispatch_guard_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm selected scope guard");
+    }
     if (sourcePayload?.data?.owner_summary?.real_order_readiness !== "等待机会") {
       throw new Error("Expected source-readiness real-order readiness to show 等待机会");
     }
@@ -522,8 +533,21 @@ async function runConnectedSmoke(browser) {
     await expectActiveNav(page, "系统");
     await expectVisible(page, "策略组可见");
     await expectVisible(page, "审计演练正常");
+    await expectVisible(page, "审计演练摘要");
+    await expectVisible(page, "演练场景");
+    await expectVisible(page, "7 项通过");
+    await expectVisible(page, "共性管道");
+    await expectVisible(page, "已覆盖");
+    await expectVisible(page, "选中范围");
+    await expectVisible(page, "已校验");
+    await expectVisible(page, "危险动作");
+    await expectVisible(page, "未发生");
     await expectVisible(page, "实盘边界");
     await expectVisible(page, "owner_console_source_readiness");
+    await page.screenshot({
+      path: path.join(artifactDir, "real-backend-system.png"),
+      fullPage: true,
+    });
     await openNav(page, "订单与持仓", "级联视图");
     await expectActiveNav(page, "订单与持仓");
     await expectVisible(page, "成交单");

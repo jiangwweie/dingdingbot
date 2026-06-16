@@ -316,6 +316,8 @@ function RecordsPage({ projection }: { projection: OwnerProductProjection }) {
 function SystemPage({ context, projection }: { context: ConsoleContext; projection: OwnerProductProjection }) {
   const connected = context.connectionState === "connected";
   const businessDataUnavailable = isBusinessDataUnavailable(projection.productSummary);
+  const dryRunSummary = projection.sourceHealth.runtimeDryRunAudit.summary;
+  const dryRunRows = buildDryRunSummaryRows(dryRunSummary);
   const guaranteeRows = Object.entries(projection.noActionGuarantee)
     .filter(([, value]) => value === false)
     .map(([key]) => noActionGuaranteeLabels[key] ?? key);
@@ -363,6 +365,29 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
                 {label}
               </div>
             ))}
+            {dryRunRows.length > 0 ? (
+              <>
+                <Separator className="my-2" />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold">审计演练摘要</div>
+                      <div className="text-xs text-muted-foreground">共性执行管道已通过只读演练</div>
+                    </div>
+                    <StatusBadge tone="safe">无需操作</StatusBadge>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                    {dryRunRows.map((row) => (
+                      <div className="flex items-center gap-2 text-sm" key={row.label}>
+                        <CheckCircle2 className="size-4 text-[color:var(--status-safe)]" />
+                        <span className="text-muted-foreground">{row.label}</span>
+                        <span className="font-semibold">{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : null}
             <Separator className="my-2" />
             <div className="text-xs text-muted-foreground">来源：{context.sourceLabel ?? projection.source}</div>
           </CardContent>
@@ -370,4 +395,18 @@ function SystemPage({ context, projection }: { context: ConsoleContext; projecti
       </div>
     </PageShell>
   );
+}
+
+function buildDryRunSummaryRows(summary: Record<string, unknown> | undefined) {
+  if (!summary) return [];
+  const scenarioCount = typeof summary.scenario_count === "number" ? summary.scenario_count : null;
+  const rows = [
+    scenarioCount !== null ? { label: "演练场景", value: `${scenarioCount} 项通过` } : null,
+    summary.shared_runtime_pipeline_checked === true ? { label: "共性管道", value: "已覆盖" } : null,
+    summary.selected_strategygroup_dispatch_guard_checked === true ? { label: "选中范围", value: "已校验" } : null,
+    summary.dangerous_effects_absent === true && summary.disabled_smoke_is_real_execution_proof === false
+      ? { label: "危险动作", value: "未发生" }
+      : null,
+  ];
+  return rows.filter((row): row is { label: string; value: string } => row !== null);
 }

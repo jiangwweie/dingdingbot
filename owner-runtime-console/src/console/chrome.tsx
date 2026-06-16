@@ -64,11 +64,15 @@ export function Sidebar({ activeView, onSelect }: { activeView: NavigationKey; o
               className={cn(
                 "flex h-12 cursor-pointer items-center gap-3 rounded-xl px-4 text-left text-sm font-medium transition",
                 active
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[var(--shadow-active-nav)]"
-                  : "text-sidebar-foreground/72 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  ? "shadow-[var(--shadow-active-nav)]"
+                  : "text-sidebar-foreground/72 hover:text-[color:var(--sidebar-accent-foreground)]",
               )}
               key={item.label}
               onClick={() => onSelect(item.key)}
+              style={{
+                backgroundColor: active ? "var(--sidebar-primary)" : "transparent",
+                color: active ? "var(--sidebar-primary-foreground)" : undefined,
+              }}
               type="button"
             >
               <Icon />
@@ -99,11 +103,19 @@ export function MobileNav({ activeView, onSelect }: { activeView: NavigationKey;
             className={cn(
               "flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition",
               active
-                ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                ? ""
                 : "border bg-card/70 text-muted-foreground",
             )}
             key={item.label}
             onClick={() => onSelect(item.key)}
+            style={
+              active
+                ? {
+                    backgroundColor: "var(--sidebar-primary)",
+                    color: "var(--sidebar-primary-foreground)",
+                  }
+                : undefined
+            }
             type="button"
           >
             <Icon className="size-4" />

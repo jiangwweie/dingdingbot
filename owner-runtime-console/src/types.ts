@@ -75,6 +75,7 @@ export type OwnerSourceHealthItem = {
   owner_label?: string;
   detail?: string | null;
   reason?: string | null;
+  summary?: Record<string, unknown>;
 };
 
 export type OwnerSourceHealth = {
