@@ -256,6 +256,28 @@ RequiredFacts, risk defaults, hard stops, and conflict policy.
 | Live runtime handoff | A runtime that has left shadow mode and is execution-enabled is no longer eligible for B0 shadow-candidate scheduler planning; it must be handled by Operation Layer evidence/readiness or closed-loop recovery |
 | Observation blocker hygiene | Plain `waiting_for_signal` and non-mutating historical attempt/candidate blockers do not create Owner attention; they remain runtime-level audit warnings unless prepare/order/exchange/budget/attempt side effects occurred |
 
+### 2026-06-17 Non-Executing Prepare Auto Bridge Checkpoint
+
+The resume dispatcher now treats `ready_for_non_executing_prepare` as an
+actionable common-pipeline checkpoint when `--execute-preflight` is enabled:
+
+```text
+fresh selected StrategyGroup signal
+-> official non-executing next-attempt prepare
+-> prepared authorization / candidate evidence
+-> action-time FinalGate preflight
+-> Operation Layer evidence readiness
+```
+
+| Requirement | Result |
+| --- | --- |
+| Common-chain execution | The dispatcher calls the existing `runtime_next_attempt_prepare_api_flow.py` prepare wrapper instead of adding StrategyGroup-specific candidate/auth code |
+| Safety invariants | Prepare may create bounded pre-submit evidence, but it must not arm local registration, arm exchange submit, call OrderLifecycle, create orders, call exchange write APIs, mutate attempt counters, mutate runtime budget, or create withdrawal/transfer actions |
+| Missing input handling | Missing runtime instance or signal/order-candidate input blocks as `missing_fact` before FinalGate |
+| Forbidden effect handling | Any forbidden prepare effect blocks as `hard_safety_stop` before FinalGate |
+| Cross-StrategyGroup proof | Unit coverage proves the same prepare -> FinalGate bridge works for MPG, TEQ, and SOR with only StrategyGroup/runtime IDs changed |
+| Remaining scope | Operation Layer evidence readiness, live boundary enablement, submit, finalize, reconciliation, settlement, and review remain shared runtime stages rather than StrategyGroup adapters |
+
 ## P0 Subgoal: Runtime Dry-Run Audit Chain
 
 ### Purpose

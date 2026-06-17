@@ -964,15 +964,25 @@ def _non_executing_prepare_command_plan(
             "/api/trading-console/strategy-runtimes/{runtime_instance_id}/"
             "official-submit-handoff-fresh-authorizations/bind"
         ),
+        "runtime_instance_id": _non_executing_prepare_runtime_instance_id(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        ),
         "requires_runtime_instance_id": True,
         "requires_readiness_handoff_bridge": True,
         "readiness_handoff_bridge": _fresh_authorization_handoff_json_path(
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
         ),
-        "signal_input_json": _first_text(
-            action_time_resume.get("signal_input_json"),
-            resume_pack.get("signal_input_json"),
+        "signal_input_json": _non_executing_prepare_signal_input_json(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        ),
+        "order_candidate_id": _first_text(
+            action_time_resume.get("shadow_candidate_id"),
+            resume_pack.get("shadow_candidate_id"),
+            action_time_resume.get("order_candidate_id"),
+            resume_pack.get("order_candidate_id"),
         ),
         "allowed_prepare_evidence_creation": True,
         "calls_official_submit_endpoint": False,
@@ -980,6 +990,278 @@ def _non_executing_prepare_command_plan(
         "calls_order_lifecycle": False,
         "exchange_write_called": False,
     }
+
+
+def _non_executing_prepare_runtime_instance_id(
+    *,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+) -> str | None:
+    return _first_text(
+        action_time_resume.get("runtime_instance_id"),
+        resume_pack.get("runtime_instance_id"),
+        *list(resume_pack.get("selected_runtime_instance_ids") or []),
+    )
+
+
+def _non_executing_prepare_signal_input_json(
+    *,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+) -> str | None:
+    return _first_text(
+        action_time_resume.get("signal_input_json"),
+        resume_pack.get("signal_input_json"),
+    )
+
+
+def _run_non_executing_prepare(
+    command_plan: dict[str, Any],
+) -> dict[str, Any]:
+    from scripts import runtime_next_attempt_prepare_api_flow as prepare_flow  # noqa: WPS433
+
+    args = argparse.Namespace(
+        env_file=None,
+        api_base=command_plan.get("api_base"),
+        runtime_instance_id=command_plan.get("runtime_instance_id"),
+        signal_input_json=command_plan.get("signal_input_json"),
+        order_candidate_id=command_plan.get("order_candidate_id"),
+        candidate_id=None,
+        context_id=None,
+        owner_operator_id="owner",
+        owner_confirmation_reference=(
+            "owner-standing-authorization-runtime-signal-watcher-"
+            "non-executing-prepare"
+        ),
+        reason=(
+            "runtime signal watcher standing authorization "
+            "non-executing candidate authorization evidence prepare"
+        ),
+        next_attempt_symbol=None,
+        next_attempt_side=None,
+        next_attempt_family=None,
+        next_attempt_strategy_family_id=None,
+        next_attempt_carrier_id=None,
+    )
+    config = prepare_flow._build_flow_config(args)  # noqa: SLF001
+    report = prepare_flow.FirstRealSubmitApiFlow(
+        client=prepare_flow.UrlLibApiClient(api_base=config.api_base),
+        config=config,
+    ).run()
+    return prepare_flow._summarize_prepare_report(report)  # noqa: SLF001
+
+
+def _non_executing_prepare_forbidden_effects(
+    prepare_packet: dict[str, Any],
+) -> list[str]:
+    safety = _dict(prepare_packet.get("safety_invariants"))
+    checks = {
+        "local_registration_armed": False,
+        "exchange_submit_armed": False,
+        "execute_real_submit": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "attempt_counter_mutated": False,
+        "runtime_budget_mutated": False,
+        "position_opened": False,
+        "withdrawal_or_transfer_created": False,
+    }
+    effects: list[str] = []
+    for name, expected in checks.items():
+        if safety.get(name) not in {expected, None, "", 0}:
+            effects.append(f"non_executing_prepare_effect:{name}")
+    return effects
+
+
+def _non_executing_prepare_authorization_id(
+    prepare_packet: dict[str, Any],
+) -> str | None:
+    return _first_text(
+        _dict(prepare_packet.get("ids")).get("authorization_id"),
+        _dict(prepare_packet.get("operator_command_plan")).get(
+            "prepared_authorization_id"
+        ),
+    )
+
+
+def _non_executing_prepare_candidate_id(
+    prepare_packet: dict[str, Any],
+) -> str | None:
+    ids = _dict(prepare_packet.get("ids"))
+    return _first_text(
+        ids.get("order_candidate_id"),
+        ids.get("shadow_candidate_id"),
+        ids.get("runtime_execution_intent_draft_id"),
+    )
+
+
+def _non_executing_prepare_ready(
+    prepare_packet: dict[str, Any],
+) -> bool:
+    return (
+        prepare_packet.get("status") == "ready_for_final_gate_preflight"
+        and bool(_non_executing_prepare_authorization_id(prepare_packet))
+        and not _list(prepare_packet.get("blockers"))
+    )
+
+
+def _packet_from_non_executing_prepare(
+    *,
+    packet: dict[str, Any],
+    status: str,
+    blocker_class: str,
+    dispatch_status: str,
+    blockers: list[str],
+    prepare_result: dict[str, Any] | None,
+    next_command_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    created_records = _dict((prepare_result or {}).get("created_records"))
+    prepare_safety = _dict((prepare_result or {}).get("safety_invariants"))
+    prepare_evidence_mutated = any(
+        bool(created_records.get(name))
+        for name in (
+            "shadow_candidate_created",
+            "runtime_execution_intent_draft_created",
+            "execution_intent_created",
+            "submit_authorization_created",
+            "protection_plan_created",
+        )
+    )
+    return {
+        **packet,
+        "status": status,
+        "blocker_class": blocker_class,
+        "dispatch_status": dispatch_status,
+        "dispatch_action": FINALGATE_ACTION if status == READY_STATUS else None,
+        "owner_state": (
+            _owner_state_for_preflight(
+                status=READY_STATUS,
+                blocker_class="none",
+                dispatch_status="non_executing_prepare_ready_for_finalgate",
+                blockers=[],
+            )
+            if status == READY_STATUS
+            else {
+                "status": "needs_intervention",
+                "blocker_class": blocker_class,
+                "blocked_at": "non_executing_prepare",
+                "blocked_reason": blockers[0] if blockers else dispatch_status,
+                "next_recover_condition": (
+                    "fresh_candidate_authorization_evidence_ready"
+                ),
+                "automatic_recovery_action": NON_EXECUTING_PREPARE_ACTION,
+                "downgrade_mode": "continue_watcher_observation_no_submit",
+            }
+        ),
+        "command_plan": next_command_plan or packet.get("command_plan"),
+        "non_executing_prepare_command_plan": packet.get("command_plan"),
+        "non_executing_prepare_result": prepare_result,
+        "blockers": blockers,
+        "safety_invariants": {
+            **_dict(packet.get("safety_invariants")),
+            "dispatcher_only": False,
+            "official_non_executing_prepare_called": prepare_result is not None,
+            "allowed_prepare_evidence_created": status == READY_STATUS,
+            "pg_prepare_evidence_mutated": prepare_evidence_mutated,
+            "created_records": created_records,
+            "prepare_safety_invariants": prepare_safety,
+            "calls_official_submit_endpoint": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "official_operation_layer_submit_called": False,
+        },
+    }
+
+
+def _execute_non_executing_prepare(
+    *,
+    packet: dict[str, Any],
+    timeout_seconds: int,
+    prepare_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    operation_layer_evidence_report: dict[str, Any] | None = None,
+    operation_layer_evidence_report_path: str | None = None,
+    operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
+    | None = None,
+    runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
+    execute_operation_layer_submit: bool = False,
+    execute_post_submit_finalize: bool = False,
+) -> dict[str, Any]:
+    command_plan = _dict(packet.get("command_plan"))
+    runtime_instance_id = _first_text(command_plan.get("runtime_instance_id"))
+    signal_input_json = _first_text(command_plan.get("signal_input_json"))
+    missing: list[str] = []
+    if not runtime_instance_id:
+        missing.append("runtime_instance_id")
+    if not signal_input_json and not command_plan.get("order_candidate_id"):
+        missing.append("signal_input_json")
+    if missing:
+        return _packet_from_non_executing_prepare(
+            packet=packet,
+            status="blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_missing_non_executing_prepare_inputs",
+            blockers=[f"missing_fact:{name}" for name in missing],
+            prepare_result=None,
+        )
+
+    runner = prepare_runner or _run_non_executing_prepare
+    prepare_result = runner(command_plan)
+    forbidden_effects = _non_executing_prepare_forbidden_effects(prepare_result)
+    if forbidden_effects:
+        return _packet_from_non_executing_prepare(
+            packet=packet,
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_non_executing_prepare_forbidden_effect",
+            blockers=forbidden_effects,
+            prepare_result=prepare_result,
+        )
+
+    if not _non_executing_prepare_ready(prepare_result):
+        blockers = _dedupe_text(prepare_result.get("blockers") or [])
+        if prepare_result.get("status") != "ready_for_final_gate_preflight":
+            blockers.append(
+                f"non_executing_prepare_status:{prepare_result.get('status')}"
+            )
+        return _packet_from_non_executing_prepare(
+            packet=packet,
+            status="blocked",
+            blocker_class="missing_fact",
+            dispatch_status="blocked_by_non_executing_prepare",
+            blockers=blockers or ["non_executing_prepare_not_ready"],
+            prepare_result=prepare_result,
+        )
+
+    authorization_id = _non_executing_prepare_authorization_id(prepare_result)
+    next_command_plan = _preflight_command_plan(
+        api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
+        authorization_id=str(authorization_id),
+        signal_input_json=signal_input_json,
+        shadow_candidate_id=_non_executing_prepare_candidate_id(prepare_result),
+    )
+    ready_packet = _packet_from_non_executing_prepare(
+        packet=packet,
+        status=READY_STATUS,
+        blocker_class="none",
+        dispatch_status="non_executing_prepare_ready_for_finalgate",
+        blockers=[],
+        prepare_result=prepare_result,
+        next_command_plan=next_command_plan,
+    )
+    return _execute_finalgate_preflight(
+        packet=ready_packet,
+        timeout_seconds=timeout_seconds,
+        operation_layer_evidence_report=operation_layer_evidence_report,
+        operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+        operation_layer_evidence_preparer=operation_layer_evidence_preparer,
+        runtime_live_enabler=runtime_live_enabler,
+        execute_operation_layer_submit=execute_operation_layer_submit,
+        execute_post_submit_finalize=execute_post_submit_finalize,
+    )
 
 
 def build_dispatch_packet(
@@ -994,6 +1276,7 @@ def build_dispatch_packet(
     operation_layer_evidence_report_path: str | None = None,
     operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
     | None = None,
+    non_executing_preparer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
     execute_post_submit_finalize: bool = False,
@@ -1095,7 +1378,7 @@ def build_dispatch_packet(
                 command_plan=None,
                 selected_strategy_group_id=selected_strategy_group_id,
             )
-        return _packet(
+        packet = _packet(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
@@ -1126,6 +1409,19 @@ def build_dispatch_packet(
                 action_time_resume=action_time_resume,
             ),
             selected_strategy_group_id=selected_strategy_group_id,
+        )
+        if not execute_preflight:
+            return packet
+        return _execute_non_executing_prepare(
+            packet=packet,
+            timeout_seconds=preflight_timeout_seconds,
+            prepare_runner=non_executing_preparer,
+            operation_layer_evidence_report=operation_layer_evidence_report,
+            operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+            operation_layer_evidence_preparer=operation_layer_evidence_preparer,
+            runtime_live_enabler=runtime_live_enabler,
+            execute_operation_layer_submit=execute_operation_layer_submit,
+            execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
     selected_scope_blockers = (

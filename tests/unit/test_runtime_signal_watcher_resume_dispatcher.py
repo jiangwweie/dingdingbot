@@ -331,6 +331,275 @@ def test_dispatcher_non_executing_prepare_requires_allowed_auto_action():
     assert packet["command_plan"] is None
 
 
+def _non_executing_prepare_resume(
+    *,
+    strategy_group_id: str = "MPG-001",
+    runtime_instance_id: str = "runtime-mpg-1",
+) -> dict:
+    resume = _with_runtime_summary(
+        _resume_pack("ready_for_non_executing_prepare"),
+        strategy_group_id=strategy_group_id,
+        runtime_instance_id=runtime_instance_id,
+    )
+    signal_input_json = f"/reports/{runtime_instance_id}/signal-input.json"
+    resume["signal_input_json"] = signal_input_json
+    resume["action_time_resume"].update(
+        {
+            "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
+            "signal_input_json": signal_input_json,
+            "allowed_auto_actions": [
+                "prepare_fresh_candidate_authorization_evidence"
+            ],
+            "requires_fresh_candidate_authorization_evidence": True,
+        }
+    )
+    resume["runtime_signal_summaries"][0]["signal_input_json"] = signal_input_json
+    resume["owner_state"] = {
+        "status": "ready_for_non_executing_prepare",
+        "blocker_class": "none",
+    }
+    return resume
+
+
+def _non_executing_prepare_ready_packet(
+    *,
+    authorization_id: str = "auth-prepared-1",
+    candidate_id: str = "candidate-1",
+) -> dict:
+    return {
+        "scope": "runtime_next_attempt_prepare_packet",
+        "status": "ready_for_final_gate_preflight",
+        "ids": {
+            "authorization_id": authorization_id,
+            "execution_intent_id": "intent-1",
+            "runtime_execution_intent_draft_id": "draft-1",
+            "order_candidate_id": candidate_id,
+        },
+        "operator_command_plan": {
+            "prepared_authorization_id": authorization_id,
+        },
+        "created_records": {
+            "shadow_candidate_created": True,
+            "runtime_execution_intent_draft_created": True,
+            "execution_intent_created": True,
+            "submit_authorization_created": True,
+            "protection_plan_created": True,
+            "attempt_reservation_created": False,
+            "attempt_mutation_created": False,
+            "order_lifecycle_handoff_created": False,
+        },
+        "safety_invariants": {
+            "uses_official_trading_console_api": True,
+            "next_attempt_gate_checked": True,
+            "local_registration_armed": False,
+            "exchange_submit_armed": False,
+            "execute_real_submit": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "position_opened": False,
+            "withdrawal_or_transfer_created": False,
+        },
+        "blockers": [],
+        "warnings": [],
+    }
+
+
+def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
+    monkeypatch,
+):
+    calls = []
+    prepare_calls = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "PASS",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    def _prepare_runner(command_plan):
+        prepare_calls.append(command_plan)
+        return _non_executing_prepare_ready_packet()
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_non_executing_prepare_resume(),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        non_executing_preparer=_prepare_runner,
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert packet["status"] == "finalgate_ready"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_action"] == "prepare_official_operation_layer_submit"
+    assert packet["non_executing_prepare_result"]["status"] == (
+        "ready_for_final_gate_preflight"
+    )
+    assert prepare_calls[0]["runtime_instance_id"] == "runtime-mpg-1"
+    assert prepare_calls[0]["signal_input_json"] == (
+        "/reports/runtime-mpg-1/signal-input.json"
+    )
+    assert packet["command_plan"]["prepared_authorization_id"] == "auth-prepared-1"
+    assert packet["command_plan"]["shadow_candidate_id"] == "candidate-1"
+    assert packet["finalgate_preflight_result"]["called"] is True
+    assert packet["finalgate_preflight_result"]["places_order"] is False
+    assert packet["safety_invariants"]["official_non_executing_prepare_called"] is True
+    assert packet["safety_invariants"]["allowed_prepare_evidence_created"] is True
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is True
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["calls_order_lifecycle"] is False
+    assert [item["method"] for item in calls] == ["GET"]
+
+
+def test_dispatcher_execute_non_executing_prepare_blocks_forbidden_effect(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**_kwargs):
+        raise AssertionError("FinalGate must not run after forbidden prepare effect")
+
+    def _prepare_runner(_command_plan):
+        packet = _non_executing_prepare_ready_packet()
+        packet["safety_invariants"]["exchange_write_called"] = True
+        return packet
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_non_executing_prepare_resume(),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+        non_executing_preparer=_prepare_runner,
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == (
+        "blocked_by_non_executing_prepare_forbidden_effect"
+    )
+    assert "non_executing_prepare_effect:exchange_write_called" in packet["blockers"]
+    assert packet["safety_invariants"]["official_non_executing_prepare_called"] is True
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_dispatcher_execute_non_executing_prepare_blocks_missing_signal_input():
+    resume = _non_executing_prepare_resume()
+    resume["signal_input_json"] = None
+    resume["action_time_resume"]["signal_input_json"] = None
+    resume["runtime_signal_summaries"][0]["signal_input_json"] = None
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+        non_executing_preparer=(
+            lambda _command_plan: _non_executing_prepare_ready_packet()
+        ),
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "missing_fact"
+    assert packet["dispatch_status"] == (
+        "blocked_by_missing_non_executing_prepare_inputs"
+    )
+    assert "missing_fact:signal_input_json" in packet["blockers"]
+    assert packet["safety_invariants"]["official_non_executing_prepare_called"] is False
+    assert packet["safety_invariants"]["official_finalgate_preflight_called"] is False
+
+
+def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scope(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        lambda **_kwargs: {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "PASS",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        },
+    )
+    prepared_runtime_ids = []
+
+    def _prepare_runner(command_plan):
+        prepared_runtime_ids.append(command_plan["runtime_instance_id"])
+        return _non_executing_prepare_ready_packet(
+            authorization_id=f"auth-{command_plan['runtime_instance_id']}",
+            candidate_id=f"candidate-{command_plan['runtime_instance_id']}",
+        )
+
+    for strategy_group_id, runtime_instance_id in (
+        ("TEQ-001", "runtime-teq-1"),
+        ("SOR-001", "runtime-sor-1"),
+    ):
+        packet = build_dispatch_packet(
+            resume_pack=_non_executing_prepare_resume(
+                strategy_group_id=strategy_group_id,
+                runtime_instance_id=runtime_instance_id,
+            ),
+            source_path=Path("/tmp/post-signal-resume-pack.json"),
+            execute_preflight=True,
+            non_executing_preparer=_prepare_runner,
+            selected_strategy_group_id=strategy_group_id,
+        )
+
+        assert packet["status"] == "finalgate_ready"
+        assert packet["selected_strategy_group_id"] == strategy_group_id
+        assert packet["command_plan"]["prepared_authorization_id"] == (
+            f"auth-{runtime_instance_id}"
+        )
+        assert packet["safety_invariants"]["places_order"] is False
+        assert packet["safety_invariants"]["exchange_write_called"] is False
+
+    assert prepared_runtime_ids == ["runtime-teq-1", "runtime-sor-1"]
+
+
 def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     packet = build_dispatch_packet(
         resume_pack=_with_runtime_summary(
