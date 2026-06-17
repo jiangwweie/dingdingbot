@@ -72,9 +72,6 @@ services:
     networks:
       - dingdingbot-net
 
-# 前端独立部署，见 docker-compose.frontend.yml
-# docker compose -f docker-compose.frontend.yml up -d
-
 networks:
   dingdingbot-net:
     driver: bridge
