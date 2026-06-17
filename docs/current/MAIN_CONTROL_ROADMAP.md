@@ -1209,6 +1209,28 @@ the existing real gateway action mode as the default. It is still not real
 execution proof and does not authorize bypassing action-time FinalGate or the
 official Operation Layer.
 
+### 2026-06-17 Watcher Packet Atomic Deploy Checkpoint
+
+Tokyo is now deployed at
+`0414db6fd1a3575d27019663fb39bfd91d5175db` through the bounded git deploy path.
+This deploy is a runtime/watcher packet durability repair, not a frontend
+publish and not a trading action.
+
+| Item | Result |
+| --- | --- |
+| Release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-0414db6f-watcher-packet-atomic-writes` |
+| Deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Atomic packet writes | `runtime-dry-run-audit-chain.json`, `runtime-execution-chain-closure-status.json`, `strategygroup-runtime-goal-status.json`, and `product-state-refresh-packet.json` now use temp-file replacement |
+| Postdeploy snapshot | `status=ready`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `watcher_timer_active=true`, `source_readiness_ready=true` |
+| Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
+| Runtime progress | `P0=waiting_for_market`, `P0.5=ready`, `product_gaps=[]`, `blockers=[]` |
+| Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, or order-sizing mutation |
+
+The static Owner Console frontend has already been removed from this main
+runtime worktree. Frontend experiments and future UI implementation remain
+external and do not affect watcher, dry-run audit, FinalGate readiness,
+Operation Layer evidence preparation, or runtime monitoring.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
