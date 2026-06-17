@@ -535,6 +535,47 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
     assert packet["safety_invariants"]["optional_source_readiness_fallback"] is True
 
 
+def test_deploy_channel_status_wins_over_docs_only_readonly_head_mismatch(tmp_path):
+    (tmp_path / "tokyo-deploy-channel-status.json").write_text(
+        json.dumps(
+            {
+                "scope": "tokyo_runtime_deploy_channel_status",
+                "status": "postdeploy_accepted",
+                "checks": {"blockers": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "tokyo-readonly-probe-current.json").write_text(
+        json.dumps(
+            {
+                "scope": "tokyo_runtime_governance_readonly_probe",
+                "status": "blocked",
+                "checks": {"blockers": ["remote_current_head_mismatch"]},
+                "facts": {
+                    "current_head": "6b615aac",
+                    "current_status": "release_manifest_without_git_status",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    deploy_channel = refresh_script._deploy_channel_fallback_source(tmp_path)
+
+    assert deploy_channel == {
+        "status": "ready",
+        "owner_label": "部署通道正常",
+        "reason": "postdeploy_accepted",
+        "summary": {
+            "checked": True,
+            "connectivity_ready": None,
+            "blockers": [],
+            "source_status": "postdeploy_accepted",
+        },
+    }
+
+
 def test_cli_can_treat_degraded_local_refresh_as_continuable(
     tmp_path,
     monkeypatch,
