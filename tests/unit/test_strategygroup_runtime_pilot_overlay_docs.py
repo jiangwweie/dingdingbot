@@ -99,3 +99,16 @@ def test_current_gate_classes_are_documented():
         "review_only_warning",
     ]:
         assert recovery_class in text
+
+
+def test_runtime_pilot_goal_audit_does_not_freeze_moving_branch_head():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
+    )
+
+    assert "Latest pushed branch head" not in text
+    assert "moving git ref" in text
+    assert "Latest deployed runtime head" in text

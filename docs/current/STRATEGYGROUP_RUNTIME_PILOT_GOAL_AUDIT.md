@@ -23,7 +23,7 @@ cleanup plan.
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
-| Latest pushed branch head | `961188a2` |
+| Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
 | Latest deployed runtime head | `001bf2667a766279fba928215780ad94fa0d6370` |
 | Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-001bf266-nested-hard-stop` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
@@ -114,4 +114,3 @@ fresh selected StrategyGroup signal exists.
 | order-sizing default mutation | false |
 | mock signal treated as real signal | false |
 | disabled smoke treated as real execution proof | false |
-
