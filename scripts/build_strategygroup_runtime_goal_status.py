@@ -480,7 +480,12 @@ def _real_order_readiness_matrix(
                 "pass"
                 if status == "operation_layer_ready"
                 else "waiting_for_chain"
-                if status == "action_time_finalgate_ready"
+                if status
+                in {
+                    "fresh_signal_detected",
+                    "fresh_signal_processing",
+                    "action_time_finalgate_ready",
+                }
                 else "waiting_for_market"
                 if not checks["fresh_signal_present"]
                 else "blocked"

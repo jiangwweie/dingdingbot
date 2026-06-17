@@ -6360,6 +6360,53 @@ def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields
     assert readiness["submit_blocking_keys"] == []
 
 
+def test_owner_console_real_order_readiness_treats_auto_chain_waiting_as_processing():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "fresh_signal_processing",
+            "ready_for_real_order_action": False,
+            "next_safe_checkpoint": "prepare_candidate_grant_authorization_evidence",
+            "real_order_readiness_matrix": [
+                {
+                    "key": "fresh_signal",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "candidate_authorization",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "action_time_finalgate",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "official_operation_layer",
+                    "status": "waiting_for_chain",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+            ],
+        }
+    )
+
+    assert readiness["status"] == "waiting_for_chain"
+    assert readiness["owner_label"] == "处理中"
+    assert readiness["source_health"]["status"] == "ready_nonempty"
+    assert readiness["blocked_count"] == 0
+    assert readiness["waiting_count"] == 3
+    assert readiness["ready_for_real_order_action"] is False
+
+
 def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_missing():
     from src.application.readmodels.trading_console import (
         _owner_console_deploy_channel_source,

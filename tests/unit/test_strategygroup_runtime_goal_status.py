@@ -501,6 +501,10 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["blockers"] == []
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    matrix = _matrix_by_key(packet)
+    assert matrix["candidate_authorization"]["status"] == "waiting_for_chain"
+    assert matrix["action_time_finalgate"]["status"] == "waiting_for_chain"
+    assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
 
 
 def test_goal_status_surfaces_watcher_liveness_blockers(
