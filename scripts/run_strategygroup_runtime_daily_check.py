@@ -82,6 +82,12 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
         status = "degraded"
     elif waiting_for_market:
         status = "waiting_for_market"
+    visibility = _owner_visibility(
+        status=status,
+        blockers=[*blockers, *hard_failures],
+        product_gaps=product_gaps,
+        waiting_for_market=waiting_for_market,
+    )
 
     return {
         "status": status,
@@ -99,15 +105,16 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
             "places_order": False,
         },
         "owner_summary": {
-            "state": owner_summary.get("state") or "状态待刷新",
+            "state": visibility["label"],
             "current_action": _daily_next_action(
                 status=status,
                 owner_summary=owner_summary,
                 blockers=blockers,
                 product_gaps=product_gaps,
             ),
-            "owner_intervention_required": status == "blocked",
+            "owner_intervention_required": visibility["owner_intervention_required"],
             "risk_level": "L1 read-only",
+            "visibility": visibility,
             "progress": {
                 "runtime": owner_summary.get("runtime"),
                 "watcher": owner_summary.get("watcher"),
@@ -155,12 +162,93 @@ def _daily_next_action(
     product_gaps: list[str],
 ) -> str:
     if blockers:
-        return "处理工程或安全阻断"
+        visibility = _owner_visibility(
+            status=status,
+            blockers=blockers,
+            product_gaps=product_gaps,
+            waiting_for_market=False,
+        )
+        return str(visibility["next_action"])
     if product_gaps:
         return "修复 Owner Console 产品发布缺口"
     if status == "waiting_for_market":
         return "继续等待市场机会"
     return str(owner_summary.get("current_action") or "继续保持监控")
+
+
+def _owner_visibility(
+    *,
+    status: str,
+    blockers: list[str],
+    product_gaps: list[str],
+    waiting_for_market: bool,
+) -> dict[str, Any]:
+    if blockers:
+        category = (
+            "safety_blocker"
+            if any(_is_safety_blocker(blocker) for blocker in blockers)
+            else "engineering_blocker"
+        )
+        return {
+            "category": category,
+            "label": "安全边界阻断" if category == "safety_blocker" else "工程状态暂不可用",
+            "detail": _owner_blocker_detail(blockers),
+            "next_action": (
+                "等待系统处理安全状态"
+                if category == "safety_blocker"
+                else "处理工程状态阻断"
+            ),
+            "owner_intervention_required": category == "safety_blocker",
+        }
+    if product_gaps:
+        return {
+            "category": "engineering_blocker",
+            "label": "工程状态暂不可用",
+            "detail": "Owner Console 首页或发布状态需要修复",
+            "next_action": "修复 Owner Console 产品发布缺口",
+            "owner_intervention_required": False,
+        }
+    if waiting_for_market or status == "waiting_for_market":
+        return {
+            "category": "waiting_for_market",
+            "label": "等待机会",
+            "detail": "自动化正常运行，当前没有 fresh signal",
+            "next_action": "继续等待市场机会",
+            "owner_intervention_required": False,
+        }
+    return {
+        "category": "running",
+        "label": "运行中",
+        "detail": "自动化正常运行",
+        "next_action": "继续保持监控",
+        "owner_intervention_required": False,
+    }
+
+
+def _is_safety_blocker(blocker: str) -> bool:
+    tokens = (
+        "active_position",
+        "open_order",
+        "protection",
+        "budget",
+        "duplicate",
+        "hard_safety",
+        "finalgate",
+        "operation_layer",
+        "exchange_write",
+        "real_order",
+        "scope_mismatch",
+        "stale_fact",
+        "missing_fact",
+    )
+    lowered = blocker.lower()
+    return any(token in lowered for token in tokens)
+
+
+def _owner_blocker_detail(blockers: list[str]) -> str:
+    if any(_is_safety_blocker(blocker) for blocker in blockers):
+        return "真实订单保持关闭，等待安全状态恢复"
+    return "运行、观察、部署或状态源需要恢复"
 
 
 def _is_waiting_for_market(

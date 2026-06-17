@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { automationStateLabels, healthLabels } from "../data";
 import type { OwnerProductProjection, StrategyGroupProductRow } from "../types";
 import { PageShell } from "./chrome";
-import { healthTone, isBusinessDataUnavailable, noActionGuaranteeLabels, sourceKindLabels, sourceStatusTone, stateTone, toneClass, toneTextClass, type ConsoleContext, type NavigationKey } from "./model";
+import { healthTone, homepageOperatingState, isBusinessDataUnavailable, noActionGuaranteeLabels, sourceKindLabels, sourceStatusTone, stateTone, toneClass, toneTextClass, type ConsoleContext, type NavigationKey } from "./model";
 import { CascadePanel, ContextRow, CurrentStrategyPanel, FundMiniCard, FundsSafetyPanel, ImportantChanges, MetricTile, SafetyOverviewStrip, StatusBadge, StrategyAvatar, StrategyGroupList, StrategyRunSettings, SystemStateCard } from "./panels";
 
 export function ConsoleContent({
@@ -52,6 +52,7 @@ function HomePage({
   return (
     <PageShell activeView="home">
       <SafetyOverviewStrip summary={projection.productSummary} />
+      <OwnerProgressBanner projection={projection} />
       <RuntimeMetrics summary={projection.productSummary} />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="grid min-w-0 gap-4">
@@ -65,6 +66,27 @@ function HomePage({
         </aside>
       </div>
     </PageShell>
+  );
+}
+
+function OwnerProgressBanner({ projection }: { projection: OwnerProductProjection }) {
+  const state = homepageOperatingState(projection);
+  return (
+    <Card className="rounded-lg bg-[color:var(--background-card-raised)] shadow-[var(--shadow-card)]">
+      <CardContent className="grid gap-3 p-4 lg:grid-cols-[180px_minmax(0,1fr)_180px] lg:items-center">
+        <div>
+          <div className="text-xs font-semibold text-muted-foreground">当前阶段</div>
+          <div className="mt-1">
+            <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-base font-semibold">{state.detail}</div>
+          <div className="mt-1 text-sm text-muted-foreground">首页只显示 Owner 需要判断的状态，技术证据收起在系统页</div>
+        </div>
+        <ContextRow label="Owner" tone={state.tone} value={state.ownerAction} />
+      </CardContent>
+    </Card>
   );
 }
 

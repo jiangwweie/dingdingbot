@@ -1,4 +1,4 @@
-import type { OwnerAutomationState, OwnerAttentionState, OwnerHealthState, OwnerImportantChange, OwnerProductProjection, OwnerProductSummary, OwnerSourceStatus, StrategyGroupProductRow } from "../types";
+import type { OwnerAutomationState, OwnerAttentionState, OwnerHealthState, OwnerImportantChange, OwnerProductProjection, OwnerProductSummary, OwnerSourceHealthItem, OwnerSourceStatus, StrategyGroupProductRow } from "../types";
 
 export type ThemeMode = "dark" | "light";
 export type Tone = "safe" | "waiting" | "processing" | "danger" | "paused" | "neutral";
@@ -159,4 +159,101 @@ export function selectedStrategyFor(projection: OwnerProductProjection, selected
     ?? projection.strategies.find((strategy) => strategy.selected)
     ?? projection.strategies[0]
     ?? null;
+}
+
+export function homepageOperatingState(projection: OwnerProductProjection): {
+  label: string;
+  detail: string;
+  tone: Tone;
+  ownerAction: string;
+} {
+  const summary = projection.productSummary;
+  const readiness = projection.realOrderReadiness;
+  const sourceHealth = projection.sourceHealth;
+
+  if (summary.ownerAttentionCount > 0 || summary.overallStatus === "attention") {
+    return {
+      label: "需要介入",
+      detail: summary.reason || "有事项需要 Owner 处理",
+      tone: "danger",
+      ownerAction: "查看需要介入的策略组",
+    };
+  }
+
+  if (readiness.submitBlockerReview.required || _hasSafetyBlocker(projection)) {
+    return {
+      label: "安全边界阻断",
+      detail: readiness.ownerDetail || "真实订单保持关闭，等待系统处理安全状态",
+      tone: "danger",
+      ownerAction: "等待系统处理或查看系统状态",
+    };
+  }
+
+  if (_hasEngineeringBlocker(sourceHealth)) {
+    return {
+      label: "工程状态暂不可用",
+      detail: _firstEngineeringDetail(sourceHealth) || "运行、观察或状态源需要刷新",
+      tone: "processing",
+      ownerAction: "等待自动修复或查看系统状态",
+    };
+  }
+
+  if (summary.processingCount > 0) {
+    return {
+      label: "系统处理中",
+      detail: "系统正在处理订单、保护、对账或状态刷新",
+      tone: "processing",
+      ownerAction: "无需操作",
+    };
+  }
+
+  if (summary.waitingCount > 0 || readiness.status === "waiting_for_market") {
+    return {
+      label: "等待市场机会",
+      detail: "自动化正常运行，当前没有 fresh signal",
+      tone: "waiting",
+      ownerAction: "无需操作",
+    };
+  }
+
+  return {
+    label: "运行中",
+    detail: "自动化正常运行",
+    tone: "safe",
+    ownerAction: "无需操作",
+  };
+}
+
+function _hasSafetyBlocker(projection: OwnerProductProjection) {
+  const readiness = projection.realOrderReadiness;
+  if (readiness.blockedCount <= 0) return false;
+  return readiness.matrix.some((item) => {
+    const blockerClass = item.blockerClass || "";
+    return item.blocksRealSubmit || blockerClass.includes("safety") || blockerClass.includes("active_position");
+  }) || readiness.submitBlockingKeys.length > 0;
+}
+
+function _hasEngineeringBlocker(sourceHealth: OwnerProductProjection["sourceHealth"]) {
+  return [
+    sourceHealth.runtime,
+    sourceHealth.watcher,
+    sourceHealth.liveFacts,
+    sourceHealth.runtimeDryRunAudit,
+    sourceHealth.deployChannel,
+  ].some(_isEngineeringUnavailable);
+}
+
+function _isEngineeringUnavailable(item: OwnerSourceHealthItem) {
+  return item.status === "degraded" || item.status === "unavailable";
+}
+
+function _firstEngineeringDetail(sourceHealth: OwnerProductProjection["sourceHealth"]) {
+  const item = [
+    sourceHealth.runtime,
+    sourceHealth.watcher,
+    sourceHealth.liveFacts,
+    sourceHealth.runtimeDryRunAudit,
+    sourceHealth.deployChannel,
+  ].find(_isEngineeringUnavailable);
+  return item?.detail || item?.label || null;
 }

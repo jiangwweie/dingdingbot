@@ -73,6 +73,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["current_action"] == "继续等待市场机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
     assert report["interaction"]["level"] == "L1_daily_check_from_snapshot"
     assert report["interaction"]["remote_interaction_count"] == 1
     assert report["interaction"]["mutates_remote_files"] is False
@@ -99,6 +100,8 @@ def test_daily_check_marks_frontend_gap_as_degraded_not_safety_blocked():
     report = module.build_daily_check_report(snapshot=snapshot)
 
     assert report["status"] == "degraded"
+    assert report["owner_summary"]["state"] == "工程状态暂不可用"
+    assert report["owner_summary"]["visibility"]["category"] == "engineering_blocker"
     assert report["owner_summary"]["current_action"] == (
         "修复 Owner Console 产品发布缺口"
     )
@@ -126,7 +129,37 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
     report = module.build_daily_check_report(snapshot=snapshot)
 
     assert report["status"] == "blocked"
-    assert report["owner_summary"]["current_action"] == "处理工程或安全阻断"
-    assert report["owner_summary"]["owner_intervention_required"] is True
+    assert report["owner_summary"]["state"] == "工程状态暂不可用"
+    assert report["owner_summary"]["current_action"] == "处理工程状态阻断"
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["visibility"]["category"] == "engineering_blocker"
     assert "owner_console_backend_inactive" in report["checks"]["blockers"]
     assert "l1_snapshot_blocked" in report["checks"]["blockers"]
+
+
+def test_daily_check_classifies_safety_blocker_separately():
+    module = _load_module()
+    snapshot = _snapshot(
+        status="blocked",
+        checks={
+            "blockers": ["active_position_open_order_conflict"],
+            "product_gaps": [],
+            "backend_active": True,
+            "watcher_timer_active": True,
+            "source_readiness_ready": True,
+            "runtime_dry_run_audit_passed": True,
+            "frontend_release_present": True,
+            "frontend_index_present": True,
+        },
+    )
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "blocked"
+    assert report["owner_summary"]["state"] == "安全边界阻断"
+    assert report["owner_summary"]["current_action"] == "等待系统处理安全状态"
+    assert report["owner_summary"]["owner_intervention_required"] is True
+    assert report["owner_summary"]["visibility"]["category"] == "safety_blocker"
+    assert report["owner_summary"]["visibility"]["detail"] == (
+        "真实订单保持关闭，等待安全状态恢复"
+    )
