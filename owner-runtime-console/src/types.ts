@@ -16,6 +16,7 @@ export type OwnerMockScenario =
   | "normal"
   | "processing"
   | "paused"
+  | "safety"
   | "intervention"
   | "stale"
   | "empty"

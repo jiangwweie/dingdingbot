@@ -418,6 +418,7 @@ export function configuredMockScenario(value: unknown): OwnerMockScenario {
     value === "normal"
     || value === "processing"
     || value === "paused"
+    || value === "safety"
     || value === "intervention"
     || value === "stale"
     || value === "empty"
@@ -429,8 +430,9 @@ export function configuredMockScenario(value: unknown): OwnerMockScenario {
 }
 
 export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerConsoleSourceReadinessResponse {
+  const safetyBlocked = scenario === "safety";
   const ready = scenario !== "stale" && scenario !== "intervention" && scenario !== "empty";
-  const ownerLabel = scenario === "processing" ? "处理中" : scenario === "intervention" ? "需要介入" : ready ? "等待机会" : "暂不可用";
+  const ownerLabel = scenario === "processing" ? "处理中" : scenario === "intervention" ? "需要介入" : safetyBlocked ? "安全边界阻断" : ready ? "等待机会" : "暂不可用";
   const sourceStatus = ready ? "ready" : "source_unavailable";
   const baseHealth = {
     strategy_catalog: { status: "ready", label: "策略组可见", detail: "mock_strategy_catalog" },
@@ -449,7 +451,11 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
       detail: "mock_runtime_dry_run_audit",
       summary: ready ? dryRunAuditSummary : undefined,
     },
-    real_order_readiness: { status: ready ? "ready_empty" : "degraded", label: ready ? "等待机会" : "实盘边界待刷新", detail: "mock_real_order_readiness" },
+    real_order_readiness: {
+      status: ready ? "ready_empty" : "degraded",
+      label: safetyBlocked ? "安全边界阻断" : ready ? "等待机会" : "实盘边界待刷新",
+      detail: safetyBlocked ? "有持仓或订单处理中，真实订单保持关闭" : "mock_real_order_readiness",
+    },
     deploy_channel: { status: "ready_empty", label: "部署通道未检查", detail: "mock_deploy_channel" },
   } as const;
 
@@ -468,7 +474,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
       owner_state: {
         status: scenario === "processing" ? "processing" : scenario === "intervention" ? "needs_intervention" : ready ? "waiting_for_opportunity" : "temporarily_unavailable",
         label: ownerLabel,
-        reason: scenario === "intervention" ? "事实不可用，暂不能使用" : ready ? "no_fresh_strategy_signal" : "数据不可用，暂不能使用",
+        reason: scenario === "intervention" ? "事实不可用，暂不能使用" : safetyBlocked ? "有持仓或订单处理中，暂不能使用" : ready ? "no_fresh_strategy_signal" : "数据不可用，暂不能使用",
         next_action: "continue_watcher_observation",
         needs_owner_action: scenario === "intervention",
       },
@@ -483,7 +489,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
         reconciliation: ready ? "对账正常" : "对账详情暂不可用",
         operation_audit: ready ? "暂无审计动作" : "审计详情暂不可用",
         runtime_dry_run_audit: ready ? "审计演练正常" : "审计演练暂不可用",
-        real_order_readiness: ready ? "等待机会" : "实盘边界待刷新",
+        real_order_readiness: safetyBlocked ? "安全边界阻断" : ready ? "等待机会" : "实盘边界待刷新",
         deploy_channel: "部署通道未检查",
       },
       strategy_groups: ["MPG", "TEQ", "FBS", "SOR", "PMR"].map((code, index) => {
@@ -504,25 +510,33 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
       }),
       source_health: baseHealth,
       real_order_readiness: {
-        status: ready ? "waiting_for_market" : "degraded",
-        owner_label: ready ? "等待机会" : "实盘边界待刷新",
-        owner_detail: ready ? "实盘边界健康，等待市场机会" : "目标状态源不可用",
+        status: safetyBlocked ? "blocked" : ready ? "waiting_for_market" : "degraded",
+        owner_label: safetyBlocked ? "安全边界阻断" : ready ? "等待机会" : "实盘边界待刷新",
+        owner_detail: safetyBlocked ? "有持仓或订单处理中，真实订单保持关闭" : ready ? "实盘边界健康，等待市场机会" : "目标状态源不可用",
         ready_for_real_order_action: false,
-        pass_count: ready ? 8 : 0,
-        waiting_count: ready ? 4 : 0,
-        blocked_count: 0,
-        submit_blocking_keys: ready ? ["fresh_signal", "candidate_authorization", "action_time_finalgate", "official_operation_layer"] : [],
+        pass_count: safetyBlocked ? 7 : ready ? 8 : 0,
+        waiting_count: safetyBlocked ? 3 : ready ? 4 : 0,
+        blocked_count: safetyBlocked ? 1 : 0,
+        submit_blocking_keys: safetyBlocked ? ["active_position_open_order"] : ready ? ["fresh_signal", "candidate_authorization", "action_time_finalgate", "official_operation_layer"] : [],
         submit_blocker_review: {
-          required: false,
+          required: safetyBlocked,
           allowed: false,
-          project_progress_allowed: false,
-          continue_observation_allowed: false,
+          project_progress_allowed: safetyBlocked,
+          continue_observation_allowed: !safetyBlocked,
           real_submit_allowed: false,
-          next_safe_checkpoint: ready ? "continue_watcher_observation" : "refresh_runtime_goal_status",
-          blocker_keys: [],
+          next_safe_checkpoint: safetyBlocked ? "review_active_position_or_open_order_state" : ready ? "continue_watcher_observation" : "refresh_runtime_goal_status",
+          blocker_keys: safetyBlocked ? ["active_position_open_order"] : [],
         },
-        next_safe_checkpoint: ready ? "continue_watcher_observation" : "refresh_runtime_goal_status",
-        matrix: [],
+        next_safe_checkpoint: safetyBlocked ? "review_active_position_or_open_order_state" : ready ? "continue_watcher_observation" : "refresh_runtime_goal_status",
+        matrix: safetyBlocked ? [
+          {
+            key: "active_position_open_order",
+            status: "blocked",
+            blocker_class: "active_position_resolution",
+            blocks_real_submit: true,
+            detail: "有持仓或订单处理中，暂不能使用",
+          },
+        ] : [],
       },
       critical_unavailable_sources: ready ? [] : ["runtime_source"],
       frontend_contract: {
