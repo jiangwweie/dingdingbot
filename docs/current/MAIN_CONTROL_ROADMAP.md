@@ -1426,6 +1426,22 @@ selected `MPG-001` tiny real-order loop.
 | Daily-check schema | `DAILY_CHECK_REPORT_SCHEMA_VERSION=6` so cache artifacts that predate the tier-policy required checks are refreshed |
 | Safety proof | This is dry-run/reporting-only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-18 StrategyGroup Tier Policy Deploy Checkpoint
+
+The tier-policy dry-run required checks were pushed and deployed to Tokyo
+through the bounded git deploy path. The postdeploy daily check accepted the
+new runtime head and reported healthy waiting-for-market state.
+
+| Item | Result |
+| --- | --- |
+| Deployed runtime head | `dc58c7506aca99e011101f2f2e2641798bffcd6a` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-dc58c750-tier-policy-dry-run` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Postdeploy daily check | `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
+| Required dry-run checks | `runtime_dry_run_missing_required_checks=[]` |
+| Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `owner_intervention_required=false` |
+| Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
