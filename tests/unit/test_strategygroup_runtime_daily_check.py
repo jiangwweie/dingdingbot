@@ -84,6 +84,12 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["waiting_for_market"] is True
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
+    assert report["notification"] == {
+        "decision": "DONT_NOTIFY",
+        "reason": "healthy_waiting_for_market",
+        "message": "自动化正常运行，当前没有 fresh signal",
+        "owner_intervention_required": False,
+    }
 
 
 def test_daily_check_marks_frontend_gap_as_degraded_not_safety_blocked():
@@ -114,6 +120,8 @@ def test_daily_check_marks_frontend_gap_as_degraded_not_safety_blocked():
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["warnings"] == ["product_gap:frontend_release_missing"]
     assert report["checks"]["blockers"] == []
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "product_gap_present"
 
 
 def test_daily_check_blocks_on_snapshot_runtime_blocker():
@@ -143,6 +151,8 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
     assert report["owner_summary"]["visibility"]["category"] == "engineering_blocker"
     assert "owner_console_backend_inactive" in report["checks"]["blockers"]
     assert "l1_snapshot_blocked" in report["checks"]["blockers"]
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "blocker_present"
 
 
 def test_daily_check_classifies_safety_blocker_separately():
@@ -173,6 +183,9 @@ def test_daily_check_classifies_safety_blocker_separately():
     assert report["owner_summary"]["visibility"]["detail"] == (
         "真实订单保持关闭，等待安全状态恢复"
     )
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "blocker_present"
+    assert report["notification"]["owner_intervention_required"] is True
 
 
 def test_daily_check_exposes_missing_dry_run_required_checks():
@@ -205,6 +218,38 @@ def test_daily_check_exposes_missing_dry_run_required_checks():
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == [
         "fresh_signal_fast_auto_chain_checked"
     ]
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "blocker_present"
+
+
+def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
+    module = _load_module()
+    snapshot = _snapshot(
+        owner_summary={
+            "state": "运行中",
+            "current_action": "继续保持监控",
+            "runtime": "正常",
+            "watcher": "运行中",
+            "source_readiness": "正常",
+            "dry_run_audit": "审计演练正常",
+            "frontend": "已发布",
+        },
+        facts={
+            "reports": {
+                "goal_status": {
+                    "status": "processing",
+                    "fresh_signal_present": True,
+                },
+            },
+        },
+    )
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "ready"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "running"
 
 
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):

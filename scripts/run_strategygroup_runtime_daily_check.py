@@ -90,6 +90,28 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
         product_gaps=product_gaps,
         waiting_for_market=waiting_for_market,
     )
+    checks_report = {
+        "blockers": _dedupe([*blockers, *hard_failures]),
+        "warnings": _dedupe(warnings),
+        "product_gaps": product_gaps,
+        "waiting_for_market": waiting_for_market,
+        "runtime_ready": checks.get("backend_active") is True,
+        "watcher_ready": checks.get("watcher_timer_active") is True,
+        "source_readiness_ready": checks.get("source_readiness_ready") is True,
+        "runtime_dry_run_audit_passed": (
+            checks.get("runtime_dry_run_audit_passed") is True
+        ),
+        "runtime_dry_run_required_checks_present": (
+            checks.get("runtime_dry_run_required_checks_present") is True
+        ),
+        "runtime_dry_run_missing_required_checks": list(
+            checks.get("runtime_dry_run_missing_required_checks") or []
+        ),
+        "frontend_published": (
+            checks.get("frontend_release_present") is True
+            and checks.get("frontend_index_present") is True
+        ),
+    }
 
     return {
         "status": status,
@@ -125,28 +147,12 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
                 "frontend": owner_summary.get("frontend"),
             },
         },
-        "checks": {
-            "blockers": _dedupe([*blockers, *hard_failures]),
-            "warnings": _dedupe(warnings),
-            "product_gaps": product_gaps,
-            "waiting_for_market": waiting_for_market,
-            "runtime_ready": checks.get("backend_active") is True,
-            "watcher_ready": checks.get("watcher_timer_active") is True,
-            "source_readiness_ready": checks.get("source_readiness_ready") is True,
-            "runtime_dry_run_audit_passed": (
-                checks.get("runtime_dry_run_audit_passed") is True
-            ),
-            "runtime_dry_run_required_checks_present": (
-                checks.get("runtime_dry_run_required_checks_present") is True
-            ),
-            "runtime_dry_run_missing_required_checks": list(
-                checks.get("runtime_dry_run_missing_required_checks") or []
-            ),
-            "frontend_published": (
-                checks.get("frontend_release_present") is True
-                and checks.get("frontend_index_present") is True
-            ),
-        },
+        "checks": checks_report,
+        "notification": _notification_decision(
+            status=status,
+            checks=checks_report,
+            visibility=visibility,
+        ),
         "safety_invariants": {
             "remote_files_modified": False,
             "env_files_read": False,
@@ -160,6 +166,68 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
             "withdrawal_or_transfer_created": False,
         },
     }
+
+
+def _notification_decision(
+    *,
+    status: str,
+    checks: dict[str, Any],
+    visibility: dict[str, Any],
+) -> dict[str, Any]:
+    quiet_waiting = (
+        status == "waiting_for_market"
+        and checks.get("waiting_for_market") is True
+        and checks.get("blockers") == []
+        and checks.get("warnings") == []
+        and checks.get("product_gaps") == []
+        and checks.get("runtime_ready") is True
+        and checks.get("watcher_ready") is True
+        and checks.get("source_readiness_ready") is True
+        and checks.get("runtime_dry_run_audit_passed") is True
+        and checks.get("runtime_dry_run_required_checks_present") is True
+        and checks.get("frontend_published") is True
+    )
+    if quiet_waiting:
+        return {
+            "decision": "DONT_NOTIFY",
+            "reason": "healthy_waiting_for_market",
+            "message": "自动化正常运行，当前没有 fresh signal",
+            "owner_intervention_required": False,
+        }
+    return {
+        "decision": "NOTIFY",
+        "reason": _notification_reason(status=status, checks=checks, visibility=visibility),
+        "message": str(visibility.get("detail") or "运行状态需要处理"),
+        "owner_intervention_required": bool(
+            visibility.get("owner_intervention_required")
+        ),
+    }
+
+
+def _notification_reason(
+    *,
+    status: str,
+    checks: dict[str, Any],
+    visibility: dict[str, Any],
+) -> str:
+    if checks.get("blockers"):
+        return "blocker_present"
+    if checks.get("product_gaps"):
+        return "product_gap_present"
+    if checks.get("warnings"):
+        return "warning_present"
+    if checks.get("runtime_dry_run_audit_passed") is not True:
+        return "dry_run_audit_not_passed"
+    if checks.get("runtime_dry_run_required_checks_present") is not True:
+        return "dry_run_required_checks_missing"
+    if checks.get("frontend_published") is not True:
+        return "frontend_not_published"
+    category = str(visibility.get("category") or "")
+    if category and category != "waiting_for_market":
+        return category
+    if status != "waiting_for_market":
+        return f"status_{status}"
+    return "not_quiet_waiting_for_market"
 
 
 def _daily_next_action(
