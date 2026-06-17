@@ -290,6 +290,29 @@ def test_active_position_without_hard_stop_requires_owner_action():
     assert "active_position_missing_hard_stop" in packet.blockers
 
 
+def test_active_position_with_local_sl_only_still_requires_exchange_native_stop():
+    packet = build_runtime_live_position_monitor_packet(
+        runtime=_runtime(),
+        local_positions=[_position()],
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[],
+        reconciliation_result=None,
+        now_ms=NOW_MS,
+        exchange_facts_available=True,
+    )
+
+    assert packet.status == RuntimeLivePositionMonitorStatus.ACTIVE_UNPROTECTED
+    assert packet.protection_status == RuntimeLiveProtectionStatus.HARD_STOP_MISSING
+    assert packet.hard_stop_boundary_present is False
+    assert packet.can_continue_holding is False
+    assert packet.owner_action_required is True
+    assert "active_position_missing_hard_stop" in packet.blockers
+    assert "local_sl_record_present_but_exchange_native_stop_missing" in packet.warnings
+    assert packet.metadata["local_sl_record_present"] is True
+    assert packet.metadata["exchange_native_hard_stop_present"] is False
+
+
 def test_flat_after_attempt_requires_review_before_next_attempt():
     packet = build_runtime_live_position_monitor_packet(
         runtime=_runtime(),

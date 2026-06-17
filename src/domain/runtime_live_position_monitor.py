@@ -150,9 +150,9 @@ def build_runtime_live_position_monitor_packet(
     ]
 
     active_position_present = bool(local_positions or exchange_positions)
-    sl_present = _has_local_sl(local_open_orders) or _has_exchange_reduce_only_stop(
-        exchange_open_stop_orders
-    )
+    local_sl_present = _has_local_sl(local_open_orders)
+    exchange_sl_present = _has_exchange_reduce_only_stop(exchange_open_stop_orders)
+    sl_present = bool(exchange_sl_present)
     tp_present = _has_local_tp(local_open_orders) or _has_exchange_tp(
         exchange_open_stop_orders
     )
@@ -171,6 +171,14 @@ def build_runtime_live_position_monitor_packet(
     active_position_slots_used = max(len(local_positions), len(exchange_positions))
     if active_position_present and runtime.boundary.max_active_positions <= active_position_slots_used:
         blockers.append("runtime_max_active_positions_in_use")
+    if (
+        active_position_present
+        and runtime.boundary.requires_protection
+        and local_sl_present
+        and not exchange_sl_present
+        and exchange_facts_available
+    ):
+        warnings.append("local_sl_record_present_but_exchange_native_stop_missing")
     if active_position_present and runtime.boundary.requires_protection and not sl_present:
         blockers.append("active_position_missing_hard_stop")
     if active_position_present and sl_present and not tp_present:
@@ -278,6 +286,9 @@ def build_runtime_live_position_monitor_packet(
                 "it is not a runaway-risk blocker"
             ),
             "hard_stop_controls_runaway_loss": hard_stop_present,
+            "exchange_native_hard_stop_required": True,
+            "local_sl_record_present": local_sl_present,
+            "exchange_native_hard_stop_present": exchange_sl_present,
             "small_loss_within_runtime_boundary_can_be_acceptable": True,
             "active_position_slots_used": active_position_slots_used,
         },

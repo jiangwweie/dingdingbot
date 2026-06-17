@@ -1360,6 +1360,22 @@ This checkpoint removes an internal self-contradiction in the fresh-signal fast
 chain without expanding symbol, side, notional, leverage, live profile,
 credentials, or order-sizing defaults.
 
+### 2026-06-17 Runtime Exit Hardening Checkpoint
+
+The first live-order pilot treats an active position as protected only when the
+system can see an exchange-native reduce-only stop. A local SL record is a
+useful intent/projection fact, but it is not sufficient to prove live
+runaway-loss protection on the exchange.
+
+| Item | Result |
+| --- | --- |
+| Exchange-native hard stop | `runtime_live_position_monitor` now requires an exchange reduce-only stop for active-position hard-stop protection |
+| Local-only SL | A local SL record without exchange stop evidence produces `active_position_missing_hard_stop` plus `local_sl_record_present_but_exchange_native_stop_missing` |
+| Holding rule | `can_continue_holding` requires active position, fresh exchange facts, clean severe reconciliation, and exchange-native hard stop |
+| TP1 rule | TP1 remains a right-tail exit-plan review shape: default 50% at 1R; when quantity is below market minimum/step, the system keeps hard-stop-only or routes to full reduce-only close review instead of faking a TP order |
+| Protection failure rule | Entry fill with protection creation failure remains a recovery state: consume/account attempt, hold/reconcile budget, block new entries, require reconciliation, recovery review, and reduce-only recovery mode |
+| Safety proof | Local tests only; no Tokyo call, server mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
