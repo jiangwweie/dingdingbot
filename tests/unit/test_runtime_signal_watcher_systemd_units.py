@@ -118,6 +118,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
         source_root="/home/ubuntu/brc-deploy/source",
         source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",
         reports_dir="/home/ubuntu/brc-deploy/reports/test",
+        watcher_reports_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
         backups_dir="/home/ubuntu/brc-deploy/backups",
         app_current="/home/ubuntu/brc-deploy/app/current",
         remote_release_path="/home/ubuntu/brc-deploy/releases/test",
@@ -164,3 +165,4 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "systemctl daemon-reload" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
+    assert "tokyo-deploy-channel-status.json" in commands
