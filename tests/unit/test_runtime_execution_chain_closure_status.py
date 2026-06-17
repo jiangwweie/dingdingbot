@@ -15,6 +15,32 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
     assert packet["dry_run_chain"]["scenario_count"] == 14
     assert packet["dry_run_chain"]["required_checks_passed"] is True
     assert packet["dry_run_chain"]["dangerous_effects_absent"] is True
+    assert packet["dry_run_chain"]["projected_checks"] == {
+        "fresh_signal_fast_auto_chain_checked": True,
+        "non_executing_prepare_auto_bridge_checked": True,
+        "operation_layer_evidence_relay_checked": True,
+        "scoped_pipeline_operation_layer_handoff_checked": True,
+        "mock_operation_layer_closed_loop_checked": True,
+        "operation_layer_hard_safety_blocker_matrix_checked": True,
+        "operation_layer_blocker_review_policy_checked": True,
+        "operation_layer_authorization_chain_guard_checked": True,
+        "selected_strategygroup_dispatch_guard_checked": True,
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
+        "shared_runtime_pipeline_checked": True,
+        "common_execution_chain_reuse_checked": True,
+        "strategygroup_adapter_boundary_checked": True,
+        "strategy_handoff_no_execution_pipeline_fields_checked": True,
+        "post_submit_closed_loop_evidence_guard_checked": True,
+        "operation_layer_submit_result_identity_guard_checked": True,
+        "post_submit_finalize_result_identity_guard_checked": True,
+    }
+    assert packet["dry_run_chain"]["missing_or_failed_segments"] == []
+    assert {
+        "fresh_signal_fast_auto_chain_checked",
+        "operation_layer_evidence_relay_checked",
+        "scoped_pipeline_operation_layer_handoff_checked",
+        "post_submit_closed_loop_evidence_guard_checked",
+    }.issubset(set(packet["dry_run_chain"]["ready_segments"]))
     assert packet["real_execution"]["status"] == "waiting_for_live_action_time_proof"
     assert packet["real_execution"]["real_order_allowed"] is False
     assert packet["real_execution"]["disabled_smoke_is_real_execution_proof"] is False
@@ -52,6 +78,12 @@ def test_closure_status_blocks_when_required_dry_run_check_fails(tmp_path):
     assert packet["status"] == "non_market_execution_chain_blocked"
     assert packet["dry_run_chain"]["status"] == "blocked"
     assert packet["dry_run_chain"]["failed_required_checks"] == [
+        "fresh_signal_fast_auto_chain_checked"
+    ]
+    assert packet["dry_run_chain"]["projected_checks"][
+        "fresh_signal_fast_auto_chain_checked"
+    ] is False
+    assert packet["dry_run_chain"]["missing_or_failed_segments"] == [
         "fresh_signal_fast_auto_chain_checked"
     ]
     assert packet["real_execution"]["real_order_allowed"] is False

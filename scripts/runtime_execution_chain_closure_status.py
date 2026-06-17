@@ -33,6 +33,25 @@ REQUIRED_LIVE_PROOFS = [
     "official_operation_layer_real_gateway_action",
     "post_submit_finalize_reconciliation_budget_settlement",
 ]
+PROJECTED_DRY_RUN_CHECKS = [
+    "fresh_signal_fast_auto_chain_checked",
+    "non_executing_prepare_auto_bridge_checked",
+    "operation_layer_evidence_relay_checked",
+    "scoped_pipeline_operation_layer_handoff_checked",
+    "mock_operation_layer_closed_loop_checked",
+    "operation_layer_hard_safety_blocker_matrix_checked",
+    "operation_layer_blocker_review_policy_checked",
+    "operation_layer_authorization_chain_guard_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    "shared_runtime_pipeline_checked",
+    "common_execution_chain_reuse_checked",
+    "strategygroup_adapter_boundary_checked",
+    "strategy_handoff_no_execution_pipeline_fields_checked",
+    "post_submit_closed_loop_evidence_guard_checked",
+    "operation_layer_submit_result_identity_guard_checked",
+    "post_submit_finalize_result_identity_guard_checked",
+]
 SAFETY_INVARIANT_KEYS = [
     "calls_tokyo_api",
     "exchange_write_called",
@@ -86,11 +105,19 @@ def _dangerous_effects(safety: dict[str, Any]) -> list[str]:
     return sorted(set(effects))
 
 
+def _projected_dry_run_checks(required_checks: dict[str, Any]) -> dict[str, bool]:
+    return {
+        name: required_checks.get(name) is True
+        for name in PROJECTED_DRY_RUN_CHECKS
+    }
+
+
 def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
     required_checks = _dict(audit_packet.get("required_checks"))
     safety = _dict(audit_packet.get("safety_invariants"))
     failed_checks = _failed_required_checks(required_checks)
     dangerous_effects = _dangerous_effects(safety)
+    projected_checks = _projected_dry_run_checks(required_checks)
     audit_passed = (
         audit_packet.get("status") == "passed"
         and not failed_checks
@@ -126,6 +153,13 @@ def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
             "failed_required_checks": failed_checks,
             "dangerous_effects_absent": not dangerous_effects,
             "dangerous_effects": dangerous_effects,
+            "projected_checks": projected_checks,
+            "ready_segments": [
+                name for name, passed in projected_checks.items() if passed
+            ],
+            "missing_or_failed_segments": [
+                name for name, passed in projected_checks.items() if not passed
+            ],
             "common_execution_chain_reuse_checked": bool(
                 _dict(audit_packet.get("summary")).get(
                     "common_execution_chain_reuse_checked"
