@@ -104,6 +104,7 @@ POST_SUBMIT_FINALIZE_OPTIONAL_EVIDENCE_IDS = (
 LEGACY_LOCAL_REGISTRATION_PROBE_BLOCKER_FRAGMENTS = (
     "runtimeexecutionorderlifecycleadapterresult_not_found",
     "runtime_execution_order_lifecycle_adapter_result_not_found",
+    "preview_disabled_first_real_submit_action_http_404",
 )
 SHADOW_RUNTIME_BOUNDARY_BLOCKERS = (
     "runtime_execution_enabled_false_current_shadow_boundary",
