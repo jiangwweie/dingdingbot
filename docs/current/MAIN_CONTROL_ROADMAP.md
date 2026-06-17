@@ -661,6 +661,24 @@ deployed again so Tokyo release identity matches the current pushed branch head.
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Smoke, deploy, probe, postdeploy, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Submit-Blocker Review State Deploy Checkpoint
+
+The submit-blocker review state was pushed and deployed to Tokyo so the
+watcher-facing goal-status packet can distinguish normal waiting from
+reviewable submit blockers.
+
+| Item | Result |
+| --- | --- |
+| Deployed code head | `315af1b7` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-315af1b7-submit-blocker-review` |
+| Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `315af1b784ae8526f505e6b8e0d577a9728bde7e` |
+| Watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal`; `resume-dispatch-packet.status=waiting_for_market` |
+| Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `next_safe_checkpoint=continue_watcher_observation`, `ready_for_real_order_action=false` |
+| Submit-blocker review | `submit_blocker_review.required=false`, `blocker_keys=[]`; natural no-signal waiting is not a review task |
+| Real order boundary | `submit_blocker_keys=["fresh_signal","candidate_authorization","action_time_finalgate","official_operation_layer"]`, but `submit_blocker_review_required=false` because these are waiting states, not blocked rows |
+| Safety | Deploy, postdeploy verify, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### Mock Dispatcher Close-Loop
 
 The dry-run audit chain also includes a local mock dispatcher close-loop. It
