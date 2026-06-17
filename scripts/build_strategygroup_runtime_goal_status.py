@@ -81,6 +81,7 @@ REQUIRED_DRY_RUN_CHECKS = {
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
+    "scoped_pipeline_operation_layer_handoff_checked",
     "fresh_signal_fast_auto_chain_checked",
     "legacy_local_registration_probe_tolerance_checked",
     "mock_operation_layer_closed_loop_checked",

@@ -14,6 +14,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
+    "scoped_pipeline_operation_layer_handoff_checked",
     "fresh_signal_fast_auto_chain_checked",
     "mock_operation_layer_closed_loop_checked",
     "operation_layer_blocker_review_policy_checked",
@@ -46,7 +47,7 @@ def _load_module():
 
 def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
     dry_run_checks = {name: True for name in REQUIRED_DRY_RUN_CHECKS}
-    dry_run_checks["scenario_count"] = 13
+    dry_run_checks["scenario_count"] = 14
     return {
         "collector_status": "ok",
         "hostname": "VM-0-11-ubuntu",
@@ -99,7 +100,7 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                 "exists": True,
                 "payload": {
                     "status": "passed",
-                    "scenario_count": 13,
+                    "scenario_count": 14,
                     "checks": dry_run_checks,
                 },
             },

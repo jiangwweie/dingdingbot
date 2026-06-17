@@ -201,7 +201,7 @@ L1 read-only snapshot
 | Notification decision | Daily check now emits `notification.decision` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
 | Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat` renders the same decision as Codex heartbeat XML; fresh cache stays `L0` / 0 remote interactions, while stale cache may refresh one `L1` snapshot |
 | Owner progress output | `scripts/run_strategygroup_runtime_daily_check.py --owner-progress` renders the same one-shot check as a concise Owner-readable progress summary, so manual status reviews do not require extra SSH probes or raw JSON/XML inspection |
-| Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 13` instead of a vague green label |
+| Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 14` instead of a vague green label |
 | Local progress cache | `--output-json` and `--output-owner-progress` can persist the latest daily-check report and Owner progress text; `--from-cache --owner-progress` re-renders the default saved report locally with zero Tokyo interaction |
 | Auto cache mode | `--auto-cache --owner-progress` first uses a fresh local cache with `L0` / 0 remote interactions; only missing, stale, or schema-stale cache triggers one `L1` snapshot and refreshes the local cache/progress files |
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
@@ -517,7 +517,7 @@ the local console server/auth environment is not running.
 | Optional goal-status refresh | `--refresh-goal-status` writes `strategygroup-runtime-goal-status.json` |
 | Local auth missing | Records `operator_cookie_unavailable` and skips API packets instead of aborting the local audit refresh |
 | Long local goal mode | `--allow-degraded-local-refresh-success` may return exit code `0` only when operator auth is missing, dry-run audit passed, goal-status refreshed, fallback source-readiness was written, and no forbidden safety effect is present |
-| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=13`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
+| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=14`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
 | Safety | The wrapper remains readmodel/local-packet only; the degraded-success flag is not installed in Tokyo systemd and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Source-Readiness Fallback Checkpoint
@@ -634,7 +634,7 @@ Result:
 
 ```text
 runtime-dry-run-audit-chain.status=passed
-scenario_count=13
+scenario_count=14
 shared_runtime_pipeline_checked=true
 common_execution_chain_reuse_checked=true
 strategygroup_adapter_boundary_checked=true
@@ -677,7 +677,7 @@ git-based standing-authorization deploy path.
 | Current Tokyo goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal` |
 | Source readiness | `owner-console-source-readiness.status=ready` |
 | Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
-| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=13` |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=14` |
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Next checkpoint | `continue_watcher_observation` until a fresh selected StrategyGroup signal appears |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
@@ -696,7 +696,7 @@ Tokyo through the git-based standing-authorization deploy path.
 | Watcher timer | `brc-runtime-signal-watcher.timer` is enabled and active |
 | Current Tokyo goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `runtime_dry_run_audit_passed=true` |
 | Source readiness | `owner-console-source-readiness.status=ready`; Owner summary reports `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, and `保护正常` |
-| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=13`, fast-auto-chain/shared-pipeline/adapter-boundary checks are true |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=14`, fast-auto-chain/shared-pipeline/adapter-boundary checks are true |
 | Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |

@@ -70,7 +70,7 @@ def _daily_check(**overrides):
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "runtime_dry_run_scenario_count": 13,
+            "runtime_dry_run_scenario_count": 14,
             "frontend_published": True,
         },
         "notification": {

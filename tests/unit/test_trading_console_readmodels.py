@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.application.production_strategy_family_admission import (
@@ -1177,7 +1178,11 @@ def test_trading_console_scheduled_observation_rejects_shadow_candidate_without_
 
 
 def test_trading_console_frontend_proxy_keeps_brc_posts_narrow():
-    server_source = Path("trading-console/server.ts").read_text()
+    server_path = Path("trading-console/server.ts")
+    if not server_path.exists():
+        pytest.skip("legacy trading console frontend has been removed")
+
+    server_source = server_path.read_text()
 
     assert "STRATEGY_RUNTIME_LIVE_ENABLEMENT_MUTATION_PATH" in server_source
     assert "BRC_RUNTIME_DRAFT_FROM_CONFIRMATION_PATH" in server_source
@@ -5912,7 +5917,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
             "checks": {
-                "scenario_count": 13,
+                "scenario_count": 14,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
@@ -5929,6 +5934,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "post_submit_finalize_result_identity_guard_checked": True,
                 "non_executing_prepare_auto_bridge_checked": True,
                 "operation_layer_evidence_relay_checked": True,
+                "scoped_pipeline_operation_layer_handoff_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
                 "shared_runtime_pipeline_checked": True,
@@ -6111,7 +6117,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
         "summary"
     ]
-    assert dry_run_summary["scenario_count"] == 13
+    assert dry_run_summary["scenario_count"] == 14
     assert dry_run_summary["required_checks_present"] is True
     assert dry_run_summary["shared_runtime_pipeline_checked"] is True
     assert dry_run_summary["common_execution_chain_reuse_checked"] is True
@@ -6153,6 +6159,7 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "dangerous_effects_absent",
         "disabled_smoke_not_real_execution_proof",
         "operation_layer_evidence_relay_checked",
+        "scoped_pipeline_operation_layer_handoff_checked",
         "fresh_signal_fast_auto_chain_checked",
         "legacy_local_registration_probe_tolerance_checked",
         "mock_operation_layer_closed_loop_checked",
@@ -6573,7 +6580,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     )
 
     checks = {name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS}
-    checks["scenario_count"] = 13
+    checks["scenario_count"] = 14
     packet = {
         "status": "passed",
         "checks": checks,
@@ -6591,7 +6598,7 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
 
     assert ready["status"] == "ready"
     assert ready["owner_label"] == "审计演练正常"
-    assert ready["summary"]["scenario_count"] == 13
+    assert ready["summary"]["scenario_count"] == 14
     assert ready["summary"]["required_checks_present"] is True
     assert ready["summary"]["shared_runtime_pipeline_checked"] is True
     assert ready["summary"]["common_execution_chain_reuse_checked"] is True

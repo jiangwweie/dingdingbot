@@ -289,7 +289,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         return {
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
-            "scenario_count": 13,
+            "scenario_count": 14,
             "checks": {"dangerous_effects_absent": True},
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -341,7 +341,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "output_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
         "output_dir": str(tmp_path / "dry"),
         "goal_status_input_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
-        "scenario_count": 13,
+        "scenario_count": 14,
         "dangerous_effects_absent": True,
     }
     assert packet["goal_status_refresh"] == {
@@ -383,7 +383,7 @@ def test_refresh_packets_mirrors_external_dry_run_packet_for_goal_status(
         return {
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
-            "scenario_count": 13,
+            "scenario_count": 14,
             "checks": {name: True for name in REQUIRED_DRY_RUN_CHECKS},
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -440,7 +440,7 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
         return {
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
-            "scenario_count": 13,
+            "scenario_count": 14,
             "checks": {"dangerous_effects_absent": True},
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -617,7 +617,7 @@ def test_cli_can_treat_degraded_local_refresh_as_continuable(
         "reason": "operator_cookie_unavailable_with_local_audit_refresh_complete",
     }
     assert packet["dry_run_audit_refresh"]["status"] == "passed"
-    assert packet["dry_run_audit_refresh"]["scenario_count"] == 13
+    assert packet["dry_run_audit_refresh"]["scenario_count"] == 14
     assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
     assert packet["source_readiness_fallback"]["reason"] == (
         "operator_cookie_unavailable"

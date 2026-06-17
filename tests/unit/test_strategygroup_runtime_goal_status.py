@@ -82,13 +82,14 @@ def _write_base_packets(report_dir: Path) -> None:
         {
             "status": "passed",
             "checks": {
-                "scenario_count": 13,
+                "scenario_count": 14,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
                 "disabled_smoke_not_real_execution_proof": True,
                 "non_executing_prepare_auto_bridge_checked": True,
                 "operation_layer_evidence_relay_checked": True,
+                "scoped_pipeline_operation_layer_handoff_checked": True,
                 "fresh_signal_fast_auto_chain_checked": True,
                 "legacy_local_registration_probe_tolerance_checked": True,
                 "mock_operation_layer_closed_loop_checked": True,
@@ -407,7 +408,7 @@ def test_goal_status_reads_local_nested_dry_run_audit_packet(
 
     assert packet["checks"]["runtime_dry_run_audit_passed"] is True
     assert "runtime_dry_run_audit_not_passed" not in packet["blockers"]
-    assert packet["evidence"]["dry_run_scenario_count"] == 13
+    assert packet["evidence"]["dry_run_scenario_count"] == 14
     assert packet["status"] == "waiting_for_signal"
 
 
@@ -432,7 +433,7 @@ def test_goal_status_prefers_more_complete_nested_dry_run_audit_packet(
     _write(root_packet, root_payload)
 
     nested_payload = json.loads(root_packet.read_text(encoding="utf-8"))
-    nested_payload["checks"]["scenario_count"] = 13
+    nested_payload["checks"]["scenario_count"] = 14
     nested_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = True
     nested_payload["checks"][
         "strategy_handoff_no_execution_pipeline_fields_checked"
@@ -453,7 +454,7 @@ def test_goal_status_prefers_more_complete_nested_dry_run_audit_packet(
         packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
         is True
     )
-    assert packet["evidence"]["dry_run_scenario_count"] == 13
+    assert packet["evidence"]["dry_run_scenario_count"] == 14
     assert (
         "runtime_dry_run_missing_required_check:"
         "non_executing_prepare_auto_bridge_checked"

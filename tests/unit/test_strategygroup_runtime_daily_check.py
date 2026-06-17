@@ -64,7 +64,7 @@ def _snapshot(**overrides):
                 },
                 "runtime_dry_run_audit": {
                     "status": "passed",
-                    "scenario_count": 13,
+                    "scenario_count": 14,
                 },
             },
         },
@@ -93,8 +93,8 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["waiting_for_market"] is True
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
-    assert report["checks"]["runtime_dry_run_scenario_count"] == 13
-    assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 13
+    assert report["checks"]["runtime_dry_run_scenario_count"] == 14
+    assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 14
     assert report["notification"] == {
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
@@ -402,7 +402,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 接近真实订单: 否" in text
     assert "- 交易所写入: 否" in text
     assert "- Runtime: 正常" in text
-    assert "- 演练场景: 13" in text
+    assert "- 演练场景: 14" in text
     assert "- Frontend: 已发布" in text
 
 
