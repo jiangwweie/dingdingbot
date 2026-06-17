@@ -240,6 +240,20 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         "strategygroup_adapter_boundary_checked"
     ] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert packet["real_order_boundary"]["submit_blocker_review_required"] is False
+    assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is False
+    assert packet["real_order_boundary"]["project_progress_allowed"] is False
+    assert packet["real_order_boundary"]["continue_observation_allowed"] is False
+    assert packet["real_order_boundary"]["real_submit_allowed"] is False
+    assert packet["evidence"]["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": False,
+        "next_safe_checkpoint": "continue_watcher_observation",
+        "blocker_keys": [],
+    }
     matrix = _matrix_by_key(packet)
     assert matrix["fresh_signal"]["status"] == "waiting_for_market"
     assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
@@ -789,6 +803,21 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["checks"]["ready_for_real_order_action"] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is True
+    assert packet["real_order_boundary"]["submit_blocker_review_required"] is False
+    assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is False
+    assert packet["real_order_boundary"]["project_progress_allowed"] is False
+    assert packet["real_order_boundary"]["continue_observation_allowed"] is False
+    assert packet["real_order_boundary"]["real_submit_allowed"] is True
+    assert packet["real_order_boundary"]["submit_blocker_keys"] == []
+    assert packet["evidence"]["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": True,
+        "next_safe_checkpoint": "call_official_operation_layer_submit_after_action_time_recheck",
+        "blocker_keys": [],
+    }
     matrix = _matrix_by_key(packet)
     assert matrix["fresh_signal"]["status"] == "pass"
     assert matrix["candidate_authorization"]["status"] == "pass"
@@ -902,8 +931,25 @@ def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
     assert packet["status"] == expected_status
     assert packet["owner_state"]["next_safe_checkpoint"] == expected_next_checkpoint
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert packet["real_order_boundary"]["submit_blocker_review_required"] is True
+    assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is True
+    assert packet["real_order_boundary"]["project_progress_allowed"] is True
+    assert packet["real_order_boundary"]["continue_observation_allowed"] is True
+    assert packet["real_order_boundary"]["real_submit_allowed"] is False
+    assert packet["real_order_boundary"]["submit_blocker_keys"] == [
+        expected_matrix_key
+    ]
     assert f"matrix_submit_blocker:{expected_matrix_key}" in packet["blockers"]
     assert packet["evidence"]["matrix_submit_blockers"] == [expected_matrix_key]
+    assert packet["evidence"]["submit_blocker_review"] == {
+        "required": True,
+        "allowed": True,
+        "project_progress_allowed": True,
+        "continue_observation_allowed": True,
+        "real_submit_allowed": False,
+        "next_safe_checkpoint": expected_next_checkpoint,
+        "blocker_keys": [expected_matrix_key],
+    }
     matrix = _matrix_by_key(packet)
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
     assert matrix["official_operation_layer"]["blocks_real_submit"] is True

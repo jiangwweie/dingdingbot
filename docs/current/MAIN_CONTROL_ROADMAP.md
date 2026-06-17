@@ -830,6 +830,26 @@ open order, missing protection, missing budget, duplicate submit, and
 symbol/side/notional/leverage mismatch all keep
 `ready_for_real_order_action=false` and emit `matrix_submit_blocker:<key>`.
 
+`strategygroup-runtime-goal-status.json` also emits an explicit
+`submit_blocker_review` object under `evidence` and mirrored fields under
+`real_order_boundary`. When these blockers appear, the packet states:
+
+| Field | Meaning |
+| --- | --- |
+| `submit_blocker_review.required=true` | A submit-blocker review packet should be recorded. |
+| `submit_blocker_review.project_progress_allowed=true` | The project can continue with review/repair work instead of waiting for chat confirmation. |
+| `submit_blocker_review.continue_observation_allowed=true` | Watcher observation can continue while real submit stays closed. |
+| `submit_blocker_review.real_submit_allowed=false` | No real exchange action is allowed until the blocker is resolved through the official path. |
+
+The review object is limited to matrix rows with `status=blocked`. Natural
+waiting states such as no fresh signal, candidate/auth not reached yet,
+FinalGate not reached yet, or Operation Layer not reached yet keep real submit
+closed but do not create a submit-blocker review requirement.
+
+This makes active position, open order, missing protection, missing budget,
+duplicate-submit risk, and symbol/side/notional/leverage mismatch reviewable
+runtime evidence, not per-StrategyGroup execution forks.
+
 ## P0 Subgoal: Common Runtime Pipe Before Strategy-Specific Adapters
 
 ### Current Judgment

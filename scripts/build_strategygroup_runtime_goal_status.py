@@ -1048,6 +1048,17 @@ def build_goal_status_packet(
         real_order_ready=real_order_ready,
     )
     matrix_submit_blockers = _matrix_submit_blocking_items(readiness_matrix)
+    submit_blocker_keys = [
+        str(item.get("key") or "") for item in matrix_submit_blockers
+    ]
+    submit_blocker_review_items = [
+        item
+        for item in matrix_submit_blockers
+        if item.get("status") == "blocked"
+    ]
+    submit_blocker_review_keys = [
+        str(item.get("key") or "") for item in submit_blocker_review_items
+    ]
     if real_order_ready and matrix_submit_blockers:
         status, next_checkpoint, owner_detail = _status_from_submit_blockers(
             matrix_submit_blockers
@@ -1068,7 +1079,29 @@ def build_goal_status_packet(
             dangerous_effects=dangerous,
             real_order_ready=real_order_ready,
         )
+        submit_blocker_keys = [
+            str(item.get("key") or "") for item in matrix_submit_blockers
+        ]
+        submit_blocker_review_items = [
+            item
+            for item in matrix_submit_blockers
+            if item.get("status") == "blocked"
+        ]
+        submit_blocker_review_keys = [
+            str(item.get("key") or "") for item in submit_blocker_review_items
+        ]
     checks["ready_for_real_order_action"] = real_order_ready
+    submit_blocker_review_required = bool(submit_blocker_review_items)
+    submit_blocker_review_allowed = (
+        submit_blocker_review_required
+        and not dangerous
+        and status
+        in {
+            "active_position_resolution",
+            "missing_fact",
+            "hard_safety_stop",
+        }
+    )
     return {
         "scope": "strategygroup_runtime_goal_status",
         "generated_at_ms": int(time.time() * 1000),
@@ -1116,9 +1149,16 @@ def build_goal_status_packet(
             "dry_run_missing_required_checks": dry_run_missing_required_checks,
             "watcher_liveness_blockers": watcher_liveness,
             "selected_scope_blockers": selected_scope_blockers,
-            "matrix_submit_blockers": [
-                str(item.get("key") or "") for item in matrix_submit_blockers
-            ],
+            "matrix_submit_blockers": submit_blocker_keys,
+            "submit_blocker_review": {
+                "required": submit_blocker_review_required,
+                "allowed": submit_blocker_review_allowed,
+                "project_progress_allowed": submit_blocker_review_allowed,
+                "continue_observation_allowed": submit_blocker_review_allowed,
+                "real_submit_allowed": real_order_ready,
+                "next_safe_checkpoint": next_checkpoint,
+                "blocker_keys": submit_blocker_review_keys,
+            },
             "pilot_matched_runtime_instance_ids": _pilot_matched_runtime_instance_ids(
                 packets["pilot_status"]
             ),
@@ -1146,6 +1186,12 @@ def build_goal_status_packet(
             "requires_candidate_grant_authorization": True,
             "requires_action_time_finalgate": True,
             "requires_official_operation_layer": True,
+            "submit_blocker_review_required": submit_blocker_review_required,
+            "submit_blocker_review_allowed": submit_blocker_review_allowed,
+            "project_progress_allowed": submit_blocker_review_allowed,
+            "continue_observation_allowed": submit_blocker_review_allowed,
+            "real_submit_allowed": real_order_ready,
+            "submit_blocker_keys": submit_blocker_keys,
         },
         "real_order_readiness_matrix": readiness_matrix,
         "safety_invariants": {
