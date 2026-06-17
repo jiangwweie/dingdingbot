@@ -818,7 +818,10 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "--run-daily-check --daily-check-mode cache --owner-progress"
     )
     assert baseline["goal_progress_audit_check"].endswith(
-        "run_strategygroup_runtime_goal_progress_audit.py --owner-progress"
+        "run_strategygroup_runtime_goal_progress_audit.py "
+        "--owner-progress "
+        "--output-json output/runtime-monitor/latest-goal-progress.json "
+        "--output-owner-progress output/runtime-monitor/latest-goal-progress.md"
     )
     assert baseline["homepage_visual_qa_check"] == (
         "cd owner-runtime-console && npm run visual:qa:home"

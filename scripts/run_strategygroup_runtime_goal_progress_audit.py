@@ -13,6 +13,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_DAILY_CHECK_JSON = REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
+DEFAULT_GOAL_PROGRESS_JSON = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.json"
+DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-goal-progress.md"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
         daily_check=_read_json(Path(args.daily_check_json)),
         baseline=_read_json(Path(args.baseline_json)),
     )
+    owner_progress_text = _owner_progress_text(report)
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,8 +33,12 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+    if args.output_owner_progress:
+        output_path = Path(args.output_owner_progress)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(owner_progress_text + "\n", encoding="utf-8")
     if args.owner_progress:
-        print(_owner_progress_text(report))
+        print(owner_progress_text)
     elif args.json:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
@@ -163,6 +172,10 @@ def build_goal_progress_report(
         "source_paths": {
             "daily_check_json": str(DEFAULT_DAILY_CHECK_JSON),
             "baseline_json": str(DEFAULT_BASELINE_JSON),
+            "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
+            "goal_progress_owner_progress_md": str(
+                DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
+            ),
         },
     }
 
@@ -449,7 +462,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--daily-check-json", default=str(DEFAULT_DAILY_CHECK_JSON))
     parser.add_argument("--baseline-json", default=str(DEFAULT_BASELINE_JSON))
-    parser.add_argument("--output-json")
+    parser.add_argument("--output-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
+    parser.add_argument(
+        "--output-owner-progress",
+        default=str(DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD),
+    )
     return parser.parse_args(argv)
 
 

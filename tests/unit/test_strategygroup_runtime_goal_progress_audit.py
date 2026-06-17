@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -174,3 +175,41 @@ def test_goal_progress_rejects_remote_interaction_in_local_audit():
     assert "local_goal_progress_expected_zero_remote_interaction" in report["checks"][
         "product_gaps"
     ]
+
+
+def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
+    module = _load_module()
+    daily_check_path = tmp_path / "daily-check.json"
+    baseline_path = tmp_path / "baseline.json"
+    output_json = tmp_path / "goal-progress.json"
+    output_md = tmp_path / "goal-progress.md"
+    daily_check_path.write_text(
+        json.dumps(_daily_check(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    baseline_path.write_text(
+        json.dumps(_baseline(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(
+        [
+            "--daily-check-json",
+            str(daily_check_path),
+            "--baseline-json",
+            str(baseline_path),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+            "--owner-progress",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["status"] == "waiting_for_market"
+    assert payload["interaction"]["remote_interaction_count"] == 0
+    progress = output_md.read_text(encoding="utf-8")
+    assert "## StrategyGroup Runtime Goal Progress" in progress
+    assert "- P0.5 ready: 是" in progress

@@ -211,6 +211,7 @@ L1 read-only snapshot
 | Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `heartbeat_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
 | Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0/P0.5 track status with `L0` / 0 remote interactions |
+| Goal progress cache | The same audit writes `output/runtime-monitor/latest-goal-progress.json` and `output/runtime-monitor/latest-goal-progress.md`, so status reviews can reuse the latest local progress artifact |
 | Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check` accepts `--daily-check-mode fresh`, `auto-cache`, or `cache`; postdeploy acceptance stays fresh, while routine reviews can reuse cache |
 | Deploy-session cache clarity | Cache-only deploy-session reviews report `interaction.level=L0_local_cache_read` and keep the original `collected_interaction_level` inside the step for audit context |
 | Deploy-session Owner progress | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress` renders a Markdown progress table with current stage, action, risk, interaction count, server mutation, and real-order proximity |
