@@ -1249,6 +1249,22 @@ This keeps the non-market rehearsal chain useful when the local machine lacks
 Tokyo SSH public-key access, while preserving fail-closed deploy verification on
 the server path.
 
+### 2026-06-17 Snapshot Goal-Status Nested Checks Checkpoint
+
+The low-interaction Tokyo snapshot now reads `strategygroup-runtime-goal-status`
+checks from the nested `checks` object as well as top-level compatibility
+fields. This keeps the Owner progress layer from losing important goal-loop
+facts when the packet is produced by the current builder.
+
+| Field | Snapshot behavior |
+| --- | --- |
+| `checks.fresh_signal_present` | Projected into the compact `goal_status` summary as explicit `true` / `false` |
+| `checks.deployment_aligned=false` | Blocks the snapshot as `runtime_goal_status_deployment_not_aligned` |
+| `checks.watcher_liveness_healthy=false` | Blocks the snapshot as `watcher_liveness_not_healthy` |
+
+This is a monitoring/readability repair only. It does not call FinalGate,
+Operation Layer, exchange write, OrderLifecycle, or any real-order path.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

@@ -91,9 +91,11 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                 "exists": True,
                 "payload": {
                     "status": "waiting_for_signal",
-                    "deployment_aligned": True,
-                    "watcher_liveness_healthy": True,
-                    "fresh_signal_present": False,
+                    "checks": {
+                        "deployment_aligned": True,
+                        "watcher_liveness_healthy": True,
+                        "fresh_signal_present": False,
+                    },
                     "ready_for_real_order_action": False,
                 },
             },
@@ -209,6 +211,8 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
         "required_facts_readiness",
     ]
     assert closure["missing_or_failed_goal_chain_segments"] == []
+    goal_status = report["facts"]["reports"]["goal_status"]
+    assert goal_status["fresh_signal_present"] is False
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
 
@@ -331,6 +335,36 @@ def test_tokyo_runtime_snapshot_blocks_on_runtime_liveness_failure():
     assert "owner_console_backend_inactive" in report["checks"]["blockers"]
     assert report["owner_summary"]["state"] == "暂不可用"
     assert report["owner_summary"]["owner_intervention_required"] is True
+
+
+def test_tokyo_runtime_snapshot_blocks_on_nested_goal_status_liveness_failure():
+    module = _load_module()
+    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    goal_status = payload["reports"]["strategygroup-runtime-goal-status.json"][
+        "payload"
+    ]
+    goal_status["checks"]["watcher_liveness_healthy"] = False
+
+    def runner(command: tuple[str, ...]):
+        return module.CommandResult(
+            stdout=json.dumps(payload),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head="frontend-head",
+        runner=runner,
+    )
+
+    assert report["status"] == "blocked"
+    assert "watcher_liveness_not_healthy" in report["checks"]["blockers"]
+    assert report["owner_summary"]["state"] == "暂不可用"
 
 
 def test_tokyo_runtime_snapshot_blocks_when_dry_run_required_check_is_missing():

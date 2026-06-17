@@ -233,13 +233,13 @@ def evaluate_runtime_snapshot(
     )
     if chain_closure.get("status") != "non_market_execution_chain_ready":
         blockers.append("runtime_execution_chain_closure_status_not_ready")
-    if goal_status.get("deployment_aligned") is False:
+    if _packet_check(goal_status, "deployment_aligned") is False:
         blockers.append("runtime_goal_status_deployment_not_aligned")
-    if goal_status.get("watcher_liveness_healthy") is False:
+    if _packet_check(goal_status, "watcher_liveness_healthy") is False:
         blockers.append("watcher_liveness_not_healthy")
 
     waiting_for_market = (
-        goal_status.get("fresh_signal_present") is False
+        _packet_check(goal_status, "fresh_signal_present") is False
         or latest_summary.get("status") in {"waiting_for_signal", "waiting_for_market"}
         or source_readiness.get("owner_state") in {"等待机会", "waiting_for_opportunity"}
     )
@@ -500,7 +500,7 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "blockers": packet.get("blockers"),
         "scenario_count": packet.get("scenario_count")
         or _as_dict(packet.get("checks")).get("scenario_count"),
-        "fresh_signal_present": packet.get("fresh_signal_present"),
+        "fresh_signal_present": _packet_check(packet, "fresh_signal_present"),
         "ready_for_real_order_action": packet.get("ready_for_real_order_action"),
         "projected_checks": dry_run_chain.get("projected_checks"),
         "ready_segments": dry_run_chain.get("ready_segments"),
@@ -515,6 +515,13 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "missing_or_failed_goal_chain_segments"
         ),
     }
+
+
+def _packet_check(packet: dict[str, Any], key: str) -> Any:
+    if key in packet:
+        return packet.get(key)
+    checks = _as_dict(packet.get("checks"))
+    return checks.get(key)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
