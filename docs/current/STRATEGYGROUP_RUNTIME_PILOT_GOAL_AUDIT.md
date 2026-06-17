@@ -24,8 +24,8 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
-| Latest deployed runtime head | `001bf2667a766279fba928215780ad94fa0d6370` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-001bf266-nested-hard-stop` |
+| Latest deployed runtime head | `2f382cd8f8e32ac509d791fdd9a9ff1d987ed83c` |
+| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2f382cd8-cache-head-drift` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -114,3 +114,22 @@ fresh selected StrategyGroup signal exists.
 | order-sizing default mutation | false |
 | mock signal treated as real signal | false |
 | disabled smoke treated as real execution proof | false |
+
+## Latest Checkpoint
+
+### 2026-06-18 Runtime Monitor Cache Head Guard
+
+The low-noise runtime monitor now treats cache freshness as a three-part check:
+schema version, generated-at age, and deployed runtime head. A fresh local cache
+whose `source.runtime_head` or `source.expected_runtime_head` no longer matches
+`docs/current/RUNTIME_MONITOR_BASELINE.json` is blocked or refreshed instead of
+quietly reporting a stale `DONT_NOTIFY`.
+
+| Item | Evidence |
+| --- | --- |
+| Local commit | `2f382cd8 feat(runtime): invalidate monitor cache on deployed head drift` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2f382cd8-cache-head-drift` |
+| Deploy apply | `output/tokyo-git-deploy-apply-2f382cd8.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-2f382cd8.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
+| Cache source | `output/runtime-monitor/latest-daily-check.json` records `source.expected_runtime_head` and `source.runtime_head` for cache-head validation |
+| Verification | `85 passed` for daily check, goal progress, goal status, and Tokyo snapshot unit tests |
