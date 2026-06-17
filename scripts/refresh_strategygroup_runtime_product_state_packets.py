@@ -844,6 +844,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--release-manifest")
     parser.add_argument("--expected-head")
     parser.add_argument(
+        "--allow-degraded-local-refresh-success",
+        action="store_true",
+        help=(
+            "Return exit code 0 when local operator auth is unavailable but "
+            "non-executing dry-run audit and goal-status refresh completed "
+            "with only operator-cookie skip blockers. This is for local "
+            "long-running goal loops; server/systemd runs should keep the "
+            "default fail-visible exit behavior."
+        ),
+    )
+    parser.add_argument(
         "--selected-strategy-group-id",
         default=os.environ.get("BRC_SELECTED_STRATEGY_GROUP_ID")
         or os.environ.get("BRC_STRATEGYGROUP_SELECTED_ID"),
@@ -867,6 +878,51 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     return parser.parse_args(argv)
+
+
+def _degraded_local_refresh_is_continuable(packet: dict[str, Any]) -> bool:
+    if packet.get("status") != "refresh_blocked":
+        return False
+    blockers = [str(item) for item in packet.get("blockers") or []]
+    if not blockers:
+        return False
+    if not all(
+        blocker.startswith("operator_cookie_unavailable:")
+        or blocker.endswith(":refresh_skipped:operator_cookie_unavailable")
+        for blocker in blockers
+    ):
+        return False
+    dry_run = packet.get("dry_run_audit_refresh")
+    if isinstance(dry_run, dict) and dry_run.get("enabled") is True:
+        if dry_run.get("status") != "passed":
+            return False
+    goal_status = packet.get("goal_status_refresh")
+    if isinstance(goal_status, dict) and goal_status.get("enabled") is True:
+        if goal_status.get("status") in {None, "failed"}:
+            return False
+        if goal_status.get("runtime_dry_run_audit_passed") is not True:
+            return False
+    fallback = packet.get("source_readiness_fallback")
+    if not isinstance(fallback, dict):
+        return False
+    if fallback.get("enabled") is not True:
+        return False
+    if fallback.get("reason") != "operator_cookie_unavailable":
+        return False
+    safety = packet.get("safety_invariants")
+    if not isinstance(safety, dict):
+        return False
+    forbidden_flags = (
+        "exchange_write_called",
+        "order_created",
+        "order_lifecycle_called",
+        "execution_intent_created",
+        "runtime_budget_mutated",
+        "withdrawal_or_transfer_created",
+        "places_order",
+        "mutates_pg",
+    )
+    return not any(safety.get(name) is True for name in forbidden_flags)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -912,10 +968,21 @@ def main(argv: list[str] | None = None) -> int:
         ),
         expected_head=args.expected_head,
     )
+    exit_code = 0 if packet["status"] == "refreshed" else 2
+    if (
+        args.allow_degraded_local_refresh_success
+        and _degraded_local_refresh_is_continuable(packet)
+    ):
+        exit_code = 0
+        packet["cli_exit_policy"] = {
+            "status": "degraded_local_refresh_continuable",
+            "exit_code": 0,
+            "reason": "operator_cookie_unavailable_with_local_audit_refresh_complete",
+        }
     if args.output_json:
         _write_json(Path(args.output_json).expanduser(), packet)
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if packet["status"] == "refreshed" else 2
+    return exit_code
 
 
 if __name__ == "__main__":

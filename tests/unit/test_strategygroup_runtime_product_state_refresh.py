@@ -533,3 +533,86 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["optional_source_readiness_fallback"] is True
+
+
+def test_cli_can_treat_degraded_local_refresh_as_continuable(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    def missing_cookie():
+        raise RuntimeError("operator auth missing")
+
+    monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
+
+    output_json = tmp_path / "product-state-refresh-packet.json"
+    exit_code = refresh_script.main(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--output-json",
+            str(output_json),
+            "--refresh-dry-run-audit-chain",
+            "--refresh-goal-status",
+            "--allow-degraded-local-refresh-success",
+            "--selected-strategy-group-id",
+            "MPG-001",
+            "--max-symbols",
+            "3",
+            "--stale-after-seconds",
+            "180",
+        ]
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["cli_exit_policy"] == packet["cli_exit_policy"]
+    assert packet["status"] == "refresh_blocked"
+    assert packet["cli_exit_policy"] == {
+        "status": "degraded_local_refresh_continuable",
+        "exit_code": 0,
+        "reason": "operator_cookie_unavailable_with_local_audit_refresh_complete",
+    }
+    assert packet["dry_run_audit_refresh"]["status"] == "passed"
+    assert packet["dry_run_audit_refresh"]["scenario_count"] == 13
+    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
+    assert packet["source_readiness_fallback"]["reason"] == (
+        "operator_cookie_unavailable"
+    )
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+
+
+def test_cli_keeps_default_blocked_exit_for_degraded_refresh(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    def missing_cookie():
+        raise RuntimeError("operator auth missing")
+
+    monkeypatch.setattr(refresh_script, "_operator_cookie", missing_cookie)
+
+    exit_code = refresh_script.main(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--refresh-dry-run-audit-chain",
+            "--refresh-goal-status",
+            "--selected-strategy-group-id",
+            "MPG-001",
+            "--max-symbols",
+            "3",
+            "--stale-after-seconds",
+            "180",
+        ]
+    )
+
+    assert exit_code == 2
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["status"] == "refresh_blocked"
+    assert "cli_exit_policy" not in packet
+    assert packet["dry_run_audit_refresh"]["status"] == "passed"
+    assert packet["goal_status_refresh"]["runtime_dry_run_audit_passed"] is True
