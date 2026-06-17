@@ -1457,6 +1457,22 @@ stop exists but the reduce-only marker is not projected to the top level.
 | Restored surfaces | live-position monitor, active-position exit plan, and post-close follow-up can proceed when the exchange-native stop is actually visible |
 | Safety proof | Local tests only; no Tokyo call, server mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-18 Nested Hard Stop Deploy Checkpoint
+
+The exchange-native hard-stop shape fix was pushed and deployed to Tokyo through
+the bounded git deploy path. Postdeploy acceptance reported a healthy
+waiting-for-market state.
+
+| Item | Result |
+| --- | --- |
+| Deployed runtime head | `001bf2667a766279fba928215780ad94fa0d6370` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-001bf266-nested-hard-stop` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Deploy session | `status=waiting_for_market`, total remote interactions `8` including one L1 postdeploy daily check |
+| Postdeploy daily check | `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
+| Monitor baseline | `expected_runtime_head=001bf2667a766279fba928215780ad94fa0d6370` |
+| Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
