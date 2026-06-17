@@ -1285,6 +1285,26 @@ This makes the non-market closure proof auditable from one packet without
 re-reading all raw dry-run artifacts. It remains non-executing and does not
 promote disabled smoke into real execution proof.
 
+### 2026-06-17 Closure Evidence Map Deploy Checkpoint
+
+Tokyo is now deployed at
+`6a49b8ba9904a10d21f52e946e84bd33d494af84` through the bounded git deploy
+path. This deploy publishes the non-market closure evidence map and the latest
+monitoring/readability repairs. It does not publish or depend on a frontend.
+
+| Item | Result |
+| --- | --- |
+| Release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-6a49b8ba-closure-evidence-map` |
+| Deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Postdeploy snapshot | `status=ready`, `watcher_timer_active=true`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `source_readiness_ready=true` |
+| Goal status | `waiting_for_signal`, `fresh_signal_present=false`, `ready_for_real_order_action=false` |
+| Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
+| Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, or order-sizing mutation |
+
+The local low-interaction snapshot reader now also projects
+`goal_chain_segment_evidence` from the closure packet, so one snapshot can show
+which dry-run scenarios proved each objective segment.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

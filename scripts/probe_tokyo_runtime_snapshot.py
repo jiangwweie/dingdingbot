@@ -508,6 +508,9 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "missing_or_failed_segments"
         ),
         "goal_chain_segments": dry_run_chain.get("goal_chain_segments"),
+        "goal_chain_segment_evidence": dry_run_chain.get(
+            "goal_chain_segment_evidence"
+        ),
         "ready_goal_chain_segments": dry_run_chain.get(
             "ready_goal_chain_segments"
         ),

@@ -127,6 +127,22 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                             "fresh_or_mock_signal": True,
                             "required_facts_readiness": True,
                         },
+                        "goal_chain_segment_evidence": {
+                            "fresh_or_mock_signal": {
+                                "required_checks": [
+                                    "fresh_signal_fast_auto_chain_checked"
+                                ],
+                                "scenario_names": [
+                                    "mock_fresh_signal_dry_run_pass"
+                                ],
+                                "scenario_statuses": {
+                                    "mock_fresh_signal_dry_run_pass": "passed"
+                                },
+                                "checks_passed": True,
+                                "scenarios_passed": True,
+                                "ready": True,
+                            }
+                        },
                         "ready_goal_chain_segments": [
                             "fresh_or_mock_signal",
                             "required_facts_readiness",
@@ -205,6 +221,16 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert closure["goal_chain_segments"] == {
         "fresh_or_mock_signal": True,
         "required_facts_readiness": True,
+    }
+    assert closure["goal_chain_segment_evidence"] == {
+        "fresh_or_mock_signal": {
+            "required_checks": ["fresh_signal_fast_auto_chain_checked"],
+            "scenario_names": ["mock_fresh_signal_dry_run_pass"],
+            "scenario_statuses": {"mock_fresh_signal_dry_run_pass": "passed"},
+            "checks_passed": True,
+            "scenarios_passed": True,
+            "ready": True,
+        }
     }
     assert closure["ready_goal_chain_segments"] == [
         "fresh_or_mock_signal",
