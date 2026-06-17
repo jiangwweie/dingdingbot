@@ -23,6 +23,7 @@ DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.js
 PACKET_FILES = {
     "watcher_tick": "watcher-tick.json",
     "latest_summary": "latest-summary.json",
+    "wakeup": "wakeup-packet.json",
     "post_signal_resume": "post-signal-resume-pack.json",
     "resume_dispatch": "resume-dispatch-packet.json",
     "runtime_dry_run_audit": "runtime-dry-run-audit-chain.json",
@@ -35,6 +36,7 @@ PACKET_FILE_FALLBACKS = {
         "dry-run-audit-chain/runtime-dry-run-audit-chain.json",
     ),
 }
+OPTIONAL_PACKET_KEYS = {"wakeup"}
 
 DANGEROUS_TRUE_KEYS = {
     "exchange_write_called",
@@ -65,6 +67,7 @@ WAITING_BLOCKER_FRAGMENTS = {
 
 FRESH_SIGNAL_STATUSES = {
     "ready_for_non_executing_prepare",
+    "runtime_signal_ready_for_non_executing_prepare",
     "ready_for_fresh_submit_authorization",
     "waiting_for_fresh_authorization",
     "ready_for_action_time_final_gate",
@@ -171,6 +174,8 @@ def _blocker_class(packet: dict[str, Any] | None) -> str:
 def _ready_runtime_signal_count(packet: dict[str, Any] | None) -> int:
     data = _data(packet)
     value = data.get("ready_runtime_signals")
+    if value is None:
+        value = _dict(data.get("summary")).get("runtime_ready_signal_count")
     if isinstance(value, int):
         return value
     if isinstance(value, list):
@@ -626,13 +631,21 @@ def _runtime_dry_run_missing_required_checks(checks: dict[str, Any]) -> list[str
 def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
     if any(
         _ready_runtime_signal_count(packets.get(name)) > 0
-        for name in ("latest_summary", "post_signal_resume", "resume_dispatch")
+        for name in (
+            "latest_summary",
+            "wakeup",
+            "post_signal_resume",
+            "resume_dispatch",
+            "pilot_status",
+        )
     ):
         return True
     statuses = {
+        _status(packets.get("wakeup")),
         _status(packets.get("latest_summary")),
         _status(packets.get("post_signal_resume")),
         _status(packets.get("resume_dispatch")),
+        _status(packets.get("pilot_status")),
         _dispatch_status(packets.get("resume_dispatch")),
     }
     return bool(statuses & FRESH_SIGNAL_STATUSES)
@@ -669,12 +682,27 @@ def _selected_scope_blockers(
     if not alignment:
         return []
 
-    if alignment.get("status") == "mismatch":
+    alignment_status = str(alignment.get("status") or "")
+    if alignment_status == "mismatch":
         return ["selected_strategygroup_scope_mismatch"]
 
     matched_ids = set(_pilot_matched_runtime_instance_ids(packets.get("pilot_status")))
     if not matched_ids:
         return ["selected_strategygroup_matched_runtime_ids_missing"]
+    if alignment_status == "expanded_scope":
+        out_of_scope_rows = _list(alignment.get("out_of_scope_runtime_signal_summaries"))
+        actionable_out_of_scope = [
+            str(_dict(item).get("runtime_instance_id"))
+            for item in out_of_scope_rows
+            if str(_dict(item).get("status") or "") in FRESH_SIGNAL_STATUSES
+            and str(_dict(item).get("runtime_instance_id") or "")
+        ]
+        if actionable_out_of_scope:
+            return [
+                f"fresh_signal_outside_selected_strategygroup_scope:{runtime_id}"
+                for runtime_id in sorted(set(actionable_out_of_scope))
+            ]
+        return []
 
     candidate_ids = (
         _selected_runtime_instance_ids(packets.get("resume_dispatch"))
@@ -695,6 +723,8 @@ def _selected_scope_blockers(
 
 def _watcher_liveness_blockers(
     packets: dict[str, dict[str, Any] | None],
+    *,
+    fresh_signal_present: bool,
 ) -> list[str]:
     blockers: list[str] = []
     for name in ("watcher_tick", "latest_summary"):
@@ -704,7 +734,9 @@ def _watcher_liveness_blockers(
         if status and status not in WAITING_STATUSES and status not in FRESH_SIGNAL_STATUSES:
             if status not in {"blocked", "owner_attention_pending"}:
                 blockers.append(f"{name}:unexpected_status:{status}")
-            elif not _non_waiting_blockers(packet):
+            elif not _non_waiting_blockers(packet) and not (
+                status == "owner_attention_pending" and fresh_signal_present
+            ):
                 blockers.append(f"{name}:status:{status}")
     return sorted(set(blockers))
 
@@ -798,9 +830,13 @@ def _current_status(
         )
 
     dispatch_status = _dispatch_status(packets.get("resume_dispatch"))
-    resume_status = _status(packets.get("resume_dispatch")) or _status(
-        packets.get("post_signal_resume")
-    )
+    chain_statuses = {
+        _status(packets.get("resume_dispatch")),
+        _status(packets.get("post_signal_resume")),
+        _status(packets.get("pilot_status")),
+        _status(packets.get("wakeup")),
+    }
+    chain_statuses.discard("")
 
     if dispatch_status == "official_operation_layer_evidence_ready":
         return (
@@ -812,15 +848,16 @@ def _current_status(
     if dispatch_status in {
         "official_finalgate_preflight_dispatch_ready",
         "official_finalgate_preflight_passed",
-    } or resume_status == "ready_for_action_time_final_gate":
+    } or "ready_for_action_time_final_gate" in chain_statuses:
         return (
             "action_time_finalgate_ready",
             "run_official_action_time_finalgate",
             "fresh signal 已进入 action-time FinalGate 检查点",
             False,
         )
-    if resume_status in {
+    if chain_statuses & {
         "ready_for_non_executing_prepare",
+        "runtime_signal_ready_for_non_executing_prepare",
         "ready_for_fresh_submit_authorization",
         "waiting_for_fresh_authorization",
     }:
@@ -886,14 +923,19 @@ def build_goal_status_packet(
     deployment_blockers.extend(source_deploy_channel_blockers)
     live_facts = _data(packets["live_facts_readiness"])
     dangerous = _dangerous_effects(*packets.values())
-    watcher_liveness = _watcher_liveness_blockers(packets)
     fresh_signal_present = _has_fresh_signal(packets)
+    watcher_liveness = _watcher_liveness_blockers(
+        packets,
+        fresh_signal_present=fresh_signal_present,
+    )
     selected_scope_blockers = _selected_scope_blockers(
         packets=packets,
         fresh_signal_present=fresh_signal_present,
     )
     missing_packets = [
-        key for key, value in packets.items() if value is None
+        key
+        for key, value in packets.items()
+        if value is None and key not in OPTIONAL_PACKET_KEYS
     ]
 
     dry_run_required_check_status = {
@@ -902,7 +944,11 @@ def build_goal_status_packet(
     }
 
     checks = {
-        "required_packets_present": all(value is not None for value in packets.values()),
+        "required_packets_present": all(
+            value is not None
+            for key, value in packets.items()
+            if key not in OPTIONAL_PACKET_KEYS
+        ),
         "deployment_aligned": not deployment_blockers,
         "runtime_dry_run_audit_passed": (
             dry_run.get("status") == "passed"

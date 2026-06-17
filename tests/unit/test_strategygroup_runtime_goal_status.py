@@ -419,6 +419,90 @@ def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
 
 
+def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degrade(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "owner_attention_pending",
+            "blockers": [],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "wakeup-packet.json",
+        {
+            "status": "runtime_signal_ready_for_non_executing_prepare",
+            "summary": {
+                "runtime_ready_signal_count": 1,
+                "selected_runtime_instance_ids": [
+                    "runtime-mpg-1",
+                    "runtime-sor-waiting",
+                ],
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "strategygroup-runtime-pilot-status.json",
+        {
+            "status": "ready_for_non_executing_prepare",
+            "blockers": [],
+            "watcher_scope_alignment": {
+                "status": "expanded_scope",
+                "selected_strategy_group_id": "MPG-001",
+                "matched_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-mpg-1",
+                        "strategy_family_id": "MPG-001",
+                        "symbol": "MSTR/USDT:USDT",
+                        "side": "long",
+                        "status": "waiting_for_signal",
+                    }
+                ],
+                "out_of_scope_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-sor-waiting",
+                        "strategy_family_id": "SOR-001",
+                        "symbol": "XAG/USDT:USDT",
+                        "side": "short",
+                        "status": "waiting_for_signal",
+                    }
+                ],
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "fresh_signal_processing"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "prepare_candidate_grant_authorization_evidence"
+    )
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["checks"]["watcher_liveness_healthy"] is True
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
+    assert packet["blockers"] == []
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+
+
 def test_goal_status_surfaces_watcher_liveness_blockers(
     tmp_path: Path,
 ) -> None:
