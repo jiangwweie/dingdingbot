@@ -256,11 +256,20 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "disabled_smoke_does_not_exchange_write": True,
         "disabled_smoke_does_not_create_order": True,
         "disabled_smoke_does_not_call_order_lifecycle": True,
+        "dispatcher_disabled_smoke_mode_passed": True,
+        "dispatcher_disabled_smoke_keeps_real_confirm_false": True,
+        "dispatcher_disabled_smoke_does_not_exchange_write": True,
     }
     assert scoped_handoff["scoped_disabled_submit_smoke"]["status"] == (
         "disabled_smoke_passed"
     )
     assert scoped_handoff["scoped_disabled_submit_smoke"]["safety_invariants"][
+        "exchange_write_called"
+    ] is False
+    assert scoped_handoff["dispatcher_disabled_submit_smoke"]["status"] == (
+        "operation_layer_disabled_smoke_passed"
+    )
+    assert scoped_handoff["dispatcher_disabled_submit_smoke"]["safety_invariants"][
         "exchange_write_called"
     ] is False
     assert scoped_handoff["pipeline_report"]["status"] == (

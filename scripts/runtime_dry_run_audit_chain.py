@@ -1037,6 +1037,57 @@ def _disabled_smoke_args(path: Path) -> argparse.Namespace:
     )
 
 
+def _dispatcher_disabled_smoke_packet(
+    *,
+    operation_layer_evidence: dict[str, Any],
+    operation_layer_evidence_path: str,
+) -> dict[str, Any]:
+    calls: list[dict[str, Any]] = []
+
+    def fake_session_cookie() -> tuple[str, None]:
+        return "brc_operator_session=dry-run", None
+
+    def fake_request_json(**kwargs: Any) -> dict[str, Any]:
+        calls.append(dict(kwargs))
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_execution_disabled",
+                "exchange_submit_execution_enabled": False,
+                "exchange_submit_execution_mode": "disabled",
+                "exchange_called": False,
+                "exchange_order_submitted": False,
+                "order_lifecycle_submit_called": False,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    original_session_cookie = dispatcher._session_cookie
+    original_request_json = dispatcher._request_json
+    try:
+        dispatcher._session_cookie = fake_session_cookie
+        dispatcher._request_json = fake_request_json
+        packet = dispatcher.build_dispatch_packet(
+            resume_pack=_resume_pack_finalgate_ready(),
+            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+            api_base="http://dry-run.local",
+            operation_layer_evidence_report=operation_layer_evidence,
+            operation_layer_evidence_report_path=operation_layer_evidence_path,
+            execute_operation_layer_submit=True,
+            operation_layer_submit_mode=(
+                dispatcher.OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE
+            ),
+        )
+    finally:
+        dispatcher._session_cookie = original_session_cookie
+        dispatcher._request_json = original_request_json
+    packet["dry_run_dispatcher_disabled_smoke_calls"] = calls
+    return packet
+
+
 def _fake_closed_loop_shape() -> dict[str, Any]:
     return {
         "scope": "runtime_dry_run_fake_closed_loop_shape",
@@ -1489,6 +1540,13 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         _disabled_smoke_args(scoped_disabled_handoff_path),
         client=_DisabledSmokeClient(),
     )
+    dispatcher_disabled_smoke = _dispatcher_disabled_smoke_packet(
+        operation_layer_evidence=operation_layer_evidence,
+        operation_layer_evidence_path=str(
+            pipeline_report.get("operation_layer_evidence_after_local_registration_path")
+            or "/tmp/scoped-pipeline-operation-layer-evidence.json"
+        ),
+    )
     ids = operation_layer_evidence.get("ids")
     if not isinstance(ids, dict):
         ids = {}
@@ -1536,6 +1594,24 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
             )
             is False
         ),
+        "dispatcher_disabled_smoke_mode_passed": (
+            dispatcher_disabled_smoke.get("status")
+            == "operation_layer_disabled_smoke_passed"
+            and dispatcher_disabled_smoke.get("dispatch_status")
+            == "official_operation_layer_disabled_smoke_passed"
+        ),
+        "dispatcher_disabled_smoke_keeps_real_confirm_false": (
+            dispatcher_disabled_smoke.get("operation_layer_submit_result", {}).get(
+                "owner_confirmed_for_first_real_submit_action"
+            )
+            is False
+        ),
+        "dispatcher_disabled_smoke_does_not_exchange_write": (
+            dispatcher_disabled_smoke.get("safety_invariants", {}).get(
+                "exchange_write_called"
+            )
+            is False
+        ),
     }
     checks = {
         "pipeline_reaches_scoped_local_registration_recorded": (
@@ -1568,6 +1644,7 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         pipeline_report,
         dispatch,
         scoped_disabled_smoke,
+        dispatcher_disabled_smoke,
     )
     return _scenario_packet(
         name="scoped_pipeline_operation_layer_handoff",
@@ -1579,6 +1656,7 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
             "checks": checks,
             "scoped_disabled_submit_checks": scoped_disabled_submit_checks,
             "scoped_disabled_submit_smoke": scoped_disabled_smoke,
+            "dispatcher_disabled_submit_smoke": dispatcher_disabled_smoke,
             "pipeline_report": pipeline_report,
             "resume_dispatch": dispatch,
             "pipeline_client_calls": pipeline_client.calls,

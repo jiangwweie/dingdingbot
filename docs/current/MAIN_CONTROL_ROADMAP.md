@@ -1126,12 +1126,15 @@ scoped pipeline evidence
 -> dispatcher accepts Operation Layer evidence
 -> handoff packet is built from the same evidence IDs
 -> official first-real-submit endpoint is called in disabled-smoke mode
+-> dispatcher can also call the same endpoint in disabled-smoke mode
 -> owner_confirmed_for_first_real_submit_action=false
 -> no order, no OrderLifecycle call, no exchange write
 ```
 
 This closes a rehearsal gap between generic mock disabled-smoke proof and the
-real pipeline-shaped scoped local-registration evidence. It is still not real
+real pipeline-shaped scoped local-registration evidence. The dispatcher mode is
+selected explicitly with `--operation-layer-submit-mode disabled_smoke` and keeps
+the existing real gateway action mode as the default. It is still not real
 execution proof and does not authorize bypassing action-time FinalGate or the
 official Operation Layer.
 

@@ -1340,6 +1340,69 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
         assert query[name] == [f"{name}-value"]
 
 
+def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
+    monkeypatch,
+):
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "exchange_submit_execution_disabled",
+                "exchange_submit_execution_enabled": False,
+                "exchange_submit_execution_mode": "disabled",
+                "exchange_called": False,
+                "exchange_order_submitted": False,
+                "order_lifecycle_submit_called": False,
+                "owner_bounded_execution_called": False,
+                "execution_intent_status_changed": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    packet = build_dispatch_packet(
+        resume_pack=_finalgate_ready_dispatch_packet(),
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+        operation_layer_submit_mode="disabled_smoke",
+    )
+
+    assert packet["status"] == "operation_layer_disabled_smoke_passed"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_status"] == "official_operation_layer_disabled_smoke_passed"
+    assert packet["dispatch_action"] == "continue_watcher_observation"
+    assert packet["owner_state"]["status"] == "operation_layer_disabled_smoke_passed"
+    assert packet["operation_layer_submit_result"]["called"] is True
+    assert packet["operation_layer_submit_result"][
+        "owner_confirmed_for_first_real_submit_action"
+    ] is False
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["safety_invariants"]["calls_order_lifecycle"] is False
+    assert packet["safety_invariants"]["withdrawal_or_transfer_created"] is False
+    assert len(calls) == 1
+    parsed = urlparse(calls[0]["url"])
+    query = parse_qs(parsed.query)
+    assert query["owner_confirmed_for_first_real_submit_action"] == ["false"]
+    for name in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
+        assert query[name] == [f"{name}-value"]
+
+
 def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(

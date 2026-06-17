@@ -57,6 +57,12 @@ CONTINUE_ACTION = "continue_watcher_observation"
 NON_EXECUTING_PREPARE_ACTION = "prepare_fresh_candidate_authorization_evidence"
 OPERATION_LAYER_ACTION = "prepare_official_operation_layer_submit"
 OPERATION_LAYER_SUBMIT_ACTION = "call_official_operation_layer_submit"
+OPERATION_LAYER_SUBMIT_MODE_REAL = "real_gateway_action"
+OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE = "disabled_smoke"
+OPERATION_LAYER_SUBMIT_MODES = {
+    OPERATION_LAYER_SUBMIT_MODE_REAL,
+    OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE,
+}
 POST_SUBMIT_FINALIZE_ACTION = "post_submit_finalize_reconciliation_budget_settlement"
 FRESH_AUTHORIZATION_ACTION = "bind_or_resolve_fresh_submit_authorization"
 FRESH_AUTHORIZATION_BINDING_ACTION = "run_official_fresh_submit_authorization_binding"
@@ -599,10 +605,13 @@ def _operation_layer_submit_url(
     *,
     command_plan: dict[str, Any],
     readiness: dict[str, Any],
+    submit_mode: str,
 ) -> str:
     ids = _dict(readiness.get("available_evidence_ids"))
     params = {
-        "owner_confirmed_for_first_real_submit_action": "true",
+        "owner_confirmed_for_first_real_submit_action": (
+            "true" if submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL else "false"
+        ),
     }
     for name in OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
         params[name] = str(ids.get(name) or "")
@@ -1189,6 +1198,7 @@ def _execute_non_executing_prepare(
     | None = None,
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
+    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
@@ -1261,6 +1271,7 @@ def _execute_non_executing_prepare(
         operation_layer_evidence_preparer=operation_layer_evidence_preparer,
         runtime_live_enabler=runtime_live_enabler,
         execute_operation_layer_submit=execute_operation_layer_submit,
+        operation_layer_submit_mode=operation_layer_submit_mode,
         execute_post_submit_finalize=execute_post_submit_finalize,
     )
 
@@ -1280,6 +1291,7 @@ def build_dispatch_packet(
     non_executing_preparer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
+    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
     selected_strategy_group_id: str | None = None,
 ) -> dict[str, Any]:
@@ -1422,6 +1434,7 @@ def build_dispatch_packet(
             operation_layer_evidence_preparer=operation_layer_evidence_preparer,
             runtime_live_enabler=runtime_live_enabler,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            operation_layer_submit_mode=operation_layer_submit_mode,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
@@ -1624,6 +1637,7 @@ def build_dispatch_packet(
             operation_layer_evidence_preparer=operation_layer_evidence_preparer,
             runtime_live_enabler=runtime_live_enabler,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            operation_layer_submit_mode=operation_layer_submit_mode,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
@@ -1697,6 +1711,7 @@ def build_dispatch_packet(
         return _maybe_execute_operation_layer_submit(
             packet=packet,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            operation_layer_submit_mode=operation_layer_submit_mode,
             execute_post_submit_finalize=execute_post_submit_finalize,
             timeout_seconds=preflight_timeout_seconds,
         )
@@ -1777,6 +1792,7 @@ def build_dispatch_packet(
             operation_layer_evidence_preparer=operation_layer_evidence_preparer,
             runtime_live_enabler=runtime_live_enabler,
             execute_operation_layer_submit=execute_operation_layer_submit,
+            operation_layer_submit_mode=operation_layer_submit_mode,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
@@ -2292,6 +2308,7 @@ def _execute_finalgate_preflight(
     | None = None,
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
+    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
@@ -2441,6 +2458,7 @@ def _execute_finalgate_preflight(
     return _maybe_execute_operation_layer_submit(
         packet=result_packet,
         execute_operation_layer_submit=execute_operation_layer_submit,
+        operation_layer_submit_mode=operation_layer_submit_mode,
         execute_post_submit_finalize=execute_post_submit_finalize,
         timeout_seconds=timeout_seconds,
     )
@@ -2457,6 +2475,7 @@ def _execute_fresh_authorization_binding(
     | None = None,
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
+    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     command_plan = _dict(packet.get("command_plan"))
@@ -2602,6 +2621,7 @@ def _execute_fresh_authorization_binding(
         operation_layer_evidence_preparer=operation_layer_evidence_preparer,
         runtime_live_enabler=runtime_live_enabler,
         execute_operation_layer_submit=execute_operation_layer_submit,
+        operation_layer_submit_mode=operation_layer_submit_mode,
         execute_post_submit_finalize=execute_post_submit_finalize,
     )
 
@@ -2907,11 +2927,28 @@ def _maybe_execute_operation_layer_submit(
     *,
     packet: dict[str, Any],
     execute_operation_layer_submit: bool,
+    operation_layer_submit_mode: str,
     execute_post_submit_finalize: bool,
     timeout_seconds: int,
 ) -> dict[str, Any]:
     if not execute_operation_layer_submit:
         return packet
+    if operation_layer_submit_mode not in OPERATION_LAYER_SUBMIT_MODES:
+        return _packet_from_operation_layer_submit(
+            packet=packet,
+            status="operation_layer_submit_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
+            blockers=[
+                f"invalid_operation_layer_submit_mode:{operation_layer_submit_mode}"
+            ],
+            submit_result={
+                "called": False,
+                "http_status": None,
+                "body": None,
+                "error": "invalid_operation_layer_submit_mode",
+            },
+        )
     blockers = _operation_layer_submit_precondition_blockers(packet)
     if blockers:
         return _packet_from_operation_layer_submit(
@@ -2930,6 +2967,7 @@ def _maybe_execute_operation_layer_submit(
     return _execute_operation_layer_submit(
         packet=packet,
         timeout_seconds=timeout_seconds,
+        operation_layer_submit_mode=operation_layer_submit_mode,
         execute_post_submit_finalize=execute_post_submit_finalize,
     )
 
@@ -2938,6 +2976,7 @@ def _execute_operation_layer_submit(
     *,
     packet: dict[str, Any],
     timeout_seconds: int,
+    operation_layer_submit_mode: str,
     execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     cookie, cookie_error = _session_cookie()
@@ -2961,6 +3000,7 @@ def _execute_operation_layer_submit(
     url = _operation_layer_submit_url(
         command_plan=command_plan,
         readiness=readiness,
+        submit_mode=operation_layer_submit_mode,
     )
     response = _request_json(
         method="POST",
@@ -2978,7 +3018,10 @@ def _execute_operation_layer_submit(
         "error": bool(response.get("error")),
         "error_type": response.get("error_type"),
         "error_message": response.get("error_message"),
-        "owner_confirmed_for_first_real_submit_action": True,
+        "owner_confirmed_for_first_real_submit_action": (
+            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+        ),
+        "operation_layer_submit_mode": operation_layer_submit_mode,
         "official_operation_layer_submit_called": True,
         "official_operation_layer_endpoint": True,
     }
@@ -3018,6 +3061,51 @@ def _execute_operation_layer_submit(
 
     body_status = str(body.get("status") or "")
     body_blockers = _dedupe_text(body.get("blockers") or [])
+    if operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
+        if body_status != "exchange_submit_execution_disabled":
+            return _packet_from_operation_layer_submit(
+                packet=packet,
+                status="operation_layer_submit_blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_status="blocked_by_disabled_smoke_submit_result",
+                blockers=[
+                    "disabled_smoke_expected_exchange_submit_execution_disabled:"
+                    f"{body_status or 'missing'}"
+                ],
+                submit_result=submit_result,
+            )
+        if (
+            body.get("exchange_called") is True
+            or body.get("exchange_order_submitted") is True
+            or body.get("order_lifecycle_submit_called") is True
+        ):
+            return _packet_from_operation_layer_submit(
+                packet=packet,
+                status="operation_layer_submit_blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_status="blocked_by_disabled_smoke_forbidden_effect",
+                blockers=["disabled_smoke_reported_submit_side_effect"],
+                submit_result=submit_result,
+            )
+        return _packet_from_operation_layer_submit(
+            packet=packet,
+            status="operation_layer_disabled_smoke_passed",
+            blocker_class="none",
+            dispatch_status="official_operation_layer_disabled_smoke_passed",
+            blockers=[],
+            submit_result=submit_result,
+        )
+    if operation_layer_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
+        return _packet_from_operation_layer_submit(
+            packet=packet,
+            status="operation_layer_submit_blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
+            blockers=[
+                f"invalid_operation_layer_submit_mode:{operation_layer_submit_mode}"
+            ],
+            submit_result=submit_result,
+        )
     if body_status == "exchange_submit_orders_submitted":
         identity_blockers = _operation_layer_submit_result_identity_blockers(
             packet=packet,
@@ -3180,7 +3268,13 @@ def _packet_from_operation_layer_submit(
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
         "dispatch_action": (
-            POST_SUBMIT_FINALIZE_ACTION if status == "submitted" else None
+            POST_SUBMIT_FINALIZE_ACTION
+            if status == "submitted"
+            else (
+                CONTINUE_ACTION
+                if status == "operation_layer_disabled_smoke_passed"
+                else None
+            )
         ),
         "owner_state": owner_state,
         "operation_layer_submit_result": submit_result,
@@ -3611,6 +3705,17 @@ def _owner_state_for_operation_layer_submit(
             "downgrade_mode": "none",
             "exchange_submit_execution_status": body.get("status"),
         }
+    if status == "operation_layer_disabled_smoke_passed":
+        return {
+            "status": status,
+            "blocker_class": "none",
+            "blocked_at": "none",
+            "blocked_reason": "none",
+            "next_recover_condition": "fresh_strategy_signal_or_real_gateway_action",
+            "automatic_recovery_action": CONTINUE_ACTION,
+            "downgrade_mode": "none",
+            "exchange_submit_execution_status": body.get("status"),
+        }
     if status == "operation_layer_submit_failed":
         return {
             "status": status,
@@ -3854,6 +3959,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--operation-layer-submit-mode",
+        choices=sorted(OPERATION_LAYER_SUBMIT_MODES),
+        default=OPERATION_LAYER_SUBMIT_MODE_REAL,
+        help=(
+            "Operation Layer submit mode used with "
+            "--execute-operation-layer-submit. real_gateway_action keeps the "
+            "existing real-order boundary; disabled_smoke calls the same "
+            "official endpoint with owner confirmation forced false and "
+            "requires exchange_submit_execution_disabled."
+        ),
+    )
+    parser.add_argument(
         "--execute-post-submit-finalize",
         action="store_true",
         help=(
@@ -3887,6 +4004,7 @@ def main(argv: list[str] | None = None) -> int:
         operation_layer_evidence_report=operation_layer_evidence_report,
         operation_layer_evidence_report_path=operation_layer_evidence_report_path,
         execute_operation_layer_submit=args.execute_operation_layer_submit,
+        operation_layer_submit_mode=args.operation_layer_submit_mode,
         execute_post_submit_finalize=args.execute_post_submit_finalize,
         selected_strategy_group_id=args.selected_strategy_group_id,
     )
