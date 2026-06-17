@@ -8,6 +8,27 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT_SCRIPT_PATH = REPO_ROOT / "scripts" / "probe_tokyo_runtime_snapshot.py"
+REQUIRED_DRY_RUN_CHECKS = (
+    "required_scenarios_present",
+    "all_scenarios_passed",
+    "dangerous_effects_absent",
+    "disabled_smoke_not_real_execution_proof",
+    "operation_layer_evidence_relay_checked",
+    "fresh_signal_fast_auto_chain_checked",
+    "mock_operation_layer_closed_loop_checked",
+    "operation_layer_blocker_review_policy_checked",
+    "operation_layer_hard_safety_blocker_matrix_checked",
+    "operation_layer_authorization_chain_guard_checked",
+    "post_submit_closed_loop_evidence_guard_checked",
+    "operation_layer_submit_result_identity_guard_checked",
+    "post_submit_finalize_result_identity_guard_checked",
+    "shared_runtime_pipeline_checked",
+    "common_execution_chain_reuse_checked",
+    "strategygroup_adapter_boundary_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    "non_executing_prepare_auto_bridge_checked",
+)
 
 
 def _load_module():
@@ -24,6 +45,8 @@ def _load_module():
 
 
 def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
+    dry_run_checks = {name: True for name in REQUIRED_DRY_RUN_CHECKS}
+    dry_run_checks["scenario_count"] = 13
     return {
         "collector_status": "ok",
         "hostname": "VM-0-11-ubuntu",
@@ -77,7 +100,7 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                 "payload": {
                     "status": "passed",
                     "scenario_count": 13,
-                    "checks": {"scenario_count": 13},
+                    "checks": dry_run_checks,
                 },
             },
             "latest-summary.json": {
@@ -219,3 +242,37 @@ def test_tokyo_runtime_snapshot_blocks_on_runtime_liveness_failure():
     assert "owner_console_backend_inactive" in report["checks"]["blockers"]
     assert report["owner_summary"]["state"] == "暂不可用"
     assert report["owner_summary"]["owner_intervention_required"] is True
+
+
+def test_tokyo_runtime_snapshot_blocks_when_dry_run_required_check_is_missing():
+    module = _load_module()
+    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    dry_run = payload["reports"]["runtime-dry-run-audit-chain.json"]["payload"]
+    dry_run["checks"]["fresh_signal_fast_auto_chain_checked"] = False
+
+    def runner(command: tuple[str, ...]):
+        return module.CommandResult(
+            stdout=json.dumps(payload),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head="frontend-head",
+        runner=runner,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["checks"]["runtime_dry_run_audit_passed"] is False
+    assert report["checks"]["runtime_dry_run_required_checks_present"] is False
+    assert report["checks"]["runtime_dry_run_missing_required_checks"] == [
+        "fresh_signal_fast_auto_chain_checked"
+    ]
+    assert "runtime_dry_run_missing_required_check:fresh_signal_fast_auto_chain_checked" in (
+        report["checks"]["blockers"]
+    )

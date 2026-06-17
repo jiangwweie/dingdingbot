@@ -34,6 +34,28 @@ DEFAULT_REPORT_FILES = (
     "runtime-dry-run-audit-chain.json",
 )
 
+REQUIRED_DRY_RUN_CHECKS = (
+    "required_scenarios_present",
+    "all_scenarios_passed",
+    "dangerous_effects_absent",
+    "disabled_smoke_not_real_execution_proof",
+    "operation_layer_evidence_relay_checked",
+    "fresh_signal_fast_auto_chain_checked",
+    "mock_operation_layer_closed_loop_checked",
+    "operation_layer_blocker_review_policy_checked",
+    "operation_layer_hard_safety_blocker_matrix_checked",
+    "operation_layer_authorization_chain_guard_checked",
+    "post_submit_closed_loop_evidence_guard_checked",
+    "operation_layer_submit_result_identity_guard_checked",
+    "post_submit_finalize_result_identity_guard_checked",
+    "shared_runtime_pipeline_checked",
+    "common_execution_chain_reuse_checked",
+    "strategygroup_adapter_boundary_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    "non_executing_prepare_auto_bridge_checked",
+)
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -193,8 +215,14 @@ def evaluate_runtime_snapshot(
 
     if source_readiness.get("status") not in {"ready", "ok"}:
         blockers.append("source_readiness_not_ready")
+    dry_run_checks = _as_dict(dry_run.get("checks"))
+    missing_dry_run_checks = _missing_dry_run_required_checks(dry_run_checks)
     if dry_run.get("status") != "passed":
         blockers.append("runtime_dry_run_audit_not_passed")
+    blockers.extend(
+        f"runtime_dry_run_missing_required_check:{name}"
+        for name in missing_dry_run_checks
+    )
     if goal_status.get("deployment_aligned") is False:
         blockers.append("runtime_goal_status_deployment_not_aligned")
     if goal_status.get("watcher_liveness_healthy") is False:
@@ -239,7 +267,11 @@ def evaluate_runtime_snapshot(
         "backend_active": backend.get("active") == "active",
         "nginx_active": nginx.get("active") == "active",
         "source_readiness_ready": source_readiness.get("status") in {"ready", "ok"},
-        "runtime_dry_run_audit_passed": dry_run.get("status") == "passed",
+        "runtime_dry_run_audit_passed": (
+            dry_run.get("status") == "passed" and not missing_dry_run_checks
+        ),
+        "runtime_dry_run_required_checks_present": not missing_dry_run_checks,
+        "runtime_dry_run_missing_required_checks": missing_dry_run_checks,
         "frontend_release_present": bool(frontend_release),
         "frontend_index_present": bool(frontend.get("index_exists")),
     }
@@ -471,6 +503,10 @@ def _report_payload(reports: dict[str, Any], filename: str) -> dict[str, Any]:
     item = _as_dict(reports.get(filename))
     payload = item.get("payload")
     return payload if isinstance(payload, dict) else {}
+
+
+def _missing_dry_run_required_checks(checks: dict[str, Any]) -> list[str]:
+    return sorted(name for name in REQUIRED_DRY_RUN_CHECKS if checks.get(name) is not True)
 
 
 def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:

@@ -48,6 +48,8 @@ def _snapshot(**overrides):
             "watcher_timer_active": True,
             "source_readiness_ready": True,
             "runtime_dry_run_audit_passed": True,
+            "runtime_dry_run_required_checks_present": True,
+            "runtime_dry_run_missing_required_checks": [],
             "frontend_release_present": True,
             "frontend_index_present": True,
         },
@@ -80,6 +82,8 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["interaction"]["approaches_real_order"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["waiting_for_market"] is True
+    assert report["checks"]["runtime_dry_run_required_checks_present"] is True
+    assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
 
 
 def test_daily_check_marks_frontend_gap_as_degraded_not_safety_blocked():
@@ -92,6 +96,8 @@ def test_daily_check_marks_frontend_gap_as_degraded_not_safety_blocked():
             "watcher_timer_active": True,
             "source_readiness_ready": True,
             "runtime_dry_run_audit_passed": True,
+            "runtime_dry_run_required_checks_present": True,
+            "runtime_dry_run_missing_required_checks": [],
             "frontend_release_present": False,
             "frontend_index_present": True,
         }
@@ -121,6 +127,8 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
             "watcher_timer_active": True,
             "source_readiness_ready": True,
             "runtime_dry_run_audit_passed": True,
+            "runtime_dry_run_required_checks_present": True,
+            "runtime_dry_run_missing_required_checks": [],
             "frontend_release_present": True,
             "frontend_index_present": True,
         },
@@ -148,6 +156,8 @@ def test_daily_check_classifies_safety_blocker_separately():
             "watcher_timer_active": True,
             "source_readiness_ready": True,
             "runtime_dry_run_audit_passed": True,
+            "runtime_dry_run_required_checks_present": True,
+            "runtime_dry_run_missing_required_checks": [],
             "frontend_release_present": True,
             "frontend_index_present": True,
         },
@@ -163,3 +173,35 @@ def test_daily_check_classifies_safety_blocker_separately():
     assert report["owner_summary"]["visibility"]["detail"] == (
         "真实订单保持关闭，等待安全状态恢复"
     )
+
+
+def test_daily_check_exposes_missing_dry_run_required_checks():
+    module = _load_module()
+    snapshot = _snapshot(
+        status="blocked",
+        checks={
+            "blockers": [
+                "runtime_dry_run_missing_required_check:fresh_signal_fast_auto_chain_checked"
+            ],
+            "product_gaps": [],
+            "backend_active": True,
+            "watcher_timer_active": True,
+            "source_readiness_ready": True,
+            "runtime_dry_run_audit_passed": False,
+            "runtime_dry_run_required_checks_present": False,
+            "runtime_dry_run_missing_required_checks": [
+                "fresh_signal_fast_auto_chain_checked"
+            ],
+            "frontend_release_present": True,
+            "frontend_index_present": True,
+        },
+    )
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "blocked"
+    assert report["checks"]["runtime_dry_run_audit_passed"] is False
+    assert report["checks"]["runtime_dry_run_required_checks_present"] is False
+    assert report["checks"]["runtime_dry_run_missing_required_checks"] == [
+        "fresh_signal_fast_auto_chain_checked"
+    ]

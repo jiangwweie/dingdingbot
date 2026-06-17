@@ -134,6 +134,12 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
             "runtime_dry_run_audit_passed": (
                 checks.get("runtime_dry_run_audit_passed") is True
             ),
+            "runtime_dry_run_required_checks_present": (
+                checks.get("runtime_dry_run_required_checks_present") is True
+            ),
+            "runtime_dry_run_missing_required_checks": list(
+                checks.get("runtime_dry_run_missing_required_checks") or []
+            ),
             "frontend_published": (
                 checks.get("frontend_release_present") is True
                 and checks.get("frontend_index_present") is True
