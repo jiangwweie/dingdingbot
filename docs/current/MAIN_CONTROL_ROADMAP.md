@@ -212,6 +212,7 @@ L1 read-only snapshot
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
 | Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check` accepts `--daily-check-mode fresh`, `auto-cache`, or `cache`; postdeploy acceptance stays fresh, while routine reviews can reuse cache |
 | Deploy-session cache clarity | Cache-only deploy-session reviews report `interaction.level=L0_local_cache_read` and keep the original `collected_interaction_level` inside the step for audit context |
+| Deploy-session Owner progress | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress` renders a Markdown progress table with current stage, action, risk, interaction count, server mutation, and real-order proximity |
 | Homepage-only visual QA | `owner-runtime-console` exposes `npm run visual:qa:home`, so current P1 frontend work verifies the homepage without pulling unfinished tabs into scope |
 | Engineering rehearsal check | L1 snapshot now requires the dry-run audit packet to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
 | UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
@@ -263,6 +264,7 @@ safety state:
 | Frontend homepage publish | One tar-over-SSH static publish | `L3`, 1 remote interaction |
 | Postdeploy acceptance | One daily-check snapshot plus one deploy-session summary | `L1` snapshot, summary local |
 | Routine deploy-session review | `--run-daily-check --daily-check-mode auto-cache` | `L0` if cache is fresh; otherwise one `L1` refresh |
+| Owner-readable deploy-session review | `--run-daily-check --daily-check-mode cache --owner-progress` | `L0`, 0 remote interactions when cache is fresh |
 | Homepage-only visual QA | `npm run visual:qa:home` | Local browser/dev-server only, 0 Tokyo interactions |
 
 When a tool can reuse a fresh cache or a single snapshot, it must not run extra

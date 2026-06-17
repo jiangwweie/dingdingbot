@@ -813,6 +813,10 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "run_tokyo_runtime_deploy_session.py "
         "--run-daily-check --daily-check-mode auto-cache --json"
     )
+    assert baseline["deploy_session_owner_progress_check"].endswith(
+        "run_tokyo_runtime_deploy_session.py "
+        "--run-daily-check --daily-check-mode cache --owner-progress"
+    )
     assert baseline["homepage_visual_qa_check"] == (
         "cd owner-runtime-console && npm run visual:qa:home"
     )

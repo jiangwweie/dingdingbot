@@ -227,6 +227,34 @@ def test_deploy_session_uses_current_read_interaction_for_cache_only_status():
     )
 
 
+def test_deploy_session_owner_progress_text_is_owner_readable():
+    module = _load_module()
+    cached_daily_check = _daily_check_report(
+        current_read_interaction={
+            "level": "L0_local_cache_read",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        }
+    )
+    report = module.build_deploy_session_report(
+        reports=[("postdeploy_daily_check", cached_daily_check)]
+    )
+
+    text = module._owner_progress_text(report)
+
+    assert "## Tokyo Runtime Deploy Session Progress" in text
+    assert "- 当前阶段: 等待机会" in text
+    assert "- 当前动作: 继续等待市场机会" in text
+    assert "- 交互等级: L0_local_cache_read" in text
+    assert "- 远端交互次数: 0" in text
+    assert "- 服务器修改: 否" in text
+    assert "- 接近真实订单: 否" in text
+    assert "| postdeploy_daily_check | waiting_for_market | L0_local_cache_read | 0 | 否 | 否 | 继续等待市场机会 |" in text
+
+
 def test_run_daily_check_defaults_to_fresh_snapshot(monkeypatch):
     module = _load_module()
     calls = []

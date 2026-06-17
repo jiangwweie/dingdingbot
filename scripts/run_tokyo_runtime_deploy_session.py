@@ -51,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-    if args.json:
+    if args.owner_progress:
+        print(_owner_progress_text(report))
+    elif args.json:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
@@ -371,6 +373,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         description="Summarize a Tokyo runtime deploy session."
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
+    parser.add_argument(
+        "--owner-progress",
+        action="store_true",
+        help="Print an Owner-readable Markdown progress summary.",
+    )
     parser.add_argument("--deploy-report-json")
     parser.add_argument("--frontend-report-json")
     parser.add_argument("--daily-check-json")
@@ -391,6 +398,66 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _owner_progress_text(report: dict[str, Any]) -> str:
+    owner = report.get("owner_summary") if isinstance(report.get("owner_summary"), dict) else {}
+    interaction = report.get("interaction") if isinstance(report.get("interaction"), dict) else {}
+    policy = interaction.get("policy") if isinstance(interaction.get("policy"), dict) else {}
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    steps = report.get("steps") if isinstance(report.get("steps"), list) else []
+    blockers = [str(item) for item in checks.get("blockers") or []]
+    warnings = [str(item) for item in checks.get("warnings") or []]
+    product_gaps = [str(item) for item in checks.get("product_gaps") or []]
+
+    lines = [
+        "## Tokyo Runtime Deploy Session Progress",
+        "",
+        f"- 报告时间: {report.get('generated_at_utc') or 'unknown'}",
+        f"- 当前阶段: {owner.get('state') or report.get('status') or 'unknown'}",
+        f"- 当前动作: {owner.get('current_action') or 'unknown'}",
+        f"- 风险等级: {owner.get('risk_level') or interaction.get('level') or 'unknown'}",
+        f"- Owner 介入: {_yes_no(bool(owner.get('owner_intervention_required')))}",
+        f"- 交互等级: {interaction.get('level') or 'unknown'}",
+        f"- 交互口径: {policy.get('owner_label') or 'unknown'}",
+        f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}",
+        f"- 服务器修改: {_yes_no(bool(interaction.get('mutates_remote_files')))}",
+        f"- 接近真实订单: {_yes_no(bool(interaction.get('approaches_real_order')))}",
+        f"- 交易所写入: {_yes_no(bool(interaction.get('calls_exchange_write')))}",
+        "",
+        "## Steps",
+        "",
+        "| Step | Status | Interaction | Remote | Server mutation | Real-order approach | Current action |",
+        "| --- | --- | --- | ---: | --- | --- | --- |",
+    ]
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(step.get("name") or "unknown"),
+                    str(step.get("status") or "unknown"),
+                    str(step.get("interaction_level") or "unknown"),
+                    str(step.get("remote_interaction_count") or 0),
+                    _yes_no(bool(step.get("mutates_remote_files"))),
+                    _yes_no(bool(step.get("approaches_real_order"))),
+                    str(step.get("current_action") or "unknown"),
+                ]
+            )
+            + " |"
+        )
+
+    lines.extend(["", "## Checks", ""])
+    lines.append(f"- Blockers: {_list_or_none(blockers)}")
+    lines.append(f"- Product gaps: {_list_or_none(product_gaps)}")
+    lines.append(f"- Warnings: {_list_or_none(warnings)}")
+    lines.append(
+        "- Safe for deploy-session summary: "
+        + _yes_no(bool(checks.get("all_steps_safe_for_deploy_session_summary")))
+    )
+    return "\n".join(lines)
+
+
 def _print_human_report(report: dict[str, Any]) -> None:
     owner = report["owner_summary"]
     interaction = report["interaction"]
@@ -406,6 +473,14 @@ def _print_human_report(report: dict[str, Any]) -> None:
         print("blockers=" + ",".join(checks["blockers"]))
     if checks["product_gaps"]:
         print("product_gaps=" + ",".join(checks["product_gaps"]))
+
+
+def _yes_no(value: bool) -> str:
+    return "是" if value else "否"
+
+
+def _list_or_none(values: list[str]) -> str:
+    return ", ".join(values) if values else "none"
 
 
 if __name__ == "__main__":
