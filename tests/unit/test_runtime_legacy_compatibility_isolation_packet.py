@@ -16,6 +16,8 @@ def _write_all_required(root: Path) -> None:
         text = "# mainline\n"
         if rel_path.endswith("runtime_official_prepare_api_flow.py"):
             text += "from scripts.runtime_first_real_submit_api_flow import FlowConfig\n"
+        if rel_path in script.STANDING_RECOVERY_PROOF_ARTIFACTS:
+            text += "selected_action = 'monitor_position_or_prepare_official_reduce_only_recovery'\n"
         _write(root, rel_path, text)
     for item in script.LEGACY_COMPATIBILITY_ARTIFACTS:
         _write(root, item["path"], "# legacy\n")
@@ -30,6 +32,11 @@ def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
     assert packet["status"] == "legacy_compatibility_isolated_from_runtime_mainline"
     assert packet["blockers"] == []
     assert packet["checks"]["mainline_artifacts_present"] is True
+    assert packet["checks"]["standing_recovery_proof_artifacts_present"] is True
+    assert (
+        packet["checks"]["standing_recovery_proofs_have_no_legacy_owner_close_terms"]
+        is True
+    )
     assert packet["checks"]["legacy_artifacts_classified"] is True
     assert packet["checks"]["legacy_artifacts_archived_to_replay_recovery_history"] is True
     assert packet["checks"]["legacy_wrapper_paths_preserved"] is True
@@ -42,6 +49,10 @@ def test_legacy_compatibility_isolation_passes_for_clean_mainline(tmp_path):
         and item["wrapper_exists"]
         and item["history_exists"]
         for item in packet["legacy_compatibility_artifacts"]
+    )
+    assert all(
+        item["primary_action_present"]
+        for item in packet["standing_recovery_proof_artifacts"]
     )
     assert packet["cleanup_policy"]["mainline_exit_cleanup_complete"] is True
     assert packet["cleanup_policy"]["future_cleanup_required"] is False
@@ -106,6 +117,27 @@ def test_isolation_blocks_missing_legacy_artifact(tmp_path):
     )
     assert packet["checks"]["legacy_artifacts_classified"] is False
     assert packet["checks"]["legacy_artifacts_archived_to_replay_recovery_history"] is False
+
+
+def test_isolation_blocks_legacy_owner_close_terms_in_standing_recovery_proof(tmp_path):
+    _write_all_required(tmp_path)
+    target = tmp_path / script.STANDING_RECOVERY_PROOF_ARTIFACTS[0]
+    target.write_text(
+        "selected_action = 'monitor_position_or_owner_authorize_reduce_only_close'\n",
+        encoding="utf-8",
+    )
+
+    packet = script.build_isolation_packet(repo_root=tmp_path)
+
+    assert packet["status"] == "legacy_compatibility_isolation_blocked"
+    assert any(
+        blocker.startswith("standing_recovery_proof_uses_legacy_owner_close_terms:")
+        for blocker in packet["blockers"]
+    )
+    assert (
+        packet["checks"]["standing_recovery_proofs_have_no_legacy_owner_close_terms"]
+        is False
+    )
 
 
 def test_isolation_cli_outputs_json(tmp_path, capsys, monkeypatch):

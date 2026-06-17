@@ -118,6 +118,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Standing Recovery Proof Isolation Guard
+
+The legacy compatibility isolation packet now explicitly checks the current
+standing reduce-only recovery proof artifacts for old per-order Owner
+close-confirmation terms. This prevents bridge proof fixtures from silently
+regressing from the standing recovery route back to the retired
+`owner_authorize_reduce_only_close` semantics.
+
+| Item | Evidence |
+| --- | --- |
+| Isolation packet | `runtime_legacy_compatibility_isolation_packet.py` now reports `standing_recovery_proof_artifacts_present=true` and `standing_recovery_proofs_have_no_legacy_owner_close_terms=true` |
+| Blocked regression | Unit coverage injects `monitor_position_or_owner_authorize_reduce_only_close` and requires `standing_recovery_proof_uses_legacy_owner_close_terms` |
+| Local packet run | `/tmp/runtime-legacy-isolation.json`: `status=legacy_compatibility_isolated_from_runtime_mainline`, `blockers=[]` |
+| Verification | `14 passed` for legacy isolation plus controlled tiny-live bridge proof tests; `py_compile` passed for the isolation packet scripts |
+| Safety | This is local packet/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-18 Real-Order Readiness Matrix Summary
 
 Tokyo snapshot and daily check now surface the real-order readiness matrix as a
