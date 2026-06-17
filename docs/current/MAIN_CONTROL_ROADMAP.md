@@ -259,6 +259,23 @@ When a tool can reuse a fresh cache or a single snapshot, it must not run extra
 Tokyo probes only to restate the same state. When a deploy is necessary, the
 report should summarize the whole session instead of narrating each command.
 
+### 2026-06-17 Batched Deploy Interaction Checkpoint
+
+The runtime deploy tool optimization was pushed and deployed to Tokyo. The
+server now carries the batched git deploy planner/executor plus the Owner
+Console homepage interaction projection.
+
+| Item | Result |
+| --- | --- |
+| Local head | `83bd0d6aa07c4784fd28e4182c214db4c344efe0` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-83bd0d6a-batched-deploy-interactions` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Frontend homepage publish | `status=applied`, `interaction.level=L3_frontend_static_publish`, `remote_interaction_count=1`, `blockers=[]` |
+| Postdeploy daily check | `status=waiting_for_market`, `runtime_ready=true`, `watcher_ready=true`, `source_readiness_ready=true`, `runtime_dry_run_audit_passed=true`, `frontend_published=true` |
+| Deploy session summary | `status=waiting_for_market`, `remote_interaction_count=9`, `all_steps_safe_for_deploy_session_summary=true` |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime and frontend head `83bd0d6aa07c4784fd28e4182c214db4c344efe0` |
+| Safety | Deploy, publish, and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ## P0 Subgoal: Runtime Liveness Repair
 
 ### Current State
