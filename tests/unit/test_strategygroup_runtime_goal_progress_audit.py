@@ -125,6 +125,19 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
         "status": "not_complete_waiting_for_market",
         "waiting_for_real_fresh_signal": True,
     }
+    assert report["exit_hardening_boundary"] == {
+        "active_position_remains_open_policy_covered": True,
+        "entry_filled_protection_failed_reduce_only_recovery_covered": True,
+        "entry_filled_protection_ok_covered": True,
+        "exchange_native_hard_stop_required_after_entry": True,
+        "exchange_submit_failed_before_acceptance_policy_covered": True,
+        "partial_fill_policy_covered": True,
+        "position_closed_by_sl_tp_or_reduce_only_recovery_covered": True,
+        "post_submit_exit_outcome_matrix_checked": True,
+        "real_order_dependent_remaining": True,
+        "real_post_submit_close_reconcile_settle_proven": False,
+        "status": "ready",
+    }
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
     assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
@@ -166,6 +179,12 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- Real order closure proven: 否" in text
     assert "- Waiting for real fresh signal: 是" in text
     assert "- Dry-run readiness proven: 是" in text
+    assert "## Exit Hardening Boundary" in text
+    assert "- Post-submit exit outcome matrix checked: 是" in text
+    assert "- Exchange-native hard stop required after entry: 是" in text
+    assert "- Protection failure reduce-only recovery covered: 是" in text
+    assert "- Real post-submit close/reconcile/settle proven: 否" in text
+    assert "- Real order dependent remaining: 是" in text
     assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
@@ -198,6 +217,37 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
     assert "runtime_dry_run_audit_not_passed" in report["checks"]["product_gaps"]
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p05_engineering_rehearsal_loop"]["status"] == "blocked"
+
+
+def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_missing():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks["runtime_dry_run_required_checks_present"] = False
+    checks["runtime_dry_run_missing_required_checks"] = [
+        "post_submit_exit_outcome_matrix_checked"
+    ]
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["exit_hardening_boundary"]["status"] == "needs_work"
+    assert (
+        report["exit_hardening_boundary"][
+            "post_submit_exit_outcome_matrix_checked"
+        ]
+        is False
+    )
+    assert (
+        report["exit_hardening_boundary"][
+            "entry_filled_protection_failed_reduce_only_recovery_covered"
+        ]
+        is False
+    )
+    assert "missing_dry_run_check:post_submit_exit_outcome_matrix_checked" in report[
+        "checks"
+    ]["product_gaps"]
 
 
 def test_goal_progress_marks_missing_chain_segment_as_degraded():
@@ -327,9 +377,17 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
         == "not_complete_waiting_for_market"
     )
     assert payload["completion_boundary"]["dry_run_readiness_proven"] is True
+    assert payload["exit_hardening_boundary"]["status"] == "ready"
+    assert (
+        payload["exit_hardening_boundary"][
+            "real_post_submit_close_reconcile_settle_proven"
+        ]
+        is False
+    )
     progress = output_md.read_text(encoding="utf-8")
     assert "## StrategyGroup Runtime Goal Progress" in progress
     assert "## Completion Boundary" in progress
+    assert "## Exit Hardening Boundary" in progress
     assert "- P0.5 ready: 是" in progress
     assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []

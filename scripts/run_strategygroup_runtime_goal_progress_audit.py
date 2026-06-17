@@ -146,6 +146,7 @@ def build_goal_progress_report(
         hard_blockers=hard_blockers,
         product_gaps=product_gaps,
     )
+    exit_hardening_boundary = _exit_hardening_boundary(checks=checks)
 
     return {
         "status": status,
@@ -176,6 +177,7 @@ def build_goal_progress_report(
             "p05": "ready" if p05_ready else "needs_work",
         },
         "completion_boundary": completion_boundary,
+        "exit_hardening_boundary": exit_hardening_boundary,
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
@@ -194,6 +196,41 @@ def build_goal_progress_report(
             ),
         },
     }
+
+
+def _exit_hardening_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
+    matrix_checked = _dry_run_required_check_present(
+        checks,
+        "post_submit_exit_outcome_matrix_checked",
+    )
+    return {
+        "status": "ready" if matrix_checked else "needs_work",
+        "post_submit_exit_outcome_matrix_checked": matrix_checked,
+        "exchange_native_hard_stop_required_after_entry": matrix_checked,
+        "entry_filled_protection_ok_covered": matrix_checked,
+        "entry_filled_protection_failed_reduce_only_recovery_covered": matrix_checked,
+        "partial_fill_policy_covered": matrix_checked,
+        "exchange_submit_failed_before_acceptance_policy_covered": matrix_checked,
+        "active_position_remains_open_policy_covered": matrix_checked,
+        "position_closed_by_sl_tp_or_reduce_only_recovery_covered": matrix_checked,
+        "real_post_submit_close_reconcile_settle_proven": (
+            checks.get("real_post_submit_close_reconcile_settle_proven") is True
+        ),
+        "real_order_dependent_remaining": (
+            checks.get("real_post_submit_close_reconcile_settle_proven") is not True
+        ),
+    }
+
+
+def _dry_run_required_check_present(checks: dict[str, Any], name: str) -> bool:
+    if checks.get(name) is not None:
+        return checks.get(name) is True
+    if checks.get("runtime_dry_run_audit_passed") is not True:
+        return False
+    missing = [str(item) for item in checks.get("runtime_dry_run_missing_required_checks") or []]
+    if checks.get("runtime_dry_run_required_checks_present") is False:
+        return False
+    return name not in missing
 
 
 def _completion_boundary(
@@ -480,6 +517,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     interaction = report["interaction"]
     checks = report["checks"]
     completion = report["completion_boundary"]
+    exit_hardening = report["exit_hardening_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -507,6 +545,30 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + _yes_no(bool(completion["waiting_for_real_fresh_signal"])),
         "- Dry-run readiness proven: "
         + _yes_no(bool(completion["dry_run_readiness_proven"])),
+        "",
+        "## Exit Hardening Boundary",
+        "",
+        f"- Status: {exit_hardening['status']}",
+        "- Post-submit exit outcome matrix checked: "
+        + _yes_no(bool(exit_hardening["post_submit_exit_outcome_matrix_checked"])),
+        "- Exchange-native hard stop required after entry: "
+        + _yes_no(
+            bool(exit_hardening["exchange_native_hard_stop_required_after_entry"])
+        ),
+        "- Protection failure reduce-only recovery covered: "
+        + _yes_no(
+            bool(
+                exit_hardening[
+                    "entry_filled_protection_failed_reduce_only_recovery_covered"
+                ]
+            )
+        ),
+        "- Real post-submit close/reconcile/settle proven: "
+        + _yes_no(
+            bool(exit_hardening["real_post_submit_close_reconcile_settle_proven"])
+        ),
+        "- Real order dependent remaining: "
+        + _yes_no(bool(exit_hardening["real_order_dependent_remaining"])),
         "",
         "## Tracks",
         "",
