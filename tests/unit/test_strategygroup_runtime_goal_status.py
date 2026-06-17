@@ -1326,6 +1326,56 @@ def test_goal_status_surfaces_deploy_channel_degraded_from_source_readiness(
     ]
 
 
+def test_goal_status_does_not_block_local_dry_run_on_deploy_channel_degraded(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "owner-console-source-readiness.json",
+        {
+            "status": "ready",
+            "owner_summary": {
+                "market_opportunity": "等待机会",
+                "funds": "资金正常",
+                "orders": "暂无订单",
+                "positions": "暂无持仓",
+                "protection": "保护正常",
+                "runtime_dry_run_audit": "审计演练正常",
+                "deploy_channel": "部署通道暂不可用",
+            },
+            "source_health": {
+                "deploy_channel": {
+                    "status": "degraded",
+                    "owner_label": "部署通道暂不可用",
+                    "reason": "tokyo_connectivity:tokyo_tcp_22_unreachable",
+                    "summary": {
+                        "checked": True,
+                        "connectivity_ready": False,
+                        "blockers": ["tokyo_tcp_22_unreachable"],
+                    },
+                }
+            },
+            "blockers": [],
+        },
+    )
+
+    packet = build_goal_status_packet(report_dir=report_dir)
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert packet["checks"]["deployment_aligned"] is True
+    assert packet["evidence"]["deploy_channel_enforced"] is False
+    assert "deploy_channel:tokyo_tcp_22_unreachable" not in packet["blockers"]
+    assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["evidence"][
+        "deploy_channel_blockers"
+    ]
+    matrix = _matrix_by_key(packet)
+    assert matrix["deployment_channel"]["status"] == "pass"
+    assert matrix["deployment_channel"]["blocks_real_submit"] is False
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+
+
 def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

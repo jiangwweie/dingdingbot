@@ -976,7 +976,9 @@ def build_goal_status_packet(
     source_deploy_channel_blockers = _source_deploy_channel_blockers(
         packets["source_readiness"]
     )
-    deployment_blockers.extend(source_deploy_channel_blockers)
+    deploy_channel_enforced = release_manifest is not None or expected_head is not None
+    if deploy_channel_enforced:
+        deployment_blockers.extend(source_deploy_channel_blockers)
     live_facts = _data(packets["live_facts_readiness"])
     dangerous = _dangerous_effects(*_dangerous_scan_packets(packets))
     fresh_signal_present = _has_fresh_signal(packets)
@@ -1137,6 +1139,7 @@ def build_goal_status_packet(
             "release_manifest": str(release_manifest) if release_manifest else None,
             "expected_head": expected_head,
             "deployed_head": deployed_head,
+            "deploy_channel_enforced": deploy_channel_enforced,
             "deploy_channel_blockers": source_deploy_channel_blockers,
             "deploy_channel_source_health": _source_health_item(
                 packets["source_readiness"],

@@ -1231,6 +1231,24 @@ runtime worktree. Frontend experiments and future UI implementation remain
 external and do not affect watcher, dry-run audit, FinalGate readiness,
 Operation Layer evidence preparation, or runtime monitoring.
 
+### 2026-06-17 Local Dry-Run Deploy-Channel Context Checkpoint
+
+`strategygroup-runtime-goal-status` now separates local dry-run goal audit from
+deployment-head verification. A degraded `deploy_channel` source-health item is
+still recorded as evidence, but it only becomes a `deployment_issue` blocker
+when the caller provides an explicit deployment context such as
+`--release-manifest` or `--expected-head`.
+
+| Context | Deploy-channel degraded behavior |
+| --- | --- |
+| Local dry-run / goal rehearsal without deployment baseline | Evidence only; do not turn a healthy dry-run chain into `deployment_issue` |
+| Tokyo watcher or explicit release/head verification | Blocking `deployment_issue`; real submit remains closed |
+| Real-order boundary | Deploy channel evidence alone never opens submit; fresh signal, live facts, candidate/auth, FinalGate, Operation Layer, budget, protection, idempotency, scope, and safety all still need to pass |
+
+This keeps the non-market rehearsal chain useful when the local machine lacks
+Tokyo SSH public-key access, while preserving fail-closed deploy verification on
+the server path.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
