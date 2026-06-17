@@ -12,6 +12,7 @@
     "smoke:states": "node scripts/state-smoke.mjs",
     "serve:dist": "node scripts/serve-console.mjs",
     "visual:qa": "node scripts/visual-qa.mjs",
+    "visual:qa:home": "VISUAL_QA_PAGES=home node scripts/visual-qa.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

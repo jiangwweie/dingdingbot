@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
                 _run_daily_check(
                     expected_runtime_head=args.expected_runtime_head,
                     expected_frontend_head=args.expected_frontend_head,
+                    mode=args.daily_check_mode,
                 ),
             )
         )
@@ -155,6 +156,12 @@ def build_deploy_session_report(
 
 def _session_step(*, name: str, report: dict[str, Any]) -> dict[str, Any]:
     interaction = report.get("interaction") if isinstance(report.get("interaction"), dict) else {}
+    current_read_interaction = (
+        report.get("current_read_interaction")
+        if isinstance(report.get("current_read_interaction"), dict)
+        else {}
+    )
+    effective_interaction = current_read_interaction or interaction
     checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
     owner_summary = (
         report.get("owner_summary")
@@ -176,25 +183,35 @@ def _session_step(*, name: str, report: dict[str, Any]) -> dict[str, Any]:
         "name": name,
         "status": status,
         "scope": str(report.get("scope") or name),
-        "interaction_level": str(interaction.get("level") or "unknown"),
-        "remote_interaction_count": int(interaction.get("remote_interaction_count") or 0),
+        "interaction_level": str(effective_interaction.get("level") or "unknown"),
+        "remote_interaction_count": int(
+            effective_interaction.get("remote_interaction_count") or 0
+        ),
+        "collected_interaction_level": str(interaction.get("level") or "unknown"),
+        "collected_remote_interaction_count": int(
+            interaction.get("remote_interaction_count") or 0
+        ),
         "mutates_remote_files": bool(
-            interaction.get("mutates_remote_files")
+            effective_interaction.get("mutates_remote_files")
             or effects.get("remote_files_modified")
             or safety.get("remote_files_modified")
         ),
-        "approaches_real_order": bool(interaction.get("approaches_real_order")),
-        "calls_finalgate": bool(interaction.get("calls_finalgate")),
-        "calls_operation_layer": bool(interaction.get("calls_operation_layer")),
+        "approaches_real_order": bool(
+            effective_interaction.get("approaches_real_order")
+        ),
+        "calls_finalgate": bool(effective_interaction.get("calls_finalgate")),
+        "calls_operation_layer": bool(
+            effective_interaction.get("calls_operation_layer")
+        ),
         "calls_exchange_write": bool(
-            interaction.get("calls_exchange_write")
-            or interaction.get("exchange_write_called")
+            effective_interaction.get("calls_exchange_write")
+            or effective_interaction.get("exchange_write_called")
             or effects.get("exchange_write_called")
             or effects.get("exchange_called")
             or safety.get("exchange_write_called")
         ),
         "places_order": bool(
-            interaction.get("places_order")
+            effective_interaction.get("places_order")
             or effects.get("order_created")
             or safety.get("order_created")
         ),
@@ -207,8 +224,8 @@ def _session_step(*, name: str, report: dict[str, Any]) -> dict[str, Any]:
 
 
 def _highest_interaction_level(levels: list[str]) -> str:
-    highest_rank = 0
-    highest_label = "L1_session_summary"
+    highest_rank = -1
+    highest_label = "L0_local_session_summary"
     for level in levels:
         rank = interaction_rank(level)
         if rank > highest_rank:
@@ -248,8 +265,15 @@ def _run_daily_check(
     *,
     expected_runtime_head: str | None,
     expected_frontend_head: str | None,
+    mode: str,
 ) -> dict[str, Any]:
     command = [sys.executable, str(DAILY_CHECK_SCRIPT), "--json"]
+    if mode == "auto-cache":
+        command.append("--auto-cache")
+    elif mode == "cache":
+        command.extend(["--from-cache", "--require-fresh-cache"])
+    elif mode != "fresh":
+        return _daily_check_mode_error(mode)
     if expected_runtime_head:
         command.extend(["--expected-runtime-head", expected_runtime_head])
     if expected_frontend_head:
@@ -270,6 +294,32 @@ def _run_daily_check(
     if not isinstance(payload, dict):
         return _daily_check_error("daily_check_output_not_object", completed)
     return payload
+
+
+def _daily_check_mode_error(mode: str) -> dict[str, Any]:
+    return {
+        "status": "blocked",
+        "scope": "strategygroup_runtime_daily_check",
+        "interaction": {
+            "level": "L0_local_cache_gate",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "owner_summary": {
+            "state": "暂不可用",
+            "current_action": "修正部署会话日检模式",
+        },
+        "checks": {
+            "blockers": [f"unknown_daily_check_mode:{mode}"],
+            "warnings": [],
+            "product_gaps": [],
+        },
+    }
 
 
 def _daily_check_error(reason: str, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -325,6 +375,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--frontend-report-json")
     parser.add_argument("--daily-check-json")
     parser.add_argument("--run-daily-check", action="store_true")
+    parser.add_argument(
+        "--daily-check-mode",
+        choices=("fresh", "auto-cache", "cache"),
+        default="fresh",
+        help=(
+            "How --run-daily-check should collect status. Use fresh for "
+            "postdeploy acceptance, auto-cache for routine low-noise status, "
+            "or cache for strict no-server review."
+        ),
+    )
     parser.add_argument("--expected-runtime-head")
     parser.add_argument("--expected-frontend-head")
     parser.add_argument("--output-json")

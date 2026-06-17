@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -196,3 +198,111 @@ def test_deploy_session_blocks_if_any_step_blocks():
     assert report["owner_summary"]["state"] == "暂不可用"
     assert report["owner_summary"]["owner_intervention_required"] is True
     assert report["checks"]["blockers"] == ["source_readiness_not_ready"]
+
+
+def test_deploy_session_uses_current_read_interaction_for_cache_only_status():
+    module = _load_module()
+    cached_daily_check = _daily_check_report(
+        current_read_interaction={
+            "level": "L0_local_cache_read",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        }
+    )
+
+    report = module.build_deploy_session_report(
+        reports=[("postdeploy_daily_check", cached_daily_check)]
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["interaction"]["level"] == "L0_local_cache_read"
+    assert report["interaction"]["policy"]["owner_label"] == "本地读取"
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["steps"][0]["interaction_level"] == "L0_local_cache_read"
+    assert report["steps"][0]["collected_interaction_level"] == (
+        "L1_daily_check_from_snapshot"
+    )
+
+
+def test_run_daily_check_defaults_to_fresh_snapshot(monkeypatch):
+    module = _load_module()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(_daily_check_report()),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    report = module._run_daily_check(
+        expected_runtime_head="runtime-head",
+        expected_frontend_head="frontend-head",
+        mode="fresh",
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert "--auto-cache" not in calls[0]
+    assert "--from-cache" not in calls[0]
+    assert "--expected-runtime-head" in calls[0]
+    assert "--expected-frontend-head" in calls[0]
+
+
+def test_run_daily_check_can_use_auto_cache_for_routine_status(monkeypatch):
+    module = _load_module()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(_daily_check_report()),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    report = module._run_daily_check(
+        expected_runtime_head=None,
+        expected_frontend_head=None,
+        mode="auto-cache",
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert "--auto-cache" in calls[0]
+    assert "--from-cache" not in calls[0]
+
+
+def test_run_daily_check_can_use_strict_cache_without_server(monkeypatch):
+    module = _load_module()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(_daily_check_report()),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    report = module._run_daily_check(
+        expected_runtime_head=None,
+        expected_frontend_head=None,
+        mode="cache",
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert "--from-cache" in calls[0]
+    assert "--require-fresh-cache" in calls[0]
+    assert "--auto-cache" not in calls[0]

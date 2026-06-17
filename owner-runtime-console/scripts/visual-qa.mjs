@@ -15,7 +15,7 @@ const scenarios = externalUrl
       .map((item) => item.trim())
       .filter(Boolean);
 
-const pages = [
+const allPages = [
   { key: "home", label: "首页", expected: "策略组状态" },
   { key: "strategies", label: "策略组", expected: "策略组已接入" },
   { key: "funds", label: "资金", expected: "安全资金池" },
@@ -23,6 +23,20 @@ const pages = [
   { key: "records", label: "记录", expected: "最近记录" },
   { key: "system", label: "系统", expected: "只读保证" },
 ];
+const pageFilter = (process.env.VISUAL_QA_PAGES ?? "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
+const pages =
+  pageFilter.length === 0
+    ? allPages
+    : allPages.filter((page) => pageFilter.includes(page.key));
+
+if (pages.length === 0) {
+  throw new Error(
+    `VISUAL_QA_PAGES did not match any known page: ${pageFilter.join(", ")}`,
+  );
+}
 
 const themes = ["dark", "light"];
 const viewports = [

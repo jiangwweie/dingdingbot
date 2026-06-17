@@ -799,6 +799,17 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
     assert baseline["forced_refresh_check"].endswith(
         "run_strategygroup_runtime_daily_check.py --json"
     )
+    assert baseline["deploy_session_postdeploy_check"].endswith(
+        "run_tokyo_runtime_deploy_session.py "
+        "--run-daily-check --daily-check-mode fresh --json"
+    )
+    assert baseline["deploy_session_routine_check"].endswith(
+        "run_tokyo_runtime_deploy_session.py "
+        "--run-daily-check --daily-check-mode auto-cache --json"
+    )
+    assert baseline["homepage_visual_qa_check"] == (
+        "cd owner-runtime-console && npm run visual:qa:home"
+    )
     assert baseline["signal_detection_source"] == (
         "tokyo_runtime_signal_watcher_feishu_webhook"
     )
@@ -808,3 +819,7 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "L1_daily_check_from_snapshot"
     )
     assert baseline["interaction_policy"]["refresh_remote_interaction_count"] == 1
+    assert baseline["interaction_policy"][
+        "deploy_postdeploy_daily_check_remote_interaction_count"
+    ] == 1
+    assert baseline["interaction_policy"]["homepage_visual_qa_remote_interaction_count"] == 0
