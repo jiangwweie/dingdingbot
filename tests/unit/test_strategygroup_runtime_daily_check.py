@@ -73,6 +73,14 @@ def _snapshot(**overrides):
                 "goal_status": {
                     "status": "waiting_for_signal",
                     "fresh_signal_present": False,
+                    "real_order_readiness_summary": {
+                        "total": 2,
+                        "pass": 1,
+                        "waiting": 1,
+                        "blocked": 0,
+                        "submit_blocker_keys": [],
+                        "waiting_keys": ["fresh_signal"],
+                    },
                 },
                 "runtime_dry_run_audit": {
                     "status": "passed",
@@ -160,6 +168,14 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["entry_fast_chain_boundary_ready"] is True
     assert report["checks"]["exit_hardening_boundary_ready"] is True
     assert report["checks"]["strategygroup_tier_boundary_ready"] is True
+    assert report["checks"]["real_order_readiness_summary"] == {
+        "total": 2,
+        "pass": 1,
+        "waiting": 1,
+        "blocked": 0,
+        "submit_blocker_keys": [],
+        "waiting_keys": ["fresh_signal"],
+    }
     assert (
         report["checks"]["runtime_execution_chain_missing_or_failed_segments"]
         == []
@@ -188,6 +204,14 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["owner_summary"]["progress"]["entry_fast_chain_boundary"] == "ready"
     assert report["owner_summary"]["progress"]["exit_hardening_boundary"] == "ready"
     assert report["owner_summary"]["progress"]["strategygroup_tier_boundary"] == "ready"
+    assert report["owner_summary"]["progress"]["real_order_readiness"] == {
+        "total": 2,
+        "pass": 1,
+        "waiting": 1,
+        "blocked": 0,
+        "submit_blocker_keys": [],
+        "waiting_keys": ["fresh_signal"],
+    }
     assert report["notification"] == {
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
@@ -795,6 +819,7 @@ def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     assert exit_code == 0
     assert "- 当前阶段: 等待机会" in output_text
     assert "- 缓存状态: fresh" in output_text
+    assert "- 实盘矩阵: 1 pass / 1 waiting / 0 blocked" in output_text
     assert "- 通知决策: DONT_NOTIFY" in output_text
     assert captured.out == output_text
 

@@ -183,6 +183,11 @@ def build_daily_check_report(
         if isinstance(reports.get("runtime_dry_run_audit"), dict)
         else {}
     )
+    real_order_readiness_summary = (
+        goal_status.get("real_order_readiness_summary")
+        if isinstance(goal_status.get("real_order_readiness_summary"), dict)
+        else {}
+    )
     chain_closure_summary = (
         reports.get("runtime_execution_chain_closure_status")
         if isinstance(reports.get("runtime_execution_chain_closure_status"), dict)
@@ -332,6 +337,7 @@ def build_daily_check_report(
         "entry_fast_chain_boundary_ready": entry_fast_chain_boundary_ready,
         "exit_hardening_boundary_ready": exit_hardening_boundary_ready,
         "strategygroup_tier_boundary_ready": strategygroup_tier_boundary_ready,
+        "real_order_readiness_summary": dict(real_order_readiness_summary),
         "frontend_scope": checks.get("frontend_scope") or "externalized",
     }
 
@@ -403,6 +409,7 @@ def build_daily_check_report(
                 "strategygroup_tier_boundary": _boundary_progress_label(
                     strategygroup_tier_boundary_ready
                 ),
+                "real_order_readiness": dict(real_order_readiness_summary),
                 "frontend": owner_summary.get("frontend") or "外部项目",
             },
         },
@@ -1123,6 +1130,7 @@ def _owner_progress_text(
         f"- 入场快链: {progress.get('entry_fast_chain_boundary') or 'unknown'}",
         f"- 出场硬化: {progress.get('exit_hardening_boundary') or 'unknown'}",
         f"- 策略组分层: {progress.get('strategygroup_tier_boundary') or 'unknown'}",
+        _real_order_readiness_progress_line(progress),
         f"- Frontend: {progress.get('frontend') or '外部项目'}",
     ]
     if blockers:
@@ -1160,6 +1168,19 @@ def _goal_chain_segment_progress_line(progress: dict[str, Any]) -> str:
     if isinstance(ready_count, int) and isinstance(missing_segments, list):
         return f"- 目标链路段: {ready_count} ready / {len(missing_segments)} missing"
     return "- 目标链路段: unknown"
+
+
+def _real_order_readiness_progress_line(progress: dict[str, Any]) -> str:
+    summary = progress.get("real_order_readiness")
+    if not isinstance(summary, dict) or not summary:
+        return "- 实盘矩阵: unknown"
+    pass_count = _int_or_zero(summary.get("pass"))
+    waiting_count = _int_or_zero(summary.get("waiting"))
+    blocked_count = _int_or_zero(summary.get("blocked"))
+    return (
+        "- 实盘矩阵: "
+        f"{pass_count} pass / {waiting_count} waiting / {blocked_count} blocked"
+    )
 
 
 def _yes_no(value: bool) -> str:

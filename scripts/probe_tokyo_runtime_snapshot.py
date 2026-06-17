@@ -242,6 +242,9 @@ def evaluate_runtime_snapshot(
     if _packet_check(goal_status, "watcher_liveness_healthy") is False:
         blockers.append("watcher_liveness_not_healthy")
     goal_status_submit_blockers = _goal_status_submit_blocker_keys(goal_status)
+    goal_status_real_order_readiness_summary = (
+        _goal_status_real_order_readiness_summary(goal_status)
+    )
     blockers.extend(
         f"runtime_goal_status_submit_blocker:{key}"
         for key in goal_status_submit_blockers
@@ -282,6 +285,9 @@ def evaluate_runtime_snapshot(
             is True
         ),
         "runtime_goal_status_submit_blocker_keys": goal_status_submit_blockers,
+        "runtime_goal_status_real_order_readiness_summary": (
+            goal_status_real_order_readiness_summary
+        ),
         "frontend_scope": "externalized",
     }
     status = "ready"
@@ -528,6 +534,9 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "missing_or_failed_goal_chain_segments"
         ),
         "submit_blocker_keys": _goal_status_submit_blocker_keys(packet),
+        "real_order_readiness_summary": _goal_status_real_order_readiness_summary(
+            packet
+        ),
     }
 
 
@@ -554,6 +563,53 @@ def _goal_status_submit_blocker_keys(packet: dict[str, Any]) -> list[str]:
         if isinstance(key, str) and key:
             keys.append(key)
     return _dedupe(keys)
+
+
+def _goal_status_real_order_readiness_summary(packet: dict[str, Any]) -> dict[str, Any]:
+    matrix = packet.get("real_order_readiness_matrix")
+    if not isinstance(matrix, list):
+        return {
+            "total": 0,
+            "pass": 0,
+            "waiting": 0,
+            "blocked": 0,
+            "submit_blocker_keys": [],
+            "waiting_keys": [],
+        }
+    summary = {
+        "total": 0,
+        "pass": 0,
+        "waiting": 0,
+        "blocked": 0,
+        "submit_blocker_keys": [],
+        "waiting_keys": [],
+    }
+    submit_blockers: list[str] = []
+    waiting_keys: list[str] = []
+    for item in matrix:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        status = str(item.get("status") or "")
+        if not isinstance(key, str) or not key:
+            key = "unknown"
+        summary["total"] += 1
+        if status == "pass":
+            summary["pass"] += 1
+        elif status == "blocked":
+            summary["blocked"] += 1
+            if item.get("blocks_real_submit") is True:
+                submit_blockers.append(key)
+        elif status.startswith("waiting"):
+            summary["waiting"] += 1
+            waiting_keys.append(key)
+        else:
+            summary["blocked"] += 1
+            if item.get("blocks_real_submit") is True:
+                submit_blockers.append(key)
+    summary["submit_blocker_keys"] = _dedupe(submit_blockers)
+    summary["waiting_keys"] = _dedupe(waiting_keys)
+    return summary
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

@@ -106,6 +106,11 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                             "key": "runtime_order_capable_profile",
                             "status": "pass",
                             "blocks_real_submit": False,
+                        },
+                        {
+                            "key": "fresh_signal",
+                            "status": "waiting_for_market",
+                            "blocks_real_submit": True,
                         }
                     ],
                 },
@@ -220,6 +225,24 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["checks"]["product_gaps"] == []
     assert report["checks"]["frontend_scope"] == "externalized"
     assert report["checks"]["runtime_goal_status_submit_blocker_keys"] == []
+    assert report["checks"]["runtime_goal_status_real_order_readiness_summary"] == {
+        "blocked": 0,
+        "pass": 1,
+        "submit_blocker_keys": [],
+        "total": 2,
+        "waiting": 1,
+        "waiting_keys": ["fresh_signal"],
+    }
+    assert report["facts"]["reports"]["goal_status"][
+        "real_order_readiness_summary"
+    ] == {
+        "blocked": 0,
+        "pass": 1,
+        "submit_blocker_keys": [],
+        "total": 2,
+        "waiting": 1,
+        "waiting_keys": ["fresh_signal"],
+    }
     closure = report["facts"]["reports"]["runtime_execution_chain_closure_status"]
     assert closure["projected_checks"] == {
         "fresh_signal_fast_auto_chain_checked": True,
