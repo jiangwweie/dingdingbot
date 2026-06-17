@@ -24,8 +24,8 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
-| Latest deployed runtime head | `2f382cd8f8e32ac509d791fdd9a9ff1d987ed83c` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-2f382cd8-cache-head-drift` |
+| Latest deployed runtime head | `592cd5f1cddaca3d8fc7066a9a0f3c0b64ed4540` |
+| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-592cd5f1-real-order-matrix-summary` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -116,6 +116,22 @@ fresh selected StrategyGroup signal exists.
 | disabled smoke treated as real execution proof | false |
 
 ## Latest Checkpoint
+
+### 2026-06-18 Real-Order Readiness Matrix Summary
+
+Tokyo snapshot and daily check now surface the real-order readiness matrix as a
+compact count instead of hiding it inside the raw goal-status packet. This keeps
+healthy waiting low-noise while still showing whether the first real-order path
+is waiting on market conditions or blocked by execution readiness.
+
+| Item | Evidence |
+| --- | --- |
+| Local commit | `592cd5f1 feat(runtime): summarize real order readiness matrix` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-592cd5f1-real-order-matrix-summary` |
+| Deploy apply | `output/tokyo-git-deploy-apply-592cd5f1.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-592cd5f1.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
+| Real-order matrix | latest snapshot reports `10 pass / 4 waiting / 0 blocked`; waiting keys are `fresh_signal`, `candidate_authorization`, `action_time_finalgate`, and `official_operation_layer` |
+| Verification | `85 passed` for daily check, goal progress, goal status, and Tokyo snapshot unit tests |
 
 ### 2026-06-18 Runtime Monitor Cache Head Guard
 
