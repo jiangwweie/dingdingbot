@@ -587,25 +587,39 @@ def _execution_chain_progress(
         next_step = (
             "rerun_action_time_finalgate_then_continue_official_operation_layer"
         )
+        post_local_registration_gate = {
+            "status": "awaiting_action_time_finalgate_rerun",
+            "required_before_operation_layer_submit": [
+                "action_time_finalgate_pass",
+                "operation_layer_evidence_ready",
+                "operation_layer_submit_preconditions_pass",
+            ],
+            "operation_layer_submit_allowed": False,
+            "ready_for_real_order": False,
+        }
     elif scoped_status == "ready_for_scoped_local_registration_proof_dry_run":
         progress_status = "local_registration_proof_dry_run_ready"
         owner_state = "工程演练已到本地登记前"
         next_step = (
             "execute_scoped_local_registration_proof_under_standing_authorization"
         )
+        post_local_registration_gate = None
     elif status.startswith("blocked_") or blocked_stage:
         progress_status = "blocked_before_operation_layer"
         owner_state = "工程链路阻断"
         next_step = f"repair_{blocked_stage or 'pipeline'}"
+        post_local_registration_gate = None
     else:
         progress_status = "pipeline_preview_only"
         owner_state = "工程链路预览"
         next_step = "continue_non_executing_chain_rehearsal"
+        post_local_registration_gate = None
 
     return {
         "status": progress_status,
         "owner_state": owner_state,
         "next_step": next_step,
+        "post_local_registration_gate": post_local_registration_gate,
         "stage_statuses": {
             "handoff": handoff_status,
             "binding": binding_status,

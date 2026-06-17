@@ -65,6 +65,7 @@ def test_pipeline_reaches_scoped_local_registration_dry_run_from_real_signal(tmp
             "ready_for_scoped_local_registration_proof_dry_run"
         ),
     }
+    assert progress["post_local_registration_gate"] is None
     assert progress["ready_for_real_order"] is False
     assert progress["official_operation_layer_reached"] is False
     assert progress["action_time_finalgate_rerun_after_local_registration"] is False
@@ -153,6 +154,7 @@ def test_pipeline_auto_readiness_reaches_scoped_local_registration(tmp_path):
     assert report["execution_chain_progress"]["status"] == (
         "local_registration_proof_dry_run_ready"
     )
+    assert report["execution_chain_progress"]["post_local_registration_gate"] is None
     assert report["execution_chain_progress"]["ready_for_real_order"] is False
     assert (
         report["execution_chain_progress"]["official_operation_layer_reached"]
@@ -284,6 +286,7 @@ def test_pipeline_collector_can_feed_auto_readiness_path(tmp_path):
         "local_registration_proof_dry_run_ready"
     )
     assert report["execution_chain_progress"]["ready_for_real_order"] is False
+    assert report["execution_chain_progress"]["post_local_registration_gate"] is None
 
 
 def test_pipeline_can_record_scoped_local_registration_with_fake_client(tmp_path):
@@ -318,6 +321,16 @@ def test_pipeline_can_record_scoped_local_registration_with_fake_client(tmp_path
     assert report["execution_chain_progress"]["next_step"] == (
         "rerun_action_time_finalgate_then_continue_official_operation_layer"
     )
+    assert report["execution_chain_progress"]["post_local_registration_gate"] == {
+        "status": "awaiting_action_time_finalgate_rerun",
+        "required_before_operation_layer_submit": [
+            "action_time_finalgate_pass",
+            "operation_layer_evidence_ready",
+            "operation_layer_submit_preconditions_pass",
+        ],
+        "operation_layer_submit_allowed": False,
+        "ready_for_real_order": False,
+    }
     assert report["execution_chain_progress"]["ready_for_real_order"] is False
     assert report["execution_chain_progress"]["official_operation_layer_reached"] is False
     assert (
