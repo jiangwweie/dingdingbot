@@ -513,6 +513,23 @@ def test_git_deploy_plan_expands_short_previous_release_for_current_symlink_chec
     ) in command
 
 
+def test_git_deploy_plan_health_wait_does_not_skip_post_health_steps():
+    plan = _ready_git_plan()
+    switch_phase = next(
+        phase
+        for phase in plan["plan_phases"]
+        if phase["phase"] == "4_switch_start_and_smoke"
+    )
+    command = switch_phase["commands"][0]
+
+    assert 'curl -fsS "$HEALTH_URL" 2>/dev/null && exit 0' not in command
+    assert "HEALTH_READY=1; break" in command
+    assert "systemctl daemon-reload" in command
+    assert command.index("HEALTH_READY=1; break") < command.index(
+        "systemctl daemon-reload"
+    )
+
+
 def test_git_deploy_executor_dry_run_does_not_execute_commands():
     module = _load_execute_module()
     plan = _ready_git_plan()

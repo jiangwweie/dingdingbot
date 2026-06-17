@@ -377,11 +377,14 @@ def _plan_phases(
     health_url = api_base.rstrip("/") + "/api/health"
     health_wait_command = (
         f"set -eu; HEALTH_URL={q(health_url)}; "
+        "HEALTH_READY=0; "
         "for attempt in $(seq 1 30); do "
-        'curl -fsS "$HEALTH_URL" 2>/dev/null && exit 0; '
+        'if curl -fsS "$HEALTH_URL" 2>/dev/null; then '
+        "HEALTH_READY=1; break; "
+        "fi; "
         "sleep 1; "
         "done; "
-        'curl -fsS "$HEALTH_URL"'
+        'test "$HEALTH_READY" = 1 || curl -fsS "$HEALTH_URL"'
     )
     base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
     head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
