@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         require_fresh_cache=args.require_fresh_cache,
         max_cache_age_minutes=args.max_cache_age_minutes,
     )
+    if args.from_cache:
+        report = _annotate_current_read_interaction(report)
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -630,6 +632,19 @@ def _gated_cache_report(
     return gated
 
 
+def _annotate_current_read_interaction(report: dict[str, Any]) -> dict[str, Any]:
+    annotated = dict(report)
+    annotated["current_read_interaction"] = {
+        "level": "L0_local_cache_read",
+        "remote_interaction_count": 0,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    }
+    return annotated
+
+
 def _resolve_expected_heads(args: argparse.Namespace) -> dict[str, str | None]:
     baseline = _read_monitor_baseline(Path(args.baseline_json)) if args.baseline_json else {}
     return {
@@ -706,6 +721,9 @@ def _owner_progress_text(
     interaction = report.get("interaction")
     if not isinstance(interaction, dict):
         interaction = {}
+    current_read_interaction = report.get("current_read_interaction")
+    if not isinstance(current_read_interaction, dict):
+        current_read_interaction = {}
     notification = report.get("notification")
     if not isinstance(notification, dict):
         notification = {}
@@ -742,10 +760,34 @@ def _owner_progress_text(
         ),
         f"- 通知决策: {notification.get('decision') or 'UNKNOWN'}",
         f"- 通知原因: {notification.get('reason') or 'unknown'}",
-        f"- 交互等级: {interaction.get('level') or 'unknown'}",
-        f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}",
-        f"- 远端交互预算: {interaction.get('max_remote_interactions', 1)}",
-        "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files"))),
+        (
+            f"- 本次读取等级: {current_read_interaction.get('level')}"
+            if current_read_interaction
+            else f"- 交互等级: {interaction.get('level') or 'unknown'}"
+        ),
+        (
+            f"- 本次远端交互次数: {current_read_interaction.get('remote_interaction_count', 0)}"
+            if current_read_interaction
+            else f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}"
+        ),
+        (
+            f"- 报告采集等级: {interaction.get('level') or 'unknown'}"
+            if current_read_interaction
+            else f"- 远端交互预算: {interaction.get('max_remote_interactions', 1)}"
+        ),
+        (
+            f"- 报告采集远端交互次数: {interaction.get('remote_interaction_count', 0)}"
+            if current_read_interaction
+            else "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files")))
+        ),
+        *(
+            [
+                f"- 报告采集远端交互预算: {interaction.get('max_remote_interactions', 1)}",
+                "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files"))),
+            ]
+            if current_read_interaction
+            else []
+        ),
         "- 接近真实订单: " + _yes_no(bool(interaction.get("approaches_real_order"))),
         "- 交易所写入: " + _yes_no(bool(interaction.get("calls_exchange_write"))),
         "",

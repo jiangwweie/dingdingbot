@@ -626,6 +626,33 @@ def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     assert captured.out == output_text
 
 
+def test_daily_check_from_cache_owner_progress_separates_read_from_collection(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load_module()
+    cache_path = tmp_path / "latest-daily-check.json"
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    cache_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("cache-only progress must not probe Tokyo")
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", cache_path)
+    monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
+
+    exit_code = module.main(
+        ["--from-cache", "--require-fresh-cache", "--owner-progress"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "- 本次读取等级: L0_local_cache_read" in captured.out
+    assert "- 本次远端交互次数: 0" in captured.out
+    assert "- 报告采集等级: L1_daily_check_from_snapshot" in captured.out
+    assert "- 报告采集远端交互次数: 1" in captured.out
+    assert "- 远端交互次数: 1" not in captured.out
+
+
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
     module = _load_module()
     baseline = tmp_path / "runtime-monitor-baseline.json"
