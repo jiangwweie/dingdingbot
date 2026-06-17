@@ -1442,6 +1442,21 @@ new runtime head and reported healthy waiting-for-market state.
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `owner_intervention_required=false` |
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Exchange-Native Hard Stop Shape Checkpoint
+
+The active-position exit surface now accepts the common CCXT/Binance stop-order
+shape where `reduceOnly` is nested under `info.reduceOnly`. This fixes a false
+`active_unprotected` classification when a real exchange-native reduce-only
+stop exists but the reduce-only marker is not projected to the top level.
+
+| Item | Result |
+| --- | --- |
+| Root cause | `runtime_live_position_monitor` previously checked only top-level `reduceOnly` when proving an exchange-native hard stop |
+| Fix | Hard-stop proof now accepts top-level `reduceOnly` or nested `info.reduceOnly` when a stop/trigger price is present |
+| Boundary retained | A local SL record without exchange-native stop evidence still blocks with `active_position_missing_hard_stop` |
+| Restored surfaces | live-position monitor, active-position exit plan, and post-close follow-up can proceed when the exchange-native stop is actually visible |
+| Safety proof | Local tests only; no Tokyo call, server mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

@@ -324,6 +324,30 @@ def test_active_position_with_local_sl_only_still_requires_exchange_native_stop(
     assert packet.metadata["exchange_native_hard_stop_present"] is False
 
 
+def test_exchange_native_hard_stop_accepts_reduce_only_from_info_payload():
+    order = _exchange_sl_order()
+    order.pop("reduceOnly")
+    order["info"]["reduceOnly"] = True
+
+    packet = build_runtime_live_position_monitor_packet(
+        runtime=_runtime(),
+        local_positions=[_position()],
+        local_open_orders=[_order("ord-sl", OrderRole.SL)],
+        exchange_positions=[_exchange_position()],
+        exchange_open_stop_orders=[order],
+        reconciliation_result=None,
+        now_ms=NOW_MS,
+        exchange_facts_available=True,
+    )
+
+    assert packet.status == RuntimeLivePositionMonitorStatus.ACTIVE_PROTECTION_WARNING
+    assert packet.hard_stop_boundary_present is True
+    assert packet.sl_protection_present is True
+    assert packet.can_continue_holding is True
+    assert packet.metadata["exchange_native_hard_stop_present"] is True
+    assert "active_position_missing_hard_stop" not in packet.blockers
+
+
 def test_flat_after_attempt_requires_review_before_next_attempt():
     packet = build_runtime_live_position_monitor_packet(
         runtime=_runtime(),

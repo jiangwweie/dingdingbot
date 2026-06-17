@@ -312,7 +312,10 @@ def _has_exchange_reduce_only_stop(orders: list[Any]) -> bool:
     for order in orders:
         if not _order_is_exchange_open(order):
             continue
-        if not _truthy(_nested(order, "reduceOnly")):
+        if not _truthy(_first_present(
+            _nested(order, "reduceOnly"),
+            _nested(order, "info", "reduceOnly"),
+        )):
             continue
         if _decimal_or_none(_first_present(
             _nested(order, "triggerPrice"),
