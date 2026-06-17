@@ -368,6 +368,35 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "--base-revision 064 --head-revision 070" not in all_commands
 
 
+def test_git_deploy_plan_batches_tokyo_ssh_commands_to_reduce_server_interactions():
+    report = _ready_git_plan()
+
+    ssh_commands = [
+        command
+        for phase in report["plan_phases"]
+        for command in phase["commands"]
+        if command.startswith("ssh tokyo ")
+    ]
+
+    assert len(ssh_commands) == 4
+    assert any(
+        "systemctl stop brc-owner-console-backend.service" in command
+        for command in ssh_commands
+    )
+    assert any(
+        "pg_dump" in command and "alembic upgrade head" in command
+        for command in ssh_commands
+    )
+    assert any(
+        "systemctl start brc-owner-console-backend.service" in command
+        for command in ssh_commands
+    )
+    assert any(
+        "tokyo-deploy-channel-status.json" in command
+        for command in ssh_commands
+    )
+
+
 def test_git_deploy_plan_allows_dirty_worktree_for_remote_git_export():
     module = _load_plan_module()
     head = _git("rev-parse", "HEAD")
@@ -508,6 +537,7 @@ def test_git_deploy_executor_dry_run_does_not_execute_commands():
     assert report["effects"]["remote_files_modified"] is False
     assert report["effects"]["migrations_run"] is False
     assert report["interaction"]["level"] == "L1_deploy_plan_only"
+    assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
     assert report["interaction"]["calls_exchange_write"] is False
@@ -588,6 +618,7 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     assert report["effects"]["order_created"] is False
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
     assert report["interaction"]["level"] == "L3_bounded_deploy_apply"
+    assert report["interaction"]["remote_interaction_count"] == 7
     assert report["interaction"]["mutates_remote_files"] is True
     assert report["interaction"]["approaches_real_order"] is False
     assert report["interaction"]["calls_operation_layer"] is False

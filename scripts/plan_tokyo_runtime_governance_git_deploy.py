@@ -413,6 +413,43 @@ def _plan_phases(
         f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}; "
         f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
+    quiesce_backup_and_migrate_command = (
+        f"set -eu; sudo -n systemctl stop {q(service_name)}; "
+        f"umask 077; set -a; . {q(env_path)}; set +a; "
+        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
+        'test -n "$DB_URL" || '
+        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
+        "if command -v pg_dump >/dev/null 2>&1; then "
+        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
+        "else "
+        f"DB_USER=$({q(venv_python)} -c "
+        "'import os; from urllib.parse import urlparse; "
+        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
+        f"DB_NAME=$({q(venv_python)} -c "
+        "'import os; from urllib.parse import urlparse; "
+        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
+        'test -n "$DB_USER"; test -n "$DB_NAME"; '
+        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
+        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
+        f"> {q(backup_path)}; "
+        "fi; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
+    )
+    switch_start_and_smoke_command = (
+        f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}; "
+        f"sudo -n systemctl start {q(service_name)}; "
+        f"sudo -n systemctl is-active {q(service_name)}; "
+        f"{health_wait_command}; "
+        f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path)}; "
+        f"mkdir -p {q(watcher_reports_dir)}; "
+        f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
+        f"{deploy_channel_status_json}\nJSON\n"
+        f"test -f {q(release_manifest)}; "
+        f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
+    )
 
     return [
         {
@@ -485,43 +522,7 @@ def _plan_phases(
                 OWNER_STANDING_AUTHORIZATION_REFERENCE
             ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
-            "commands": [
-                _ssh(host, f"sudo -n systemctl stop {q(service_name)}"),
-                _ssh(
-                    host,
-                    (
-                        "set -eu; umask 077; set -a; "
-                        f". {q(env_path)}; set +a; "
-                        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
-                        'test -n "$DB_URL" || '
-                        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
-                        "if command -v pg_dump >/dev/null 2>&1; then "
-                        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
-                        "else "
-                        f"DB_USER=$({q(venv_python)} -c "
-                        "'import os; from urllib.parse import urlparse; "
-                        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
-                        f"DB_NAME=$({q(venv_python)} -c "
-                        "'import os; from urllib.parse import urlparse; "
-                        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
-                        'test -n "$DB_USER"; test -n "$DB_NAME"; '
-                        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
-                        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
-                        f"> {q(backup_path)}; "
-                        "fi"
-                    ),
-                ),
-                _ssh(
-                    host,
-                    (
-                        f"set -eu; cd {q(remote_release_path)}; set -a; "
-                        f". {q(env_path)}; set +a; "
-                        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
-                        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
-                        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
-                    ),
-                ),
-            ],
+            "commands": [_ssh(host, quiesce_backup_and_migrate_command)],
             "stop_if": [
                 "service cannot be stopped with non-interactive sudo",
                 "database backup is not created",
@@ -536,16 +537,7 @@ def _plan_phases(
             ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
             "commands": [
-                _ssh(host, f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}"),
-                _ssh(host, f"sudo -n systemctl start {q(service_name)}"),
-                _ssh(host, f"sudo -n systemctl is-active {q(service_name)}"),
-                _ssh(host, health_wait_command),
-                _ssh(
-                    host,
-                    runtime_signal_watcher_dispatcher_dropin_install_command(
-                        remote_release_path=remote_release_path
-                    ),
-                ),
+                _ssh(host, switch_start_and_smoke_command),
                 (
                     f"cd {q(str(repo_root))} && {local_python} "
                     "scripts/probe_tokyo_runtime_governance_readonly.py --json "
@@ -559,21 +551,6 @@ def _plan_phases(
                     f"--expected-current-head {q(target_commit)} "
                     f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)}"
-                ),
-                _ssh(
-                    host,
-                    (
-                        f"set -eu; mkdir -p {q(watcher_reports_dir)}; "
-                        f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
-                        f"{deploy_channel_status_json}\nJSON\n"
-                    ),
-                ),
-                _ssh(
-                    host,
-                    (
-                        f"test -f {q(release_manifest)} && "
-                        f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
-                    ),
                 ),
             ],
             "stop_if": [

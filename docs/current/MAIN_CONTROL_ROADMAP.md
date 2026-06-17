@@ -190,6 +190,8 @@ L1 read-only snapshot
 | Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply`; frontend publish reports `L1_publish_plan_only` or `L3_frontend_static_publish` |
 | Homepage interaction label | Owner Console homepage reads `runtime_interaction` from the source-readiness projection and shows `L1 只读低交互`, so routine monitoring is visibly classified without hardcoding the UI to one interaction level |
 | Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
+| Batched deploy apply | `scripts/plan_tokyo_runtime_governance_git_deploy.py` batches contiguous Tokyo operations so the git deploy path uses 4 direct SSH commands instead of many small server command fragments |
+| Deploy interaction count | `scripts/execute_tokyo_runtime_governance_git_deploy.py` writes `interaction.remote_interaction_count`; current git deploy apply budget is 7 counted remote interactions including readonly/postdeploy verifier probes |
 | Frontend publish | `scripts/publish_owner_console_frontend.py` publishes `owner-runtime-console/dist` to `/var/www/brc-owner-console` and writes `frontend-release.json` with the current branch/head |
 | Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy, frontend publish, and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
 | Tokyo verification | L1 snapshot after publish reports runtime head `e0c3fd63fcd1d588c1c815baeec3bab921288c1d` and frontend head `dbf468fd517c3c9e61dab791c0ff571679c77bf9`; watcher/backend/nginx active, source-readiness ready, dry-run audit passed, and no product gaps |
@@ -239,6 +241,23 @@ The report must state:
 This is a communication and tooling optimization only. It does not authorize
 FinalGate bypass, Operation Layer bypass, exchange write, live-profile changes,
 order-sizing changes, withdrawals, transfers, or stale-fact execution.
+
+### Deploy Tooling Optimization Rule
+
+The default deploy workflow should minimize Tokyo interaction without hiding
+safety state:
+
+| Step | Preferred shape | Interaction budget |
+| --- | --- | --- |
+| Routine status review | `--from-cache --require-fresh-cache --owner-progress` | `L0`, 0 remote interactions |
+| Fresh runtime status | One `probe_tokyo_runtime_snapshot.py` collection | `L1`, 1 remote interaction |
+| Runtime deploy apply | Batched git deploy phases with explicit remote count | `L3`, 4 direct SSH commands, 7 counted remote interactions |
+| Frontend homepage publish | One tar-over-SSH static publish | `L3`, 1 remote interaction |
+| Postdeploy acceptance | One daily-check snapshot plus one deploy-session summary | `L1` snapshot, summary local |
+
+When a tool can reuse a fresh cache or a single snapshot, it must not run extra
+Tokyo probes only to restate the same state. When a deploy is necessary, the
+report should summarize the whole session instead of narrating each command.
 
 ## P0 Subgoal: Runtime Liveness Repair
 

@@ -340,6 +340,7 @@ def _interaction_summary(
 ) -> dict[str, bool | str]:
     return {
         "level": "L3_bounded_deploy_apply" if apply else "L1_deploy_plan_only",
+        "remote_interaction_count": _remote_interaction_count(effects),
         "mutates_remote_files": bool(effects.get("remote_files_modified")),
         "approaches_real_order": False,
         "calls_finalgate": False,
@@ -348,6 +349,12 @@ def _interaction_summary(
         "places_order": False,
         "requires_owner_chat_confirmation": False,
     }
+
+
+def _remote_interaction_count(effects: dict[str, Any]) -> int:
+    if not effects.get("apply_requested"):
+        return 0
+    return int(effects.get("remote_interaction_count") or 0)
 
 
 def _owner_deploy_summary(
@@ -406,7 +413,7 @@ def _effects_from_command_results(
     *,
     apply: bool,
     command_results: list[dict[str, Any]],
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     successful_commands = [
         str(result.get("command") or "")
         for result in command_results
@@ -417,7 +424,12 @@ def _effects_from_command_results(
         for result in command_results
         if result.get("returncode") == 0
     }
+    remote_interaction_count = sum(
+        1 for command in successful_commands if _command_touches_tokyo(command)
+    )
     return {
+        "apply_requested": bool(apply),
+        "remote_interaction_count": remote_interaction_count,
         "remote_files_modified": bool(
             apply
             and (
@@ -442,6 +454,15 @@ def _effects_from_command_results(
         "exchange_called": False,
         "secrets_read_by_codex": False,
     }
+
+
+def _command_touches_tokyo(command: str) -> bool:
+    markers = (
+        "ssh ",
+        "probe_tokyo_runtime_governance_readonly.py",
+        "verify_tokyo_runtime_governance_postdeploy.py",
+    )
+    return any(marker in command for marker in markers)
 
 
 def _run_shell(command: str) -> ShellResult:
