@@ -113,6 +113,18 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert report["owner_summary"]["p05"] == "ready"
     assert report["checks"]["p05_ready"] is True
     assert report["checks"]["blockers"] == []
+    assert report["completion_boundary"] == {
+        "completion_blocker_class": "waiting_for_market",
+        "disabled_smoke_treated_as_real_execution_proof": False,
+        "dry_run_readiness_proven": True,
+        "first_bounded_real_order_complete": False,
+        "goal_complete": False,
+        "mock_signal_treated_as_real_signal": False,
+        "real_order_closure_proven": False,
+        "reason": "waiting_for_real_fresh_selected_strategygroup_signal",
+        "status": "not_complete_waiting_for_market",
+        "waiting_for_real_fresh_signal": True,
+    }
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
     assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
@@ -146,6 +158,14 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- 当前阶段: 等待机会" in text
     assert "- 交互等级: L0_local_goal_progress_audit" in text
     assert "- 远端交互次数: 0" in text
+    assert "## Completion Boundary" in text
+    assert "- Goal complete: 否" in text
+    assert "- Status: not_complete_waiting_for_market" in text
+    assert "- Completion blocker class: waiting_for_market" in text
+    assert "- First bounded real order complete: 否" in text
+    assert "- Real order closure proven: 否" in text
+    assert "- Waiting for real fresh signal: 是" in text
+    assert "- Dry-run readiness proven: 是" in text
     assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
@@ -170,6 +190,11 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
     assert report["status"] == "degraded"
     assert report["owner_summary"]["p05"] == "needs_work"
     assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["completion_boundary"]["goal_complete"] is False
+    assert report["completion_boundary"]["status"] == "not_complete_product_gap"
+    assert report["completion_boundary"]["completion_blocker_class"] == "missing_fact"
+    assert report["completion_boundary"]["waiting_for_real_fresh_signal"] is False
+    assert report["completion_boundary"]["dry_run_readiness_proven"] is False
     assert "runtime_dry_run_audit_not_passed" in report["checks"]["product_gaps"]
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p05_engineering_rehearsal_loop"]["status"] == "blocked"
@@ -296,8 +321,15 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     payload = json.loads(output_json.read_text(encoding="utf-8"))
     assert payload["status"] == "waiting_for_market"
     assert payload["interaction"]["remote_interaction_count"] == 0
+    assert payload["completion_boundary"]["goal_complete"] is False
+    assert (
+        payload["completion_boundary"]["status"]
+        == "not_complete_waiting_for_market"
+    )
+    assert payload["completion_boundary"]["dry_run_readiness_proven"] is True
     progress = output_md.read_text(encoding="utf-8")
     assert "## StrategyGroup Runtime Goal Progress" in progress
+    assert "## Completion Boundary" in progress
     assert "- P0.5 ready: 是" in progress
     assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []

@@ -129,6 +129,23 @@ def build_goal_progress_report(
         status = "waiting_for_market"
     elif not p05_ready:
         status = "degraded"
+    product_gaps = [item for item in issues if item not in hard_blockers]
+    engineering_rehearsal_ready = next(
+        (
+            item["status"] == "ready"
+            for item in p05_tracks
+            if item["id"] == "p05_engineering_rehearsal_loop"
+        ),
+        False,
+    )
+    completion_boundary = _completion_boundary(
+        checks=checks,
+        waiting_for_market=waiting_for_market,
+        p05_ready=p05_ready,
+        engineering_rehearsal_ready=engineering_rehearsal_ready,
+        hard_blockers=hard_blockers,
+        product_gaps=product_gaps,
+    )
 
     return {
         "status": status,
@@ -158,9 +175,10 @@ def build_goal_progress_report(
             "p0": p0["status"],
             "p05": "ready" if p05_ready else "needs_work",
         },
+        "completion_boundary": completion_boundary,
         "checks": {
             "blockers": hard_blockers,
-            "product_gaps": [item for item in issues if item not in hard_blockers],
+            "product_gaps": product_gaps,
             "waiting_for_market": waiting_for_market,
             "p05_ready": p05_ready,
             "daily_check_status": daily_check.get("status"),
@@ -175,6 +193,65 @@ def build_goal_progress_report(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
             ),
         },
+    }
+
+
+def _completion_boundary(
+    *,
+    checks: dict[str, Any],
+    waiting_for_market: bool,
+    p05_ready: bool,
+    engineering_rehearsal_ready: bool,
+    hard_blockers: list[str],
+    product_gaps: list[str],
+) -> dict[str, Any]:
+    first_bounded_real_order_complete = (
+        checks.get("first_bounded_real_order_complete") is True
+    )
+    real_order_closure_proven = (
+        checks.get("real_order_closure_proven") is True
+        or first_bounded_real_order_complete
+    )
+    goal_complete = (
+        first_bounded_real_order_complete
+        and real_order_closure_proven
+        and not hard_blockers
+        and not product_gaps
+    )
+    waiting_for_real_fresh_signal = (
+        waiting_for_market and p05_ready and not hard_blockers and not product_gaps
+    )
+    if goal_complete:
+        status = "complete"
+        blocker_class = "none"
+        reason = "first_bounded_real_order_closed"
+    elif waiting_for_real_fresh_signal:
+        status = "not_complete_waiting_for_market"
+        blocker_class = "waiting_for_market"
+        reason = "waiting_for_real_fresh_selected_strategygroup_signal"
+    elif hard_blockers:
+        status = "not_complete_hard_safety_stop"
+        blocker_class = "hard_safety_stop"
+        reason = "hard_safety_blocker_present"
+    elif product_gaps:
+        status = "not_complete_product_gap"
+        blocker_class = "missing_fact"
+        reason = "non_market_product_gap_present"
+    else:
+        status = "not_complete_runtime_processing"
+        blocker_class = "runtime_processing"
+        reason = "runtime_chain_not_settled"
+    return {
+        "goal_complete": goal_complete,
+        "status": status,
+        "reason": reason,
+        "completion_blocker_class": blocker_class,
+        "first_bounded_real_order_complete": first_bounded_real_order_complete,
+        "real_order_closure_proven": real_order_closure_proven,
+        "waiting_for_real_fresh_signal": waiting_for_real_fresh_signal,
+        "dry_run_readiness_proven": engineering_rehearsal_ready,
+        "mock_signal_treated_as_real_signal": False,
+        "disabled_smoke_treated_as_real_execution_proof": False,
     }
 
 
@@ -402,6 +479,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     owner = report["owner_summary"]
     interaction = report["interaction"]
     checks = report["checks"]
+    completion = report["completion_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -414,6 +492,21 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 远端交互次数: {interaction['remote_interaction_count']}",
         f"- 服务器修改: {_yes_no(bool(interaction['mutates_remote_files']))}",
         f"- 接近真实订单: {_yes_no(bool(interaction['approaches_real_order']))}",
+        "",
+        "## Completion Boundary",
+        "",
+        f"- Goal complete: {_yes_no(bool(completion['goal_complete']))}",
+        f"- Status: {completion['status']}",
+        f"- Reason: {completion['reason']}",
+        f"- Completion blocker class: {completion['completion_blocker_class']}",
+        "- First bounded real order complete: "
+        + _yes_no(bool(completion["first_bounded_real_order_complete"])),
+        "- Real order closure proven: "
+        + _yes_no(bool(completion["real_order_closure_proven"])),
+        "- Waiting for real fresh signal: "
+        + _yes_no(bool(completion["waiting_for_real_fresh_signal"])),
+        "- Dry-run readiness proven: "
+        + _yes_no(bool(completion["dry_run_readiness_proven"])),
         "",
         "## Tracks",
         "",
