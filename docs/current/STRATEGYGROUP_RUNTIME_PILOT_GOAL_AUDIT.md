@@ -184,3 +184,19 @@ check, and keeps healthy market-waiting low-noise.
 | Postdeploy acceptance | `output/tokyo-runtime-deploy-session-bb2b2bf0.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `bb2b2bf0b1dfcb72a5616dadfa8e32f0d884d950` |
 | Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
+### 2026-06-18 Bridge Proof Standing-Recovery Fixture Checkpoint
+
+The controlled tiny-live bridge proof fixtures now use the same standing
+reduce-only recovery selector state as the runtime continuation chain. This
+keeps local proof artifacts from reintroducing the old
+`owner_authorize_reduce_only_close` selected action while the official route
+continues to require fresh prepare, FinalGate, and controlled submit preflight.
+
+| Item | Evidence |
+| --- | --- |
+| Waiting selector fixture | `runtime_controlled_tiny_live_bridge_to_preflight_proof.py` now uses `continuation_refresh_monitor_position_or_standing_recovery` and `monitor_position_or_prepare_official_reduce_only_recovery` |
+| Legacy owner action scan | Targeted `rg` found no `monitor_position_or_owner_authorize_reduce_only_close` or owner-close refresh status in the bridge proof and bridge proof tests |
+| Test isolation | CLI tests now monkeypatch official proof builders instead of touching login-protected runtime proof paths |
+| Verification | `64 passed` for controlled bridge, continuation, dry-run closure, and daily-check tests; `py_compile` passed for the bridge proof scripts |
+| Safety | This is local proof/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
