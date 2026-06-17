@@ -118,6 +118,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Post-Submit Owner-Confirmation Regression Guard
+
+The dry-run post-submit exit outcome matrix now explicitly proves that none of
+the six covered post-submit outcomes reintroduce per-order Owner chat
+confirmation as a next-step gate. Recovery after protection failure still
+requires standing authorization, action-time FinalGate, and the official
+Operation Layer; it does not require a new chat approval inside the selected
+tiny-risk runtime boundary.
+
+| Item | Evidence |
+| --- | --- |
+| Covered outcomes | `entry_filled_protection_ok`, `entry_filled_protection_failed`, `partial_fill`, `exchange_submit_failed_before_acceptance`, `active_position_remains_open`, `position_closed_by_sl_tp_or_reduce_only_recovery` |
+| New dry-run check | `no_post_submit_case_requires_owner_chat_confirmation=true` |
+| Boundary | Standing recovery remains bounded by FinalGate and Operation Layer, not by old per-order chat confirmation |
+| Safety | Local dry-run/test work only; no Tokyo call, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Standing Recovery Proof Isolation Guard
 
 The legacy compatibility isolation packet now explicitly checks the current

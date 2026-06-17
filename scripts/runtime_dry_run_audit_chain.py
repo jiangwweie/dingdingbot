@@ -2844,6 +2844,7 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "review_policy": "record_open_position_review_snapshot",
             "next_attempt_gate": "blocked_until_position_closed_or_scope_allows",
             "reduce_only_recovery_mode": False,
+            "owner_chat_confirmation_required": False,
         },
         "entry_filled_protection_failed": {
             "submit_outcome": "entry_filled",
@@ -2870,6 +2871,7 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "review_policy": "record_partial_fill_review",
             "next_attempt_gate": "blocked_until_partial_fill_reconciled",
             "reduce_only_recovery_mode": "if_protection_missing_or_residual_risk",
+            "owner_chat_confirmation_required": False,
         },
         "exchange_submit_failed_before_acceptance": {
             "submit_outcome": "submit_failed_before_exchange_acceptance",
@@ -2881,6 +2883,7 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "review_policy": "record_submit_failure_review",
             "next_attempt_gate": "ready_after_no_fill_reconciliation",
             "reduce_only_recovery_mode": False,
+            "owner_chat_confirmation_required": False,
         },
         "active_position_remains_open": {
             "submit_outcome": "position_still_open_after_finalize",
@@ -2892,6 +2895,7 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "review_policy": "record_open_position_status_snapshot",
             "next_attempt_gate": "blocked_for_same_scope_while_position_open",
             "reduce_only_recovery_mode": "only_if_hard_stop_missing_or_drift",
+            "owner_chat_confirmation_required": False,
         },
         "position_closed_by_sl_tp_or_reduce_only_recovery": {
             "submit_outcome": "position_closed",
@@ -2903,6 +2907,7 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "review_policy": "record_closed_trade_review",
             "next_attempt_gate": "ready_for_fresh_signal_after_review",
             "reduce_only_recovery_mode": False,
+            "owner_chat_confirmation_required": False,
         },
     }
     checks = {
@@ -2955,6 +2960,10 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
                 "review_policy"
             ]
             == "record_closed_trade_review"
+        ),
+        "no_post_submit_case_requires_owner_chat_confirmation": all(
+            case.get("owner_chat_confirmation_required") is False
+            for case in cases.values()
         ),
         "no_dangerous_effects": True,
     }

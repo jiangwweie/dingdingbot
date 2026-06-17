@@ -438,6 +438,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "submit_failure_releases_only_after_no_fill_verified": True,
         "active_position_blocks_same_scope_next_attempt": True,
         "closed_position_requires_review_before_fresh_signal": True,
+        "no_post_submit_case_requires_owner_chat_confirmation": True,
         "no_dangerous_effects": True,
     }
     assert set(exit_outcome_matrix["cases"]) == {
@@ -461,8 +462,18 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         is True
     )
     assert (
+        exit_outcome_matrix["cases"]["entry_filled_protection_failed"][
+            "owner_chat_confirmation_required"
+        ]
+        is False
+    )
+    assert (
         exit_outcome_matrix["cases"]["partial_fill"]["budget_policy"]
         == "hold_budget_for_filled_or_residual_exposure"
+    )
+    assert all(
+        case["owner_chat_confirmation_required"] is False
+        for case in exit_outcome_matrix["cases"].values()
     )
     assert (
         exit_outcome_matrix["cases"][
