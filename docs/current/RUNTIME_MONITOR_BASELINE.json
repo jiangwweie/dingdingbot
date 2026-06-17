@@ -1,9 +1,9 @@
 {
   "schema": "brc.runtime_monitor_baseline.v1",
-  "updated_at_utc": "2026-06-17T08:10:00Z",
+  "updated_at_utc": "2026-06-17T08:27:35Z",
   "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and check modes.",
-  "expected_runtime_head": "83bd0d6aa07c4784fd28e4182c214db4c344efe0",
-  "expected_frontend_head": "83bd0d6aa07c4784fd28e4182c214db4c344efe0",
+  "expected_runtime_head": "7df799e1ee3dbabd69060f92758a6b84ba2a0ae6",
+  "expected_frontend_head": "7df799e1ee3dbabd69060f92758a6b84ba2a0ae6",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
   "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",
   "strict_no_server_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress",

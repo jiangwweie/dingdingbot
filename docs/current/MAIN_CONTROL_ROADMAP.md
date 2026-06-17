@@ -280,6 +280,24 @@ Console homepage interaction projection.
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime and frontend head `83bd0d6aa07c4784fd28e4182c214db4c344efe0` |
 | Safety | Deploy, publish, and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Homepage Visibility Deploy Checkpoint
+
+The low-interaction monitor defaults and Owner Console homepage visibility
+changes were pushed and deployed to Tokyo.
+
+| Item | Result |
+| --- | --- |
+| Deployed runtime head | `7df799e1ee3dbabd69060f92758a6b84ba2a0ae6` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-7df799e1-homepage-visibility` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Frontend homepage publish | `status=applied`, `interaction.level=L3_frontend_static_publish`, `remote_interaction_count=1`, `blockers=[]` |
+| Postdeploy daily check | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `blockers=[]`, `product_gaps=[]` |
+| Deploy session summary | `status=waiting_for_market`, `remote_interaction_count=9`, `all_steps_safe_for_deploy_session_summary=true` |
+| Owner Console homepage | Homepage no longer shows deploy-channel status as a primary operating card; deploy-channel detail remains on the system/source-health surface |
+| Visibility coverage | Homepage state smoke now covers waiting for market, processing, engineering blocker, safety blocker, and needs-intervention states |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime and frontend head `7df799e1ee3dbabd69060f92758a6b84ba2a0ae6` |
+| Safety | Deploy, publish, and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ## P0 Subgoal: Runtime Liveness Repair
 
 ### Current State
