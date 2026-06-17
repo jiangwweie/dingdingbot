@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -94,3 +95,38 @@ def test_quiet_monitor_owner_progress_is_readable(tmp_path):
     assert "- 交互等级: L0_local_automation_audit" in text
     assert "- 远端交互次数: 0" in text
     assert "| heartbeat_check | pass |" in text
+
+
+def test_quiet_monitor_cli_writes_json_and_owner_progress(tmp_path):
+    module = _load_module()
+    baseline_path = tmp_path / "baseline.json"
+    automation_path = tmp_path / "automation.toml"
+    output_json = tmp_path / "quiet-monitor-audit.json"
+    output_md = tmp_path / "quiet-monitor-audit.md"
+    baseline_path.write_text(
+        json.dumps(_baseline(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    automation_path.write_text(_prompt_text(), encoding="utf-8")
+
+    exit_code = module.main(
+        [
+            "--baseline-json",
+            str(baseline_path),
+            "--automation-toml",
+            str(automation_path),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+            "--owner-progress",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["status"] == "ready"
+    assert payload["interaction"]["remote_interaction_count"] == 0
+    progress = output_md.read_text(encoding="utf-8")
+    assert "## Tokyo Runtime Quiet Monitor Audit" in progress
+    assert "- Blockers: none" in progress

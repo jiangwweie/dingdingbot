@@ -15,6 +15,12 @@ DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_AUTOMATION_TOML = (
     Path.home() / ".codex/automations/tokyo-runtime-quiet-monitor/automation.toml"
 )
+DEFAULT_QUIET_MONITOR_AUDIT_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-quiet-monitor-audit.json"
+)
+DEFAULT_QUIET_MONITOR_AUDIT_OWNER_PROGRESS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-quiet-monitor-audit.md"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         automation_text=Path(args.automation_toml).read_text(encoding="utf-8"),
         automation_path=Path(args.automation_toml),
     )
+    owner_progress_text = _owner_progress_text(report)
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,8 +38,12 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+    if args.output_owner_progress:
+        output_path = Path(args.output_owner_progress)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(owner_progress_text + "\n", encoding="utf-8")
     if args.owner_progress:
-        print(_owner_progress_text(report))
+        print(owner_progress_text)
     elif args.json:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
@@ -85,6 +96,10 @@ def build_quiet_monitor_audit(
         "source_paths": {
             "baseline_json": str(DEFAULT_BASELINE_JSON),
             "automation_toml": str(automation_path),
+            "quiet_monitor_audit_json": str(DEFAULT_QUIET_MONITOR_AUDIT_JSON),
+            "quiet_monitor_audit_owner_progress_md": str(
+                DEFAULT_QUIET_MONITOR_AUDIT_OWNER_PROGRESS_MD
+            ),
         },
     }
 
@@ -178,7 +193,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--baseline-json", default=str(DEFAULT_BASELINE_JSON))
     parser.add_argument("--automation-toml", default=str(DEFAULT_AUTOMATION_TOML))
-    parser.add_argument("--output-json")
+    parser.add_argument("--output-json", default=str(DEFAULT_QUIET_MONITOR_AUDIT_JSON))
+    parser.add_argument(
+        "--output-owner-progress",
+        default=str(DEFAULT_QUIET_MONITOR_AUDIT_OWNER_PROGRESS_MD),
+    )
     return parser.parse_args(argv)
 
 

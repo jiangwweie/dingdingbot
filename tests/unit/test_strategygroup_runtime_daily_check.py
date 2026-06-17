@@ -824,7 +824,10 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "--output-owner-progress output/runtime-monitor/latest-goal-progress.md"
     )
     assert baseline["quiet_monitor_audit_check"].endswith(
-        "audit_tokyo_runtime_quiet_monitor.py --owner-progress"
+        "audit_tokyo_runtime_quiet_monitor.py "
+        "--owner-progress "
+        "--output-json output/runtime-monitor/latest-quiet-monitor-audit.json "
+        "--output-owner-progress output/runtime-monitor/latest-quiet-monitor-audit.md"
     )
     assert baseline["homepage_visual_qa_check"] == (
         "cd owner-runtime-console && npm run visual:qa:home"
