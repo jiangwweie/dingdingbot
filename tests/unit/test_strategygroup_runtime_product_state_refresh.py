@@ -305,9 +305,14 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         return {
             "scope": "strategygroup_runtime_goal_status",
             "status": "waiting_for_signal",
-            "checks": {"runtime_dry_run_audit_passed": True},
+            "ready_for_real_order_action": False,
+            "next_safe_checkpoint": "continue_watcher_observation",
+            "checks": {
+                "runtime_dry_run_audit_passed": True,
+                "ready_for_real_order_action": True,
+            },
             "owner_state": {"next_safe_checkpoint": "continue_watcher_observation"},
-            "real_order_boundary": {"ready_for_real_order_action": False},
+            "real_order_boundary": {"ready_for_real_order_action": True},
         }
 
     packet = refresh_packets(

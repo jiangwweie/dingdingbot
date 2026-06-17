@@ -7971,12 +7971,9 @@ def _owner_console_real_order_readiness(
 
     matrix = runtime_goal_status.get("real_order_readiness_matrix")
     matrix_rows = [item for item in matrix if isinstance(item, dict)] if isinstance(matrix, list) else []
-    ready_for_real_order = bool(
-        (runtime_goal_status.get("real_order_boundary") or {}).get(
-            "ready_for_real_order_action"
-        )
-        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
-        else False
+    ready_for_real_order = (
+        _owner_console_goal_status_ready_for_real_order_action(runtime_goal_status)
+        is True
     )
     owner_state = (
         runtime_goal_status.get("owner_state")
@@ -7984,7 +7981,8 @@ def _owner_console_real_order_readiness(
         else {}
     )
     next_checkpoint = str(
-        owner_state.get("next_safe_checkpoint")
+        runtime_goal_status.get("next_safe_checkpoint")
+        or owner_state.get("next_safe_checkpoint")
         or owner_state.get("next_action")
         or "review_runtime_goal_status"
     )
@@ -8048,6 +8046,28 @@ def _owner_console_real_order_readiness(
             reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
         ),
     }
+
+
+def _owner_console_goal_status_ready_for_real_order_action(
+    runtime_goal_status: dict[str, Any],
+) -> bool:
+    ready_value = runtime_goal_status.get("ready_for_real_order_action")
+    if isinstance(ready_value, bool):
+        return ready_value
+    checks = (
+        runtime_goal_status.get("checks")
+        if isinstance(runtime_goal_status.get("checks"), dict)
+        else {}
+    )
+    ready_value = checks.get("ready_for_real_order_action")
+    if isinstance(ready_value, bool):
+        return ready_value
+    boundary = (
+        runtime_goal_status.get("real_order_boundary")
+        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+        else {}
+    )
+    return boundary.get("ready_for_real_order_action") is True
 
 
 def _owner_console_apply_runtime_goal_status_overlay(

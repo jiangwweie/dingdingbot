@@ -706,6 +706,10 @@ nesting:
 | `checks.ready_for_real_order_action` | Machine-check mirror for smoke tests, heartbeat monitors, and readmodel consumers. |
 | `next_safe_checkpoint` | Direct Owner/runtime continuation point, such as `continue_watcher_observation` while no fresh signal exists. |
 
+`owner-console-source-readiness` and the product-state refresh script now
+prefer these top-level fields first, then fall back to `checks` and the older
+`real_order_boundary` shape only for compatibility with historical packets.
+
 | Matrix item | Purpose |
 | --- | --- |
 | `selected_strategygroup_scope` | Proves the signal/runtime belongs to the selected StrategyGroup before any real-submit boundary. |

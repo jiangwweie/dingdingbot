@@ -6323,6 +6323,43 @@ def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation()
     assert "tokyo_readonly_probe_error" in source["summary"]["blockers"]
 
 
+def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "operation_layer_ready",
+            "ready_for_real_order_action": True,
+            "next_safe_checkpoint": "call_official_operation_layer_submit",
+            "checks": {"ready_for_real_order_action": False},
+            "owner_state": {"next_safe_checkpoint": "legacy_owner_checkpoint"},
+            "real_order_boundary": {"ready_for_real_order_action": False},
+            "real_order_readiness_matrix": [
+                {
+                    "key": "selected_strategygroup_scope",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+                {
+                    "key": "official_operation_layer",
+                    "status": "pass",
+                    "blocker_class": "none",
+                    "blocks_real_submit": False,
+                },
+            ],
+        }
+    )
+
+    assert readiness["status"] == "ready"
+    assert readiness["ready_for_real_order_action"] is True
+    assert readiness["next_safe_checkpoint"] == "call_official_operation_layer_submit"
+    assert readiness["pass_count"] == 2
+    assert readiness["submit_blocking_keys"] == []
+
+
 def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_missing():
     from src.application.readmodels.trading_console import (
         _owner_console_deploy_channel_source,

@@ -136,11 +136,6 @@ def _real_order_readiness_fallback(
 ) -> dict[str, Any]:
     matrix = runtime_goal_status.get("real_order_readiness_matrix")
     rows = [item for item in matrix if isinstance(item, dict)] if isinstance(matrix, list) else []
-    boundary = (
-        runtime_goal_status.get("real_order_boundary")
-        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
-        else {}
-    )
     owner_state = (
         runtime_goal_status.get("owner_state")
         if isinstance(runtime_goal_status.get("owner_state"), dict)
@@ -160,7 +155,7 @@ def _real_order_readiness_fallback(
         1 for item in rows if str(item.get("status") or "") == "blocked"
     )
     pass_count = sum(1 for item in rows if str(item.get("status") or "") == "pass")
-    ready = boundary.get("ready_for_real_order_action") is True
+    ready = _goal_status_ready_for_real_order_action(runtime_goal_status)
     status = (
         "ready_for_real_order"
         if ready
@@ -187,7 +182,9 @@ def _real_order_readiness_fallback(
         "blocked_count": blocked_count,
         "submit_blocking_keys": submit_blocking_keys,
         "next_safe_checkpoint": str(
-            owner_state.get("next_safe_checkpoint") or "refresh_runtime_goal_status"
+            runtime_goal_status.get("next_safe_checkpoint")
+            or owner_state.get("next_safe_checkpoint")
+            or "refresh_runtime_goal_status"
         ),
         "matrix": rows,
         "source_health": _detail_source(
@@ -196,6 +193,28 @@ def _real_order_readiness_fallback(
             reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
         ),
     }
+
+
+def _goal_status_ready_for_real_order_action(
+    goal_status_packet: dict[str, Any],
+) -> bool:
+    ready_value = goal_status_packet.get("ready_for_real_order_action")
+    if isinstance(ready_value, bool):
+        return ready_value
+    checks = (
+        goal_status_packet.get("checks")
+        if isinstance(goal_status_packet.get("checks"), dict)
+        else {}
+    )
+    ready_value = checks.get("ready_for_real_order_action")
+    if isinstance(ready_value, bool):
+        return ready_value
+    boundary = (
+        goal_status_packet.get("real_order_boundary")
+        if isinstance(goal_status_packet.get("real_order_boundary"), dict)
+        else {}
+    )
+    return boundary.get("ready_for_real_order_action") is True
 
 
 def _source_readiness_fallback_packet(
@@ -716,7 +735,8 @@ def refresh_packets(
                 "output_json": str(resolved_goal_status_output_json),
                 "fallback_input_json": str(fallback_goal_status_json),
                 "next_safe_checkpoint": (
-                    (goal_status_packet.get("owner_state") or {}).get(
+                    goal_status_packet.get("next_safe_checkpoint")
+                    or (goal_status_packet.get("owner_state") or {}).get(
                         "next_safe_checkpoint"
                     )
                 ),
@@ -727,10 +747,7 @@ def refresh_packets(
                     is True
                 ),
                 "ready_for_real_order_action": (
-                    (goal_status_packet.get("real_order_boundary") or {}).get(
-                        "ready_for_real_order_action"
-                    )
-                    is True
+                    _goal_status_ready_for_real_order_action(goal_status_packet)
                 ),
             }
         except Exception as exc:
