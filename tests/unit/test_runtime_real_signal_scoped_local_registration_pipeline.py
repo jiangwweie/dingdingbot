@@ -75,9 +75,13 @@ def test_pipeline_reaches_scoped_local_registration_dry_run_from_real_signal(tmp
     assert progress["exchange_write_called"] is False
     assert progress["order_created"] is False
     assert progress["withdrawal_or_transfer_created"] is False
-    assert progress["known_non_executing_probe_findings"] == [
+    assert set(progress["known_non_executing_probe_findings"]) == {
         "evidence_chain:preview_disabled_first_real_submit_action_http_404",
-    ]
+        (
+            "evidence_chain:disabled_first_real_submit_action_prerequisite_missing:"
+            "RuntimeExecutionOrderLifecycleAdapterResult not found"
+        ),
+    }
     assert progress["non_executing_first_real_submit_action_probe_called"] is True
     assert progress["real_first_real_submit_action_called"] is False
     paths = [call["path"] for call in client.calls]

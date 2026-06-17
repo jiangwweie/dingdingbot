@@ -44,6 +44,11 @@ OPERATION_LAYER_REQUIRED_EVIDENCE_IDS = (
     "exchange_submit_action_authorization_id",
     "deployment_readiness_evidence_id",
 )
+LOCAL_REGISTRATION_SATISFIED_PROBE_BLOCKER_FRAGMENTS = (
+    "runtimeexecutionorderlifecycleadapterresult_not_found",
+    "runtime_execution_order_lifecycle_adapter_result_not_found",
+    "preview_disabled_first_real_submit_action_http_404",
+)
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -75,6 +80,14 @@ def _blockers(value: dict[str, Any] | None) -> list[str]:
     if not isinstance(value, dict):
         return []
     return [str(item) for item in value.get("blockers") or []]
+
+
+def _is_local_registration_satisfied_probe_blocker(value: str) -> bool:
+    text = value.lower()
+    return any(
+        fragment in text
+        for fragment in LOCAL_REGISTRATION_SATISFIED_PROBE_BLOCKER_FRAGMENTS
+    )
 
 
 def _read_json_object(path: str | None) -> dict[str, Any]:
@@ -663,6 +676,22 @@ def _final_report(
             )
             or []
         )
+    if (
+        _status(reports.get("scoped_local_registration_proof"))
+        == "scoped_local_registration_proof_recorded"
+    ):
+        satisfied_probe_blockers = [
+            item for item in blockers if _is_local_registration_satisfied_probe_blocker(item)
+        ]
+        blockers = [
+            item
+            for item in blockers
+            if not _is_local_registration_satisfied_probe_blocker(item)
+        ]
+        warnings.extend(
+            f"local_registration_satisfied_probe_blocker:{item}"
+            for item in satisfied_probe_blockers
+        )
     result = {
         "scope": "runtime_real_signal_scoped_local_registration_pipeline",
         "status": status,
@@ -720,9 +749,20 @@ def _execution_chain_progress(
     handoff_status = _status(handoff)
     binding_status = _status(binding)
 
+    probe_sources = list(blockers)
+    for name, report in (
+        ("evidence_chain", evidence),
+        ("scoped_local_registration_proof", scoped),
+    ):
+        if isinstance(report, dict):
+            probe_sources.extend(f"{name}:{item}" for item in _blockers(report))
+            probe_sources.extend(
+                f"{name}:{item}" for item in report.get("warnings") or []
+            )
+
     known_non_executing_probe_findings = [
         item
-        for item in blockers
+        for item in _dedupe([str(value) for value in probe_sources])
         if "runtimeexecutionorderlifecycleadapterresult_not_found" in item.lower()
         or "runtimeexecutionorderlifecycleadapterresult not found" in item.lower()
         or "preview_disabled_first_real_submit_action_http_404" in item.lower()

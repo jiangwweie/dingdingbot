@@ -10,12 +10,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["scenario_count"] == 13
-    assert packet["checks"]["scenario_count"] == 13
+    assert packet["scenario_count"] == 14
+    assert packet["checks"]["scenario_count"] == 14
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["summary"] == {
-        "scenario_count": 13,
+        "scenario_count": 14,
         "required_checks_present": True,
         "all_scenarios_passed": True,
         "dangerous_effects_absent": True,
@@ -33,6 +33,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
         "non_executing_prepare_auto_bridge_checked": True,
+        "scoped_pipeline_operation_layer_handoff_checked": True,
     }
     assert packet["required_checks"] == {
         "all_scenarios_passed": True,
@@ -50,6 +51,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
         "operation_layer_evidence_relay_checked": True,
+        "scoped_pipeline_operation_layer_handoff_checked": True,
         "required_scenarios_present": True,
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
@@ -68,6 +70,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert set(scenarios) == {
         "no_signal",
         "mock_fresh_signal_dry_run_pass",
+        "scoped_pipeline_operation_layer_handoff",
         "non_executing_prepare_auto_bridge",
         "mock_operation_layer_submit_finalize_pass",
         "required_facts_missing",
@@ -203,6 +206,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
             "real_submit_allowed"
         ] is False
     assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
+    assert packet["checks"]["scoped_pipeline_operation_layer_handoff_checked"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
     assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
     assert packet["checks"][
@@ -233,6 +237,24 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         is True
     )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
+    scoped_handoff = scenarios["scoped_pipeline_operation_layer_handoff"][
+        "artifacts"
+    ]
+    assert scoped_handoff["checks"] == {
+        "pipeline_reaches_scoped_local_registration_recorded": True,
+        "pipeline_reports_operation_layer_evidence_ready": True,
+        "dispatcher_accepts_pipeline_evidence": True,
+        "operation_layer_readiness_has_no_missing_ids": True,
+        "operation_layer_submit_not_called": True,
+        "pipeline_does_not_exchange_write": True,
+    }
+    assert scoped_handoff["pipeline_report"]["status"] == (
+        "scoped_local_registration_proof_recorded"
+    )
+    assert scoped_handoff["resume_dispatch"]["status"] == "operation_layer_ready"
+    assert scoped_handoff["resume_dispatch"]["safety_invariants"][
+        "official_operation_layer_submit_called"
+    ] is False
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
     assert selected_guard["checks"] == {
         "selected_mpg_dispatch_reaches_finalgate_plan": True,

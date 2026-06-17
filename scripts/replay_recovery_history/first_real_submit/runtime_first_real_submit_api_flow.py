@@ -1380,6 +1380,7 @@ def _pre_adapter_evidence_blockers(body: dict[str, Any]) -> list[str]:
     tolerated_fragments = (
         "runtimeexecutionorderlifecycleadapterresult_not_found",
         "runtime_execution_order_lifecycle_adapter_result_not_found",
+        "preview_disabled_first_real_submit_action_http_404",
     )
     blockers = body.get("blockers") if isinstance(body, dict) else None
     result: list[str] = []

@@ -23,6 +23,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_fresh_signal_readiness_bridge as readiness_bridge  # noqa: E402
+from scripts import runtime_real_signal_scoped_local_registration_pipeline as scoped_pipeline  # noqa: E402
 from scripts import runtime_official_submit_disabled_smoke_from_handoff as disabled_smoke  # noqa: E402
 from scripts import runtime_signal_watcher_resume_dispatcher as dispatcher  # noqa: E402
 from src.domain.runtime_executable_submit_readiness import (  # noqa: E402
@@ -127,6 +128,199 @@ class _DisabledSmokeClient:
                 "execution_result_id": "dry-run-disabled-submit-result-1",
             },
         }
+
+
+class _ScopedPipelineClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {"method": method, "path": path, "query": query or {}, "body": body}
+        )
+        if "strategy-signal-intent-draft-sources" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "persisted_ready_intent_draft",
+                    "blockers": [],
+                    "warnings": ["dry-run-scoped-source"],
+                    "signal_evaluation_id": "dry-run-signal-eval-1",
+                    "order_candidate_id": "dry-run-order-candidate-1",
+                    "runtime_execution_intent_draft_id": "dry-run-intent-draft-1",
+                    "ready_for_official_handoff_source": True,
+                    "signal_evaluation_created": True,
+                    "order_candidate_created": True,
+                    "runtime_execution_intent_draft_created": True,
+                },
+            }
+        if "persisted-draft-source-readiness-previews" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "ready_for_executable_submit",
+                    "packet_id": "dry-run-readiness-1",
+                    "source_strategy_planning_packet_id": "dry-run-plan-1",
+                    "source_authorization_id": "dry-run-source-auth-1",
+                    "signal_evaluation_id": "dry-run-signal-eval-1",
+                    "order_candidate_id": "dry-run-order-candidate-1",
+                    "executable_submit_ready": True,
+                    "blockers": [],
+                    "warnings": ["dry-run-scoped-readiness"],
+                },
+            }
+        if "official-submit-handoff-previews" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "ready_for_official_submit_call",
+                    "blockers": [],
+                    "warnings": ["dry-run-scoped-handoff"],
+                    "ready_for_official_submit_call": True,
+                    "official_endpoint_method": "POST",
+                    "official_endpoint_path": (
+                        "/api/trading-console/"
+                        "runtime-execution-first-real-submit-actions/"
+                        f"authorizations/{FRESH_AUTHORIZATION_ID}"
+                    ),
+                    "official_query": {
+                        "owner_confirmed_for_first_real_submit_action": False,
+                    },
+                    "mode": "disabled_smoke",
+                },
+            }
+        if "fresh-authorizations/bind" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "created_intent_and_authorization",
+                    "blockers": [],
+                    "warnings": ["dry-run-scoped-binding"],
+                    "fresh_submit_authorization_id": FRESH_AUTHORIZATION_ID,
+                    "execution_intent_id": "dry-run-execution-intent-1",
+                    "runtime_execution_intent_draft_id": "dry-run-intent-draft-1",
+                    "ready_for_fresh_authorization_resolution": True,
+                    "ready_for_disabled_smoke_call": True,
+                    "binding_source": "latest_ready_draft",
+                    "creates_execution_intent": True,
+                    "creates_submit_authorization": True,
+                },
+            }
+        if "runtime-execution-first-real-submit-actions" in path:
+            return {
+                "http_status": 404,
+                "body": {
+                    "message": "RuntimeExecutionOrderLifecycleAdapterResult not found",
+                },
+                "error": True,
+            }
+        if "runtime-execution-first-real-submit-evidence-preparations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "status": "prepared_packet_blocked",
+                    "available_evidence_ids": {
+                        "trusted_submit_fact_snapshot_id": (
+                            "dry-run-trusted-facts-1"
+                        ),
+                        "submit_idempotency_policy_id": "dry-run-idempotency-1",
+                        "protection_creation_failure_policy_id": (
+                            "dry-run-protection-policy-1"
+                        ),
+                    },
+                    "blockers": [
+                        "preview_disabled_first_real_submit_action_http_404",
+                    ],
+                },
+            }
+        if "runtime-execution-controlled-submit-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "execution_intent_id": "dry-run-execution-intent-1",
+                    "runtime_execution_intent_draft_id": "dry-run-intent-draft-1",
+                    "source_id": "dry-run-order-candidate-1",
+                    "semantic_ids": {
+                        "order_candidate_id": "dry-run-order-candidate-1",
+                        "runtime_instance_id": RUNTIME_ID,
+                        "signal_evaluation_id": "dry-run-signal-eval-1",
+                    },
+                    "status": "ready_for_controlled_submit_adapter",
+                },
+            }
+        if "runtime-execution-protection-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "protection_plan_id": "dry-run-protection-plan-1",
+                    "status": "ready_for_submit_adapter",
+                },
+            }
+        if "runtime-execution-attempt-reservations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "reservation_id": "dry-run-attempt-reservation-1",
+                    "status": "pending_runtime_mutation",
+                },
+            }
+        if "runtime-execution-attempt-mutations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "mutation_id": "dry-run-attempt-mutation-1",
+                    "status": "applied",
+                },
+            }
+        if "runtime-execution-attempt-outcome-policies" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "policy_id": "dry-run-attempt-policy-1",
+                    "status": "ready_for_attempt_budget_outcome_accounting",
+                },
+            }
+        if "runtime-execution-order-lifecycle-handoff-drafts" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "handoff_draft_id": "dry-run-handoff-1",
+                    "status": "ready_for_order_lifecycle_adapter",
+                    "blockers": [],
+                },
+            }
+        if "runtime-execution-local-registration-action-authorizations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "action_authorization_id": "dry-run-local-action-1",
+                    "status": "approved_for_local_registration_action",
+                },
+            }
+        if "runtime-execution-local-registration-enablements" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "decision_id": "dry-run-local-enable-1",
+                    "status": "ready_for_local_registration_action",
+                },
+            }
+        if "runtime-execution-order-lifecycle-adapter-results" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "adapter_result_id": "dry-run-local-adapter-result-1",
+                    "status": "registered_created_local_orders",
+                },
+            }
+        raise AssertionError(f"unexpected scoped pipeline path {path}")
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -439,6 +633,85 @@ def _readiness_evidence_path(output_dir: Path) -> Path:
         },
     )
     return path
+
+
+def _scoped_pipeline_signal_path(output_dir: Path) -> Path:
+    path = output_dir / "scoped-pipeline-signal-input.json"
+    _write_json(
+        path,
+        {
+            "evaluation_id": "dry-run-signal-eval-1",
+            "strategy_family_id": "MPG-001",
+            "strategy_family_version_id": "MPG-001-v0",
+            "symbol": "MSTR/USDT:USDT",
+            "side": "long",
+            "timestamp_ms": int(time.time() * 1000),
+        },
+    )
+    return path
+
+
+def _scoped_pipeline_args(
+    *,
+    output_dir: Path,
+    signal_input_json: Path,
+    readiness_evidence_json: Path,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        runtime_instance_id=RUNTIME_ID,
+        signal_input_json=str(signal_input_json),
+        readiness_evidence_json=str(readiness_evidence_json),
+        auto_readiness_evidence=False,
+        final_gate_preview_id=None,
+        final_gate_passed=False,
+        runtime_grant_authorization_id=None,
+        owner_real_submit_authorization_id=None,
+        trusted_submit_fact_snapshot_id=None,
+        submit_idempotency_policy_id=None,
+        attempt_outcome_policy_id=None,
+        protection_creation_failure_policy_id=None,
+        local_registration_enablement_decision_id=None,
+        exchange_submit_enablement_decision_id=None,
+        exchange_submit_action_authorization_id=None,
+        order_lifecycle_submit_enablement_id=None,
+        exchange_submit_adapter_enablement_id=None,
+        deployment_readiness_evidence_id=None,
+        protection_required_and_ready=False,
+        active_position_source_trusted=False,
+        account_facts_fresh=False,
+        duplicate_submit_guard_ready=False,
+        legacy_runtime_submit_rehearsal_id=None,
+        durable_exchange_submit_execution_result_id=None,
+        final_gate_preview_json=None,
+        trusted_submit_facts_json=None,
+        submit_idempotency_json=None,
+        attempt_outcome_policy_json=None,
+        protection_failure_policy_json=None,
+        local_registration_enablement_json=None,
+        exchange_submit_enablement_json=None,
+        exchange_action_authorization_json=None,
+        order_lifecycle_submit_enablement_json=None,
+        exchange_adapter_enablement_json=None,
+        deployment_readiness_json=None,
+        candidate_id="dry-run-order-candidate-1",
+        context_id="dry-run-context",
+        expires_at_ms=None,
+        active_positions_count=0,
+        metadata_json='{"runtime_dry_run_audit_chain": true}',
+        source_kind="current_live_signal",
+        allow_scoped_local_registration_proof=True,
+        allow_sample_local_registration=False,
+        execute_scoped_local_registration_proof=True,
+        owner_operator_id="dry-run-owner",
+        owner_confirmation_reference="standing-authorization-dry-run",
+        reason="dry-run scoped local registration proof",
+        outcome_kind="entry_filled_protection_creation_failed",
+        skip_next_attempt_gate_check=True,
+        env_file=None,
+        api_base="http://dry-run.local",
+        artifact_dir=str(output_dir / "scoped-pipeline-artifacts"),
+        output=None,
+    )
 
 
 def _resume_pack_waiting() -> dict[str, Any]:
@@ -1100,6 +1373,98 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
                 if not value
             ],
             *disabled_report.get("blockers", []),
+        ],
+    )
+
+
+def _scenario_scoped_pipeline_operation_layer_handoff(
+    output_dir: Path,
+) -> dict[str, Any]:
+    signal_path = _scoped_pipeline_signal_path(output_dir)
+    readiness_evidence_path = _readiness_evidence_path(output_dir)
+    pipeline_client = _ScopedPipelineClient()
+    pipeline_report = scoped_pipeline._build_report(
+        _scoped_pipeline_args(
+            output_dir=output_dir,
+            signal_input_json=signal_path,
+            readiness_evidence_json=readiness_evidence_path,
+        ),
+        client=pipeline_client,
+    )
+    operation_layer_evidence = pipeline_report.get(
+        "operation_layer_evidence_after_local_registration"
+    )
+    if not isinstance(operation_layer_evidence, dict):
+        operation_layer_evidence = {}
+    dispatch = dispatcher.build_dispatch_packet(
+        resume_pack=_resume_pack_finalgate_ready(),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        operation_layer_evidence_report=operation_layer_evidence,
+        operation_layer_evidence_report_path=str(
+            pipeline_report.get("operation_layer_evidence_after_local_registration_path")
+            or "/tmp/scoped-pipeline-operation-layer-evidence.json"
+        ),
+        execute_operation_layer_submit=False,
+    )
+    progress = pipeline_report.get("execution_chain_progress")
+    if not isinstance(progress, dict):
+        progress = {}
+    post_gate = progress.get("post_local_registration_gate")
+    if not isinstance(post_gate, dict):
+        post_gate = {}
+    readiness = dispatch.get("operation_layer_readiness")
+    if not isinstance(readiness, dict):
+        readiness = {}
+    checks = {
+        "pipeline_reaches_scoped_local_registration_recorded": (
+            pipeline_report.get("status") == "scoped_local_registration_proof_recorded"
+        ),
+        "pipeline_reports_operation_layer_evidence_ready": (
+            post_gate.get("operation_layer_evidence_ready") is True
+            and post_gate.get("operation_layer_evidence_missing_ids") == []
+        ),
+        "dispatcher_accepts_pipeline_evidence": (
+            dispatch.get("status") == "operation_layer_ready"
+            and dispatch.get("dispatch_status")
+            == "official_operation_layer_evidence_ready"
+        ),
+        "operation_layer_readiness_has_no_missing_ids": (
+            readiness.get("missing_evidence_ids") == []
+        ),
+        "operation_layer_submit_not_called": (
+            _operation_layer_submit_called(dispatch) is False
+        ),
+        "pipeline_does_not_exchange_write": (
+            pipeline_report.get("safety_invariants", {}).get("exchange_write_called")
+            is False
+        ),
+    }
+    passed = all(checks.values()) and not _dangerous_effects(
+        pipeline_report,
+        dispatch,
+    )
+    return _scenario_packet(
+        name="scoped_pipeline_operation_layer_handoff",
+        expected=(
+            "real pipeline-shaped scoped local registration proof emits "
+            "Operation Layer evidence consumed by dispatcher without submit"
+        ),
+        artifacts={
+            "checks": checks,
+            "pipeline_report": pipeline_report,
+            "resume_dispatch": dispatch,
+            "pipeline_client_calls": pipeline_client.calls,
+        },
+        passed=passed,
+        blockers=[
+            *pipeline_report.get("blockers", []),
+            *dispatch.get("blockers", []),
+            *[
+                f"scoped_pipeline_handoff_check_failed:{name}"
+                for name, value in checks.items()
+                if not value
+            ],
         ],
     )
 
@@ -2510,6 +2875,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     scenarios = [
         _scenario_no_signal(output_dir),
         _scenario_mock_pass(output_dir),
+        _scenario_scoped_pipeline_operation_layer_handoff(output_dir),
         _scenario_non_executing_prepare_auto_bridge(output_dir),
         _scenario_mock_operation_layer_closed_loop(output_dir),
         _scenario_required_facts_missing(output_dir),
@@ -2536,7 +2902,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 13,
+        "required_scenarios_present": len(scenarios) == 14,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -2553,6 +2919,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 "mock_fresh_signal_dry_run_pass",
                 "fast_auto_chain_checks",
             ).values()
+        ),
+        "scoped_pipeline_operation_layer_handoff_checked": (
+            _scenario_artifact(
+                scenarios,
+                "scoped_pipeline_operation_layer_handoff",
+                "checks",
+            )
+            != {}
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "scoped_pipeline_operation_layer_handoff",
+                    "checks",
+                ).values()
+            )
         ),
         "non_executing_prepare_auto_bridge_checked": (
             _scenario_artifact(
@@ -2805,6 +3186,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "non_executing_prepare_auto_bridge_checked": checks[
             "non_executing_prepare_auto_bridge_checked"
+        ],
+        "scoped_pipeline_operation_layer_handoff_checked": checks[
+            "scoped_pipeline_operation_layer_handoff_checked"
         ],
     }
     return {
