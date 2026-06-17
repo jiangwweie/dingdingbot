@@ -14,16 +14,18 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT_SCRIPT = REPO_ROOT / "scripts" / "probe_tokyo_runtime_snapshot.py"
+DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    expected_heads = _resolve_expected_heads(args)
     snapshot = (
         _read_json(Path(args.snapshot_json_path))
         if args.snapshot_json_path
         else _run_snapshot(
-            expected_runtime_head=args.expected_runtime_head,
-            expected_frontend_head=args.expected_frontend_head,
+            expected_runtime_head=expected_heads["expected_runtime_head"],
+            expected_frontend_head=expected_heads["expected_frontend_head"],
         )
     )
     report = build_daily_check_report(snapshot=snapshot)
@@ -332,6 +334,29 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _resolve_expected_heads(args: argparse.Namespace) -> dict[str, str | None]:
+    baseline = _read_monitor_baseline(Path(args.baseline_json)) if args.baseline_json else {}
+    return {
+        "expected_runtime_head": args.expected_runtime_head
+        or _optional_text(baseline.get("expected_runtime_head")),
+        "expected_frontend_head": args.expected_frontend_head
+        or _optional_text(baseline.get("expected_frontend_head")),
+    }
+
+
+def _read_monitor_baseline(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    return _read_json(path)
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -345,6 +370,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--output-json")
     parser.add_argument("--expected-runtime-head")
     parser.add_argument("--expected-frontend-head")
+    parser.add_argument(
+        "--baseline-json",
+        default=str(DEFAULT_BASELINE_JSON),
+        help=(
+            "Read expected runtime/frontend heads from this JSON file. "
+            "Explicit --expected-* arguments override it."
+        ),
+    )
     return parser.parse_args(argv)
 
 

@@ -205,3 +205,54 @@ def test_daily_check_exposes_missing_dry_run_required_checks():
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == [
         "fresh_signal_fast_auto_chain_checked"
     ]
+
+
+def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
+    module = _load_module()
+    baseline = tmp_path / "runtime-monitor-baseline.json"
+    baseline.write_text(
+        """
+{
+  "expected_runtime_head": "runtime-head-from-file",
+  "expected_frontend_head": "frontend-head-from-file"
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    args = module._parse_args(["--baseline-json", str(baseline)])
+
+    assert module._resolve_expected_heads(args) == {
+        "expected_runtime_head": "runtime-head-from-file",
+        "expected_frontend_head": "frontend-head-from-file",
+    }
+
+
+def test_daily_check_explicit_expected_heads_override_baseline_file(tmp_path):
+    module = _load_module()
+    baseline = tmp_path / "runtime-monitor-baseline.json"
+    baseline.write_text(
+        """
+{
+  "expected_runtime_head": "runtime-head-from-file",
+  "expected_frontend_head": "frontend-head-from-file"
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    args = module._parse_args(
+        [
+            "--baseline-json",
+            str(baseline),
+            "--expected-runtime-head",
+            "runtime-head-from-cli",
+            "--expected-frontend-head",
+            "frontend-head-from-cli",
+        ]
+    )
+
+    assert module._resolve_expected_heads(args) == {
+        "expected_runtime_head": "runtime-head-from-cli",
+        "expected_frontend_head": "frontend-head-from-cli",
+    }
