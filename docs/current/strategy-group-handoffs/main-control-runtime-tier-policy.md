@@ -41,6 +41,24 @@ the selected live lane.
 
 ## Boundary
 
+`L4 tiny_real_order_eligible` is still not direct order authority. A real order
+requires every item in this runtime chain:
+
+| Requirement | Meaning |
+| --- | --- |
+| `selected_strategygroup_scope` | The active selected StrategyGroup scope matches the live lane |
+| `tiny_risk_boundary` | Symbol, side, notional, leverage, and max exposure stay inside the selected tiny-risk boundary |
+| `fresh_signal` | The signal is fresh at action time |
+| `required_facts_readiness` | RequiredFacts are present and fresh |
+| `candidate_authorization_evidence` | Candidate and authorization evidence are bound to the fresh signal |
+| `action_time_finalgate` | The official action-time FinalGate passes |
+| `official_operation_layer` | The official Operation Layer path is ready and used |
+| `exchange_native_protection` | Exchange-native protection is required after entry |
+| `post_submit_finalize` | Post-submit finalize records the submit outcome |
+| `reconciliation` | Account/order/position facts are reconciled |
+| `budget_settlement` | Runtime budget is settled or held according to position state |
+| `review_capture` | Review evidence is recorded |
+
 StrategyGroup tiers do not bypass:
 
 - selected StrategyGroup scope;

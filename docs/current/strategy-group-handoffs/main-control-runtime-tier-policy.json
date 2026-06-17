@@ -6,6 +6,20 @@
   "not_finalgate_input": true,
   "not_operation_layer_input": true,
   "not_order_sizing_default": true,
+  "l4_real_order_requirements": [
+    "selected_strategygroup_scope",
+    "tiny_risk_boundary",
+    "fresh_signal",
+    "required_facts_readiness",
+    "candidate_authorization_evidence",
+    "action_time_finalgate",
+    "official_operation_layer",
+    "exchange_native_protection",
+    "post_submit_finalize",
+    "reconciliation",
+    "budget_settlement",
+    "review_capture"
+  ],
   "tier_definitions": {
     "L0": {
       "name": "catalog_only",

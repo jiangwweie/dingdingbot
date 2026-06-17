@@ -54,6 +54,20 @@ EXPECTED_RUNTIME_TIERS = {
     "PMR-001": "L1",
 }
 EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS = {"BRF", "BTPC", "VCB", "LSR", "RBR"}
+EXPECTED_L4_REAL_ORDER_REQUIREMENTS = [
+    "selected_strategygroup_scope",
+    "tiny_risk_boundary",
+    "fresh_signal",
+    "required_facts_readiness",
+    "candidate_authorization_evidence",
+    "action_time_finalgate",
+    "official_operation_layer",
+    "exchange_native_protection",
+    "post_submit_finalize",
+    "reconciliation",
+    "budget_settlement",
+    "review_capture",
+]
 EXPECTED_HARD_SAFETY_BLOCKER_CASES = {
     "active_position",
     "open_order",
@@ -1358,6 +1372,12 @@ def _runtime_tier_policy_validation(
     known_new_groups = known_new_groups if isinstance(known_new_groups, dict) else {}
     safety = policy.get("safety_invariants")
     safety = safety if isinstance(safety, dict) else {}
+    l4_real_order_requirements = policy.get("l4_real_order_requirements")
+    l4_real_order_requirements = (
+        l4_real_order_requirements
+        if isinstance(l4_real_order_requirements, list)
+        else []
+    )
 
     rows: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -1444,6 +1464,9 @@ def _runtime_tier_policy_validation(
             is True
             and safety.get("l4_still_requires_official_runtime_chain") is True
         ),
+        "l4_real_order_requirements_complete": (
+            l4_real_order_requirements == EXPECTED_L4_REAL_ORDER_REQUIREMENTS
+        ),
     }
     blockers.extend(name for name, ok in checks.items() if ok is not True)
     return {
@@ -1454,6 +1477,10 @@ def _runtime_tier_policy_validation(
         "expected_new_strategy_group_defaults": sorted(
             EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS
         ),
+        "expected_l4_real_order_requirements": list(
+            EXPECTED_L4_REAL_ORDER_REQUIREMENTS
+        ),
+        "l4_real_order_requirements": list(l4_real_order_requirements),
         "l4_strategy_groups": l4_groups,
         "new_strategy_group_tiers": new_group_tiers,
         "rows": rows,

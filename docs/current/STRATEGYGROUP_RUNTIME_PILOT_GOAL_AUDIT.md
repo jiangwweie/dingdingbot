@@ -118,6 +118,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 L4 Runtime Requirement Guard
+
+The StrategyGroup tier policy now carries a machine-readable
+`l4_real_order_requirements` list. This makes `L4 tiny_real_order_eligible`
+auditable as eligibility for the official runtime chain, not direct execution
+authority. The dry-run audit fails if the L4 requirement list omits any
+required step or drifts from the current first-live-order boundary.
+
+| Item | Evidence |
+| --- | --- |
+| Policy source | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` includes `l4_real_order_requirements` |
+| Required chain | selected scope, tiny risk, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, official Operation Layer, exchange-native protection, finalize, reconciliation, budget settlement, review |
+| New dry-run check | `l4_real_order_requirements_complete=true` inside `runtime_tier_policy_validation.checks` |
+| Boundary | L4 remains limited to `MPG-001`; tier policy is not execution authority, FinalGate input, Operation Layer input, or sizing default |
+| Safety | Local dry-run/test work only; no Tokyo call, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Post-Submit Owner-Confirmation Regression Guard
 
 The dry-run post-submit exit outcome matrix now explicitly proves that none of

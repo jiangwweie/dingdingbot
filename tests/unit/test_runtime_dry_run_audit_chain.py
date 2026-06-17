@@ -647,7 +647,22 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "new_strategy_groups_default_to_l1": True,
         "new_strategy_groups_do_not_enter_l4": True,
         "tier_policy_does_not_bypass_runtime_chain": True,
+        "l4_real_order_requirements_complete": True,
     }
+    assert tier_policy["l4_real_order_requirements"] == [
+        "selected_strategygroup_scope",
+        "tiny_risk_boundary",
+        "fresh_signal",
+        "required_facts_readiness",
+        "candidate_authorization_evidence",
+        "action_time_finalgate",
+        "official_operation_layer",
+        "exchange_native_protection",
+        "post_submit_finalize",
+        "reconciliation",
+        "budget_settlement",
+        "review_capture",
+    ]
     assert tier_policy["safety_invariants"]["exchange_write_called"] is False
     assert tier_policy["safety_invariants"]["order_created"] is False
     assert tier_policy["safety_invariants"]["modifies_order_sizing_defaults"] is False
