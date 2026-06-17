@@ -6,12 +6,12 @@ import { chromium } from "playwright";
 const basePort = Number(process.env.PORT ?? "5177");
 const artifactDir = path.resolve("artifacts", "state-smoke");
 const scenarios = [
-  { name: "normal", expected: ["当前阶段", "等待市场机会", "只读低交互", "链路演练", "实盘边界", "8 项正常"] },
-  { name: "processing", expected: ["当前阶段", "系统处理中", "只读低交互", "处理中", "SOR 正在处理订单"] },
-  { name: "paused", expected: ["当前阶段", "等待市场机会", "只读低交互", "已暂停", "Owner 已暂停"] },
-  { name: "intervention", expected: ["当前阶段", "需要介入", "只读低交互", "事实不可用，暂不能使用"] },
+  { name: "normal", expected: ["当前阶段", "等待市场机会", "L1 只读低交互", "链路演练", "实盘边界", "8 项正常"] },
+  { name: "processing", expected: ["当前阶段", "系统处理中", "L1 只读低交互", "处理中", "SOR 正在处理订单"] },
+  { name: "paused", expected: ["当前阶段", "等待市场机会", "L1 只读低交互", "已暂停", "Owner 已暂停"] },
+  { name: "intervention", expected: ["当前阶段", "需要介入", "L1 只读低交互", "事实不可用，暂不能使用"] },
   { name: "stale", expected: ["当前阶段", "工程状态暂不可用", "链路演练", "系统处理", "数据不可用，暂不能使用"] },
-  { name: "empty", expected: ["当前阶段", "工程状态暂不可用", "只读低交互", "状态暂不可用", "MPG"] },
+  { name: "empty", expected: ["当前阶段", "工程状态暂不可用", "L1 只读低交互", "状态暂不可用", "MPG"] },
   { name: "error", expected: ["运行状态不可用", "资金路径保持关闭"] },
 ];
 

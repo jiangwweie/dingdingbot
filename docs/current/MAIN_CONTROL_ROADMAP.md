@@ -187,6 +187,7 @@ L1 read-only snapshot
 | --- | --- |
 | Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, nginx, static frontend release, source-readiness, goal-status, latest-summary, and dry-run audit facts through one read-only SSH interaction |
 | Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply`; frontend publish reports `L1_publish_plan_only` or `L3_frontend_static_publish` |
+| Homepage interaction label | Owner Console homepage shows `L1 只读低交互` so routine monitoring is visibly classified without opening raw packets or server logs |
 | Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
 | Frontend publish | `scripts/publish_owner_console_frontend.py` publishes `owner-runtime-console/dist` to `/var/www/brc-owner-console` and writes `frontend-release.json` with the current branch/head |
 | Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy, frontend publish, and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |

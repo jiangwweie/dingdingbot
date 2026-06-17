@@ -103,7 +103,7 @@ function OperationalAssuranceStrip({ projection }: { projection: OwnerProductPro
   const items = [
     {
       label: "监控方式",
-      value: "只读低交互",
+      value: "L1 只读低交互",
       detail: "一次快照归纳状态",
       tone: "safe" as const,
       icon: <ShieldCheck />,

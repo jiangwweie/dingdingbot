@@ -82,6 +82,7 @@ try {
   await expectVisible(page, "重要变化");
   await expectVisible(page, "等待机会");
   await expectVisible(page, "无需操作");
+  await expectVisible(page, "L1 只读低交互");
 
   await openNav(page, "策略组", "策略组已接入");
   await expectVisible(page, "运行设置");
