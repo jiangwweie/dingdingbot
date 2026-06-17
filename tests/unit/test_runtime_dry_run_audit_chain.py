@@ -116,10 +116,25 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     ]["fast_auto_chain_checks"]
     assert fast_auto_chain_checks == {
         "fresh_signal_to_authorization_ready": True,
+        "fresh_signal_within_freshness_window": True,
+        "stale_signal_rejected_by_freshness_window": True,
         "authorization_to_finalgate_dispatch_ready": True,
         "finalgate_to_operation_layer_evidence_ready": True,
         "operation_layer_real_submit_still_not_called": True,
     }
+    freshness_checks = scenarios["mock_fresh_signal_dry_run_pass"]["artifacts"][
+        "fresh_signal_freshness_checks"
+    ]
+    assert freshness_checks["status"] == "passed"
+    assert freshness_checks["freshness_window_seconds"] == 120
+    assert freshness_checks["checks"] == {
+        "freshness_window_seconds_matches_pilot": True,
+        "signal_timestamp_present": True,
+        "fresh_signal_within_window": True,
+        "fresh_signal_can_enter_fast_chain": True,
+        "stale_signal_rejected_by_window": True,
+    }
+    assert freshness_checks["safety_invariants"]["exchange_write_called"] is False
     assert relay_checks == {
         "required_evidence_ids_present": True,
         "no_missing_evidence_ids": True,
@@ -623,6 +638,8 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         assert row["forbidden_execution_fields_present"] == []
         assert row["checks"]["tiny_risk_boundary"] is True
         assert row["checks"]["uses_standard_signal_status"] is True
+        assert row["checks"]["uses_pilot_signal_freshness_window"] is True
+        assert row["sample_input_contract"]["freshness_window_seconds"] == 120
         assert row["shared_runtime_pipeline_stages"] == shared[
             "shared_runtime_pipeline_stages"
         ]

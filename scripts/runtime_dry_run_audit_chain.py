@@ -46,6 +46,7 @@ RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
 EXPECTED_STRATEGY_GROUPS = {"MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"}
+EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS = 120
 EXPECTED_RUNTIME_TIERS = {
     "MPG-001": "L4",
     "TEQ-001": "L2",
@@ -1241,6 +1242,10 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
                 signal_rule.get("status_name")
                 == "ready_for_shadow_candidate_prepare"
             ),
+            "uses_pilot_signal_freshness_window": (
+                signal_rule.get("freshness_window_seconds")
+                == EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS
+            ),
         }
         rows.append(
             {
@@ -1537,6 +1542,59 @@ def _scenario_no_signal(output_dir: Path) -> dict[str, Any]:
     )
 
 
+def _mock_fresh_signal_freshness_checks(
+    *,
+    fresh_path: Path,
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    packet = _read_json(fresh_path)
+    signal_path_value = packet.get("signal_input_json")
+    signal_path = Path(str(signal_path_value)) if signal_path_value else None
+    signal = _read_json(signal_path) if signal_path and signal_path.exists() else {}
+    now_ms = int(time.time() * 1000)
+    timestamp_ms = int(signal.get("timestamp_ms") or 0)
+    age_seconds = max(0, (now_ms - timestamp_ms) // 1000)
+    stale_age_seconds = EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS + 1
+    checks = {
+        "freshness_window_seconds_matches_pilot": (
+            EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS == 120
+        ),
+        "signal_timestamp_present": timestamp_ms > 0,
+        "fresh_signal_within_window": (
+            timestamp_ms > 0
+            and age_seconds <= EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS
+        ),
+        "fresh_signal_can_enter_fast_chain": (
+            readiness.get("status") == "ready_for_fresh_submit_authorization"
+        ),
+        "stale_signal_rejected_by_window": (
+            stale_age_seconds > EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS
+        ),
+    }
+    blockers = [
+        f"fresh_signal_freshness_check_failed:{name}"
+        for name, ok in checks.items()
+        if ok is not True
+    ]
+    return {
+        "scope": "runtime_dry_run_fresh_signal_freshness_checks",
+        "status": "passed" if not blockers else "failed",
+        "freshness_window_seconds": EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS,
+        "signal_timestamp_ms": timestamp_ms,
+        "fresh_signal_age_seconds": age_seconds,
+        "stale_signal_age_seconds": stale_age_seconds,
+        "checks": checks,
+        "blockers": blockers,
+        "safety_invariants": {
+            "calls_tokyo_api": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
 def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
     evidence_path = _readiness_evidence_path(output_dir)
     fresh_path = _fresh_loop_packet(
@@ -1577,10 +1635,20 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         operation_layer=operation_layer,
         closed_loop_shape=closed_loop_shape,
     )
+    freshness_checks = _mock_fresh_signal_freshness_checks(
+        fresh_path=fresh_path,
+        readiness=readiness,
+    )
     fast_auto_chain_checks = {
         "fresh_signal_to_authorization_ready": (
             readiness["status"] == "ready_for_fresh_submit_authorization"
         ),
+        "fresh_signal_within_freshness_window": freshness_checks["checks"][
+            "fresh_signal_within_window"
+        ],
+        "stale_signal_rejected_by_freshness_window": freshness_checks["checks"][
+            "stale_signal_rejected_by_window"
+        ],
         "authorization_to_finalgate_dispatch_ready": (
             finalgate_plan["status"] == "ready_for_action_time_final_gate"
             and finalgate_plan["dispatch_action"]
@@ -1621,6 +1689,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         == "run_official_action_time_final_gate_preflight"
         and operation_layer["status"] == "operation_layer_ready"
         and all(relay_checks.values())
+        and freshness_checks["status"] == "passed"
         and legacy_probe_passed
         and disabled_report["status"] == "disabled_smoke_passed"
         and closed_loop_shape["status"] == "shape_checked"
@@ -1648,6 +1717,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             "finalgate_dispatch_plan": finalgate_plan,
             "operation_layer_evidence_prep": operation_layer,
             "operation_layer_relay_checks": relay_checks,
+            "fresh_signal_freshness_checks": freshness_checks,
             "legacy_local_registration_probe_tolerance": legacy_probe,
             "disabled_submit_smoke": disabled_report,
             "closed_loop_shape": closed_loop_shape,
@@ -1662,6 +1732,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
                 for name, value in fast_auto_chain_checks.items()
                 if not value
             ],
+            *freshness_checks.get("blockers", []),
             *(legacy_probe.get("blockers", []) if not legacy_probe_passed else []),
             *[
                 f"relay_check_failed:{name}"

@@ -118,6 +118,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Fresh Signal TTL Guard
+
+The dry-run fast chain now makes the StrategyGroup signal freshness window
+machine-checkable. Current StrategyGroup handoffs use a `120` second freshness
+window, and the mock fresh-signal path records that the signal is inside this
+window while a synthetic stale signal is rejected by the same TTL boundary.
+
+| Item | Evidence |
+| --- | --- |
+| Pilot freshness window | `freshness_window_seconds=120` across current StrategyGroup handoffs |
+| New mock-pass artifact | `fresh_signal_freshness_checks` inside `mock_fresh_signal_dry_run_pass` |
+| Fast-chain checks | `fresh_signal_within_freshness_window=true` and `stale_signal_rejected_by_freshness_window=true` |
+| Shared handoff guard | `uses_pilot_signal_freshness_window=true` for each current StrategyGroup handoff |
+| Boundary | Freshness is a runtime readiness check, not a chat confirmation or execution authority |
+| Safety | Local dry-run/test work only; no Tokyo call, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 L4 Runtime Requirement Guard
 
 The StrategyGroup tier policy now carries a machine-readable
