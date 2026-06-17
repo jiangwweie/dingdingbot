@@ -315,7 +315,7 @@ The local script is:
 scripts/runtime_dry_run_audit_chain.py
 ```
 
-It currently runs twelve fixture-backed scenarios and treats expected blocked
+It currently runs thirteen fixture-backed scenarios and treats expected blocked
 states as successful audit coverage when they stop before dangerous actions.
 Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
 
@@ -369,7 +369,7 @@ the local console server/auth environment is not running.
 | Optional dry-run refresh | `--refresh-dry-run-audit-chain` writes `runtime-dry-run-audit-chain.json` |
 | Optional goal-status refresh | `--refresh-goal-status` writes `strategygroup-runtime-goal-status.json` |
 | Local auth missing | Records `operator_cookie_unavailable` and skips API packets instead of aborting the local audit refresh |
-| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=12`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
+| Current local command result | `dry_run_audit_refresh.status=passed`, `scenario_count=13`, `goal_status_refresh.runtime_dry_run_audit_passed=true`, `goal_status_refresh.status=missing_fact` |
 | Safety | The wrapper remains readmodel/local-packet only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Source-Readiness Fallback Checkpoint
@@ -486,7 +486,7 @@ Result:
 
 ```text
 runtime-dry-run-audit-chain.status=passed
-scenario_count=12
+scenario_count=13
 shared_runtime_pipeline_checked=true
 common_execution_chain_reuse_checked=true
 strategygroup_adapter_boundary_checked=true
@@ -529,7 +529,7 @@ git-based standing-authorization deploy path.
 | Current Tokyo goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal` |
 | Source readiness | `owner-console-source-readiness.status=ready` |
 | Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
-| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=12` |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=13` |
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Next checkpoint | `continue_watcher_observation` until a fresh selected StrategyGroup signal appears |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
@@ -548,7 +548,7 @@ Tokyo through the git-based standing-authorization deploy path.
 | Watcher timer | `brc-runtime-signal-watcher.timer` is enabled and active |
 | Current Tokyo goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `runtime_dry_run_audit_passed=true` |
 | Source readiness | `owner-console-source-readiness.status=ready`; Owner summary reports `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, and `保护正常` |
-| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=12`, fast-auto-chain/shared-pipeline/adapter-boundary checks are true |
+| Dry-run audit | `runtime-dry-run-audit-chain.status=passed`, `scenario_count=13`, fast-auto-chain/shared-pipeline/adapter-boundary checks are true |
 | Live facts | `strategy-group-live-facts-readiness.status=strategy_group_live_facts_ready_for_armed_observation` |
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
