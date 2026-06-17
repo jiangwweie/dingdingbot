@@ -78,6 +78,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
     assert report["interaction"]["level"] == "L1_daily_check_from_snapshot"
     assert report["interaction"]["remote_interaction_count"] == 1
+    assert report["interaction"]["max_remote_interactions"] == 1
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
     assert report["checks"]["blockers"] == []
@@ -188,6 +189,32 @@ def test_daily_check_classifies_safety_blocker_separately():
     assert report["notification"]["owner_intervention_required"] is True
 
 
+def test_daily_check_classifies_missing_budget_as_safety_blocker():
+    module = _load_module()
+    snapshot = _snapshot(
+        status="blocked",
+        checks={
+            "blockers": ["missing_budget_for_runtime_attempt"],
+            "product_gaps": [],
+            "backend_active": True,
+            "watcher_timer_active": True,
+            "source_readiness_ready": True,
+            "runtime_dry_run_audit_passed": True,
+            "runtime_dry_run_required_checks_present": True,
+            "runtime_dry_run_missing_required_checks": [],
+            "frontend_release_present": True,
+            "frontend_index_present": True,
+        },
+    )
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "blocked"
+    assert report["owner_summary"]["state"] == "安全边界阻断"
+    assert report["owner_summary"]["visibility"]["category"] == "safety_blocker"
+    assert report["owner_summary"]["owner_intervention_required"] is True
+
+
 def test_daily_check_exposes_missing_dry_run_required_checks():
     module = _load_module()
     snapshot = _snapshot(
@@ -252,6 +279,55 @@ def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
     assert report["notification"]["reason"] == "running"
 
 
+def test_daily_check_blocks_when_remote_interaction_budget_is_exceeded():
+    module = _load_module()
+    snapshot = _snapshot(
+        interaction={
+            "level": "L1_readonly_snapshot",
+            "remote_interaction_count": 2,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_exchange_write": False,
+        }
+    )
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "blocked"
+    assert report["interaction"]["remote_interaction_count"] == 2
+    assert report["interaction"]["max_remote_interactions"] == 1
+    assert report["owner_summary"]["state"] == "工程状态暂不可用"
+    assert (
+        "daily_check_remote_interaction_budget_exceeded:2>1"
+        in report["checks"]["blockers"]
+    )
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "blocker_present"
+
+
+def test_daily_check_allows_explicitly_larger_remote_interaction_budget():
+    module = _load_module()
+    snapshot = _snapshot(
+        interaction={
+            "level": "L1_readonly_snapshot",
+            "remote_interaction_count": 2,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_exchange_write": False,
+        }
+    )
+
+    report = module.build_daily_check_report(
+        snapshot=snapshot,
+        max_remote_interactions=2,
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["interaction"]["remote_interaction_count"] == 2
+    assert report["interaction"]["max_remote_interactions"] == 2
+    assert report["checks"]["blockers"] == []
+
+
 def test_daily_check_heartbeat_xml_uses_dont_notify_decision():
     module = _load_module()
     report = module.build_daily_check_report(snapshot=_snapshot())
@@ -303,6 +379,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 通知决策: DONT_NOTIFY" in text
     assert "- 交互等级: L1_daily_check_from_snapshot" in text
     assert "- 远端交互次数: 1" in text
+    assert "- 远端交互预算: 1" in text
     assert "- 服务器修改: 否" in text
     assert "- 接近真实订单: 否" in text
     assert "- 交易所写入: 否" in text

@@ -29,7 +29,10 @@ def main(argv: list[str] | None = None) -> int:
             expected_frontend_head=expected_heads["expected_frontend_head"],
         )
     )
-    report = build_daily_check_report(snapshot=snapshot)
+    report = build_daily_check_report(
+        snapshot=snapshot,
+        max_remote_interactions=args.max_remote_interactions,
+    )
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if report["status"] in {"ready", "waiting_for_market"} else 2
 
 
-def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
+def build_daily_check_report(
+    *,
+    snapshot: dict[str, Any],
+    max_remote_interactions: int = 1,
+) -> dict[str, Any]:
     checks = snapshot.get("checks") if isinstance(snapshot.get("checks"), dict) else {}
     owner_summary = (
         snapshot.get("owner_summary")
@@ -71,6 +78,14 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
 
     if snapshot.get("status") == "blocked":
         hard_failures.append("l1_snapshot_blocked")
+    remote_interaction_count = _int_or_zero(
+        interaction.get("remote_interaction_count")
+    )
+    if remote_interaction_count > max_remote_interactions:
+        hard_failures.append(
+            "daily_check_remote_interaction_budget_exceeded:"
+            f"{remote_interaction_count}>{max_remote_interactions}"
+        )
     if interaction.get("mutates_remote_files") is True:
         hard_failures.append("daily_check_snapshot_mutated_remote")
     if interaction.get("approaches_real_order") is True:
@@ -125,7 +140,8 @@ def build_daily_check_report(*, snapshot: dict[str, Any]) -> dict[str, Any]:
         "interaction": {
             "level": "L1_daily_check_from_snapshot",
             "uses_snapshot_level": interaction.get("level"),
-            "remote_interaction_count": interaction.get("remote_interaction_count", 0),
+            "remote_interaction_count": remote_interaction_count,
+            "max_remote_interactions": max_remote_interactions,
             "mutates_remote_files": False,
             "approaches_real_order": False,
             "calls_finalgate": False,
@@ -311,7 +327,10 @@ def _is_safety_blocker(blocker: str) -> bool:
         "active_position",
         "open_order",
         "protection",
-        "budget",
+        "missing_budget",
+        "budget_missing",
+        "budget_exhausted",
+        "insufficient_budget",
         "duplicate",
         "hard_safety",
         "finalgate",
@@ -430,6 +449,13 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -492,6 +518,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- 通知原因: {notification.get('reason') or 'unknown'}",
         f"- 交互等级: {interaction.get('level') or 'unknown'}",
         f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}",
+        f"- 远端交互预算: {interaction.get('max_remote_interactions', 1)}",
         "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files"))),
         "- 接近真实订单: " + _yes_no(bool(interaction.get("approaches_real_order"))),
         "- 交易所写入: " + _yes_no(bool(interaction.get("calls_exchange_write"))),
@@ -542,6 +569,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--output-json")
     parser.add_argument("--expected-runtime-head")
     parser.add_argument("--expected-frontend-head")
+    parser.add_argument(
+        "--max-remote-interactions",
+        type=int,
+        default=1,
+        help="Fail the daily check if the source snapshot used more remote calls.",
+    )
     parser.add_argument(
         "--baseline-json",
         default=str(DEFAULT_BASELINE_JSON),
