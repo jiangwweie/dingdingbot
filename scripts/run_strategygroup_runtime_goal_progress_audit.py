@@ -147,6 +147,7 @@ def build_goal_progress_report(
         product_gaps=product_gaps,
     )
     exit_hardening_boundary = _exit_hardening_boundary(checks=checks)
+    strategygroup_tier_boundary = _strategygroup_tier_boundary(checks=checks)
 
     return {
         "status": status,
@@ -178,6 +179,7 @@ def build_goal_progress_report(
         },
         "completion_boundary": completion_boundary,
         "exit_hardening_boundary": exit_hardening_boundary,
+        "strategygroup_tier_boundary": strategygroup_tier_boundary,
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
@@ -195,6 +197,75 @@ def build_goal_progress_report(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
             ),
         },
+    }
+
+
+def _strategygroup_tier_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
+    tier_policy_checked = _dry_run_required_check_present(
+        checks,
+        "runtime_tier_policy_checked",
+    )
+    only_mpg_l4_checked = _dry_run_required_check_present(
+        checks,
+        "only_mpg_tiny_real_order_eligible_checked",
+    )
+    new_defaults_checked = _dry_run_required_check_present(
+        checks,
+        "new_strategygroups_default_observe_only_checked",
+    )
+    adapter_boundary_checked = _dry_run_required_check_present(
+        checks,
+        "strategygroup_adapter_boundary_checked",
+    )
+    selected_dispatch_checked = _dry_run_required_check_present(
+        checks,
+        "selected_strategygroup_dispatch_guard_checked",
+    )
+    all_selected_finalgate_checked = _dry_run_required_check_present(
+        checks,
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    )
+    current_strategy_group_tiers = {
+        "MPG-001": "L4",
+        "TEQ-001": "L2",
+        "FBS-001": "L3",
+        "SOR-001": "L3",
+        "PMR-001": "L1",
+    }
+    new_strategy_group_default_tiers = {
+        "BRF": "L1",
+        "BTPC": "L1",
+        "VCB": "L1",
+        "LSR": "L1",
+        "RBR": "L1",
+    }
+    checks_passed = {
+        "runtime_tier_policy_checked": tier_policy_checked,
+        "only_mpg_tiny_real_order_eligible_checked": only_mpg_l4_checked,
+        "new_strategygroups_default_observe_only_checked": new_defaults_checked,
+        "strategygroup_adapter_boundary_checked": adapter_boundary_checked,
+        "selected_strategygroup_dispatch_guard_checked": selected_dispatch_checked,
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
+            all_selected_finalgate_checked
+        ),
+    }
+    return {
+        "status": "ready" if all(checks_passed.values()) else "needs_work",
+        "checks": checks_passed,
+        "current_strategy_group_tiers": current_strategy_group_tiers,
+        "l4_strategy_groups": ["MPG-001"] if only_mpg_l4_checked else [],
+        "first_live_lane_strategy_group": "MPG-001" if only_mpg_l4_checked else None,
+        "non_l4_strategy_groups": [
+            strategy_group_id
+            for strategy_group_id, tier in current_strategy_group_tiers.items()
+            if tier != "L4"
+        ],
+        "new_strategy_group_default_tiers": new_strategy_group_default_tiers,
+        "new_strategy_groups_default_non_l4": new_defaults_checked,
+        "tier_policy_is_execution_authority": False,
+        "tier_policy_bypasses_finalgate": False,
+        "tier_policy_bypasses_operation_layer": False,
+        "strategygroups_define_custom_execution_pipeline": False,
     }
 
 
@@ -518,6 +589,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     checks = report["checks"]
     completion = report["completion_boundary"]
     exit_hardening = report["exit_hardening_boundary"]
+    tier_boundary = report["strategygroup_tier_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -569,6 +641,22 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         ),
         "- Real order dependent remaining: "
         + _yes_no(bool(exit_hardening["real_order_dependent_remaining"])),
+        "",
+        "## StrategyGroup Tier Boundary",
+        "",
+        f"- Status: {tier_boundary['status']}",
+        "- First live lane StrategyGroup: "
+        + str(tier_boundary["first_live_lane_strategy_group"] or "none"),
+        "- L4 StrategyGroups: "
+        + _list_or_none([str(item) for item in tier_boundary["l4_strategy_groups"]]),
+        "- New StrategyGroups default non-L4: "
+        + _yes_no(bool(tier_boundary["new_strategy_groups_default_non_l4"])),
+        "- Tier policy is execution authority: "
+        + _yes_no(bool(tier_boundary["tier_policy_is_execution_authority"])),
+        "- Tier policy bypasses FinalGate: "
+        + _yes_no(bool(tier_boundary["tier_policy_bypasses_finalgate"])),
+        "- Tier policy bypasses Operation Layer: "
+        + _yes_no(bool(tier_boundary["tier_policy_bypasses_operation_layer"])),
         "",
         "## Tracks",
         "",

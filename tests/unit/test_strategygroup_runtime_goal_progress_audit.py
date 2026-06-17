@@ -138,6 +138,39 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
         "real_post_submit_close_reconcile_settle_proven": False,
         "status": "ready",
     }
+    assert report["strategygroup_tier_boundary"] == {
+        "checks": {
+            "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
+            "new_strategygroups_default_observe_only_checked": True,
+            "only_mpg_tiny_real_order_eligible_checked": True,
+            "runtime_tier_policy_checked": True,
+            "selected_strategygroup_dispatch_guard_checked": True,
+            "strategygroup_adapter_boundary_checked": True,
+        },
+        "current_strategy_group_tiers": {
+            "FBS-001": "L3",
+            "MPG-001": "L4",
+            "PMR-001": "L1",
+            "SOR-001": "L3",
+            "TEQ-001": "L2",
+        },
+        "first_live_lane_strategy_group": "MPG-001",
+        "l4_strategy_groups": ["MPG-001"],
+        "new_strategy_group_default_tiers": {
+            "BRF": "L1",
+            "BTPC": "L1",
+            "LSR": "L1",
+            "RBR": "L1",
+            "VCB": "L1",
+        },
+        "new_strategy_groups_default_non_l4": True,
+        "non_l4_strategy_groups": ["TEQ-001", "FBS-001", "SOR-001", "PMR-001"],
+        "status": "ready",
+        "strategygroups_define_custom_execution_pipeline": False,
+        "tier_policy_bypasses_finalgate": False,
+        "tier_policy_bypasses_operation_layer": False,
+        "tier_policy_is_execution_authority": False,
+    }
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
     assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
@@ -185,6 +218,13 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- Protection failure reduce-only recovery covered: 是" in text
     assert "- Real post-submit close/reconcile/settle proven: 否" in text
     assert "- Real order dependent remaining: 是" in text
+    assert "## StrategyGroup Tier Boundary" in text
+    assert "- First live lane StrategyGroup: MPG-001" in text
+    assert "- L4 StrategyGroups: MPG-001" in text
+    assert "- New StrategyGroups default non-L4: 是" in text
+    assert "- Tier policy is execution authority: 否" in text
+    assert "- Tier policy bypasses FinalGate: 否" in text
+    assert "- Tier policy bypasses Operation Layer: 否" in text
     assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
@@ -246,6 +286,32 @@ def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_miss
         is False
     )
     assert "missing_dry_run_check:post_submit_exit_outcome_matrix_checked" in report[
+        "checks"
+    ]["product_gaps"]
+
+
+def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_l4_guard_missing():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks["runtime_dry_run_required_checks_present"] = False
+    checks["runtime_dry_run_missing_required_checks"] = [
+        "only_mpg_tiny_real_order_eligible_checked"
+    ]
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["strategygroup_tier_boundary"]["status"] == "needs_work"
+    assert report["strategygroup_tier_boundary"]["l4_strategy_groups"] == []
+    assert report["strategygroup_tier_boundary"][
+        "first_live_lane_strategy_group"
+    ] is None
+    assert report["strategygroup_tier_boundary"]["checks"][
+        "only_mpg_tiny_real_order_eligible_checked"
+    ] is False
+    assert "missing_dry_run_check:only_mpg_tiny_real_order_eligible_checked" in report[
         "checks"
     ]["product_gaps"]
 
@@ -378,6 +444,13 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     )
     assert payload["completion_boundary"]["dry_run_readiness_proven"] is True
     assert payload["exit_hardening_boundary"]["status"] == "ready"
+    assert payload["strategygroup_tier_boundary"]["status"] == "ready"
+    assert payload["strategygroup_tier_boundary"]["l4_strategy_groups"] == [
+        "MPG-001"
+    ]
+    assert payload["strategygroup_tier_boundary"][
+        "new_strategy_groups_default_non_l4"
+    ] is True
     assert (
         payload["exit_hardening_boundary"][
             "real_post_submit_close_reconcile_settle_proven"
@@ -388,6 +461,7 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     assert "## StrategyGroup Runtime Goal Progress" in progress
     assert "## Completion Boundary" in progress
     assert "## Exit Hardening Boundary" in progress
+    assert "## StrategyGroup Tier Boundary" in progress
     assert "- P0.5 ready: 是" in progress
     assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []
