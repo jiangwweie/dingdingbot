@@ -9,6 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DAILY_CHECK_SCRIPT_PATH = REPO_ROOT / "scripts" / "run_strategygroup_runtime_daily_check.py"
+RUNTIME_MONITOR_BASELINE_PATH = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 
 
 def _load_module():
@@ -780,3 +781,30 @@ def test_daily_check_explicit_expected_heads_override_baseline_file(tmp_path):
         "expected_runtime_head": "runtime-head-from-cli",
         "expected_frontend_head": "frontend-head-from-cli",
     }
+
+
+def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
+    baseline = json.loads(RUNTIME_MONITOR_BASELINE_PATH.read_text(encoding="utf-8"))
+
+    assert baseline["default_check"].endswith(
+        "run_strategygroup_runtime_daily_check.py --auto-cache --json"
+    )
+    assert baseline["routine_status_check"].endswith(
+        "run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress"
+    )
+    assert baseline["strict_no_server_check"].endswith(
+        "run_strategygroup_runtime_daily_check.py "
+        "--from-cache --require-fresh-cache --owner-progress"
+    )
+    assert baseline["forced_refresh_check"].endswith(
+        "run_strategygroup_runtime_daily_check.py --json"
+    )
+    assert baseline["signal_detection_source"] == (
+        "tokyo_runtime_signal_watcher_feishu_webhook"
+    )
+    assert baseline["interaction_policy"]["default_level"] == "L0_local_cache_read"
+    assert baseline["interaction_policy"]["remote_interaction_count"] == 0
+    assert baseline["interaction_policy"]["refresh_level"] == (
+        "L1_daily_check_from_snapshot"
+    )
+    assert baseline["interaction_policy"]["refresh_remote_interaction_count"] == 1

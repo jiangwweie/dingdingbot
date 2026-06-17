@@ -1,10 +1,15 @@
 {
   "schema": "brc.runtime_monitor_baseline.v1",
-  "updated_at_utc": "2026-06-17T07:44:08Z",
-  "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads.",
+  "updated_at_utc": "2026-06-17T08:10:00Z",
+  "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and check modes.",
   "expected_runtime_head": "83bd0d6aa07c4784fd28e4182c214db4c344efe0",
   "expected_frontend_head": "83bd0d6aa07c4784fd28e4182c214db4c344efe0",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
+  "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",
+  "strict_no_server_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress",
+  "forced_refresh_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --json",
+  "signal_detection_source": "tokyo_runtime_signal_watcher_feishu_webhook",
+  "signal_detection_note": "Local auto-cache checks are for low-noise status review; fresh market opportunity detection remains server-side watcher and notification driven.",
   "interaction_policy": {
     "default_level": "L0_local_cache_read",
     "remote_interaction_count": 0,

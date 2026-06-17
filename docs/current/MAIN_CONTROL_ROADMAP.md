@@ -196,7 +196,7 @@ L1 read-only snapshot
 | Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy, frontend publish, and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
 | Tokyo verification | L1 snapshot after publish reports runtime head `e0c3fd63fcd1d588c1c815baeec3bab921288c1d` and frontend head `dbf468fd517c3c9e61dab791c0ff571679c77bf9`; watcher/backend/nginx active, source-readiness ready, dry-run audit passed, and no product gaps |
 | Daily check | `scripts/run_strategygroup_runtime_daily_check.py` consumes one L1 snapshot and returns `waiting_for_market`, `degraded`, or `blocked` with Owner-readable current action and safety invariants |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for expected runtime/frontend heads and the default `--auto-cache --json` check, so heartbeat automation can run a low-interaction daily check without hardcoded deployment SHAs |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for expected runtime/frontend heads, low-interaction check modes, and the server-side signal-detection source, so heartbeat automation can run without hardcoded deployment SHAs or accidental extra probes |
 | Interaction budget | Daily check defaults to `--max-remote-interactions 1`; if the source snapshot exceeds the budget, the report becomes a `NOTIFY` engineering blocker instead of silently becoming chatty |
 | Notification decision | Daily check now emits `notification.decision` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
 | Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --heartbeat` renders the same decision as Codex heartbeat XML, allowing the recurring monitor to forward quiet/notify decisions without parsing raw JSON in the prompt |
@@ -207,13 +207,14 @@ L1 read-only snapshot
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
 | Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into an Owner-readable engineering blocker instead of triggering an extra Tokyo probe |
 | Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become an Owner-readable engineering blocker instead of mixing new code with stale cached fields |
-| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` runs one L1 heartbeat check every 30 minutes and writes `output/runtime-monitor/latest-daily-check.json` plus `output/runtime-monitor/latest-owner-progress.md` for later local review |
+| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should use the baseline check modes: default status review is `--auto-cache`; explicit signal or regression investigation may force one L1 refresh and write `output/runtime-monitor/latest-daily-check.json` plus `output/runtime-monitor/latest-owner-progress.md` |
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
 | Engineering rehearsal check | L1 snapshot now requires the dry-run audit packet to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
 | UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
 | Owner visibility classification | The daily check emits `owner_summary.visibility.category`, and the homepage shows `当前阶段` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names |
 | Homepage Owner language guard | The homepage now maps internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the homepage |
 | Monitor Owner language guard | Healthy waiting notifications say `当前没有可用市场机会`; internal signal terms remain audit/detail concepts instead of the default Owner heartbeat text |
+| Signal detection source | Fresh opportunity detection remains Tokyo watcher / Feishu notification driven; local `--auto-cache` status checks are not the only market-opportunity detector |
 | Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
 
 ### Deploy Interaction Rule
@@ -252,6 +253,7 @@ safety state:
 | --- | --- | --- |
 | Routine status review | `--auto-cache --owner-progress` | `L0` if cache is fresh; otherwise one `L1` refresh |
 | Strict no-server status review | `--from-cache --require-fresh-cache --owner-progress` | `L0`, 0 remote interactions |
+| Explicit signal/regression investigation | `--json` or one direct L1 snapshot | `L1`, 1 remote interaction |
 | Fresh runtime status | One `probe_tokyo_runtime_snapshot.py` collection | `L1`, 1 remote interaction |
 | Runtime deploy apply | Batched git deploy phases with explicit remote count | `L3`, 4 direct SSH commands, 7 counted remote interactions |
 | Frontend homepage publish | One tar-over-SSH static publish | `L3`, 1 remote interaction |
