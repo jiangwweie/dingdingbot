@@ -168,3 +168,19 @@ Layer before any real exchange action.
 | Dry-run audit | `runtime-dry-run-audit-chain-current.json`: `status=passed`, `scenario_count=14`, `reduce_only_recovery_standing_authorization_checked=true`, `exchange_write_called=false`, `order_created=false` |
 | Monitor state | `run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress`: `DONT_NOTIFY`, `waiting_for_market`, `L0_local_cache_read`, `remote_interaction_count=0` |
 | Verification | `90 passed` for dry-run/monitor status tests; `109 passed, 1 skipped` for reduce-only recovery/domain/readmodel tests; `py_compile` passed for modified runtime files |
+
+### 2026-06-18 Standing Reduce-Only Recovery Deploy Checkpoint
+
+The standing reduce-only recovery checkpoint was pushed and deployed to Tokyo.
+Tokyo is now on the runtime head that understands
+`ready_for_standing_reduce_only_recovery`, carries the new dry-run required
+check, and keeps healthy market-waiting low-noise.
+
+| Item | Evidence |
+| --- | --- |
+| Local commit | `bb2b2bf0 feat(runtime): align reduce-only recovery authorization` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-bb2b2bf0-standing-reduce-only-recovery` |
+| Deploy apply | `output/tokyo-git-deploy-apply-bb2b2bf0.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-bb2b2bf0.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `bb2b2bf0b1dfcb72a5616dadfa8e32f0d884d950` |
+| Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
