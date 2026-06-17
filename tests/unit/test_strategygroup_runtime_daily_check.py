@@ -43,7 +43,7 @@ def _snapshot(**overrides):
             "source_readiness": "正常",
             "dry_run_audit": "审计演练正常",
             "chain_closure": "非市场链路已收口",
-            "frontend": "已发布",
+            "frontend": "外部项目",
         },
         "checks": {
             "blockers": [],
@@ -55,8 +55,7 @@ def _snapshot(**overrides):
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_execution_chain_closure_status_ready": True,
-            "frontend_release_present": True,
-            "frontend_index_present": True,
+            "frontend_scope": "externalized",
         },
         "facts": {
             "reports": {
@@ -114,36 +113,33 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     }
 
 
-def test_daily_check_marks_frontend_gap_as_degraded_not_safety_blocked():
+def test_daily_check_does_not_require_frontend_publish_for_quiet_waiting():
     module = _load_module()
     snapshot = _snapshot(
         checks={
             "blockers": [],
-            "product_gaps": ["frontend_release_missing"],
+            "product_gaps": [],
             "backend_active": True,
             "watcher_timer_active": True,
             "source_readiness_ready": True,
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_release_present": False,
-            "frontend_index_present": True,
+            "frontend_scope": "externalized",
         }
     )
 
     report = module.build_daily_check_report(snapshot=snapshot)
 
-    assert report["status"] == "degraded"
-    assert report["owner_summary"]["state"] == "工程状态暂不可用"
-    assert report["owner_summary"]["visibility"]["category"] == "engineering_blocker"
-    assert report["owner_summary"]["current_action"] == (
-        "修复 Owner Console 产品发布缺口"
-    )
+    assert report["status"] == "waiting_for_market"
+    assert report["owner_summary"]["state"] == "等待机会"
+    assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
+    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["checks"]["warnings"] == ["product_gap:frontend_release_missing"]
+    assert report["checks"]["warnings"] == []
     assert report["checks"]["blockers"] == []
-    assert report["notification"]["decision"] == "NOTIFY"
-    assert report["notification"]["reason"] == "product_gap_present"
+    assert report["notification"]["decision"] == "DONT_NOTIFY"
+    assert report["notification"]["reason"] == "healthy_waiting_for_market"
 
 
 def test_daily_check_blocks_on_snapshot_runtime_blocker():
@@ -159,8 +155,7 @@ def test_daily_check_blocks_on_snapshot_runtime_blocker():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_release_present": True,
-            "frontend_index_present": True,
+            "frontend_scope": "externalized",
         },
     )
 
@@ -190,8 +185,7 @@ def test_daily_check_classifies_safety_blocker_separately():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_release_present": True,
-            "frontend_index_present": True,
+            "frontend_scope": "externalized",
         },
     )
 
@@ -223,8 +217,7 @@ def test_daily_check_classifies_missing_budget_as_safety_blocker():
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_release_present": True,
-            "frontend_index_present": True,
+            "frontend_scope": "externalized",
         },
     )
 
@@ -253,8 +246,7 @@ def test_daily_check_exposes_missing_dry_run_required_checks():
             "runtime_dry_run_missing_required_checks": [
                 "fresh_signal_fast_auto_chain_checked"
             ],
-            "frontend_release_present": True,
-            "frontend_index_present": True,
+            "frontend_scope": "externalized",
         },
     )
 
@@ -374,8 +366,7 @@ def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
                 "runtime_dry_run_audit_passed": True,
                 "runtime_dry_run_required_checks_present": True,
                 "runtime_dry_run_missing_required_checks": [],
-                "frontend_release_present": True,
-                "frontend_index_present": True,
+            "frontend_scope": "externalized",
             },
         )
     )
@@ -414,7 +405,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 交易所写入: 否" in text
     assert "- Runtime: 正常" in text
     assert "- 演练场景: 14" in text
-    assert "- Frontend: 已发布" in text
+    assert "- Frontend: 外部项目" in text
 
 
 def test_daily_check_owner_progress_text_surfaces_safety_blocker():
@@ -431,8 +422,7 @@ def test_daily_check_owner_progress_text_surfaces_safety_blocker():
                 "runtime_dry_run_audit_passed": True,
                 "runtime_dry_run_required_checks_present": True,
                 "runtime_dry_run_missing_required_checks": [],
-                "frontend_release_present": True,
-                "frontend_index_present": True,
+            "frontend_scope": "externalized",
             },
         )
     )
@@ -749,8 +739,7 @@ def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
     baseline.write_text(
         """
 {
-  "expected_runtime_head": "runtime-head-from-file",
-  "expected_frontend_head": "frontend-head-from-file"
+  "expected_runtime_head": "runtime-head-from-file"
 }
 """.strip(),
         encoding="utf-8",
@@ -760,7 +749,7 @@ def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
 
     assert module._resolve_expected_heads(args) == {
         "expected_runtime_head": "runtime-head-from-file",
-        "expected_frontend_head": "frontend-head-from-file",
+        "expected_frontend_head": None,
     }
 
 
@@ -840,9 +829,6 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "--output-json output/runtime-monitor/latest-quiet-monitor-audit.json "
         "--output-owner-progress output/runtime-monitor/latest-quiet-monitor-audit.md"
     )
-    assert baseline["homepage_visual_qa_check"] == (
-        "cd owner-runtime-console && npm run visual:qa:home"
-    )
     assert baseline["signal_detection_source"] == (
         "tokyo_runtime_signal_watcher_feishu_webhook"
     )
@@ -855,6 +841,5 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
     assert baseline["interaction_policy"][
         "deploy_postdeploy_daily_check_remote_interaction_count"
     ] == 1
-    assert baseline["interaction_policy"]["homepage_visual_qa_remote_interaction_count"] == 0
     assert baseline["interaction_policy"]["goal_progress_audit_remote_interaction_count"] == 0
     assert baseline["interaction_policy"]["quiet_monitor_audit_remote_interaction_count"] == 0

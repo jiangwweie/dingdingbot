@@ -24,7 +24,6 @@ DEFAULT_SERVICES = (
     "brc-runtime-signal-watcher.timer",
     "brc-runtime-signal-watcher.service",
     "brc-owner-console-backend.service",
-    "nginx.service",
 )
 DEFAULT_REPORT_FILES = (
     "watcher-tick.json",
@@ -180,7 +179,6 @@ def evaluate_runtime_snapshot(
 
     services = _as_dict(remote_facts.get("systemd"))
     reports = _as_dict(remote_facts.get("reports"))
-    frontend = _as_dict(remote_facts.get("frontend"))
     release = _as_dict(remote_facts.get("release"))
 
     blockers: list[str] = []
@@ -202,13 +200,10 @@ def evaluate_runtime_snapshot(
 
     timer = _as_dict(services.get("brc-runtime-signal-watcher.timer"))
     backend = _as_dict(services.get("brc-owner-console-backend.service"))
-    nginx = _as_dict(services.get("nginx.service"))
     if timer.get("active") != "active":
         blockers.append("watcher_timer_inactive")
     if backend.get("active") != "active":
         blockers.append("owner_console_backend_inactive")
-    if nginx.get("active") != "active":
-        blockers.append("nginx_inactive")
 
     source_readiness = _report_payload(reports, "owner-console-source-readiness.json")
     goal_status = _report_payload(reports, "strategygroup-runtime-goal-status.json")
@@ -236,22 +231,6 @@ def evaluate_runtime_snapshot(
     if goal_status.get("watcher_liveness_healthy") is False:
         blockers.append("watcher_liveness_not_healthy")
 
-    frontend_release = _as_dict(frontend.get("release"))
-    frontend_head = _first_text(
-        frontend_release.get("head"),
-        frontend_release.get("commit"),
-        frontend_release.get("runtime_head"),
-    )
-    if not frontend.get("index_exists"):
-        product_gaps.append("frontend_static_index_missing")
-    if not frontend_release:
-        product_gaps.append("frontend_release_missing")
-    elif expected_frontend_head and frontend_head != expected_frontend_head:
-        product_gaps.append("frontend_head_mismatch")
-
-    if frontend.get("nginx_root") and frontend.get("nginx_root") != frontend_root:
-        warnings.append("nginx_root_differs_from_expected_frontend_root")
-
     waiting_for_market = (
         goal_status.get("fresh_signal_present") is False
         or latest_summary.get("status") in {"waiting_for_signal", "waiting_for_market"}
@@ -273,7 +252,6 @@ def evaluate_runtime_snapshot(
         ),
         "watcher_timer_active": timer.get("active") == "active",
         "backend_active": backend.get("active") == "active",
-        "nginx_active": nginx.get("active") == "active",
         "source_readiness_ready": source_readiness.get("status") in {"ready", "ok"},
         "runtime_dry_run_audit_passed": (
             dry_run.get("status") == "passed" and not missing_dry_run_checks
@@ -287,8 +265,7 @@ def evaluate_runtime_snapshot(
             _as_dict(chain_closure.get("real_execution")).get("real_order_allowed")
             is True
         ),
-        "frontend_release_present": bool(frontend_release),
-        "frontend_index_present": bool(frontend.get("index_exists")),
+        "frontend_scope": "externalized",
     }
     status = "ready"
     if checks["blockers"]:
@@ -314,17 +291,12 @@ def evaluate_runtime_snapshot(
             "host": host,
             "deploy_root": deploy_root,
             "report_dir": report_dir,
-            "frontend_root": frontend_root,
             "expected_runtime_head": expected_runtime_head,
             "expected_frontend_head": expected_frontend_head,
         },
         "owner_summary": {
             "state": owner_stage,
-            "current_action": (
-                "发布或核验 Owner Console 首页静态版本"
-                if checks["product_gaps"]
-                else "继续等待市场机会"
-            ),
+            "current_action": "继续等待市场机会",
             "owner_intervention_required": False if not checks["blockers"] else True,
             "runtime": "正常" if not checks["blockers"] else "暂不可用",
             "watcher": "运行中" if checks["watcher_timer_active"] else "暂不可用",
@@ -341,7 +313,7 @@ def evaluate_runtime_snapshot(
                 if checks["runtime_execution_chain_closure_status_ready"]
                 else "非市场链路待修复"
             ),
-            "frontend": "需发布首页" if checks["product_gaps"] else "已发布",
+            "frontend": "外部项目",
         },
         "facts": {
             "release": {
@@ -350,7 +322,6 @@ def evaluate_runtime_snapshot(
                 "manifest": release.get("manifest"),
             },
             "systemd": services,
-            "frontend": frontend,
             "reports": {
                 "latest_summary": _summary_from_packet(latest_summary),
                 "goal_status": _summary_from_packet(goal_status),
@@ -447,18 +418,6 @@ for service in services:
         "enabled": run(["systemctl", "is-enabled", service])["stdout"],
     }
 
-nginx_root = None
-nginx_dump = run(["sudo", "-n", "nginx", "-T"])
-if nginx_dump["returncode"] == 0:
-    for line in nginx_dump["stdout"].splitlines():
-        stripped = line.strip()
-        if stripped.startswith("root ") and "brc-owner-console" in stripped:
-            nginx_root = stripped.split()[1].rstrip(";")
-            break
-
-frontend_index = os.path.join(frontend_root, "index.html")
-frontend_release = read_json(os.path.join(frontend_root, "frontend-release.json"))
-
 reports = {}
 for filename in report_files:
     reports[filename] = read_json(os.path.join(report_dir, filename))
@@ -477,13 +436,7 @@ payload = {
         ),
     },
     "systemd": systemd,
-    "frontend": {
-        "root": frontend_root,
-        "nginx_root": nginx_root,
-        "index_exists": os.path.exists(frontend_index),
-        "release": frontend_release.get("payload") if frontend_release.get("exists") else None,
-        "release_exists": frontend_release.get("exists"),
-    },
+    "frontend": {"scope": "externalized"},
     "reports": reports,
     "collector_safety": {
         "remote_files_modified": False,

@@ -30,7 +30,6 @@ def _baseline(**overrides):
         "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",
         "strict_no_server_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress",
         "deploy_session_owner_progress_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress",
-        "homepage_visual_qa_check": "cd owner-runtime-console && npm run visual:qa:home",
     }
     base.update(overrides)
     return base
@@ -71,7 +70,6 @@ def _daily_check(**overrides):
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_dry_run_scenario_count": 14,
-            "frontend_published": True,
         },
         "notification": {
             "decision": "DONT_NOTIFY",
@@ -114,7 +112,6 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
     assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
-    assert tracks["p05_owner_console_homepage"]["status"] == "ready"
     assert tracks["p05_engineering_rehearsal_loop"]["status"] == "ready"
     assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
     assert tracks["p05_safety_invariants"]["status"] == "ready"
@@ -143,7 +140,7 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
         daily_check=_daily_check(
             checks={
                 **_daily_check()["checks"],
-                "frontend_published": False,
+                "runtime_dry_run_audit_passed": False,
             }
         ),
         baseline=_baseline(),
@@ -152,9 +149,9 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
     assert report["status"] == "degraded"
     assert report["owner_summary"]["p05"] == "needs_work"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert "homepage_frontend_not_published" in report["checks"]["product_gaps"]
+    assert "runtime_dry_run_audit_not_passed" in report["checks"]["product_gaps"]
     tracks = {track["id"]: track for track in report["tracks"]}
-    assert tracks["p05_owner_console_homepage"]["status"] == "blocked"
+    assert tracks["p05_engineering_rehearsal_loop"]["status"] == "blocked"
 
 
 def test_goal_progress_rejects_remote_interaction_in_local_audit():

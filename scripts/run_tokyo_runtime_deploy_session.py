@@ -240,7 +240,7 @@ def _owner_state_for_status(*, status: str, highest_level: str) -> str:
     if status == "blocked":
         return "暂不可用"
     if status == "degraded":
-        return "需要修复产品发布缺口"
+        return "需要修复产品状态缺口"
     if status == "waiting_for_market":
         return "等待机会"
     if highest_level.startswith("L3"):
@@ -257,7 +257,7 @@ def _current_action_for_status(
     if blockers:
         return "处理部署或运行阻断"
     if product_gaps:
-        return "修复 Owner Console 首页发布缺口"
+        return "修复产品状态缺口"
     if status == "waiting_for_market":
         return "继续等待市场机会"
     return "继续低噪音监控"

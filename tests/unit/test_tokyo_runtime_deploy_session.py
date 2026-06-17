@@ -73,7 +73,7 @@ def _frontend_report(**overrides):
         },
         "owner_summary": {
             "state": "首页已发布",
-            "current_action": "运行 L1 快照核验 frontend-release.json",
+            "current_action": "运行 L1 快照核验",
         },
         "checks": {
             "blockers": [],
@@ -168,9 +168,7 @@ def test_deploy_session_surfaces_product_gap_without_safety_blocking():
 
     assert report["status"] == "degraded"
     assert report["owner_summary"]["owner_intervention_required"] is False
-    assert report["owner_summary"]["current_action"] == (
-        "修复 Owner Console 首页发布缺口"
-    )
+    assert report["owner_summary"]["current_action"] == "修复产品状态缺口"
     assert report["checks"]["product_gaps"] == ["frontend_release_missing"]
     assert report["checks"]["blockers"] == []
 

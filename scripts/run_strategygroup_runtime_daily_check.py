@@ -228,10 +228,7 @@ def build_daily_check_report(
         "runtime_execution_chain_closure_status_ready": (
             checks.get("runtime_execution_chain_closure_status_ready") is True
         ),
-        "frontend_published": (
-            checks.get("frontend_release_present") is True
-            and checks.get("frontend_index_present") is True
-        ),
+        "frontend_scope": checks.get("frontend_scope") or "externalized",
     }
 
     return {
@@ -270,7 +267,7 @@ def build_daily_check_report(
                 "dry_run_audit_scenarios": dry_run_scenario_count,
                 "chain_closure": owner_summary.get("chain_closure")
                 or chain_closure_summary.get("status"),
-                "frontend": owner_summary.get("frontend"),
+                "frontend": owner_summary.get("frontend") or "外部项目",
             },
         },
         "checks": checks_report,
@@ -312,7 +309,6 @@ def _notification_decision(
         and checks.get("runtime_dry_run_audit_passed") is True
         and checks.get("runtime_dry_run_required_checks_present") is True
         and checks.get("runtime_execution_chain_closure_status_ready") is True
-        and checks.get("frontend_published") is True
     )
     if quiet_waiting:
         return {
@@ -349,8 +345,6 @@ def _notification_reason(
         return "dry_run_required_checks_missing"
     if checks.get("runtime_execution_chain_closure_status_ready") is not True:
         return "runtime_execution_chain_closure_status_not_ready"
-    if checks.get("frontend_published") is not True:
-        return "frontend_not_published"
     category = str(visibility.get("category") or "")
     if category and category != "waiting_for_market":
         return category
@@ -567,9 +561,9 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "progress": {
                 "runtime": "unknown",
                 "watcher": "unknown",
-                "source_readiness": "unknown",
-                "dry_run_audit": "unknown",
-                "frontend": "unknown",
+            "source_readiness": "unknown",
+            "dry_run_audit": "unknown",
+            "frontend": "外部项目",
             },
         },
         "checks": {
@@ -583,7 +577,7 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "runtime_dry_run_audit_passed": False,
             "runtime_dry_run_required_checks_present": False,
             "runtime_dry_run_missing_required_checks": [],
-            "frontend_published": False,
+            "frontend_scope": "externalized",
         },
         "notification": {
             "decision": "NOTIFY",
@@ -901,7 +895,7 @@ def _owner_progress_text(
         f"- Dry-run audit: {progress.get('dry_run_audit') or 'unknown'}",
         f"- 演练场景: {progress.get('dry_run_audit_scenarios') or 'unknown'}",
         f"- Execution chain: {progress.get('chain_closure') or 'unknown'}",
-        f"- Frontend: {progress.get('frontend') or 'unknown'}",
+        f"- Frontend: {progress.get('frontend') or '外部项目'}",
     ]
     if blockers:
         lines.extend(["", "## Blockers", ""])
@@ -1031,7 +1025,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--baseline-json",
         default=str(DEFAULT_BASELINE_JSON),
         help=(
-            "Read expected runtime/frontend heads from this JSON file. "
+            "Read expected runtime heads from this JSON file. "
             "Explicit --expected-* arguments override it."
         ),
     )

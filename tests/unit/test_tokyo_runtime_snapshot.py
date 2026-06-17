@@ -165,14 +165,15 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
     assert report["interaction"]["calls_exchange_write"] is False
-    assert report["status"] == "product_gap"
+    assert report["status"] == "ready"
     assert report["checks"]["blockers"] == []
-    assert report["checks"]["product_gaps"] == ["frontend_release_missing"]
+    assert report["checks"]["product_gaps"] == []
+    assert report["checks"]["frontend_scope"] == "externalized"
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
 
 
-def test_tokyo_runtime_snapshot_accepts_current_frontend_release():
+def test_tokyo_runtime_snapshot_ignores_externalized_frontend_release():
     module = _load_module()
 
     def runner(command: tuple[str, ...]):
@@ -196,8 +197,8 @@ def test_tokyo_runtime_snapshot_accepts_current_frontend_release():
 
     assert report["status"] == "ready"
     assert report["checks"]["product_gaps"] == []
-    assert report["checks"]["frontend_release_present"] is True
-    assert report["owner_summary"]["frontend"] == "已发布"
+    assert report["checks"]["frontend_scope"] == "externalized"
+    assert report["owner_summary"]["frontend"] == "外部项目"
     assert report["safety_invariants"]["remote_files_modified"] is False
     assert report["safety_invariants"]["order_created"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False

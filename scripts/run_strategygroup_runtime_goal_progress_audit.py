@@ -102,7 +102,6 @@ def build_goal_progress_report(
             collected_interaction=collected_interaction,
             checks=checks,
         ),
-        _homepage_track(baseline=baseline, checks=checks),
         _engineering_rehearsal_track(checks=checks, owner=owner),
         _owner_visibility_track(
             owner=owner,
@@ -251,24 +250,6 @@ def _runtime_interaction_track(
             "baseline_low_noise_commands=present" if not missing else "baseline_low_noise_commands=missing",
         ],
         next_action="使用 L0 本地缓存进度，必要时才刷新一次 L1 快照",
-    )
-
-
-def _homepage_track(*, baseline: dict[str, Any], checks: dict[str, Any]) -> dict[str, Any]:
-    blockers: list[str] = []
-    if checks.get("frontend_published") is not True:
-        blockers.append("homepage_frontend_not_published")
-    if not baseline.get("homepage_visual_qa_check"):
-        blockers.append("homepage_visual_qa_check_missing")
-    return _track(
-        track_id="p05_owner_console_homepage",
-        label="P0.5 Owner Console Homepage Publish + Stabilization",
-        blockers=blockers,
-        evidence=[
-            f"frontend_published={checks.get('frontend_published')}",
-            f"homepage_visual_qa_check={bool(baseline.get('homepage_visual_qa_check'))}",
-        ],
-        next_action="只维护首页验收，不推进其它 tab",
     )
 
 

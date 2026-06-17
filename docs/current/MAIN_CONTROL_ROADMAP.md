@@ -26,8 +26,8 @@ Complete the first selected StrategyGroup + tiny risk bounded real-order loop
 when a fresh signal exists and all official runtime gates pass.
 ```
 
-Dry-run audit, source readiness, and UI work are support tracks for that target.
-They are not substitutes for the first bounded live-order closure.
+Dry-run audit and source readiness are support tracks for that target. Frontend
+UI work has been externalized and is no longer part of the main runtime goal.
 
 This file is not a research backlog, frontend design spec, or historical packet
 index.
@@ -44,7 +44,7 @@ index.
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
 | P0.5 Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active | Use one L1 runtime snapshot for routine checks and L3 summaries for deploy/static publish actions |
-| P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | active | Stabilize real-backend UI semantics, source-health display, and responsive visual QA from mainline |
+| P1 Owner Console Mainline Stabilization | External frontend can consume one stable source-readiness/readmodel contract | Main runtime window | paused in mainline | Keep readmodel/API stable; do not maintain static frontend or UI QA in this worktree |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
 | P2 LLM Assistance | LLM supports audit/readiness/notification without changing execution authority | Main runtime window | pending | Start with read-only audit summaries and Feishu notification text only |
@@ -186,17 +186,16 @@ L1 read-only snapshot
 | Item | Result |
 | --- | --- |
 | Interaction taxonomy | `scripts/runtime_interaction_levels.py` defines L0-L5 as a machine-readable policy for local read, read-only remote checks, dry-run rehearsal, bounded server mutation, action-time pre-execution checks, and official tiny real-order actions |
-| Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, nginx, static frontend release, source-readiness, goal-status, latest-summary, and dry-run audit facts through one read-only SSH interaction |
-| Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply`; frontend publish reports `L1_publish_plan_only` or `L3_frontend_static_publish` |
-| Homepage interaction label | Owner Console homepage reads `runtime_interaction` from the source-readiness projection and shows `L1 只读低交互`, so routine monitoring is visibly classified without hardcoding the UI to one interaction level |
+| Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, source-readiness, goal-status, latest-summary, dry-run audit, and execution-chain closure facts through one read-only SSH interaction |
+| Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply` |
 | Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
 | Batched deploy apply | `scripts/plan_tokyo_runtime_governance_git_deploy.py` batches contiguous Tokyo operations so the git deploy path uses 4 direct SSH commands instead of many small server command fragments |
 | Deploy interaction count | `scripts/execute_tokyo_runtime_governance_git_deploy.py` writes `interaction.remote_interaction_count`; current git deploy apply budget is 7 counted remote interactions including readonly/postdeploy verifier probes |
-| Frontend publish | `scripts/publish_owner_console_frontend.py` publishes `owner-runtime-console/dist` to `/var/www/brc-owner-console` and writes `frontend-release.json` with the current branch/head |
-| Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy, frontend publish, and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
-| Tokyo verification | L1 snapshot after publish reports runtime head `e0c3fd63fcd1d588c1c815baeec3bab921288c1d` and frontend head `dbf468fd517c3c9e61dab791c0ff571679c77bf9`; watcher/backend/nginx active, source-readiness ready, dry-run audit passed, and no product gaps |
+| Frontend scope | Static frontend publishing has been removed from the main runtime worktree; future UI work should live in a separate frontend project and consume the stable readmodel/API |
+| Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
+| Tokyo verification | L1 snapshot reports the runtime head, watcher/backend active state, source-readiness, dry-run audit, execution-chain closure status, and safety invariants; it no longer reads nginx or static frontend release files |
 | Daily check | `scripts/run_strategygroup_runtime_daily_check.py` consumes one L1 snapshot and returns `waiting_for_market`, `degraded`, or `blocked` with Owner-readable current action and safety invariants |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for expected runtime/frontend heads, low-interaction check modes, and the server-side signal-detection source, so heartbeat automation can run without hardcoded deployment SHAs or accidental extra probes |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` is the machine-readable SSOT for expected runtime head, low-interaction check modes, and the server-side signal-detection source, so heartbeat automation can run without hardcoded deployment SHAs or accidental extra probes |
 | Interaction budget | Daily check defaults to `--max-remote-interactions 1`; if the source snapshot exceeds the budget, the report becomes a `NOTIFY` engineering blocker instead of silently becoming chatty |
 | Notification decision | Daily check now emits `notification.decision` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
 | Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat` renders the same decision as Codex heartbeat XML; fresh cache stays `L0` / 0 remote interactions, while stale cache may refresh one `L1` snapshot |
@@ -289,11 +288,10 @@ Console homepage interaction projection.
 | Local head | `83bd0d6aa07c4784fd28e4182c214db4c344efe0` |
 | Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-83bd0d6a-batched-deploy-interactions` |
 | Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
-| Frontend homepage publish | `status=applied`, `interaction.level=L3_frontend_static_publish`, `remote_interaction_count=1`, `blockers=[]` |
-| Postdeploy daily check | `status=waiting_for_market`, `runtime_ready=true`, `watcher_ready=true`, `source_readiness_ready=true`, `runtime_dry_run_audit_passed=true`, `frontend_published=true` |
-| Deploy session summary | `status=waiting_for_market`, `remote_interaction_count=9`, `all_steps_safe_for_deploy_session_summary=true` |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime and frontend head `83bd0d6aa07c4784fd28e4182c214db4c344efe0` |
-| Safety | Deploy, publish, and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+| Postdeploy daily check | `status=waiting_for_market`, `runtime_ready=true`, `watcher_ready=true`, `source_readiness_ready=true`, `runtime_dry_run_audit_passed=true` |
+| Deploy session summary | `status=waiting_for_market`, `all_steps_safe_for_deploy_session_summary=true` |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects runtime head only |
+| Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
 ### 2026-06-17 Homepage Visibility Deploy Checkpoint
 
@@ -794,35 +792,21 @@ StrategyGroup signal.
 | Real order boundary | `ready_for_real_order_action=false` because there is no fresh signal |
 | Safety | Deploy, probe, postdeploy, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
-### 2026-06-17 Owner Console UI Validation Checkpoint
+### 2026-06-17 Frontend Externalization Checkpoint
 
-While the selected StrategyGroup runtime is waiting for a fresh signal, the
-mainline Owner Console passed the current UI hard gate and real-backend smoke.
-
-| Item | Result |
-| --- | --- |
-| Build | `owner-runtime-console: npm run build` passed |
-| Mock smoke | `npm run smoke` passed for the normal scenario |
-| State smoke | `npm run smoke:states` passed for 7 scenarios |
-| Visual QA | `npm run visual:qa` passed for normal/stale, dark/light, 6 pages, and 5 viewport sizes |
-| Real backend smoke | `npm run smoke:real` passed against `GET /api/trading-console/owner-console-source-readiness` |
-| Real backend deploy-channel variants | `npm run smoke:real` now covers both `部署通道未检查` and `部署通道正常` so the UI matches Tokyo `postdeploy_accepted` source readiness |
-| Real backend product state | `status=ready`; Owner summary reports `等待机会`, `资金正常`, `暂无订单`, `暂无持仓`, `保护正常`, `审计演练正常` |
-| UI hard gate | No blank page, framework overlay, forbidden primary engineering terms, accidental horizontal overflow, clipped primary text, or abnormal empty-order/empty-position presentation was reported by the QA scripts |
-| Safety | UI validation did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
-
-### 2026-06-17 Owner Console Deploy-Channel Smoke Checkpoint
-
-The Owner Console real-backend smoke now covers both the missing deploy-channel
-packet state and the Tokyo `postdeploy_accepted` state. The main branch head was
-deployed again so Tokyo release identity matches the current pushed branch head.
+The static Owner Console frontend was removed from the main runtime goal. The
+main worktree keeps the source-readiness/readmodel contract for future external
+frontends, but frontend build, visual QA, static publishing, and homepage
+release checks no longer affect runtime monitoring or first real-order closure.
 
 | Item | Result |
 | --- | --- |
-| Deployed code head | `49850e04` |
-| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-49850e04-console-smoke-deploy-channel` |
-| Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
-| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `49850e04988e414e970dd74d42141a83fdaf9c85` |
+| Static frontend publish | Removed from mainline runtime monitoring |
+| UI governance docs/assets | Removed from `docs/current` |
+| Runtime snapshot | No longer checks nginx or `/var/www/brc-owner-console` release files |
+| Daily check | Healthy waiting-for-market can stay quiet without frontend release proof |
+| Goal progress audit | No longer contains a homepage publish track |
+| Runtime/API contract | Source-readiness and readmodel/API surfaces remain available for a future external frontend |
 | Readonly probe | `status=ready_for_controlled_deploy_preflight`, `blockers=[]`, health is `ok`, `live_ready=false` |
 | Watcher state | `watcher-tick.status=watching_no_signal`; `latest-summary.status=waiting_for_signal` |
 | Goal status | `strategygroup-runtime-goal-status.status=waiting_for_signal`, `fresh_signal_present=false`, `source_readiness_ready=true`, `live_facts_ready=true` |
@@ -1162,8 +1146,8 @@ official Operation Layer.
 
 ## Boundaries
 
-- Keep UI experiments outside mainline until reviewed, but the Owner Console
-  source-readiness contract is now mainline-owned in `/Users/jiangwei/Documents/final`.
+- Keep UI experiments outside mainline; the Owner Console source-readiness
+  contract remains mainline-owned in `/Users/jiangwei/Documents/final`.
 - Keep strategy research in `/Users/jiangwei/Documents/final-strategy-research`.
 - Keep main runtime work in `/Users/jiangwei/Documents/final`.
 - Do not expose internal gate names as Owner homepage labels.

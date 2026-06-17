@@ -1,9 +1,8 @@
 {
   "schema": "brc.runtime_monitor_baseline.v1",
-  "updated_at_utc": "2026-06-17T08:27:35Z",
-  "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and check modes.",
+  "updated_at_utc": "2026-06-17T13:10:00Z",
+  "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and runtime check modes.",
   "expected_runtime_head": "7df799e1ee3dbabd69060f92758a6b84ba2a0ae6",
-  "expected_frontend_head": "7df799e1ee3dbabd69060f92758a6b84ba2a0ae6",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
   "heartbeat_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md",
   "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",
@@ -14,7 +13,6 @@
   "deploy_session_owner_progress_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress",
   "goal_progress_audit_check": "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md",
   "quiet_monitor_audit_check": "python3 scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress --output-json output/runtime-monitor/latest-quiet-monitor-audit.json --output-owner-progress output/runtime-monitor/latest-quiet-monitor-audit.md",
-  "homepage_visual_qa_check": "cd owner-runtime-console && npm run visual:qa:home",
   "signal_detection_source": "tokyo_runtime_signal_watcher_feishu_webhook",
   "signal_detection_note": "Local auto-cache checks are for low-noise status review; fresh market opportunity detection remains server-side watcher and notification driven.",
   "interaction_policy": {
@@ -24,7 +22,6 @@
     "refresh_remote_interaction_count": 1,
     "deploy_postdeploy_daily_check_level": "L1_daily_check_from_snapshot",
     "deploy_postdeploy_daily_check_remote_interaction_count": 1,
-    "homepage_visual_qa_remote_interaction_count": 0,
     "goal_progress_audit_remote_interaction_count": 0,
     "quiet_monitor_audit_remote_interaction_count": 0,
     "mutates_remote_files": false,
