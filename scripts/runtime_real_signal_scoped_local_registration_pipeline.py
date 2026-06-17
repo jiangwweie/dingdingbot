@@ -546,9 +546,81 @@ def _final_report(
         "warnings": _dedupe(warnings),
         "safety_invariants": _safety(reports),
     }
+    result["execution_chain_progress"] = _execution_chain_progress(
+        status=status,
+        blocked_stage=blocked_stage,
+        reports=reports,
+        blockers=result["blockers"],
+    )
     if args.output:
         _write_json(Path(args.output).expanduser(), result)
     return result
+
+
+def _execution_chain_progress(
+    *,
+    status: str,
+    blocked_stage: str | None,
+    reports: dict[str, dict[str, Any] | None],
+    blockers: list[str],
+) -> dict[str, Any]:
+    scoped = reports.get("scoped_local_registration_proof") or {}
+    evidence = reports.get("evidence_chain") or {}
+    handoff = reports.get("handoff") or {}
+    binding = reports.get("binding") or {}
+    scoped_status = _status(scoped)
+    evidence_status = _status(evidence)
+    handoff_status = _status(handoff)
+    binding_status = _status(binding)
+
+    known_non_executing_probe_findings = [
+        item
+        for item in blockers
+        if "runtimeexecutionorderlifecycleadapterresult_not_found" in item.lower()
+        or "runtimeexecutionorderlifecycleadapterresult not found" in item.lower()
+        or "preview_disabled_first_real_submit_action_http_404" in item.lower()
+    ]
+
+    if scoped_status == "scoped_local_registration_proof_recorded":
+        progress_status = "scoped_local_registration_recorded"
+        owner_state = "需要重新运行行动时检查"
+        next_step = (
+            "rerun_action_time_finalgate_then_continue_official_operation_layer"
+        )
+    elif scoped_status == "ready_for_scoped_local_registration_proof_dry_run":
+        progress_status = "local_registration_proof_dry_run_ready"
+        owner_state = "工程演练已到本地登记前"
+        next_step = (
+            "execute_scoped_local_registration_proof_under_standing_authorization"
+        )
+    elif status.startswith("blocked_") or blocked_stage:
+        progress_status = "blocked_before_operation_layer"
+        owner_state = "工程链路阻断"
+        next_step = f"repair_{blocked_stage or 'pipeline'}"
+    else:
+        progress_status = "pipeline_preview_only"
+        owner_state = "工程链路预览"
+        next_step = "continue_non_executing_chain_rehearsal"
+
+    return {
+        "status": progress_status,
+        "owner_state": owner_state,
+        "next_step": next_step,
+        "stage_statuses": {
+            "handoff": handoff_status,
+            "binding": binding_status,
+            "evidence_chain": evidence_status,
+            "scoped_local_registration_proof": scoped_status,
+        },
+        "known_non_executing_probe_findings": known_non_executing_probe_findings,
+        "ready_for_real_order": False,
+        "official_operation_layer_reached": False,
+        "action_time_finalgate_rerun_after_local_registration": False,
+        "disabled_smoke_is_real_execution_proof": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "withdrawal_or_transfer_created": False,
+    }
 
 
 def _safety(reports: dict[str, dict[str, Any] | None]) -> dict[str, bool]:

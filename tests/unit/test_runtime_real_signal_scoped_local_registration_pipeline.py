@@ -51,6 +51,30 @@ def test_pipeline_reaches_scoped_local_registration_dry_run_from_real_signal(tmp
     assert report["safety_invariants"]["local_registration_attempted"] is False
     assert report["safety_invariants"]["first_real_submit_action_called"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
+    progress = report["execution_chain_progress"]
+    assert progress["status"] == "local_registration_proof_dry_run_ready"
+    assert progress["owner_state"] == "工程演练已到本地登记前"
+    assert progress["next_step"] == (
+        "execute_scoped_local_registration_proof_under_standing_authorization"
+    )
+    assert progress["stage_statuses"] == {
+        "handoff": "ready_for_official_submit_call",
+        "binding": "created_intent_and_authorization",
+        "evidence_chain": "prepared_machine_evidence_blocked_before_local_order_adapter",
+        "scoped_local_registration_proof": (
+            "ready_for_scoped_local_registration_proof_dry_run"
+        ),
+    }
+    assert progress["ready_for_real_order"] is False
+    assert progress["official_operation_layer_reached"] is False
+    assert progress["action_time_finalgate_rerun_after_local_registration"] is False
+    assert progress["disabled_smoke_is_real_execution_proof"] is False
+    assert progress["exchange_write_called"] is False
+    assert progress["order_created"] is False
+    assert progress["withdrawal_or_transfer_created"] is False
+    assert progress["known_non_executing_probe_findings"] == [
+        "evidence_chain:preview_disabled_first_real_submit_action_http_404",
+    ]
     paths = [call["path"] for call in client.calls]
     assert any("strategy-signal-intent-draft-sources" in path for path in paths)
     assert any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -85,6 +109,12 @@ def test_pipeline_auto_readiness_blocks_with_missing_trusted_facts(tmp_path):
     ) in report["blockers"]
     assert report["safety_invariants"]["sample_rehearsal_used"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
+    assert report["execution_chain_progress"]["status"] == (
+        "blocked_before_operation_layer"
+    )
+    assert report["execution_chain_progress"]["next_step"] == (
+        "repair_readiness_evidence_resolution"
+    )
     paths = [call["path"] for call in client.calls]
     assert any("strategy-signal-intent-draft-sources" in path for path in paths)
     assert not any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -118,6 +148,14 @@ def test_pipeline_auto_readiness_reaches_scoped_local_registration(tmp_path):
     assert written["trusted_submit_fact_snapshot_id"] == "facts-auto-rtf020"
     assert report["safety_invariants"]["first_real_submit_action_called"] is False
     assert report["safety_invariants"]["exchange_write_called"] is False
+    assert report["execution_chain_progress"]["status"] == (
+        "local_registration_proof_dry_run_ready"
+    )
+    assert report["execution_chain_progress"]["ready_for_real_order"] is False
+    assert (
+        report["execution_chain_progress"]["official_operation_layer_reached"]
+        is False
+    )
 
 
 def test_pipeline_collector_blocks_before_readiness_when_report_facts_missing(tmp_path):
@@ -142,6 +180,12 @@ def test_pipeline_collector_blocks_before_readiness_when_report_facts_missing(tm
     }
     assert "early_readiness_fact_collection:trusted_submit_fact_snapshot_id_missing" in (
         report["blockers"]
+    )
+    assert report["execution_chain_progress"]["status"] == (
+        "blocked_before_operation_layer"
+    )
+    assert report["execution_chain_progress"]["next_step"] == (
+        "repair_early_readiness_fact_collection"
     )
     paths = [call["path"] for call in client.calls]
     assert not any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -234,6 +278,10 @@ def test_pipeline_collector_can_feed_auto_readiness_path(tmp_path):
     evidence_path = tmp_path / "artifacts" / "02-collected-readiness-evidence.json"
     assert evidence_path.exists()
     assert report["safety_invariants"]["exchange_write_called"] is False
+    assert report["execution_chain_progress"]["status"] == (
+        "local_registration_proof_dry_run_ready"
+    )
+    assert report["execution_chain_progress"]["ready_for_real_order"] is False
 
 
 class _Client:
