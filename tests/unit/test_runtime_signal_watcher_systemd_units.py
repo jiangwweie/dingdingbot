@@ -97,6 +97,8 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "--collect-live-facts-before-refresh" in text
     assert "--live-facts-output" in text
     assert "strategy-group-live-facts-input.json" in text
+    assert "--refresh-chain-closure-status" in text
+    assert "runtime-execution-chain-closure-status.json" in text
     assert "product-state-refresh-packet.json" in text
     assert "owner-console-source-readiness" not in text
     assert "FinalGate" in text
