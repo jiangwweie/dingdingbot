@@ -111,6 +111,15 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                     "dry_run_chain": {
                         "status": "passed",
                         "scenario_count": 14,
+                        "projected_checks": {
+                            "fresh_signal_fast_auto_chain_checked": True,
+                            "operation_layer_evidence_relay_checked": True,
+                        },
+                        "ready_segments": [
+                            "fresh_signal_fast_auto_chain_checked",
+                            "operation_layer_evidence_relay_checked",
+                        ],
+                        "missing_or_failed_segments": [],
                     },
                     "real_execution": {
                         "status": "waiting_for_live_action_time_proof",
@@ -171,6 +180,16 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["checks"]["blockers"] == []
     assert report["checks"]["product_gaps"] == []
     assert report["checks"]["frontend_scope"] == "externalized"
+    closure = report["facts"]["reports"]["runtime_execution_chain_closure_status"]
+    assert closure["projected_checks"] == {
+        "fresh_signal_fast_auto_chain_checked": True,
+        "operation_layer_evidence_relay_checked": True,
+    }
+    assert closure["ready_segments"] == [
+        "fresh_signal_fast_auto_chain_checked",
+        "operation_layer_evidence_relay_checked",
+    ]
+    assert closure["missing_or_failed_segments"] == []
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
 

@@ -32,7 +32,7 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 2
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,6 +167,26 @@ def build_daily_check_report(
         else {}
     )
     dry_run_scenario_count = _int_or_none(dry_run_summary.get("scenario_count"))
+    chain_segments_available = (
+        isinstance(chain_closure_summary.get("ready_segments"), list)
+        or isinstance(
+            chain_closure_summary.get("missing_or_failed_segments"),
+            list,
+        )
+    )
+    chain_ready_segments = (
+        [str(item) for item in chain_closure_summary.get("ready_segments") or []]
+        if chain_segments_available
+        else None
+    )
+    chain_missing_or_failed_segments = (
+        [
+            str(item)
+            for item in chain_closure_summary.get("missing_or_failed_segments") or []
+        ]
+        if chain_segments_available
+        else None
+    )
 
     blockers = list(checks.get("blockers") or [])
     product_gaps = list(checks.get("product_gaps") or [])
@@ -228,6 +248,14 @@ def build_daily_check_report(
         "runtime_execution_chain_closure_status_ready": (
             checks.get("runtime_execution_chain_closure_status_ready") is True
         ),
+        "runtime_execution_chain_ready_segment_count": (
+            len(chain_ready_segments)
+            if chain_ready_segments is not None
+            else None
+        ),
+        "runtime_execution_chain_missing_or_failed_segments": (
+            chain_missing_or_failed_segments or []
+        ),
         "frontend_scope": checks.get("frontend_scope") or "externalized",
     }
 
@@ -267,6 +295,14 @@ def build_daily_check_report(
                 "dry_run_audit_scenarios": dry_run_scenario_count,
                 "chain_closure": owner_summary.get("chain_closure")
                 or chain_closure_summary.get("status"),
+                "chain_closure_ready_segments": (
+                    len(chain_ready_segments)
+                    if chain_ready_segments is not None
+                    else None
+                ),
+                "chain_closure_missing_or_failed_segments": (
+                    chain_missing_or_failed_segments or []
+                ),
                 "frontend": owner_summary.get("frontend") or "外部项目",
             },
         },
@@ -823,6 +859,13 @@ def _owner_progress_text(
     missing_dry_run_checks = [
         str(item) for item in checks.get("runtime_dry_run_missing_required_checks") or []
     ]
+    missing_chain_segments = [
+        str(item)
+        for item in checks.get(
+            "runtime_execution_chain_missing_or_failed_segments"
+        )
+        or []
+    ]
     generated_at = str(report.get("generated_at_utc") or "unknown")
     cache_age = _cache_age_text(generated_at=generated_at, now_utc=now_utc)
     cache_status = _cache_status_text(
@@ -895,6 +938,7 @@ def _owner_progress_text(
         f"- Dry-run audit: {progress.get('dry_run_audit') or 'unknown'}",
         f"- 演练场景: {progress.get('dry_run_audit_scenarios') or 'unknown'}",
         f"- Execution chain: {progress.get('chain_closure') or 'unknown'}",
+        _chain_segment_progress_line(progress),
         f"- Frontend: {progress.get('frontend') or '外部项目'}",
     ]
     if blockers:
@@ -909,7 +953,18 @@ def _owner_progress_text(
     if missing_dry_run_checks:
         lines.extend(["", "## Missing Dry-Run Checks", ""])
         lines.extend(f"- {item}" for item in missing_dry_run_checks)
+    if missing_chain_segments:
+        lines.extend(["", "## Missing Chain Segments", ""])
+        lines.extend(f"- {item}" for item in missing_chain_segments)
     return "\n".join(lines)
+
+
+def _chain_segment_progress_line(progress: dict[str, Any]) -> str:
+    ready_count = progress.get("chain_closure_ready_segments")
+    missing_segments = progress.get("chain_closure_missing_or_failed_segments")
+    if isinstance(ready_count, int) and isinstance(missing_segments, list):
+        return f"- 链路段: {ready_count} ready / {len(missing_segments)} missing"
+    return "- 链路段: unknown"
 
 
 def _yes_no(value: bool) -> str:

@@ -486,6 +486,7 @@ def _missing_dry_run_required_checks(checks: dict[str, Any]) -> list[str]:
 
 
 def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    dry_run_chain = _as_dict(packet.get("dry_run_chain"))
     return {
         "status": packet.get("status"),
         "owner_state": packet.get("owner_state"),
@@ -494,6 +495,11 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         or _as_dict(packet.get("checks")).get("scenario_count"),
         "fresh_signal_present": packet.get("fresh_signal_present"),
         "ready_for_real_order_action": packet.get("ready_for_real_order_action"),
+        "projected_checks": dry_run_chain.get("projected_checks"),
+        "ready_segments": dry_run_chain.get("ready_segments"),
+        "missing_or_failed_segments": dry_run_chain.get(
+            "missing_or_failed_segments"
+        ),
     }
 
 

@@ -69,6 +69,12 @@ def _snapshot(**overrides):
                 },
                 "runtime_execution_chain_closure_status": {
                     "status": "non_market_execution_chain_ready",
+                    "ready_segments": [
+                        "fresh_signal_fast_auto_chain_checked",
+                        "operation_layer_evidence_relay_checked",
+                        "scoped_pipeline_operation_layer_handoff_checked",
+                    ],
+                    "missing_or_failed_segments": [],
                 },
             },
         },
@@ -104,7 +110,19 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
     assert report["checks"]["runtime_dry_run_scenario_count"] == 14
+    assert report["checks"]["runtime_execution_chain_ready_segment_count"] == 3
+    assert (
+        report["checks"]["runtime_execution_chain_missing_or_failed_segments"]
+        == []
+    )
     assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 14
+    assert report["owner_summary"]["progress"]["chain_closure_ready_segments"] == 3
+    assert (
+        report["owner_summary"]["progress"][
+            "chain_closure_missing_or_failed_segments"
+        ]
+        == []
+    )
     assert report["notification"] == {
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
@@ -405,7 +423,53 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 交易所写入: 否" in text
     assert "- Runtime: 正常" in text
     assert "- 演练场景: 14" in text
+    assert "- 链路段: 3 ready / 0 missing" in text
     assert "- Frontend: 外部项目" in text
+
+
+def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
+    module = _load_module()
+    snapshot = _snapshot(
+        facts={
+            "reports": {
+                "goal_status": {
+                    "status": "waiting_for_signal",
+                    "fresh_signal_present": False,
+                },
+                "runtime_dry_run_audit": {
+                    "status": "passed",
+                    "scenario_count": 14,
+                },
+                "runtime_execution_chain_closure_status": {
+                    "status": "non_market_execution_chain_ready",
+                    "ready_segments": ["fresh_signal_fast_auto_chain_checked"],
+                    "missing_or_failed_segments": [
+                        "operation_layer_evidence_relay_checked"
+                    ],
+                },
+            },
+        },
+    )
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    text = module._owner_progress_text(report)
+
+    assert "- 链路段: 1 ready / 1 missing" in text
+    assert "## Missing Chain Segments" in text
+    assert "- operation_layer_evidence_relay_checked" in text
+
+
+def test_daily_check_owner_progress_text_marks_chain_segments_unknown_when_absent():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["owner_summary"]["progress"]["chain_closure_ready_segments"] = None
+    report["owner_summary"]["progress"][
+        "chain_closure_missing_or_failed_segments"
+    ] = []
+
+    text = module._owner_progress_text(report)
+
+    assert "- 链路段: unknown" in text
 
 
 def test_daily_check_owner_progress_text_surfaces_safety_blocker():
