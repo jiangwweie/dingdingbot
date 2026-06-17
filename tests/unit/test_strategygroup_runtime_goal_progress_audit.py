@@ -70,6 +70,8 @@ def _daily_check(**overrides):
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_dry_run_scenario_count": 14,
+            "runtime_execution_chain_ready_segment_count": 3,
+            "runtime_execution_chain_missing_or_failed_segments": [],
         },
         "notification": {
             "decision": "DONT_NOTIFY",
@@ -113,6 +115,12 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
     assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
     assert tracks["p05_engineering_rehearsal_loop"]["status"] == "ready"
+    assert "chain_ready_segments=3" in tracks["p05_engineering_rehearsal_loop"][
+        "evidence"
+    ]
+    assert "missing_chain_segments=0" in tracks["p05_engineering_rehearsal_loop"][
+        "evidence"
+    ]
     assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
     assert tracks["p05_safety_invariants"]["status"] == "ready"
 
@@ -131,6 +139,9 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- 交互等级: L0_local_goal_progress_audit" in text
     assert "- 远端交互次数: 0" in text
     assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
+    assert "## Evidence" in text
+    assert "chain_ready_segments=3" in text
+    assert "missing_chain_segments=0" in text
     assert "- P0.5 ready: 是" in text
 
 
@@ -152,6 +163,46 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
     assert "runtime_dry_run_audit_not_passed" in report["checks"]["product_gaps"]
     tracks = {track["id"]: track for track in report["tracks"]}
     assert tracks["p05_engineering_rehearsal_loop"]["status"] == "blocked"
+
+
+def test_goal_progress_marks_missing_chain_segment_as_degraded():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks["runtime_execution_chain_ready_segment_count"] = 1
+    checks["runtime_execution_chain_missing_or_failed_segments"] = [
+        "operation_layer_evidence_relay_checked"
+    ]
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+    )
+
+    assert report["status"] == "degraded"
+    assert "missing_chain_segment:operation_layer_evidence_relay_checked" in report[
+        "checks"
+    ]["product_gaps"]
+    tracks = {track["id"]: track for track in report["tracks"]}
+    rehearsal = tracks["p05_engineering_rehearsal_loop"]
+    assert rehearsal["status"] == "blocked"
+    assert "chain_ready_segments=1" in rehearsal["evidence"]
+    assert "missing_chain_segments=1" in rehearsal["evidence"]
+
+
+def test_goal_progress_keeps_chain_segment_count_unknown_when_daily_check_lacks_it():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks.pop("runtime_execution_chain_ready_segment_count")
+    checks.pop("runtime_execution_chain_missing_or_failed_segments")
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+    )
+
+    tracks = {track["id"]: track for track in report["tracks"]}
+    rehearsal = tracks["p05_engineering_rehearsal_loop"]
+    assert rehearsal["status"] == "ready"
+    assert "chain_ready_segments=unknown" in rehearsal["evidence"]
+    assert "missing_chain_segments=0" in rehearsal["evidence"]
 
 
 def test_goal_progress_rejects_remote_interaction_in_local_audit():

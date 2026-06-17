@@ -267,7 +267,19 @@ def _engineering_rehearsal_track(
     missing = [
         str(item) for item in checks.get("runtime_dry_run_missing_required_checks") or []
     ]
+    missing_chain_segments = [
+        str(item)
+        for item in checks.get(
+            "runtime_execution_chain_missing_or_failed_segments"
+        )
+        or []
+    ]
     blockers.extend(f"missing_dry_run_check:{item}" for item in missing)
+    blockers.extend(f"missing_chain_segment:{item}" for item in missing_chain_segments)
+    ready_segment_count = checks.get("runtime_execution_chain_ready_segment_count")
+    ready_segment_text = (
+        str(ready_segment_count) if ready_segment_count is not None else "unknown"
+    )
     return _track(
         track_id="p05_engineering_rehearsal_loop",
         label="P0.5 Engineering Rehearsal Loop",
@@ -275,6 +287,8 @@ def _engineering_rehearsal_track(
         evidence=[
             f"dry_run_audit={progress.get('dry_run_audit')}",
             f"scenario_count={checks.get('runtime_dry_run_scenario_count')}",
+            f"chain_ready_segments={ready_segment_text}",
+            f"missing_chain_segments={len(missing_chain_segments)}",
         ],
         next_action="保持 dry-run / mock signal / source readiness 日检",
     )
@@ -396,6 +410,20 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
                     str(track["owner_state"]),
                     str(track["next_action"]),
                     _list_or_none([str(item) for item in track.get("blockers", [])]),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(["", "## Evidence", ""])
+    lines.append("| Track | Evidence |")
+    lines.append("| --- | --- |")
+    for track in report["tracks"]:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(track["label"]),
+                    _list_or_none([str(item) for item in track.get("evidence", [])]),
                 ]
             )
             + " |"
