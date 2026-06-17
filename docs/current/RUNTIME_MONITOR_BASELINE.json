@@ -5,6 +5,7 @@
   "expected_runtime_head": "7df799e1ee3dbabd69060f92758a6b84ba2a0ae6",
   "expected_frontend_head": "7df799e1ee3dbabd69060f92758a6b84ba2a0ae6",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
+  "heartbeat_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md",
   "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",
   "strict_no_server_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress",
   "forced_refresh_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --json",

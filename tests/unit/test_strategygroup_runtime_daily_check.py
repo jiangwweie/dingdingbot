@@ -789,6 +789,12 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
     assert baseline["default_check"].endswith(
         "run_strategygroup_runtime_daily_check.py --auto-cache --json"
     )
+    assert baseline["heartbeat_check"].endswith(
+        "run_strategygroup_runtime_daily_check.py "
+        "--auto-cache --heartbeat "
+        "--output-json output/runtime-monitor/latest-daily-check.json "
+        "--output-owner-progress output/runtime-monitor/latest-owner-progress.md"
+    )
     assert baseline["routine_status_check"].endswith(
         "run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress"
     )
