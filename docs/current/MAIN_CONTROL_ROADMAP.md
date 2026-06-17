@@ -452,6 +452,7 @@ mock fresh signal
 | Artifact | Path |
 | --- | --- |
 | Local audit packet | `output/strategygroup-runtime-pilot/dry-run-audit-chain/runtime-dry-run-audit-chain.json` |
+| Local closure status packet | `output/strategygroup-runtime-pilot/chain-closure-status/runtime-execution-chain-closure-status.json` |
 | Tokyo audit packet | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/runtime-dry-run-audit-chain.json` |
 
 ### Current Implementation
@@ -460,11 +461,14 @@ The local script is:
 
 ```text
 scripts/runtime_dry_run_audit_chain.py
+scripts/runtime_execution_chain_closure_status.py
 ```
 
-It currently runs thirteen fixture-backed scenarios and treats expected blocked
+It currently runs fourteen fixture-backed scenarios and treats expected blocked
 states as successful audit coverage when they stop before dangerous actions.
-Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
+Tokyo refreshes the dry-run audit script as a watcher-adjacent non-executing
+audit step. The closure-status script compresses the local dry-run result into
+one go/no-go status for main-control progress reviews.
 
 ### Scenario Matrix
 
@@ -477,6 +481,21 @@ Tokyo refreshes this script as a watcher-adjacent non-executing audit step.
 | Active position or open-order conflict | Clear conflict blocker before FinalGate or Operation Layer action |
 | Operation Layer blocker review matrix | Active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets |
 | Selected StrategyGroup dispatch guard | Selected MPG-001 mock fresh signal can reach FinalGate dispatch; out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer |
+
+### 2026-06-17 Chain Closure Status Checkpoint
+
+`scripts/runtime_execution_chain_closure_status.py` now converts the full
+dry-run audit packet into a compact status packet. This keeps routine progress
+reviews from rereading many raw evidence packets while still refusing to treat
+mock or disabled-smoke proof as a real-order proof.
+
+| Item | Result |
+| --- | --- |
+| Non-market status | `non_market_execution_chain_ready` only when the dry-run audit passes, all required checks are true, and no dangerous effect is present |
+| Real-order status | Remains `waiting_for_live_action_time_proof` after local dry-run success |
+| Missing live proofs | `live_fresh_signal`, `same_run_action_time_finalgate_pass`, `official_operation_layer_real_gateway_action`, and `post_submit_finalize_reconciliation_budget_settlement` |
+| Next safe actions | Keep watcher running, rerun dry-run audit after runtime changes, and on fresh signal run same-run FinalGate then official Operation Layer |
+| Safety | The closure-status script does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
 ### 2026-06-17 Goal Status Local Dry-Run Checkpoint
 
