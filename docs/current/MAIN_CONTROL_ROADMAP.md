@@ -1410,6 +1410,22 @@ P0 exit-hardening change.
 | Owner progress | Engineering rehearsal evidence now reports `goal_chain_ready_segments=7` after refresh |
 | Safety proof | This is monitor/reporting-only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-18 StrategyGroup Tier Policy Dry-Run Checkpoint
+
+StrategyGroup tier governance is now part of the non-executing dry-run audit
+chain instead of remaining only a planning document. This makes strategy
+expansion auditable without letting new StrategyGroups compete with the first
+selected `MPG-001` tiny real-order loop.
+
+| Item | Result |
+| --- | --- |
+| Required dry-run checks | `runtime_tier_policy_checked`, `only_mpg_tiny_real_order_eligible_checked`, and `new_strategygroups_default_observe_only_checked` |
+| Current L4 lane | Only `MPG-001` may be `tiny_real_order_eligible` for the first bounded live-order pilot |
+| New group default | `BRF`, `BTPC`, `VCB`, `LSR`, and `RBR` must remain `L1 observe_only` unless promoted through reviewed intake |
+| Shared pipeline | Tier policy is validated as an input boundary; it does not define candidate, FinalGate, Operation Layer, submit, finalize, reconciliation, budget settlement, live profile, or sizing defaults |
+| Daily-check schema | `DAILY_CHECK_REPORT_SCHEMA_VERSION=6` so cache artifacts that predate the tier-policy required checks are refreshed |
+| Safety proof | This is dry-run/reporting-only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

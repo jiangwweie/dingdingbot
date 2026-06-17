@@ -5941,6 +5941,9 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
                 "common_execution_chain_reuse_checked": True,
                 "strategygroup_adapter_boundary_checked": True,
                 "strategy_handoff_no_execution_pipeline_fields_checked": True,
+                "runtime_tier_policy_checked": True,
+                "only_mpg_tiny_real_order_eligible_checked": True,
+                "new_strategygroups_default_observe_only_checked": True,
             },
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -6126,6 +6129,12 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         dry_run_summary["strategy_handoff_no_execution_pipeline_fields_checked"]
         is True
     )
+    assert dry_run_summary["runtime_tier_policy_checked"] is True
+    assert dry_run_summary["only_mpg_tiny_real_order_eligible_checked"] is True
+    assert (
+        dry_run_summary["new_strategygroups_default_observe_only_checked"]
+        is True
+    )
     assert dry_run_summary["selected_strategygroup_dispatch_guard_checked"] is True
     assert (
         dry_run_summary[
@@ -6175,6 +6184,9 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
         "common_execution_chain_reuse_checked",
         "strategygroup_adapter_boundary_checked",
         "strategy_handoff_no_execution_pipeline_fields_checked",
+        "runtime_tier_policy_checked",
+        "only_mpg_tiny_real_order_eligible_checked",
+        "new_strategygroups_default_observe_only_checked",
         "selected_strategygroup_dispatch_guard_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     }
@@ -6607,6 +6619,12 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         ready["summary"]["strategy_handoff_no_execution_pipeline_fields_checked"]
         is True
     )
+    assert ready["summary"]["runtime_tier_policy_checked"] is True
+    assert ready["summary"]["only_mpg_tiny_real_order_eligible_checked"] is True
+    assert (
+        ready["summary"]["new_strategygroups_default_observe_only_checked"]
+        is True
+    )
     assert ready["summary"]["selected_strategygroup_dispatch_guard_checked"] is True
     assert (
         ready["summary"][
@@ -6644,6 +6662,9 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
         and key != "common_execution_chain_reuse_checked"
         and key != "strategygroup_adapter_boundary_checked"
         and key != "strategy_handoff_no_execution_pipeline_fields_checked"
+        and key != "runtime_tier_policy_checked"
+        and key != "only_mpg_tiny_real_order_eligible_checked"
+        and key != "new_strategygroups_default_observe_only_checked"
     }
 
     degraded = _owner_console_dry_run_audit_source(packet)
@@ -6655,6 +6676,9 @@ def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
     assert "shared_runtime_pipeline_checked" in degraded["reason"]
     assert "strategygroup_adapter_boundary_checked" in degraded["reason"]
     assert "strategy_handoff_no_execution_pipeline_fields_checked" in degraded["reason"]
+    assert "runtime_tier_policy_checked" in degraded["reason"]
+    assert "only_mpg_tiny_real_order_eligible_checked" in degraded["reason"]
+    assert "new_strategygroups_default_observe_only_checked" in degraded["reason"]
 
 
 def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(

@@ -39,10 +39,21 @@ from src.domain.runtime_official_submit_handoff import (  # noqa: E402
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/dry-run-audit-chain")
 DEFAULT_OUTPUT_JSON = DEFAULT_OUTPUT_DIR / "runtime-dry-run-audit-chain.json"
 DEFAULT_HANDOFF_ROOT = ROOT_DIR / "docs/current/strategy-group-handoffs"
+DEFAULT_RUNTIME_TIER_POLICY_JSON = (
+    DEFAULT_HANDOFF_ROOT / "main-control-runtime-tier-policy.json"
+)
 RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
 EXPECTED_STRATEGY_GROUPS = {"MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"}
+EXPECTED_RUNTIME_TIERS = {
+    "MPG-001": "L4",
+    "TEQ-001": "L2",
+    "FBS-001": "L3",
+    "SOR-001": "L3",
+    "PMR-001": "L1",
+}
+EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS = {"BRF", "BTPC", "VCB", "LSR", "RBR"}
 EXPECTED_HARD_SAFETY_BLOCKER_CASES = {
     "active_position",
     "open_order",
@@ -1329,6 +1340,137 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             "withdrawal_or_transfer_created": False,
             "finalgate_bypassed": False,
             "operation_layer_bypassed": False,
+        },
+    }
+
+
+def _runtime_tier_policy_validation(
+    policy_path: Path = DEFAULT_RUNTIME_TIER_POLICY_JSON,
+) -> dict[str, Any]:
+    policy = _read_json(policy_path)
+    tier_definitions = policy.get("tier_definitions")
+    tier_definitions = tier_definitions if isinstance(tier_definitions, dict) else {}
+    current_groups = policy.get("current_strategy_groups")
+    current_groups = current_groups if isinstance(current_groups, dict) else {}
+    new_defaults = policy.get("new_strategy_group_defaults")
+    new_defaults = new_defaults if isinstance(new_defaults, dict) else {}
+    known_new_groups = new_defaults.get("known_new_groups")
+    known_new_groups = known_new_groups if isinstance(known_new_groups, dict) else {}
+    safety = policy.get("safety_invariants")
+    safety = safety if isinstance(safety, dict) else {}
+
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for strategy_group_id, expected_tier in sorted(EXPECTED_RUNTIME_TIERS.items()):
+        item = current_groups.get(strategy_group_id)
+        item = item if isinstance(item, dict) else {}
+        tier = str(item.get("tier") or "")
+        definition = tier_definitions.get(tier)
+        definition = definition if isinstance(definition, dict) else {}
+        row_checks = {
+            "tier_matches_policy": tier == expected_tier,
+            "tier_definition_exists": bool(definition),
+            "non_l4_cannot_place_real_order": (
+                strategy_group_id == "MPG-001"
+                or definition.get("may_place_real_order") is False
+            ),
+            "l4_requires_official_runtime_chain": (
+                strategy_group_id != "MPG-001"
+                or (
+                    definition.get("may_place_real_order") is True
+                    and safety.get("l4_still_requires_official_runtime_chain")
+                    is True
+                )
+            ),
+        }
+        rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "expected_tier": expected_tier,
+                "tier": tier,
+                "mode": item.get("mode"),
+                "checks": row_checks,
+                "may_place_real_order": definition.get("may_place_real_order"),
+                "passed": all(row_checks.values()),
+            }
+        )
+        blockers.extend(
+            f"{strategy_group_id}:{check_name}"
+            for check_name, ok in row_checks.items()
+            if ok is not True
+        )
+
+    l4_groups = sorted(
+        strategy_group_id
+        for strategy_group_id, item in current_groups.items()
+        if isinstance(item, dict) and item.get("tier") == "L4"
+    )
+    new_group_tiers = {
+        str(group_id): str(tier)
+        for group_id, tier in known_new_groups.items()
+        if str(group_id) in EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS
+    }
+    checks = {
+        "policy_schema_current": (
+            policy.get("schema") == "brc.strategy_group_runtime_tier_policy.v1"
+        ),
+        "policy_not_execution_authority": (
+            policy.get("not_execution_authority") is True
+            and policy.get("not_finalgate_input") is True
+            and policy.get("not_operation_layer_input") is True
+            and policy.get("not_order_sizing_default") is True
+        ),
+        "expected_current_strategy_groups_present": (
+            set(current_groups) >= set(EXPECTED_RUNTIME_TIERS)
+        ),
+        "current_tiers_match_expected_policy": all(
+            row.get("passed") is True for row in rows
+        ),
+        "only_mpg_is_l4": l4_groups == ["MPG-001"],
+        "new_strategy_groups_default_to_l1": (
+            set(new_group_tiers) == EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS
+            and all(tier == "L1" for tier in new_group_tiers.values())
+        ),
+        "new_strategy_groups_do_not_enter_l4": all(
+            tier != "L4" for tier in new_group_tiers.values()
+        ),
+        "tier_policy_does_not_bypass_runtime_chain": (
+            safety.get("no_strategy_group_directly_defines_candidate_pipeline")
+            is True
+            and safety.get("no_strategy_group_directly_defines_finalgate") is True
+            and safety.get("no_strategy_group_directly_defines_operation_layer")
+            is True
+            and safety.get("no_strategy_group_directly_authorizes_real_submit")
+            is True
+            and safety.get("l4_still_requires_official_runtime_chain") is True
+        ),
+    }
+    blockers.extend(name for name, ok in checks.items() if ok is not True)
+    return {
+        "scope": "runtime_tier_policy_validation",
+        "status": "passed" if not blockers else "failed",
+        "policy_path": str(policy_path),
+        "expected_runtime_tiers": dict(EXPECTED_RUNTIME_TIERS),
+        "expected_new_strategy_group_defaults": sorted(
+            EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS
+        ),
+        "l4_strategy_groups": l4_groups,
+        "new_strategy_group_tiers": new_group_tiers,
+        "rows": rows,
+        "checks": checks,
+        "blockers": sorted(set(blockers)),
+        "safety_invariants": {
+            "calls_tokyo_api": False,
+            "exchange_write_called": False,
+            "finalgate_bypassed": False,
+            "operation_layer_bypassed": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "real_order_created": False,
+            "withdrawal_or_transfer_created": False,
+            "modifies_secret_or_credentials": False,
+            "modifies_live_profile": False,
+            "modifies_order_sizing_defaults": False,
         },
     }
 
@@ -3255,6 +3397,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         _scenario_post_submit_finalize_result_identity_guard(output_dir),
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
+    runtime_tier_policy = _runtime_tier_policy_validation()
     blockers = [
         f"{scenario['name']}:{blocker}"
         for scenario in scenarios
@@ -3264,6 +3407,10 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     blockers.extend(
         f"shared_runtime_pipeline_validation:{blocker}"
         for blocker in shared_pipeline.get("blockers", [])
+    )
+    blockers.extend(
+        f"runtime_tier_policy_validation:{blocker}"
+        for blocker in runtime_tier_policy.get("blockers", [])
     )
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
@@ -3411,6 +3558,29 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "runtime_tier_policy_checked": (
+            runtime_tier_policy.get("status") == "passed"
+            and all(
+                value is True
+                for value in (runtime_tier_policy.get("checks") or {}).values()
+            )
+        ),
+        "only_mpg_tiny_real_order_eligible_checked": (
+            runtime_tier_policy.get("status") == "passed"
+            and runtime_tier_policy.get("checks", {}).get("only_mpg_is_l4")
+            is True
+        ),
+        "new_strategygroups_default_observe_only_checked": (
+            runtime_tier_policy.get("status") == "passed"
+            and runtime_tier_policy.get("checks", {}).get(
+                "new_strategy_groups_default_to_l1"
+            )
+            is True
+            and runtime_tier_policy.get("checks", {}).get(
+                "new_strategy_groups_do_not_enter_l4"
+            )
+            is True
+        ),
         "selected_strategygroup_dispatch_guard_checked": (
             _scenario_artifact(
                 scenarios,
@@ -3549,6 +3719,15 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "strategy_handoff_no_execution_pipeline_fields_checked": checks[
             "strategy_handoff_no_execution_pipeline_fields_checked"
         ],
+        "runtime_tier_policy_checked": checks[
+            "runtime_tier_policy_checked"
+        ],
+        "only_mpg_tiny_real_order_eligible_checked": checks[
+            "only_mpg_tiny_real_order_eligible_checked"
+        ],
+        "new_strategygroups_default_observe_only_checked": checks[
+            "new_strategygroups_default_observe_only_checked"
+        ],
         "selected_strategygroup_dispatch_guard_checked": checks[
             "selected_strategygroup_dispatch_guard_checked"
         ],
@@ -3596,6 +3775,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ),
         "scenarios": scenarios,
         "shared_runtime_pipeline_validation": shared_pipeline,
+        "runtime_tier_policy_validation": runtime_tier_policy,
         "checks": checks,
         "scenario_count": checks["scenario_count"],
         "required_checks": required_checks,

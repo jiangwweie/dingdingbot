@@ -24,6 +24,9 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
         "strategy_handoff_no_execution_pipeline_fields_checked": True,
+        "runtime_tier_policy_checked": True,
+        "only_mpg_tiny_real_order_eligible_checked": True,
+        "new_strategygroups_default_observe_only_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
@@ -60,6 +63,9 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
         "strategy_handoff_no_execution_pipeline_fields_checked": True,
+        "runtime_tier_policy_checked": True,
+        "only_mpg_tiny_real_order_eligible_checked": True,
+        "new_strategygroups_default_observe_only_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
@@ -240,6 +246,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
     assert (
         packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is True
+    )
+    assert packet["checks"]["runtime_tier_policy_checked"] is True
+    assert packet["checks"]["only_mpg_tiny_real_order_eligible_checked"] is True
+    assert (
+        packet["checks"]["new_strategygroups_default_observe_only_checked"]
         is True
     )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
@@ -602,6 +614,29 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         ]
         assert "final_gate_input" in row["execution_boundary"]
         assert row["execution_boundary"]["final_gate_input"] is False
+    tier_policy = packet["runtime_tier_policy_validation"]
+    assert tier_policy["status"] == "passed"
+    assert tier_policy["l4_strategy_groups"] == ["MPG-001"]
+    assert tier_policy["new_strategy_group_tiers"] == {
+        "BRF": "L1",
+        "BTPC": "L1",
+        "LSR": "L1",
+        "RBR": "L1",
+        "VCB": "L1",
+    }
+    assert tier_policy["checks"] == {
+        "policy_schema_current": True,
+        "policy_not_execution_authority": True,
+        "expected_current_strategy_groups_present": True,
+        "current_tiers_match_expected_policy": True,
+        "only_mpg_is_l4": True,
+        "new_strategy_groups_default_to_l1": True,
+        "new_strategy_groups_do_not_enter_l4": True,
+        "tier_policy_does_not_bypass_runtime_chain": True,
+    }
+    assert tier_policy["safety_invariants"]["exchange_write_called"] is False
+    assert tier_policy["safety_invariants"]["order_created"] is False
+    assert tier_policy["safety_invariants"]["modifies_order_sizing_defaults"] is False
 
 
 def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, capsys):

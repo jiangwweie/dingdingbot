@@ -129,6 +129,9 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "common_execution_chain_reuse_checked",
     "strategygroup_adapter_boundary_checked",
     "strategy_handoff_no_execution_pipeline_fields_checked",
+    "runtime_tier_policy_checked",
+    "only_mpg_tiny_real_order_eligible_checked",
+    "new_strategygroups_default_observe_only_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
@@ -7838,6 +7841,19 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 "strategy_handoff_no_execution_pipeline_fields_checked": (
                     checks.get(
                         "strategy_handoff_no_execution_pipeline_fields_checked"
+                    )
+                    is True
+                ),
+                "runtime_tier_policy_checked": (
+                    checks.get("runtime_tier_policy_checked") is True
+                ),
+                "only_mpg_tiny_real_order_eligible_checked": (
+                    checks.get("only_mpg_tiny_real_order_eligible_checked")
+                    is True
+                ),
+                "new_strategygroups_default_observe_only_checked": (
+                    checks.get(
+                        "new_strategygroups_default_observe_only_checked"
                     )
                     is True
                 ),

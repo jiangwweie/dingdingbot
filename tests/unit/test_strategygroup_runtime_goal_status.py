@@ -106,6 +106,9 @@ def _write_base_packets(report_dir: Path) -> None:
                 "common_execution_chain_reuse_checked": True,
                 "strategygroup_adapter_boundary_checked": True,
                 "strategy_handoff_no_execution_pipeline_fields_checked": True,
+                "runtime_tier_policy_checked": True,
+                "only_mpg_tiny_real_order_eligible_checked": True,
+                "new_strategygroups_default_observe_only_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
             },
@@ -351,6 +354,18 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     assert (
         "runtime_dry_run_missing_required_check:"
         "strategy_handoff_no_execution_pipeline_fields_checked"
+    ) in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "runtime_tier_policy_checked"
+    ) in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "only_mpg_tiny_real_order_eligible_checked"
+    ) in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "new_strategygroups_default_observe_only_checked"
     ) in packet["blockers"]
     assert (
         "runtime_dry_run_missing_required_check:"
