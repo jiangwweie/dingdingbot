@@ -1116,6 +1116,25 @@ specific code.
 | Operation Layer readiness | Missing evidence is never fabricated; after live enablement the dispatcher must re-run evidence prep and re-check readiness. |
 | Strategy adapters | StrategyGroup code remains limited to signal/facts/risk/hard-stop inputs. It must not implement custom FinalGate, Operation Layer, gateway, or settlement paths. |
 
+### 2026-06-17 Scoped Dry-Run Proof Tightening
+
+The dry-run audit chain keeps `scenario_count=14` but now strengthens the
+`scoped_pipeline_operation_layer_handoff` scenario:
+
+```text
+scoped pipeline evidence
+-> dispatcher accepts Operation Layer evidence
+-> handoff packet is built from the same evidence IDs
+-> official first-real-submit endpoint is called in disabled-smoke mode
+-> owner_confirmed_for_first_real_submit_action=false
+-> no order, no OrderLifecycle call, no exchange write
+```
+
+This closes a rehearsal gap between generic mock disabled-smoke proof and the
+real pipeline-shaped scoped local-registration evidence. It is still not real
+execution proof and does not authorize bypassing action-time FinalGate or the
+official Operation Layer.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline until reviewed, but the Owner Console

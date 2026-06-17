@@ -247,7 +247,22 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_readiness_has_no_missing_ids": True,
         "operation_layer_submit_not_called": True,
         "pipeline_does_not_exchange_write": True,
+        "scoped_pipeline_disabled_submit_smoke_passed": True,
     }
+    assert scoped_handoff["scoped_disabled_submit_checks"] == {
+        "handoff_query_uses_pipeline_evidence_ids": True,
+        "disabled_smoke_called_official_endpoint": True,
+        "disabled_smoke_keeps_owner_real_submit_false": True,
+        "disabled_smoke_does_not_exchange_write": True,
+        "disabled_smoke_does_not_create_order": True,
+        "disabled_smoke_does_not_call_order_lifecycle": True,
+    }
+    assert scoped_handoff["scoped_disabled_submit_smoke"]["status"] == (
+        "disabled_smoke_passed"
+    )
+    assert scoped_handoff["scoped_disabled_submit_smoke"]["safety_invariants"][
+        "exchange_write_called"
+    ] is False
     assert scoped_handoff["pipeline_report"]["status"] == (
         "scoped_local_registration_proof_recorded"
     )

@@ -963,6 +963,71 @@ def _disabled_handoff_path(output_dir: Path) -> Path:
     return path
 
 
+def _disabled_handoff_path_from_operation_layer_evidence(
+    output_dir: Path,
+    *,
+    operation_layer_evidence: dict[str, Any],
+) -> Path:
+    ids = operation_layer_evidence.get("ids")
+    if not isinstance(ids, dict):
+        ids = {}
+    evidence = RuntimeExecutableSubmitReadinessEvidence(
+        final_gate_preview_id=str(
+            ids.get("final_gate_preview_id") or "dry-run-final-gate-preview-1"
+        ),
+        final_gate_passed=True,
+        owner_real_submit_authorization_id=ids.get(
+            "owner_real_submit_authorization_id"
+        ),
+        trusted_submit_fact_snapshot_id=ids.get("trusted_submit_fact_snapshot_id"),
+        submit_idempotency_policy_id=ids.get("submit_idempotency_policy_id"),
+        attempt_outcome_policy_id=ids.get("attempt_outcome_policy_id"),
+        protection_creation_failure_policy_id=ids.get(
+            "protection_creation_failure_policy_id"
+        ),
+        local_registration_enablement_decision_id=ids.get(
+            "local_registration_enablement_decision_id"
+        ),
+        exchange_submit_enablement_decision_id=(
+            ids.get("exchange_submit_enablement_decision_id")
+            or ids.get("exchange_submit_adapter_enablement_id")
+        ),
+        exchange_submit_action_authorization_id=ids.get(
+            "exchange_submit_action_authorization_id"
+        ),
+        order_lifecycle_submit_enablement_id=ids.get(
+            "order_lifecycle_submit_enablement_id"
+        ),
+        exchange_submit_adapter_enablement_id=ids.get(
+            "exchange_submit_adapter_enablement_id"
+        ),
+        deployment_readiness_evidence_id=ids.get("deployment_readiness_evidence_id"),
+        protection_required_and_ready=True,
+        active_position_source_trusted=True,
+        account_facts_fresh=True,
+        duplicate_submit_guard_ready=True,
+    )
+    readiness = build_runtime_executable_submit_readiness_packet(
+        runtime_instance_id=RUNTIME_ID,
+        source_strategy_planning_packet_id="dry-run-scoped-pipeline-plan-1",
+        source_authorization_id="dry-run-consumed-auth-1",
+        strategy_planning_status="ready_for_final_gate_preflight",
+        evidence=evidence,
+        order_candidate_id="dry-run-order-candidate-1",
+        signal_evaluation_id="dry-run-signal-eval-1",
+        source_release_packet_id="dry-run-release-1",
+        now_ms=int(time.time() * 1000),
+    )
+    handoff = build_runtime_official_submit_handoff_packet(
+        readiness_packet=readiness,
+        fresh_submit_authorization_id=FRESH_AUTHORIZATION_ID,
+        now_ms=int(time.time() * 1000),
+    )
+    path = output_dir / "scoped-pipeline-disabled-submit-handoff.json"
+    _write_json(path, {"packet": handoff.model_dump(mode="json")})
+    return path
+
+
 def _disabled_smoke_args(path: Path) -> argparse.Namespace:
     return argparse.Namespace(
         handoff_json=str(path),
@@ -1416,6 +1481,62 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
     readiness = dispatch.get("operation_layer_readiness")
     if not isinstance(readiness, dict):
         readiness = {}
+    scoped_disabled_handoff_path = _disabled_handoff_path_from_operation_layer_evidence(
+        output_dir,
+        operation_layer_evidence=operation_layer_evidence,
+    )
+    scoped_disabled_smoke = disabled_smoke._build_report(
+        _disabled_smoke_args(scoped_disabled_handoff_path),
+        client=_DisabledSmokeClient(),
+    )
+    ids = operation_layer_evidence.get("ids")
+    if not isinstance(ids, dict):
+        ids = {}
+    scoped_disabled_query = scoped_disabled_smoke.get("official_call", {}).get("query")
+    if not isinstance(scoped_disabled_query, dict):
+        scoped_disabled_query = {}
+    required_submit_query_ids = {
+        "trusted_submit_fact_snapshot_id",
+        "submit_idempotency_policy_id",
+        "attempt_outcome_policy_id",
+        "protection_creation_failure_policy_id",
+        "local_registration_enablement_decision_id",
+        "owner_real_submit_authorization_id",
+        "order_lifecycle_submit_enablement_id",
+        "exchange_submit_adapter_enablement_id",
+        "exchange_submit_action_authorization_id",
+        "deployment_readiness_evidence_id",
+    }
+    scoped_disabled_submit_checks = {
+        "handoff_query_uses_pipeline_evidence_ids": all(
+            scoped_disabled_query.get(name) == ids.get(name)
+            for name in required_submit_query_ids
+        ),
+        "disabled_smoke_called_official_endpoint": (
+            scoped_disabled_smoke.get("status") == "disabled_smoke_passed"
+            and scoped_disabled_smoke.get("official_call", {}).get("method") == "POST"
+        ),
+        "disabled_smoke_keeps_owner_real_submit_false": (
+            scoped_disabled_query.get("owner_confirmed_for_first_real_submit_action")
+            is False
+        ),
+        "disabled_smoke_does_not_exchange_write": (
+            scoped_disabled_smoke.get("safety_invariants", {}).get(
+                "exchange_write_called"
+            )
+            is False
+        ),
+        "disabled_smoke_does_not_create_order": (
+            scoped_disabled_smoke.get("safety_invariants", {}).get("order_created")
+            is False
+        ),
+        "disabled_smoke_does_not_call_order_lifecycle": (
+            scoped_disabled_smoke.get("safety_invariants", {}).get(
+                "order_lifecycle_called"
+            )
+            is False
+        ),
+    }
     checks = {
         "pipeline_reaches_scoped_local_registration_recorded": (
             pipeline_report.get("status") == "scoped_local_registration_proof_recorded"
@@ -1439,10 +1560,14 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
             pipeline_report.get("safety_invariants", {}).get("exchange_write_called")
             is False
         ),
+        "scoped_pipeline_disabled_submit_smoke_passed": all(
+            scoped_disabled_submit_checks.values()
+        ),
     }
     passed = all(checks.values()) and not _dangerous_effects(
         pipeline_report,
         dispatch,
+        scoped_disabled_smoke,
     )
     return _scenario_packet(
         name="scoped_pipeline_operation_layer_handoff",
@@ -1452,6 +1577,8 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         ),
         artifacts={
             "checks": checks,
+            "scoped_disabled_submit_checks": scoped_disabled_submit_checks,
+            "scoped_disabled_submit_smoke": scoped_disabled_smoke,
             "pipeline_report": pipeline_report,
             "resume_dispatch": dispatch,
             "pipeline_client_calls": pipeline_client.calls,
@@ -1460,9 +1587,15 @@ def _scenario_scoped_pipeline_operation_layer_handoff(
         blockers=[
             *pipeline_report.get("blockers", []),
             *dispatch.get("blockers", []),
+            *scoped_disabled_smoke.get("blockers", []),
             *[
                 f"scoped_pipeline_handoff_check_failed:{name}"
                 for name, value in checks.items()
+                if not value
+            ],
+            *[
+                f"scoped_pipeline_disabled_submit_check_failed:{name}"
+                for name, value in scoped_disabled_submit_checks.items()
                 if not value
             ],
         ],
