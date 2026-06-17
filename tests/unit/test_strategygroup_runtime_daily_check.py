@@ -823,6 +823,9 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "--output-json output/runtime-monitor/latest-goal-progress.json "
         "--output-owner-progress output/runtime-monitor/latest-goal-progress.md"
     )
+    assert baseline["quiet_monitor_audit_check"].endswith(
+        "audit_tokyo_runtime_quiet_monitor.py --owner-progress"
+    )
     assert baseline["homepage_visual_qa_check"] == (
         "cd owner-runtime-console && npm run visual:qa:home"
     )
@@ -840,3 +843,4 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
     ] == 1
     assert baseline["interaction_policy"]["homepage_visual_qa_remote_interaction_count"] == 0
     assert baseline["interaction_policy"]["goal_progress_audit_remote_interaction_count"] == 0
+    assert baseline["interaction_policy"]["quiet_monitor_audit_remote_interaction_count"] == 0

@@ -209,6 +209,7 @@ L1 read-only snapshot
 | Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become an Owner-readable engineering blocker instead of mixing new code with stale cached fields |
 | Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should use the baseline check modes: default status review is `--auto-cache`; explicit signal or regression investigation may force one L1 refresh and write `output/runtime-monitor/latest-daily-check.json` plus `output/runtime-monitor/latest-owner-progress.md` |
 | Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `heartbeat_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
+| Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including daily check and goal-progress commands, using `L0` / 0 remote interactions |
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
 | Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0/P0.5 track status with `L0` / 0 remote interactions |
 | Goal progress cache | The same audit writes `output/runtime-monitor/latest-goal-progress.json` and `output/runtime-monitor/latest-goal-progress.md`, so status reviews can reuse the latest local progress artifact |
@@ -268,6 +269,7 @@ safety state:
 | Routine deploy-session review | `--run-daily-check --daily-check-mode auto-cache` | `L0` if cache is fresh; otherwise one `L1` refresh |
 | Owner-readable deploy-session review | `--run-daily-check --daily-check-mode cache --owner-progress` | `L0`, 0 remote interactions when cache is fresh |
 | Goal progress review | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress` | Local cache/baseline only, 0 Tokyo interactions |
+| Quiet-monitor drift review | `audit_tokyo_runtime_quiet_monitor.py --owner-progress` | Local automation/config files only, 0 Tokyo interactions |
 | Homepage-only visual QA | `npm run visual:qa:home` | Local browser/dev-server only, 0 Tokyo interactions |
 
 When a tool can reuse a fresh cache or a single snapshot, it must not run extra
