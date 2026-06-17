@@ -502,6 +502,28 @@ def test_daily_check_reads_prebuilt_report_without_snapshot_probe(tmp_path, monk
     assert loaded["notification"]["decision"] == "DONT_NOTIFY"
 
 
+def test_daily_check_reads_default_cache_without_snapshot_probe(tmp_path, monkeypatch):
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    cache_path = tmp_path / "latest-daily-check.json"
+    cache_path.write_text(
+        json.dumps(report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("snapshot probe should not run")
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", cache_path)
+    monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
+    args = module._parse_args(["--from-cache"])
+
+    loaded = module._build_or_read_daily_check_report(args)
+
+    assert loaded["status"] == "waiting_for_market"
+    assert loaded["notification"]["decision"] == "DONT_NOTIFY"
+
+
 def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     module = _load_module()
     snapshot_path = tmp_path / "snapshot.json"

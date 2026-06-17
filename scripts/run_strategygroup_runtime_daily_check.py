@@ -16,6 +16,9 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT_SCRIPT = REPO_ROOT / "scripts" / "probe_tokyo_runtime_snapshot.py"
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
+DEFAULT_DAILY_CHECK_CACHE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
+)
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
 
 
@@ -51,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
 def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any]:
     if args.report_json_path:
         return _read_json(Path(args.report_json_path))
+    if args.from_cache:
+        return _read_json(DEFAULT_DAILY_CHECK_CACHE_JSON)
     expected_heads = _resolve_expected_heads(args)
     snapshot = (
         _read_json(Path(args.snapshot_json_path))
@@ -647,6 +652,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--report-json-path",
         help="Read a prebuilt daily-check report JSON without probing Tokyo.",
+    )
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Read the default local daily-check cache without probing Tokyo.",
     )
     parser.add_argument("--output-json")
     parser.add_argument(
