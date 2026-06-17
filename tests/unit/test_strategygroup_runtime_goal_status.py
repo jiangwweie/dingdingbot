@@ -1353,6 +1353,7 @@ def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
     assert packet["status"] == "waiting_for_signal"
     assert packet["ready_for_real_order_action"] is False
     assert packet["next_safe_checkpoint"] == "continue_watcher_observation"
+    assert list(report_dir.glob(".strategygroup-runtime-goal-status.json.*.tmp")) == []
     stdout_packet = json.loads(capsys.readouterr().out)
     assert stdout_packet["status"] == "waiting_for_signal"
     assert stdout_packet["ready_for_real_order_action"] is False

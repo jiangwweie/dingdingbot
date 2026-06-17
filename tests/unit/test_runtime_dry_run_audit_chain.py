@@ -557,3 +557,4 @@ def test_runtime_dry_run_audit_chain_cli_writes_packet(tmp_path, monkeypatch, ca
     packet = json.loads(output_json.read_text(encoding="utf-8"))
     assert packet["status"] == "passed"
     assert packet["checks"]["required_scenarios_present"] is True
+    assert list(tmp_path.glob(".runtime-dry-run-audit-chain.json.*.tmp")) == []

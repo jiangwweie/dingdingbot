@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from scripts import runtime_dry_run_audit_chain as audit_chain
 from scripts import runtime_execution_chain_closure_status as closure_status
 
@@ -118,3 +120,27 @@ def test_closure_status_blocks_when_required_dry_run_check_fails(tmp_path):
         "repair_failed_dry_run_checks_before_waiting_for_market",
         "do_not_call_real_operation_layer",
     ]
+
+
+def test_closure_status_cli_writes_packet_atomically(tmp_path, capsys):
+    audit_packet = audit_chain.build_audit_chain(tmp_path / "audit")
+    audit_json = tmp_path / "runtime-dry-run-audit-chain.json"
+    output_json = tmp_path / "runtime-execution-chain-closure-status.json"
+    audit_json.write_text(json.dumps(audit_packet), encoding="utf-8")
+
+    assert closure_status.main(
+        [
+            "--audit-json",
+            str(audit_json),
+            "--output-json",
+            str(output_json),
+        ]
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("{")
+    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    assert packet["status"] == "non_market_execution_chain_ready"
+    assert list(
+        tmp_path.glob(".runtime-execution-chain-closure-status.json.*.tmp")
+    ) == []

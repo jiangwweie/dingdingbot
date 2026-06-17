@@ -652,6 +652,9 @@ def test_cli_can_treat_degraded_local_refresh_as_continuable(
     )
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["places_order"] is False
+    assert list(tmp_path.glob(".product-state-refresh-packet.json.*.tmp")) == []
+    assert list(tmp_path.glob(".runtime-dry-run-audit-chain.json.*.tmp")) == []
+    assert list(tmp_path.glob(".strategygroup-runtime-goal-status.json.*.tmp")) == []
 
 
 def test_cli_keeps_default_blocked_exit_for_degraded_refresh(
