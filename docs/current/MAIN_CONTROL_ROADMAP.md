@@ -169,6 +169,24 @@ postdeploy or fresh-signal resume checks.
 | Postdeploy verification | Current Tokyo snapshot remains `status=ready`, `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
 | Safety | The monitor hardening is file-output-only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Runtime Monitor Atomic Deploy Checkpoint
+
+The monitor artifact hardening was pushed and deployed to Tokyo. This ensures
+future postdeploy and fresh-signal resume checks can write their local snapshot,
+daily-check, and goal-progress artifacts without exposing empty or partially
+written JSON to parallel readers.
+
+| Item | Result |
+| --- | --- |
+| Deployed runtime head | `14f76105efedafdc0be7e2b49d9d8618ad51a0b1` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-14f76105-monitor-atomic-artifacts` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Postdeploy snapshot | `status=ready`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `watcher_timer_active=true`, `source_readiness_ready=true` |
+| Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
+| Daily progress | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `目标链路段: 6 ready / 0 missing` |
+| Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]` |
+| Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Deploy Channel Diagnostic Checkpoint
 
 Tokyo deploy readiness now distinguishes deployment channel failures from
