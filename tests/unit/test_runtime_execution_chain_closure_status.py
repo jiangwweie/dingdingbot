@@ -35,6 +35,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "strategygroup_adapter_boundary_checked": True,
         "strategy_handoff_no_execution_pipeline_fields_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
+        "post_submit_exit_outcome_matrix_checked": True,
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
     }
@@ -46,6 +47,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "action_time_finalgate": True,
         "official_operation_layer_evidence_handoff": True,
         "disabled_dry_run_proof": True,
+        "post_submit_exit_outcome_matrix": True,
     }
     assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
         "fresh_or_mock_signal"
@@ -76,6 +78,11 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "scoped_pipeline_operation_layer_handoff": "passed",
         "mock_operation_layer_submit_finalize_pass": "passed",
     }
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "post_submit_exit_outcome_matrix"
+    ]["scenario_statuses"] == {
+        "post_submit_closed_loop_evidence_guard": "passed",
+    }
     assert packet["dry_run_chain"]["ready_goal_chain_segments"] == [
         "fresh_or_mock_signal",
         "required_facts_readiness",
@@ -83,6 +90,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "action_time_finalgate",
         "official_operation_layer_evidence_handoff",
         "disabled_dry_run_proof",
+        "post_submit_exit_outcome_matrix",
     ]
     assert packet["dry_run_chain"]["missing_or_failed_goal_chain_segments"] == []
     assert {

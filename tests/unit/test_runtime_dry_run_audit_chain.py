@@ -30,6 +30,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
+        "post_submit_exit_outcome_matrix_checked": True,
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
         "non_executing_prepare_auto_bridge_checked": True,
@@ -50,6 +51,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
+        "post_submit_exit_outcome_matrix_checked": True,
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
         "operation_layer_evidence_relay_checked": True,
@@ -224,6 +226,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert packet["checks"]["expanded_watcher_scope_execution_guard_checked"] is True
     assert packet["checks"]["operation_layer_authorization_chain_guard_checked"] is True
     assert packet["checks"]["post_submit_closed_loop_evidence_guard_checked"] is True
+    assert packet["checks"]["post_submit_exit_outcome_matrix_checked"] is True
     assert (
         packet["checks"]["operation_layer_submit_result_identity_guard_checked"]
         is True

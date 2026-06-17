@@ -3479,6 +3479,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).get("checks", {}).values()
             )
         ),
+        "post_submit_exit_outcome_matrix_checked": (
+            _scenario_artifact(
+                scenarios,
+                "post_submit_closed_loop_evidence_guard",
+                "post_submit_closed_loop_evidence_guard",
+            ).get("exit_outcome_matrix", {}).get("status")
+            == "passed"
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "post_submit_closed_loop_evidence_guard",
+                    "post_submit_closed_loop_evidence_guard",
+                ).get("exit_outcome_matrix", {}).get("checks", {}).values()
+            )
+        ),
         "operation_layer_submit_result_identity_guard_checked": (
             _scenario_artifact(
                 scenarios,
@@ -3551,6 +3566,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "post_submit_closed_loop_evidence_guard_checked": checks[
             "post_submit_closed_loop_evidence_guard_checked"
+        ],
+        "post_submit_exit_outcome_matrix_checked": checks[
+            "post_submit_exit_outcome_matrix_checked"
         ],
         "operation_layer_submit_result_identity_guard_checked": checks[
             "operation_layer_submit_result_identity_guard_checked"

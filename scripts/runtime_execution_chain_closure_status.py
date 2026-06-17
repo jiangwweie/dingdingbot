@@ -52,6 +52,7 @@ PROJECTED_DRY_RUN_CHECKS = [
     "strategygroup_adapter_boundary_checked",
     "strategy_handoff_no_execution_pipeline_fields_checked",
     "post_submit_closed_loop_evidence_guard_checked",
+    "post_submit_exit_outcome_matrix_checked",
     "operation_layer_submit_result_identity_guard_checked",
     "post_submit_finalize_result_identity_guard_checked",
 ]
@@ -78,6 +79,10 @@ GOAL_CHAIN_SEGMENTS = {
         "disabled_smoke_not_real_execution_proof",
         "mock_operation_layer_closed_loop_checked",
     ],
+    "post_submit_exit_outcome_matrix": [
+        "post_submit_closed_loop_evidence_guard_checked",
+        "post_submit_exit_outcome_matrix_checked",
+    ],
 }
 GOAL_CHAIN_SEGMENT_SCENARIOS = {
     "fresh_or_mock_signal": [
@@ -103,6 +108,9 @@ GOAL_CHAIN_SEGMENT_SCENARIOS = {
         "mock_fresh_signal_dry_run_pass",
         "scoped_pipeline_operation_layer_handoff",
         "mock_operation_layer_submit_finalize_pass",
+    ],
+    "post_submit_exit_outcome_matrix": [
+        "post_submit_closed_loop_evidence_guard",
     ],
 }
 SAFETY_INVARIANT_KEYS = [
