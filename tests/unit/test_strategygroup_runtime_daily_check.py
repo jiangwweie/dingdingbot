@@ -817,6 +817,9 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "run_tokyo_runtime_deploy_session.py "
         "--run-daily-check --daily-check-mode cache --owner-progress"
     )
+    assert baseline["goal_progress_audit_check"].endswith(
+        "run_strategygroup_runtime_goal_progress_audit.py --owner-progress"
+    )
     assert baseline["homepage_visual_qa_check"] == (
         "cd owner-runtime-console && npm run visual:qa:home"
     )
@@ -833,3 +836,4 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "deploy_postdeploy_daily_check_remote_interaction_count"
     ] == 1
     assert baseline["interaction_policy"]["homepage_visual_qa_remote_interaction_count"] == 0
+    assert baseline["interaction_policy"]["goal_progress_audit_remote_interaction_count"] == 0

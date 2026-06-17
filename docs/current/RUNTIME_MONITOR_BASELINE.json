@@ -12,6 +12,7 @@
   "deploy_session_postdeploy_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode fresh --json",
   "deploy_session_routine_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode auto-cache --json",
   "deploy_session_owner_progress_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress",
+  "goal_progress_audit_check": "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress",
   "homepage_visual_qa_check": "cd owner-runtime-console && npm run visual:qa:home",
   "signal_detection_source": "tokyo_runtime_signal_watcher_feishu_webhook",
   "signal_detection_note": "Local auto-cache checks are for low-noise status review; fresh market opportunity detection remains server-side watcher and notification driven.",
@@ -23,6 +24,7 @@
     "deploy_postdeploy_daily_check_level": "L1_daily_check_from_snapshot",
     "deploy_postdeploy_daily_check_remote_interaction_count": 1,
     "homepage_visual_qa_remote_interaction_count": 0,
+    "goal_progress_audit_remote_interaction_count": 0,
     "mutates_remote_files": false,
     "approaches_real_order": false
   }

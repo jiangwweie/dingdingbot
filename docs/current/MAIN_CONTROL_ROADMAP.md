@@ -210,6 +210,7 @@ L1 read-only snapshot
 | Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should use the baseline check modes: default status review is `--auto-cache`; explicit signal or regression investigation may force one L1 refresh and write `output/runtime-monitor/latest-daily-check.json` plus `output/runtime-monitor/latest-owner-progress.md` |
 | Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `heartbeat_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
+| Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0/P0.5 track status with `L0` / 0 remote interactions |
 | Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check` accepts `--daily-check-mode fresh`, `auto-cache`, or `cache`; postdeploy acceptance stays fresh, while routine reviews can reuse cache |
 | Deploy-session cache clarity | Cache-only deploy-session reviews report `interaction.level=L0_local_cache_read` and keep the original `collected_interaction_level` inside the step for audit context |
 | Deploy-session Owner progress | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress` renders a Markdown progress table with current stage, action, risk, interaction count, server mutation, and real-order proximity |
@@ -265,6 +266,7 @@ safety state:
 | Postdeploy acceptance | One daily-check snapshot plus one deploy-session summary | `L1` snapshot, summary local |
 | Routine deploy-session review | `--run-daily-check --daily-check-mode auto-cache` | `L0` if cache is fresh; otherwise one `L1` refresh |
 | Owner-readable deploy-session review | `--run-daily-check --daily-check-mode cache --owner-progress` | `L0`, 0 remote interactions when cache is fresh |
+| Goal progress review | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress` | Local cache/baseline only, 0 Tokyo interactions |
 | Homepage-only visual QA | `npm run visual:qa:home` | Local browser/dev-server only, 0 Tokyo interactions |
 
 When a tool can reuse a fresh cache or a single snapshot, it must not run extra
