@@ -340,6 +340,17 @@ async function createRuntimeFixtures({ deployChannelReady = false } = {}) {
     real_order_boundary: {
       ready_for_real_order_action: false,
     },
+    evidence: {
+      submit_blocker_review: {
+        required: false,
+        allowed: false,
+        project_progress_allowed: false,
+        continue_observation_allowed: false,
+        real_submit_allowed: false,
+        next_safe_checkpoint: "continue_watcher_observation",
+        blocker_keys: [],
+      },
+    },
     real_order_readiness_matrix: [
       { key: "selected_strategygroup_scope", status: "pass", blocker_class: "none", blocks_real_submit: false },
       { key: "fresh_signal", status: "waiting_for_market", blocker_class: "waiting_for_market", blocks_real_submit: true },
@@ -565,6 +576,9 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
     if (sourcePayload?.data?.real_order_readiness?.pass_count !== 8) {
       throw new Error("Expected source-readiness real-order readiness to include 8 passing checks");
     }
+    if (sourcePayload?.data?.real_order_readiness?.submit_blocker_review?.required !== false) {
+      throw new Error("Expected source-readiness real-order readiness to keep no-signal waiting out of submit-blocker review");
+    }
     const page = await context.newPage();
     const consoleIssues = [];
     page.on("console", (message) => {
@@ -584,6 +598,7 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
     await expectVisible(page, "8 项正常");
     await expectVisible(page, "4 项等待");
     await expectVisible(page, "0 项不可用");
+    await expectAbsent(page, "系统审查已记录");
     await expectVisible(page, "资金正常");
     await expectVisible(page, "暂无订单");
     await expectVisible(page, "暂无持仓");

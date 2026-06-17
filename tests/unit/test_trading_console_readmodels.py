@@ -6358,6 +6358,15 @@ def test_owner_console_real_order_readiness_prefers_top_level_goal_status_fields
     assert readiness["next_safe_checkpoint"] == "call_official_operation_layer_submit"
     assert readiness["pass_count"] == 2
     assert readiness["submit_blocking_keys"] == []
+    assert readiness["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": True,
+        "next_safe_checkpoint": "call_official_operation_layer_submit",
+        "blocker_keys": [],
+    }
 
 
 def test_owner_console_real_order_readiness_treats_auto_chain_waiting_as_processing():
@@ -6405,6 +6414,76 @@ def test_owner_console_real_order_readiness_treats_auto_chain_waiting_as_process
     assert readiness["blocked_count"] == 0
     assert readiness["waiting_count"] == 3
     assert readiness["ready_for_real_order_action"] is False
+    assert readiness["submit_blocker_review"] == {
+        "required": False,
+        "allowed": False,
+        "project_progress_allowed": False,
+        "continue_observation_allowed": False,
+        "real_submit_allowed": False,
+        "next_safe_checkpoint": "prepare_candidate_grant_authorization_evidence",
+        "blocker_keys": [],
+    }
+
+
+def test_owner_console_real_order_readiness_projects_submit_blocker_review():
+    from src.application.readmodels.trading_console import (
+        _owner_console_real_order_readiness,
+    )
+
+    readiness = _owner_console_real_order_readiness(
+        {
+            "status": "missing_fact",
+            "ready_for_real_order_action": False,
+            "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+            "evidence": {
+                "submit_blocker_review": {
+                    "required": True,
+                    "allowed": True,
+                    "project_progress_allowed": True,
+                    "continue_observation_allowed": True,
+                    "real_submit_allowed": False,
+                    "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+                    "blocker_keys": ["protection", "budget"],
+                }
+            },
+            "real_order_boundary": {
+                "submit_blocker_review_required": True,
+                "submit_blocker_review_allowed": True,
+                "project_progress_allowed": True,
+                "continue_observation_allowed": True,
+                "real_submit_allowed": False,
+                "submit_blocker_keys": ["protection", "budget"],
+            },
+            "real_order_readiness_matrix": [
+                {
+                    "key": "protection",
+                    "status": "blocked",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+                {
+                    "key": "budget",
+                    "status": "blocked",
+                    "blocker_class": "missing_fact",
+                    "blocks_real_submit": True,
+                },
+            ],
+        }
+    )
+
+    assert readiness["status"] == "blocked"
+    assert readiness["owner_label"] == "暂不可用"
+    assert readiness["ready_for_real_order_action"] is False
+    assert readiness["submit_blocking_keys"] == ["protection", "budget"]
+    assert readiness["submit_blocker_review"] == {
+        "required": True,
+        "allowed": True,
+        "project_progress_allowed": True,
+        "continue_observation_allowed": True,
+        "real_submit_allowed": False,
+        "next_safe_checkpoint": "record_submit_blocker_review_and_refresh_required_facts",
+        "blocker_keys": ["protection", "budget"],
+    }
 
 
 def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_missing():

@@ -70,6 +70,7 @@ function HomePage({
 
 function realOrderTone(projection: OwnerProductProjection) {
   const readiness = projection.realOrderReadiness;
+  if (readiness.submitBlockerReview.required) return "danger" as const;
   if (readiness.blockedCount > 0 || projection.sourceHealth.realOrderReadiness.status === "unavailable") return "danger" as const;
   if (readiness.readyForRealOrderAction) return "safe" as const;
   if (readiness.waitingCount > 0) return "waiting" as const;
@@ -81,9 +82,12 @@ function RealOrderReadinessCard({ projection }: { projection: OwnerProductProjec
   const tone = realOrderTone(projection);
   const actionText = readiness.readyForRealOrderAction
     ? "路径已就绪，系统自动处理"
+    : readiness.submitBlockerReview.required
+      ? "已记录阻断，真实订单关闭"
     : readiness.blockedCount > 0
       ? "路径未就绪，系统保持关闭"
       : "路径健康，等待市场机会";
+  const blockerLabels = submitBlockerLabels(readiness.submitBlockerReview.blockerKeys);
 
   return (
     <Card className="rounded-lg shadow-[var(--shadow-panel)]">
@@ -101,13 +105,42 @@ function RealOrderReadinessCard({ projection }: { projection: OwnerProductProjec
             {readiness.passCount} 项正常 / {readiness.waitingCount} 项等待 / {readiness.blockedCount} 项不可用
           </div>
           <div className="mt-1 text-sm text-muted-foreground">
-            {readiness.blockedCount > 0 ? "系统会保持关闭，直到状态恢复" : "市场没有机会时，系统继续观察"}
+            {readiness.submitBlockerReview.required
+              ? "系统已记录审查，继续修复或观察，真实订单不会提交"
+              : readiness.blockedCount > 0
+                ? "系统会保持关闭，直到状态恢复"
+                : "市场没有机会时，系统继续观察"}
           </div>
         </div>
+        {readiness.submitBlockerReview.required ? (
+          <div className="rounded-lg border border-[color:var(--status-danger-border)] bg-[color:var(--status-danger-bg)] p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--status-danger)]">
+              <AlertTriangle className="size-4" />
+              系统审查已记录
+            </div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              {blockerLabels.length > 0 ? blockerLabels.join("、") : "提交前状态需要系统处理"}
+            </div>
+          </div>
+        ) : null}
         <ContextRow label="真实订单" tone={tone} value={readiness.readyForRealOrderAction ? "路径就绪" : "保持关闭"} />
       </CardContent>
     </Card>
   );
+}
+
+function submitBlockerLabels(keys: string[]) {
+  const labels: Record<string, string> = {
+    active_position_open_order: "有持仓或订单处理中",
+    protection: "保护未就绪",
+    budget: "预算未就绪",
+    duplicate_submit: "重复提交风险",
+    symbol_side_notional_leverage_scope: "交易边界不匹配",
+    selected_strategygroup_scope: "策略组范围不匹配",
+    hard_safety: "安全边界阻断",
+    required_facts: "事实状态不可用",
+  };
+  return keys.map((key) => labels[key]).filter((label): label is string => Boolean(label));
 }
 
 function RuntimeMetrics({ summary }: { summary: OwnerProductProjection["productSummary"] }) {

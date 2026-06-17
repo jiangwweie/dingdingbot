@@ -7960,6 +7960,15 @@ def _owner_console_real_order_readiness(
             "waiting_count": 0,
             "blocked_count": 0,
             "submit_blocking_keys": [],
+            "submit_blocker_review": {
+                "required": False,
+                "allowed": False,
+                "project_progress_allowed": False,
+                "continue_observation_allowed": False,
+                "real_submit_allowed": False,
+                "next_safe_checkpoint": "refresh_runtime_goal_status",
+                "blocker_keys": [],
+            },
             "next_safe_checkpoint": "refresh_runtime_goal_status",
             "matrix": [],
             "source_health": _owner_console_detail_source(
@@ -7991,6 +8000,11 @@ def _owner_console_real_order_readiness(
         for item in matrix_rows
         if item.get("blocks_real_submit") is True
     ]
+    submit_blocker_review = _owner_console_submit_blocker_review(
+        runtime_goal_status=runtime_goal_status,
+        next_checkpoint=next_checkpoint,
+        ready_for_real_order=ready_for_real_order,
+    )
     blocked_count = sum(1 for item in matrix_rows if item.get("status") == "blocked")
     waiting_count = sum(
         1
@@ -8038,6 +8052,7 @@ def _owner_console_real_order_readiness(
         "waiting_count": waiting_count,
         "blocked_count": blocked_count,
         "submit_blocking_keys": submit_blocking_keys,
+        "submit_blocker_review": submit_blocker_review,
         "next_safe_checkpoint": next_checkpoint,
         "matrix": matrix_rows,
         "source_health": _owner_console_detail_source(
@@ -8045,6 +8060,66 @@ def _owner_console_real_order_readiness(
             owner_label=owner_label,
             reason=str(runtime_goal_status.get("status") or "runtime_goal_status"),
         ),
+    }
+
+
+def _owner_console_submit_blocker_review(
+    *,
+    runtime_goal_status: dict[str, Any],
+    next_checkpoint: str,
+    ready_for_real_order: bool,
+) -> dict[str, Any]:
+    evidence = (
+        runtime_goal_status.get("evidence")
+        if isinstance(runtime_goal_status.get("evidence"), dict)
+        else {}
+    )
+    review = (
+        evidence.get("submit_blocker_review")
+        if isinstance(evidence.get("submit_blocker_review"), dict)
+        else {}
+    )
+    boundary = (
+        runtime_goal_status.get("real_order_boundary")
+        if isinstance(runtime_goal_status.get("real_order_boundary"), dict)
+        else {}
+    )
+    blocker_keys = review.get("blocker_keys")
+    if not isinstance(blocker_keys, list):
+        blocker_keys = boundary.get("submit_blocker_keys")
+    if not isinstance(blocker_keys, list):
+        blocker_keys = []
+    required = review.get("required")
+    if not isinstance(required, bool):
+        required = boundary.get("submit_blocker_review_required") is True
+    allowed = review.get("allowed")
+    if not isinstance(allowed, bool):
+        allowed = boundary.get("submit_blocker_review_allowed") is True
+    project_progress_allowed = review.get("project_progress_allowed")
+    if not isinstance(project_progress_allowed, bool):
+        project_progress_allowed = boundary.get("project_progress_allowed") is True
+    continue_observation_allowed = review.get("continue_observation_allowed")
+    if not isinstance(continue_observation_allowed, bool):
+        continue_observation_allowed = (
+            boundary.get("continue_observation_allowed") is True
+        )
+    real_submit_allowed = review.get("real_submit_allowed")
+    if not isinstance(real_submit_allowed, bool):
+        real_submit_allowed = (
+            boundary.get("real_submit_allowed")
+            if isinstance(boundary.get("real_submit_allowed"), bool)
+            else ready_for_real_order
+        )
+    return {
+        "required": required,
+        "allowed": allowed,
+        "project_progress_allowed": project_progress_allowed,
+        "continue_observation_allowed": continue_observation_allowed,
+        "real_submit_allowed": real_submit_allowed,
+        "next_safe_checkpoint": str(
+            review.get("next_safe_checkpoint") or next_checkpoint
+        ),
+        "blocker_keys": [str(item) for item in blocker_keys if str(item)],
     }
 
 

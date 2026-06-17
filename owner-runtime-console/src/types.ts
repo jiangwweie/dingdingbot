@@ -112,6 +112,15 @@ export type OwnerRealOrderReadiness = {
   waitingCount: number;
   blockedCount: number;
   submitBlockingKeys: string[];
+  submitBlockerReview: {
+    required: boolean;
+    allowed: boolean;
+    projectProgressAllowed: boolean;
+    continueObservationAllowed: boolean;
+    realSubmitAllowed: boolean;
+    nextSafeCheckpoint: string;
+    blockerKeys: string[];
+  };
   nextSafeCheckpoint: string;
   matrix: OwnerReadinessMatrixItem[];
 };
@@ -185,6 +194,15 @@ export type OwnerConsoleSourceReadinessData = {
     waiting_count?: number | null;
     blocked_count?: number | null;
     submit_blocking_keys?: string[] | null;
+    submit_blocker_review?: {
+      required?: boolean | null;
+      allowed?: boolean | null;
+      project_progress_allowed?: boolean | null;
+      continue_observation_allowed?: boolean | null;
+      real_submit_allowed?: boolean | null;
+      next_safe_checkpoint?: string | null;
+      blocker_keys?: string[] | null;
+    } | null;
     next_safe_checkpoint?: string | null;
     matrix?: Array<{
       key?: string | null;

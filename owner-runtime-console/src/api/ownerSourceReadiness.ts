@@ -102,6 +102,19 @@ function mapReadinessMatrix(value: OwnerConsoleSourceReadinessData["real_order_r
   }));
 }
 
+function mapSubmitBlockerReview(value: OwnerConsoleSourceReadinessData["real_order_readiness"]) {
+  const raw = value?.submit_blocker_review;
+  return {
+    required: raw?.required === true,
+    allowed: raw?.allowed === true,
+    projectProgressAllowed: raw?.project_progress_allowed === true,
+    continueObservationAllowed: raw?.continue_observation_allowed === true,
+    realSubmitAllowed: raw?.real_submit_allowed === true,
+    nextSafeCheckpoint: raw?.next_safe_checkpoint || value?.next_safe_checkpoint || "等待系统刷新",
+    blockerKeys: asStringList(raw?.blocker_keys),
+  };
+}
+
 function mapRealOrderReadiness(source: OwnerConsoleSourceReadinessData, health: OwnerSourceHealth): OwnerRealOrderReadiness {
   const raw = source.real_order_readiness;
   const ownerLabel = raw?.owner_label || source.owner_summary?.real_order_readiness || health.realOrderReadiness.label;
@@ -115,12 +128,14 @@ function mapRealOrderReadiness(source: OwnerConsoleSourceReadinessData, health: 
     waitingCount: asNumber(raw?.waiting_count),
     blockedCount: asNumber(raw?.blocked_count),
     submitBlockingKeys: asStringList(raw?.submit_blocking_keys),
+    submitBlockerReview: mapSubmitBlockerReview(raw),
     nextSafeCheckpoint: raw?.next_safe_checkpoint || "等待系统刷新",
     matrix: mapReadinessMatrix(raw),
   };
 }
 
 function realOrderChangeTitle(readiness: OwnerRealOrderReadiness) {
+  if (readiness.submitBlockerReview.required) return "实盘阻断已记录";
   if (readiness.blockedCount > 0) return "实盘状态暂不可用";
   if (readiness.readyForRealOrderAction) return "实盘路径已就绪";
   if (readiness.waitingCount > 0) return "实盘状态等待机会";
@@ -288,8 +303,10 @@ export function sourceReadinessToProjection(response: OwnerConsoleSourceReadines
       {
         id: "real-order-readiness-state",
         title: realOrderChangeTitle(realOrderReadiness),
-        detail: `${realOrderReadiness.passCount} 项正常，${realOrderReadiness.waitingCount} 项等待，${realOrderReadiness.blockedCount} 项不可用`,
-        tone: realOrderReadiness.blockedCount > 0 ? "danger" : realOrderReadiness.readyForRealOrderAction ? "safe" : "waiting",
+        detail: realOrderReadiness.submitBlockerReview.required
+          ? "系统已记录阻断审查，真实订单保持关闭"
+          : `${realOrderReadiness.passCount} 项正常，${realOrderReadiness.waitingCount} 项等待，${realOrderReadiness.blockedCount} 项不可用`,
+        tone: realOrderReadiness.submitBlockerReview.required || realOrderReadiness.blockedCount > 0 ? "danger" : realOrderReadiness.readyForRealOrderAction ? "safe" : "waiting",
         sourceKind: "safety_state",
       },
       ...rowChanges,
