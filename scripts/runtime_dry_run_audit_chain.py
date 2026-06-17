@@ -188,7 +188,8 @@ def _legacy_local_registration_probe_report() -> dict[str, Any]:
     report = _operation_evidence_report(
         blockers=[
             "first_real_submit_packet_unavailable:"
-            "runtimeexecutionorderlifecycleadapterresult_not_found"
+            "runtimeexecutionorderlifecycleadapterresult_not_found",
+            "preview_disabled_first_real_submit_action_http_404",
         ]
     )
     report["status"] = "ready"
