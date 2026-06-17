@@ -32,6 +32,13 @@ UI work has been externalized and is no longer part of the main runtime goal.
 This file is not a research backlog, frontend design spec, or historical packet
 index.
 
+## Current Audit Surface
+
+Use `docs/current/STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md` for the current
+requirement-by-requirement audit of P0 real-entry fast chain, P0 exit
+hardening, P1 StrategyGroup tier governance, and the remaining
+market-dependent first real-order proof.
+
 ## Current Tracks
 
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
