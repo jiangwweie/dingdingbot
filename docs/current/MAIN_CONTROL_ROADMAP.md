@@ -189,10 +189,38 @@ L1 read-only snapshot
 | Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply`; frontend publish reports `L1_publish_plan_only` or `L3_frontend_static_publish` |
 | Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
 | Frontend publish | `scripts/publish_owner_console_frontend.py` publishes `owner-runtime-console/dist` to `/var/www/brc-owner-console` and writes `frontend-release.json` with the current branch/head |
+| Deploy session summary | `scripts/run_tokyo_runtime_deploy_session.py` combines runtime deploy, frontend publish, and one postdeploy daily check into a single Owner-readable report with highest interaction level, total remote interactions, mutation status, and real-order proximity |
 | Tokyo verification | L1 snapshot after publish reports runtime head `e0c3fd63fcd1d588c1c815baeec3bab921288c1d` and frontend head `dfdfd5140de366aad955ede8b7c4fbb1ed75bdca`; watcher/backend/nginx active, source-readiness ready, dry-run audit passed, and no product gaps |
 | Daily check | `scripts/run_strategygroup_runtime_daily_check.py` consumes one L1 snapshot and returns `waiting_for_market`, `degraded`, or `blocked` with Owner-readable current action and safety invariants |
 | UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
 | Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
+
+### Deploy Interaction Rule
+
+After bounded Tokyo deploys or homepage publishes, the main runtime window should
+prefer one deploy-session report instead of narrating each server command. The
+normal shape is:
+
+```text
+runtime deploy report
++ optional frontend publish report
++ one L1 daily check
+-> tokyo_runtime_deploy_session
+```
+
+The report must state:
+
+| Field | Meaning |
+| --- | --- |
+| `interaction.level` | Highest interaction level in the session, for example `L3_bounded_deploy_apply` |
+| `interaction.remote_interaction_count` | Total counted remote interactions from the session steps |
+| `interaction.mutates_remote_files` | Whether the session changed remote runtime or static frontend files |
+| `interaction.approaches_real_order` | Must remain `false` for deploy and frontend publish sessions |
+| `owner_summary.current_action` | One Owner-readable next action, usually `继续等待市场机会` when healthy |
+
+This is a communication and tooling optimization only. It does not authorize
+FinalGate bypass, Operation Layer bypass, exchange write, live-profile changes,
+order-sizing changes, withdrawals, transfers, or stale-fact execution.
 
 ## P0 Subgoal: Runtime Liveness Repair
 
