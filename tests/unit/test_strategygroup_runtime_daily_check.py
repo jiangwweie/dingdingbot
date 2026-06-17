@@ -35,6 +35,10 @@ def _snapshot(**overrides):
             "approaches_real_order": False,
             "calls_exchange_write": False,
         },
+        "inputs": {
+            "expected_runtime_head": "runtime-head-1",
+            "expected_frontend_head": None,
+        },
         "owner_summary": {
             "state": "等待机会",
             "current_action": "继续等待市场机会",
@@ -58,6 +62,13 @@ def _snapshot(**overrides):
             "frontend_scope": "externalized",
         },
         "facts": {
+            "release": {
+                "head": "runtime-head-1",
+                "current_realpath": (
+                    "/home/ubuntu/brc-deploy/releases/"
+                    "brc-runtime-governance-runtime-head-1"
+                ),
+            },
             "reports": {
                 "goal_status": {
                     "status": "waiting_for_signal",
@@ -133,6 +144,14 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False
     assert report["checks"]["blockers"] == []
+    assert report["source"] == {
+        "expected_runtime_head": "runtime-head-1",
+        "runtime_head": "runtime-head-1",
+        "runtime_release_path": (
+            "/home/ubuntu/brc-deploy/releases/"
+            "brc-runtime-governance-runtime-head-1"
+        ),
+    }
     assert report["checks"]["waiting_for_market"] is True
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
@@ -722,6 +741,36 @@ def test_daily_check_require_fresh_cache_blocks_stale_schema():
     assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
 
 
+def test_daily_check_require_fresh_cache_blocks_runtime_head_mismatch():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = datetime(
+        2026,
+        6,
+        17,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    ).isoformat()
+
+    gated = module._apply_cache_freshness_gate(
+        report,
+        require_fresh_cache=True,
+        now_utc=datetime(2026, 6, 17, 0, 1, tzinfo=timezone.utc),
+        max_cache_age_minutes=5,
+        expected_runtime_head="runtime-head-2",
+    )
+
+    assert gated["status"] == "blocked"
+    assert gated["notification"]["decision"] == "NOTIFY"
+    assert (
+        gated["notification"]["reason"]
+        == "runtime_progress_cache_runtime_head_stale"
+    )
+    assert "runtime_progress_cache_runtime_head_stale" in gated["checks"]["blockers"]
+    assert gated["interaction"]["level"] == "L0_local_cache_gate"
+
+
 def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     module = _load_module()
     snapshot_path = tmp_path / "snapshot.json"
@@ -799,7 +848,13 @@ def test_daily_check_from_cache_owner_progress_separates_read_from_collection(
     monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
 
     exit_code = module.main(
-        ["--from-cache", "--require-fresh-cache", "--owner-progress"]
+        [
+            "--from-cache",
+            "--require-fresh-cache",
+            "--owner-progress",
+            "--expected-runtime-head",
+            "runtime-head-1",
+        ]
     )
 
     captured = capsys.readouterr()
@@ -834,7 +889,14 @@ def test_daily_check_auto_cache_uses_fresh_cache_without_snapshot_probe(
     )
     monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
 
-    exit_code = module.main(["--auto-cache", "--owner-progress"])
+    exit_code = module.main(
+        [
+            "--auto-cache",
+            "--owner-progress",
+            "--expected-runtime-head",
+            "runtime-head-1",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -886,6 +948,68 @@ def test_daily_check_auto_cache_refreshes_stale_cache_once_and_writes_outputs(
     assert "- 当前阶段: 等待机会" in owner_progress_path.read_text(
         encoding="utf-8"
     )
+
+
+def test_daily_check_auto_cache_refreshes_runtime_head_mismatch_once(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load_module()
+    cache_path = tmp_path / "latest-daily-check.json"
+    owner_progress_path = tmp_path / "latest-owner-progress.md"
+    stale_head_report = module.build_daily_check_report(snapshot=_snapshot())
+    stale_head_report["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    cache_path.write_text(
+        json.dumps(stale_head_report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def one_snapshot(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["expected_runtime_head"] == "runtime-head-2"
+        return _snapshot(
+            inputs={
+                "expected_runtime_head": "runtime-head-2",
+                "expected_frontend_head": None,
+            },
+            facts={
+                "release": {
+                    "head": "runtime-head-2",
+                    "current_realpath": (
+                        "/home/ubuntu/brc-deploy/releases/"
+                        "brc-runtime-governance-runtime-head-2"
+                    ),
+                },
+                "reports": _snapshot()["facts"]["reports"],
+            },
+        )
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", cache_path)
+    monkeypatch.setattr(
+        module,
+        "DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD",
+        owner_progress_path,
+    )
+    monkeypatch.setattr(module, "_run_snapshot", one_snapshot)
+
+    exit_code = module.main(
+        [
+            "--auto-cache",
+            "--owner-progress",
+            "--expected-runtime-head",
+            "runtime-head-2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    refreshed = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert refreshed["source"]["runtime_head"] == "runtime-head-2"
+    assert refreshed["source"]["expected_runtime_head"] == "runtime-head-2"
+    assert "- 交互等级: L1_daily_check_from_snapshot" in captured.out
+    assert "- 本次读取等级: L0_local_cache_read" not in captured.out
+    assert owner_progress_path.exists()
 
 
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):

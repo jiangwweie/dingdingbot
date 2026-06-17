@@ -33,7 +33,7 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 7
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 8
 
 ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "fresh_signal_fast_auto_chain_checked",
@@ -58,11 +58,13 @@ STRATEGYGROUP_TIER_REQUIRED_SEGMENTS = (
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    expected_heads = _resolve_expected_heads(args)
     report = _build_or_read_daily_check_report(args)
     report = _apply_cache_freshness_gate(
         report,
         require_fresh_cache=args.require_fresh_cache,
         max_cache_age_minutes=args.max_cache_age_minutes,
+        expected_runtime_head=expected_heads["expected_runtime_head"],
     )
     if args.from_cache:
         report = _annotate_current_read_interaction(report)
@@ -118,15 +120,16 @@ def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any
 
 
 def _build_auto_cache_daily_check_report(args: argparse.Namespace) -> dict[str, Any]:
+    expected_heads = _resolve_expected_heads(args)
     if DEFAULT_DAILY_CHECK_CACHE_JSON.exists():
         cached = _read_json(DEFAULT_DAILY_CHECK_CACHE_JSON)
         if _is_fresh_cache_report(
             cached,
             max_cache_age_minutes=args.max_cache_age_minutes,
+            expected_runtime_head=expected_heads["expected_runtime_head"],
         ):
             return _annotate_current_read_interaction(cached)
 
-    expected_heads = _resolve_expected_heads(args)
     snapshot = (
         _read_json(Path(args.snapshot_json_path))
         if args.snapshot_json_path
@@ -168,7 +171,9 @@ def build_daily_check_report(
     interaction = (
         snapshot.get("interaction") if isinstance(snapshot.get("interaction"), dict) else {}
     )
+    inputs = snapshot.get("inputs") if isinstance(snapshot.get("inputs"), dict) else {}
     facts = snapshot.get("facts") if isinstance(snapshot.get("facts"), dict) else {}
+    release = facts.get("release") if isinstance(facts.get("release"), dict) else {}
     reports = facts.get("reports") if isinstance(facts.get("reports"), dict) else {}
     goal_status = (
         reports.get("goal_status") if isinstance(reports.get("goal_status"), dict) else {}
@@ -335,6 +340,13 @@ def build_daily_check_report(
         "status": status,
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source": {
+            "expected_runtime_head": _optional_text(
+                inputs.get("expected_runtime_head")
+            ),
+            "runtime_head": _optional_text(release.get("head")),
+            "runtime_release_path": _optional_text(release.get("current_realpath")),
+        },
         "interaction": annotate_interaction({
             "level": "L1_daily_check_from_snapshot",
             "uses_snapshot_level": interaction.get("level"),
@@ -746,6 +758,7 @@ def _apply_cache_freshness_gate(
     *,
     require_fresh_cache: bool,
     max_cache_age_minutes: int,
+    expected_runtime_head: str | None = None,
     now_utc: datetime | None = None,
 ) -> dict[str, Any]:
     if not require_fresh_cache:
@@ -762,7 +775,16 @@ def _apply_cache_freshness_gate(
         max_cache_age_minutes=max_cache_age_minutes,
     )
     if cache_status == "fresh":
-        return report
+        if _cache_runtime_head_matches(
+            report,
+            expected_runtime_head=expected_runtime_head,
+        ):
+            return report
+        return _gated_cache_report(
+            report,
+            reason="runtime_progress_cache_runtime_head_stale",
+            detail="本地 runtime monitor 缓存对应的部署 head 已过期，等待自动化刷新",
+        )
     reason = (
         "runtime_progress_cache_timestamp_unknown"
         if cache_status == "unknown"
@@ -780,15 +802,37 @@ def _is_fresh_cache_report(
     report: dict[str, Any],
     *,
     max_cache_age_minutes: int,
+    expected_runtime_head: str | None = None,
 ) -> bool:
     if report.get("schema_version") != DAILY_CHECK_REPORT_SCHEMA_VERSION:
         return False
-    return (
+    if (
         _cache_status_text(
             generated_at=str(report.get("generated_at_utc") or "unknown"),
             max_cache_age_minutes=max_cache_age_minutes,
         )
-        == "fresh"
+        != "fresh"
+    ):
+        return False
+    return _cache_runtime_head_matches(
+        report,
+        expected_runtime_head=expected_runtime_head,
+    )
+
+
+def _cache_runtime_head_matches(
+    report: dict[str, Any],
+    *,
+    expected_runtime_head: str | None,
+) -> bool:
+    if not expected_runtime_head:
+        return True
+    source = report.get("source") if isinstance(report.get("source"), dict) else {}
+    cached_runtime_head = _optional_text(source.get("runtime_head"))
+    cached_expected_head = _optional_text(source.get("expected_runtime_head"))
+    return (
+        cached_runtime_head == expected_runtime_head
+        and cached_expected_head == expected_runtime_head
     )
 
 
