@@ -491,7 +491,11 @@ def _heartbeat_xml(report: dict[str, Any]) -> str:
     )
 
 
-def _owner_progress_text(report: dict[str, Any]) -> str:
+def _owner_progress_text(
+    report: dict[str, Any],
+    *,
+    now_utc: datetime | None = None,
+) -> str:
     owner = report.get("owner_summary")
     if not isinstance(owner, dict):
         owner = {}
@@ -514,10 +518,14 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     missing_dry_run_checks = [
         str(item) for item in checks.get("runtime_dry_run_missing_required_checks") or []
     ]
+    generated_at = str(report.get("generated_at_utc") or "unknown")
+    cache_age = _cache_age_text(generated_at=generated_at, now_utc=now_utc)
 
     lines = [
         "## StrategyGroup Runtime Progress",
         "",
+        f"- 报告时间: {generated_at}",
+        f"- 缓存年龄: {cache_age}",
         f"- 当前阶段: {owner.get('state') or report.get('status') or 'unknown'}",
         f"- 当前动作: {owner.get('current_action') or 'unknown'}",
         f"- 风险等级: {owner.get('risk_level') or 'unknown'}",
@@ -559,6 +567,39 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
 
 def _yes_no(value: bool) -> str:
     return "是" if value else "否"
+
+
+def _cache_age_text(*, generated_at: str, now_utc: datetime | None = None) -> str:
+    generated_at_dt = _parse_iso_datetime(generated_at)
+    if generated_at_dt is None:
+        return "unknown"
+    now = now_utc or datetime.now(timezone.utc)
+    age_seconds = max(0, int((now - generated_at_dt).total_seconds()))
+    age_minutes = age_seconds // 60
+    if age_minutes < 1:
+        return "<1m"
+    if age_minutes < 60:
+        return f"{age_minutes}m"
+    age_hours = age_minutes // 60
+    remaining_minutes = age_minutes % 60
+    if remaining_minutes == 0:
+        return f"{age_hours}h"
+    return f"{age_hours}h{remaining_minutes}m"
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    text = value.strip()
+    if not text or text == "unknown":
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

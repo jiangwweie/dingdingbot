@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -370,10 +371,16 @@ def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
 def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     module = _load_module()
     report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = "2026-06-17T00:00:00+00:00"
 
-    text = module._owner_progress_text(report)
+    text = module._owner_progress_text(
+        report,
+        now_utc=datetime(2026, 6, 17, 0, 5, tzinfo=timezone.utc),
+    )
 
     assert "## StrategyGroup Runtime Progress" in text
+    assert "- 报告时间: 2026-06-17T00:00:00+00:00" in text
+    assert "- 缓存年龄: 5m" in text
     assert "- 当前阶段: 等待机会" in text
     assert "- 当前动作: 继续等待市场机会" in text
     assert "- Owner 介入: 否" in text
@@ -416,6 +423,43 @@ def test_daily_check_owner_progress_text_surfaces_safety_blocker():
     assert "- 通知决策: NOTIFY" in text
     assert "## Blockers" in text
     assert "- active_position_open_order_conflict" in text
+
+
+def test_daily_check_owner_progress_text_marks_subminute_cache_age():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = "2026-06-17T00:00:30+00:00"
+
+    text = module._owner_progress_text(
+        report,
+        now_utc=datetime(2026, 6, 17, 0, 0, 45, tzinfo=timezone.utc),
+    )
+
+    assert "- 缓存年龄: <1m" in text
+
+
+def test_daily_check_owner_progress_text_marks_hour_cache_age():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = "2026-06-17T00:00:00Z"
+
+    text = module._owner_progress_text(
+        report,
+        now_utc=datetime(2026, 6, 17, 2, 7, tzinfo=timezone.utc),
+    )
+
+    assert "- 缓存年龄: 2h7m" in text
+
+
+def test_daily_check_owner_progress_text_handles_unknown_cache_age():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = "not-a-date"
+
+    text = module._owner_progress_text(report)
+
+    assert "- 报告时间: not-a-date" in text
+    assert "- 缓存年龄: unknown" in text
 
 
 def test_daily_check_reads_prebuilt_report_without_snapshot_probe(tmp_path, monkeypatch):
