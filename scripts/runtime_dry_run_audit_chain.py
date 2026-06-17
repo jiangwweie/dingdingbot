@@ -447,6 +447,54 @@ def _resume_pack_waiting() -> dict[str, Any]:
     }
 
 
+def _non_executing_prepare_packet() -> dict[str, Any]:
+    return {
+        "scope": "runtime_next_attempt_prepare_packet",
+        "status": "ready_for_final_gate_preflight",
+        "ids": {
+            "authorization_id": FRESH_AUTHORIZATION_ID,
+            "execution_intent_id": "dry-run-execution-intent-1",
+            "runtime_execution_intent_draft_id": "dry-run-intent-draft-1",
+            "order_candidate_id": "dry-run-order-candidate-1",
+        },
+        "operator_command_plan": {
+            "prepared_authorization_id": FRESH_AUTHORIZATION_ID,
+            "not_executed": True,
+            "live_submit_allowed": False,
+            "requires_official_final_gate": True,
+            "requires_official_operation_layer": True,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+        },
+        "created_records": {
+            "shadow_candidate_created": True,
+            "runtime_execution_intent_draft_created": True,
+            "execution_intent_created": True,
+            "submit_authorization_created": True,
+            "protection_plan_created": True,
+            "attempt_reservation_created": False,
+            "attempt_mutation_created": False,
+            "order_lifecycle_handoff_created": False,
+        },
+        "safety_invariants": {
+            "uses_official_trading_console_api": True,
+            "next_attempt_gate_checked": True,
+            "local_registration_armed": False,
+            "exchange_submit_armed": False,
+            "execute_real_submit": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "attempt_counter_mutated": False,
+            "runtime_budget_mutated": False,
+            "position_opened": False,
+            "withdrawal_or_transfer_created": False,
+        },
+        "blockers": [],
+        "warnings": [],
+    }
+
+
 def _resume_pack_ready_for_finalgate(
     *,
     strategy_group_id: str = "MPG-001",
@@ -490,6 +538,53 @@ def _resume_pack_ready_for_finalgate(
             "withdrawal_or_transfer_requested": False,
         },
         "owner_state": {"status": "ready_for_action_time_final_gate", "blocker_class": "none"},
+        "safety_invariants": _safe_resume_flags(),
+        "blockers": [],
+        "warnings": [],
+    }
+
+
+def _resume_pack_ready_for_non_executing_prepare(
+    *,
+    strategy_group_id: str = "MPG-001",
+    runtime_instance_id: str = RUNTIME_ID,
+) -> dict[str, Any]:
+    signal_input_json = "/tmp/dry-run-signal-input.json"
+    return {
+        "scope": "runtime_signal_watcher_post_signal_resume_pack",
+        "status": "ready_for_non_executing_prepare",
+        "runtime_instance_id": runtime_instance_id,
+        "selected_runtime_instance_ids": [runtime_instance_id],
+        "signal_input_json": signal_input_json,
+        "runtime_signal_summaries": [
+            {
+                "runtime_instance_id": runtime_instance_id,
+                "strategy_family_id": strategy_group_id,
+                "strategy_family_version_id": f"{strategy_group_id}-v0",
+                "symbol": "MSTR/USDT:USDT",
+                "side": "long",
+                "signal_input_json": signal_input_json,
+                "status": "ready_for_non_executing_prepare",
+            }
+        ],
+        "action_time_resume": {
+            "status": "ready_for_non_executing_prepare",
+            "runtime_instance_id": runtime_instance_id,
+            "strategy_family_id": strategy_group_id,
+            "next_step": "prepare_fresh_candidate_authorization_evidence",
+            "allowed_auto_actions": [
+                "prepare_fresh_candidate_authorization_evidence"
+            ],
+            "signal_input_json": signal_input_json,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_state": {
+            "status": "ready_for_non_executing_prepare",
+            "blocker_class": "none",
+        },
         "safety_invariants": _safe_resume_flags(),
         "blockers": [],
         "warnings": [],
@@ -974,6 +1069,98 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             ],
             *disabled_report.get("blockers", []),
         ],
+    )
+
+
+def _scenario_non_executing_prepare_auto_bridge(output_dir: Path) -> dict[str, Any]:
+    del output_dir
+    prepare_calls: list[dict[str, Any]] = []
+    finalgate_calls: list[dict[str, Any]] = []
+
+    def prepare_runner(command_plan: dict[str, Any]) -> dict[str, Any]:
+        prepare_calls.append(dict(command_plan))
+        return _non_executing_prepare_packet()
+
+    def request_json(**kwargs: Any) -> dict[str, Any]:
+        finalgate_calls.append(dict(kwargs))
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "PASS",
+                "blockers": [],
+                "warnings": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    original_session_cookie = dispatcher._session_cookie  # noqa: SLF001
+    original_request_json = dispatcher._request_json  # noqa: SLF001
+    dispatcher._session_cookie = (  # noqa: SLF001
+        lambda: ("brc_operator_session=dry-run", None)
+    )
+    dispatcher._request_json = request_json  # noqa: SLF001
+    try:
+        dispatch = dispatcher.build_dispatch_packet(
+            resume_pack=_resume_pack_ready_for_non_executing_prepare(),
+            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+            api_base="http://dry-run.local",
+            execute_preflight=True,
+            non_executing_preparer=prepare_runner,
+            selected_strategy_group_id="MPG-001",
+        )
+    finally:
+        dispatcher._session_cookie = original_session_cookie  # noqa: SLF001
+        dispatcher._request_json = original_request_json  # noqa: SLF001
+
+    checks = {
+        "prepare_runner_called_once": len(prepare_calls) == 1,
+        "prepare_uses_runtime_and_signal_input": (
+            bool(prepare_calls)
+            and prepare_calls[0].get("runtime_instance_id") == RUNTIME_ID
+            and prepare_calls[0].get("signal_input_json")
+            == "/tmp/dry-run-signal-input.json"
+        ),
+        "prepare_result_ready_for_finalgate": (
+            dispatch.get("non_executing_prepare_result", {}).get("status")
+            == "ready_for_final_gate_preflight"
+        ),
+        "dispatcher_reaches_finalgate_ready": (
+            dispatch.get("status") == "finalgate_ready"
+            and dispatch.get("dispatch_action")
+            == "prepare_official_operation_layer_submit"
+        ),
+        "finalgate_called_once": len(finalgate_calls) == 1,
+        "operation_layer_submit_not_called": (
+            _operation_layer_submit_called(dispatch) is False
+        ),
+        "no_dangerous_effects": not _dangerous_effects(dispatch),
+    }
+    blockers = [
+        f"non_executing_prepare_auto_bridge:{name}"
+        for name, value in checks.items()
+        if value is not True
+    ]
+    return _scenario_packet(
+        name="non_executing_prepare_auto_bridge",
+        expected=(
+            "ready_for_non_executing_prepare can call the official "
+            "non-executing prepare wrapper and continue to FinalGate without "
+            "Operation Layer submit or exchange write"
+        ),
+        artifacts={
+            "checks": checks,
+            "resume_dispatch": dispatch,
+            "prepare_calls": prepare_calls,
+            "finalgate_calls": finalgate_calls,
+        },
+        passed=not blockers,
+        blockers=blockers,
     )
 
 
@@ -2291,6 +2478,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     scenarios = [
         _scenario_no_signal(output_dir),
         _scenario_mock_pass(output_dir),
+        _scenario_non_executing_prepare_auto_bridge(output_dir),
         _scenario_mock_operation_layer_closed_loop(output_dir),
         _scenario_required_facts_missing(output_dir),
         _scenario_active_conflict(output_dir),
@@ -2316,7 +2504,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
         "scenario_count": len(scenarios),
-        "required_scenarios_present": len(scenarios) == 12,
+        "required_scenarios_present": len(scenarios) == 13,
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
@@ -2333,6 +2521,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 "mock_fresh_signal_dry_run_pass",
                 "fast_auto_chain_checks",
             ).values()
+        ),
+        "non_executing_prepare_auto_bridge_checked": (
+            _scenario_artifact(
+                scenarios,
+                "non_executing_prepare_auto_bridge",
+                "checks",
+            )
+            != {}
+            and all(
+                _scenario_artifact(
+                    scenarios,
+                    "non_executing_prepare_auto_bridge",
+                    "checks",
+                ).values()
+            )
         ),
         "legacy_local_registration_probe_tolerance_checked": (
             _scenario_artifact(
@@ -2557,6 +2760,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "post_submit_finalize_result_identity_guard_checked": checks[
             "post_submit_finalize_result_identity_guard_checked"
+        ],
+        "non_executing_prepare_auto_bridge_checked": checks[
+            "non_executing_prepare_auto_bridge_checked"
         ],
     }
     return {

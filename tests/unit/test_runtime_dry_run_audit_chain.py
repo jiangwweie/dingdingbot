@@ -10,12 +10,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
     assert packet["status"] == "passed"
-    assert packet["scenario_count"] == 12
-    assert packet["checks"]["scenario_count"] == 12
+    assert packet["scenario_count"] == 13
+    assert packet["checks"]["scenario_count"] == 13
     assert packet["checks"]["all_scenarios_passed"] is True
     assert packet["checks"]["dangerous_effects_absent"] is True
     assert packet["summary"] == {
-        "scenario_count": 12,
+        "scenario_count": 13,
         "required_checks_present": True,
         "all_scenarios_passed": True,
         "dangerous_effects_absent": True,
@@ -31,12 +31,14 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "post_submit_closed_loop_evidence_guard_checked": True,
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
+        "non_executing_prepare_auto_bridge_checked": True,
     }
     assert packet["required_checks"] == {
         "all_scenarios_passed": True,
         "dangerous_effects_absent": True,
         "disabled_smoke_not_real_execution_proof": True,
         "fresh_signal_fast_auto_chain_checked": True,
+        "non_executing_prepare_auto_bridge_checked": True,
         "legacy_local_registration_probe_tolerance_checked": True,
         "mock_operation_layer_closed_loop_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
@@ -64,6 +66,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert set(scenarios) == {
         "no_signal",
         "mock_fresh_signal_dry_run_pass",
+        "non_executing_prepare_auto_bridge",
         "mock_operation_layer_submit_finalize_pass",
         "required_facts_missing",
         "active_position_or_open_order_conflict",
@@ -199,6 +202,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         ] is False
     assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
+    assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
     assert packet["checks"][
         "legacy_local_registration_probe_tolerance_checked"
     ] is True
@@ -254,6 +258,26 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "blocked_by_selected_strategygroup_scope"
     )
     assert selected_guard["out_of_scope_dispatch"]["command_plan"] is None
+    auto_bridge = scenarios["non_executing_prepare_auto_bridge"]["artifacts"]
+    assert auto_bridge["checks"] == {
+        "prepare_runner_called_once": True,
+        "prepare_uses_runtime_and_signal_input": True,
+        "prepare_result_ready_for_finalgate": True,
+        "dispatcher_reaches_finalgate_ready": True,
+        "finalgate_called_once": True,
+        "operation_layer_submit_not_called": True,
+        "no_dangerous_effects": True,
+    }
+    assert auto_bridge["resume_dispatch"]["status"] == "finalgate_ready"
+    assert auto_bridge["resume_dispatch"]["dispatch_action"] == (
+        "prepare_official_operation_layer_submit"
+    )
+    assert auto_bridge["resume_dispatch"]["safety_invariants"][
+        "official_non_executing_prepare_called"
+    ] is True
+    assert auto_bridge["resume_dispatch"]["safety_invariants"][
+        "official_operation_layer_submit_called"
+    ] is False
     expanded_guard = scenarios["expanded_watcher_scope_execution_guard"][
         "artifacts"
     ]
