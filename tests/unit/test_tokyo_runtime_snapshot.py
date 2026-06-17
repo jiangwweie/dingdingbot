@@ -160,6 +160,8 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
 
     assert len(calls) == 1
     assert calls[0][0] == "ssh"
+    assert "runtime-execution-chain-closure-status.json" in calls[0][-1]
+    assert "nginx.service" not in calls[0][-1]
     assert report["interaction"]["level"] == "L1_readonly_snapshot"
     assert report["interaction"]["remote_interaction_count"] == 1
     assert report["interaction"]["mutates_remote_files"] is False

@@ -369,7 +369,6 @@ services = [
     "brc-runtime-signal-watcher.timer",
     "brc-runtime-signal-watcher.service",
     "brc-owner-console-backend.service",
-    "nginx.service",
 ]
 report_files = [
     "watcher-tick.json",
@@ -377,6 +376,7 @@ report_files = [
     "strategygroup-runtime-goal-status.json",
     "owner-console-source-readiness.json",
     "runtime-dry-run-audit-chain.json",
+    "runtime-execution-chain-closure-status.json",
 ]
 
 def run(args):
