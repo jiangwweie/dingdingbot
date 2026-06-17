@@ -197,6 +197,46 @@ fresh signal
 | Operation Layer | Must use official endpoint and required evidence IDs |
 | Safety | No secret mutation, profile expansion, sizing change, withdrawal, transfer, stale-fact execution, duplicate submit, or conflicting position/order execution |
 
+### Common Pipeline vs StrategyGroup Adaptation
+
+The runtime chain must be validated as one shared execution pipeline. A fresh
+signal from MPG, TEQ, FBS, PMR, or SOR should reuse the same common path:
+
+```text
+fresh signal
+-> RequiredFacts readiness
+-> candidate / authorization evidence
+-> action-time FinalGate
+-> official Operation Layer
+-> finalize / reconciliation / settlement / review
+```
+
+| Area | Classification | Repeated per StrategyGroup |
+| --- | --- | --- |
+| Fresh signal -> candidate/auth automatic chain | Common runtime pipeline | No |
+| RequiredFacts readiness reading | Common facts/readiness layer | No |
+| Attempt renewal / admission | Common runtime admission | No |
+| FinalGate call order | Common execution-safety layer | No |
+| Operation Layer evidence relay | Common execution layer | No |
+| Active position / open order checks | Common account-safety layer | No |
+| Protection / budget / duplicate-submit checks | Common protection, budget, idempotency layer | No |
+| Post-submit finalize / reconciliation / settlement | Common closed-loop layer | No |
+| Owner Console status projection | Common product readmodel | No |
+| Supported symbols/sides, signal rule, strategy RequiredFacts, risk defaults, hard stops, conflict policy | StrategyGroup handoff adaptation | Yes |
+
+The expected ratio is roughly:
+
+```text
+80% common execution-chain repair
+20% StrategyGroup handoff adaptation
+```
+
+If a blocker appears in candidate/auth, FinalGate, Operation Layer, account
+safety, protection, budget, idempotency, or closed-loop settlement, treat it as
+a common pipeline defect first. StrategyGroup-specific work should only define
+inputs and boundaries: supported symbols, supported sides, signal-ready rule,
+RequiredFacts, risk defaults, hard stops, and conflict policy.
+
 ### 2026-06-16 Checkpoint
 
 | Item | Result |

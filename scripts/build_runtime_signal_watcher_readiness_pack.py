@@ -20,6 +20,8 @@ RESUME_READY_STATUSES = {
     "runtime_signal_ready_for_non_executing_prepare",
     "prepared_shadow_evidence_ready_for_owner_review",
 }
+NON_EXECUTING_PREPARE_STATUS = "ready_for_non_executing_prepare"
+FRESH_AUTHORIZATION_ACTION = "prepare_fresh_candidate_authorization_evidence"
 UNSAFE_FLAGS = {
     "exchange_write_called",
     "order_created",
@@ -81,6 +83,7 @@ def _action_time_resume(
     missing: list[str],
 ) -> dict[str, Any]:
     prepared = bool(str(prepared_authorization_id or "").strip())
+    auto_resume_status = str(post_signal_auto_resume.get("status") or "")
     if unsafe_flags or missing:
         status = "blocked"
         next_step = "resolve_watcher_resume_blockers"
@@ -89,6 +92,10 @@ def _action_time_resume(
         status = "ready_for_action_time_final_gate"
         next_step = "run_official_action_time_final_gate_preflight"
         allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
+    elif auto_resume_status == NON_EXECUTING_PREPARE_STATUS:
+        status = NON_EXECUTING_PREPARE_STATUS
+        next_step = "prepare_fresh_candidate_grant_authorization_evidence"
+        allowed_auto_actions = [FRESH_AUTHORIZATION_ACTION]
     else:
         status = "waiting_for_market"
         next_step = (
@@ -111,6 +118,9 @@ def _action_time_resume(
             "runtime_budget_mutation",
         ],
         "requires_fresh_action_time_facts": prepared,
+        "requires_fresh_candidate_authorization_evidence": (
+            status == NON_EXECUTING_PREPARE_STATUS
+        ),
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
         "final_gate_status": "not_run" if prepared else "not_reached",
@@ -128,6 +138,7 @@ def _owner_state(
     post_signal_auto_resume: dict[str, Any],
 ) -> dict[str, Any]:
     status = str(action_time_resume.get("status") or "blocked")
+    prefer_action_time_resume = status == NON_EXECUTING_PREPARE_STATUS
     if status == "waiting_for_market":
         blocker_class = "waiting_for_market"
         blocked_at = "watcher_signal"
@@ -137,6 +148,15 @@ def _owner_state(
         )
         automatic_recovery_action = "continue_watcher_observation"
         downgrade_mode = "observe_only"
+    elif status == NON_EXECUTING_PREPARE_STATUS:
+        blocker_class = "none"
+        blocked_at = "candidate_authorization"
+        blocked_reason = "fresh_signal_waiting_for_candidate_authorization_evidence"
+        next_recover_condition = (
+            "fresh_candidate_runtime_grant_authorization_evidence_exists"
+        )
+        automatic_recovery_action = FRESH_AUTHORIZATION_ACTION
+        downgrade_mode = "no_real_submit_until_candidate_authorization_finalgate"
     elif status == "ready_for_action_time_final_gate":
         blocker_class = "none"
         blocked_at = "FinalGate"
@@ -157,16 +177,34 @@ def _owner_state(
     return {
         "status": status,
         "blocker_class": blocker_class,
-        "blocked_at": post_signal_auto_resume.get("blocked_at") or blocked_at,
+        "blocked_at": (
+            None
+            if prefer_action_time_resume
+            else post_signal_auto_resume.get("blocked_at")
+        )
+        or blocked_at,
         "blocked_reason": (
-            post_signal_auto_resume.get("blocked_reason") or blocked_reason
-        ),
+            None
+            if prefer_action_time_resume
+            else post_signal_auto_resume.get("blocked_reason")
+        )
+        or blocked_reason,
         "next_recover_condition": (
-            post_signal_auto_resume.get("next_recover_condition")
-            or next_recover_condition
-        ),
+            None
+            if prefer_action_time_resume
+            else post_signal_auto_resume.get("next_recover_condition")
+        )
+        or next_recover_condition,
         "automatic_recovery_action": (
-            post_signal_auto_resume.get("automatic_recovery_action")
+            None
+            if prefer_action_time_resume
+            else post_signal_auto_resume.get("automatic_recovery_action")
+        )
+        or (
+            action_time_resume.get("allowed_auto_actions") or [None]
+        )[0]
+        or (
+            action_time_resume.get("next_step")
             or automatic_recovery_action
         ),
         "downgrade_mode": post_signal_auto_resume.get("downgrade_mode")

@@ -189,6 +189,109 @@ def test_build_runtime_signal_watcher_readiness_pack_blocks_unsafe_effect(tmp_pa
     assert resume["action_time_resume"]["allowed_auto_actions"] == []
 
 
+def test_build_runtime_signal_watcher_readiness_pack_preserves_non_executing_prepare_checkpoint(tmp_path):
+    report_dir = tmp_path / "report"
+    output_dir = tmp_path / "out"
+    report_dir.mkdir()
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "owner_attention_pending",
+            "wakeup_status": "runtime_signal_ready_for_non_executing_prepare",
+            "operator_status": "operator_review",
+            "status_packet_status": "attention",
+            "notification": {
+                "configured": True,
+                "attempted": False,
+                "sent": False,
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "execution_intent_created": False,
+                "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+            "post_signal_auto_resume": {
+                "status": "ready_for_non_executing_prepare",
+                "blocked_at": "non_executing_prepare_records",
+                "blocked_reason": "fresh_strategy_signal_ready",
+                "next_recover_condition": (
+                    "shadow_candidate_runtime_grant_authorization_evidence_exists"
+                ),
+                "automatic_recovery_action": (
+                    "wait_for_prepare_records_then_rebuild_final_gate_status"
+                ),
+                "downgrade_mode": "armed_observation_no_real_submit",
+                "can_continue_without_owner_chat": True,
+                "requires_action_time_final_gate": True,
+                "requires_official_operation_layer": True,
+            },
+        },
+    )
+    _write(
+        report_dir / "wakeup-packet.json",
+        {"status": "runtime_signal_ready_for_non_executing_prepare"},
+    )
+    _write(report_dir / "operator-packet.json", {"status": "operator_review"})
+    _write(
+        report_dir / "status-packet.json",
+        {
+            "status": "attention",
+            "blockers": [],
+            "warnings": [],
+            "active_runtime_count": 1,
+            "monitored_runtime_count": 1,
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
+            "prepared_authorization_id": None,
+            "shadow_candidate_id": None,
+            "runtime_signal_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-1",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "MPG-001-v0",
+                    "symbol": "MSTR/USDT:USDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                }
+            ],
+        },
+    )
+    _write(report_dir / "notification-state.json", {})
+
+    summary = build_pack(
+        report_dir=report_dir,
+        output_dir=output_dir,
+        stale_after_seconds=180,
+        label="unit-test",
+    )
+
+    resume = json.loads((output_dir / "post-signal-resume-pack.json").read_text())
+    assert summary["resume_status"] == "ready_for_non_executing_prepare"
+    assert summary["can_continue_steps_5_8"] is True
+    assert resume["status"] == "ready_for_non_executing_prepare"
+    assert resume["owner_state"]["blocker_class"] == "none"
+    assert resume["owner_state"]["automatic_recovery_action"] == (
+        "prepare_fresh_candidate_authorization_evidence"
+    )
+    assert resume["action_time_resume"]["status"] == (
+        "ready_for_non_executing_prepare"
+    )
+    assert resume["action_time_resume"]["next_step"] == (
+        "prepare_fresh_candidate_grant_authorization_evidence"
+    )
+    assert resume["action_time_resume"]["allowed_auto_actions"] == [
+        "prepare_fresh_candidate_authorization_evidence"
+    ]
+    assert resume["action_time_resume"][
+        "requires_fresh_candidate_authorization_evidence"
+    ] is True
+    assert resume["action_time_resume"]["places_order"] is False
+    assert resume["action_time_resume"]["exchange_write_called"] is False
+
+
 def test_build_runtime_signal_watcher_readiness_pack_normalizes_no_signal(tmp_path):
     report_dir = tmp_path / "report"
     output_dir = tmp_path / "out"

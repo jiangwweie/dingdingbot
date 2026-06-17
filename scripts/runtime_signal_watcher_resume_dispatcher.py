@@ -47,12 +47,14 @@ DEFAULT_API_BASE = "http://127.0.0.1:18080"
 READY_STATUS = "ready_for_action_time_final_gate"
 FINALGATE_READY_STATUS = "finalgate_ready"
 WAITING_STATUS = "waiting_for_market"
+NON_EXECUTING_PREPARE_STATUS = "ready_for_non_executing_prepare"
 FRESH_AUTHORIZATION_STATUSES = {
     "ready_for_fresh_submit_authorization",
     "waiting_for_fresh_authorization",
 }
 FINALGATE_ACTION = "run_official_action_time_final_gate_preflight"
 CONTINUE_ACTION = "continue_watcher_observation"
+NON_EXECUTING_PREPARE_ACTION = "prepare_fresh_candidate_authorization_evidence"
 OPERATION_LAYER_ACTION = "prepare_official_operation_layer_submit"
 OPERATION_LAYER_SUBMIT_ACTION = "call_official_operation_layer_submit"
 POST_SUBMIT_FINALIZE_ACTION = "post_submit_finalize_reconciliation_budget_settlement"
@@ -948,6 +950,38 @@ def _fresh_authorization_binding_command_plan(
     }
 
 
+def _non_executing_prepare_command_plan(
+    *,
+    api_base: str,
+    resume_pack: dict[str, Any],
+    action_time_resume: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "kind": "fresh_candidate_authorization_evidence_preparation",
+        "method": "POST",
+        "api_base": api_base.rstrip("/"),
+        "path": (
+            "/api/trading-console/strategy-runtimes/{runtime_instance_id}/"
+            "official-submit-handoff-fresh-authorizations/bind"
+        ),
+        "requires_runtime_instance_id": True,
+        "requires_readiness_handoff_bridge": True,
+        "readiness_handoff_bridge": _fresh_authorization_handoff_json_path(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        ),
+        "signal_input_json": _first_text(
+            action_time_resume.get("signal_input_json"),
+            resume_pack.get("signal_input_json"),
+        ),
+        "allowed_prepare_evidence_creation": True,
+        "calls_official_submit_endpoint": False,
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+    }
+
+
 def build_dispatch_packet(
     *,
     resume_pack: dict[str, Any],
@@ -1013,6 +1047,84 @@ def build_dispatch_packet(
             dispatch_status="no_action_continue_observation",
             blockers=[],
             command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
+        )
+
+    if status == NON_EXECUTING_PREPARE_STATUS:
+        if NON_EXECUTING_PREPARE_ACTION not in allowed_auto_actions:
+            return _packet(
+                label=label,
+                source_path=source_path,
+                resume_pack=resume_pack,
+                action_time_resume=action_time_resume,
+                owner_state=owner_state,
+                status="blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_action=None,
+                dispatch_status="blocked_by_resume_allowed_actions",
+                blockers=base_blockers + [
+                    "allowed_auto_actions_missing_non_executing_prepare"
+                ],
+                command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
+            )
+        selected_scope_blockers = _selected_scope_action_blockers(
+            selected_strategy_group_id=selected_strategy_group_id,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+        )
+        if selected_scope_blockers:
+            return _packet(
+                label=label,
+                source_path=source_path,
+                resume_pack=resume_pack,
+                action_time_resume=action_time_resume,
+                owner_state={
+                    "status": "needs_intervention",
+                    "blocker_class": "hard_safety_stop",
+                    "blocked_at": "selected_strategygroup_scope",
+                    "blocked_reason": ",".join(selected_scope_blockers),
+                    "next_safe_checkpoint": "review_selected_strategygroup_scope",
+                    "downgrade_mode": "continue_watcher_observation_no_submit",
+                },
+                status="blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_action=None,
+                dispatch_status="blocked_by_selected_strategygroup_scope",
+                blockers=base_blockers + selected_scope_blockers,
+                command_plan=None,
+                selected_strategy_group_id=selected_strategy_group_id,
+            )
+        return _packet(
+            label=label,
+            source_path=source_path,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            owner_state={
+                "status": NON_EXECUTING_PREPARE_STATUS,
+                "blocker_class": "none",
+                "blocked_at": "candidate_authorization",
+                "blocked_reason": (
+                    "fresh_signal_waiting_for_candidate_authorization_evidence"
+                ),
+                "next_recover_condition": (
+                    "fresh_candidate_runtime_grant_authorization_evidence_exists"
+                ),
+                "automatic_recovery_action": NON_EXECUTING_PREPARE_ACTION,
+                "downgrade_mode": (
+                    "no_real_submit_until_candidate_authorization_finalgate"
+                ),
+            },
+            status=NON_EXECUTING_PREPARE_STATUS,
+            blocker_class="none",
+            dispatch_action=NON_EXECUTING_PREPARE_ACTION,
+            dispatch_status="non_executing_prepare_dispatch_ready",
+            blockers=[],
+            command_plan=_non_executing_prepare_command_plan(
+                api_base=api_base,
+                resume_pack=resume_pack,
+                action_time_resume=action_time_resume,
+            ),
             selected_strategy_group_id=selected_strategy_group_id,
         )
 
@@ -3487,6 +3599,7 @@ def main(argv: list[str] | None = None) -> int:
         WAITING_STATUS,
         READY_STATUS,
         *FRESH_AUTHORIZATION_STATUSES,
+        NON_EXECUTING_PREPARE_STATUS,
         "fresh_authorization_bound",
         "finalgate_ready",
         "operation_layer_ready",

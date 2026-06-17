@@ -266,6 +266,71 @@ def test_dispatcher_waiting_for_market_is_no_action():
     assert packet["safety_invariants"]["places_order"] is False
 
 
+def test_dispatcher_non_executing_prepare_emits_common_chain_prepare_plan():
+    resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
+    resume["signal_input_json"] = "/reports/runtime-mpg-1/signal-input.json"
+    resume["action_time_resume"].update(
+        {
+            "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
+            "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
+            "allowed_auto_actions": [
+                "prepare_fresh_candidate_authorization_evidence"
+            ],
+            "requires_fresh_candidate_authorization_evidence": True,
+        }
+    )
+    resume["owner_state"] = {
+        "status": "ready_for_non_executing_prepare",
+        "blocker_class": "none",
+    }
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        api_base="http://127.0.0.1:18080",
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert packet["status"] == "ready_for_non_executing_prepare"
+    assert packet["blocker_class"] == "none"
+    assert packet["dispatch_action"] == (
+        "prepare_fresh_candidate_authorization_evidence"
+    )
+    assert packet["dispatch_status"] == "non_executing_prepare_dispatch_ready"
+    assert packet["owner_state"]["automatic_recovery_action"] == (
+        "prepare_fresh_candidate_authorization_evidence"
+    )
+    command = packet["command_plan"]
+    assert command["kind"] == "fresh_candidate_authorization_evidence_preparation"
+    assert command["requires_runtime_instance_id"] is True
+    assert command["requires_readiness_handoff_bridge"] is True
+    assert command["signal_input_json"] == "/reports/runtime-mpg-1/signal-input.json"
+    assert command["calls_official_submit_endpoint"] is False
+    assert command["places_order"] is False
+    assert command["exchange_write_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_non_executing_prepare_requires_allowed_auto_action():
+    resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
+    resume["action_time_resume"]["allowed_auto_actions"] = [
+        "continue_watcher_observation"
+    ]
+
+    packet = build_dispatch_packet(
+        resume_pack=resume,
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        selected_strategy_group_id="MPG-001",
+    )
+
+    assert packet["status"] == "blocked"
+    assert packet["blocker_class"] == "hard_safety_stop"
+    assert packet["dispatch_status"] == "blocked_by_resume_allowed_actions"
+    assert "allowed_auto_actions_missing_non_executing_prepare" in packet["blockers"]
+    assert packet["command_plan"] is None
+
+
 def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
     packet = build_dispatch_packet(
         resume_pack=_with_runtime_summary(
