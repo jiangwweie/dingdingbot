@@ -163,6 +163,28 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
         "status": "not_complete_waiting_for_market",
         "waiting_for_real_fresh_signal": True,
     }
+    assert report["entry_fast_chain_boundary"] == {
+        "candidate_authorization_to_finalgate_covered": True,
+        "checks": {
+            "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
+            "fresh_signal_fast_auto_chain_checked": True,
+            "operation_layer_authorization_chain_guard_checked": True,
+            "operation_layer_blocker_review_policy_checked": True,
+            "operation_layer_evidence_relay_checked": True,
+            "required_facts_readiness_checked": True,
+            "scoped_pipeline_operation_layer_handoff_checked": True,
+            "selected_strategygroup_dispatch_guard_checked": True,
+        },
+        "finalgate_to_operation_layer_evidence_covered": True,
+        "fresh_signal_to_candidate_authorization_covered": True,
+        "operation_layer_authorization_guard_covered": True,
+        "operation_layer_blocker_review_policy_covered": True,
+        "real_action_time_finalgate_proven": False,
+        "real_operation_layer_submit_proven": False,
+        "real_order_dependent_remaining": True,
+        "required_facts_gate_covered": True,
+        "status": "ready",
+    }
     assert report["exit_hardening_boundary"] == {
         "active_position_remains_open_policy_covered": True,
         "entry_filled_protection_failed_reduce_only_recovery_covered": True,
@@ -252,6 +274,14 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- Real order closure proven: 否" in text
     assert "- Waiting for real fresh signal: 是" in text
     assert "- Dry-run readiness proven: 是" in text
+    assert "## Entry Fast Chain Boundary" in text
+    assert "- Fresh signal to candidate/auth covered: 是" in text
+    assert "- RequiredFacts gate covered: 是" in text
+    assert "- Candidate/auth to FinalGate covered: 是" in text
+    assert "- FinalGate to Operation Layer evidence covered: 是" in text
+    assert "- Operation Layer authorization guard covered: 是" in text
+    assert "- Real action-time FinalGate proven: 否" in text
+    assert "- Real Operation Layer submit proven: 否" in text
     assert "## Exit Hardening Boundary" in text
     assert "- Post-submit exit outcome matrix checked: 是" in text
     assert "- Exchange-native hard stop required after entry: 是" in text
@@ -328,6 +358,33 @@ def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_miss
         is False
     )
     assert "missing_dry_run_check:post_submit_exit_outcome_matrix_checked" in report[
+        "checks"
+    ]["product_gaps"]
+
+
+def test_goal_progress_marks_entry_fast_chain_boundary_needs_work_when_fast_chain_missing():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks["runtime_dry_run_required_checks_present"] = False
+    checks["runtime_dry_run_missing_required_checks"] = [
+        "fresh_signal_fast_auto_chain_checked"
+    ]
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["entry_fast_chain_boundary"]["status"] == "needs_work"
+    assert report["entry_fast_chain_boundary"]["checks"][
+        "fresh_signal_fast_auto_chain_checked"
+    ] is False
+    assert report["entry_fast_chain_boundary"][
+        "fresh_signal_to_candidate_authorization_covered"
+    ] is False
+    assert "entry_fast_chain_boundary_not_ready" in report["checks"]["product_gaps"]
+    assert "missing_dry_run_check:fresh_signal_fast_auto_chain_checked" in report[
         "checks"
     ]["product_gaps"]
 
@@ -518,6 +575,13 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
         == "not_complete_waiting_for_market"
     )
     assert payload["completion_boundary"]["dry_run_readiness_proven"] is True
+    assert payload["entry_fast_chain_boundary"]["status"] == "ready"
+    assert payload["entry_fast_chain_boundary"][
+        "real_action_time_finalgate_proven"
+    ] is False
+    assert payload["entry_fast_chain_boundary"][
+        "real_operation_layer_submit_proven"
+    ] is False
     assert payload["exit_hardening_boundary"]["status"] == "ready"
     assert payload["strategygroup_tier_boundary"]["status"] == "ready"
     assert payload["strategygroup_tier_boundary"]["l4_strategy_groups"] == [
@@ -535,6 +599,7 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     progress = output_md.read_text(encoding="utf-8")
     assert "## StrategyGroup Runtime Goal Progress" in progress
     assert "## Completion Boundary" in progress
+    assert "## Entry Fast Chain Boundary" in progress
     assert "## Exit Hardening Boundary" in progress
     assert "## StrategyGroup Tier Boundary" in progress
     assert "- P0.5 ready: 是" in progress

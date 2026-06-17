@@ -137,12 +137,15 @@ def build_goal_progress_report(
         ),
         False,
     )
+    entry_fast_chain_boundary = _entry_fast_chain_boundary(checks=checks)
     exit_hardening_boundary = _exit_hardening_boundary(checks=checks)
     strategygroup_tier_boundary = _strategygroup_tier_boundary(
         checks=checks,
         tier_policy=tier_policy or {},
     )
     boundary_product_gaps = []
+    if entry_fast_chain_boundary["status"] != "ready":
+        boundary_product_gaps.append("entry_fast_chain_boundary_not_ready")
     if exit_hardening_boundary["status"] != "ready":
         boundary_product_gaps.append("exit_hardening_boundary_not_ready")
     if strategygroup_tier_boundary["status"] != "ready":
@@ -193,6 +196,7 @@ def build_goal_progress_report(
             "p05": "ready" if p05_ready else "needs_work",
         },
         "completion_boundary": completion_boundary,
+        "entry_fast_chain_boundary": entry_fast_chain_boundary,
         "exit_hardening_boundary": exit_hardening_boundary,
         "strategygroup_tier_boundary": strategygroup_tier_boundary,
         "checks": {
@@ -213,6 +217,90 @@ def build_goal_progress_report(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
             ),
         },
+    }
+
+
+def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
+    fast_chain_checks = {
+        "fresh_signal_fast_auto_chain_checked": _dry_run_required_check_present(
+            checks,
+            "fresh_signal_fast_auto_chain_checked",
+        ),
+        "required_facts_readiness_checked": _dry_run_required_check_present(
+            checks,
+            "required_facts_readiness_checked",
+        ),
+        "selected_strategygroup_dispatch_guard_checked": (
+            _dry_run_required_check_present(
+                checks,
+                "selected_strategygroup_dispatch_guard_checked",
+            )
+        ),
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
+            _dry_run_required_check_present(
+                checks,
+                "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+            )
+        ),
+        "operation_layer_evidence_relay_checked": _dry_run_required_check_present(
+            checks,
+            "operation_layer_evidence_relay_checked",
+        ),
+        "scoped_pipeline_operation_layer_handoff_checked": (
+            _dry_run_required_check_present(
+                checks,
+                "scoped_pipeline_operation_layer_handoff_checked",
+            )
+        ),
+        "operation_layer_authorization_chain_guard_checked": (
+            _dry_run_required_check_present(
+                checks,
+                "operation_layer_authorization_chain_guard_checked",
+            )
+        ),
+        "operation_layer_blocker_review_policy_checked": (
+            _dry_run_required_check_present(
+                checks,
+                "operation_layer_blocker_review_policy_checked",
+            )
+        ),
+    }
+    status = "ready" if all(fast_chain_checks.values()) else "needs_work"
+    return {
+        "status": status,
+        "checks": fast_chain_checks,
+        "fresh_signal_to_candidate_authorization_covered": fast_chain_checks[
+            "fresh_signal_fast_auto_chain_checked"
+        ],
+        "required_facts_gate_covered": fast_chain_checks[
+            "required_facts_readiness_checked"
+        ],
+        "candidate_authorization_to_finalgate_covered": (
+            fast_chain_checks[
+                "all_selected_strategygroups_reach_finalgate_dispatch_checked"
+            ]
+            and fast_chain_checks["selected_strategygroup_dispatch_guard_checked"]
+        ),
+        "finalgate_to_operation_layer_evidence_covered": (
+            fast_chain_checks["operation_layer_evidence_relay_checked"]
+            and fast_chain_checks["scoped_pipeline_operation_layer_handoff_checked"]
+        ),
+        "operation_layer_authorization_guard_covered": fast_chain_checks[
+            "operation_layer_authorization_chain_guard_checked"
+        ],
+        "operation_layer_blocker_review_policy_covered": fast_chain_checks[
+            "operation_layer_blocker_review_policy_checked"
+        ],
+        "real_action_time_finalgate_proven": (
+            checks.get("real_action_time_finalgate_proven") is True
+        ),
+        "real_operation_layer_submit_proven": (
+            checks.get("real_operation_layer_submit_proven") is True
+        ),
+        "real_order_dependent_remaining": not (
+            checks.get("real_action_time_finalgate_proven") is True
+            and checks.get("real_operation_layer_submit_proven") is True
+        ),
     }
 
 
@@ -650,6 +738,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     interaction = report["interaction"]
     checks = report["checks"]
     completion = report["completion_boundary"]
+    entry_fast_chain = report["entry_fast_chain_boundary"]
     exit_hardening = report["exit_hardening_boundary"]
     tier_boundary = report["strategygroup_tier_boundary"]
     lines = [
@@ -679,6 +768,34 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + _yes_no(bool(completion["waiting_for_real_fresh_signal"])),
         "- Dry-run readiness proven: "
         + _yes_no(bool(completion["dry_run_readiness_proven"])),
+        "",
+        "## Entry Fast Chain Boundary",
+        "",
+        f"- Status: {entry_fast_chain['status']}",
+        "- Fresh signal to candidate/auth covered: "
+        + _yes_no(
+            bool(entry_fast_chain["fresh_signal_to_candidate_authorization_covered"])
+        ),
+        "- RequiredFacts gate covered: "
+        + _yes_no(bool(entry_fast_chain["required_facts_gate_covered"])),
+        "- Candidate/auth to FinalGate covered: "
+        + _yes_no(
+            bool(entry_fast_chain["candidate_authorization_to_finalgate_covered"])
+        ),
+        "- FinalGate to Operation Layer evidence covered: "
+        + _yes_no(
+            bool(entry_fast_chain["finalgate_to_operation_layer_evidence_covered"])
+        ),
+        "- Operation Layer authorization guard covered: "
+        + _yes_no(
+            bool(entry_fast_chain["operation_layer_authorization_guard_covered"])
+        ),
+        "- Real action-time FinalGate proven: "
+        + _yes_no(bool(entry_fast_chain["real_action_time_finalgate_proven"])),
+        "- Real Operation Layer submit proven: "
+        + _yes_no(bool(entry_fast_chain["real_operation_layer_submit_proven"])),
+        "- Real order dependent remaining: "
+        + _yes_no(bool(entry_fast_chain["real_order_dependent_remaining"])),
         "",
         "## Exit Hardening Boundary",
         "",
