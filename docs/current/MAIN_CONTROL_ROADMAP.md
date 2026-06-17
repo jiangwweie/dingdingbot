@@ -561,6 +561,25 @@ mock or disabled-smoke proof as a real-order proof.
 | Next safe actions | Keep watcher running, rerun dry-run audit after runtime changes, and on fresh signal run same-run FinalGate then official Operation Layer |
 | Safety | The closure-status script does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 
+### 2026-06-17 Order-Capable Experiment Profile Checkpoint
+
+The runtime pilot now treats Tokyo as an experimental bounded-capital server:
+inside the selected StrategyGroup and tiny-risk boundary, trading permission is
+not itself a risk blocker. The system must still fail closed on stale facts,
+missing protection, duplicate-submit risk, conflicting active positions or open
+orders, FinalGate failure, or Operation Layer failure.
+
+| Item | Result |
+| --- | --- |
+| SSOT | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
+| Server overlay | `/home/ubuntu/brc-deploy/env/runtime-order-capable.env` |
+| Tracked template | `.env.tokyo.experimental-live-order-capable.example` |
+| Required env | `TRADING_ENV=live`, `EXCHANGE_TESTNET=false`, `BRC_EXECUTION_PERMISSION_MAX=order_allowed`, `RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED=true` |
+| Runtime control/test surfaces | Must remain `RUNTIME_CONTROL_API_ENABLED=false` and `RUNTIME_TEST_SIGNAL_INJECTION_ENABLED=false` |
+| Watcher systemd | Loads the optional order-capable overlay after `live-readonly.env` |
+| Operation Layer mode | Resume dispatcher explicitly uses `--operation-layer-submit-mode real_gateway_action` |
+| Credential preflight | Now checks `order_allowed` and gateway-binding env readiness without printing secrets |
+
 ### 2026-06-17 Goal Status Local Dry-Run Checkpoint
 
 The goal-status packet now accepts the local dry-run audit packet from either

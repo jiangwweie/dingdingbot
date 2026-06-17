@@ -47,6 +47,7 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     assert "Environment=BRC_SELECTED_STRATEGY_GROUP_ID=MPG-001" in text
     assert "Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3" in text
     assert "Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180" in text
+    assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env" in text
     for strategy_family_id in ("MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"):
         assert f"--strategy-family-id {strategy_family_id}" in text
@@ -60,6 +61,7 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "--selected-strategy-group-id ${BRC_SELECTED_STRATEGY_GROUP_ID}" in text
     assert "--execute-preflight" in text
     assert "--execute-operation-layer-submit" in text
+    assert "--operation-layer-submit-mode real_gateway_action" in text
     assert "--execute-post-submit-finalize" in text
     assert "OwnerBoundedExecution" not in text
     assert "withdrawal" not in text

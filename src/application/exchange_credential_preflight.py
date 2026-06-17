@@ -11,6 +11,7 @@ CANONICAL_KEY_ENV = "EXCHANGE_API_KEY"
 CANONICAL_SECRET_ENV = "EXCHANGE_API_SECRET"
 BINANCE_ALIAS_KEY_ENV = "BINANCE_API_KEY"
 BINANCE_ALIAS_SECRET_ENV = "BINANCE_SECRET_KEY"
+GATEWAY_BINDING_ENV = "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED"
 SUPPORTED_PREFLIGHT_SYMBOLS = frozenset(
     {
         "SOL/USDT:USDT",
@@ -42,6 +43,10 @@ def exchange_credential_env_status(env: Mapping[str, str]) -> dict[str, Any]:
             env.get("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "")
         ).strip().lower()
         or "unset",
+        "runtime_exchange_submit_gateway_binding_enabled": str(
+            env.get(GATEWAY_BINDING_ENV, "")
+        ).strip().lower()
+        or "unset",
         "exchange_api_key_present": key_present,
         "exchange_api_secret_present": secret_present,
         "binance_alias_key_present": alias_key_present,
@@ -60,10 +65,19 @@ def credential_preflight_env_blockers(status: Mapping[str, Any]) -> list[str]:
         blockers.append("trading_env_not_live")
     if status.get("exchange_testnet") != "false":
         blockers.append("exchange_testnet_not_false")
+    if status.get("brc_execution_permission_max") != "order_allowed":
+        blockers.append("brc_execution_permission_max_not_order_allowed")
     if status.get("runtime_control_api_enabled") != "false":
         blockers.append("runtime_control_api_enabled_not_false")
     if status.get("runtime_test_signal_injection_enabled") != "false":
         blockers.append("runtime_test_signal_injection_enabled_not_false")
+    if status.get("runtime_exchange_submit_gateway_binding_enabled") not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        blockers.append("runtime_exchange_submit_gateway_binding_not_enabled")
     if not status.get("exchange_api_key_present"):
         blockers.append("exchange_api_key_missing")
     if not status.get("exchange_api_secret_present"):

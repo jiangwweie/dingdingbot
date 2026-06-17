@@ -20,6 +20,7 @@ def test_exchange_credential_env_status_uses_canonical_names_without_values():
             "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
             "RUNTIME_CONTROL_API_ENABLED": "false",
             "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+            "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
             "EXCHANGE_NAME": "binance",
             "EXCHANGE_API_KEY": "real-key",
             "EXCHANGE_API_SECRET": "real-secret",
@@ -46,6 +47,12 @@ def test_credential_preflight_env_blockers_fail_closed():
     )
 
     assert "exchange_testnet_not_false" in credential_preflight_env_blockers(status)
+    assert "brc_execution_permission_max_not_order_allowed" in (
+        credential_preflight_env_blockers(status)
+    )
+    assert "runtime_exchange_submit_gateway_binding_not_enabled" in (
+        credential_preflight_env_blockers(status)
+    )
     assert "exchange_api_key_missing" in credential_preflight_env_blockers(status)
     assert "exchange_api_secret_missing" in credential_preflight_env_blockers(status)
     assert status["binance_alias_credentials_ignored_by_mainline"] is True
@@ -148,8 +155,10 @@ def test_run_exchange_credential_preflight_fake_gateway_passes_without_secrets()
     env = {
         "TRADING_ENV": "live",
         "EXCHANGE_TESTNET": "false",
+        "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
         "RUNTIME_CONTROL_API_ENABLED": "false",
         "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+        "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
         "EXCHANGE_NAME": "binance",
         "EXCHANGE_API_KEY": "server-key",
         "EXCHANGE_API_SECRET": "server-secret",
@@ -223,8 +232,10 @@ def test_run_exchange_credential_preflight_accepts_mr_eth_exact_scope_without_se
             env={
                 "TRADING_ENV": "live",
                 "EXCHANGE_TESTNET": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
                 "RUNTIME_CONTROL_API_ENABLED": "false",
                 "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
                 "EXCHANGE_NAME": "binance",
                 "EXCHANGE_API_KEY": "server-key",
                 "EXCHANGE_API_SECRET": "server-secret",
@@ -289,8 +300,10 @@ def test_run_exchange_credential_preflight_blocks_withdrawal_permission():
             env={
                 "TRADING_ENV": "live",
                 "EXCHANGE_TESTNET": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
                 "RUNTIME_CONTROL_API_ENABLED": "false",
                 "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
                 "EXCHANGE_NAME": "binance",
                 "EXCHANGE_API_KEY": "server-key",
                 "EXCHANGE_API_SECRET": "server-secret",
@@ -334,8 +347,10 @@ def test_run_exchange_credential_preflight_fail_fast_on_restriction_failure():
             env={
                 "TRADING_ENV": "live",
                 "EXCHANGE_TESTNET": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
                 "RUNTIME_CONTROL_API_ENABLED": "false",
                 "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
                 "EXCHANGE_NAME": "binance",
                 "EXCHANGE_API_KEY": "server-key",
                 "EXCHANGE_API_SECRET": "server-secret",
@@ -389,8 +404,10 @@ def test_run_exchange_credential_preflight_fail_fast_on_futures_account_failure(
             env={
                 "TRADING_ENV": "live",
                 "EXCHANGE_TESTNET": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
                 "RUNTIME_CONTROL_API_ENABLED": "false",
                 "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
                 "EXCHANGE_NAME": "binance",
                 "EXCHANGE_API_KEY": "server-key",
                 "EXCHANGE_API_SECRET": "server-secret",
@@ -421,8 +438,10 @@ def test_run_exchange_credential_preflight_blocks_unsupported_symbol_before_gate
             env={
                 "TRADING_ENV": "live",
                 "EXCHANGE_TESTNET": "false",
+                "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
                 "RUNTIME_CONTROL_API_ENABLED": "false",
                 "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+                "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
                 "EXCHANGE_NAME": "binance",
                 "EXCHANGE_API_KEY": "server-key",
                 "EXCHANGE_API_SECRET": "server-secret",
@@ -470,6 +489,8 @@ def test_exchange_credential_preflight_api_run_blocks_on_env_before_gateway(monk
         "EXCHANGE_TESTNET",
         "RUNTIME_CONTROL_API_ENABLED",
         "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED",
+        "BRC_EXECUTION_PERMISSION_MAX",
+        "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED",
         "EXCHANGE_API_KEY",
         "EXCHANGE_API_SECRET",
     ):
@@ -546,8 +567,10 @@ def test_exchange_credential_preflight_api_run_with_fake_gateway(monkeypatch):
 
     monkeypatch.setenv("TRADING_ENV", "live")
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
     monkeypatch.setenv("EXCHANGE_NAME", "binance")
     monkeypatch.setenv("EXCHANGE_API_KEY", "server-key")
     monkeypatch.setenv("EXCHANGE_API_SECRET", "server-secret")
@@ -591,8 +614,10 @@ def test_exchange_credential_preflight_api_sanitizes_binance_permission_failure(
 
     monkeypatch.setenv("TRADING_ENV", "live")
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
     monkeypatch.setenv("EXCHANGE_NAME", "binance")
     monkeypatch.setenv("EXCHANGE_API_KEY", "server-key")
     monkeypatch.setenv("EXCHANGE_API_SECRET", "server-secret")
