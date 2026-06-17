@@ -81,6 +81,8 @@ def test_signal_watcher_goal_status_dropin_is_read_only_summary():
 
     assert "build_strategygroup_runtime_goal_status.py" in text
     assert "strategygroup-runtime-goal-status.json" in text
+    assert "--release-manifest /home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json" in text
+    assert "--expected-head" not in text
     assert "FinalGate" in text
     assert "Operation" in text
     assert "exchange write" in text
