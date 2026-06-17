@@ -1265,6 +1265,26 @@ facts when the packet is produced by the current builder.
 This is a monitoring/readability repair only. It does not call FinalGate,
 Operation Layer, exchange write, OrderLifecycle, or any real-order path.
 
+### 2026-06-17 Closure Segment Evidence Map Checkpoint
+
+`runtime-execution-chain-closure-status.json` now includes
+`dry_run_chain.goal_chain_segment_evidence`. Each objective segment maps back
+to both the required dry-run checks and the specific scenario names that proved
+the segment.
+
+| Objective segment | Evidence examples |
+| --- | --- |
+| `fresh_or_mock_signal` | `fresh_signal_fast_auto_chain_checked`, `mock_fresh_signal_dry_run_pass` |
+| `required_facts_readiness` | `required_facts_readiness_checked`, `required_facts_missing` |
+| `candidate_authorization_evidence` | `non_executing_prepare_auto_bridge_checked`, `non_executing_prepare_auto_bridge` |
+| `action_time_finalgate` | `all_selected_strategygroups_reach_finalgate_dispatch_checked`, `non_executing_prepare_auto_bridge` |
+| `official_operation_layer_evidence_handoff` | `operation_layer_evidence_relay_checked`, `scoped_pipeline_operation_layer_handoff` |
+| `disabled_dry_run_proof` | `disabled_smoke_not_real_execution_proof`, `mock_operation_layer_submit_finalize_pass` |
+
+This makes the non-market closure proof auditable from one packet without
+re-reading all raw dry-run artifacts. It remains non-executing and does not
+promote disabled smoke into real execution proof.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

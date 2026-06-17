@@ -79,6 +79,32 @@ GOAL_CHAIN_SEGMENTS = {
         "mock_operation_layer_closed_loop_checked",
     ],
 }
+GOAL_CHAIN_SEGMENT_SCENARIOS = {
+    "fresh_or_mock_signal": [
+        "mock_fresh_signal_dry_run_pass",
+    ],
+    "required_facts_readiness": [
+        "mock_fresh_signal_dry_run_pass",
+        "required_facts_missing",
+    ],
+    "candidate_authorization_evidence": [
+        "mock_fresh_signal_dry_run_pass",
+        "non_executing_prepare_auto_bridge",
+    ],
+    "action_time_finalgate": [
+        "mock_fresh_signal_dry_run_pass",
+        "non_executing_prepare_auto_bridge",
+    ],
+    "official_operation_layer_evidence_handoff": [
+        "mock_fresh_signal_dry_run_pass",
+        "scoped_pipeline_operation_layer_handoff",
+    ],
+    "disabled_dry_run_proof": [
+        "mock_fresh_signal_dry_run_pass",
+        "scoped_pipeline_operation_layer_handoff",
+        "mock_operation_layer_submit_finalize_pass",
+    ],
+}
 SAFETY_INVARIANT_KEYS = [
     "calls_tokyo_api",
     "exchange_write_called",
@@ -141,11 +167,48 @@ def _projected_dry_run_checks(required_checks: dict[str, Any]) -> dict[str, bool
     }
 
 
-def _goal_chain_segments(projected_checks: dict[str, bool]) -> dict[str, bool]:
-    return {
-        segment: all(projected_checks.get(check) is True for check in checks)
-        for segment, checks in GOAL_CHAIN_SEGMENTS.items()
-    }
+def _scenario_statuses(audit_packet: dict[str, Any]) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    scenarios = audit_packet.get("scenarios")
+    if not isinstance(scenarios, list):
+        return statuses
+    for item in scenarios:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        statuses[name] = str(item.get("status") or "").strip()
+    return statuses
+
+
+def _goal_chain_segment_evidence(
+    *,
+    projected_checks: dict[str, bool],
+    scenario_statuses: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    evidence: dict[str, dict[str, Any]] = {}
+    for segment, required_checks in GOAL_CHAIN_SEGMENTS.items():
+        scenario_names = GOAL_CHAIN_SEGMENT_SCENARIOS.get(segment, [])
+        scenario_states = {
+            name: scenario_statuses.get(name, "missing")
+            for name in scenario_names
+        }
+        checks_passed = all(
+            projected_checks.get(check) is True for check in required_checks
+        )
+        scenarios_passed = all(
+            scenario_states.get(name) == "passed" for name in scenario_names
+        )
+        evidence[segment] = {
+            "required_checks": list(required_checks),
+            "scenario_names": list(scenario_names),
+            "scenario_statuses": scenario_states,
+            "checks_passed": checks_passed,
+            "scenarios_passed": scenarios_passed,
+            "ready": checks_passed and scenarios_passed,
+        }
+    return evidence
 
 
 def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
@@ -154,7 +217,15 @@ def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
     failed_checks = _failed_required_checks(required_checks)
     dangerous_effects = _dangerous_effects(safety)
     projected_checks = _projected_dry_run_checks(required_checks)
-    goal_chain_segments = _goal_chain_segments(projected_checks)
+    scenario_statuses = _scenario_statuses(audit_packet)
+    goal_chain_segment_evidence = _goal_chain_segment_evidence(
+        projected_checks=projected_checks,
+        scenario_statuses=scenario_statuses,
+    )
+    goal_chain_segments = {
+        segment: bool(item.get("ready"))
+        for segment, item in goal_chain_segment_evidence.items()
+    }
     audit_passed = (
         audit_packet.get("status") == "passed"
         and not failed_checks
@@ -198,6 +269,7 @@ def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
                 name for name, passed in projected_checks.items() if not passed
             ],
             "goal_chain_segments": goal_chain_segments,
+            "goal_chain_segment_evidence": goal_chain_segment_evidence,
             "ready_goal_chain_segments": [
                 name for name, passed in goal_chain_segments.items() if passed
             ],

@@ -47,6 +47,35 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "official_operation_layer_evidence_handoff": True,
         "disabled_dry_run_proof": True,
     }
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "fresh_or_mock_signal"
+    ] == {
+        "required_checks": ["fresh_signal_fast_auto_chain_checked"],
+        "scenario_names": ["mock_fresh_signal_dry_run_pass"],
+        "scenario_statuses": {"mock_fresh_signal_dry_run_pass": "passed"},
+        "checks_passed": True,
+        "scenarios_passed": True,
+        "ready": True,
+    }
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "required_facts_readiness"
+    ]["scenario_statuses"] == {
+        "mock_fresh_signal_dry_run_pass": "passed",
+        "required_facts_missing": "passed",
+    }
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "official_operation_layer_evidence_handoff"
+    ]["scenario_statuses"] == {
+        "mock_fresh_signal_dry_run_pass": "passed",
+        "scoped_pipeline_operation_layer_handoff": "passed",
+    }
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "disabled_dry_run_proof"
+    ]["scenario_statuses"] == {
+        "mock_fresh_signal_dry_run_pass": "passed",
+        "scoped_pipeline_operation_layer_handoff": "passed",
+        "mock_operation_layer_submit_finalize_pass": "passed",
+    }
     assert packet["dry_run_chain"]["ready_goal_chain_segments"] == [
         "fresh_or_mock_signal",
         "required_facts_readiness",
@@ -110,6 +139,12 @@ def test_closure_status_blocks_when_required_dry_run_check_fails(tmp_path):
     assert packet["dry_run_chain"]["goal_chain_segments"][
         "fresh_or_mock_signal"
     ] is False
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "fresh_or_mock_signal"
+    ]["checks_passed"] is False
+    assert packet["dry_run_chain"]["goal_chain_segment_evidence"][
+        "fresh_or_mock_signal"
+    ]["scenarios_passed"] is True
     assert packet["dry_run_chain"]["missing_or_failed_goal_chain_segments"] == [
         "fresh_or_mock_signal",
         "candidate_authorization_evidence",
