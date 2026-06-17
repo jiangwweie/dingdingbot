@@ -394,6 +394,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- Owner 介入: 否" in text
     assert "- 通知决策: DONT_NOTIFY" in text
     assert "- 交互等级: L1_daily_check_from_snapshot" in text
+    assert "- 交互口径: 只读低交互" in text
     assert "- 远端交互次数: 1" in text
     assert "- 远端交互预算: 1" in text
     assert "- 服务器修改: 否" in text
@@ -647,8 +648,10 @@ def test_daily_check_from_cache_owner_progress_separates_read_from_collection(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "- 本次读取等级: L0_local_cache_read" in captured.out
+    assert "- 本次读取口径: 本地读取" in captured.out
     assert "- 本次远端交互次数: 0" in captured.out
     assert "- 报告采集等级: L1_daily_check_from_snapshot" in captured.out
+    assert "- 报告采集口径: 只读低交互" in captured.out
     assert "- 报告采集远端交互次数: 1" in captured.out
     assert "- 远端交互次数: 1" not in captured.out
 

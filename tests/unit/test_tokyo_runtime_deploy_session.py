@@ -125,6 +125,9 @@ def test_deploy_session_summarizes_l3_deploy_plus_l1_check():
 
     assert report["status"] == "waiting_for_market"
     assert report["interaction"]["level"] == "L3_bounded_deploy_apply"
+    assert report["interaction"]["policy"]["owner_label"] == "有界服务器变更"
+    assert report["interaction"]["policy"]["remote_mutation_allowed"] is True
+    assert report["interaction"]["policy"]["exchange_write_allowed"] is False
     assert report["interaction"]["remote_interaction_count"] == 9
     assert report["interaction"]["mutates_remote_files"] is True
     assert report["interaction"]["approaches_real_order"] is False

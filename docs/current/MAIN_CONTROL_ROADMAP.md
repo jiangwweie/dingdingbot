@@ -185,6 +185,7 @@ L1 read-only snapshot
 
 | Item | Result |
 | --- | --- |
+| Interaction taxonomy | `scripts/runtime_interaction_levels.py` defines L0-L5 as a machine-readable policy for local read, read-only remote checks, dry-run rehearsal, bounded server mutation, action-time pre-execution checks, and official tiny real-order actions |
 | Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, nginx, static frontend release, source-readiness, goal-status, latest-summary, and dry-run audit facts through one read-only SSH interaction |
 | Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply`; frontend publish reports `L1_publish_plan_only` or `L3_frontend_static_publish` |
 | Homepage interaction label | Owner Console homepage shows `L1 只读低交互` so routine monitoring is visibly classified without opening raw packets or server logs |

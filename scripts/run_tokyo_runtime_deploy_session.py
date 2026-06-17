@@ -13,15 +13,13 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DAILY_CHECK_SCRIPT = REPO_ROOT / "scripts" / "run_strategygroup_runtime_daily_check.py"
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-INTERACTION_RANK = {
-    "L1": 1,
-    "L2": 2,
-    "L3": 3,
-    "L4": 4,
-    "L5": 5,
-}
+from runtime_interaction_levels import annotate_interaction, interaction_rank
+
+DAILY_CHECK_SCRIPT = REPO_ROOT / "scripts" / "run_strategygroup_runtime_daily_check.py"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,7 +102,7 @@ def build_deploy_session_report(
         "status": status,
         "scope": "tokyo_runtime_deploy_session",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "interaction": {
+        "interaction": annotate_interaction({
             "level": highest_level,
             "remote_interaction_count": remote_interactions,
             "mutates_remote_files": mutates_remote,
@@ -115,7 +113,7 @@ def build_deploy_session_report(
             ),
             "calls_exchange_write": calls_exchange_write,
             "places_order": places_order,
-        },
+        }),
         "owner_summary": {
             "state": _owner_state_for_status(status=status, highest_level=highest_level),
             "current_action": _current_action_for_status(
@@ -212,8 +210,7 @@ def _highest_interaction_level(levels: list[str]) -> str:
     highest_rank = 0
     highest_label = "L1_session_summary"
     for level in levels:
-        prefix = level.split("_", 1)[0]
-        rank = INTERACTION_RANK.get(prefix, 0)
+        rank = interaction_rank(level)
         if rank > highest_rank:
             highest_rank = rank
             highest_label = level

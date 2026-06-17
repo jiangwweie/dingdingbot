@@ -14,6 +14,15 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from runtime_interaction_levels import (
+    annotate_interaction,
+    interaction_policy as policy_for_interaction_level,
+)
+
 SNAPSHOT_SCRIPT = REPO_ROOT / "scripts" / "probe_tokyo_runtime_snapshot.py"
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_DAILY_CHECK_CACHE_JSON = (
@@ -178,7 +187,7 @@ def build_daily_check_report(
         "status": status,
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "interaction": {
+        "interaction": annotate_interaction({
             "level": "L1_daily_check_from_snapshot",
             "uses_snapshot_level": interaction.get("level"),
             "remote_interaction_count": remote_interaction_count,
@@ -189,7 +198,7 @@ def build_daily_check_report(
             "calls_operation_layer": False,
             "calls_exchange_write": False,
             "places_order": False,
-        },
+        }),
         "owner_summary": {
             "state": visibility["label"],
             "current_action": _daily_next_action(
@@ -474,7 +483,7 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
         "status": "blocked",
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "interaction": {
+        "interaction": annotate_interaction({
             "level": "L0_local_cache_read",
             "uses_snapshot_level": None,
             "remote_interaction_count": 0,
@@ -485,7 +494,7 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "calls_operation_layer": False,
             "calls_exchange_write": False,
             "places_order": False,
-        },
+        }),
         "owner_summary": {
             "state": "工程状态暂不可用",
             "current_action": "等待自动化刷新本地 runtime monitor 缓存",
@@ -588,7 +597,7 @@ def _gated_cache_report(
         else {}
     )
     gated["cached_report_interaction"] = cached_interaction
-    gated["interaction"] = {
+    gated["interaction"] = annotate_interaction({
         "level": "L0_local_cache_gate",
         "uses_snapshot_level": cached_interaction.get("uses_snapshot_level")
         or cached_interaction.get("level"),
@@ -600,7 +609,7 @@ def _gated_cache_report(
         "calls_operation_layer": False,
         "calls_exchange_write": False,
         "places_order": False,
-    }
+    })
     checks = dict(gated.get("checks") if isinstance(gated.get("checks"), dict) else {})
     blockers = _dedupe([*[str(item) for item in checks.get("blockers") or []], reason])
     checks["blockers"] = blockers
@@ -634,14 +643,14 @@ def _gated_cache_report(
 
 def _annotate_current_read_interaction(report: dict[str, Any]) -> dict[str, Any]:
     annotated = dict(report)
-    annotated["current_read_interaction"] = {
+    annotated["current_read_interaction"] = annotate_interaction({
         "level": "L0_local_cache_read",
         "remote_interaction_count": 0,
         "mutates_remote_files": False,
         "approaches_real_order": False,
         "calls_exchange_write": False,
         "places_order": False,
-    }
+    })
     return annotated
 
 
@@ -730,6 +739,16 @@ def _owner_progress_text(
     progress = owner.get("progress")
     if not isinstance(progress, dict):
         progress = {}
+    interaction_policy = interaction.get("policy")
+    if not isinstance(interaction_policy, dict):
+        interaction_policy = policy_for_interaction_level(
+            str(interaction.get("level") or "unknown")
+        )
+    current_read_policy = current_read_interaction.get("policy")
+    if not isinstance(current_read_policy, dict):
+        current_read_policy = policy_for_interaction_level(
+            str(current_read_interaction.get("level") or "unknown")
+        )
 
     blockers = [str(item) for item in checks.get("blockers") or []]
     product_gaps = [str(item) for item in checks.get("product_gaps") or []]
@@ -765,6 +784,11 @@ def _owner_progress_text(
             if current_read_interaction
             else f"- 交互等级: {interaction.get('level') or 'unknown'}"
         ),
+        *(
+            [f"- 本次读取口径: {current_read_policy.get('owner_label') or 'unknown'}"]
+            if current_read_interaction
+            else [f"- 交互口径: {interaction_policy.get('owner_label') or 'unknown'}"]
+        ),
         (
             f"- 本次远端交互次数: {current_read_interaction.get('remote_interaction_count', 0)}"
             if current_read_interaction
@@ -774,6 +798,11 @@ def _owner_progress_text(
             f"- 报告采集等级: {interaction.get('level') or 'unknown'}"
             if current_read_interaction
             else f"- 远端交互预算: {interaction.get('max_remote_interactions', 1)}"
+        ),
+        *(
+            [f"- 报告采集口径: {interaction_policy.get('owner_label') or 'unknown'}"]
+            if current_read_interaction
+            else []
         ),
         (
             f"- 报告采集远端交互次数: {interaction.get('remote_interaction_count', 0)}"
