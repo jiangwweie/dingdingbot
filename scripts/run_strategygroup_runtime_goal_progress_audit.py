@@ -424,12 +424,20 @@ def _exit_hardening_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         checks,
         "post_submit_exit_outcome_matrix_checked",
     )
+    standing_recovery_checked = _dry_run_required_check_present(
+        checks,
+        "reduce_only_recovery_standing_authorization_checked",
+    )
+    ready = matrix_checked and standing_recovery_checked
     return {
-        "status": "ready" if matrix_checked else "needs_work",
+        "status": "ready" if ready else "needs_work",
         "post_submit_exit_outcome_matrix_checked": matrix_checked,
+        "reduce_only_recovery_standing_authorization_checked": (
+            standing_recovery_checked
+        ),
         "exchange_native_hard_stop_required_after_entry": matrix_checked,
         "entry_filled_protection_ok_covered": matrix_checked,
-        "entry_filled_protection_failed_reduce_only_recovery_covered": matrix_checked,
+        "entry_filled_protection_failed_reduce_only_recovery_covered": ready,
         "partial_fill_policy_covered": matrix_checked,
         "exchange_submit_failed_before_acceptance_policy_covered": matrix_checked,
         "active_position_remains_open_policy_covered": matrix_checked,

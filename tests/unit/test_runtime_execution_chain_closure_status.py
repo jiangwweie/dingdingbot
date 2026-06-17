@@ -39,6 +39,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "new_strategygroups_default_observe_only_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
         "post_submit_exit_outcome_matrix_checked": True,
+        "reduce_only_recovery_standing_authorization_checked": True,
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
     }

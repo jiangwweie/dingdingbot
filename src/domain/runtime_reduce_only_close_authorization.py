@@ -1,8 +1,10 @@
-"""Owner authorization packet for a runtime reduce-only close.
+"""Standing-recovery readiness packet for a runtime reduce-only close.
 
 This module is pure domain logic. It turns an already-built active-position
-exit plan into an Owner review packet. It never closes positions, creates
-orders, calls an exchange, or grants execution authority by itself.
+exit plan into a standing-authorization readiness packet. It never closes
+positions, creates orders, calls an exchange, or grants execution authority by
+itself. Real reduce-only recovery still requires the official action-time
+FinalGate and Operation Layer path.
 """
 
 from __future__ import annotations
@@ -20,11 +22,17 @@ from src.domain.runtime_position_exit_plan import (
 
 
 OWNER_REDUCE_ONLY_CLOSE_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE"
+STANDING_REDUCE_ONLY_RECOVERY_SCOPE = (
+    "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
+)
 
 
 class RuntimeReduceOnlyCloseOwnerPacketStatus(str, Enum):
     BLOCKED = "blocked"
     READY_FOR_OWNER_AUTHORIZATION = "ready_for_owner_authorization"
+    READY_FOR_STANDING_RECOVERY_AUTHORIZATION = (
+        "ready_for_standing_recovery_authorization"
+    )
 
 
 class RuntimeReduceOnlyCloseOwnerPacket(BaseModel):
@@ -42,9 +50,12 @@ class RuntimeReduceOnlyCloseOwnerPacket(BaseModel):
     close_notional_reference: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     stop_price_reference: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     entry_price: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
-    owner_approval_env: str = OWNER_REDUCE_ONLY_CLOSE_APPROVAL_ENV
+    owner_approval_env: Optional[str] = None
     owner_approval_value: Optional[str] = Field(default=None, max_length=512)
-    owner_approval_required: Literal[True] = True
+    owner_approval_required: bool = False
+    standing_authorization_scope: Optional[str] = Field(default=None, max_length=256)
+    operation_layer_required: Literal[True] = True
+    finalgate_required: Literal[True] = True
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     recommended_owner_decision: str
@@ -78,6 +89,20 @@ class RuntimeReduceOnlyCloseOwnerPacket(BaseModel):
                 raise ValueError("ready reduce-only close packet requires positive close quantity")
             if not self.reduce_only_side:
                 raise ValueError("ready reduce-only close packet requires reduce-only side")
+        if (
+            self.status
+            == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
+        ):
+            if self.owner_approval_required:
+                raise ValueError("standing recovery packet must not require owner approval")
+            if self.owner_approval_value is not None:
+                raise ValueError("standing recovery packet must not expose owner approval value")
+            if not self.standing_authorization_scope:
+                raise ValueError("standing recovery packet requires standing scope")
+            if self.close_quantity is None or self.close_quantity <= Decimal("0"):
+                raise ValueError("standing recovery packet requires positive close quantity")
+            if not self.reduce_only_side:
+                raise ValueError("standing recovery packet requires reduce-only side")
         return self
 
 
@@ -103,18 +128,13 @@ def build_runtime_reduce_only_close_owner_packet(
         blockers.append("reduce_only_side_missing")
 
     ready = not blockers
-    approval_value = (
-        _approval_value(exit_plan)
-        if ready
-        else None
-    )
     return RuntimeReduceOnlyCloseOwnerPacket(
         packet_id=(
             "runtime-reduce-only-close-owner-packet-"
             f"{exit_plan.runtime_instance_id}-{now_ms}"
         ),
         status=(
-            RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_OWNER_AUTHORIZATION
+            RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
             if ready
             else RuntimeReduceOnlyCloseOwnerPacketStatus.BLOCKED
         ),
@@ -128,13 +148,16 @@ def build_runtime_reduce_only_close_owner_packet(
         close_notional_reference=exit_plan.full_reduce_only_close_notional_reference,
         stop_price_reference=exit_plan.stop_price_reference,
         entry_price=exit_plan.entry_price,
-        owner_approval_value=approval_value,
+        owner_approval_required=False,
+        standing_authorization_scope=(
+            STANDING_REDUCE_ONLY_RECOVERY_SCOPE if ready else None
+        ),
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
         recommended_owner_decision=(
-            "owner_may_authorize_full_reduce_only_close"
+            "prepare_official_reduce_only_recovery"
             if ready
-            else "repair_exit_plan_before_owner_close_authorization"
+            else "repair_exit_plan_before_reduce_only_recovery"
         ),
         created_at_ms=now_ms,
     )

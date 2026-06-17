@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a non-executing Owner packet for runtime reduce-only close review."""
+"""Build a non-executing standing recovery packet for reduce-only close review."""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
             now_ms=int(time.time() * 1000),
         )
         return {
-            "scope": "runtime_reduce_only_close_owner_packet",
+            "scope": "runtime_reduce_only_close_standing_recovery_packet",
             "status": packet.status.value,
             "packet": _json_value(packet),
             "source_exit_plan": _json_value(exit_plan),
@@ -137,7 +137,7 @@ async def _build_packet(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a non-executing Owner packet for runtime reduce-only close.",
+        description="Build a non-executing standing recovery packet for runtime reduce-only close.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
     parser.add_argument(
@@ -157,7 +157,15 @@ def main() -> int:
     args = parser.parse_args()
     payload = asyncio.run(_build_packet(args))
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-    return 0 if payload["status"] == "ready_for_owner_authorization" else 2
+    return (
+        0
+        if payload["status"]
+        in {
+            "ready_for_owner_authorization",
+            "ready_for_standing_recovery_authorization",
+        }
+        else 2
+    )
 
 
 if __name__ == "__main__":

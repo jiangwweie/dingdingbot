@@ -227,7 +227,7 @@ def test_exit_plan_proposes_tp1_runner_without_execution_authority():
     assert plan.full_reduce_only_close_quantity == Decimal("1.0")
     assert plan.full_reduce_only_close_feasible is True
     assert plan.full_reduce_only_close_notional_reference == Decimal("6.62844777")
-    assert plan.full_reduce_only_close_requires_owner_authorization is True
+    assert plan.full_reduce_only_close_requires_owner_authorization is False
     assert plan.runner_primary_exit_rule == "structure_invalidation_first"
     assert plan.runner_secondary_exit_rules == [
         "atr_trailing_review_only",
@@ -274,7 +274,7 @@ def test_exit_plan_warns_when_tp1_partial_qty_cannot_satisfy_market_step():
     assert plan.tp1_quantity_feasible is False
     assert plan.runner_quantity_reference == Decimal("1")
     assert plan.recommended_owner_decision == (
-        "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+        "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
     )
     assert plan.full_reduce_only_close_quantity == Decimal("1")
     assert plan.full_reduce_only_close_feasible is True

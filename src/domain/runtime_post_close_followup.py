@@ -27,6 +27,9 @@ from src.domain.runtime_reduce_only_close_authorization import (
 class RuntimePostCloseFollowupStatus(str, Enum):
     BLOCKED = "blocked"
     WAITING_FOR_OWNER_CLOSE_AUTHORIZATION = "waiting_for_owner_close_authorization"
+    READY_FOR_STANDING_REDUCE_ONLY_RECOVERY = (
+        "ready_for_standing_reduce_only_recovery"
+    )
     READY_FOR_CLOSED_REVIEW = "ready_for_closed_review"
     POST_CLOSE_COMPLETE = "post_close_complete"
 
@@ -43,6 +46,9 @@ class RuntimePostCloseFollowupPacket(BaseModel):
     owner_close_packet_status: Optional[str] = None
     owner_close_approval_env: Optional[str] = None
     owner_close_approval_value: Optional[str] = None
+    standing_recovery_authorization_scope: Optional[str] = None
+    operation_layer_required: bool = True
+    finalgate_required: bool = True
     closed_review_facts_status: Optional[str] = None
     closed_review_entry_order_id: Optional[str] = None
     closed_review_exit_order_id: Optional[str] = None
@@ -81,6 +87,11 @@ class RuntimePostCloseFollowupPacket(BaseModel):
             and not self.owner_close_approval_value
         ):
             raise ValueError("waiting for close authorization requires approval value")
+        if self.status == RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY:
+            if self.owner_close_approval_value is not None:
+                raise ValueError("standing reduce-only recovery must not expose approval value")
+            if not self.standing_recovery_authorization_scope:
+                raise ValueError("standing reduce-only recovery requires standing scope")
         return self
 
 
@@ -107,24 +118,45 @@ def build_runtime_post_close_followup_packet(
             blockers.append("owner_close_packet_missing")
         elif (
             owner_close_packet.status
-            != RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_OWNER_AUTHORIZATION
+            not in {
+                RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_OWNER_AUTHORIZATION,
+                RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION,
+            }
         ):
             blockers.extend(owner_close_packet.blockers)
             blockers.append("owner_close_packet_not_ready")
         if blockers:
             status = RuntimePostCloseFollowupStatus.BLOCKED
             recommended = "repair_owner_close_packet_before_close_followup"
+        elif (
+            owner_close_packet is not None
+            and owner_close_packet.status
+            == RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION
+        ):
+            status = RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY
+            recommended = "prepare_official_reduce_only_recovery_or_continue_holding"
         else:
             status = RuntimePostCloseFollowupStatus.WAITING_FOR_OWNER_CLOSE_AUTHORIZATION
             recommended = "owner_authorize_reduce_only_close_or_continue_holding"
-        required_steps = [
-            "owner_authorize_exact_reduce_only_close_value",
-            "execute_runtime_owner_reduce_only_close_flow",
-            "verify_runtime_live_position_monitor_flat",
-            "verify_reconciliation_severe_count_zero",
-            "record_runtime_closed_trade_review",
-            "verify_next_attempt_gate",
-        ]
+        if status == RuntimePostCloseFollowupStatus.READY_FOR_STANDING_REDUCE_ONLY_RECOVERY:
+            required_steps = [
+                "prepare_official_operation_layer_reduce_only_recovery",
+                "run_action_time_finalgate_for_reduce_only_recovery",
+                "execute_reduce_only_recovery_through_operation_layer",
+                "verify_runtime_live_position_monitor_flat",
+                "verify_reconciliation_severe_count_zero",
+                "record_runtime_closed_trade_review",
+                "verify_next_attempt_gate",
+            ]
+        else:
+            required_steps = [
+                "owner_authorize_exact_reduce_only_close_value",
+                "execute_runtime_owner_reduce_only_close_flow",
+                "verify_runtime_live_position_monitor_flat",
+                "verify_reconciliation_severe_count_zero",
+                "record_runtime_closed_trade_review",
+                "verify_next_attempt_gate",
+            ]
         completed_steps = ["fresh_monitor_read", "owner_close_packet_built"]
     elif monitor.review_required_before_next_attempt:
         if closed_review_recorded:
@@ -184,6 +216,21 @@ def build_runtime_post_close_followup_packet(
         ),
         owner_close_approval_value=(
             owner_close_packet.owner_approval_value if owner_close_packet is not None else None
+        ),
+        standing_recovery_authorization_scope=(
+            owner_close_packet.standing_authorization_scope
+            if owner_close_packet is not None
+            else None
+        ),
+        operation_layer_required=(
+            owner_close_packet.operation_layer_required
+            if owner_close_packet is not None
+            else True
+        ),
+        finalgate_required=(
+            owner_close_packet.finalgate_required
+            if owner_close_packet is not None
+            else True
         ),
         closed_review_facts_status=closed_review_status,
         closed_review_entry_order_id=(

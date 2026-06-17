@@ -53,7 +53,7 @@ class RuntimePositionExitPlan(RuntimePositionExitPlanModel):
         ge=Decimal("0"),
     )
     full_reduce_only_close_feasible: bool = False
-    full_reduce_only_close_requires_owner_authorization: bool = True
+    full_reduce_only_close_requires_owner_authorization: bool = False
     market_min_qty: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     market_qty_step: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     tp1_quantity_feasible: bool = False
@@ -215,9 +215,9 @@ def build_runtime_position_exit_plan(
         recommended = "tp_already_present_continue_monitoring"
     elif not feasible:
         recommended = (
-            "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+            "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
             if full_close_feasible
-            else "keep_hard_stop_only_or_authorize_different_reduce_only_exit_shape"
+            else "keep_hard_stop_only_or_prepare_different_reduce_only_exit_shape"
         )
 
     return RuntimePositionExitPlan(
@@ -265,7 +265,7 @@ def build_runtime_position_exit_plan(
             ],
             "runner_exit_automation": "review_packet_only_first_stage",
             "runner_stop_update_authority": "none_in_first_stage",
-            "full_reduce_only_close_is_risk_reducing_but_requires_owner_authorization": (
+            "full_reduce_only_close_is_risk_reducing_under_standing_authorization": (
                 full_close_feasible
             ),
             "market_rule_source": _get(market_rule, "source", "unknown") if market_rule else None,

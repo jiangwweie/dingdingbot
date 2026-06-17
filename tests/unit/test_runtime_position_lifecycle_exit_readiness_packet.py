@@ -83,7 +83,7 @@ def _exit_plan(**overrides):
         "symbol": "BNB/USDT:USDT",
         "side": "long",
         "recommended_owner_decision": (
-            "keep_hard_stop_only_or_owner_authorize_full_reduce_only_close"
+            "keep_hard_stop_only_or_prepare_official_reduce_only_recovery"
         ),
         "tp1_quantity_feasible": False,
         "tp1_price_reference": "616.09",
@@ -94,7 +94,7 @@ def _exit_plan(**overrides):
         "full_reduce_only_close_feasible": True,
         "full_reduce_only_close_quantity": "0.01",
         "full_reduce_only_close_notional_reference": "6.0503",
-        "full_reduce_only_close_requires_owner_authorization": True,
+        "full_reduce_only_close_requires_owner_authorization": False,
         "blockers": [],
         "warnings": ["tp1_partial_quantity_below_min_qty_or_step"],
     }
@@ -116,24 +116,25 @@ def _exit_plan(**overrides):
 
 def _followup(**overrides):
     packet = {
-        "status": "waiting_for_owner_close_authorization",
+        "status": "ready_for_standing_reduce_only_recovery",
         "runtime_instance_id": "runtime-bnb",
         "symbol": "BNB/USDT:USDT",
         "active_position_present": True,
-        "owner_close_approval_env": "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE",
-        "owner_close_approval_value": (
-            "runtime-reduce-only-close:runtime-bnb:BNB/USDT:USDT:long:"
-            "qty=0.01:owner-authorized"
+        "owner_close_approval_env": None,
+        "owner_close_approval_value": None,
+        "standing_recovery_authorization_scope": (
+            "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
         ),
         "required_steps": [
-            "owner_authorize_exact_reduce_only_close_value",
-            "execute_runtime_owner_reduce_only_close_flow",
+            "prepare_official_operation_layer_reduce_only_recovery",
+            "run_action_time_finalgate_for_reduce_only_recovery",
+            "execute_reduce_only_recovery_through_operation_layer",
             "verify_runtime_live_position_monitor_flat",
             "record_runtime_closed_trade_review",
             "verify_next_attempt_gate",
         ],
         "completed_steps": ["fresh_monitor_read", "owner_close_packet_built"],
-        "recommended_next_action": "owner_authorize_reduce_only_close_or_continue_holding",
+        "recommended_next_action": "prepare_official_reduce_only_recovery_or_continue_holding",
         "blockers": [],
         "warnings": ["missing_tp_protection_right_tail_exit_not_mounted"],
     }
@@ -153,7 +154,7 @@ def _followup(**overrides):
     }
 
 
-def test_lifecycle_classifies_hold_or_owner_close_ready():
+def test_lifecycle_classifies_hold_or_standing_recovery_ready():
     packet = script.build_lifecycle_packet(
         gate_classification=_gate_classification(),
         live_position_monitor=_monitor_packet(),
@@ -161,14 +162,18 @@ def test_lifecycle_classifies_hold_or_owner_close_ready():
         post_close_followup=_followup(),
     )
 
-    assert packet["status"] == "position_lifecycle_hold_or_owner_close_ready"
+    assert packet["status"] == "position_lifecycle_hold_or_standing_recovery_ready"
     assert packet["position_facts"]["active_position_present"] is True
     assert packet["position_facts"]["hard_stop_boundary_present"] is True
     assert packet["exit_path"]["full_reduce_only_close_feasible"] is True
     assert packet["exit_path"]["tp1_quantity_feasible"] is False
     assert packet["operator_command_plan"][
         "reduce_only_close_ready_for_owner_authorization"
+    ] is False
+    assert packet["operator_command_plan"][
+        "reduce_only_recovery_ready_for_standing_authorization"
     ] is True
+    assert packet["operator_command_plan"]["requires_official_operation_layer"] is True
     assert packet["operator_command_plan"]["execute_reduce_only_close_now"] is False
     assert packet["operator_command_plan"]["allows_new_attempt_now"] is False
     assert packet["safety_invariants"]["no_forbidden_live_side_effects"] is True
@@ -230,7 +235,7 @@ def test_lifecycle_blocks_forbidden_effect():
         position_exit_plan=_exit_plan(),
         post_close_followup=_followup(),
     )
-    assert packet["status"] == "position_lifecycle_hold_or_owner_close_ready"
+    assert packet["status"] == "position_lifecycle_hold_or_standing_recovery_ready"
 
     blocked = script.build_lifecycle_packet(
         gate_classification=_gate_classification(
@@ -285,5 +290,5 @@ def test_lifecycle_cli_tolerates_log_prefixed_json(tmp_path, capsys):
 
     stdout_packet = json.loads(capsys.readouterr().out)
     file_packet = json.loads(output_path.read_text(encoding="utf-8"))
-    assert stdout_packet["status"] == "position_lifecycle_hold_or_owner_close_ready"
+    assert stdout_packet["status"] == "position_lifecycle_hold_or_standing_recovery_ready"
     assert file_packet["deployment_context"]["deployed_head"] == "f8871634"

@@ -941,14 +941,23 @@ def test_trading_console_runtime_post_close_followup_surfaces_operator_plan(
     payload = response.json()
     packet = payload["packet"]
     plan = payload["operator_command_plan"]
-    assert payload["status"] == "waiting_for_owner_close_authorization"
-    assert packet["owner_close_approval_env"] == "OWNER_APPROVED_RUNTIME_REDUCE_ONLY_CLOSE"
+    assert payload["status"] == "ready_for_standing_reduce_only_recovery"
+    assert packet["owner_close_approval_env"] is None
+    assert packet["owner_close_approval_value"] is None
+    assert packet["standing_recovery_authorization_scope"] == (
+        "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
+    )
     assert packet["closed_review_facts_status"] == "waiting_for_close"
     assert packet["closed_review_entry_order_id"] == "entry-1"
     assert packet["closed_review_exit_order_id"] is None
     assert plan["not_executed"] is True
-    assert plan["requires_explicit_owner_approval_before_execute"] is True
-    assert plan["owner_close_execute_command_args"][-1] == "--execute-real-close"
+    assert plan["requires_explicit_owner_approval_before_execute"] is False
+    assert plan["requires_official_operation_layer"] is True
+    assert plan["owner_close_execute_command_args"] == []
+    assert plan["operation_layer_reduce_only_recovery_args"][:2] == [
+        "official_operation_layer",
+        "prepare_reduce_only_recovery",
+    ]
     assert plan["safety_invariants"]["exchange_write_called"] is False
     assert payload["safety_invariants"]["api_read_only"] is True
     assert payload["safety_invariants"]["review_record_created"] is False

@@ -53,8 +53,9 @@ cleanup plan.
 | CCXT/Binance nested reduce-only shape | `test_exchange_native_hard_stop_accepts_reduce_only_from_info_payload` covers `info.reduceOnly=true` | Proven by unit tests |
 | TP1 first-stage shape | `runtime_position_exit_plan` preserves default TP1 review shape and blocks fake TP orders when min qty / step makes partial TP infeasible | Proven by unit tests |
 | runner first-stage rule | `runner_primary_exit_rule=structure_invalidation_first`, ATR trailing and time stop are review-only helpers | Proven by domain model/tests |
-| reduce-only recovery authorization packet | `test_runtime_reduce_only_close_authorization.py` proves ready and blocked owner-packet shapes | Proven by unit tests |
+| standing reduce-only recovery authorization packet | `test_runtime_reduce_only_close_authorization.py` proves ready and blocked recovery-packet shapes; no per-order chat confirmation is required inside the official recovery boundary | Proven by unit tests |
 | post-submit exit outcome matrix | Dry-run audit has `post_submit_exit_outcome_matrix_checked=true` | Proven by dry-run |
+| protection-failure reduce-only recovery route | Dry-run audit has `reduce_only_recovery_standing_authorization_checked=true`; recovery still requires action-time FinalGate and official Operation Layer | Proven by dry-run |
 | entry filled + protection failure handling | Dry-run outcome matrix includes protection-failed path and recovery/review shape | Proven by dry-run |
 | real post-submit close/reconcile/settle after actual order | Not proven because no real order has been accepted yet | Market/order-dependent |
 
@@ -149,3 +150,21 @@ quietly reporting a stale `DONT_NOTIFY`.
 | Postdeploy acceptance | `output/tokyo-runtime-deploy-session-2f382cd8.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]` |
 | Cache source | `output/runtime-monitor/latest-daily-check.json` records `source.expected_runtime_head` and `source.runtime_head` for cache-head validation |
 | Verification | `85 passed` for daily check, goal progress, goal status, and Tokyo snapshot unit tests |
+
+### 2026-06-18 Standing Reduce-Only Recovery Checkpoint
+
+The active-position recovery path no longer presents the current pilot's
+reduce-only recovery readiness as an old per-order Owner chat confirmation.
+When an entry is filled but exchange-native protection creation fails, the
+system now treats reduce-only recovery as a standing-authorized risk-reducing
+path that still must pass action-time FinalGate and the official Operation
+Layer before any real exchange action.
+
+| Item | Evidence |
+| --- | --- |
+| Domain readiness | `RuntimeReduceOnlyCloseOwnerPacketStatus.READY_FOR_STANDING_RECOVERY_AUTHORIZATION` carries `operation_layer_required=true`, `finalgate_required=true`, and no owner approval value |
+| Post-close followup | `ready_for_standing_reduce_only_recovery` requires `prepare_official_operation_layer_reduce_only_recovery`, `run_action_time_finalgate_for_reduce_only_recovery`, and `execute_reduce_only_recovery_through_operation_layer` |
+| Continuation selector | Active-position continuation selects `monitor_position_or_prepare_official_reduce_only_recovery` instead of the old owner-authorize close action |
+| Dry-run audit | `runtime-dry-run-audit-chain-current.json`: `status=passed`, `scenario_count=14`, `reduce_only_recovery_standing_authorization_checked=true`, `exchange_write_called=false`, `order_created=false` |
+| Monitor state | `run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress`: `DONT_NOTIFY`, `waiting_for_market`, `L0_local_cache_read`, `remote_interaction_count=0` |
+| Verification | `90 passed` for dry-run/monitor status tests; `109 passed, 1 skipped` for reduce-only recovery/domain/readmodel tests; `py_compile` passed for modified runtime files |

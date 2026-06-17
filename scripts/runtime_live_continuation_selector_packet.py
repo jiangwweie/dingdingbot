@@ -105,6 +105,8 @@ def _row_action(row: dict[str, Any], lifecycle: dict[str, Any] | None) -> str:
         return "prepare_shadow_candidate_records"
     if lifecycle:
         lifecycle_status = str(lifecycle.get("status") or "")
+        if lifecycle_status == "position_lifecycle_hold_or_standing_recovery_ready":
+            return "monitor_position_or_prepare_official_reduce_only_recovery"
         if lifecycle_status == "position_lifecycle_hold_or_owner_close_ready":
             return "monitor_position_or_owner_authorize_reduce_only_close"
         if lifecycle_status == "position_lifecycle_hold_with_hard_stop":
@@ -129,6 +131,7 @@ def _priority(action: str) -> int:
     priorities = {
         "review_final_gate_preflight": 100,
         "prepare_shadow_candidate_records": 90,
+        "monitor_position_or_prepare_official_reduce_only_recovery": 75,
         "monitor_position_or_owner_authorize_reduce_only_close": 70,
         "monitor_position_until_flat_or_exit_signal": 60,
         "record_closed_trade_review": 55,
@@ -178,7 +181,13 @@ def _continuation_row(
         "reduce_only_close_ready_for_owner_authorization": bool(
             operator.get("reduce_only_close_ready_for_owner_authorization")
         ),
+        "reduce_only_recovery_ready_for_standing_authorization": bool(
+            operator.get("reduce_only_recovery_ready_for_standing_authorization")
+        ),
         "owner_close_approval_value": operator.get("owner_close_approval_value"),
+        "standing_recovery_authorization_scope": operator.get(
+            "standing_recovery_authorization_scope"
+        ),
         "selected_action": action,
         "priority": _priority(action),
     }
@@ -196,6 +205,8 @@ def _selector_status(
         return "continuation_ready_for_final_gate_review"
     if "prepare_shadow_candidate_records" in actions:
         return "continuation_ready_for_prepare"
+    if "monitor_position_or_prepare_official_reduce_only_recovery" in actions:
+        return "continuation_monitor_position_or_standing_recovery"
     if "monitor_position_or_owner_authorize_reduce_only_close" in actions:
         return "continuation_monitor_position_or_owner_close"
     if actions == {"wait_for_strategy_signal"}:
@@ -212,6 +223,8 @@ def _operator_plan(status: str, selected: dict[str, Any] | None) -> dict[str, An
         next_step = "review_final_gate_and_controlled_tiny_live_attempt"
     elif status == "continuation_ready_for_prepare":
         next_step = "run_official_prepare_for_ready_strategy_candidate"
+    elif status == "continuation_monitor_position_or_standing_recovery":
+        next_step = "continue_position_monitoring_or_prepare_official_reduce_only_recovery"
     elif status == "continuation_monitor_position_or_owner_close":
         next_step = "continue_position_monitoring_or_owner_authorize_reduce_only_close"
     elif status == "continuation_waiting_for_strategy_signal":
@@ -315,7 +328,10 @@ def build_selector_packet(
         "right_tail_objective_context": {
             "bounded_active_position_may_continue": any(
                 row.get("selected_action")
-                == "monitor_position_or_owner_authorize_reduce_only_close"
+                in {
+                    "monitor_position_or_prepare_official_reduce_only_recovery",
+                    "monitor_position_or_owner_authorize_reduce_only_close",
+                }
                 for row in rows
             ),
             "real_strategy_signal_required_before_new_attempt": True,
@@ -363,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if packet["status"] in {
         "continuation_ready_for_final_gate_review",
         "continuation_ready_for_prepare",
+        "continuation_monitor_position_or_standing_recovery",
         "continuation_monitor_position_or_owner_close",
         "continuation_waiting_for_strategy_signal",
         "continuation_mixed_observation",

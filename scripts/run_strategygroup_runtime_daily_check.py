@@ -46,6 +46,7 @@ ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
 )
 EXIT_HARDENING_REQUIRED_SEGMENTS = (
     "post_submit_exit_outcome_matrix_checked",
+    "reduce_only_recovery_standing_authorization_checked",
 )
 STRATEGYGROUP_TIER_REQUIRED_SEGMENTS = (
     "strategygroup_adapter_boundary_checked",

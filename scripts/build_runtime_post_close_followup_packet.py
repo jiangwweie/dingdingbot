@@ -88,19 +88,42 @@ def _operator_command_plan(
     approval_env = getattr(packet, "owner_close_approval_env", None)
     approval_value = getattr(packet, "owner_close_approval_value", None)
     close_execute_args = [*close_args, "--execute-real-close"] if approval_value else []
+    standing_recovery_scope = getattr(
+        packet,
+        "standing_recovery_authorization_scope",
+        None,
+    )
     packet_status = getattr(packet, "status", "")
     post_close_complete = (
         str(getattr(packet_status, "value", packet_status)) == "post_close_complete"
     )
+    standing_recovery_ready = (
+        str(getattr(packet_status, "value", packet_status))
+        == "ready_for_standing_reduce_only_recovery"
+    )
     return {
         "scope": "runtime_post_close_operator_command_plan",
         "not_executed": True,
-        "requires_explicit_owner_approval_before_execute": True,
+        "requires_explicit_owner_approval_before_execute": bool(approval_value),
+        "requires_official_operation_layer": bool(standing_recovery_ready),
+        "standing_recovery_authorization_scope": standing_recovery_scope,
         "owner_close_approval_env": approval_env,
         "owner_close_approval_value": approval_value,
         "refresh_followup_command_args": followup_args,
         "owner_close_dry_run_command_args": close_args if approval_value else [],
-        "owner_close_execute_command_args": close_execute_args,
+        "owner_close_execute_command_args": [] if standing_recovery_ready else close_execute_args,
+        "operation_layer_reduce_only_recovery_args": (
+            [
+                "official_operation_layer",
+                "prepare_reduce_only_recovery",
+                "--runtime-instance-id",
+                runtime_instance_id,
+                "--standing-authorization-scope",
+                str(standing_recovery_scope),
+            ]
+            if standing_recovery_ready
+            else []
+        ),
         "closed_review_facts_refresh_command_args": review_facts_args,
         "closed_review_command_args": (
             []
@@ -112,8 +135,18 @@ def _operator_command_plan(
             if post_close_complete
             else [
                 "refresh_followup",
-                "owner_authorize_exact_reduce_only_close_value",
-                "run_owner_close_execute_command",
+                *(
+                    [
+                        "prepare_official_operation_layer_reduce_only_recovery",
+                        "run_action_time_finalgate_for_reduce_only_recovery",
+                        "execute_reduce_only_recovery_through_operation_layer",
+                    ]
+                    if standing_recovery_ready
+                    else [
+                        "owner_authorize_exact_reduce_only_close_value",
+                        "run_owner_close_execute_command",
+                    ]
+                ),
                 "refresh_followup_until_flat",
                 "run_closed_review_dry_run",
                 "run_closed_review_apply_if_ready",

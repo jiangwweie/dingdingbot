@@ -2855,6 +2855,10 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
             "review_policy": "require_recovery_review",
             "next_attempt_gate": "blocked_protection_recovery_required",
             "reduce_only_recovery_mode": True,
+            "owner_chat_confirmation_required": False,
+            "standing_recovery_authorization": True,
+            "action_time_finalgate_required": True,
+            "operation_layer_required": True,
         },
         "partial_fill": {
             "submit_outcome": "partial_fill",
@@ -2918,6 +2922,24 @@ def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
         ),
         "protection_failure_enters_reduce_only_recovery": (
             cases["entry_filled_protection_failed"]["reduce_only_recovery_mode"]
+            is True
+        ),
+        "protection_failure_recovery_uses_standing_authorization": (
+            cases["entry_filled_protection_failed"][
+                "owner_chat_confirmation_required"
+            ]
+            is False
+            and cases["entry_filled_protection_failed"][
+                "standing_recovery_authorization"
+            ]
+            is True
+            and cases["entry_filled_protection_failed"][
+                "action_time_finalgate_required"
+            ]
+            is True
+            and cases["entry_filled_protection_failed"][
+                "operation_layer_required"
+            ]
             is True
         ),
         "submit_failure_releases_only_after_no_fill_verified": (
@@ -3664,6 +3686,17 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 ).get("exit_outcome_matrix", {}).get("checks", {}).values()
             )
         ),
+        "reduce_only_recovery_standing_authorization_checked": (
+            _scenario_artifact(
+                scenarios,
+                "post_submit_closed_loop_evidence_guard",
+                "post_submit_closed_loop_evidence_guard",
+            )
+            .get("exit_outcome_matrix", {})
+            .get("checks", {})
+            .get("protection_failure_recovery_uses_standing_authorization")
+            is True
+        ),
         "operation_layer_submit_result_identity_guard_checked": (
             _scenario_artifact(
                 scenarios,
@@ -3748,6 +3781,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "post_submit_exit_outcome_matrix_checked": checks[
             "post_submit_exit_outcome_matrix_checked"
+        ],
+        "reduce_only_recovery_standing_authorization_checked": checks[
+            "reduce_only_recovery_standing_authorization_checked"
         ],
         "operation_layer_submit_result_identity_guard_checked": checks[
             "operation_layer_submit_result_identity_guard_checked"

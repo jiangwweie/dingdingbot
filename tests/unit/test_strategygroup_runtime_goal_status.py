@@ -100,6 +100,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "operation_layer_authorization_chain_guard_checked": True,
                 "post_submit_closed_loop_evidence_guard_checked": True,
                 "post_submit_exit_outcome_matrix_checked": True,
+                "reduce_only_recovery_standing_authorization_checked": True,
                 "operation_layer_submit_result_identity_guard_checked": True,
                 "post_submit_finalize_result_identity_guard_checked": True,
                 "shared_runtime_pipeline_checked": True,

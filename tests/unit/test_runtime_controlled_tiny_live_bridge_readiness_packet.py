@@ -27,7 +27,7 @@ def _selected(
 
 def _refresh(
     *,
-    status: str = "continuation_refresh_monitor_position_or_owner_close",
+    status: str = "continuation_refresh_monitor_position_or_standing_recovery",
     selected: dict | None = None,
     forbidden: bool = False,
 ) -> dict:
@@ -35,12 +35,12 @@ def _refresh(
         "scope": "runtime_live_continuation_refresh_flow",
         "status": status,
         "readiness_status": "live_attempt_blocked_by_runtime_or_signal_gate",
-        "selector_status": "continuation_monitor_position_or_owner_close",
+        "selector_status": "continuation_monitor_position_or_standing_recovery",
         "active_runtime_count": 3,
         "selected_continuation": selected
         or {
             "runtime_instance_id": "runtime-bnb",
-            "selected_action": "monitor_position_or_owner_authorize_reduce_only_close",
+            "selected_action": "monitor_position_or_prepare_official_reduce_only_recovery",
             "symbol": "BNB/USDT:USDT",
             "side": "long",
             "strategy_family_id": "CPM-001",
@@ -86,7 +86,7 @@ def test_bridge_waits_for_ready_selector_without_execution_authority():
     )
 
     assert packet["status"] == "controlled_tiny_live_bridge_waiting_for_ready_selector"
-    assert packet["blockers"] == ["continuation_refresh_monitor_position_or_owner_close"]
+    assert packet["blockers"] == ["continuation_refresh_monitor_position_or_standing_recovery"]
     assert packet["bridge_inputs"]["ready_for_prepare"] is False
     assert packet["bridge_inputs"]["ready_for_final_gate_preflight"] is False
     assert packet["operator_command_plan"]["next_step"] == (

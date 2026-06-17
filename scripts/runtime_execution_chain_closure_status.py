@@ -56,6 +56,7 @@ PROJECTED_DRY_RUN_CHECKS = [
     "new_strategygroups_default_observe_only_checked",
     "post_submit_closed_loop_evidence_guard_checked",
     "post_submit_exit_outcome_matrix_checked",
+    "reduce_only_recovery_standing_authorization_checked",
     "operation_layer_submit_result_identity_guard_checked",
     "post_submit_finalize_result_identity_guard_checked",
 ]
@@ -85,6 +86,7 @@ GOAL_CHAIN_SEGMENTS = {
     "post_submit_exit_outcome_matrix": [
         "post_submit_closed_loop_evidence_guard_checked",
         "post_submit_exit_outcome_matrix_checked",
+        "reduce_only_recovery_standing_authorization_checked",
     ],
 }
 GOAL_CHAIN_SEGMENT_SCENARIOS = {

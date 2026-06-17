@@ -88,18 +88,18 @@ def _active_monitor(*rows: dict, exchange_write_called: bool = False) -> dict:
 def _lifecycle_packet(**overrides) -> dict:
     packet = {
         "scope": "runtime_position_lifecycle_exit_readiness_packet",
-        "status": "position_lifecycle_hold_or_owner_close_ready",
+        "status": "position_lifecycle_hold_or_standing_recovery_ready",
         "runtime_instance_id": "runtime-bnb",
         "symbol": "BNB/USDT:USDT",
         "side": "long",
         "warnings": ["missing_tp_protection_right_tail_exit_not_mounted"],
         "operator_command_plan": {
-            "next_step": "continue_monitoring_or_explicitly_authorize_reduce_only_close",
+            "next_step": "continue_monitoring_or_prepare_official_reduce_only_recovery",
             "allows_new_attempt_now": False,
-            "reduce_only_close_ready_for_owner_authorization": True,
-            "owner_close_approval_value": (
-                "runtime-reduce-only-close:runtime-bnb:BNB/USDT:USDT:long:"
-                "qty=0.01:owner-authorized"
+            "reduce_only_close_ready_for_owner_authorization": False,
+            "reduce_only_recovery_ready_for_standing_authorization": True,
+            "standing_recovery_authorization_scope": (
+                "standing-authorization:strategygroup-runtime-pilot:reduce-only-recovery"
             ),
         },
         "safety_invariants": {
@@ -144,9 +144,9 @@ def test_refresh_flow_builds_readiness_and_selector_for_current_mixed_state():
         deployed_head="6b671626",
     )
 
-    assert refresh["status"] == "continuation_refresh_monitor_position_or_owner_close"
+    assert refresh["status"] == "continuation_refresh_monitor_position_or_standing_recovery"
     assert readiness["status"] == "live_attempt_blocked_by_runtime_or_signal_gate"
-    assert selector["status"] == "continuation_monitor_position_or_owner_close"
+    assert selector["status"] == "continuation_monitor_position_or_standing_recovery"
     assert refresh["selected_continuation"]["runtime_instance_id"] == "runtime-bnb"
     assert refresh["operator_command_plan"]["execute_tiny_live_attempt_now"] is False
     assert refresh["operator_command_plan"]["execute_reduce_only_close_now"] is False
@@ -224,7 +224,7 @@ def test_refresh_flow_cli_writes_all_packets(tmp_path, capsys):
     ) == 0
 
     stdout_packet = json.loads(capsys.readouterr().out)
-    assert stdout_packet["status"] == "continuation_refresh_monitor_position_or_owner_close"
+    assert stdout_packet["status"] == "continuation_refresh_monitor_position_or_standing_recovery"
     assert json.loads(output_json.read_text(encoding="utf-8"))["deployment_context"][
         "deployed_head"
     ] == "6b671626"

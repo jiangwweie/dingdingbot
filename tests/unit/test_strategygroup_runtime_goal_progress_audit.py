@@ -194,6 +194,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
         "partial_fill_policy_covered": True,
         "position_closed_by_sl_tp_or_reduce_only_recovery_covered": True,
         "post_submit_exit_outcome_matrix_checked": True,
+        "reduce_only_recovery_standing_authorization_checked": True,
         "real_order_dependent_remaining": True,
         "real_post_submit_close_reconcile_settle_proven": False,
         "status": "ready",
