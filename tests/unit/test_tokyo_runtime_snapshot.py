@@ -104,6 +104,26 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                     "checks": dry_run_checks,
                 },
             },
+            "runtime-execution-chain-closure-status.json": {
+                "exists": True,
+                "payload": {
+                    "status": "non_market_execution_chain_ready",
+                    "dry_run_chain": {
+                        "status": "passed",
+                        "scenario_count": 14,
+                    },
+                    "real_execution": {
+                        "status": "waiting_for_live_action_time_proof",
+                        "real_order_allowed": False,
+                        "missing_live_proofs": [
+                            "live_fresh_signal",
+                            "same_run_action_time_finalgate_pass",
+                            "official_operation_layer_real_gateway_action",
+                            "post_submit_finalize_reconciliation_budget_settlement",
+                        ],
+                    },
+                },
+            },
             "latest-summary.json": {
                 "exists": True,
                 "payload": {"status": "waiting_for_signal"},

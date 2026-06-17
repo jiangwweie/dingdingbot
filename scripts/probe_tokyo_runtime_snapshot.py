@@ -32,6 +32,7 @@ DEFAULT_REPORT_FILES = (
     "strategygroup-runtime-goal-status.json",
     "owner-console-source-readiness.json",
     "runtime-dry-run-audit-chain.json",
+    "runtime-execution-chain-closure-status.json",
 )
 
 REQUIRED_DRY_RUN_CHECKS = (
@@ -212,6 +213,10 @@ def evaluate_runtime_snapshot(
     source_readiness = _report_payload(reports, "owner-console-source-readiness.json")
     goal_status = _report_payload(reports, "strategygroup-runtime-goal-status.json")
     dry_run = _report_payload(reports, "runtime-dry-run-audit-chain.json")
+    chain_closure = _report_payload(
+        reports,
+        "runtime-execution-chain-closure-status.json",
+    )
     latest_summary = _report_payload(reports, "latest-summary.json")
 
     if source_readiness.get("status") not in {"ready", "ok"}:
@@ -224,6 +229,8 @@ def evaluate_runtime_snapshot(
         f"runtime_dry_run_missing_required_check:{name}"
         for name in missing_dry_run_checks
     )
+    if chain_closure.get("status") != "non_market_execution_chain_ready":
+        blockers.append("runtime_execution_chain_closure_status_not_ready")
     if goal_status.get("deployment_aligned") is False:
         blockers.append("runtime_goal_status_deployment_not_aligned")
     if goal_status.get("watcher_liveness_healthy") is False:
@@ -273,6 +280,13 @@ def evaluate_runtime_snapshot(
         ),
         "runtime_dry_run_required_checks_present": not missing_dry_run_checks,
         "runtime_dry_run_missing_required_checks": missing_dry_run_checks,
+        "runtime_execution_chain_closure_status_ready": (
+            chain_closure.get("status") == "non_market_execution_chain_ready"
+        ),
+        "runtime_execution_chain_real_order_allowed": (
+            _as_dict(chain_closure.get("real_execution")).get("real_order_allowed")
+            is True
+        ),
         "frontend_release_present": bool(frontend_release),
         "frontend_index_present": bool(frontend.get("index_exists")),
     }
@@ -322,6 +336,11 @@ def evaluate_runtime_snapshot(
                 if checks["runtime_dry_run_audit_passed"]
                 else "审计演练暂不可用"
             ),
+            "chain_closure": (
+                "非市场链路已收口"
+                if checks["runtime_execution_chain_closure_status_ready"]
+                else "非市场链路待修复"
+            ),
             "frontend": "需发布首页" if checks["product_gaps"] else "已发布",
         },
         "facts": {
@@ -337,6 +356,9 @@ def evaluate_runtime_snapshot(
                 "goal_status": _summary_from_packet(goal_status),
                 "source_readiness": _summary_from_packet(source_readiness),
                 "runtime_dry_run_audit": _summary_from_packet(dry_run),
+                "runtime_execution_chain_closure_status": (
+                    _summary_from_packet(chain_closure)
+                ),
             },
         },
         "checks": checks,

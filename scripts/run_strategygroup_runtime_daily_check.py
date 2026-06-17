@@ -161,6 +161,11 @@ def build_daily_check_report(
         if isinstance(reports.get("runtime_dry_run_audit"), dict)
         else {}
     )
+    chain_closure_summary = (
+        reports.get("runtime_execution_chain_closure_status")
+        if isinstance(reports.get("runtime_execution_chain_closure_status"), dict)
+        else {}
+    )
     dry_run_scenario_count = _int_or_none(dry_run_summary.get("scenario_count"))
 
     blockers = list(checks.get("blockers") or [])
@@ -220,6 +225,9 @@ def build_daily_check_report(
             checks.get("runtime_dry_run_missing_required_checks") or []
         ),
         "runtime_dry_run_scenario_count": dry_run_scenario_count,
+        "runtime_execution_chain_closure_status_ready": (
+            checks.get("runtime_execution_chain_closure_status_ready") is True
+        ),
         "frontend_published": (
             checks.get("frontend_release_present") is True
             and checks.get("frontend_index_present") is True
@@ -260,6 +268,8 @@ def build_daily_check_report(
                 "source_readiness": owner_summary.get("source_readiness"),
                 "dry_run_audit": owner_summary.get("dry_run_audit"),
                 "dry_run_audit_scenarios": dry_run_scenario_count,
+                "chain_closure": owner_summary.get("chain_closure")
+                or chain_closure_summary.get("status"),
                 "frontend": owner_summary.get("frontend"),
             },
         },
@@ -301,6 +311,7 @@ def _notification_decision(
         and checks.get("source_readiness_ready") is True
         and checks.get("runtime_dry_run_audit_passed") is True
         and checks.get("runtime_dry_run_required_checks_present") is True
+        and checks.get("runtime_execution_chain_closure_status_ready") is True
         and checks.get("frontend_published") is True
     )
     if quiet_waiting:
@@ -336,6 +347,8 @@ def _notification_reason(
         return "dry_run_audit_not_passed"
     if checks.get("runtime_dry_run_required_checks_present") is not True:
         return "dry_run_required_checks_missing"
+    if checks.get("runtime_execution_chain_closure_status_ready") is not True:
+        return "runtime_execution_chain_closure_status_not_ready"
     if checks.get("frontend_published") is not True:
         return "frontend_not_published"
     category = str(visibility.get("category") or "")
@@ -887,6 +900,7 @@ def _owner_progress_text(
         f"- Source readiness: {progress.get('source_readiness') or 'unknown'}",
         f"- Dry-run audit: {progress.get('dry_run_audit') or 'unknown'}",
         f"- 演练场景: {progress.get('dry_run_audit_scenarios') or 'unknown'}",
+        f"- Execution chain: {progress.get('chain_closure') or 'unknown'}",
         f"- Frontend: {progress.get('frontend') or 'unknown'}",
     ]
     if blockers:

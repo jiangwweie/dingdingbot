@@ -42,6 +42,7 @@ def _snapshot(**overrides):
             "watcher": "运行中",
             "source_readiness": "正常",
             "dry_run_audit": "审计演练正常",
+            "chain_closure": "非市场链路已收口",
             "frontend": "已发布",
         },
         "checks": {
@@ -53,6 +54,7 @@ def _snapshot(**overrides):
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "runtime_dry_run_missing_required_checks": [],
+            "runtime_execution_chain_closure_status_ready": True,
             "frontend_release_present": True,
             "frontend_index_present": True,
         },
@@ -66,10 +68,19 @@ def _snapshot(**overrides):
                     "status": "passed",
                     "scenario_count": 14,
                 },
+                "runtime_execution_chain_closure_status": {
+                    "status": "non_market_execution_chain_ready",
+                },
             },
         },
     }
-    base.update(overrides)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            merged = dict(base[key])
+            merged.update(value)
+            base[key] = merged
+        else:
+            base[key] = value
     return base
 
 
