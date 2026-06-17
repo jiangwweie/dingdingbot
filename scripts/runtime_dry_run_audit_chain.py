@@ -75,6 +75,20 @@ STRATEGY_SPECIFIC_INPUT_FIELDS = [
     "sample_stale_signal_packet",
     "sample_conflict_packet",
 ]
+STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS = [
+    "candidate",
+    "authorization",
+    "runtime_grant",
+    "final_gate",
+    "finalgate",
+    "operation_layer",
+    "order_lifecycle",
+    "exchange_gateway",
+    "submit_endpoint",
+    "post_submit_finalize",
+    "reconciliation",
+    "budget_settlement",
+]
 EXECUTION_BOUNDARY_FALSE_FIELDS = [
     "runtime_registration_authorized",
     "candidate_creation_authorized",
@@ -774,6 +788,11 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         signal_rule = signal_rule if isinstance(signal_rule, dict) else {}
         risk_defaults = payload.get("risk_defaults")
         risk_defaults = risk_defaults if isinstance(risk_defaults, dict) else {}
+        forbidden_execution_fields_present = sorted(
+            field
+            for field in STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS
+            if field in payload
+        )
         row_checks = {
             "has_supported_symbols": bool(payload.get("supported_symbols")),
             "has_supported_sides": bool(payload.get("supported_sides")),
@@ -781,6 +800,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             "has_required_facts": bool(required_facts),
             "has_risk_defaults": bool(risk_defaults),
             "has_hard_stops": bool(payload.get("hard_stops")),
+            "no_execution_pipeline_fields": not forbidden_execution_fields_present,
             "research_handoff_only": boundary.get("research_handoff_only") is True,
             "does_not_authorize_execution_boundary": all(
                 boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
@@ -818,6 +838,9 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
                     "hard_stop_count": len(payload.get("hard_stops") or []),
                 },
                 "execution_boundary": boundary,
+                "forbidden_execution_fields_present": (
+                    forbidden_execution_fields_present
+                ),
                 "checks": row_checks,
                 "passed": all(row_checks.values()),
             }
@@ -847,6 +870,10 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             row.get("checks", {}).get("does_not_authorize_execution_boundary") is True
             for row in rows
         ),
+        "all_strategy_groups_have_no_execution_pipeline_fields": all(
+            row.get("checks", {}).get("no_execution_pipeline_fields") is True
+            for row in rows
+        ),
         "all_strategy_groups_keep_tiny_risk_boundary": all(
             row.get("checks", {}).get("tiny_risk_boundary") is True for row in rows
         ),
@@ -860,6 +887,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         ),
         "strategygroup_adapters_are_input_only": all(
             row.get("checks", {}).get("does_not_authorize_execution_boundary") is True
+            and row.get("checks", {}).get("no_execution_pipeline_fields") is True
             and row.get("checks", {}).get("has_signal_ready_rule") is True
             and row.get("checks", {}).get("has_required_facts") is True
             and row.get("checks", {}).get("has_risk_defaults") is True
@@ -886,6 +914,9 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         "unexpected_strategy_groups": unexpected_groups,
         "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
         "strategy_specific_input_fields": STRATEGY_SPECIFIC_INPUT_FIELDS,
+        "strategy_handoff_forbidden_execution_fields": (
+            STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS
+        ),
         "rows": rows,
         "checks": checks,
         "blockers": sorted(set(blockers)),

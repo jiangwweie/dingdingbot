@@ -442,6 +442,24 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     }
     assert shared["checks"]["common_execution_chain_reused_by_all_strategygroups"] is True
     assert shared["checks"]["strategygroup_adapters_are_input_only"] is True
+    assert (
+        shared["checks"]["all_strategy_groups_have_no_execution_pipeline_fields"]
+        is True
+    )
+    assert set(shared["strategy_handoff_forbidden_execution_fields"]) == {
+        "candidate",
+        "authorization",
+        "runtime_grant",
+        "final_gate",
+        "finalgate",
+        "operation_layer",
+        "order_lifecycle",
+        "exchange_gateway",
+        "submit_endpoint",
+        "post_submit_finalize",
+        "reconciliation",
+        "budget_settlement",
+    }
     assert set(shared["found_strategy_groups"]) == {
         "MPG-001",
         "TEQ-001",
@@ -452,6 +470,8 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     for row in shared["rows"]:
         assert row["passed"] is True
         assert row["checks"]["does_not_authorize_execution_boundary"] is True
+        assert row["checks"]["no_execution_pipeline_fields"] is True
+        assert row["forbidden_execution_fields_present"] == []
         assert row["checks"]["tiny_risk_boundary"] is True
         assert row["checks"]["uses_standard_signal_status"] is True
         assert row["shared_runtime_pipeline_stages"] == shared[
