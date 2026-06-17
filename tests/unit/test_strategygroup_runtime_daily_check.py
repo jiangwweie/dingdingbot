@@ -71,8 +71,25 @@ def _snapshot(**overrides):
                     "status": "non_market_execution_chain_ready",
                     "ready_segments": [
                         "fresh_signal_fast_auto_chain_checked",
+                        "required_facts_readiness_checked",
+                        "non_executing_prepare_auto_bridge_checked",
+                        "selected_strategygroup_dispatch_guard_checked",
+                        "all_selected_strategygroups_reach_finalgate_dispatch_checked",
                         "operation_layer_evidence_relay_checked",
                         "scoped_pipeline_operation_layer_handoff_checked",
+                        "operation_layer_authorization_chain_guard_checked",
+                        "operation_layer_blocker_review_policy_checked",
+                        "post_submit_exit_outcome_matrix_checked",
+                        "strategygroup_adapter_boundary_checked",
+                        "runtime_tier_policy_checked",
+                        "new_strategygroups_default_observe_only_checked",
+                        "tp1_policy_checked",
+                        "runner_exit_policy_checked",
+                        "reduce_only_recovery_checked",
+                        "entry_filled_protection_ok_checked",
+                        "partial_fill_policy_checked",
+                        "exchange_submit_failed_before_acceptance_policy_checked",
+                        "active_position_remains_open_policy_checked",
                     ],
                     "missing_or_failed_segments": [],
                     "ready_goal_chain_segments": [
@@ -120,7 +137,10 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
     assert report["checks"]["runtime_dry_run_scenario_count"] == 14
-    assert report["checks"]["runtime_execution_chain_ready_segment_count"] == 3
+    assert report["checks"]["runtime_execution_chain_ready_segment_count"] == 20
+    assert report["checks"]["entry_fast_chain_boundary_ready"] is True
+    assert report["checks"]["exit_hardening_boundary_ready"] is True
+    assert report["checks"]["strategygroup_tier_boundary_ready"] is True
     assert (
         report["checks"]["runtime_execution_chain_missing_or_failed_segments"]
         == []
@@ -134,7 +154,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         == []
     )
     assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 14
-    assert report["owner_summary"]["progress"]["chain_closure_ready_segments"] == 3
+    assert report["owner_summary"]["progress"]["chain_closure_ready_segments"] == 20
     assert (
         report["owner_summary"]["progress"][
             "chain_closure_missing_or_failed_segments"
@@ -146,6 +166,9 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         report["owner_summary"]["progress"]["goal_chain_missing_or_failed_segments"]
         == []
     )
+    assert report["owner_summary"]["progress"]["entry_fast_chain_boundary"] == "ready"
+    assert report["owner_summary"]["progress"]["exit_hardening_boundary"] == "ready"
+    assert report["owner_summary"]["progress"]["strategygroup_tier_boundary"] == "ready"
     assert report["notification"] == {
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
@@ -315,15 +338,11 @@ def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
             "dry_run_audit": "审计演练正常",
             "frontend": "已发布",
         },
-        facts={
-            "reports": {
-                "goal_status": {
-                    "status": "processing",
-                    "fresh_signal_present": True,
-                },
-            },
-        },
     )
+    snapshot["facts"]["reports"]["goal_status"] = {
+        "status": "processing",
+        "fresh_signal_present": True,
+    }
 
     report = module.build_daily_check_report(snapshot=snapshot)
 
@@ -446,7 +465,10 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 交易所写入: 否" in text
     assert "- Runtime: 正常" in text
     assert "- 演练场景: 14" in text
-    assert "- 链路段: 3 ready / 0 missing" in text
+    assert "- 链路段: 20 ready / 0 missing" in text
+    assert "- 入场快链: ready" in text
+    assert "- 出场硬化: ready" in text
+    assert "- 策略组分层: ready" in text
     assert "- Frontend: 外部项目" in text
 
 

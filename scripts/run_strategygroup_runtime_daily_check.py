@@ -33,7 +33,27 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 6
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 7
+
+ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
+    "fresh_signal_fast_auto_chain_checked",
+    "required_facts_readiness_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    "operation_layer_evidence_relay_checked",
+    "scoped_pipeline_operation_layer_handoff_checked",
+    "operation_layer_authorization_chain_guard_checked",
+)
+EXIT_HARDENING_REQUIRED_SEGMENTS = (
+    "post_submit_exit_outcome_matrix_checked",
+)
+STRATEGYGROUP_TIER_REQUIRED_SEGMENTS = (
+    "strategygroup_adapter_boundary_checked",
+    "runtime_tier_policy_checked",
+    "new_strategygroups_default_observe_only_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -210,6 +230,21 @@ def build_daily_check_report(
         if goal_chain_segments_available
         else None
     )
+    entry_fast_chain_boundary_ready = _required_segments_ready(
+        ready_segments=chain_ready_segments,
+        missing_or_failed_segments=chain_missing_or_failed_segments,
+        required_segments=ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS,
+    )
+    exit_hardening_boundary_ready = _required_segments_ready(
+        ready_segments=chain_ready_segments,
+        missing_or_failed_segments=chain_missing_or_failed_segments,
+        required_segments=EXIT_HARDENING_REQUIRED_SEGMENTS,
+    )
+    strategygroup_tier_boundary_ready = _required_segments_ready(
+        ready_segments=chain_ready_segments,
+        missing_or_failed_segments=chain_missing_or_failed_segments,
+        required_segments=STRATEGYGROUP_TIER_REQUIRED_SEGMENTS,
+    )
 
     blockers = list(checks.get("blockers") or [])
     product_gaps = list(checks.get("product_gaps") or [])
@@ -276,6 +311,7 @@ def build_daily_check_report(
             if chain_ready_segments is not None
             else None
         ),
+        "runtime_execution_chain_ready_segments": chain_ready_segments or [],
         "runtime_execution_chain_missing_or_failed_segments": (
             chain_missing_or_failed_segments or []
         ),
@@ -284,9 +320,13 @@ def build_daily_check_report(
             if goal_chain_ready_segments is not None
             else None
         ),
+        "runtime_execution_goal_chain_ready_segments": goal_chain_ready_segments or [],
         "runtime_execution_goal_chain_missing_or_failed_segments": (
             goal_chain_missing_or_failed_segments or []
         ),
+        "entry_fast_chain_boundary_ready": entry_fast_chain_boundary_ready,
+        "exit_hardening_boundary_ready": exit_hardening_boundary_ready,
+        "strategygroup_tier_boundary_ready": strategygroup_tier_boundary_ready,
         "frontend_scope": checks.get("frontend_scope") or "externalized",
     }
 
@@ -342,6 +382,15 @@ def build_daily_check_report(
                 "goal_chain_missing_or_failed_segments": (
                     goal_chain_missing_or_failed_segments or []
                 ),
+                "entry_fast_chain_boundary": _boundary_progress_label(
+                    entry_fast_chain_boundary_ready
+                ),
+                "exit_hardening_boundary": _boundary_progress_label(
+                    exit_hardening_boundary_ready
+                ),
+                "strategygroup_tier_boundary": _boundary_progress_label(
+                    strategygroup_tier_boundary_ready
+                ),
                 "frontend": owner_summary.get("frontend") or "外部项目",
             },
         },
@@ -384,6 +433,9 @@ def _notification_decision(
         and checks.get("runtime_dry_run_audit_passed") is True
         and checks.get("runtime_dry_run_required_checks_present") is True
         and checks.get("runtime_execution_chain_closure_status_ready") is True
+        and checks.get("entry_fast_chain_boundary_ready") is True
+        and checks.get("exit_hardening_boundary_ready") is True
+        and checks.get("strategygroup_tier_boundary_ready") is True
     )
     if quiet_waiting:
         return {
@@ -420,6 +472,12 @@ def _notification_reason(
         return "dry_run_required_checks_missing"
     if checks.get("runtime_execution_chain_closure_status_ready") is not True:
         return "runtime_execution_chain_closure_status_not_ready"
+    if checks.get("entry_fast_chain_boundary_ready") is not True:
+        return "entry_fast_chain_boundary_not_ready"
+    if checks.get("exit_hardening_boundary_ready") is not True:
+        return "exit_hardening_boundary_not_ready"
+    if checks.get("strategygroup_tier_boundary_ready") is not True:
+        return "strategygroup_tier_boundary_not_ready"
     category = str(visibility.get("category") or "")
     if category and category != "waiting_for_market":
         return category
@@ -841,6 +899,30 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _required_segments_ready(
+    *,
+    ready_segments: list[str] | None,
+    missing_or_failed_segments: list[str] | None,
+    required_segments: tuple[str, ...],
+) -> bool | None:
+    if ready_segments is None or missing_or_failed_segments is None:
+        return None
+    ready = set(ready_segments)
+    missing_or_failed = set(missing_or_failed_segments)
+    return all(
+        segment in ready and segment not in missing_or_failed
+        for segment in required_segments
+    )
+
+
+def _boundary_progress_label(value: bool | None) -> str:
+    if value is True:
+        return "ready"
+    if value is False:
+        return "needs_work"
+    return "unknown"
+
+
 def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -994,6 +1076,9 @@ def _owner_progress_text(
         f"- Execution chain: {progress.get('chain_closure') or 'unknown'}",
         _chain_segment_progress_line(progress),
         _goal_chain_segment_progress_line(progress),
+        f"- 入场快链: {progress.get('entry_fast_chain_boundary') or 'unknown'}",
+        f"- 出场硬化: {progress.get('exit_hardening_boundary') or 'unknown'}",
+        f"- 策略组分层: {progress.get('strategygroup_tier_boundary') or 'unknown'}",
         f"- Frontend: {progress.get('frontend') or '外部项目'}",
     ]
     if blockers:
