@@ -28,6 +28,9 @@ DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_DAILY_CHECK_CACHE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
 )
+DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
+)
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
 DAILY_CHECK_REPORT_SCHEMA_VERSION = 2
 
@@ -69,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any]:
+    if args.auto_cache:
+        return _build_auto_cache_daily_check_report(args)
     if args.report_json_path:
         return _read_json(Path(args.report_json_path))
     if args.from_cache:
@@ -91,6 +96,45 @@ def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any
         snapshot=snapshot,
         max_remote_interactions=args.max_remote_interactions,
     )
+
+
+def _build_auto_cache_daily_check_report(args: argparse.Namespace) -> dict[str, Any]:
+    if DEFAULT_DAILY_CHECK_CACHE_JSON.exists():
+        cached = _read_json(DEFAULT_DAILY_CHECK_CACHE_JSON)
+        if _is_fresh_cache_report(
+            cached,
+            max_cache_age_minutes=args.max_cache_age_minutes,
+        ):
+            return _annotate_current_read_interaction(cached)
+
+    expected_heads = _resolve_expected_heads(args)
+    snapshot = (
+        _read_json(Path(args.snapshot_json_path))
+        if args.snapshot_json_path
+        else _run_snapshot(
+            expected_runtime_head=expected_heads["expected_runtime_head"],
+            expected_frontend_head=expected_heads["expected_frontend_head"],
+        )
+    )
+    report = build_daily_check_report(
+        snapshot=snapshot,
+        max_remote_interactions=args.max_remote_interactions,
+    )
+    DEFAULT_DAILY_CHECK_CACHE_JSON.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_DAILY_CHECK_CACHE_JSON.write_text(
+        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD.write_text(
+        _owner_progress_text(
+            report,
+            max_cache_age_minutes=args.max_cache_age_minutes,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return report
 
 
 def build_daily_check_report(
@@ -584,6 +628,22 @@ def _apply_cache_freshness_gate(
     return _gated_cache_report(report, reason=reason, detail=detail)
 
 
+def _is_fresh_cache_report(
+    report: dict[str, Any],
+    *,
+    max_cache_age_minutes: int,
+) -> bool:
+    if report.get("schema_version") != DAILY_CHECK_REPORT_SCHEMA_VERSION:
+        return False
+    return (
+        _cache_status_text(
+            generated_at=str(report.get("generated_at_utc") or "unknown"),
+            max_cache_age_minutes=max_cache_age_minutes,
+        )
+        == "fresh"
+    )
+
+
 def _gated_cache_report(
     report: dict[str, Any],
     *,
@@ -920,6 +980,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--from-cache",
         action="store_true",
         help="Read the default local daily-check cache without probing Tokyo.",
+    )
+    parser.add_argument(
+        "--auto-cache",
+        action="store_true",
+        help=(
+            "Use the default local cache when it is fresh; otherwise run one L1 "
+            "snapshot and refresh the cache."
+        ),
     )
     parser.add_argument("--output-json")
     parser.add_argument(

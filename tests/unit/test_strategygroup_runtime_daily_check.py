@@ -656,6 +656,81 @@ def test_daily_check_from_cache_owner_progress_separates_read_from_collection(
     assert "- 远端交互次数: 1" not in captured.out
 
 
+def test_daily_check_auto_cache_uses_fresh_cache_without_snapshot_probe(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load_module()
+    cache_path = tmp_path / "latest-daily-check.json"
+    owner_progress_path = tmp_path / "latest-owner-progress.md"
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    cache_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("fresh auto-cache progress must not probe Tokyo")
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", cache_path)
+    monkeypatch.setattr(
+        module,
+        "DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD",
+        owner_progress_path,
+    )
+    monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
+
+    exit_code = module.main(["--auto-cache", "--owner-progress"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "- 本次读取等级: L0_local_cache_read" in captured.out
+    assert "- 本次远端交互次数: 0" in captured.out
+    assert "- 报告采集远端交互次数: 1" in captured.out
+    assert not owner_progress_path.exists()
+
+
+def test_daily_check_auto_cache_refreshes_stale_cache_once_and_writes_outputs(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load_module()
+    cache_path = tmp_path / "latest-daily-check.json"
+    owner_progress_path = tmp_path / "latest-owner-progress.md"
+    stale_report = module.build_daily_check_report(snapshot=_snapshot())
+    stale_report["generated_at_utc"] = "2026-06-17T00:00:00+00:00"
+    cache_path.write_text(
+        json.dumps(stale_report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def one_snapshot(**kwargs):
+        calls.append(kwargs)
+        return _snapshot()
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", cache_path)
+    monkeypatch.setattr(
+        module,
+        "DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD",
+        owner_progress_path,
+    )
+    monkeypatch.setattr(module, "_run_snapshot", one_snapshot)
+
+    exit_code = module.main(
+        ["--auto-cache", "--owner-progress", "--max-cache-age-minutes", "5"]
+    )
+
+    captured = capsys.readouterr()
+    refreshed = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert refreshed["status"] == "waiting_for_market"
+    assert refreshed["interaction"]["remote_interaction_count"] == 1
+    assert "- 交互等级: L1_daily_check_from_snapshot" in captured.out
+    assert "- 本次读取等级: L0_local_cache_read" not in captured.out
+    assert owner_progress_path.exists()
+    assert "- 当前阶段: 等待机会" in owner_progress_path.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
     module = _load_module()
     baseline = tmp_path / "runtime-monitor-baseline.json"

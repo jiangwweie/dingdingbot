@@ -203,6 +203,7 @@ L1 read-only snapshot
 | Owner progress output | `scripts/run_strategygroup_runtime_daily_check.py --owner-progress` renders the same one-shot check as a concise Owner-readable progress summary, so manual status reviews do not require extra SSH probes or raw JSON/XML inspection |
 | Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 13` instead of a vague green label |
 | Local progress cache | `--output-json` and `--output-owner-progress` can persist the latest daily-check report and Owner progress text; `--from-cache --owner-progress` re-renders the default saved report locally with zero Tokyo interaction |
+| Auto cache mode | `--auto-cache --owner-progress` first uses a fresh local cache with `L0` / 0 remote interactions; only missing, stale, or schema-stale cache triggers one `L1` snapshot and refreshes the local cache/progress files |
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
 | Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into an Owner-readable engineering blocker instead of triggering an extra Tokyo probe |
 | Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become an Owner-readable engineering blocker instead of mixing new code with stale cached fields |
@@ -249,7 +250,8 @@ safety state:
 
 | Step | Preferred shape | Interaction budget |
 | --- | --- | --- |
-| Routine status review | `--from-cache --require-fresh-cache --owner-progress` | `L0`, 0 remote interactions |
+| Routine status review | `--auto-cache --owner-progress` | `L0` if cache is fresh; otherwise one `L1` refresh |
+| Strict no-server status review | `--from-cache --require-fresh-cache --owner-progress` | `L0`, 0 remote interactions |
 | Fresh runtime status | One `probe_tokyo_runtime_snapshot.py` collection | `L1`, 1 remote interaction |
 | Runtime deploy apply | Batched git deploy phases with explicit remote count | `L3`, 4 direct SSH commands, 7 counted remote interactions |
 | Frontend homepage publish | One tar-over-SSH static publish | `L3`, 1 remote interaction |
