@@ -135,3 +135,25 @@ def test_runtime_pilot_goal_audit_deployed_head_matches_monitor_baseline():
 
     assert match is not None
     assert match.group(1) == baseline["expected_runtime_head"]
+
+
+def test_runtime_pilot_goal_audit_keeps_completion_boundary_explicit():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
+    )
+
+    for phrase in [
+        "The goal is not complete yet",
+        "real fresh selected StrategyGroup",
+        "first bounded real order",
+        "Healthy waiting for market is not a blocker",
+        "mock signal treated as real signal",
+        "disabled smoke treated as real execution proof",
+    ]:
+        assert phrase in text
+
+    assert "| real exchange submit |" in text
+    assert "Market-dependent" in text
