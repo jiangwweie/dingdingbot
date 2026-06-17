@@ -381,6 +381,45 @@ def test_goal_status_reads_local_nested_dry_run_audit_packet(
     assert packet["status"] == "waiting_for_signal"
 
 
+def test_goal_status_prefers_more_complete_nested_dry_run_audit_packet(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    root_packet = report_dir / "runtime-dry-run-audit-chain.json"
+    nested_packet = (
+        report_dir
+        / "dry-run-audit-chain"
+        / "runtime-dry-run-audit-chain.json"
+    )
+    root_payload = json.loads(root_packet.read_text(encoding="utf-8"))
+    root_payload["checks"]["scenario_count"] = 12
+    root_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = False
+    root_payload["generated_at_ms"] = 1
+    _write(root_packet, root_payload)
+
+    nested_payload = json.loads(root_packet.read_text(encoding="utf-8"))
+    nested_payload["checks"]["scenario_count"] = 13
+    nested_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = True
+    nested_payload["generated_at_ms"] = 2
+    nested_packet.parent.mkdir(parents=True)
+    _write(nested_packet, nested_payload)
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["checks"]["runtime_dry_run_audit_passed"] is True
+    assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
+    assert packet["evidence"]["dry_run_scenario_count"] == 13
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "non_executing_prepare_auto_bridge_checked"
+    ) not in packet["blockers"]
+
+
 def test_goal_status_does_not_treat_missing_position_fact_as_conflict(
     tmp_path: Path,
 ) -> None:

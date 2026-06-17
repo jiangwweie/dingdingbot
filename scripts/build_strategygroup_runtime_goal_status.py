@@ -110,14 +110,41 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _read_packet(report_dir: Path, key: str, filename: str) -> dict[str, Any] | None:
+    candidates: list[dict[str, Any]] = []
     primary = _read_json(report_dir / filename)
     if primary is not None:
-        return primary
+        candidates.append(primary)
     for fallback in PACKET_FILE_FALLBACKS.get(key, ()):
         packet = _read_json(report_dir / fallback)
         if packet is not None:
-            return packet
-    return None
+            candidates.append(packet)
+    if not candidates:
+        return None
+    if key == "runtime_dry_run_audit":
+        return max(candidates, key=_runtime_dry_run_packet_score)
+    return candidates[0]
+
+
+def _runtime_dry_run_packet_score(packet: dict[str, Any]) -> tuple[int, int, int, int]:
+    data = packet.get("data") if isinstance(packet.get("data"), dict) else packet
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    passed_required = sum(
+        1 for name in REQUIRED_DRY_RUN_CHECKS if checks.get(name) is True
+    )
+    scenario_count = checks.get("scenario_count")
+    if not isinstance(scenario_count, int):
+        scenario_count = data.get("scenario_count")
+    if not isinstance(scenario_count, int):
+        scenario_count = 0
+    generated_at_ms = data.get("generated_at_ms")
+    if not isinstance(generated_at_ms, int):
+        generated_at_ms = 0
+    return (
+        1 if data.get("status") == "passed" else 0,
+        passed_required,
+        scenario_count,
+        generated_at_ms,
+    )
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
