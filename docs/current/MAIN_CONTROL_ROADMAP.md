@@ -1375,6 +1375,7 @@ runaway-loss protection on the exchange.
 | TP1 rule | TP1 remains a right-tail exit-plan review shape: default 50% at 1R; when quantity is below market minimum/step, the system keeps hard-stop-only or routes to full reduce-only close review instead of faking a TP order |
 | Runner first-stage rule | Runner management is `structure_invalidation_first`; ATR trailing and time stop are review-only helpers; first stage does not auto-amend stops or create runner exit orders |
 | Protection failure rule | Entry fill with protection creation failure remains a recovery state: consume/account attempt, hold/reconcile budget, block new entries, require reconciliation, recovery review, and reduce-only recovery mode |
+| Post-submit exit outcome matrix | The dry-run audit now names six non-executing post-submit outcomes: entry filled + protection ok, entry filled + protection failed, partial fill, exchange submit failed before acceptance, active position remains open, and position closed by SL / TP / reduce-only recovery |
 | Safety proof | Local tests only; no Tokyo call, server mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-17 StrategyGroup Runtime Tier Policy Checkpoint

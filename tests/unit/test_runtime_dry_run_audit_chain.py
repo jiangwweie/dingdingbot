@@ -386,6 +386,11 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert closed_loop_guard["actual_withdrawal_or_transfer_created"] is False
     assert closed_loop_guard["checks"] == {
         "all_incomplete_closed_loop_cases_block_next_attempt": True,
+        "exit_outcome_matrix_expected_cases_present": True,
+        "exit_outcome_matrix_all_cases_have_accounting_policy": True,
+        "exit_outcome_matrix_all_cases_have_reconciliation_policy": True,
+        "exit_outcome_matrix_all_cases_have_next_attempt_gate": True,
+        "exit_outcome_matrix_no_dangerous_effects": True,
         "actual_dangerous_effects_absent": True,
     }
     assert set(closed_loop_guard["cases"]) == {
@@ -399,6 +404,66 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         assert result["packet"]["owner_state"]["downgrade_mode"] == (
             "halt_new_entries_until_post_submit_settled"
         )
+    exit_outcome_matrix = closed_loop_guard["exit_outcome_matrix"]
+    assert exit_outcome_matrix["status"] == "passed"
+    assert exit_outcome_matrix["actual_exchange_write_called"] is False
+    assert exit_outcome_matrix["actual_order_created"] is False
+    assert exit_outcome_matrix["actual_order_lifecycle_called"] is False
+    assert exit_outcome_matrix["actual_withdrawal_or_transfer_created"] is False
+    assert exit_outcome_matrix["checks"] == {
+        "expected_cases_present": True,
+        "all_cases_have_accounting_policy": True,
+        "all_cases_have_reconciliation_policy": True,
+        "all_cases_have_next_attempt_gate": True,
+        "all_cases_have_review_policy": True,
+        "protection_failure_enters_reduce_only_recovery": True,
+        "submit_failure_releases_only_after_no_fill_verified": True,
+        "active_position_blocks_same_scope_next_attempt": True,
+        "closed_position_requires_review_before_fresh_signal": True,
+        "no_dangerous_effects": True,
+    }
+    assert set(exit_outcome_matrix["cases"]) == {
+        "entry_filled_protection_ok",
+        "entry_filled_protection_failed",
+        "partial_fill",
+        "exchange_submit_failed_before_acceptance",
+        "active_position_remains_open",
+        "position_closed_by_sl_tp_or_reduce_only_recovery",
+    }
+    assert (
+        exit_outcome_matrix["cases"]["entry_filled_protection_ok"][
+            "next_attempt_gate"
+        ]
+        == "blocked_until_position_closed_or_scope_allows"
+    )
+    assert (
+        exit_outcome_matrix["cases"]["entry_filled_protection_failed"][
+            "reduce_only_recovery_mode"
+        ]
+        is True
+    )
+    assert (
+        exit_outcome_matrix["cases"]["partial_fill"]["budget_policy"]
+        == "hold_budget_for_filled_or_residual_exposure"
+    )
+    assert (
+        exit_outcome_matrix["cases"][
+            "exchange_submit_failed_before_acceptance"
+        ]["budget_policy"]
+        == "release_reserved_budget_after_no_fill_verified"
+    )
+    assert (
+        exit_outcome_matrix["cases"]["active_position_remains_open"][
+            "protection_state"
+        ]
+        == "exchange_native_hard_stop_required"
+    )
+    assert (
+        exit_outcome_matrix["cases"][
+            "position_closed_by_sl_tp_or_reduce_only_recovery"
+        ]["review_policy"]
+        == "record_closed_trade_review"
+    )
     submit_identity_guard = scenarios["operation_layer_submit_result_identity_guard"][
         "artifacts"
     ]["operation_layer_submit_result_identity_guard"]

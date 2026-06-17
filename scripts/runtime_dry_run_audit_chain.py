@@ -54,6 +54,14 @@ EXPECTED_HARD_SAFETY_BLOCKER_CASES = {
     "notional_scope_mismatch",
     "leverage_scope_mismatch",
 }
+EXPECTED_POST_SUBMIT_EXIT_OUTCOME_CASES = {
+    "entry_filled_protection_ok",
+    "entry_filled_protection_failed",
+    "partial_fill",
+    "exchange_submit_failed_before_acceptance",
+    "active_position_remains_open",
+    "position_closed_by_sl_tp_or_reduce_only_recovery",
+}
 SHARED_RUNTIME_PIPELINE_STAGES = [
     "runtime_admission",
     "fresh_signal_to_candidate_authorization",
@@ -2618,6 +2626,12 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
         for check, ok in result.get("checks", {}).items()
         if ok is not True
     ]
+    exit_outcome_matrix = _mock_post_submit_exit_outcome_matrix()
+    blockers.extend(
+        f"exit_outcome_matrix:{check}"
+        for check, ok in exit_outcome_matrix.get("checks", {}).items()
+        if ok is not True
+    )
     return {
         "scope": "runtime_dry_run_post_submit_closed_loop_evidence_guard",
         "status": "passed" if not blockers else "failed",
@@ -2627,8 +2641,30 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
         "actual_order_lifecycle_called": False,
         "actual_withdrawal_or_transfer_created": False,
         "cases": results,
+        "exit_outcome_matrix": exit_outcome_matrix,
         "checks": {
             "all_incomplete_closed_loop_cases_block_next_attempt": not blockers,
+            "exit_outcome_matrix_expected_cases_present": exit_outcome_matrix[
+                "checks"
+            ]["expected_cases_present"],
+            "exit_outcome_matrix_all_cases_have_accounting_policy": (
+                exit_outcome_matrix["checks"][
+                    "all_cases_have_accounting_policy"
+                ]
+            ),
+            "exit_outcome_matrix_all_cases_have_reconciliation_policy": (
+                exit_outcome_matrix["checks"][
+                    "all_cases_have_reconciliation_policy"
+                ]
+            ),
+            "exit_outcome_matrix_all_cases_have_next_attempt_gate": (
+                exit_outcome_matrix["checks"][
+                    "all_cases_have_next_attempt_gate"
+                ]
+            ),
+            "exit_outcome_matrix_no_dangerous_effects": exit_outcome_matrix[
+                "checks"
+            ]["no_dangerous_effects"],
             "actual_dangerous_effects_absent": True,
         },
         "blockers": blockers,
@@ -2652,6 +2688,122 @@ def _scenario_post_submit_closed_loop_evidence_guard(output_dir: Path) -> dict[s
         passed=passed,
         blockers=guard.get("blockers", []),
     )
+
+
+def _mock_post_submit_exit_outcome_matrix() -> dict[str, Any]:
+    cases = {
+        "entry_filled_protection_ok": {
+            "submit_outcome": "entry_filled",
+            "position_state": "active_position_open",
+            "protection_state": "exchange_native_hard_stop_present",
+            "finalize_policy": "record_fill_and_keep_position_open",
+            "reconciliation_policy": "verify_entry_position_and_exchange_stop",
+            "budget_policy": "keep_runtime_budget_reserved_while_position_open",
+            "review_policy": "record_open_position_review_snapshot",
+            "next_attempt_gate": "blocked_until_position_closed_or_scope_allows",
+            "reduce_only_recovery_mode": False,
+        },
+        "entry_filled_protection_failed": {
+            "submit_outcome": "entry_filled",
+            "position_state": "active_position_open",
+            "protection_state": "exchange_native_hard_stop_missing",
+            "finalize_policy": "record_fill_and_protection_failure",
+            "reconciliation_policy": "halt_new_entries_until_protection_reconciled",
+            "budget_policy": "hold_or_reconcile_budget_until_position_resolved",
+            "review_policy": "require_recovery_review",
+            "next_attempt_gate": "blocked_protection_recovery_required",
+            "reduce_only_recovery_mode": True,
+        },
+        "partial_fill": {
+            "submit_outcome": "partial_fill",
+            "position_state": "active_position_open_or_residual",
+            "protection_state": "protection_required_for_filled_quantity",
+            "finalize_policy": "count_as_attempt_and_record_partial_fill",
+            "reconciliation_policy": "reconcile_filled_quantity_before_new_entry",
+            "budget_policy": "hold_budget_for_filled_or_residual_exposure",
+            "review_policy": "record_partial_fill_review",
+            "next_attempt_gate": "blocked_until_partial_fill_reconciled",
+            "reduce_only_recovery_mode": "if_protection_missing_or_residual_risk",
+        },
+        "exchange_submit_failed_before_acceptance": {
+            "submit_outcome": "submit_failed_before_exchange_acceptance",
+            "position_state": "no_position_expected",
+            "protection_state": "no_protection_order_expected",
+            "finalize_policy": "record_submit_failure_without_fill",
+            "reconciliation_policy": "verify_no_exchange_position_or_order",
+            "budget_policy": "release_reserved_budget_after_no_fill_verified",
+            "review_policy": "record_submit_failure_review",
+            "next_attempt_gate": "ready_after_no_fill_reconciliation",
+            "reduce_only_recovery_mode": False,
+        },
+        "active_position_remains_open": {
+            "submit_outcome": "position_still_open_after_finalize",
+            "position_state": "active_position_open",
+            "protection_state": "exchange_native_hard_stop_required",
+            "finalize_policy": "record_open_position_lifecycle_packet",
+            "reconciliation_policy": "continue_position_monitoring",
+            "budget_policy": "keep_budget_reserved_until_flat_or_released",
+            "review_policy": "record_open_position_status_snapshot",
+            "next_attempt_gate": "blocked_for_same_scope_while_position_open",
+            "reduce_only_recovery_mode": "only_if_hard_stop_missing_or_drift",
+        },
+        "position_closed_by_sl_tp_or_reduce_only_recovery": {
+            "submit_outcome": "position_closed",
+            "position_state": "flat",
+            "protection_state": "closed_or_cancelled_protection_reconciled",
+            "finalize_policy": "record_close_outcome",
+            "reconciliation_policy": "verify_flat_and_cancel_orphan_protection",
+            "budget_policy": "settle_and_release_remaining_budget",
+            "review_policy": "record_closed_trade_review",
+            "next_attempt_gate": "ready_for_fresh_signal_after_review",
+            "reduce_only_recovery_mode": False,
+        },
+    }
+    checks = {
+        "expected_cases_present": set(cases) == EXPECTED_POST_SUBMIT_EXIT_OUTCOME_CASES,
+        "all_cases_have_accounting_policy": all(
+            bool(case.get("budget_policy")) and bool(case.get("finalize_policy"))
+            for case in cases.values()
+        ),
+        "all_cases_have_reconciliation_policy": all(
+            bool(case.get("reconciliation_policy")) for case in cases.values()
+        ),
+        "all_cases_have_next_attempt_gate": all(
+            bool(case.get("next_attempt_gate")) for case in cases.values()
+        ),
+        "all_cases_have_review_policy": all(
+            bool(case.get("review_policy")) for case in cases.values()
+        ),
+        "protection_failure_enters_reduce_only_recovery": (
+            cases["entry_filled_protection_failed"]["reduce_only_recovery_mode"]
+            is True
+        ),
+        "submit_failure_releases_only_after_no_fill_verified": (
+            cases["exchange_submit_failed_before_acceptance"]["budget_policy"]
+            == "release_reserved_budget_after_no_fill_verified"
+        ),
+        "active_position_blocks_same_scope_next_attempt": (
+            cases["active_position_remains_open"]["next_attempt_gate"]
+            == "blocked_for_same_scope_while_position_open"
+        ),
+        "closed_position_requires_review_before_fresh_signal": (
+            cases["position_closed_by_sl_tp_or_reduce_only_recovery"][
+                "review_policy"
+            ]
+            == "record_closed_trade_review"
+        ),
+        "no_dangerous_effects": True,
+    }
+    return {
+        "scope": "runtime_dry_run_post_submit_exit_outcome_matrix",
+        "status": "passed" if all(checks.values()) else "failed",
+        "cases": cases,
+        "checks": checks,
+        "actual_exchange_write_called": False,
+        "actual_order_created": False,
+        "actual_order_lifecycle_called": False,
+        "actual_withdrawal_or_transfer_created": False,
+    }
 
 
 def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
