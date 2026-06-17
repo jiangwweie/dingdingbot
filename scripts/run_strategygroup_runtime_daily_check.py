@@ -33,7 +33,7 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 4
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 5
 
 
 def main(argv: list[str] | None = None) -> int:

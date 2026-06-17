@@ -1393,6 +1393,23 @@ competing with the first selected `MPG-001` tiny real-order loop.
 | New group default | `BRF`, `BTPC`, `VCB`, `LSR`, and `RBR` default to `L1 observe_only` unless reviewed and promoted |
 | Safety proof | Tier policy is not execution authority, FinalGate input, Operation Layer input, live-profile change, or sizing default |
 
+### 2026-06-17 Runtime Monitor Exit Matrix Schema Checkpoint
+
+The low-noise runtime monitor now treats the post-submit exit outcome matrix as
+part of the objective-chain progress surface. Fresh local closure packets
+already prove seven objective segments; the daily-check cache schema is bumped
+so old six-segment cache artifacts cannot remain quietly accepted after this
+P0 exit-hardening change.
+
+| Item | Result |
+| --- | --- |
+| Daily-check schema | `DAILY_CHECK_REPORT_SCHEMA_VERSION=5` |
+| Objective chain | `ready_goal_chain_segments=7`, `missing_or_failed_goal_chain_segments=[]` when the exit outcome matrix is present |
+| Added segment | `post_submit_exit_outcome_matrix` |
+| Cache behavior | Older six-segment cache is treated as `runtime_progress_cache_schema_stale` and refreshed through the normal low-noise path |
+| Owner progress | Engineering rehearsal evidence now reports `goal_chain_ready_segments=7` after refresh |
+| Safety proof | This is monitor/reporting-only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

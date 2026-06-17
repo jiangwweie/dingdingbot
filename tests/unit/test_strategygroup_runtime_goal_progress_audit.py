@@ -72,7 +72,7 @@ def _daily_check(**overrides):
             "runtime_dry_run_scenario_count": 14,
             "runtime_execution_chain_ready_segment_count": 3,
             "runtime_execution_chain_missing_or_failed_segments": [],
-            "runtime_execution_goal_chain_ready_segment_count": 6,
+            "runtime_execution_goal_chain_ready_segment_count": 7,
             "runtime_execution_goal_chain_missing_or_failed_segments": [],
         },
         "notification": {
@@ -123,7 +123,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert "missing_chain_segments=0" in tracks["p05_engineering_rehearsal_loop"][
         "evidence"
     ]
-    assert "goal_chain_ready_segments=6" in tracks[
+    assert "goal_chain_ready_segments=7" in tracks[
         "p05_engineering_rehearsal_loop"
     ]["evidence"]
     assert "missing_goal_chain_segments=0" in tracks[
@@ -150,7 +150,7 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
     assert "missing_chain_segments=0" in text
-    assert "goal_chain_ready_segments=6" in text
+    assert "goal_chain_ready_segments=7" in text
     assert "missing_goal_chain_segments=0" in text
     assert "- P0.5 ready: 是" in text
 

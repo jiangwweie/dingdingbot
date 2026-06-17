@@ -82,6 +82,7 @@ def _snapshot(**overrides):
                         "action_time_finalgate",
                         "official_operation_layer_evidence_handoff",
                         "disabled_dry_run_proof",
+                        "post_submit_exit_outcome_matrix",
                     ],
                     "missing_or_failed_goal_chain_segments": [],
                 },
@@ -126,7 +127,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     )
     assert (
         report["checks"]["runtime_execution_goal_chain_ready_segment_count"]
-        == 6
+        == 7
     )
     assert (
         report["checks"]["runtime_execution_goal_chain_missing_or_failed_segments"]
@@ -140,7 +141,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         ]
         == []
     )
-    assert report["owner_summary"]["progress"]["goal_chain_ready_segments"] == 6
+    assert report["owner_summary"]["progress"]["goal_chain_ready_segments"] == 7
     assert (
         report["owner_summary"]["progress"]["goal_chain_missing_or_failed_segments"]
         == []
@@ -754,7 +755,7 @@ def test_daily_check_writes_outputs_atomically(tmp_path, capsys):
     assert json.loads(output_json.read_text(encoding="utf-8"))["status"] == (
         "waiting_for_market"
     )
-    assert "目标链路段: 6 ready / 0 missing" in output_md.read_text(
+    assert "目标链路段: 7 ready / 0 missing" in output_md.read_text(
         encoding="utf-8"
     )
     assert list(tmp_path.glob(".latest-daily-check.json.*.tmp")) == []
