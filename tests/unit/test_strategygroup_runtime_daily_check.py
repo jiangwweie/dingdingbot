@@ -75,6 +75,15 @@ def _snapshot(**overrides):
                         "scoped_pipeline_operation_layer_handoff_checked",
                     ],
                     "missing_or_failed_segments": [],
+                    "ready_goal_chain_segments": [
+                        "fresh_or_mock_signal",
+                        "required_facts_readiness",
+                        "candidate_authorization_evidence",
+                        "action_time_finalgate",
+                        "official_operation_layer_evidence_handoff",
+                        "disabled_dry_run_proof",
+                    ],
+                    "missing_or_failed_goal_chain_segments": [],
                 },
             },
         },
@@ -115,12 +124,25 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         report["checks"]["runtime_execution_chain_missing_or_failed_segments"]
         == []
     )
+    assert (
+        report["checks"]["runtime_execution_goal_chain_ready_segment_count"]
+        == 6
+    )
+    assert (
+        report["checks"]["runtime_execution_goal_chain_missing_or_failed_segments"]
+        == []
+    )
     assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 14
     assert report["owner_summary"]["progress"]["chain_closure_ready_segments"] == 3
     assert (
         report["owner_summary"]["progress"][
             "chain_closure_missing_or_failed_segments"
         ]
+        == []
+    )
+    assert report["owner_summary"]["progress"]["goal_chain_ready_segments"] == 6
+    assert (
+        report["owner_summary"]["progress"]["goal_chain_missing_or_failed_segments"]
         == []
     )
     assert report["notification"] == {
@@ -446,6 +468,10 @@ def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
                     "missing_or_failed_segments": [
                         "operation_layer_evidence_relay_checked"
                     ],
+                    "ready_goal_chain_segments": ["fresh_or_mock_signal"],
+                    "missing_or_failed_goal_chain_segments": [
+                        "official_operation_layer_evidence_handoff"
+                    ],
                 },
             },
         },
@@ -455,8 +481,11 @@ def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
     text = module._owner_progress_text(report)
 
     assert "- 链路段: 1 ready / 1 missing" in text
+    assert "- 目标链路段: 1 ready / 1 missing" in text
     assert "## Missing Chain Segments" in text
     assert "- operation_layer_evidence_relay_checked" in text
+    assert "## Missing Goal Chain Segments" in text
+    assert "- official_operation_layer_evidence_handoff" in text
 
 
 def test_daily_check_owner_progress_text_marks_chain_segments_unknown_when_absent():
@@ -466,10 +495,15 @@ def test_daily_check_owner_progress_text_marks_chain_segments_unknown_when_absen
     report["owner_summary"]["progress"][
         "chain_closure_missing_or_failed_segments"
     ] = []
+    report["owner_summary"]["progress"]["goal_chain_ready_segments"] = None
+    report["owner_summary"]["progress"][
+        "goal_chain_missing_or_failed_segments"
+    ] = []
 
     text = module._owner_progress_text(report)
 
     assert "- 链路段: unknown" in text
+    assert "- 目标链路段: unknown" in text
 
 
 def test_daily_check_owner_progress_text_surfaces_safety_blocker():

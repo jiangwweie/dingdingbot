@@ -72,6 +72,8 @@ def _daily_check(**overrides):
             "runtime_dry_run_scenario_count": 14,
             "runtime_execution_chain_ready_segment_count": 3,
             "runtime_execution_chain_missing_or_failed_segments": [],
+            "runtime_execution_goal_chain_ready_segment_count": 6,
+            "runtime_execution_goal_chain_missing_or_failed_segments": [],
         },
         "notification": {
             "decision": "DONT_NOTIFY",
@@ -121,6 +123,12 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert "missing_chain_segments=0" in tracks["p05_engineering_rehearsal_loop"][
         "evidence"
     ]
+    assert "goal_chain_ready_segments=6" in tracks[
+        "p05_engineering_rehearsal_loop"
+    ]["evidence"]
+    assert "missing_goal_chain_segments=0" in tracks[
+        "p05_engineering_rehearsal_loop"
+    ]["evidence"]
     assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
     assert tracks["p05_safety_invariants"]["status"] == "ready"
 
@@ -142,6 +150,8 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
     assert "missing_chain_segments=0" in text
+    assert "goal_chain_ready_segments=6" in text
+    assert "missing_goal_chain_segments=0" in text
     assert "- P0.5 ready: 是" in text
 
 
@@ -188,11 +198,37 @@ def test_goal_progress_marks_missing_chain_segment_as_degraded():
     assert "missing_chain_segments=1" in rehearsal["evidence"]
 
 
+def test_goal_progress_marks_missing_goal_chain_segment_as_degraded():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks["runtime_execution_goal_chain_ready_segment_count"] = 5
+    checks["runtime_execution_goal_chain_missing_or_failed_segments"] = [
+        "official_operation_layer_evidence_handoff"
+    ]
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+    )
+
+    assert report["status"] == "degraded"
+    assert (
+        "missing_goal_chain_segment:official_operation_layer_evidence_handoff"
+        in report["checks"]["product_gaps"]
+    )
+    tracks = {track["id"]: track for track in report["tracks"]}
+    rehearsal = tracks["p05_engineering_rehearsal_loop"]
+    assert rehearsal["status"] == "blocked"
+    assert "goal_chain_ready_segments=5" in rehearsal["evidence"]
+    assert "missing_goal_chain_segments=1" in rehearsal["evidence"]
+
+
 def test_goal_progress_keeps_chain_segment_count_unknown_when_daily_check_lacks_it():
     module = _load_module()
     checks = dict(_daily_check()["checks"])
     checks.pop("runtime_execution_chain_ready_segment_count")
     checks.pop("runtime_execution_chain_missing_or_failed_segments")
+    checks.pop("runtime_execution_goal_chain_ready_segment_count")
+    checks.pop("runtime_execution_goal_chain_missing_or_failed_segments")
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
         baseline=_baseline(),
@@ -203,6 +239,8 @@ def test_goal_progress_keeps_chain_segment_count_unknown_when_daily_check_lacks_
     assert rehearsal["status"] == "ready"
     assert "chain_ready_segments=unknown" in rehearsal["evidence"]
     assert "missing_chain_segments=0" in rehearsal["evidence"]
+    assert "goal_chain_ready_segments=unknown" in rehearsal["evidence"]
+    assert "missing_goal_chain_segments=0" in rehearsal["evidence"]
 
 
 def test_goal_progress_rejects_remote_interaction_in_local_audit():

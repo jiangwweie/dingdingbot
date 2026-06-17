@@ -126,6 +126,16 @@ real-order readiness detail state
 | Resume dispatcher guard | `40-resume-dispatcher.conf` passes the selected StrategyGroup scope to `runtime_signal_watcher_resume_dispatcher.py`; actionable fresh-authorization, FinalGate, or Operation Layer dispatch is blocked unless the packet proves the action belongs to the selected StrategyGroup |
 | Safety | This remains readmodel/live-facts GET-only work; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Runtime Objective Chain Visibility Checkpoint
+
+| Item | Result |
+| --- | --- |
+| Objective chain segments | `runtime_execution_chain_closure_status.py` projects six target-aligned segments: fresh/mock signal, RequiredFacts, candidate/auth evidence, action-time FinalGate, official Operation Layer evidence handoff, and disabled/dry-run proof |
+| Daily monitor | `run_strategygroup_runtime_daily_check.py` now carries goal-chain ready/missing counts separately from lower-level implementation checks |
+| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py` now degrades P0.5 engineering rehearsal when any objective chain segment is missing |
+| Old deployed packets | Missing `ready_goal_chain_segments` is reported as `unknown`, not as `0 ready / 0 missing` |
+| Safety | This is non-executing visibility work only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Deploy Channel Diagnostic Checkpoint
 
 Tokyo deploy readiness now distinguishes deployment channel failures from

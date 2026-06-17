@@ -274,11 +274,30 @@ def _engineering_rehearsal_track(
         )
         or []
     ]
+    missing_goal_chain_segments = [
+        str(item)
+        for item in checks.get(
+            "runtime_execution_goal_chain_missing_or_failed_segments"
+        )
+        or []
+    ]
     blockers.extend(f"missing_dry_run_check:{item}" for item in missing)
     blockers.extend(f"missing_chain_segment:{item}" for item in missing_chain_segments)
+    blockers.extend(
+        f"missing_goal_chain_segment:{item}"
+        for item in missing_goal_chain_segments
+    )
     ready_segment_count = checks.get("runtime_execution_chain_ready_segment_count")
     ready_segment_text = (
         str(ready_segment_count) if ready_segment_count is not None else "unknown"
+    )
+    ready_goal_segment_count = checks.get(
+        "runtime_execution_goal_chain_ready_segment_count"
+    )
+    ready_goal_segment_text = (
+        str(ready_goal_segment_count)
+        if ready_goal_segment_count is not None
+        else "unknown"
     )
     return _track(
         track_id="p05_engineering_rehearsal_loop",
@@ -289,6 +308,8 @@ def _engineering_rehearsal_track(
             f"scenario_count={checks.get('runtime_dry_run_scenario_count')}",
             f"chain_ready_segments={ready_segment_text}",
             f"missing_chain_segments={len(missing_chain_segments)}",
+            f"goal_chain_ready_segments={ready_goal_segment_text}",
+            f"missing_goal_chain_segments={len(missing_goal_chain_segments)}",
         ],
         next_action="保持 dry-run / mock signal / source readiness 日检",
     )
