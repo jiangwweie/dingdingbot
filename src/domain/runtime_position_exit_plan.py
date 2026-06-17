@@ -58,6 +58,22 @@ class RuntimePositionExitPlan(RuntimePositionExitPlanModel):
     market_qty_step: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     tp1_quantity_feasible: bool = False
     runner_preserved: bool = True
+    runner_primary_exit_rule: Literal["structure_invalidation_first"] = (
+        "structure_invalidation_first"
+    )
+    runner_secondary_exit_rules: list[str] = Field(
+        default_factory=lambda: [
+            "atr_trailing_review_only",
+            "time_stop_review_only",
+        ]
+    )
+    runner_exit_automation: Literal["review_packet_only_first_stage"] = (
+        "review_packet_only_first_stage"
+    )
+    runner_stop_update_authority: Literal["none_in_first_stage"] = (
+        "none_in_first_stage"
+    )
+    runner_exit_review_required: Literal[True] = True
     recommended_owner_decision: str
     blockers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -84,6 +100,8 @@ class RuntimePositionExitPlan(RuntimePositionExitPlanModel):
             raise ValueError("ready exit plan requires active position")
         if self.tp1_quantity_feasible and self.tp1_quantity_step_aligned is None:
             raise ValueError("feasible TP1 quantity requires step-aligned quantity")
+        if self.runner_preserved and not self.runner_primary_exit_rule:
+            raise ValueError("runner preservation requires a primary exit rule")
         return self
 
 
@@ -240,6 +258,13 @@ def build_runtime_position_exit_plan(
             "hard_stop_only_is_holdable_when_reconciliation_clean": (
                 monitor.can_continue_holding and monitor.hard_stop_boundary_present
             ),
+            "runner_primary_exit_rule": "structure_invalidation_first",
+            "runner_secondary_exit_rules": [
+                "atr_trailing_review_only",
+                "time_stop_review_only",
+            ],
+            "runner_exit_automation": "review_packet_only_first_stage",
+            "runner_stop_update_authority": "none_in_first_stage",
             "full_reduce_only_close_is_risk_reducing_but_requires_owner_authorization": (
                 full_close_feasible
             ),

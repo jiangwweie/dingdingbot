@@ -1373,6 +1373,7 @@ runaway-loss protection on the exchange.
 | Local-only SL | A local SL record without exchange stop evidence produces `active_position_missing_hard_stop` plus `local_sl_record_present_but_exchange_native_stop_missing` |
 | Holding rule | `can_continue_holding` requires active position, fresh exchange facts, clean severe reconciliation, and exchange-native hard stop |
 | TP1 rule | TP1 remains a right-tail exit-plan review shape: default 50% at 1R; when quantity is below market minimum/step, the system keeps hard-stop-only or routes to full reduce-only close review instead of faking a TP order |
+| Runner first-stage rule | Runner management is `structure_invalidation_first`; ATR trailing and time stop are review-only helpers; first stage does not auto-amend stops or create runner exit orders |
 | Protection failure rule | Entry fill with protection creation failure remains a recovery state: consume/account attempt, hold/reconcile budget, block new entries, require reconciliation, recovery review, and reduce-only recovery mode |
 | Safety proof | Local tests only; no Tokyo call, server mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
 

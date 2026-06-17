@@ -228,6 +228,17 @@ def test_exit_plan_proposes_tp1_runner_without_execution_authority():
     assert plan.full_reduce_only_close_feasible is True
     assert plan.full_reduce_only_close_notional_reference == Decimal("6.62844777")
     assert plan.full_reduce_only_close_requires_owner_authorization is True
+    assert plan.runner_primary_exit_rule == "structure_invalidation_first"
+    assert plan.runner_secondary_exit_rules == [
+        "atr_trailing_review_only",
+        "time_stop_review_only",
+    ]
+    assert plan.runner_exit_automation == "review_packet_only_first_stage"
+    assert plan.runner_stop_update_authority == "none_in_first_stage"
+    assert plan.runner_exit_review_required is True
+    assert plan.metadata["runner_primary_exit_rule"] == (
+        "structure_invalidation_first"
+    )
     assert plan.not_order is True
     assert plan.not_execution_intent is True
     assert plan.exchange_order_submitted is False
