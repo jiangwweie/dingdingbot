@@ -25,6 +25,11 @@ DEFAULT_MAX_CACHE_AGE_MINUTES = 35
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     report = _build_or_read_daily_check_report(args)
+    report = _apply_cache_freshness_gate(
+        report,
+        require_fresh_cache=args.require_fresh_cache,
+        max_cache_age_minutes=args.max_cache_age_minutes,
+    )
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,6 +60,11 @@ def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any
     if args.report_json_path:
         return _read_json(Path(args.report_json_path))
     if args.from_cache:
+        if not DEFAULT_DAILY_CHECK_CACHE_JSON.exists():
+            return _cache_unavailable_report(
+                reason="runtime_progress_cache_missing",
+                detail=f"cache not found: {DEFAULT_DAILY_CHECK_CACHE_JSON}",
+            )
         return _read_json(DEFAULT_DAILY_CHECK_CACHE_JSON)
     expected_heads = _resolve_expected_heads(args)
     snapshot = (
@@ -446,6 +456,136 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
+    return {
+        "status": "blocked",
+        "scope": "strategygroup_runtime_daily_check",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "interaction": {
+            "level": "L0_local_cache_read",
+            "uses_snapshot_level": None,
+            "remote_interaction_count": 0,
+            "max_remote_interactions": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "owner_summary": {
+            "state": "工程状态暂不可用",
+            "current_action": "等待自动化刷新本地 runtime monitor 缓存",
+            "owner_intervention_required": False,
+            "risk_level": "L0 local cache only",
+            "visibility": {
+                "category": "engineering_blocker",
+                "label": "工程状态暂不可用",
+                "detail": detail,
+                "next_action": "等待自动化刷新本地 runtime monitor 缓存",
+                "owner_intervention_required": False,
+            },
+            "progress": {
+                "runtime": "unknown",
+                "watcher": "unknown",
+                "source_readiness": "unknown",
+                "dry_run_audit": "unknown",
+                "frontend": "unknown",
+            },
+        },
+        "checks": {
+            "blockers": [reason],
+            "warnings": [],
+            "product_gaps": [],
+            "waiting_for_market": False,
+            "runtime_ready": False,
+            "watcher_ready": False,
+            "source_readiness_ready": False,
+            "runtime_dry_run_audit_passed": False,
+            "runtime_dry_run_required_checks_present": False,
+            "runtime_dry_run_missing_required_checks": [],
+            "frontend_published": False,
+        },
+        "notification": {
+            "decision": "NOTIFY",
+            "reason": reason,
+            "message": detail,
+            "owner_intervention_required": False,
+        },
+        "safety_invariants": {
+            "remote_files_modified": False,
+            "env_files_read": False,
+            "secrets_read": False,
+            "migrations_run": False,
+            "services_restarted": False,
+            "execution_intent_created": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_created": False,
+        },
+    }
+
+
+def _apply_cache_freshness_gate(
+    report: dict[str, Any],
+    *,
+    require_fresh_cache: bool,
+    max_cache_age_minutes: int,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    if not require_fresh_cache:
+        return report
+    cache_status = _cache_status_text(
+        generated_at=str(report.get("generated_at_utc") or "unknown"),
+        now_utc=now_utc,
+        max_cache_age_minutes=max_cache_age_minutes,
+    )
+    if cache_status == "fresh":
+        return report
+
+    gated = dict(report)
+    checks = dict(gated.get("checks") if isinstance(gated.get("checks"), dict) else {})
+    blockers = [str(item) for item in checks.get("blockers") or []]
+    reason = (
+        "runtime_progress_cache_timestamp_unknown"
+        if cache_status == "unknown"
+        else "runtime_progress_cache_stale"
+    )
+    blockers = _dedupe([*blockers, reason])
+    checks["blockers"] = blockers
+    gated["checks"] = checks
+    gated["status"] = "blocked"
+
+    detail = (
+        "本地 runtime monitor 缓存时间不可用，等待自动化刷新"
+        if cache_status == "unknown"
+        else "本地 runtime monitor 缓存已过期，等待自动化刷新"
+    )
+    visibility = _owner_visibility(
+        status="blocked",
+        blockers=blockers,
+        product_gaps=[str(item) for item in checks.get("product_gaps") or []],
+        waiting_for_market=False,
+    )
+    visibility["detail"] = detail
+    visibility["next_action"] = "等待自动化刷新本地 runtime monitor 缓存"
+
+    owner = dict(gated.get("owner_summary") if isinstance(gated.get("owner_summary"), dict) else {})
+    owner["state"] = visibility["label"]
+    owner["current_action"] = visibility["next_action"]
+    owner["owner_intervention_required"] = False
+    owner["visibility"] = visibility
+    gated["owner_summary"] = owner
+    gated["notification"] = {
+        "decision": "NOTIFY",
+        "reason": reason,
+        "message": detail,
+        "owner_intervention_required": False,
+    }
+    return gated
+
+
 def _resolve_expected_heads(args: argparse.Namespace) -> dict[str, str | None]:
     baseline = _read_monitor_baseline(Path(args.baseline_json)) if args.baseline_json else {}
     return {
@@ -676,6 +816,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_CACHE_AGE_MINUTES,
         help="Mark cached Owner progress as stale when older than this.",
+    )
+    parser.add_argument(
+        "--require-fresh-cache",
+        action="store_true",
+        help="Treat stale or timestamp-missing cached reports as an engineering blocker.",
     )
     parser.add_argument(
         "--baseline-json",

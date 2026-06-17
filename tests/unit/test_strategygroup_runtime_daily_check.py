@@ -524,6 +524,47 @@ def test_daily_check_reads_default_cache_without_snapshot_probe(tmp_path, monkey
     assert loaded["notification"]["decision"] == "DONT_NOTIFY"
 
 
+def test_daily_check_from_cache_missing_returns_owner_readable_blocker(tmp_path, monkeypatch):
+    module = _load_module()
+    missing_cache_path = tmp_path / "missing-daily-check.json"
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("snapshot probe should not run")
+
+    monkeypatch.setattr(module, "DEFAULT_DAILY_CHECK_CACHE_JSON", missing_cache_path)
+    monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
+    args = module._parse_args(["--from-cache"])
+
+    loaded = module._build_or_read_daily_check_report(args)
+
+    assert loaded["status"] == "blocked"
+    assert loaded["interaction"]["level"] == "L0_local_cache_read"
+    assert loaded["interaction"]["remote_interaction_count"] == 0
+    assert loaded["notification"]["decision"] == "NOTIFY"
+    assert "runtime_progress_cache_missing" in loaded["checks"]["blockers"]
+    assert loaded["owner_summary"]["state"] == "工程状态暂不可用"
+
+
+def test_daily_check_require_fresh_cache_blocks_stale_report():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = "2026-06-17T00:00:00+00:00"
+
+    gated = module._apply_cache_freshness_gate(
+        report,
+        require_fresh_cache=True,
+        now_utc=datetime(2026, 6, 17, 0, 10, tzinfo=timezone.utc),
+        max_cache_age_minutes=5,
+    )
+
+    assert gated["status"] == "blocked"
+    assert gated["notification"]["decision"] == "NOTIFY"
+    assert gated["notification"]["reason"] == "runtime_progress_cache_stale"
+    assert "runtime_progress_cache_stale" in gated["checks"]["blockers"]
+    assert gated["owner_summary"]["state"] == "工程状态暂不可用"
+    assert gated["interaction"]["remote_interaction_count"] == 1
+
+
 def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     module = _load_module()
     snapshot_path = tmp_path / "snapshot.json"
