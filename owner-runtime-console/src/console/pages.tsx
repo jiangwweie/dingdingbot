@@ -53,6 +53,7 @@ function HomePage({
     <PageShell activeView="home">
       <SafetyOverviewStrip summary={projection.productSummary} />
       <OwnerProgressBanner projection={projection} />
+      <OperationalAssuranceStrip projection={projection} />
       <RuntimeMetrics summary={projection.productSummary} />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="grid min-w-0 gap-4">
@@ -88,6 +89,72 @@ function OwnerProgressBanner({ projection }: { projection: OwnerProductProjectio
       </CardContent>
     </Card>
   );
+}
+
+function OperationalAssuranceStrip({ projection }: { projection: OwnerProductProjection }) {
+  const items = [
+    {
+      label: "监控方式",
+      value: "只读低交互",
+      detail: "一次快照归纳状态",
+      tone: "safe" as const,
+      icon: <ShieldCheck />,
+    },
+    {
+      label: "观察服务",
+      value: projection.sourceHealth.watcher.label,
+      detail: ownerSafeSourceDetail(projection.sourceHealth.watcher.detail, "正在观察市场，当前无需操作"),
+      tone: sourceStatusTone[projection.sourceHealth.watcher.status],
+      icon: <Activity />,
+    },
+    {
+      label: "事实状态",
+      value: projection.sourceHealth.liveFacts.label,
+      detail: ownerSafeSourceDetail(projection.sourceHealth.liveFacts.detail, "账户、订单、持仓与保护只读确认"),
+      tone: sourceStatusTone[projection.sourceHealth.liveFacts.status],
+      icon: <ListChecks />,
+    },
+    {
+      label: "链路演练",
+      value: projection.sourceHealth.runtimeDryRunAudit.label,
+      detail: ownerSafeSourceDetail(projection.sourceHealth.runtimeDryRunAudit.detail, "非执行演练正常"),
+      tone: sourceStatusTone[projection.sourceHealth.runtimeDryRunAudit.status],
+      icon: <RefreshCw />,
+    },
+    {
+      label: "发布状态",
+      value: projection.sourceHealth.deployChannel.label,
+      detail: ownerSafeSourceDetail(projection.sourceHealth.deployChannel.detail, "首页静态资源已接入主线"),
+      tone: sourceStatusTone[projection.sourceHealth.deployChannel.status],
+      icon: <FileText />,
+    },
+  ];
+
+  return (
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5" aria-label="运行保障">
+      {items.map((item) => (
+        <div
+          className="grid min-h-[116px] grid-rows-[auto_1fr] rounded-lg border bg-[color:var(--background-card-raised)] p-4 shadow-[var(--shadow-card)]"
+          key={item.label}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className={cn("grid size-8 place-items-center rounded-lg border", toneClass(item.tone))}>{item.icon}</span>
+            <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
+          </div>
+          <div className="mt-4 min-w-0">
+            <div className="truncate text-base font-semibold">{item.value}</div>
+            <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{item.detail}</div>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ownerSafeSourceDetail(detail: string | null | undefined, fallback: string) {
+  if (!detail) return fallback;
+  if (detail.includes("_") || detail.includes(":") || detail.length > 34) return fallback;
+  return detail;
 }
 
 function realOrderTone(projection: OwnerProductProjection) {
