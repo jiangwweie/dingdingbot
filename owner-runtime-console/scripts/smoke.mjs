@@ -127,7 +127,9 @@ try {
   await expectVisible(page, "已校验");
   await expectVisible(page, "危险动作");
   await expectVisible(page, "未发生");
-  await openNav(page, "首页", "系统安全运行");
+  await openNav(page, "首页", "策略组状态");
+  await expectAbsent(page, "部署通道");
+  await expectAbsent(page, "发布状态");
 
   const forbidden = [
     "Final" + "Gate",

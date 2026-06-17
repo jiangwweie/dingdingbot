@@ -129,17 +129,10 @@ function OperationalAssuranceStrip({ projection }: { projection: OwnerProductPro
       tone: sourceStatusTone[projection.sourceHealth.runtimeDryRunAudit.status],
       icon: <RefreshCw />,
     },
-    {
-      label: "发布状态",
-      value: projection.sourceHealth.deployChannel.label,
-      detail: ownerSafeSourceDetail(projection.sourceHealth.deployChannel.detail, "首页静态资源已接入主线"),
-      tone: sourceStatusTone[projection.sourceHealth.deployChannel.status],
-      icon: <FileText />,
-    },
   ];
 
   return (
-    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5" aria-label="运行保障">
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="运行保障">
       {items.map((item) => (
         <div
           className="grid min-h-[116px] grid-rows-[auto_1fr] rounded-lg border bg-[color:var(--background-card-raised)] p-4 shadow-[var(--shadow-card)]"
