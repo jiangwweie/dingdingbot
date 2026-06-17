@@ -1376,6 +1376,20 @@ runaway-loss protection on the exchange.
 | Protection failure rule | Entry fill with protection creation failure remains a recovery state: consume/account attempt, hold/reconcile budget, block new entries, require reconciliation, recovery review, and reduce-only recovery mode |
 | Safety proof | Local tests only; no Tokyo call, server mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-17 StrategyGroup Runtime Tier Policy Checkpoint
+
+StrategyGroup expansion is now separated from first-live-order eligibility.
+New strategy groups can enter the catalog or observation layers without
+competing with the first selected `MPG-001` tiny real-order loop.
+
+| Item | Result |
+| --- | --- |
+| Tier model | `L0 catalog_only`, `L1 observe_only`, `L2 shadow_candidate`, `L3 armed_observation`, `L4 tiny_real_order_eligible` |
+| Current L4 lane | Only `MPG-001` is `L4` for the first bounded live-order pilot |
+| Current non-L4 lanes | `TEQ-001=L2`, `FBS-001=L3`, `SOR-001=L3 conditional`, `PMR-001=L1` |
+| New group default | `BRF`, `BTPC`, `VCB`, `LSR`, and `RBR` default to `L1 observe_only` unless reviewed and promoted |
+| Safety proof | Tier policy is not execution authority, FinalGate input, Operation Layer input, live-profile change, or sizing default |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

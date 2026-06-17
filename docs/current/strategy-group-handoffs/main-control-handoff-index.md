@@ -15,6 +15,13 @@ status: reviewed_and_synced_to_main_control_baseline
 
 See `docs/current/strategy-group-handoffs/main-control-research-sync.md`.
 
+Runtime eligibility tiers are defined in:
+
+```text
+docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md
+docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
+```
+
 ## Batch
 
 | StrategyGroup | Role | Default Mode |
