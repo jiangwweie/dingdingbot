@@ -22,6 +22,17 @@ RESUME_READY_STATUSES = {
 }
 NON_EXECUTING_PREPARE_STATUS = "ready_for_non_executing_prepare"
 FRESH_AUTHORIZATION_ACTION = "prepare_fresh_candidate_authorization_evidence"
+ACTIONABLE_RUNTIME_SIGNAL_STATUSES = {
+    "ready_for_prepare",
+    "ready_for_prepare_records",
+    "runtime_signal_ready_for_non_executing_prepare",
+    "prepared_shadow_evidence_ready_for_owner_review",
+    "ready_for_fresh_submit_authorization",
+    "waiting_for_fresh_authorization",
+    "ready_for_action_time_final_gate",
+    "ready_for_final_gate_preflight",
+    "finalgate_ready",
+}
 UNSAFE_FLAGS = {
     "exchange_write_called",
     "order_created",
@@ -71,6 +82,40 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def _items(value: Any) -> list[dict[str, Any]]:
     return [item for item in value or [] if isinstance(item, dict)]
+
+
+def _has_actionable_runtime_signal(
+    *,
+    runtime_signal_summaries: list[dict[str, Any]],
+    signal_input_json: Any,
+    shadow_candidate_id: Any,
+    prepared_authorization_id: Any,
+) -> bool:
+    if any(
+        str(value or "").strip()
+        for value in (signal_input_json, shadow_candidate_id, prepared_authorization_id)
+    ):
+        return True
+    return any(
+        str(item.get("status") or "").strip() in ACTIONABLE_RUNTIME_SIGNAL_STATUSES
+        for item in runtime_signal_summaries
+    )
+
+
+def _waiting_for_market_auto_resume() -> dict[str, Any]:
+    return {
+        "status": "waiting_for_market",
+        "blocked_at": "watcher_signal",
+        "blocked_reason": "no_fresh_strategy_signal",
+        "next_recover_condition": (
+            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
+        ),
+        "automatic_recovery_action": "continue_watcher_observation",
+        "downgrade_mode": "observe_only",
+        "can_continue_without_owner_chat": True,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+    }
 
 
 def _action_time_resume(
@@ -261,6 +306,19 @@ def build_pack(
     signal_input_json = status_packet.get("signal_input_json")
     prepared_authorization_id = status_packet.get("prepared_authorization_id")
     shadow_candidate_id = status_packet.get("shadow_candidate_id")
+    actionable_runtime_signal = _has_actionable_runtime_signal(
+        runtime_signal_summaries=runtime_signal_summaries,
+        signal_input_json=signal_input_json,
+        shadow_candidate_id=shadow_candidate_id,
+        prepared_authorization_id=prepared_authorization_id,
+    )
+    normalized_ready_without_actionable_signal = (
+        str(post_signal_auto_resume.get("status") or "")
+        == NON_EXECUTING_PREPARE_STATUS
+        and not actionable_runtime_signal
+    )
+    if normalized_ready_without_actionable_signal:
+        post_signal_auto_resume = _waiting_for_market_auto_resume()
     action_time_resume = _action_time_resume(
         post_signal_auto_resume=post_signal_auto_resume,
         signal_input_json=signal_input_json,
@@ -273,7 +331,12 @@ def build_pack(
         action_time_resume=action_time_resume,
         post_signal_auto_resume=post_signal_auto_resume,
     )
-    can_resume_steps_5_8 = wakeup_status in RESUME_READY_STATUSES and not unsafe_flags and not missing
+    can_resume_steps_5_8 = (
+        wakeup_status in RESUME_READY_STATUSES
+        and actionable_runtime_signal
+        and not unsafe_flags
+        and not missing
+    )
 
     if missing:
         deployment_status = "evidence_missing"
@@ -312,6 +375,12 @@ def build_pack(
             "status_packet_status": watcher_tick.get("status_packet_status") or status_packet.get("status") or "unknown",
         },
         "post_signal_auto_resume": post_signal_auto_resume,
+        "post_signal_resume_normalization": {
+            "actionable_runtime_signal": actionable_runtime_signal,
+            "normalized_ready_status_without_actionable_signal": (
+                normalized_ready_without_actionable_signal
+            ),
+        },
         "safety_invariants": {
             **{name: bool(safety.get(name)) for name in sorted(UNSAFE_FLAGS)},
             "forbidden_effect_flags": unsafe_flags,
@@ -352,6 +421,12 @@ def build_pack(
         "action_time_resume": action_time_resume,
         "owner_state": owner_state,
         "post_signal_auto_resume": post_signal_auto_resume,
+        "post_signal_resume_normalization": {
+            "actionable_runtime_signal": actionable_runtime_signal,
+            "normalized_ready_status_without_actionable_signal": (
+                normalized_ready_without_actionable_signal
+            ),
+        },
         "automatic_recovery_action": post_signal_auto_resume.get(
             "automatic_recovery_action"
         ),
@@ -390,7 +465,14 @@ def build_pack(
         "safety_invariants": deployment_packet["safety_invariants"],
         "blockers": deployment_packet["blockers"]
         + list(watcher_tick.get("blockers") or status_packet.get("blockers") or []),
-        "warnings": list(watcher_tick.get("warnings") or status_packet.get("warnings") or []),
+        "warnings": list(
+            watcher_tick.get("warnings") or status_packet.get("warnings") or []
+        )
+        + (
+            ["normalized_ready_status_without_actionable_signal"]
+            if normalized_ready_without_actionable_signal
+            else []
+        ),
     }
 
     deployment_path = output_dir / "deployment-readiness-packet.json"
