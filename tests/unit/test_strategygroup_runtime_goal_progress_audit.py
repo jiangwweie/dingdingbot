@@ -35,6 +35,43 @@ def _baseline(**overrides):
     return base
 
 
+def _tier_policy(**overrides):
+    base = {
+        "schema": "brc.strategy_group_runtime_tier_policy.v1",
+        "not_execution_authority": True,
+        "not_finalgate_input": True,
+        "not_operation_layer_input": True,
+        "not_order_sizing_default": True,
+        "current_strategy_groups": {
+            "MPG-001": {"tier": "L4", "mode": "tiny_real_order_eligible"},
+            "TEQ-001": {"tier": "L2", "mode": "shadow_candidate"},
+            "FBS-001": {"tier": "L3", "mode": "armed_observation"},
+            "SOR-001": {"tier": "L3", "mode": "conditional_armed_observation"},
+            "PMR-001": {"tier": "L1", "mode": "observe_only"},
+        },
+        "new_strategy_group_defaults": {
+            "default_tier": "L1",
+            "default_mode": "observe_only",
+            "known_new_groups": {
+                "BRF": "L1",
+                "BTPC": "L1",
+                "VCB": "L1",
+                "LSR": "L1",
+                "RBR": "L1",
+            },
+        },
+        "safety_invariants": {
+            "no_strategy_group_directly_defines_candidate_pipeline": True,
+            "no_strategy_group_directly_defines_finalgate": True,
+            "no_strategy_group_directly_defines_operation_layer": True,
+            "no_strategy_group_directly_authorizes_real_submit": True,
+            "l4_still_requires_official_runtime_chain": True,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
 def _daily_check(**overrides):
     base = {
         "status": "waiting_for_market",
@@ -102,6 +139,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     report = module.build_goal_progress_report(
         daily_check=_daily_check(),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "waiting_for_market"
@@ -146,6 +184,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
             "runtime_tier_policy_checked": True,
             "selected_strategygroup_dispatch_guard_checked": True,
             "strategygroup_adapter_boundary_checked": True,
+            "tier_policy_source_readable": True,
         },
         "current_strategy_group_tiers": {
             "FBS-001": "L3",
@@ -196,6 +235,7 @@ def test_goal_progress_owner_progress_text_has_track_table():
     report = module.build_goal_progress_report(
         daily_check=_daily_check(),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     text = module._owner_progress_text(report)
@@ -244,6 +284,7 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
             }
         ),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "degraded"
@@ -269,6 +310,7 @@ def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_miss
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "degraded"
@@ -300,6 +342,7 @@ def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_l4_guar
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "degraded"
@@ -316,6 +359,27 @@ def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_l4_guar
     ]["product_gaps"]
 
 
+def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_policy_missing():
+    module = _load_module()
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy={},
+    )
+
+    assert report["status"] == "degraded"
+    assert report["strategygroup_tier_boundary"]["status"] == "needs_work"
+    assert report["strategygroup_tier_boundary"]["current_strategy_group_tiers"] == {}
+    assert report["strategygroup_tier_boundary"]["checks"][
+        "tier_policy_source_readable"
+    ] is False
+    assert report["completion_boundary"]["waiting_for_real_fresh_signal"] is False
+    assert "strategygroup_tier_boundary_not_ready" in report["checks"]["product_gaps"]
+    assert report["strategygroup_tier_boundary"][
+        "tier_policy_is_execution_authority"
+    ] is True
+
+
 def test_goal_progress_marks_missing_chain_segment_as_degraded():
     module = _load_module()
     checks = dict(_daily_check()["checks"])
@@ -326,6 +390,7 @@ def test_goal_progress_marks_missing_chain_segment_as_degraded():
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "degraded"
@@ -349,6 +414,7 @@ def test_goal_progress_marks_missing_goal_chain_segment_as_degraded():
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "degraded"
@@ -373,6 +439,7 @@ def test_goal_progress_keeps_chain_segment_count_unknown_when_daily_check_lacks_
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     tracks = {track["id"]: track for track in report["tracks"]}
@@ -396,6 +463,7 @@ def test_goal_progress_rejects_remote_interaction_in_local_audit():
             }
         ),
         baseline=_baseline(),
+        tier_policy=_tier_policy(),
     )
 
     assert report["status"] == "degraded"
@@ -408,6 +476,7 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     module = _load_module()
     daily_check_path = tmp_path / "daily-check.json"
     baseline_path = tmp_path / "baseline.json"
+    tier_policy_path = tmp_path / "tier-policy.json"
     output_json = tmp_path / "goal-progress.json"
     output_md = tmp_path / "goal-progress.md"
     daily_check_path.write_text(
@@ -418,6 +487,10 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
         json.dumps(_baseline(), ensure_ascii=False),
         encoding="utf-8",
     )
+    tier_policy_path.write_text(
+        json.dumps(_tier_policy(), ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     exit_code = module.main(
         [
@@ -425,6 +498,8 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
             str(daily_check_path),
             "--baseline-json",
             str(baseline_path),
+            "--tier-policy-json",
+            str(tier_policy_path),
             "--output-json",
             str(output_json),
             "--output-owner-progress",

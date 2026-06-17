@@ -14,6 +14,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_DAILY_CHECK_JSON = REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
+DEFAULT_TIER_POLICY_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
+)
 DEFAULT_GOAL_PROGRESS_JSON = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.json"
 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-goal-progress.md"
@@ -25,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_goal_progress_report(
         daily_check=_read_json(Path(args.daily_check_json)),
         baseline=_read_json(Path(args.baseline_json)),
+        tier_policy=_read_json(Path(args.tier_policy_json)),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -49,6 +54,7 @@ def build_goal_progress_report(
     *,
     daily_check: dict[str, Any],
     baseline: dict[str, Any],
+    tier_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -122,13 +128,6 @@ def build_goal_progress_report(
     )
     waiting_for_market = p0["status"] == "waiting_for_market"
     p05_ready = all(item["status"] == "ready" for item in p05_tracks)
-    status = "ready"
-    if hard_blockers:
-        status = "blocked"
-    elif waiting_for_market and p05_ready:
-        status = "waiting_for_market"
-    elif not p05_ready:
-        status = "degraded"
     product_gaps = [item for item in issues if item not in hard_blockers]
     engineering_rehearsal_ready = next(
         (
@@ -138,6 +137,24 @@ def build_goal_progress_report(
         ),
         False,
     )
+    exit_hardening_boundary = _exit_hardening_boundary(checks=checks)
+    strategygroup_tier_boundary = _strategygroup_tier_boundary(
+        checks=checks,
+        tier_policy=tier_policy or {},
+    )
+    boundary_product_gaps = []
+    if exit_hardening_boundary["status"] != "ready":
+        boundary_product_gaps.append("exit_hardening_boundary_not_ready")
+    if strategygroup_tier_boundary["status"] != "ready":
+        boundary_product_gaps.append("strategygroup_tier_boundary_not_ready")
+    product_gaps = _dedupe([*product_gaps, *boundary_product_gaps])
+    status = "ready"
+    if hard_blockers:
+        status = "blocked"
+    elif product_gaps or not p05_ready:
+        status = "degraded"
+    elif waiting_for_market and p05_ready:
+        status = "waiting_for_market"
     completion_boundary = _completion_boundary(
         checks=checks,
         waiting_for_market=waiting_for_market,
@@ -146,8 +163,6 @@ def build_goal_progress_report(
         hard_blockers=hard_blockers,
         product_gaps=product_gaps,
     )
-    exit_hardening_boundary = _exit_hardening_boundary(checks=checks)
-    strategygroup_tier_boundary = _strategygroup_tier_boundary(checks=checks)
 
     return {
         "status": status,
@@ -192,6 +207,7 @@ def build_goal_progress_report(
         "source_paths": {
             "daily_check_json": str(DEFAULT_DAILY_CHECK_JSON),
             "baseline_json": str(DEFAULT_BASELINE_JSON),
+            "tier_policy_json": str(DEFAULT_TIER_POLICY_JSON),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
@@ -200,7 +216,11 @@ def build_goal_progress_report(
     }
 
 
-def _strategygroup_tier_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
+def _strategygroup_tier_boundary(
+    *,
+    checks: dict[str, Any],
+    tier_policy: dict[str, Any],
+) -> dict[str, Any]:
     tier_policy_checked = _dry_run_required_check_present(
         checks,
         "runtime_tier_policy_checked",
@@ -225,20 +245,13 @@ def _strategygroup_tier_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         checks,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     )
-    current_strategy_group_tiers = {
-        "MPG-001": "L4",
-        "TEQ-001": "L2",
-        "FBS-001": "L3",
-        "SOR-001": "L3",
-        "PMR-001": "L1",
-    }
-    new_strategy_group_default_tiers = {
-        "BRF": "L1",
-        "BTPC": "L1",
-        "VCB": "L1",
-        "LSR": "L1",
-        "RBR": "L1",
-    }
+    current_strategy_group_tiers = _current_strategy_group_tiers(tier_policy)
+    new_strategy_group_default_tiers = _new_strategy_group_default_tiers(tier_policy)
+    l4_strategy_groups = [
+        strategy_group_id
+        for strategy_group_id, tier in current_strategy_group_tiers.items()
+        if tier == "L4"
+    ]
     checks_passed = {
         "runtime_tier_policy_checked": tier_policy_checked,
         "only_mpg_tiny_real_order_eligible_checked": only_mpg_l4_checked,
@@ -248,13 +261,18 @@ def _strategygroup_tier_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
             all_selected_finalgate_checked
         ),
+        "tier_policy_source_readable": bool(current_strategy_group_tiers),
     }
     return {
         "status": "ready" if all(checks_passed.values()) else "needs_work",
         "checks": checks_passed,
         "current_strategy_group_tiers": current_strategy_group_tiers,
-        "l4_strategy_groups": ["MPG-001"] if only_mpg_l4_checked else [],
-        "first_live_lane_strategy_group": "MPG-001" if only_mpg_l4_checked else None,
+        "l4_strategy_groups": l4_strategy_groups if only_mpg_l4_checked else [],
+        "first_live_lane_strategy_group": (
+            l4_strategy_groups[0]
+            if only_mpg_l4_checked and len(l4_strategy_groups) == 1
+            else None
+        ),
         "non_l4_strategy_groups": [
             strategy_group_id
             for strategy_group_id, tier in current_strategy_group_tiers.items()
@@ -262,10 +280,54 @@ def _strategygroup_tier_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         ],
         "new_strategy_group_default_tiers": new_strategy_group_default_tiers,
         "new_strategy_groups_default_non_l4": new_defaults_checked,
-        "tier_policy_is_execution_authority": False,
-        "tier_policy_bypasses_finalgate": False,
-        "tier_policy_bypasses_operation_layer": False,
-        "strategygroups_define_custom_execution_pipeline": False,
+        "tier_policy_is_execution_authority": not bool(
+            tier_policy.get("not_execution_authority")
+        ),
+        "tier_policy_bypasses_finalgate": not bool(
+            tier_policy.get("not_finalgate_input")
+        ),
+        "tier_policy_bypasses_operation_layer": not bool(
+            tier_policy.get("not_operation_layer_input")
+        ),
+        "strategygroups_define_custom_execution_pipeline": not bool(
+            (tier_policy.get("safety_invariants") or {}).get(
+                "no_strategy_group_directly_defines_candidate_pipeline"
+            )
+            and (tier_policy.get("safety_invariants") or {}).get(
+                "no_strategy_group_directly_defines_finalgate"
+            )
+            and (tier_policy.get("safety_invariants") or {}).get(
+                "no_strategy_group_directly_defines_operation_layer"
+            )
+        ),
+    }
+
+
+def _current_strategy_group_tiers(tier_policy: dict[str, Any]) -> dict[str, str]:
+    current = tier_policy.get("current_strategy_groups")
+    if not isinstance(current, dict):
+        return {}
+    tiers: dict[str, str] = {}
+    for strategy_group_id, payload in current.items():
+        if not isinstance(payload, dict):
+            continue
+        tier = payload.get("tier")
+        if isinstance(tier, str) and tier:
+            tiers[str(strategy_group_id)] = tier
+    return tiers
+
+
+def _new_strategy_group_default_tiers(tier_policy: dict[str, Any]) -> dict[str, str]:
+    defaults = tier_policy.get("new_strategy_group_defaults")
+    if not isinstance(defaults, dict):
+        return {}
+    known = defaults.get("known_new_groups")
+    if not isinstance(known, dict):
+        return {}
+    return {
+        str(strategy_group_id): str(tier)
+        for strategy_group_id, tier in known.items()
+        if str(strategy_group_id) and str(tier)
     }
 
 
@@ -742,6 +804,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--daily-check-json", default=str(DEFAULT_DAILY_CHECK_JSON))
     parser.add_argument("--baseline-json", default=str(DEFAULT_BASELINE_JSON))
+    parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
     parser.add_argument("--output-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
     parser.add_argument(
         "--output-owner-progress",
