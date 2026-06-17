@@ -24,8 +24,8 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
-| Latest deployed runtime head | `592cd5f1cddaca3d8fc7066a9a0f3c0b64ed4540` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-592cd5f1-real-order-matrix-summary` |
+| Latest deployed runtime head | `18c30ae03dc735e6f4043fbdcdeedd75cc16faba` |
+| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-18c30ae0-runtime-exit-hardening` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -264,3 +264,21 @@ continues to require fresh prepare, FinalGate, and controlled submit preflight.
 | Test isolation | CLI tests now monkeypatch official proof builders instead of touching login-protected runtime proof paths |
 | Verification | `64 passed` for controlled bridge, continuation, dry-run closure, and daily-check tests; `py_compile` passed for the bridge proof scripts |
 | Safety | This is local proof/test work only; it does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
+### 2026-06-18 Runtime Exit-Hardening Deploy Checkpoint
+
+The current runtime exit-hardening proof set was deployed to Tokyo through the
+bounded git deploy path. Tokyo now runs the head that includes the pilot
+confidence floor alignment, dry-run audit chain validation, fresh-signal
+freshness guard, L4 tier requirements, post-submit Owner-confirmation
+regression guard, and standing recovery proof isolation guard.
+
+| Item | Evidence |
+| --- | --- |
+| Deployed runtime head | `18c30ae03dc735e6f4043fbdcdeedd75cc16faba` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-18c30ae0-runtime-exit-hardening` |
+| Deploy dry-run | `output/tokyo-git-deploy-dry-run-18c30ae0.json`: `status=dry_run_ready`, `blockers=[]`, `interaction.level=L1_deploy_plan_only`, `remote_interaction_count=0` |
+| Deploy apply | `output/tokyo-git-deploy-apply-18c30ae0.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-18c30ae0.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` including one L1 postdeploy daily check |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `18c30ae03dc735e6f4043fbdcdeedd75cc16faba` |
+| Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
