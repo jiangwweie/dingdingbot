@@ -4,10 +4,12 @@
   "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads.",
   "expected_runtime_head": "83bd0d6aa07c4784fd28e4182c214db4c344efe0",
   "expected_frontend_head": "83bd0d6aa07c4784fd28e4182c214db4c344efe0",
-  "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --json",
+  "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
   "interaction_policy": {
-    "default_level": "L1_daily_check_from_snapshot",
-    "remote_interaction_count": 1,
+    "default_level": "L0_local_cache_read",
+    "remote_interaction_count": 0,
+    "refresh_level": "L1_daily_check_from_snapshot",
+    "refresh_remote_interaction_count": 1,
     "mutates_remote_files": false,
     "approaches_real_order": false
   }
