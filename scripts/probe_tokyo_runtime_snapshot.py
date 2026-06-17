@@ -241,6 +241,11 @@ def evaluate_runtime_snapshot(
         blockers.append("runtime_goal_status_deployment_not_aligned")
     if _packet_check(goal_status, "watcher_liveness_healthy") is False:
         blockers.append("watcher_liveness_not_healthy")
+    goal_status_submit_blockers = _goal_status_submit_blocker_keys(goal_status)
+    blockers.extend(
+        f"runtime_goal_status_submit_blocker:{key}"
+        for key in goal_status_submit_blockers
+    )
 
     waiting_for_market = (
         _packet_check(goal_status, "fresh_signal_present") is False
@@ -276,6 +281,7 @@ def evaluate_runtime_snapshot(
             _as_dict(chain_closure.get("real_execution")).get("real_order_allowed")
             is True
         ),
+        "runtime_goal_status_submit_blocker_keys": goal_status_submit_blockers,
         "frontend_scope": "externalized",
     }
     status = "ready"
@@ -521,6 +527,7 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "missing_or_failed_goal_chain_segments": dry_run_chain.get(
             "missing_or_failed_goal_chain_segments"
         ),
+        "submit_blocker_keys": _goal_status_submit_blocker_keys(packet),
     }
 
 
@@ -529,6 +536,24 @@ def _packet_check(packet: dict[str, Any], key: str) -> Any:
         return packet.get(key)
     checks = _as_dict(packet.get("checks"))
     return checks.get(key)
+
+
+def _goal_status_submit_blocker_keys(packet: dict[str, Any]) -> list[str]:
+    matrix = packet.get("real_order_readiness_matrix")
+    if not isinstance(matrix, list):
+        return []
+    keys: list[str] = []
+    for item in matrix:
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") != "blocked":
+            continue
+        if item.get("blocks_real_submit") is not True:
+            continue
+        key = item.get("key")
+        if isinstance(key, str) and key:
+            keys.append(key)
+    return _dedupe(keys)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

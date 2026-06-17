@@ -879,11 +879,63 @@ def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
     assert matrix["candidate_authorization"]["status"] == "pass"
     assert matrix["action_time_finalgate"]["status"] == "pass"
     assert matrix["official_operation_layer"]["status"] == "pass"
+    assert matrix["runtime_order_capable_profile"]["status"] == "pass"
     assert not [
         item
         for item in matrix.values()
         if item["status"] == "blocked" or item["blocks_real_submit"] is True
     ]
+
+
+def test_goal_status_blocks_real_submit_when_runtime_order_profile_is_not_capable(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "resume-dispatch-packet.json",
+        {
+            "status": "ready_for_operation_layer",
+            "dispatch_status": "official_operation_layer_evidence_ready",
+            "dispatch_action": "call_official_operation_layer_submit",
+            "blocker_class": "none",
+            "selected_runtime_instance_ids": ["runtime-mpg-1"],
+            "ready_runtime_signals": 1,
+            "blockers": ["brc_execution_permission_max_not_order_allowed"],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "deployment_issue"
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "repair_runtime_order_capable_profile_or_deploy_channel"
+    )
+    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
+    assert packet["real_order_boundary"]["real_submit_allowed"] is False
+    assert packet["real_order_boundary"]["submit_blocker_keys"] == [
+        "runtime_order_capable_profile"
+    ]
+    assert (
+        "matrix_submit_blocker:runtime_order_capable_profile"
+        in packet["blockers"]
+    )
+    matrix = _matrix_by_key(packet)
+    assert matrix["runtime_order_capable_profile"]["status"] == "blocked"
+    assert matrix["runtime_order_capable_profile"]["blocker_class"] == (
+        "deployment_issue"
+    )
+    assert matrix["runtime_order_capable_profile"]["blocks_real_submit"] is True
 
 
 @pytest.mark.parametrize(

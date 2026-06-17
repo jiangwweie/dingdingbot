@@ -464,6 +464,21 @@ def _real_order_readiness_matrix(
             "max_exposure_scope_mismatch",
         ),
     )
+    has_runtime_order_capable_profile_blocker = _contains_any(
+        blocker_text,
+        (
+            "brc_execution_permission_max_not_order_allowed",
+            "runtime_exchange_submit_gateway_binding_not_enabled",
+            "exchange_submit_execution_disabled",
+            "exchange_submit_execution_not_enabled",
+            "exchange_submit_gateway_binding_not_ready",
+            "gateway_binding_not_enabled",
+            "permission_max_not_order_allowed",
+            "execution_permission_max_not_order_allowed",
+            "runtime_order_capable_profile_not_ready",
+            "runtime_order_capable_env_not_ready",
+        ),
+    )
     deployment_channel_blocked = status == "deployment_issue" or any(
         str(item).startswith("deploy_channel:") for item in blockers
     )
@@ -571,6 +586,20 @@ def _real_order_readiness_matrix(
             "resume-dispatch-packet.json",
         ),
         _readiness_item(
+            "runtime_order_capable_profile",
+            "blocked" if has_runtime_order_capable_profile_blocker else "pass",
+            "deployment_issue"
+            if has_runtime_order_capable_profile_blocker
+            else "none",
+            has_runtime_order_capable_profile_blocker,
+            (
+                "runtime order-capable profile 未就绪"
+                if has_runtime_order_capable_profile_blocker
+                else "runtime order-capable profile 未发现阻断"
+            ),
+            "resume_dispatch.blockers/gateway_readiness",
+        ),
+        _readiness_item(
             "active_position_open_order",
             "blocked" if has_active_position_blocker else "pass",
             "active_position_resolution" if has_active_position_blocker else "none",
@@ -648,6 +677,15 @@ def _status_from_submit_blockers(
             "active_position_resolution",
             "record_submit_blocker_review_and_resolve_active_position",
             "Operation Layer evidence 已到边界，但存在持仓或挂单冲突，真实提交保持关闭",
+        )
+    if keys & {
+        "runtime_order_capable_profile",
+        "deployment_channel",
+    }:
+        return (
+            "deployment_issue",
+            "repair_runtime_order_capable_profile_or_deploy_channel",
+            "Operation Layer evidence 已到边界，但 runtime order-capable profile 或部署通道未就绪，真实提交保持关闭",
         )
     if keys & {
         "selected_strategygroup_scope",

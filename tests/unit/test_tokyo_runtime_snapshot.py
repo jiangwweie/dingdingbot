@@ -101,6 +101,13 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                         "fresh_signal_present": False,
                     },
                     "ready_for_real_order_action": False,
+                    "real_order_readiness_matrix": [
+                        {
+                            "key": "runtime_order_capable_profile",
+                            "status": "pass",
+                            "blocks_real_submit": False,
+                        }
+                    ],
                 },
             },
             "runtime-dry-run-audit-chain.json": {
@@ -212,6 +219,7 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["checks"]["blockers"] == []
     assert report["checks"]["product_gaps"] == []
     assert report["checks"]["frontend_scope"] == "externalized"
+    assert report["checks"]["runtime_goal_status_submit_blocker_keys"] == []
     closure = report["facts"]["reports"]["runtime_execution_chain_closure_status"]
     assert closure["projected_checks"] == {
         "fresh_signal_fast_auto_chain_checked": True,
@@ -243,8 +251,53 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert closure["missing_or_failed_goal_chain_segments"] == []
     goal_status = report["facts"]["reports"]["goal_status"]
     assert goal_status["fresh_signal_present"] is False
+    assert goal_status["submit_blocker_keys"] == []
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
+
+
+def test_tokyo_runtime_snapshot_blocks_on_goal_status_submit_blocker():
+    module = _load_module()
+    payload = _healthy_remote_payload(frontend_release={"head": "frontend-head"})
+    goal_status = payload["reports"]["strategygroup-runtime-goal-status.json"][
+        "payload"
+    ]
+    goal_status["real_order_readiness_matrix"] = [
+        {
+            "key": "runtime_order_capable_profile",
+            "status": "blocked",
+            "blocks_real_submit": True,
+            "blocker_class": "deployment_issue",
+        }
+    ]
+
+    def runner(command: tuple[str, ...]):
+        return module.CommandResult(
+            stdout=json.dumps(payload),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head="frontend-head",
+        runner=runner,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["checks"]["runtime_goal_status_submit_blocker_keys"] == [
+        "runtime_order_capable_profile"
+    ]
+    assert (
+        "runtime_goal_status_submit_blocker:runtime_order_capable_profile"
+        in report["checks"]["blockers"]
+    )
+    assert report["owner_summary"]["state"] == "暂不可用"
+    assert report["interaction"]["calls_exchange_write"] is False
 
 
 def test_tokyo_runtime_snapshot_cli_writes_output_json_atomically(
