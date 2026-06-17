@@ -679,6 +679,69 @@ reviewable submit blockers.
 | Real order boundary | `submit_blocker_keys=["fresh_signal","candidate_authorization","action_time_finalgate","official_operation_layer"]`, but `submit_blocker_review_required=false` because these are waiting states, not blocked rows |
 | Safety | Deploy, postdeploy verify, watcher refresh, and status reads did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Owner Console Submit-Blocker Review Projection Checkpoint
+
+The Owner Console source-readiness readmodel and frontend now consume the
+submit-blocker review state instead of forcing the Owner to interpret raw
+matrix keys.
+
+| Item | Result |
+| --- | --- |
+| Deployed code head | `6b615aac` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-6b615aac-console-submit-blocker-review` |
+| Deploy apply | `status=applied`, `commands_executed=19`, `blockers=[]` |
+| Postdeploy verifier | `postdeploy_acceptance_passed`; current head is `6b615aaca2b6f593d7feaa98ee3f7884ad22b56f` |
+| Source-readiness projection | `real_order_readiness.submit_blocker_review.required=false`, `blocker_keys=[]`, `ready_for_real_order_action=false` |
+| Current Owner state | `owner_summary.real_order_readiness=等待机会`; no-signal waiting remains a normal waiting state, not a review task |
+| Frontend copy | Real submit blockers show `系统审查已记录` and `真实订单保持关闭`; normal waiting does not show that warning |
+| Validation | `pytest` readmodel checks passed; `npm run build`, `npm run smoke`, `npm run smoke:states`, `npm run smoke:real`, and `npm run visual:qa` passed |
+| Safety | UI/readmodel validation and deploy did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
+### P0 Common Runtime Pipe Reuse Verification
+
+After the first bounded live chain closes, the main controller must verify that
+the fixed path is a shared runtime pipe, not an MPG-only or SOR-only special
+case. The working hypothesis is:
+
+```text
+80% common execution-chain work
+20% StrategyGroup adapter work
+```
+
+The common pipe owns these stages once:
+
+| Common stage | Owner | StrategyGroup-specific rewrite allowed |
+| --- | --- | --- |
+| fresh signal to candidate / authorization | runtime mainline | No |
+| RequiredFacts readiness read | runtime / facts layer | No |
+| attempt renewal / admission | runtime admission | No |
+| action-time FinalGate order | execution safety | No |
+| Operation Layer evidence handoff | execution layer | No |
+| active position / open order checks | account safety | No |
+| protection missing check | protection layer | No |
+| budget missing check | budget layer | No |
+| duplicate submit risk | idempotency / order lifecycle | No |
+| post-submit finalize / reconciliation / settlement | closed-loop layer | No |
+| Owner Console state projection | product readmodel | No |
+
+Each StrategyGroup may only swap its adapter inputs:
+
+| Adapter input | Example | Purpose |
+| --- | --- | --- |
+| supported symbols | `MSTR/USDT:USDT`, `XAG/USDT:USDT` | limit observable markets |
+| supported sides | `long`, `short` | limit direction |
+| signal ready rule | momentum, funding stress, session breakout | decide whether a fresh signal exists |
+| RequiredFacts definition | mark, funding, session, OI, position | declare required evidence |
+| risk defaults | tiny notional, `1x` | cap risk |
+| hard stops | stale signal, conflict, low liquidity | stop unsafe strategy-specific conditions |
+| conflict policy | TEQ / MPG same beta concentration | prevent stacked exposure |
+
+The P0 close-loop is accepted only when one real or fully dry-run audited path
+proves the common stages above are parameterized by StrategyGroup handoff data.
+The verification must then run at least one non-executing adapter replay for a
+second StrategyGroup so that a future MPG / TEQ / FBS / SOR / PMR activation does
+not require rebuilding candidate, FinalGate, Operation Layer, or finalize logic.
+
 ### Mock Dispatcher Close-Loop
 
 The dry-run audit chain also includes a local mock dispatcher close-loop. It
