@@ -727,6 +727,40 @@ def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     assert captured.out == output_text
 
 
+def test_daily_check_writes_outputs_atomically(tmp_path, capsys):
+    module = _load_module()
+    snapshot_path = tmp_path / "snapshot.json"
+    output_json = tmp_path / "latest-daily-check.json"
+    output_md = tmp_path / "latest-owner-progress.md"
+    snapshot_path.write_text(
+        json.dumps(_snapshot(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(
+        [
+            "--snapshot-json-path",
+            str(snapshot_path),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+            "--owner-progress",
+        ]
+    )
+
+    capsys.readouterr()
+    assert exit_code == 0
+    assert json.loads(output_json.read_text(encoding="utf-8"))["status"] == (
+        "waiting_for_market"
+    )
+    assert "目标链路段: 6 ready / 0 missing" in output_md.read_text(
+        encoding="utf-8"
+    )
+    assert list(tmp_path.glob(".latest-daily-check.json.*.tmp")) == []
+    assert list(tmp_path.glob(".latest-owner-progress.md.*.tmp")) == []
+
+
 def test_daily_check_from_cache_owner_progress_separates_read_from_collection(
     tmp_path, monkeypatch, capsys
 ):

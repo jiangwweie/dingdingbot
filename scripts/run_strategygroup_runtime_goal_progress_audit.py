@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,15 +29,13 @@ def main(argv: list[str] | None = None) -> int:
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
         output_path = Path(args.output_json)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
+        _write_text_atomic(
+            output_path,
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
     if args.output_owner_progress:
         output_path = Path(args.output_owner_progress)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(owner_progress_text + "\n", encoding="utf-8")
+        _write_text_atomic(output_path, owner_progress_text + "\n")
     if args.owner_progress:
         print(owner_progress_text)
     elif args.json:
@@ -478,6 +477,14 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"expected object JSON at {path}")
     return payload
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

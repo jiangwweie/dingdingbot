@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -47,10 +48,9 @@ def main(argv: list[str] | None = None) -> int:
         report = _annotate_current_read_interaction(report)
     if args.output_json:
         output_path = Path(args.output_json)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
+        _write_text_atomic(
+            output_path,
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
     owner_progress_text = _owner_progress_text(
         report,
@@ -58,8 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.output_owner_progress:
         output_path = Path(args.output_owner_progress)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(owner_progress_text + "\n", encoding="utf-8")
+        _write_text_atomic(output_path, owner_progress_text + "\n")
     if args.heartbeat:
         print(_heartbeat_xml(report))
     elif args.owner_progress:
@@ -120,19 +119,17 @@ def _build_auto_cache_daily_check_report(args: argparse.Namespace) -> dict[str, 
         snapshot=snapshot,
         max_remote_interactions=args.max_remote_interactions,
     )
-    DEFAULT_DAILY_CHECK_CACHE_JSON.parent.mkdir(parents=True, exist_ok=True)
-    DEFAULT_DAILY_CHECK_CACHE_JSON.write_text(
+    _write_text_atomic(
+        DEFAULT_DAILY_CHECK_CACHE_JSON,
         json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
     )
-    DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD.parent.mkdir(parents=True, exist_ok=True)
-    DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD.write_text(
+    _write_text_atomic(
+        DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD,
         _owner_progress_text(
             report,
             max_cache_age_minutes=args.max_cache_age_minutes,
         )
         + "\n",
-        encoding="utf-8",
     )
     return report
 
@@ -604,6 +601,14 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"expected object JSON at {path}")
     return payload
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:

@@ -213,6 +213,33 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["owner_summary"]["owner_intervention_required"] is False
 
 
+def test_tokyo_runtime_snapshot_cli_writes_output_json_atomically(
+    tmp_path, monkeypatch, capsys
+):
+    module = _load_module()
+    output_path = tmp_path / "snapshot.json"
+
+    def fake_build(**kwargs):
+        return {
+            "status": "ready",
+            "scope": "tokyo_runtime_snapshot",
+            "checks": {"blockers": [], "product_gaps": []},
+            "owner_summary": {"state": "等待机会"},
+            "interaction": {"remote_interaction_count": 1},
+        }
+
+    monkeypatch.setattr(module, "build_tokyo_runtime_snapshot", fake_build)
+
+    exit_code = module.main(["--json", "--output-json", str(output_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert payload["status"] == "ready"
+    assert json.loads(captured.out)["scope"] == "tokyo_runtime_snapshot"
+    assert list(tmp_path.glob(".snapshot.json.*.tmp")) == []
+
+
 def test_tokyo_runtime_snapshot_ignores_externalized_frontend_release():
     module = _load_module()
 

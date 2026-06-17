@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -80,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
         expected_frontend_head=args.expected_frontend_head,
         connect_timeout_seconds=args.connect_timeout_seconds,
     )
+    if args.output_json:
+        _write_text_atomic(
+            Path(args.output_json),
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
@@ -538,7 +544,20 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--expected-runtime-head", default=None)
     parser.add_argument("--expected-frontend-head", default=None)
     parser.add_argument("--connect-timeout-seconds", type=int, default=8)
+    parser.add_argument(
+        "--output-json",
+        default=None,
+        help="Atomically write the snapshot JSON to this path.",
+    )
     return parser.parse_args(argv)
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _print_human_report(report: dict[str, Any]) -> None:

@@ -154,6 +154,21 @@ runtime dry-run audit summary.
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]` |
 | Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Runtime Monitor Atomic Artifact Checkpoint
+
+The runtime monitor scripts now write their machine-readable artifacts through
+same-directory temporary files followed by atomic replacement. This prevents a
+parallel reader from seeing an empty or partially-written snapshot during
+postdeploy or fresh-signal resume checks.
+
+| Item | Result |
+| --- | --- |
+| Snapshot output | `probe_tokyo_runtime_snapshot.py --output-json` writes the L1 snapshot atomically |
+| Daily check output | `run_strategygroup_runtime_daily_check.py` writes JSON and Owner progress artifacts atomically |
+| Goal progress output | `run_strategygroup_runtime_goal_progress_audit.py` writes JSON and Owner progress artifacts atomically |
+| Postdeploy verification | Current Tokyo snapshot remains `status=ready`, `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
+| Safety | The monitor hardening is file-output-only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Deploy Channel Diagnostic Checkpoint
 
 Tokyo deploy readiness now distinguishes deployment channel failures from

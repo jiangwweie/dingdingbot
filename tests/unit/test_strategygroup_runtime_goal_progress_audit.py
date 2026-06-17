@@ -299,3 +299,5 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     progress = output_md.read_text(encoding="utf-8")
     assert "## StrategyGroup Runtime Goal Progress" in progress
     assert "- P0.5 ready: 是" in progress
+    assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
+    assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []
