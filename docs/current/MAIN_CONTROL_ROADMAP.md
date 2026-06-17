@@ -580,6 +580,23 @@ orders, FinalGate failure, or Operation Layer failure.
 | Operation Layer mode | Resume dispatcher explicitly uses `--operation-layer-submit-mode real_gateway_action` |
 | Credential preflight | Now checks `order_allowed` and gateway-binding env readiness without printing secrets |
 
+### 2026-06-17 Order-Capable Experiment Deploy Checkpoint
+
+The order-capable experiment profile was pushed and deployed to Tokyo through
+the git-based standing-authorization deploy path. Tokyo now has a server-only,
+non-secret overlay at `/home/ubuntu/brc-deploy/env/runtime-order-capable.env`.
+
+| Item | Result |
+| --- | --- |
+| Commit | `bceea34db0317325c368a67514967f824d9694b6` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-bceea34d-order-capable-experiment` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Watcher systemd | `brc-runtime-signal-watcher.timer` active/enabled; service loads `runtime-order-capable.env` after `live-readonly.env` |
+| Masked env check | `TRADING_ENV=live`, `EXCHANGE_TESTNET=false`, `BRC_EXECUTION_PERMISSION_MAX=order_allowed`, `RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED=true` |
+| Credential preflight | Passed with futures permission present, withdrawals disabled, scoped position count `0`, scoped open order count `0` |
+| Daily check | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `blockers=[]`, `product_gaps=[]` |
+| Safety | Deploy and checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Goal Status Local Dry-Run Checkpoint
 
 The goal-status packet now accepts the local dry-run audit packet from either
