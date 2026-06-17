@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 
@@ -112,3 +114,24 @@ def test_runtime_pilot_goal_audit_does_not_freeze_moving_branch_head():
     assert "Latest pushed branch head" not in text
     assert "moving git ref" in text
     assert "Latest deployed runtime head" in text
+
+
+def test_runtime_pilot_goal_audit_deployed_head_matches_monitor_baseline():
+    text = _read(
+        REPO_ROOT
+        / "docs"
+        / "current"
+        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
+    )
+    baseline = json.loads(
+        (
+            REPO_ROOT
+            / "docs"
+            / "current"
+            / "RUNTIME_MONITOR_BASELINE.json"
+        ).read_text(encoding="utf-8")
+    )
+    match = re.search(r"\| Latest deployed runtime head \| `([0-9a-f]{40})` \|", text)
+
+    assert match is not None
+    assert match.group(1) == baseline["expected_runtime_head"]
