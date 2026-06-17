@@ -60,21 +60,24 @@ const dryRunRequiredChecks = {
   post_submit_closed_loop_evidence_guard_checked: true,
   operation_layer_submit_result_identity_guard_checked: true,
   post_submit_finalize_result_identity_guard_checked: true,
+  non_executing_prepare_auto_bridge_checked: true,
   shared_runtime_pipeline_checked: true,
   common_execution_chain_reuse_checked: true,
   strategygroup_adapter_boundary_checked: true,
+  strategy_handoff_no_execution_pipeline_fields_checked: true,
   selected_strategygroup_dispatch_guard_checked: true,
   all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
 };
 
 const dryRunAuditSummary = {
-  scenario_count: 12,
+  scenario_count: 13,
   required_checks_present: true,
   dangerous_effects_absent: true,
   disabled_smoke_is_real_execution_proof: false,
   shared_runtime_pipeline_checked: true,
   common_execution_chain_reuse_checked: true,
   strategygroup_adapter_boundary_checked: true,
+  strategy_handoff_no_execution_pipeline_fields_checked: true,
   selected_strategygroup_dispatch_guard_checked: true,
   all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
   operation_layer_hard_safety_blocker_matrix_checked: true,
@@ -83,6 +86,7 @@ const dryRunAuditSummary = {
   post_submit_closed_loop_evidence_guard_checked: true,
   operation_layer_submit_result_identity_guard_checked: true,
   post_submit_finalize_result_identity_guard_checked: true,
+  non_executing_prepare_auto_bridge_checked: true,
   required_checks: dryRunRequiredChecks,
 };
 

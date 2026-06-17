@@ -94,6 +94,7 @@ REQUIRED_DRY_RUN_CHECKS = {
     "shared_runtime_pipeline_checked",
     "common_execution_chain_reuse_checked",
     "strategygroup_adapter_boundary_checked",
+    "strategy_handoff_no_execution_pipeline_fields_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     "non_executing_prepare_auto_bridge_checked",

@@ -2648,6 +2648,13 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "strategy_handoff_no_execution_pipeline_fields_checked": (
+            shared_pipeline.get("status") == "passed"
+            and shared_pipeline.get("checks", {}).get(
+                "all_strategy_groups_have_no_execution_pipeline_fields"
+            )
+            is True
+        ),
         "selected_strategygroup_dispatch_guard_checked": (
             _scenario_artifact(
                 scenarios,
@@ -2767,6 +2774,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "strategygroup_adapter_boundary_checked": checks[
             "strategygroup_adapter_boundary_checked"
+        ],
+        "strategy_handoff_no_execution_pipeline_fields_checked": checks[
+            "strategy_handoff_no_execution_pipeline_fields_checked"
         ],
         "selected_strategygroup_dispatch_guard_checked": checks[
             "selected_strategygroup_dispatch_guard_checked"

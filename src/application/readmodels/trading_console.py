@@ -123,9 +123,11 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "post_submit_closed_loop_evidence_guard_checked",
     "operation_layer_submit_result_identity_guard_checked",
     "post_submit_finalize_result_identity_guard_checked",
+    "non_executing_prepare_auto_bridge_checked",
     "shared_runtime_pipeline_checked",
     "common_execution_chain_reuse_checked",
     "strategygroup_adapter_boundary_checked",
+    "strategy_handoff_no_execution_pipeline_fields_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
 }
@@ -7831,6 +7833,12 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                 "strategygroup_adapter_boundary_checked": (
                     checks.get("strategygroup_adapter_boundary_checked") is True
                 ),
+                "strategy_handoff_no_execution_pipeline_fields_checked": (
+                    checks.get(
+                        "strategy_handoff_no_execution_pipeline_fields_checked"
+                    )
+                    is True
+                ),
                 "selected_strategygroup_dispatch_guard_checked": (
                     checks.get("selected_strategygroup_dispatch_guard_checked")
                     is True
@@ -7868,6 +7876,9 @@ def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[s
                         "post_submit_finalize_result_identity_guard_checked"
                     )
                     is True
+                ),
+                "non_executing_prepare_auto_bridge_checked": (
+                    checks.get("non_executing_prepare_auto_bridge_checked") is True
                 ),
                 "required_checks": required_checks,
             },

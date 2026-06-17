@@ -274,7 +274,7 @@ async function createRuntimeFixtures({ deployChannelReady = false } = {}) {
     scope: "runtime_dry_run_audit_chain",
     status: "passed",
     checks: {
-      scenario_count: 12,
+      scenario_count: 13,
       required_scenarios_present: true,
       all_scenarios_passed: true,
       dangerous_effects_absent: true,
@@ -289,12 +289,14 @@ async function createRuntimeFixtures({ deployChannelReady = false } = {}) {
       post_submit_closed_loop_evidence_guard_checked: true,
       operation_layer_submit_result_identity_guard_checked: true,
       post_submit_finalize_result_identity_guard_checked: true,
+      non_executing_prepare_auto_bridge_checked: true,
       operation_layer_evidence_relay_checked: true,
       selected_strategygroup_dispatch_guard_checked: true,
       all_selected_strategygroups_reach_finalgate_dispatch_checked: true,
       shared_runtime_pipeline_checked: true,
       common_execution_chain_reuse_checked: true,
       strategygroup_adapter_boundary_checked: true,
+      strategy_handoff_no_execution_pipeline_fields_checked: true,
     },
     safety_invariants: {
       exchange_write_called: false,
@@ -536,8 +538,8 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
       throw new Error(`Expected source-readiness deploy channel to show ${expectedDeployChannel}`);
     }
     const dryRunSummary = sourcePayload?.data?.source_health?.runtime_dry_run_audit?.summary;
-    if (dryRunSummary?.scenario_count !== 12) {
-      throw new Error("Expected source-readiness dry-run audit summary to include 12 scenarios");
+    if (dryRunSummary?.scenario_count !== 13) {
+      throw new Error("Expected source-readiness dry-run audit summary to include 13 scenarios");
     }
     if (dryRunSummary?.shared_runtime_pipeline_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm shared runtime pipeline");
@@ -547,6 +549,9 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
     }
     if (dryRunSummary?.strategygroup_adapter_boundary_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm StrategyGroup adapter boundary");
+    }
+    if (dryRunSummary?.strategy_handoff_no_execution_pipeline_fields_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm StrategyGroup handoffs do not own execution-chain fields");
     }
     if (dryRunSummary?.selected_strategygroup_dispatch_guard_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm selected scope guard");
@@ -571,6 +576,9 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
     }
     if (dryRunSummary?.post_submit_finalize_result_identity_guard_checked !== true) {
       throw new Error("Expected source-readiness dry-run audit summary to confirm post-submit finalize result identity guard");
+    }
+    if (dryRunSummary?.non_executing_prepare_auto_bridge_checked !== true) {
+      throw new Error("Expected source-readiness dry-run audit summary to confirm non-executing prepare auto bridge");
     }
     if (sourcePayload?.data?.owner_summary?.real_order_readiness !== "等待机会") {
       throw new Error("Expected source-readiness real-order readiness to show 等待机会");
@@ -617,7 +625,7 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
     await expectVisible(page, "审计演练正常");
     await expectVisible(page, "审计演练摘要");
     await expectVisible(page, "演练场景");
-    await expectVisible(page, "12 项通过");
+    await expectVisible(page, "13 项通过");
     await expectVisible(page, "观察范围");
     await expectVisible(page, "已隔离");
     await expectVisible(page, "证据接力");
@@ -632,8 +640,12 @@ async function runConnectedSmoke(browser, { deployChannelReady = false } = {}) {
     await expectVisible(page, "已覆盖");
     await expectVisible(page, "执行复用");
     await expectVisible(page, "已验证");
+    await expectVisible(page, "策略输入");
+    await expectVisible(page, "未越界");
     await expectVisible(page, "选中范围");
     await expectVisible(page, "已校验");
+    await expectVisible(page, "准备链路");
+    await expectVisible(page, "已演练");
     await expectVisible(page, "危险动作");
     await expectVisible(page, "未发生");
     await expectVisible(page, "实盘边界");

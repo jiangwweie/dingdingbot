@@ -102,6 +102,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "shared_runtime_pipeline_checked": True,
                 "common_execution_chain_reuse_checked": True,
                 "strategygroup_adapter_boundary_checked": True,
+                "strategy_handoff_no_execution_pipeline_fields_checked": True,
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
             },
@@ -225,6 +226,10 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
     assert packet["checks"]["common_execution_chain_reuse_checked"] is True
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
+    assert (
+        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is True
+    )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
     assert (
         packet["checks"]["all_selected_strategygroups_reach_finalgate_dispatch_checked"]
@@ -238,6 +243,9 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     ] is True
     assert packet["evidence"]["dry_run_required_checks"][
         "strategygroup_adapter_boundary_checked"
+    ] is True
+    assert packet["evidence"]["dry_run_required_checks"][
+        "strategy_handoff_no_execution_pipeline_fields_checked"
     ] is True
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["real_order_boundary"]["submit_blocker_review_required"] is False
@@ -307,6 +315,10 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
     assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
     assert packet["checks"]["common_execution_chain_reuse_checked"] is False
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is False
+    assert (
+        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is False
+    )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is False
     assert "runtime_dry_run_audit_not_passed" in packet["blockers"]
     assert (
@@ -329,6 +341,10 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
         "runtime_dry_run_missing_required_check:strategygroup_adapter_boundary_checked"
         in packet["blockers"]
     )
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "strategy_handoff_no_execution_pipeline_fields_checked"
+    ) in packet["blockers"]
     assert (
         "runtime_dry_run_missing_required_check:"
         "selected_strategygroup_dispatch_guard_checked"
@@ -409,12 +425,18 @@ def test_goal_status_prefers_more_complete_nested_dry_run_audit_packet(
     root_payload = json.loads(root_packet.read_text(encoding="utf-8"))
     root_payload["checks"]["scenario_count"] = 12
     root_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = False
+    root_payload["checks"][
+        "strategy_handoff_no_execution_pipeline_fields_checked"
+    ] = False
     root_payload["generated_at_ms"] = 1
     _write(root_packet, root_payload)
 
     nested_payload = json.loads(root_packet.read_text(encoding="utf-8"))
     nested_payload["checks"]["scenario_count"] = 13
     nested_payload["checks"]["non_executing_prepare_auto_bridge_checked"] = True
+    nested_payload["checks"][
+        "strategy_handoff_no_execution_pipeline_fields_checked"
+    ] = True
     nested_payload["generated_at_ms"] = 2
     nested_packet.parent.mkdir(parents=True)
     _write(nested_packet, nested_payload)
@@ -427,10 +449,18 @@ def test_goal_status_prefers_more_complete_nested_dry_run_audit_packet(
 
     assert packet["checks"]["runtime_dry_run_audit_passed"] is True
     assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
+    assert (
+        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is True
+    )
     assert packet["evidence"]["dry_run_scenario_count"] == 13
     assert (
         "runtime_dry_run_missing_required_check:"
         "non_executing_prepare_auto_bridge_checked"
+    ) not in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "strategy_handoff_no_execution_pipeline_fields_checked"
     ) not in packet["blockers"]
 
 

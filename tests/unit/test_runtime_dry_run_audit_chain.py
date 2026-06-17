@@ -23,6 +23,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "shared_runtime_pipeline_checked": True,
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
+        "strategy_handoff_no_execution_pipeline_fields_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
@@ -52,6 +53,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "required_scenarios_present": True,
         "common_execution_chain_reuse_checked": True,
         "strategygroup_adapter_boundary_checked": True,
+        "strategy_handoff_no_execution_pipeline_fields_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
@@ -226,6 +228,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert packet["checks"]["shared_runtime_pipeline_checked"] is True
     assert packet["checks"]["common_execution_chain_reuse_checked"] is True
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
+    assert (
+        packet["checks"]["strategy_handoff_no_execution_pipeline_fields_checked"]
+        is True
+    )
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
     selected_guard = scenarios["selected_strategygroup_dispatch_guard"]["artifacts"]
     assert selected_guard["checks"] == {

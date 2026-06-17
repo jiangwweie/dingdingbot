@@ -289,7 +289,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         return {
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
-            "scenario_count": 12,
+            "scenario_count": 13,
             "checks": {"dangerous_effects_absent": True},
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -341,7 +341,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "output_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
         "output_dir": str(tmp_path / "dry"),
         "goal_status_input_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
-        "scenario_count": 12,
+        "scenario_count": 13,
         "dangerous_effects_absent": True,
     }
     assert packet["goal_status_refresh"] == {
@@ -383,7 +383,7 @@ def test_refresh_packets_mirrors_external_dry_run_packet_for_goal_status(
         return {
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
-            "scenario_count": 12,
+            "scenario_count": 13,
             "checks": {name: True for name in REQUIRED_DRY_RUN_CHECKS},
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -440,7 +440,7 @@ def test_refresh_packets_auth_missing_does_not_block_local_audit_refresh(
         return {
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
-            "scenario_count": 12,
+            "scenario_count": 13,
             "checks": {"dangerous_effects_absent": True},
             "safety_invariants": {
                 "exchange_write_called": False,
