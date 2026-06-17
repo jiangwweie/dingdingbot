@@ -136,6 +136,24 @@ real-order readiness detail state
 | Old deployed packets | Missing `ready_goal_chain_segments` is reported as `unknown`, not as `0 ready / 0 missing` |
 | Safety | This is non-executing visibility work only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
 
+### 2026-06-17 Runtime Objective Chain Deploy Checkpoint
+
+The target-chain visibility change was pushed and deployed to Tokyo through the
+standing-authorization git deploy path. The deployment repaired the old Tokyo
+monitor gap where `required_facts_readiness_checked` was missing from the
+runtime dry-run audit summary.
+
+| Item | Result |
+| --- | --- |
+| Deployed runtime head | `0e2af29a040159857a29b705c563fff27e651a7b` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-0e2af29a-objective-chain-progress` |
+| Runtime deploy apply | `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `blockers=[]` |
+| Postdeploy snapshot | `status=ready`, `runtime_dry_run_audit_passed=true`, `runtime_execution_chain_closure_status_ready=true`, `watcher_timer_active=true`, `source_readiness_ready=true` |
+| Objective chain | `ready_goal_chain_segments=6`, `missing_or_failed_goal_chain_segments=[]` |
+| Daily progress | `status=waiting_for_market`, `notification=DONT_NOTIFY`, `目标链路段: 6 ready / 0 missing` |
+| Goal progress | `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]` |
+| Safety | Deploy/postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, or sizing mutation |
+
 ### 2026-06-17 Deploy Channel Diagnostic Checkpoint
 
 Tokyo deploy readiness now distinguishes deployment channel failures from
