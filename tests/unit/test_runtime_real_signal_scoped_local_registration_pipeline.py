@@ -75,6 +75,8 @@ def test_pipeline_reaches_scoped_local_registration_dry_run_from_real_signal(tmp
     assert progress["known_non_executing_probe_findings"] == [
         "evidence_chain:preview_disabled_first_real_submit_action_http_404",
     ]
+    assert progress["non_executing_first_real_submit_action_probe_called"] is True
+    assert progress["real_first_real_submit_action_called"] is False
     paths = [call["path"] for call in client.calls]
     assert any("strategy-signal-intent-draft-sources" in path for path in paths)
     assert any("persisted-draft-source-readiness-previews" in path for path in paths)
@@ -284,6 +286,89 @@ def test_pipeline_collector_can_feed_auto_readiness_path(tmp_path):
     assert report["execution_chain_progress"]["ready_for_real_order"] is False
 
 
+def test_pipeline_can_record_scoped_local_registration_with_fake_client(tmp_path):
+    client = _Client()
+
+    report = script._build_report(
+        _args(
+            tmp_path,
+            readiness_evidence_json=str(_write_evidence(tmp_path)),
+            source_kind="scoped_local_registration_proof",
+            allow_scoped_local_registration_proof=True,
+            execute_scoped_local_registration_proof=True,
+        ),
+        client=client,
+    )
+
+    assert report["status"] == "scoped_local_registration_proof_recorded"
+    assert report["blocked_stage"] is None
+    assert report["stage_statuses"] == {
+        "intent_draft_source": "persisted_ready_intent_draft",
+        "readiness": "ready_for_executable_submit",
+        "handoff": "ready_for_official_submit_call",
+        "binding": "created_intent_and_authorization",
+        "evidence_chain": "prepared_machine_evidence_blocked_before_local_order_adapter",
+        "scoped_local_registration_proof": (
+            "scoped_local_registration_proof_recorded"
+        ),
+    }
+    assert report["execution_chain_progress"]["status"] == (
+        "scoped_local_registration_recorded"
+    )
+    assert report["execution_chain_progress"]["next_step"] == (
+        "rerun_action_time_finalgate_then_continue_official_operation_layer"
+    )
+    assert report["execution_chain_progress"]["ready_for_real_order"] is False
+    assert report["execution_chain_progress"]["official_operation_layer_reached"] is False
+    assert (
+        report["execution_chain_progress"][
+            "non_executing_first_real_submit_action_probe_called"
+        ]
+        is True
+    )
+    assert (
+        report["execution_chain_progress"]["real_first_real_submit_action_called"]
+        is False
+    )
+    assert report["safety_invariants"]["local_registration_attempted"] is True
+    assert report["safety_invariants"]["local_registration_recorded"] is True
+    assert report["safety_invariants"]["first_real_submit_action_called"] is False
+    assert report["safety_invariants"]["exchange_write_called"] is False
+    paths = [call["path"] for call in client.calls]
+    assert any("runtime-execution-order-lifecycle-adapter-results" in path for path in paths)
+    assert not any("runtime-execution-exchange-submit" in path for path in paths)
+    first_real_submit_action_calls = [
+        call for call in client.calls
+        if "runtime-execution-first-real-submit-actions" in call["path"]
+    ]
+    assert first_real_submit_action_calls
+    assert all(call["method"] == "POST" for call in first_real_submit_action_calls)
+    assert all(
+        call["query"].get("owner_confirmed_for_first_real_submit_action") is False
+        for call in first_real_submit_action_calls
+    )
+
+
+def test_pipeline_cli_exposes_scoped_local_registration_flags():
+    args = script._parse_args(
+        [
+            "--runtime-instance-id",
+            "runtime-cli",
+            "--signal-input-json",
+            "signal.json",
+            "--source-kind",
+            "scoped_local_registration_proof",
+            "--allow-scoped-local-registration-proof",
+            "--execute-scoped-local-registration-proof",
+        ]
+    )
+
+    assert args.source_kind == "scoped_local_registration_proof"
+    assert args.allow_scoped_local_registration_proof is True
+    assert args.allow_sample_local_registration is False
+    assert args.execute_scoped_local_registration_proof is True
+
+
 class _Client:
     def __init__(self, *, source_status: str = "persisted_ready_intent_draft") -> None:
         self.source_status = source_status
@@ -404,6 +489,83 @@ class _Client:
                         "first_real_submit_packet_unavailable:"
                         "runtimeexecutionorderlifecycleadapterresult_not_found"
                     ],
+                },
+            }
+        if "runtime-execution-controlled-submit-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "execution_intent_id": "intent-rtf020",
+                    "runtime_execution_intent_draft_id": "draft-rtf020",
+                    "source_id": "candidate-rtf020",
+                    "semantic_ids": {
+                        "order_candidate_id": "candidate-rtf020",
+                        "runtime_instance_id": "runtime-rtf020",
+                        "signal_evaluation_id": "signal-rtf020",
+                    },
+                    "status": "ready_for_controlled_submit_adapter",
+                },
+            }
+        if "runtime-execution-protection-plans" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "protection_plan_id": "protection-plan-rtf020",
+                    "status": "ready_for_submit_adapter",
+                },
+            }
+        if "runtime-execution-attempt-reservations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "reservation_id": "reservation-rtf020",
+                    "status": "pending_runtime_mutation",
+                },
+            }
+        if "runtime-execution-attempt-mutations" in path:
+            return {
+                "http_status": 200,
+                "body": {"mutation_id": "mutation-rtf020", "status": "applied"},
+            }
+        if "runtime-execution-attempt-outcome-policies" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "policy_id": "policy-rtf020",
+                    "status": "ready_for_attempt_budget_outcome_accounting",
+                },
+            }
+        if "runtime-execution-order-lifecycle-handoff-drafts" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "handoff_draft_id": "handoff-rtf020",
+                    "status": "ready_for_order_lifecycle_adapter",
+                    "blockers": [],
+                },
+            }
+        if "runtime-execution-local-registration-action-authorizations" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "action_authorization_id": "local-action-rtf020",
+                    "status": "approved_for_local_registration_action",
+                },
+            }
+        if "runtime-execution-local-registration-enablements" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "decision_id": "local-enable-rtf020",
+                    "status": "ready_for_local_registration_action",
+                },
+            }
+        if "runtime-execution-order-lifecycle-adapter-results" in path:
+            return {
+                "http_status": 200,
+                "body": {
+                    "adapter_result_id": "local-result-rtf020",
+                    "status": "registered_created_local_orders",
                 },
             }
         raise AssertionError(f"unexpected path {path}")
@@ -565,6 +727,9 @@ def _args(tmp_path, **overrides):
         "expires_at_ms": None,
         "active_positions_count": 0,
         "metadata_json": None,
+        "source_kind": "current_live_signal",
+        "allow_scoped_local_registration_proof": False,
+        "allow_sample_local_registration": False,
         "execute_scoped_local_registration_proof": False,
         "owner_operator_id": "owner",
         "owner_confirmation_reference": "owner-authorized-rtf020",

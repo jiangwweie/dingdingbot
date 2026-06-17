@@ -613,6 +613,10 @@ def _execution_chain_progress(
             "scoped_local_registration_proof": scoped_status,
         },
         "known_non_executing_probe_findings": known_non_executing_probe_findings,
+        "non_executing_first_real_submit_action_probe_called": bool(
+            known_non_executing_probe_findings
+        ),
+        "real_first_real_submit_action_called": False,
         "ready_for_real_order": False,
         "official_operation_layer_reached": False,
         "action_time_finalgate_rerun_after_local_registration": False,
@@ -708,6 +712,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--expires-at-ms", type=int)
     parser.add_argument("--active-positions-count", type=int)
     parser.add_argument("--metadata-json")
+    parser.add_argument(
+        "--source-kind",
+        choices=[
+            "sample_rehearsal",
+            "current_live_signal",
+            "scoped_local_registration_proof",
+        ],
+        default="current_live_signal",
+    )
+    parser.add_argument("--allow-scoped-local-registration-proof", action="store_true")
+    parser.add_argument("--allow-sample-local-registration", action="store_true")
     parser.add_argument("--execute-scoped-local-registration-proof", action="store_true")
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
