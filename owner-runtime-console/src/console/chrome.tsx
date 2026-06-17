@@ -140,8 +140,8 @@ export function TopSafetyBar({
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
 }) {
-  const connectionLabel = connectionState === "loading" ? "连接中" : connectionState === "connected" ? "后端已连接" : "后端不可用";
-  const connectionTone = connectionState === "loading" ? "neutral" : connectionState === "connected" ? "safe" : "danger";
+  const connectionLabel = connectionState === "loading" ? "连接中" : connectionState === "connected" ? "后端已连接" : connectionState === "unauthorized" ? "需要登录" : "后端不可用";
+  const connectionTone = connectionState === "loading" ? "neutral" : connectionState === "connected" ? "safe" : connectionState === "unauthorized" ? "waiting" : "danger";
   const businessDataUnavailable = isBusinessDataUnavailable(summary);
   const dataLabel = !summary ? "等待数据" : businessDataUnavailable ? "业务数据不可用" : "业务数据正常";
   const dataNote = !summary ? "等待只读接口" : businessDataUnavailable ? (summary.reason ?? "状态证据待刷新") : summary.dataFreshnessLabel;
@@ -205,13 +205,15 @@ export function LoadingState() {
 }
 
 export function ErrorState({ message }: { message: string }) {
+  const requiresLogin = message.includes("HTTP 401") || message.includes("需要登录");
   return (
     <main className="flex flex-1 items-center justify-center p-6">
-      <Alert className="max-w-xl border-[color:var(--status-danger-border)] bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger)]">
+      <Alert className={cn("max-w-xl", requiresLogin ? "border-[color:var(--status-waiting-border)] bg-[color:var(--status-waiting-bg)] text-[color:var(--status-waiting)]" : "border-[color:var(--status-danger-border)] bg-[color:var(--status-danger-bg)] text-[color:var(--status-danger)]")}>
         <AlertTriangle />
-        <AlertTitle>运行状态不可用</AlertTitle>
-        <AlertDescription className="text-[color:var(--status-danger)]">
-          控制台暂时无法加载。资金路径保持关闭。{message ? ` ${message}` : ""}
+        <AlertTitle>{requiresLogin ? "需要登录" : "运行状态不可用"}</AlertTitle>
+        <AlertDescription className={requiresLogin ? "text-[color:var(--status-waiting)]" : "text-[color:var(--status-danger)]"}>
+          {requiresLogin ? "只读运行状态需要登录后查看。资金路径保持关闭。" : "控制台暂时无法加载。资金路径保持关闭。"}
+          {message && !requiresLogin ? ` ${message}` : ""}
         </AlertDescription>
       </Alert>
     </main>

@@ -43,6 +43,7 @@ index.
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
+| P0.5 Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active | Use one L1 runtime snapshot for routine checks and L3 summaries for deploy/static publish actions |
 | P1 Owner Console Mainline Stabilization | Owner sees simple state, not raw gate vocabulary | Main runtime window | active | Stabilize real-backend UI semantics, source-health display, and responsive visual QA from mainline |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
@@ -164,6 +165,33 @@ from market opportunity, runtime liveness, live facts, and real-order safety.
 | Degraded state | Blocked deploy packet with `tokyo_tcp_22_unreachable` maps to `degraded` / `部署通道暂不可用` |
 | Owner UI | The status appears only on the system/source-health page, not as a homepage primary gate |
 | Safety | Deploy-channel degradation does not hide StrategyGroups, create orders, call exchange write APIs, bypass FinalGate, or bypass Operation Layer |
+
+## P0.5 Subgoal: Runtime Interaction Optimization
+
+### Purpose
+
+Routine Tokyo checks should not appear as many unrelated server interactions.
+The main runtime window should use one compact interaction report whenever
+possible:
+
+```text
+L1 read-only snapshot
+-> Owner-readable current state
+-> product gaps or blockers
+-> next safe action
+```
+
+### 2026-06-17 Checkpoint
+
+| Item | Result |
+| --- | --- |
+| Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, nginx, static frontend release, source-readiness, goal-status, latest-summary, and dry-run audit facts through one read-only SSH interaction |
+| Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply`; frontend publish reports `L1_publish_plan_only` or `L3_frontend_static_publish` |
+| Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
+| Frontend publish | `scripts/publish_owner_console_frontend.py` publishes `owner-runtime-console/dist` to `/var/www/brc-owner-console` and writes `frontend-release.json` with the current branch/head |
+| Tokyo verification | L1 snapshot after publish reports runtime head and frontend head both at `e0c3fd63fcd1d588c1c815baeec3bab921288c1d`, watcher/backend/nginx active, source-readiness ready, dry-run audit passed, and no product gaps |
+| UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
+| Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
 
 ## P0 Subgoal: Runtime Liveness Repair
 

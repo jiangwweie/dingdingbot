@@ -14,7 +14,9 @@ export function App() {
   const connectionState: BackendConnectionState = projectionState.loading
     ? "loading"
     : projectionState.error
-      ? "unavailable"
+      ? projectionState.error.includes("HTTP 401")
+        ? "unauthorized"
+        : "unavailable"
       : "connected";
   const sourceLabel = projectionState.data?.scenario ? `${projectionState.data.source}: ${projectionState.data.scenario}` : projectionState.data?.source;
   const selectedStrategy = useMemo(() => {

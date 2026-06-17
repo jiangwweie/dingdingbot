@@ -507,6 +507,13 @@ def test_git_deploy_executor_dry_run_does_not_execute_commands():
     assert calls == []
     assert report["effects"]["remote_files_modified"] is False
     assert report["effects"]["migrations_run"] is False
+    assert report["interaction"]["level"] == "L1_deploy_plan_only"
+    assert report["interaction"]["mutates_remote_files"] is False
+    assert report["interaction"]["approaches_real_order"] is False
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["owner_summary"]["frontend_static_site"] == "not_included"
+    assert report["owner_summary"]["postdeploy_snapshot_recommended"] is False
 
 
 def test_git_deploy_executor_applies_with_standing_authorization_without_owner_packet():
@@ -580,6 +587,18 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     assert report["effects"]["migrations_run"] is True
     assert report["effects"]["order_created"] is False
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
+    assert report["interaction"]["level"] == "L3_bounded_deploy_apply"
+    assert report["interaction"]["mutates_remote_files"] is True
+    assert report["interaction"]["approaches_real_order"] is False
+    assert report["interaction"]["calls_operation_layer"] is False
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["owner_summary"]["state"] == "部署完成"
+    assert report["owner_summary"]["changed"]["remote_files"] is True
+    assert report["owner_summary"]["changed"]["services_restarted"] is True
+    assert report["owner_summary"]["not_changed"]["exchange_orders"] is True
+    assert report["owner_summary"]["frontend_static_site"] == "not_included"
+    assert report["owner_summary"]["postdeploy_snapshot_recommended"] is True
+    assert report["owner_summary"]["safety"]["order_created"] is False
 
 
 def test_git_owner_deploy_packet_requires_ready_git_plan_and_blocked_real_submit():

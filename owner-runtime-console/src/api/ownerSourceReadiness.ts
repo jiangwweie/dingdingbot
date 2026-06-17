@@ -340,6 +340,9 @@ export async function loadOwnerSourceReadinessProjection(): Promise<OwnerProduct
     headers: { Accept: "application/json" },
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("需要登录后查看只读运行状态：HTTP 401");
+    }
     throw new Error(`真实后端不可用：HTTP ${response.status}`);
   }
   return sourceReadinessToProjection((await response.json()) as OwnerConsoleSourceReadinessResponse);

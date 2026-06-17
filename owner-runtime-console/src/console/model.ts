@@ -2,7 +2,11 @@ import type { OwnerAutomationState, OwnerAttentionState, OwnerHealthState, Owner
 
 export type ThemeMode = "dark" | "light";
 export type Tone = "safe" | "waiting" | "processing" | "danger" | "paused" | "neutral";
-export type BackendConnectionState = "loading" | "connected" | "unavailable";
+export type BackendConnectionState =
+  | "loading"
+  | "connected"
+  | "unavailable"
+  | "unauthorized";
 export type NavigationKey = "home" | "strategies" | "funds" | "orders" | "records" | "system";
 
 export type ConsoleContext = {
