@@ -125,6 +125,17 @@ export type OwnerRealOrderReadiness = {
   matrix: OwnerReadinessMatrixItem[];
 };
 
+export type OwnerRuntimeInteraction = {
+  level: string;
+  ownerLabel: string;
+  detail: string;
+  remoteInteractionCount: number;
+  mutatesRemoteFiles: boolean;
+  approachesRealOrder: boolean;
+  callsExchangeWrite: boolean;
+  placesOrder: boolean;
+};
+
 export type OwnerImportantChange = {
   id: string;
   title: string;
@@ -142,6 +153,7 @@ export type OwnerProductProjection = {
   selectedStrategyId: string | null;
   fundPool: FundPoolSummary;
   sourceHealth: OwnerSourceHealth;
+  runtimeInteraction: OwnerRuntimeInteraction;
   realOrderReadiness: OwnerRealOrderReadiness;
   importantChanges: OwnerImportantChange[];
   noActionGuarantee: Record<string, boolean>;
@@ -185,6 +197,16 @@ export type OwnerConsoleSourceReadinessData = {
   } | null;
   strategy_groups?: OwnerSourceReadinessStrategyGroup[];
   source_health?: Record<string, OwnerSourceHealthItem | undefined>;
+  runtime_interaction?: {
+    level?: string | null;
+    owner_label?: string | null;
+    detail?: string | null;
+    remote_interaction_count?: number | null;
+    mutates_remote_files?: boolean | null;
+    approaches_real_order?: boolean | null;
+    calls_exchange_write?: boolean | null;
+    places_order?: boolean | null;
+  } | null;
   real_order_readiness?: {
     status?: string | null;
     owner_label?: string | null;

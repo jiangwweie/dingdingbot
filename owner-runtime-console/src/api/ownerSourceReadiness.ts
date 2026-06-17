@@ -9,6 +9,7 @@ import type {
   OwnerProductProjection,
   OwnerProductSummary,
   OwnerRealOrderReadiness,
+  OwnerRuntimeInteraction,
   OwnerSourceHealth,
   OwnerSourceHealthItem,
   OwnerSourceReadinessStrategyGroup,
@@ -131,6 +132,21 @@ function mapRealOrderReadiness(source: OwnerConsoleSourceReadinessData, health: 
     submitBlockerReview: mapSubmitBlockerReview(raw),
     nextSafeCheckpoint: raw?.next_safe_checkpoint || "等待系统刷新",
     matrix: mapReadinessMatrix(raw),
+  };
+}
+
+function runtimeInteraction(source: OwnerConsoleSourceReadinessData): OwnerRuntimeInteraction {
+  const raw = source.runtime_interaction;
+  const level = raw?.level || "L1_daily_check_from_snapshot";
+  return {
+    level,
+    ownerLabel: raw?.owner_label || "只读低交互",
+    detail: raw?.detail || "一次快照归纳状态",
+    remoteInteractionCount: asNumber(raw?.remote_interaction_count, 1),
+    mutatesRemoteFiles: raw?.mutates_remote_files === true,
+    approachesRealOrder: raw?.approaches_real_order === true,
+    callsExchangeWrite: raw?.calls_exchange_write === true,
+    placesOrder: raw?.places_order === true,
   };
 }
 
@@ -291,6 +307,7 @@ export function sourceReadinessToProjection(response: OwnerConsoleSourceReadines
     selectedStrategyId: selected?.id ?? null,
     fundPool: fundPool(source, health),
     sourceHealth: health,
+    runtimeInteraction: runtimeInteraction(source),
     realOrderReadiness,
     importantChanges: [
       {

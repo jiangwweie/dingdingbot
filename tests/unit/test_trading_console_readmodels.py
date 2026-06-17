@@ -6081,6 +6081,18 @@ def test_owner_console_source_readiness_returns_single_frontend_contract(
     assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
     assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
     assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道暂不可用"
+    assert payload["data"]["runtime_interaction"] == {
+        "level": "L1_daily_check_from_snapshot",
+        "owner_label": "只读低交互",
+        "detail": "一次快照归纳状态",
+        "remote_interaction_count": 1,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    }
     assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
     assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"

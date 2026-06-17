@@ -7339,6 +7339,7 @@ def _owner_console_source_readiness_packet(
             "real_order_readiness": real_order_readiness["owner_label"],
             "deploy_channel": deploy_channel_source["owner_label"],
         },
+        "runtime_interaction": _owner_console_runtime_interaction_summary(),
         "strategy_groups": rows,
         "source_health": source_health,
         "real_order_readiness": real_order_readiness,
@@ -8280,6 +8281,21 @@ def _owner_console_detail_source(
         "status": status,
         "owner_label": owner_label,
         "reason": reason,
+    }
+
+
+def _owner_console_runtime_interaction_summary() -> dict[str, Any]:
+    return {
+        "level": "L1_daily_check_from_snapshot",
+        "owner_label": "只读低交互",
+        "detail": "一次快照归纳状态",
+        "remote_interaction_count": 1,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
     }
 
 

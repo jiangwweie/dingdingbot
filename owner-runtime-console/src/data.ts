@@ -8,6 +8,7 @@ import type {
   OwnerProductProjection,
   OwnerProductSummary,
   OwnerRealOrderReadiness,
+  OwnerRuntimeInteraction,
   StrategyGroupProductRow,
 } from "./types";
 
@@ -42,6 +43,17 @@ const baseFundPool: FundPoolSummary = {
   reconciliationLabel: "对账正常",
   protectionLabel: "正常",
   fundsLocked: true,
+};
+
+const baseRuntimeInteraction: OwnerRuntimeInteraction = {
+  level: "L1_daily_check_from_snapshot",
+  ownerLabel: "只读低交互",
+  detail: "一次快照归纳状态",
+  remoteInteractionCount: 1,
+  mutatesRemoteFiles: false,
+  approachesRealOrder: false,
+  callsExchangeWrite: false,
+  placesOrder: false,
 };
 
 const dryRunRequiredChecks = {
@@ -279,6 +291,7 @@ function buildProjection(
     selectedStrategyId: selected?.id ?? null,
     fundPool,
     sourceHealth: baseSourceHealth,
+    runtimeInteraction: baseRuntimeInteraction,
     realOrderReadiness: baseRealOrderReadiness,
     importantChanges,
     noActionGuarantee: {

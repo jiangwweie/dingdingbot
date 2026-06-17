@@ -103,8 +103,8 @@ function OperationalAssuranceStrip({ projection }: { projection: OwnerProductPro
   const items = [
     {
       label: "监控方式",
-      value: "L1 只读低交互",
-      detail: "一次快照归纳状态",
+      value: `${interactionPrefix(projection.runtimeInteraction.level)} ${projection.runtimeInteraction.ownerLabel}`,
+      detail: projection.runtimeInteraction.detail,
       tone: "safe" as const,
       icon: <ShieldCheck />,
     },
@@ -157,6 +157,10 @@ function OperationalAssuranceStrip({ projection }: { projection: OwnerProductPro
       ))}
     </section>
   );
+}
+
+function interactionPrefix(level: string) {
+  return level.split("_", 1)[0] || "L1";
 }
 
 function ownerSafeSourceDetail(detail: string | null | undefined, fallback: string) {
