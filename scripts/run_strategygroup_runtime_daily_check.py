@@ -100,6 +100,12 @@ def build_daily_check_report(
     goal_status = (
         reports.get("goal_status") if isinstance(reports.get("goal_status"), dict) else {}
     )
+    dry_run_summary = (
+        reports.get("runtime_dry_run_audit")
+        if isinstance(reports.get("runtime_dry_run_audit"), dict)
+        else {}
+    )
+    dry_run_scenario_count = _int_or_none(dry_run_summary.get("scenario_count"))
 
     blockers = list(checks.get("blockers") or [])
     product_gaps = list(checks.get("product_gaps") or [])
@@ -157,6 +163,7 @@ def build_daily_check_report(
         "runtime_dry_run_missing_required_checks": list(
             checks.get("runtime_dry_run_missing_required_checks") or []
         ),
+        "runtime_dry_run_scenario_count": dry_run_scenario_count,
         "frontend_published": (
             checks.get("frontend_release_present") is True
             and checks.get("frontend_index_present") is True
@@ -195,6 +202,7 @@ def build_daily_check_report(
                 "watcher": owner_summary.get("watcher"),
                 "source_readiness": owner_summary.get("source_readiness"),
                 "dry_run_audit": owner_summary.get("dry_run_audit"),
+                "dry_run_audit_scenarios": dry_run_scenario_count,
                 "frontend": owner_summary.get("frontend"),
             },
         },
@@ -242,7 +250,7 @@ def _notification_decision(
         return {
             "decision": "DONT_NOTIFY",
             "reason": "healthy_waiting_for_market",
-            "message": "自动化正常运行，当前没有 fresh signal",
+            "message": "自动化正常运行，当前没有可用市场机会",
             "owner_intervention_required": False,
         }
     return {
@@ -616,6 +624,13 @@ def _int_or_zero(value: Any) -> int:
         return 0
 
 
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -704,6 +719,7 @@ def _owner_progress_text(
         f"- Watcher: {progress.get('watcher') or 'unknown'}",
         f"- Source readiness: {progress.get('source_readiness') or 'unknown'}",
         f"- Dry-run audit: {progress.get('dry_run_audit') or 'unknown'}",
+        f"- 演练场景: {progress.get('dry_run_audit_scenarios') or 'unknown'}",
         f"- Frontend: {progress.get('frontend') or 'unknown'}",
     ]
     if blockers:

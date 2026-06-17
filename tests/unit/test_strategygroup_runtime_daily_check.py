@@ -61,6 +61,10 @@ def _snapshot(**overrides):
                     "status": "waiting_for_signal",
                     "fresh_signal_present": False,
                 },
+                "runtime_dry_run_audit": {
+                    "status": "passed",
+                    "scenario_count": 13,
+                },
             },
         },
     }
@@ -87,10 +91,12 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["waiting_for_market"] is True
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
+    assert report["checks"]["runtime_dry_run_scenario_count"] == 13
+    assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 13
     assert report["notification"] == {
         "decision": "DONT_NOTIFY",
         "reason": "healthy_waiting_for_market",
-        "message": "自动化正常运行，当前没有 fresh signal",
+        "message": "自动化正常运行，当前没有可用市场机会",
         "owner_intervention_required": False,
     }
 
@@ -338,7 +344,7 @@ def test_daily_check_heartbeat_xml_uses_dont_notify_decision():
 
     assert "<automation_id>tokyo-runtime-quiet-monitor</automation_id>" in xml
     assert "<decision>DONT_NOTIFY</decision>" in xml
-    assert "<message>自动化正常运行，当前没有 fresh signal</message>" in xml
+    assert "<message>自动化正常运行，当前没有可用市场机会</message>" in xml
 
 
 def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
@@ -393,6 +399,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 接近真实订单: 否" in text
     assert "- 交易所写入: 否" in text
     assert "- Runtime: 正常" in text
+    assert "- 演练场景: 13" in text
     assert "- Frontend: 已发布" in text
 
 

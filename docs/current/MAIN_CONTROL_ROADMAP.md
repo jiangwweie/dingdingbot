@@ -198,6 +198,7 @@ L1 read-only snapshot
 | Notification decision | Daily check now emits `notification.decision` as `DONT_NOTIFY` only for healthy `waiting_for_market`; fresh/processing/degraded/blocked states emit `NOTIFY` so automation does not re-interpret raw checks |
 | Heartbeat output | `scripts/run_strategygroup_runtime_daily_check.py --heartbeat` renders the same decision as Codex heartbeat XML, allowing the recurring monitor to forward quiet/notify decisions without parsing raw JSON in the prompt |
 | Owner progress output | `scripts/run_strategygroup_runtime_daily_check.py --owner-progress` renders the same one-shot check as a concise Owner-readable progress summary, so manual status reviews do not require extra SSH probes or raw JSON/XML inspection |
+| Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 13` instead of a vague green label |
 | Local progress cache | `--output-json` and `--output-owner-progress` can persist the latest daily-check report and Owner progress text; `--from-cache --owner-progress` re-renders the default saved report locally with zero Tokyo interaction |
 | Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into an Owner-readable engineering blocker instead of triggering an extra Tokyo probe |
 | Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` runs one L1 heartbeat check every 30 minutes and writes `output/runtime-monitor/latest-daily-check.json` plus `output/runtime-monitor/latest-owner-progress.md` for later local review |
@@ -206,6 +207,7 @@ L1 read-only snapshot
 | UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
 | Owner visibility classification | The daily check emits `owner_summary.visibility.category`, and the homepage shows `当前阶段` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names |
 | Homepage Owner language guard | The homepage now maps internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the homepage |
+| Monitor Owner language guard | Healthy waiting notifications say `当前没有可用市场机会`; internal signal terms remain audit/detail concepts instead of the default Owner heartbeat text |
 | Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
 
 ### Deploy Interaction Rule
