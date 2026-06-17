@@ -91,6 +91,7 @@ def _write_base_packets(report_dir: Path) -> None:
                 "operation_layer_evidence_relay_checked": True,
                 "scoped_pipeline_operation_layer_handoff_checked": True,
                 "fresh_signal_fast_auto_chain_checked": True,
+                "required_facts_readiness_checked": True,
                 "legacy_local_registration_probe_tolerance_checked": True,
                 "mock_operation_layer_closed_loop_checked": True,
                 "operation_layer_blocker_review_policy_checked": True,
@@ -224,6 +225,7 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["checks"]["ready_for_real_order_action"] is False
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
+    assert packet["checks"]["required_facts_readiness_checked"] is True
     assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
     assert packet["checks"]["common_execution_chain_reuse_checked"] is True
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
@@ -236,6 +238,9 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         packet["checks"]["all_selected_strategygroups_reach_finalgate_dispatch_checked"]
         is True
     )
+    assert packet["evidence"]["dry_run_required_checks"][
+        "required_facts_readiness_checked"
+    ] is True
     assert packet["evidence"]["dry_run_required_checks"][
         "non_executing_prepare_auto_bridge_checked"
     ] is True

@@ -35,7 +35,9 @@ REQUIRED_LIVE_PROOFS = [
 ]
 PROJECTED_DRY_RUN_CHECKS = [
     "fresh_signal_fast_auto_chain_checked",
+    "required_facts_readiness_checked",
     "non_executing_prepare_auto_bridge_checked",
+    "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
     "scoped_pipeline_operation_layer_handoff_checked",
     "mock_operation_layer_closed_loop_checked",
@@ -52,6 +54,30 @@ PROJECTED_DRY_RUN_CHECKS = [
     "operation_layer_submit_result_identity_guard_checked",
     "post_submit_finalize_result_identity_guard_checked",
 ]
+GOAL_CHAIN_SEGMENTS = {
+    "fresh_or_mock_signal": [
+        "fresh_signal_fast_auto_chain_checked",
+    ],
+    "required_facts_readiness": [
+        "required_facts_readiness_checked",
+    ],
+    "candidate_authorization_evidence": [
+        "fresh_signal_fast_auto_chain_checked",
+        "non_executing_prepare_auto_bridge_checked",
+    ],
+    "action_time_finalgate": [
+        "fresh_signal_fast_auto_chain_checked",
+        "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    ],
+    "official_operation_layer_evidence_handoff": [
+        "operation_layer_evidence_relay_checked",
+        "scoped_pipeline_operation_layer_handoff_checked",
+    ],
+    "disabled_dry_run_proof": [
+        "disabled_smoke_not_real_execution_proof",
+        "mock_operation_layer_closed_loop_checked",
+    ],
+}
 SAFETY_INVARIANT_KEYS = [
     "calls_tokyo_api",
     "exchange_write_called",
@@ -112,12 +138,20 @@ def _projected_dry_run_checks(required_checks: dict[str, Any]) -> dict[str, bool
     }
 
 
+def _goal_chain_segments(projected_checks: dict[str, bool]) -> dict[str, bool]:
+    return {
+        segment: all(projected_checks.get(check) is True for check in checks)
+        for segment, checks in GOAL_CHAIN_SEGMENTS.items()
+    }
+
+
 def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
     required_checks = _dict(audit_packet.get("required_checks"))
     safety = _dict(audit_packet.get("safety_invariants"))
     failed_checks = _failed_required_checks(required_checks)
     dangerous_effects = _dangerous_effects(safety)
     projected_checks = _projected_dry_run_checks(required_checks)
+    goal_chain_segments = _goal_chain_segments(projected_checks)
     audit_passed = (
         audit_packet.get("status") == "passed"
         and not failed_checks
@@ -159,6 +193,13 @@ def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
             ],
             "missing_or_failed_segments": [
                 name for name, passed in projected_checks.items() if not passed
+            ],
+            "goal_chain_segments": goal_chain_segments,
+            "ready_goal_chain_segments": [
+                name for name, passed in goal_chain_segments.items() if passed
+            ],
+            "missing_or_failed_goal_chain_segments": [
+                name for name, passed in goal_chain_segments.items() if not passed
             ],
             "common_execution_chain_reuse_checked": bool(
                 _dict(audit_packet.get("summary")).get(

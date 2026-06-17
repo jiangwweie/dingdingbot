@@ -3131,6 +3131,14 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 "fast_auto_chain_checks",
             ).values()
         ),
+        "required_facts_readiness_checked": (
+            _scenario_artifact(
+                scenarios,
+                "required_facts_missing",
+                "readiness_bridge",
+            ).get("status")
+            == "ready_for_readiness_evidence"
+        ),
         "scoped_pipeline_operation_layer_handoff_checked": (
             _scenario_artifact(
                 scenarios,
@@ -3397,6 +3405,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "non_executing_prepare_auto_bridge_checked": checks[
             "non_executing_prepare_auto_bridge_checked"
+        ],
+        "required_facts_readiness_checked": checks[
+            "required_facts_readiness_checked"
         ],
         "scoped_pipeline_operation_layer_handoff_checked": checks[
             "scoped_pipeline_operation_layer_handoff_checked"

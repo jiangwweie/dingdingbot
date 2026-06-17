@@ -17,7 +17,9 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
     assert packet["dry_run_chain"]["dangerous_effects_absent"] is True
     assert packet["dry_run_chain"]["projected_checks"] == {
         "fresh_signal_fast_auto_chain_checked": True,
+        "required_facts_readiness_checked": True,
         "non_executing_prepare_auto_bridge_checked": True,
+        "disabled_smoke_not_real_execution_proof": True,
         "operation_layer_evidence_relay_checked": True,
         "scoped_pipeline_operation_layer_handoff_checked": True,
         "mock_operation_layer_closed_loop_checked": True,
@@ -35,6 +37,23 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "post_submit_finalize_result_identity_guard_checked": True,
     }
     assert packet["dry_run_chain"]["missing_or_failed_segments"] == []
+    assert packet["dry_run_chain"]["goal_chain_segments"] == {
+        "fresh_or_mock_signal": True,
+        "required_facts_readiness": True,
+        "candidate_authorization_evidence": True,
+        "action_time_finalgate": True,
+        "official_operation_layer_evidence_handoff": True,
+        "disabled_dry_run_proof": True,
+    }
+    assert packet["dry_run_chain"]["ready_goal_chain_segments"] == [
+        "fresh_or_mock_signal",
+        "required_facts_readiness",
+        "candidate_authorization_evidence",
+        "action_time_finalgate",
+        "official_operation_layer_evidence_handoff",
+        "disabled_dry_run_proof",
+    ]
+    assert packet["dry_run_chain"]["missing_or_failed_goal_chain_segments"] == []
     assert {
         "fresh_signal_fast_auto_chain_checked",
         "operation_layer_evidence_relay_checked",
@@ -85,6 +104,14 @@ def test_closure_status_blocks_when_required_dry_run_check_fails(tmp_path):
     ] is False
     assert packet["dry_run_chain"]["missing_or_failed_segments"] == [
         "fresh_signal_fast_auto_chain_checked"
+    ]
+    assert packet["dry_run_chain"]["goal_chain_segments"][
+        "fresh_or_mock_signal"
+    ] is False
+    assert packet["dry_run_chain"]["missing_or_failed_goal_chain_segments"] == [
+        "fresh_or_mock_signal",
+        "candidate_authorization_evidence",
+        "action_time_finalgate",
     ]
     assert packet["real_execution"]["real_order_allowed"] is False
     assert packet["next_safe_actions"] == [

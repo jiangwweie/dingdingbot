@@ -42,6 +42,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "operation_layer_evidence_relay_checked",
     "scoped_pipeline_operation_layer_handoff_checked",
     "fresh_signal_fast_auto_chain_checked",
+    "required_facts_readiness_checked",
     "mock_operation_layer_closed_loop_checked",
     "operation_layer_blocker_review_policy_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
@@ -499,6 +500,13 @@ def _summary_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "ready_segments": dry_run_chain.get("ready_segments"),
         "missing_or_failed_segments": dry_run_chain.get(
             "missing_or_failed_segments"
+        ),
+        "goal_chain_segments": dry_run_chain.get("goal_chain_segments"),
+        "ready_goal_chain_segments": dry_run_chain.get(
+            "ready_goal_chain_segments"
+        ),
+        "missing_or_failed_goal_chain_segments": dry_run_chain.get(
+            "missing_or_failed_goal_chain_segments"
         ),
     }
 

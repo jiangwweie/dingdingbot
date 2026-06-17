@@ -16,6 +16,7 @@ REQUIRED_DRY_RUN_CHECKS = (
     "operation_layer_evidence_relay_checked",
     "scoped_pipeline_operation_layer_handoff_checked",
     "fresh_signal_fast_auto_chain_checked",
+    "required_facts_readiness_checked",
     "mock_operation_layer_closed_loop_checked",
     "operation_layer_blocker_review_policy_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
@@ -120,6 +121,15 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
                             "operation_layer_evidence_relay_checked",
                         ],
                         "missing_or_failed_segments": [],
+                        "goal_chain_segments": {
+                            "fresh_or_mock_signal": True,
+                            "required_facts_readiness": True,
+                        },
+                        "ready_goal_chain_segments": [
+                            "fresh_or_mock_signal",
+                            "required_facts_readiness",
+                        ],
+                        "missing_or_failed_goal_chain_segments": [],
                     },
                     "real_execution": {
                         "status": "waiting_for_live_action_time_proof",
@@ -190,6 +200,15 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
         "operation_layer_evidence_relay_checked",
     ]
     assert closure["missing_or_failed_segments"] == []
+    assert closure["goal_chain_segments"] == {
+        "fresh_or_mock_signal": True,
+        "required_facts_readiness": True,
+    }
+    assert closure["ready_goal_chain_segments"] == [
+        "fresh_or_mock_signal",
+        "required_facts_readiness",
+    ]
+    assert closure["missing_or_failed_goal_chain_segments"] == []
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
 

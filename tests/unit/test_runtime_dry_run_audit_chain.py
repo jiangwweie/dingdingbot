@@ -33,6 +33,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_submit_result_identity_guard_checked": True,
         "post_submit_finalize_result_identity_guard_checked": True,
         "non_executing_prepare_auto_bridge_checked": True,
+        "required_facts_readiness_checked": True,
         "scoped_pipeline_operation_layer_handoff_checked": True,
     }
     assert packet["required_checks"] == {
@@ -40,6 +41,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "dangerous_effects_absent": True,
         "disabled_smoke_not_real_execution_proof": True,
         "fresh_signal_fast_auto_chain_checked": True,
+        "required_facts_readiness_checked": True,
         "non_executing_prepare_auto_bridge_checked": True,
         "legacy_local_registration_probe_tolerance_checked": True,
         "mock_operation_layer_closed_loop_checked": True,
@@ -208,6 +210,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
     assert packet["checks"]["scoped_pipeline_operation_layer_handoff_checked"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
+    assert packet["checks"]["required_facts_readiness_checked"] is True
     assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
     assert packet["checks"][
         "legacy_local_registration_probe_tolerance_checked"
