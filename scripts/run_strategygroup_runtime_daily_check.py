@@ -20,6 +20,33 @@ DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    report = _build_or_read_daily_check_report(args)
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    owner_progress_text = _owner_progress_text(report)
+    if args.output_owner_progress:
+        output_path = Path(args.output_owner_progress)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(owner_progress_text + "\n", encoding="utf-8")
+    if args.heartbeat:
+        print(_heartbeat_xml(report))
+    elif args.owner_progress:
+        print(owner_progress_text)
+    elif args.json:
+        print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        _print_human_report(report)
+    return 0 if report["status"] in {"ready", "waiting_for_market"} else 2
+
+
+def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any]:
+    if args.report_json_path:
+        return _read_json(Path(args.report_json_path))
     expected_heads = _resolve_expected_heads(args)
     snapshot = (
         _read_json(Path(args.snapshot_json_path))
@@ -29,26 +56,10 @@ def main(argv: list[str] | None = None) -> int:
             expected_frontend_head=expected_heads["expected_frontend_head"],
         )
     )
-    report = build_daily_check_report(
+    return build_daily_check_report(
         snapshot=snapshot,
         max_remote_interactions=args.max_remote_interactions,
     )
-    if args.output_json:
-        output_path = Path(args.output_json)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-    if args.heartbeat:
-        print(_heartbeat_xml(report))
-    elif args.owner_progress:
-        print(_owner_progress_text(report))
-    elif args.json:
-        print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
-    else:
-        _print_human_report(report)
-    return 0 if report["status"] in {"ready", "waiting_for_market"} else 2
 
 
 def build_daily_check_report(
@@ -566,7 +577,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Print Codex heartbeat XML using notification.decision.",
     )
     parser.add_argument("--snapshot-json-path")
+    parser.add_argument(
+        "--report-json-path",
+        help="Read a prebuilt daily-check report JSON without probing Tokyo.",
+    )
     parser.add_argument("--output-json")
+    parser.add_argument(
+        "--output-owner-progress",
+        help="Write the Owner-readable progress summary to this path.",
+    )
     parser.add_argument("--expected-runtime-head")
     parser.add_argument("--expected-frontend-head")
     parser.add_argument(

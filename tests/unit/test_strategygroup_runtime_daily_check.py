@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -415,6 +416,55 @@ def test_daily_check_owner_progress_text_surfaces_safety_blocker():
     assert "- 通知决策: NOTIFY" in text
     assert "## Blockers" in text
     assert "- active_position_open_order_conflict" in text
+
+
+def test_daily_check_reads_prebuilt_report_without_snapshot_probe(tmp_path, monkeypatch):
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report_path = tmp_path / "daily-check.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("snapshot probe should not run")
+
+    monkeypatch.setattr(module, "_run_snapshot", fail_if_called)
+    args = module._parse_args(["--report-json-path", str(report_path)])
+
+    loaded = module._build_or_read_daily_check_report(args)
+
+    assert loaded["status"] == "waiting_for_market"
+    assert loaded["interaction"]["remote_interaction_count"] == 1
+    assert loaded["notification"]["decision"] == "DONT_NOTIFY"
+
+
+def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
+    module = _load_module()
+    snapshot_path = tmp_path / "snapshot.json"
+    output_path = tmp_path / "owner-progress.md"
+    snapshot_path.write_text(
+        json.dumps(_snapshot(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(
+        [
+            "--snapshot-json-path",
+            str(snapshot_path),
+            "--output-owner-progress",
+            str(output_path),
+            "--owner-progress",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    output_text = output_path.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert "- 当前阶段: 等待机会" in output_text
+    assert "- 通知决策: DONT_NOTIFY" in output_text
+    assert captured.out == output_text
 
 
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
