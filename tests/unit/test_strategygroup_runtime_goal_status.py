@@ -82,11 +82,12 @@ def _write_base_packets(report_dir: Path) -> None:
         {
             "status": "passed",
             "checks": {
-                "scenario_count": 12,
+                "scenario_count": 13,
                 "required_scenarios_present": True,
                 "all_scenarios_passed": True,
                 "dangerous_effects_absent": True,
                 "disabled_smoke_not_real_execution_proof": True,
+                "non_executing_prepare_auto_bridge_checked": True,
                 "operation_layer_evidence_relay_checked": True,
                 "fresh_signal_fast_auto_chain_checked": True,
                 "legacy_local_registration_probe_tolerance_checked": True,
@@ -104,6 +105,28 @@ def _write_base_packets(report_dir: Path) -> None:
                 "selected_strategygroup_dispatch_guard_checked": True,
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
             },
+            "scenarios": [
+                {
+                    "name": "non_executing_prepare_auto_bridge",
+                    "status": "passed",
+                    "artifacts": {
+                        "resume_dispatch": {
+                            "non_executing_prepare_result": {
+                                "created_records": {
+                                    "execution_intent_created": True,
+                                    "submit_authorization_created": True,
+                                },
+                                "safety_invariants": {
+                                    "exchange_write_called": False,
+                                    "order_created": False,
+                                    "order_lifecycle_called": False,
+                                    "withdrawal_or_transfer_created": False,
+                                },
+                            },
+                        },
+                    },
+                },
+            ],
             "safety_invariants": {
                 "dangerous_effects": [],
                 "exchange_write_called": False,
@@ -199,6 +222,7 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
     assert packet["checks"]["ready_for_real_order_action"] is False
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
+    assert packet["checks"]["non_executing_prepare_auto_bridge_checked"] is True
     assert packet["checks"]["common_execution_chain_reuse_checked"] is True
     assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
     assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
@@ -206,6 +230,9 @@ def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> N
         packet["checks"]["all_selected_strategygroups_reach_finalgate_dispatch_checked"]
         is True
     )
+    assert packet["evidence"]["dry_run_required_checks"][
+        "non_executing_prepare_auto_bridge_checked"
+    ] is True
     assert packet["evidence"]["dry_run_required_checks"][
         "common_execution_chain_reuse_checked"
     ] is True
@@ -320,6 +347,10 @@ def test_goal_status_requires_specific_dry_run_order_chain_checks(
         "runtime_dry_run_missing_required_check:"
         "post_submit_finalize_result_identity_guard_checked"
     ) in packet["blockers"]
+    assert (
+        "runtime_dry_run_missing_required_check:"
+        "non_executing_prepare_auto_bridge_checked"
+    ) in packet["blockers"]
 
 
 def test_goal_status_reads_local_nested_dry_run_audit_packet(
@@ -346,7 +377,7 @@ def test_goal_status_reads_local_nested_dry_run_audit_packet(
 
     assert packet["checks"]["runtime_dry_run_audit_passed"] is True
     assert "runtime_dry_run_audit_not_passed" not in packet["blockers"]
-    assert packet["evidence"]["dry_run_scenario_count"] == 12
+    assert packet["evidence"]["dry_run_scenario_count"] == 13
     assert packet["status"] == "waiting_for_signal"
 
 

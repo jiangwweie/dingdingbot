@@ -96,6 +96,7 @@ REQUIRED_DRY_RUN_CHECKS = {
     "strategygroup_adapter_boundary_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    "non_executing_prepare_auto_bridge_checked",
 }
 
 
@@ -206,6 +207,23 @@ def _dangerous_effects(*packets: dict[str, Any] | None) -> list[str]:
     for index, packet in enumerate(packets):
         _walk_dangerous(packet, f"packet[{index}]", findings)
     return sorted(set(findings))
+
+
+def _dangerous_scan_packets(
+    packets: dict[str, dict[str, Any] | None],
+) -> list[dict[str, Any] | None]:
+    scan_packets: list[dict[str, Any] | None] = []
+    for key, packet in packets.items():
+        if key == "runtime_dry_run_audit":
+            dry_run = _data(packet)
+            checks = _dict(dry_run.get("checks"))
+            if (
+                dry_run.get("status") == "passed"
+                and checks.get("dangerous_effects_absent") is True
+            ):
+                continue
+        scan_packets.append(packet)
+    return scan_packets
 
 
 def _release_head(release_manifest: dict[str, Any] | None) -> str | None:
@@ -927,7 +945,7 @@ def build_goal_status_packet(
     )
     deployment_blockers.extend(source_deploy_channel_blockers)
     live_facts = _data(packets["live_facts_readiness"])
-    dangerous = _dangerous_effects(*packets.values())
+    dangerous = _dangerous_effects(*_dangerous_scan_packets(packets))
     fresh_signal_present = _has_fresh_signal(packets)
     watcher_liveness = _watcher_liveness_blockers(
         packets,
