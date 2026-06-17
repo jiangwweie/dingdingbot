@@ -290,6 +290,56 @@ def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
     assert "<message>A &lt; B &amp; C</message>" in xml
 
 
+def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+
+    text = module._owner_progress_text(report)
+
+    assert "## StrategyGroup Runtime Progress" in text
+    assert "- 当前阶段: 等待机会" in text
+    assert "- 当前动作: 继续等待市场机会" in text
+    assert "- Owner 介入: 否" in text
+    assert "- 通知决策: DONT_NOTIFY" in text
+    assert "- 交互等级: L1_daily_check_from_snapshot" in text
+    assert "- 远端交互次数: 1" in text
+    assert "- 服务器修改: 否" in text
+    assert "- 接近真实订单: 否" in text
+    assert "- 交易所写入: 否" in text
+    assert "- Runtime: 正常" in text
+    assert "- Frontend: 已发布" in text
+
+
+def test_daily_check_owner_progress_text_surfaces_safety_blocker():
+    module = _load_module()
+    report = module.build_daily_check_report(
+        snapshot=_snapshot(
+            status="blocked",
+            checks={
+                "blockers": ["active_position_open_order_conflict"],
+                "product_gaps": [],
+                "backend_active": True,
+                "watcher_timer_active": True,
+                "source_readiness_ready": True,
+                "runtime_dry_run_audit_passed": True,
+                "runtime_dry_run_required_checks_present": True,
+                "runtime_dry_run_missing_required_checks": [],
+                "frontend_release_present": True,
+                "frontend_index_present": True,
+            },
+        )
+    )
+
+    text = module._owner_progress_text(report)
+
+    assert "- 当前阶段: 安全边界阻断" in text
+    assert "- 当前动作: 等待系统处理安全状态" in text
+    assert "- Owner 介入: 是" in text
+    assert "- 通知决策: NOTIFY" in text
+    assert "## Blockers" in text
+    assert "- active_position_open_order_conflict" in text
+
+
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
     module = _load_module()
     baseline = tmp_path / "runtime-monitor-baseline.json"

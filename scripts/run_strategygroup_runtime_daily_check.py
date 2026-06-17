@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.heartbeat:
         print(_heartbeat_xml(report))
+    elif args.owner_progress:
+        print(_owner_progress_text(report))
     elif args.json:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
@@ -452,11 +454,85 @@ def _heartbeat_xml(report: dict[str, Any]) -> str:
     )
 
 
+def _owner_progress_text(report: dict[str, Any]) -> str:
+    owner = report.get("owner_summary")
+    if not isinstance(owner, dict):
+        owner = {}
+    checks = report.get("checks")
+    if not isinstance(checks, dict):
+        checks = {}
+    interaction = report.get("interaction")
+    if not isinstance(interaction, dict):
+        interaction = {}
+    notification = report.get("notification")
+    if not isinstance(notification, dict):
+        notification = {}
+    progress = owner.get("progress")
+    if not isinstance(progress, dict):
+        progress = {}
+
+    blockers = [str(item) for item in checks.get("blockers") or []]
+    product_gaps = [str(item) for item in checks.get("product_gaps") or []]
+    warnings = [str(item) for item in checks.get("warnings") or []]
+    missing_dry_run_checks = [
+        str(item) for item in checks.get("runtime_dry_run_missing_required_checks") or []
+    ]
+
+    lines = [
+        "## StrategyGroup Runtime Progress",
+        "",
+        f"- 当前阶段: {owner.get('state') or report.get('status') or 'unknown'}",
+        f"- 当前动作: {owner.get('current_action') or 'unknown'}",
+        f"- 风险等级: {owner.get('risk_level') or 'unknown'}",
+        (
+            "- Owner 介入: "
+            + _yes_no(bool(owner.get("owner_intervention_required")))
+        ),
+        f"- 通知决策: {notification.get('decision') or 'UNKNOWN'}",
+        f"- 通知原因: {notification.get('reason') or 'unknown'}",
+        f"- 交互等级: {interaction.get('level') or 'unknown'}",
+        f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}",
+        "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files"))),
+        "- 接近真实订单: " + _yes_no(bool(interaction.get("approaches_real_order"))),
+        "- 交易所写入: " + _yes_no(bool(interaction.get("calls_exchange_write"))),
+        "",
+        "## Progress",
+        "",
+        f"- Runtime: {progress.get('runtime') or 'unknown'}",
+        f"- Watcher: {progress.get('watcher') or 'unknown'}",
+        f"- Source readiness: {progress.get('source_readiness') or 'unknown'}",
+        f"- Dry-run audit: {progress.get('dry_run_audit') or 'unknown'}",
+        f"- Frontend: {progress.get('frontend') or 'unknown'}",
+    ]
+    if blockers:
+        lines.extend(["", "## Blockers", ""])
+        lines.extend(f"- {item}" for item in blockers)
+    if product_gaps:
+        lines.extend(["", "## Product Gaps", ""])
+        lines.extend(f"- {item}" for item in product_gaps)
+    if warnings:
+        lines.extend(["", "## Warnings", ""])
+        lines.extend(f"- {item}" for item in warnings)
+    if missing_dry_run_checks:
+        lines.extend(["", "## Missing Dry-Run Checks", ""])
+        lines.extend(f"- {item}" for item in missing_dry_run_checks)
+    return "\n".join(lines)
+
+
+def _yes_no(value: bool) -> str:
+    return "是" if value else "否"
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a low-noise StrategyGroup runtime daily check."
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
+    parser.add_argument(
+        "--owner-progress",
+        action="store_true",
+        help="Print a concise Owner-readable progress summary.",
+    )
     parser.add_argument(
         "--heartbeat",
         action="store_true",
