@@ -91,6 +91,7 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
         "readmodel_refresh_only": True,
         "optional_signed_get_live_facts_precollect": False,
         "optional_dry_run_audit_chain_refresh": False,
+        "optional_chain_closure_status_refresh": False,
         "optional_goal_status_refresh": False,
         "optional_source_readiness_fallback": False,
         "exchange_write_called": False,
@@ -315,6 +316,20 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
             "real_order_boundary": {"ready_for_real_order_action": True},
         }
 
+    def chain_closure_status_builder(**kwargs):
+        assert kwargs["audit_packet"]["scope"] == "runtime_dry_run_audit_chain"
+        return {
+            "scope": "runtime_execution_chain_closure_status",
+            "status": "non_market_execution_chain_ready",
+            "real_execution": {
+                "real_order_allowed": False,
+                "missing_live_proofs": [
+                    "live_fresh_signal",
+                    "same_run_action_time_finalgate_pass",
+                ],
+            },
+        }
+
     packet = refresh_packets(
         api_base="http://unit",
         output_dir=tmp_path,
@@ -327,6 +342,9 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         dry_run_output_dir=tmp_path / "dry",
         dry_run_output_json=tmp_path / "runtime-dry-run-audit-chain.json",
         dry_run_builder=dry_run_builder,
+        refresh_chain_closure_status=True,
+        chain_closure_output_json=tmp_path / "runtime-execution-chain-closure-status.json",
+        chain_closure_status_builder=chain_closure_status_builder,
         refresh_goal_status=True,
         goal_status_output_json=tmp_path / "strategygroup-runtime-goal-status.json",
         release_manifest=tmp_path / "manifest.json",
@@ -344,6 +362,14 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "scenario_count": 14,
         "dangerous_effects_absent": True,
     }
+    assert packet["chain_closure_status_refresh"] == {
+        "enabled": True,
+        "status": "non_market_execution_chain_ready",
+        "output_json": str(tmp_path / "runtime-execution-chain-closure-status.json"),
+        "audit_json": str(tmp_path / "runtime-dry-run-audit-chain.json"),
+        "real_order_allowed": False,
+        "missing_live_proof_count": 2,
+    }
     assert packet["goal_status_refresh"] == {
         "enabled": True,
         "status": "waiting_for_signal",
@@ -354,8 +380,10 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "ready_for_real_order_action": False,
     }
     assert (tmp_path / "runtime-dry-run-audit-chain.json").exists()
+    assert (tmp_path / "runtime-execution-chain-closure-status.json").exists()
     assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
     assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
+    assert packet["safety_invariants"]["optional_chain_closure_status_refresh"] is True
     assert packet["safety_invariants"]["optional_goal_status_refresh"] is True
     assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False

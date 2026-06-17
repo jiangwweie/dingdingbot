@@ -509,6 +509,9 @@ def refresh_packets(
     dry_run_output_dir: Path | None = None,
     dry_run_output_json: Path | None = None,
     dry_run_builder: Callable[..., dict[str, Any]] | None = None,
+    refresh_chain_closure_status: bool = False,
+    chain_closure_output_json: Path | None = None,
+    chain_closure_status_builder: Callable[..., dict[str, Any]] | None = None,
     refresh_goal_status: bool = False,
     goal_status_output_json: Path | None = None,
     release_manifest: Path | None = None,
@@ -573,6 +576,8 @@ def refresh_packets(
         "enabled": refresh_dry_run_audit_chain,
         "status": "skipped",
     }
+    refreshed_dry_run_packet: dict[str, Any] | None = None
+    resolved_dry_run_output_json: Path | None = None
     if refresh_dry_run_audit_chain:
         from scripts.runtime_dry_run_audit_chain import (
             DEFAULT_OUTPUT_JSON as DEFAULT_DRY_RUN_OUTPUT_JSON,
@@ -586,6 +591,7 @@ def refresh_packets(
         )
         try:
             dry_run_packet = builder(resolved_dry_run_output_dir)
+            refreshed_dry_run_packet = dry_run_packet
             _write_json(resolved_dry_run_output_json, dry_run_packet)
             goal_status_dry_run_json = output_dir / DEFAULT_DRY_RUN_OUTPUT_JSON.name
             if (
@@ -617,6 +623,70 @@ def refresh_packets(
                 "status": "failed",
                 "output_json": str(resolved_dry_run_output_json),
                 "output_dir": str(resolved_dry_run_output_dir),
+            }
+
+    chain_closure_status_refresh: dict[str, Any] = {
+        "enabled": refresh_chain_closure_status,
+        "status": "skipped",
+    }
+    if refresh_chain_closure_status:
+        from scripts.runtime_execution_chain_closure_status import (
+            DEFAULT_OUTPUT_JSON as DEFAULT_CHAIN_CLOSURE_OUTPUT_JSON,
+            build_status_packet,
+        )
+
+        builder = chain_closure_status_builder or build_status_packet
+        resolved_chain_closure_output_json = (
+            chain_closure_output_json
+            or output_dir / DEFAULT_CHAIN_CLOSURE_OUTPUT_JSON.name
+        )
+        try:
+            audit_packet = refreshed_dry_run_packet
+            audit_source_json = resolved_dry_run_output_json
+            if audit_packet is None:
+                audit_source_json = output_dir / "runtime-dry-run-audit-chain.json"
+                audit_packet = _read_json_if_exists(audit_source_json)
+            if not audit_packet:
+                blockers.append("runtime_chain_closure_status_audit_missing")
+                chain_closure_status_refresh = {
+                    "enabled": True,
+                    "status": "failed",
+                    "output_json": str(resolved_chain_closure_output_json),
+                    "audit_json": str(audit_source_json) if audit_source_json else None,
+                }
+            else:
+                closure_packet = builder(audit_packet=audit_packet)
+                _write_json(resolved_chain_closure_output_json, closure_packet)
+                chain_closure_status_refresh = {
+                    "enabled": True,
+                    "status": closure_packet.get("status"),
+                    "output_json": str(resolved_chain_closure_output_json),
+                    "audit_json": str(audit_source_json) if audit_source_json else None,
+                    "real_order_allowed": (
+                        (closure_packet.get("real_execution") or {}).get(
+                            "real_order_allowed"
+                        )
+                        is True
+                    ),
+                    "missing_live_proof_count": len(
+                        (closure_packet.get("real_execution") or {}).get(
+                            "missing_live_proofs"
+                        )
+                        or []
+                    ),
+                }
+                if (
+                    closure_packet.get("status")
+                    != "non_market_execution_chain_ready"
+                ):
+                    blockers.append("runtime_chain_closure_status_not_ready")
+        except Exception as exc:
+            blockers.append(f"runtime_chain_closure_status_failed:{type(exc).__name__}")
+            warnings.append(str(exc))
+            chain_closure_status_refresh = {
+                "enabled": True,
+                "status": "failed",
+                "output_json": str(resolved_chain_closure_output_json),
             }
 
     if cookie is None:
@@ -791,6 +861,7 @@ def refresh_packets(
         "packets": packets,
         "live_facts_precollect": live_facts_precollect,
         "dry_run_audit_refresh": dry_run_audit_refresh,
+        "chain_closure_status_refresh": chain_closure_status_refresh,
         "goal_status_refresh": goal_status_refresh,
         "source_readiness_fallback": source_readiness_fallback,
         "blockers": blockers,
@@ -805,6 +876,7 @@ def refresh_packets(
             "readmodel_refresh_only": True,
             "optional_signed_get_live_facts_precollect": collect_live_facts_before_refresh,
             "optional_dry_run_audit_chain_refresh": refresh_dry_run_audit_chain,
+            "optional_chain_closure_status_refresh": refresh_chain_closure_status,
             "optional_goal_status_refresh": refresh_goal_status,
             "optional_source_readiness_fallback": source_readiness_fallback.get(
                 "enabled"
@@ -839,6 +911,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--refresh-dry-run-audit-chain", action="store_true")
     parser.add_argument("--dry-run-output-dir")
     parser.add_argument("--dry-run-output-json")
+    parser.add_argument("--refresh-chain-closure-status", action="store_true")
+    parser.add_argument("--chain-closure-output-json")
     parser.add_argument("--refresh-goal-status", action="store_true")
     parser.add_argument("--goal-status-output-json")
     parser.add_argument("--release-manifest")
@@ -953,6 +1027,12 @@ def main(argv: list[str] | None = None) -> int:
         dry_run_output_json=(
             Path(args.dry_run_output_json).expanduser()
             if args.dry_run_output_json
+            else None
+        ),
+        refresh_chain_closure_status=args.refresh_chain_closure_status,
+        chain_closure_output_json=(
+            Path(args.chain_closure_output_json).expanduser()
+            if args.chain_closure_output_json
             else None
         ),
         refresh_goal_status=args.refresh_goal_status,
