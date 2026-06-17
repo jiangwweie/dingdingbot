@@ -1341,6 +1341,25 @@ The local low-interaction snapshot reader now also projects
 `goal_chain_segment_evidence` from the closure packet, so one snapshot can show
 which dry-run scenarios proved each objective segment.
 
+### 2026-06-17 Pilot Confidence Floor Checkpoint
+
+The StrategyGroup handoff `confidence_min` floor is aligned with the current
+pilot reference evaluators. The previous `0.70` floor could block otherwise
+valid pilot ready signals before candidate preparation because current pilot
+ready-signal evaluators emit `0.58` to `0.62`.
+
+| Item | Result |
+| --- | --- |
+| Updated handoffs | `MPG-001`, `TEQ-001`, `FBS-001`, `PMR-001`, `SOR-001` |
+| Pilot floor | `confidence_min=0.58` |
+| Meaning | Candidate-preparation floor only; not execution authority |
+| Execution boundary | FinalGate and Operation Layer still required |
+| Safety proof | Local tests and dry-run audit only; no Tokyo call, server mutation, exchange write, OrderLifecycle call, or real order |
+
+This checkpoint removes an internal self-contradiction in the fresh-signal fast
+chain without expanding symbol, side, notional, leverage, live profile,
+credentials, or order-sizing defaults.
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
