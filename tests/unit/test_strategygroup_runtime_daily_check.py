@@ -381,6 +381,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "## StrategyGroup Runtime Progress" in text
     assert "- 报告时间: 2026-06-17T00:00:00+00:00" in text
     assert "- 缓存年龄: 5m" in text
+    assert "- 缓存状态: fresh" in text
     assert "- 当前阶段: 等待机会" in text
     assert "- 当前动作: 继续等待市场机会" in text
     assert "- Owner 介入: 否" in text
@@ -438,7 +439,7 @@ def test_daily_check_owner_progress_text_marks_subminute_cache_age():
     assert "- 缓存年龄: <1m" in text
 
 
-def test_daily_check_owner_progress_text_marks_hour_cache_age():
+def test_daily_check_owner_progress_text_marks_stale_hour_cache_age():
     module = _load_module()
     report = module.build_daily_check_report(snapshot=_snapshot())
     report["generated_at_utc"] = "2026-06-17T00:00:00Z"
@@ -449,6 +450,7 @@ def test_daily_check_owner_progress_text_marks_hour_cache_age():
     )
 
     assert "- 缓存年龄: 2h7m" in text
+    assert "- 缓存状态: stale" in text
 
 
 def test_daily_check_owner_progress_text_handles_unknown_cache_age():
@@ -460,6 +462,22 @@ def test_daily_check_owner_progress_text_handles_unknown_cache_age():
 
     assert "- 报告时间: not-a-date" in text
     assert "- 缓存年龄: unknown" in text
+    assert "- 缓存状态: unknown" in text
+
+
+def test_daily_check_owner_progress_text_honors_custom_cache_age_threshold():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["generated_at_utc"] = "2026-06-17T00:00:00+00:00"
+
+    text = module._owner_progress_text(
+        report,
+        now_utc=datetime(2026, 6, 17, 0, 10, tzinfo=timezone.utc),
+        max_cache_age_minutes=5,
+    )
+
+    assert "- 缓存年龄: 10m" in text
+    assert "- 缓存状态: stale" in text
 
 
 def test_daily_check_reads_prebuilt_report_without_snapshot_probe(tmp_path, monkeypatch):
@@ -507,6 +525,7 @@ def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
     output_text = output_path.read_text(encoding="utf-8")
     assert exit_code == 0
     assert "- 当前阶段: 等待机会" in output_text
+    assert "- 缓存状态: fresh" in output_text
     assert "- 通知决策: DONT_NOTIFY" in output_text
     assert captured.out == output_text
 

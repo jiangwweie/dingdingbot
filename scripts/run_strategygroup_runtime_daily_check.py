@@ -16,6 +16,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT_SCRIPT = REPO_ROOT / "scripts" / "probe_tokyo_runtime_snapshot.py"
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
+DEFAULT_MAX_CACHE_AGE_MINUTES = 35
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,7 +29,10 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-    owner_progress_text = _owner_progress_text(report)
+    owner_progress_text = _owner_progress_text(
+        report,
+        max_cache_age_minutes=args.max_cache_age_minutes,
+    )
     if args.output_owner_progress:
         output_path = Path(args.output_owner_progress)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -495,6 +499,7 @@ def _owner_progress_text(
     report: dict[str, Any],
     *,
     now_utc: datetime | None = None,
+    max_cache_age_minutes: int = DEFAULT_MAX_CACHE_AGE_MINUTES,
 ) -> str:
     owner = report.get("owner_summary")
     if not isinstance(owner, dict):
@@ -520,12 +525,18 @@ def _owner_progress_text(
     ]
     generated_at = str(report.get("generated_at_utc") or "unknown")
     cache_age = _cache_age_text(generated_at=generated_at, now_utc=now_utc)
+    cache_status = _cache_status_text(
+        generated_at=generated_at,
+        now_utc=now_utc,
+        max_cache_age_minutes=max_cache_age_minutes,
+    )
 
     lines = [
         "## StrategyGroup Runtime Progress",
         "",
         f"- 报告时间: {generated_at}",
         f"- 缓存年龄: {cache_age}",
+        f"- 缓存状态: {cache_status}",
         f"- 当前阶段: {owner.get('state') or report.get('status') or 'unknown'}",
         f"- 当前动作: {owner.get('current_action') or 'unknown'}",
         f"- 风险等级: {owner.get('risk_level') or 'unknown'}",
@@ -587,6 +598,21 @@ def _cache_age_text(*, generated_at: str, now_utc: datetime | None = None) -> st
     return f"{age_hours}h{remaining_minutes}m"
 
 
+def _cache_status_text(
+    *,
+    generated_at: str,
+    now_utc: datetime | None = None,
+    max_cache_age_minutes: int = DEFAULT_MAX_CACHE_AGE_MINUTES,
+) -> str:
+    generated_at_dt = _parse_iso_datetime(generated_at)
+    if generated_at_dt is None:
+        return "unknown"
+    now = now_utc or datetime.now(timezone.utc)
+    age_seconds = max(0, int((now - generated_at_dt).total_seconds()))
+    max_age_seconds = max(0, max_cache_age_minutes) * 60
+    return "stale" if age_seconds > max_age_seconds else "fresh"
+
+
 def _parse_iso_datetime(value: str) -> datetime | None:
     text = value.strip()
     if not text or text == "unknown":
@@ -634,6 +660,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=int,
         default=1,
         help="Fail the daily check if the source snapshot used more remote calls.",
+    )
+    parser.add_argument(
+        "--max-cache-age-minutes",
+        type=int,
+        default=DEFAULT_MAX_CACHE_AGE_MINUTES,
+        help="Mark cached Owner progress as stale when older than this.",
     )
     parser.add_argument(
         "--baseline-json",
