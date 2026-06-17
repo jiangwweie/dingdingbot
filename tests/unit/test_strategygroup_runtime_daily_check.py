@@ -252,6 +252,44 @@ def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
     assert report["notification"]["reason"] == "running"
 
 
+def test_daily_check_heartbeat_xml_uses_dont_notify_decision():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+
+    xml = module._heartbeat_xml(report)
+
+    assert "<automation_id>tokyo-runtime-quiet-monitor</automation_id>" in xml
+    assert "<decision>DONT_NOTIFY</decision>" in xml
+    assert "<message>自动化正常运行，当前没有 fresh signal</message>" in xml
+
+
+def test_daily_check_heartbeat_xml_uses_notify_and_escapes_message():
+    module = _load_module()
+    report = module.build_daily_check_report(
+        snapshot=_snapshot(
+            status="blocked",
+            checks={
+                "blockers": ["owner_console_backend_inactive"],
+                "product_gaps": [],
+                "backend_active": False,
+                "watcher_timer_active": True,
+                "source_readiness_ready": True,
+                "runtime_dry_run_audit_passed": True,
+                "runtime_dry_run_required_checks_present": True,
+                "runtime_dry_run_missing_required_checks": [],
+                "frontend_release_present": True,
+                "frontend_index_present": True,
+            },
+        )
+    )
+    report["notification"]["message"] = "A < B & C"
+
+    xml = module._heartbeat_xml(report)
+
+    assert "<decision>NOTIFY</decision>" in xml
+    assert "<message>A &lt; B &amp; C</message>" in xml
+
+
 def test_daily_check_resolves_expected_heads_from_baseline_file(tmp_path):
     module = _load_module()
     baseline = tmp_path / "runtime-monitor-baseline.json"

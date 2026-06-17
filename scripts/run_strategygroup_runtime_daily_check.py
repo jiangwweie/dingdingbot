@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,9 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-    if args.json:
+    if args.heartbeat:
+        print(_heartbeat_xml(report))
+    elif args.json:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
@@ -429,11 +432,36 @@ def _dedupe(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _heartbeat_xml(report: dict[str, Any]) -> str:
+    notification = report.get("notification")
+    if not isinstance(notification, dict):
+        notification = {}
+    decision = str(notification.get("decision") or "NOTIFY")
+    if decision not in {"DONT_NOTIFY", "NOTIFY"}:
+        decision = "NOTIFY"
+    message = str(notification.get("message") or "运行状态需要处理")
+    automation_id = "tokyo-runtime-quiet-monitor"
+    return "\n".join(
+        [
+            "<heartbeat>",
+            f"  <automation_id>{escape(automation_id)}</automation_id>",
+            f"  <decision>{escape(decision)}</decision>",
+            f"  <message>{escape(message)}</message>",
+            "</heartbeat>",
+        ]
+    )
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a low-noise StrategyGroup runtime daily check."
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
+    parser.add_argument(
+        "--heartbeat",
+        action="store_true",
+        help="Print Codex heartbeat XML using notification.decision.",
+    )
     parser.add_argument("--snapshot-json-path")
     parser.add_argument("--output-json")
     parser.add_argument("--expected-runtime-head")
