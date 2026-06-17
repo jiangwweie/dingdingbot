@@ -204,6 +204,7 @@ L1 read-only snapshot
 | Engineering rehearsal check | L1 snapshot now requires the dry-run audit packet to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
 | UI unauthenticated state | Public homepage now maps HTTP 401 to `需要登录` instead of `后端不可用`, while keeping `资金路径保持关闭` |
 | Owner visibility classification | The daily check emits `owner_summary.visibility.category`, and the homepage shows `当前阶段` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names |
+| Homepage Owner language guard | The homepage now maps internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the homepage |
 | Safety | These tools do not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live-profile mutation, or order-sizing mutation |
 
 ### Deploy Interaction Rule

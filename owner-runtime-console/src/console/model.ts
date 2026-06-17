@@ -210,7 +210,7 @@ export function homepageOperatingState(projection: OwnerProductProjection): {
   if (summary.waitingCount > 0 || readiness.status === "waiting_for_market") {
     return {
       label: "等待市场机会",
-      detail: "自动化正常运行，当前没有 fresh signal",
+      detail: "自动化正常运行，当前没有可用市场机会",
       tone: "waiting",
       ownerAction: "无需操作",
     };

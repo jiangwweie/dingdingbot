@@ -83,12 +83,20 @@ function OwnerProgressBanner({ projection }: { projection: OwnerProductProjectio
         </div>
         <div className="min-w-0">
           <div className="truncate text-base font-semibold">{state.detail}</div>
-          <div className="mt-1 text-sm text-muted-foreground">首页只显示 Owner 需要判断的状态，技术证据收起在系统页</div>
+          <div className="mt-1 text-sm text-muted-foreground">{ownerProgressSupportText(state.label)}</div>
         </div>
         <ContextRow label="Owner" tone={state.tone} value={state.ownerAction} />
       </CardContent>
     </Card>
   );
+}
+
+function ownerProgressSupportText(label: string) {
+  if (label === "安全边界阻断") return "真实订单路径保持关闭，等待安全状态恢复";
+  if (label === "工程状态暂不可用") return "本地状态等待刷新，不触发额外服务器操作";
+  if (label === "系统处理中") return "系统正在处理，Owner 暂无需操作";
+  if (label === "需要介入") return "系统已收敛到需要处理的事项";
+  return "真实订单路径保持关闭，系统继续观察市场";
 }
 
 function OperationalAssuranceStrip({ projection }: { projection: OwnerProductProjection }) {

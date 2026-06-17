@@ -33,6 +33,9 @@ const forbidden = [
   "检查" + "器",
   "系统自动" + "观察中",
   "暂无可用" + "机会",
+  "fresh" + " signal",
+  "技术" + "证据",
+  "Owner 需要" + "判断",
 ];
 
 async function waitForServer(url, timeoutMs = 20_000) {

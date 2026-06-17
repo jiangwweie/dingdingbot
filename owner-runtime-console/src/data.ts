@@ -109,7 +109,7 @@ const baseSourceHealth = {
 const baseRealOrderReadiness: OwnerRealOrderReadiness = {
   status: "waiting_for_market",
   ownerLabel: "等待机会",
-  ownerDetail: "实盘边界健康，等待 fresh signal",
+  ownerDetail: "实盘边界健康，等待市场机会",
   readyForRealOrderAction: false,
   passCount: 8,
   waitingCount: 4,
@@ -493,7 +493,7 @@ export function buildMockSourceReadiness(scenario: OwnerMockScenario): OwnerCons
       real_order_readiness: {
         status: ready ? "waiting_for_market" : "degraded",
         owner_label: ready ? "等待机会" : "实盘边界待刷新",
-        owner_detail: ready ? "实盘边界健康，等待 fresh signal" : "目标状态源不可用",
+        owner_detail: ready ? "实盘边界健康，等待市场机会" : "目标状态源不可用",
         ready_for_real_order_action: false,
         pass_count: ready ? 8 : 0,
         waiting_count: ready ? 4 : 0,

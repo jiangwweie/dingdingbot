@@ -145,6 +145,9 @@ try {
     "系统自动" + "观察中",
     "暂无可用" + "机会",
     "read" + "model",
+    "fresh" + " signal",
+    "技术" + "证据",
+    "Owner 需要" + "判断",
   ];
 
   for (const text of forbidden) {
