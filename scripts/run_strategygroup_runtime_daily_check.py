@@ -20,6 +20,7 @@ DEFAULT_DAILY_CHECK_CACHE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -171,6 +172,7 @@ def build_daily_check_report(
     }
 
     return {
+        "schema_version": DAILY_CHECK_REPORT_SCHEMA_VERSION,
         "status": status,
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -466,6 +468,7 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
     return {
+        "schema_version": DAILY_CHECK_REPORT_SCHEMA_VERSION,
         "status": "blocked",
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -544,6 +547,12 @@ def _apply_cache_freshness_gate(
 ) -> dict[str, Any]:
     if not require_fresh_cache:
         return report
+    if report.get("schema_version") != DAILY_CHECK_REPORT_SCHEMA_VERSION:
+        return _gated_cache_report(
+            report,
+            reason="runtime_progress_cache_schema_stale",
+            detail="本地 runtime monitor 缓存结构已过期，等待自动化刷新",
+        )
     cache_status = _cache_status_text(
         generated_at=str(report.get("generated_at_utc") or "unknown"),
         now_utc=now_utc,
@@ -551,25 +560,51 @@ def _apply_cache_freshness_gate(
     )
     if cache_status == "fresh":
         return report
-
-    gated = dict(report)
-    checks = dict(gated.get("checks") if isinstance(gated.get("checks"), dict) else {})
-    blockers = [str(item) for item in checks.get("blockers") or []]
     reason = (
         "runtime_progress_cache_timestamp_unknown"
         if cache_status == "unknown"
         else "runtime_progress_cache_stale"
     )
-    blockers = _dedupe([*blockers, reason])
-    checks["blockers"] = blockers
-    gated["checks"] = checks
-    gated["status"] = "blocked"
-
     detail = (
         "本地 runtime monitor 缓存时间不可用，等待自动化刷新"
         if cache_status == "unknown"
         else "本地 runtime monitor 缓存已过期，等待自动化刷新"
     )
+    return _gated_cache_report(report, reason=reason, detail=detail)
+
+
+def _gated_cache_report(
+    report: dict[str, Any],
+    *,
+    reason: str,
+    detail: str,
+) -> dict[str, Any]:
+    gated = dict(report)
+    cached_interaction = (
+        dict(gated.get("interaction"))
+        if isinstance(gated.get("interaction"), dict)
+        else {}
+    )
+    gated["cached_report_interaction"] = cached_interaction
+    gated["interaction"] = {
+        "level": "L0_local_cache_gate",
+        "uses_snapshot_level": cached_interaction.get("uses_snapshot_level")
+        or cached_interaction.get("level"),
+        "remote_interaction_count": 0,
+        "max_remote_interactions": 0,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    }
+    checks = dict(gated.get("checks") if isinstance(gated.get("checks"), dict) else {})
+    blockers = _dedupe([*[str(item) for item in checks.get("blockers") or []], reason])
+    checks["blockers"] = blockers
+    gated["checks"] = checks
+    gated["status"] = "blocked"
+
     visibility = _owner_visibility(
         status="blocked",
         blockers=blockers,
@@ -583,6 +618,7 @@ def _apply_cache_freshness_gate(
     owner["state"] = visibility["label"]
     owner["current_action"] = visibility["next_action"]
     owner["owner_intervention_required"] = False
+    owner["risk_level"] = "L0 local cache only"
     owner["visibility"] = visibility
     gated["owner_summary"] = owner
     gated["notification"] = {

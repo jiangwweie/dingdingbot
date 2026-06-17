@@ -77,6 +77,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
 
     report = module.build_daily_check_report(snapshot=_snapshot())
 
+    assert report["schema_version"] == module.DAILY_CHECK_REPORT_SCHEMA_VERSION
     assert report["status"] == "waiting_for_market"
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["current_action"] == "继续等待市场机会"
@@ -569,7 +570,32 @@ def test_daily_check_require_fresh_cache_blocks_stale_report():
     assert gated["notification"]["reason"] == "runtime_progress_cache_stale"
     assert "runtime_progress_cache_stale" in gated["checks"]["blockers"]
     assert gated["owner_summary"]["state"] == "工程状态暂不可用"
-    assert gated["interaction"]["remote_interaction_count"] == 1
+    assert gated["interaction"]["level"] == "L0_local_cache_gate"
+    assert gated["interaction"]["remote_interaction_count"] == 0
+    assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
+
+
+def test_daily_check_require_fresh_cache_blocks_stale_schema():
+    module = _load_module()
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    report["schema_version"] = module.DAILY_CHECK_REPORT_SCHEMA_VERSION - 1
+
+    gated = module._apply_cache_freshness_gate(
+        report,
+        require_fresh_cache=True,
+        now_utc=datetime.now(timezone.utc),
+        max_cache_age_minutes=module.DEFAULT_MAX_CACHE_AGE_MINUTES,
+    )
+
+    assert gated["status"] == "blocked"
+    assert gated["notification"]["decision"] == "NOTIFY"
+    assert gated["notification"]["reason"] == "runtime_progress_cache_schema_stale"
+    assert "runtime_progress_cache_schema_stale" in gated["checks"]["blockers"]
+    assert gated["owner_summary"]["state"] == "工程状态暂不可用"
+    assert gated["owner_summary"]["current_action"] == "等待自动化刷新本地 runtime monitor 缓存"
+    assert gated["interaction"]["level"] == "L0_local_cache_gate"
+    assert gated["interaction"]["remote_interaction_count"] == 0
+    assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
 
 
 def test_daily_check_writes_owner_progress_output(tmp_path, capsys):
