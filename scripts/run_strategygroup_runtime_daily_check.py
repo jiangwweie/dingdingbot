@@ -33,7 +33,7 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 9
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 10
 
 ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "fresh_signal_fast_auto_chain_checked",
@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
-    return 0 if report["status"] in {"ready", "waiting_for_market"} else 2
+    return 0 if report["status"] in {"ready", "waiting_for_market", "processing"} else 2
 
 
 def _build_or_read_daily_check_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -261,6 +261,21 @@ def build_daily_check_report(
     product_gaps = list(checks.get("product_gaps") or [])
     hard_failures = []
     warnings = []
+    live_closure_status = str(
+        checks.get("runtime_live_closure_evidence_status") or "not_generated"
+    )
+    live_closure_reject_reasons = [
+        str(item)
+        for item in checks.get("runtime_live_closure_evidence_reject_reasons") or []
+    ]
+    live_closure_processing = live_closure_status in {
+        "in_progress",
+        "live_closure_in_progress",
+    }
+    live_closure_rejected = live_closure_status in {
+        "rejected",
+        "blocked_live_closure_rejected",
+    }
 
     if snapshot.get("status") == "blocked":
         hard_failures.append("l1_snapshot_blocked")
@@ -279,6 +294,13 @@ def build_daily_check_report(
     if interaction.get("calls_exchange_write") is True:
         hard_failures.append("daily_check_snapshot_called_exchange_write")
 
+    if live_closure_rejected:
+        product_gaps.extend(
+            f"live_closure_evidence:{item}"
+            for item in (live_closure_reject_reasons or ["rejected"])
+        )
+    product_gaps = _dedupe([str(item) for item in product_gaps])
+
     if product_gaps:
         warnings.extend(f"product_gap:{item}" for item in product_gaps)
 
@@ -287,13 +309,19 @@ def build_daily_check_report(
     )
     real_order_closure_proven = checks.get("real_order_closure_proven") is True
     waiting_for_market = _is_waiting_for_market(owner_summary, goal_status)
-    if first_bounded_real_order_complete and real_order_closure_proven:
+    if (
+        (first_bounded_real_order_complete and real_order_closure_proven)
+        or live_closure_processing
+        or live_closure_rejected
+    ):
         waiting_for_market = False
     status = "ready"
     if blockers or hard_failures:
         status = "blocked"
     elif product_gaps:
         status = "degraded"
+    elif live_closure_processing:
+        status = "processing"
     elif waiting_for_market:
         status = "waiting_for_market"
     visibility = _owner_visibility(
@@ -324,12 +352,8 @@ def build_daily_check_report(
         "runtime_execution_chain_closure_status_ready": (
             checks.get("runtime_execution_chain_closure_status_ready") is True
         ),
-        "runtime_live_closure_evidence_status": (
-            checks.get("runtime_live_closure_evidence_status") or "not_generated"
-        ),
-        "runtime_live_closure_evidence_reject_reasons": list(
-            checks.get("runtime_live_closure_evidence_reject_reasons") or []
-        ),
+        "runtime_live_closure_evidence_status": live_closure_status,
+        "runtime_live_closure_evidence_reject_reasons": live_closure_reject_reasons,
         "first_bounded_real_order_complete": first_bounded_real_order_complete,
         "real_order_closure_proven": real_order_closure_proven,
         "runtime_execution_chain_ready_segment_count": (
@@ -541,9 +565,13 @@ def _daily_next_action(
         )
         return str(visibility["next_action"])
     if product_gaps:
-        return "修复 Owner Console 产品发布缺口"
+        if any(str(item).startswith("live_closure_evidence:") for item in product_gaps):
+            return "处理真实闭环证据异常"
+        return "处理产品状态缺口"
     if status == "waiting_for_market":
         return "继续等待市场机会"
+    if status == "processing":
+        return "等待系统完成收口"
     return str(owner_summary.get("current_action") or "继续保持监控")
 
 
@@ -572,11 +600,19 @@ def _owner_visibility(
             "owner_intervention_required": category == "safety_blocker",
         }
     if product_gaps:
+        if any(str(item).startswith("live_closure_evidence:") for item in product_gaps):
+            return {
+                "category": "engineering_blocker",
+                "label": "工程状态暂不可用",
+                "detail": "真实闭环证据不可用，等待系统处理",
+                "next_action": "处理真实闭环证据异常",
+                "owner_intervention_required": False,
+            }
         return {
             "category": "engineering_blocker",
             "label": "工程状态暂不可用",
-            "detail": "Owner Console 首页或发布状态需要修复",
-            "next_action": "修复 Owner Console 产品发布缺口",
+            "detail": "产品状态需要修复",
+            "next_action": "处理产品状态缺口",
             "owner_intervention_required": False,
         }
     if waiting_for_market or status == "waiting_for_market":
@@ -585,6 +621,14 @@ def _owner_visibility(
             "label": "等待机会",
             "detail": "自动化正常运行，当前没有 fresh signal",
             "next_action": "继续等待市场机会",
+            "owner_intervention_required": False,
+        }
+    if status == "processing":
+        return {
+            "category": "processing",
+            "label": "处理中",
+            "detail": "系统正在处理真实订单闭环证据",
+            "next_action": "等待系统完成收口",
             "owner_intervention_required": False,
         }
     return {

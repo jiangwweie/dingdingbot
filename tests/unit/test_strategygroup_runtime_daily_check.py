@@ -252,6 +252,69 @@ def test_daily_check_projects_first_bounded_live_closure_completion():
     )
 
 
+def test_daily_check_projects_live_closure_in_progress_as_processing():
+    module = _load_module()
+
+    report = module.build_daily_check_report(
+        snapshot=_snapshot(
+            checks={
+                "runtime_live_closure_evidence_status": "live_closure_in_progress",
+            }
+        )
+    )
+
+    assert report["status"] == "processing"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "live_closure_in_progress"
+    )
+    assert report["owner_summary"]["state"] == "处理中"
+    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert report["owner_summary"]["visibility"]["category"] == "processing"
+    assert report["owner_summary"]["progress"]["live_closure"] == (
+        "live_closure_in_progress"
+    )
+    assert report["notification"] == {
+        "decision": "NOTIFY",
+        "reason": "processing",
+        "message": "系统正在处理真实订单闭环证据",
+        "owner_intervention_required": False,
+    }
+
+
+def test_daily_check_projects_rejected_live_closure_as_product_gap():
+    module = _load_module()
+
+    report = module.build_daily_check_report(
+        snapshot=_snapshot(
+            checks={
+                "runtime_live_closure_evidence_status": (
+                    "blocked_live_closure_rejected"
+                ),
+                "runtime_live_closure_evidence_reject_reasons": [
+                    "official_live_closure_source_missing",
+                ],
+            }
+        )
+    )
+
+    assert report["status"] == "degraded"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["checks"]["product_gaps"] == [
+        "live_closure_evidence:official_live_closure_source_missing"
+    ]
+    assert report["checks"]["warnings"] == [
+        "product_gap:live_closure_evidence:official_live_closure_source_missing"
+    ]
+    assert report["owner_summary"]["state"] == "工程状态暂不可用"
+    assert report["owner_summary"]["current_action"] == "处理真实闭环证据异常"
+    assert report["owner_summary"]["visibility"]["detail"] == (
+        "真实闭环证据不可用，等待系统处理"
+    )
+    assert report["notification"]["decision"] == "NOTIFY"
+    assert report["notification"]["reason"] == "product_gap_present"
+
+
 def test_daily_check_does_not_require_frontend_publish_for_quiet_waiting():
     module = _load_module()
     snapshot = _snapshot(
