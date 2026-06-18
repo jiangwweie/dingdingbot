@@ -33,7 +33,7 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 10
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 11
 
 ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "fresh_signal_fast_auto_chain_checked",
@@ -268,7 +268,7 @@ def build_daily_check_report(
         str(item)
         for item in checks.get("runtime_live_closure_evidence_reject_reasons") or []
     ]
-    live_closure_processing = live_closure_status in {
+    live_closure_processing_claimed = live_closure_status in {
         "in_progress",
         "live_closure_in_progress",
     }
@@ -308,7 +308,14 @@ def build_daily_check_report(
         checks.get("first_bounded_real_order_complete") is True
     )
     real_order_closure_proven = checks.get("real_order_closure_proven") is True
+    real_order_waiting_keys = {
+        str(item)
+        for item in real_order_readiness_summary.get("waiting_keys") or []
+    }
     waiting_for_market = _is_waiting_for_market(owner_summary, goal_status)
+    live_closure_processing = live_closure_processing_claimed and not (
+        waiting_for_market and "fresh_signal" in real_order_waiting_keys
+    )
     if (
         (first_bounded_real_order_complete and real_order_closure_proven)
         or live_closure_processing

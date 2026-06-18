@@ -252,7 +252,7 @@ def test_daily_check_projects_first_bounded_live_closure_completion():
     )
 
 
-def test_daily_check_projects_live_closure_in_progress_as_processing():
+def test_daily_check_normalizes_no_signal_live_closure_in_progress_to_waiting():
     module = _load_module()
 
     report = module.build_daily_check_report(
@@ -262,6 +262,47 @@ def test_daily_check_projects_live_closure_in_progress_as_processing():
             }
         )
     )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["checks"]["waiting_for_market"] is True
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "live_closure_in_progress"
+    )
+    assert report["owner_summary"]["state"] == "等待机会"
+    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
+    assert report["owner_summary"]["visibility"]["category"] == "waiting_for_market"
+    assert report["notification"] == {
+        "decision": "DONT_NOTIFY",
+        "reason": "healthy_waiting_for_market",
+        "message": "自动化正常运行，当前没有可用市场机会",
+        "owner_intervention_required": False,
+    }
+
+
+def test_daily_check_projects_post_signal_live_closure_in_progress_as_processing():
+    module = _load_module()
+    snapshot = _snapshot(
+        checks={
+            "runtime_live_closure_evidence_status": "live_closure_in_progress",
+        },
+        owner_summary={
+            "state": "处理中",
+        },
+    )
+    snapshot["facts"]["reports"]["goal_status"] = {
+        "status": "signal_ready",
+        "fresh_signal_present": True,
+        "real_order_readiness_summary": {
+            "total": 2,
+            "pass": 1,
+            "waiting": 1,
+            "blocked": 0,
+            "submit_blocker_keys": [],
+            "waiting_keys": ["action_time_finalgate"],
+        },
+    }
+
+    report = module.build_daily_check_report(snapshot=snapshot)
 
     assert report["status"] == "processing"
     assert report["checks"]["waiting_for_market"] is False

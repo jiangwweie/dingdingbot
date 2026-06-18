@@ -376,6 +376,51 @@ def test_goal_progress_accepts_processing_owner_visibility_without_product_gap()
     assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
 
 
+def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp_path):
+    module = _load_module()
+    daily_check = _daily_check(status="waiting_for_market")
+    daily_check["checks"]["waiting_for_market"] = True
+    daily_check["checks"]["runtime_live_closure_evidence_status"] = (
+        "live_closure_in_progress"
+    )
+    daily_check["checks"]["real_order_readiness_summary"] = {
+        "total": 2,
+        "pass": 1,
+        "waiting": 1,
+        "blocked": 0,
+        "submit_blocker_keys": [],
+        "waiting_keys": ["fresh_signal"],
+    }
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=live_cutover_script.build_cutover_readiness_packet(
+            output_dir=tmp_path / "cutover",
+            generated_at_ms=1781753000000,
+        ),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["owner_summary"]["state"] == "等待机会"
+    assert report["owner_summary"]["current_action"] == "继续等待市场机会"
+    assert report["checks"]["product_gaps"] == []
+    assert report["completion_boundary"]["status"] == (
+        "not_complete_waiting_for_market"
+    )
+    assert report["live_closure_evidence_boundary"]["status"] == "not_generated"
+    assert report["live_closure_evidence_boundary"]["source_status"] == (
+        "live_closure_in_progress"
+    )
+    assert report["p0_completion_audit_boundary"]["status"] == (
+        "not_complete_waiting_for_market"
+    )
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
+    assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
+
+
 def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
     module = _load_module()
     daily_check = _daily_check(status="ready")

@@ -702,7 +702,30 @@ def _live_closure_evidence_boundary(
             for item in checks.get("runtime_live_closure_evidence_reject_reasons")
             or []
         ]
+        real_order_readiness = checks.get("real_order_readiness_summary")
+        if not isinstance(real_order_readiness, dict):
+            real_order_readiness = {}
+        real_order_waiting_keys = {
+            str(item) for item in real_order_readiness.get("waiting_keys") or []
+        }
+        no_signal_waiting = (
+            checks.get("waiting_for_market") is True
+            and "fresh_signal" in real_order_waiting_keys
+        )
         if source_status in {"live_closure_in_progress", "in_progress"}:
+            if no_signal_waiting:
+                return {
+                    "status": "not_generated",
+                    "source_status": source_status,
+                    "owner_state": "未生成",
+                    "first_bounded_real_order_complete": False,
+                    "real_order_closure_proven": False,
+                    "completed_stage_count": 0,
+                    "stage_count": 0,
+                    "first_incomplete_stage": None,
+                    "missing_evidence_keys": [],
+                    "reject_reasons": [],
+                }
             return {
                 "status": "in_progress",
                 "source_status": source_status,
