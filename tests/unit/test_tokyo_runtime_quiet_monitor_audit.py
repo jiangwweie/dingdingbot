@@ -38,6 +38,7 @@ def _prompt_text():
         "--daily-check-mode cache --owner-progress "
         "--output-json output/runtime-monitor/latest-local-monitor-sequence.json "
         "--output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md "
+        "live-cutover readiness refresh "
         "DONT_NOTIFY waiting_for_market not_complete_waiting_for_market "
         "blockers none non-market gaps none remote interaction count 0 "
         "fresh/runtime-ready signal "

@@ -88,15 +88,34 @@ def _live_cutover(**overrides):
         ],
         "live_closure_cutover_contract": {
             "required_evidence_keys": [
+                "live_watcher_signal_packet_id",
+                "required_facts_readiness_packet_id",
+                "candidate_id",
+                "runtime_grant_id",
+                "fresh_submit_authorization_id",
+                "action_time_finalgate_packet_id",
                 "operation_layer_submit_authorization_id",
+                "exchange_submit_execution_result_id",
                 "exchange_native_hard_stop_order_id",
+                "runtime_post_submit_finalize_packet_id",
+                "post_submit_reconciliation_evidence_id",
+                "post_submit_budget_settlement_id",
+                "submit_outcome_review_id",
             ],
             "checks": {
+                "live_closure_contract_defined": True,
                 "live_closure_contract_rejects_synthetic_signal": True,
                 "live_closure_contract_rejects_disabled_smoke": True,
+                "live_closure_contract_requires_live_signal_chain_binding": True,
+                "live_closure_contract_requires_pre_submit_authorization_chain_binding": True,
+                "live_closure_contract_requires_runtime_boundary_binding": True,
                 "live_closure_contract_requires_exchange_acceptance": True,
                 "live_closure_contract_requires_live_submit_truth": True,
                 "live_closure_contract_requires_exchange_native_protection": True,
+                "live_closure_contract_requires_exchange_native_protection_binding": True,
+                "live_closure_contract_requires_post_submit_reconciliation": True,
+                "live_closure_contract_requires_post_submit_result_binding": True,
+                "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
             },
         },
     }
@@ -323,6 +342,68 @@ def test_completion_audit_requires_live_submit_truth_contract_check():
             "requirement": "live closure complete requires explicit live submit proof",
             "missing_or_false": [
                 "live_closure_contract_requires_live_submit_truth"
+            ],
+        },
+        {
+            "requirement": (
+                "live closure contract carries all first-order live proof guards"
+            ),
+            "missing_or_false": [
+                "live_closure_contract_requires_live_submit_truth"
+            ],
+        }
+    ]
+
+
+def test_completion_audit_requires_full_live_closure_contract_guards():
+    live_cutover = _live_cutover()
+    live_cutover["live_closure_cutover_contract"]["checks"].pop(
+        "live_closure_contract_requires_exchange_native_protection_binding"
+    )
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=live_cutover,
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": (
+                "live closure contract carries all first-order live proof guards"
+            ),
+            "missing_or_false": [
+                "live_closure_contract_requires_exchange_native_protection_binding"
+            ],
+        }
+    ]
+
+
+def test_completion_audit_requires_all_live_closure_evidence_keys():
+    live_cutover = _live_cutover()
+    live_cutover["live_closure_cutover_contract"]["required_evidence_keys"].remove(
+        "post_submit_budget_settlement_id"
+    )
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=live_cutover,
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": (
+                "live closure contract carries all first-order live proof guards"
+            ),
+            "missing_or_false": [
+                "live_closure_contract_required_evidence_keys_complete"
             ],
         }
     ]

@@ -24,6 +24,12 @@ DEFAULT_DAILY_OWNER_PROGRESS = (
 )
 DEFAULT_GOAL_PROGRESS_JSON = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.json"
 DEFAULT_GOAL_PROGRESS_MD = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.md"
+DEFAULT_LIVE_CUTOVER_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-live-cutover-readiness.json"
+)
+DEFAULT_LIVE_CUTOVER_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-live-cutover-readiness.md"
+)
 DEFAULT_COMPLETION_AUDIT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json"
 )
@@ -47,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         daily_check_mode=args.daily_check_mode,
         daily_check_json=Path(args.daily_check_json),
         daily_owner_progress=Path(args.daily_owner_progress),
+        live_cutover_json=Path(args.live_cutover_json),
+        live_cutover_md=Path(args.live_cutover_md),
         goal_progress_json=Path(args.goal_progress_json),
         goal_progress_md=Path(args.goal_progress_md),
         completion_audit_json=Path(args.completion_audit_json),
@@ -71,6 +79,8 @@ def build_local_monitor_sequence_report(
     daily_check_mode: str = "cache",
     daily_check_json: Path = DEFAULT_DAILY_CHECK_JSON,
     daily_owner_progress: Path = DEFAULT_DAILY_OWNER_PROGRESS,
+    live_cutover_json: Path = DEFAULT_LIVE_CUTOVER_JSON,
+    live_cutover_md: Path = DEFAULT_LIVE_CUTOVER_MD,
     goal_progress_json: Path = DEFAULT_GOAL_PROGRESS_JSON,
     goal_progress_md: Path = DEFAULT_GOAL_PROGRESS_MD,
     completion_audit_json: Path = DEFAULT_COMPLETION_AUDIT_JSON,
@@ -86,6 +96,23 @@ def build_local_monitor_sequence_report(
         output_owner_progress=daily_owner_progress,
     )
     steps.append(_run_step("daily_check", daily_command, daily_check_json, runner))
+
+    live_cutover_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/runtime_live_cutover_readiness.py"),
+        "--output-json",
+        str(live_cutover_json),
+        "--output-owner-progress",
+        str(live_cutover_md),
+    ]
+    steps.append(
+        _run_step(
+            "live_cutover_readiness",
+            live_cutover_command,
+            live_cutover_json,
+            runner,
+        )
+    )
 
     goal_command = [
         sys.executable,
@@ -161,6 +188,7 @@ def build_local_monitor_sequence_report(
         ],
         "source_paths": {
             "daily_check_json": str(daily_check_json),
+            "live_cutover_json": str(live_cutover_json),
             "goal_progress_json": str(goal_progress_json),
             "completion_audit_json": str(completion_audit_json),
         },
@@ -429,6 +457,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--daily-check-json", default=str(DEFAULT_DAILY_CHECK_JSON))
     parser.add_argument("--daily-owner-progress", default=str(DEFAULT_DAILY_OWNER_PROGRESS))
+    parser.add_argument("--live-cutover-json", default=str(DEFAULT_LIVE_CUTOVER_JSON))
+    parser.add_argument("--live-cutover-md", default=str(DEFAULT_LIVE_CUTOVER_MD))
     parser.add_argument("--goal-progress-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
     parser.add_argument("--goal-progress-md", default=str(DEFAULT_GOAL_PROGRESS_MD))
     parser.add_argument("--completion-audit-json", default=str(DEFAULT_COMPLETION_AUDIT_JSON))

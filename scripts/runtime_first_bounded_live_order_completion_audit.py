@@ -49,6 +49,36 @@ REQUIRED_INPUT_SOURCES = (
     "dry_run_audit",
     "live_cutover",
 )
+LIVE_CLOSURE_REQUIRED_EVIDENCE_KEYS = (
+    "live_watcher_signal_packet_id",
+    "required_facts_readiness_packet_id",
+    "candidate_id",
+    "runtime_grant_id",
+    "fresh_submit_authorization_id",
+    "action_time_finalgate_packet_id",
+    "operation_layer_submit_authorization_id",
+    "exchange_submit_execution_result_id",
+    "exchange_native_hard_stop_order_id",
+    "runtime_post_submit_finalize_packet_id",
+    "post_submit_reconciliation_evidence_id",
+    "post_submit_budget_settlement_id",
+    "submit_outcome_review_id",
+)
+LIVE_CLOSURE_REQUIRED_CONTRACT_CHECKS = (
+    "live_closure_contract_defined",
+    "live_closure_contract_rejects_synthetic_signal",
+    "live_closure_contract_rejects_disabled_smoke",
+    "live_closure_contract_requires_live_signal_chain_binding",
+    "live_closure_contract_requires_pre_submit_authorization_chain_binding",
+    "live_closure_contract_requires_runtime_boundary_binding",
+    "live_closure_contract_requires_exchange_acceptance",
+    "live_closure_contract_requires_live_submit_truth",
+    "live_closure_contract_requires_exchange_native_protection",
+    "live_closure_contract_requires_exchange_native_protection_binding",
+    "live_closure_contract_requires_post_submit_reconciliation",
+    "live_closure_contract_requires_post_submit_result_binding",
+    "live_closure_contract_has_no_owner_chat_confirmation_stage",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -466,6 +496,23 @@ def _audit_items(
                         "live_closure_contract_requires_exchange_native_protection"
                     )
                 ),
+            },
+        },
+        {
+            "requirement": (
+                "live closure contract carries all first-order live proof guards"
+            ),
+            "evidence_source": "runtime_live_cutover_readiness",
+            "status": "ready_non_market",
+            "proof": {
+                "live_closure_contract_required_evidence_keys_complete": all(
+                    key in evidence_keys
+                    for key in LIVE_CLOSURE_REQUIRED_EVIDENCE_KEYS
+                ),
+                **{
+                    key: contract_checks.get(key)
+                    for key in LIVE_CLOSURE_REQUIRED_CONTRACT_CHECKS
+                },
             },
         },
         {

@@ -914,3 +914,26 @@ treated as sufficient first-live-order closure protection.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `83 passed` for the live-closure verifier/packet/cutover/refresh/goal-progress/snapshot tests; `146 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Completion Audit Full Contract Guard Checkpoint
+
+The P0 completion audit now treats the live-cutover contract itself as a
+first-order proof surface. It no longer checks only a small subset of live
+closure contract fields; it requires all 13 official first-live closure
+evidence keys and all first-order live proof guards to remain present before a
+healthy waiting state can be reported.
+
+This checkpoint also fixes the local monitor sequence so it refreshes
+`latest-live-cutover-readiness.json` before goal-progress and completion-audit.
+That prevents a stale live-cutover packet from creating false non-market gaps
+or hiding a real contract regression during the no-signal waiting window.
+
+| Item | Evidence |
+| --- | --- |
+| Completion audit contract guard | `runtime_first_bounded_live_order_completion_audit.py` now checks `LIVE_CLOSURE_REQUIRED_EVIDENCE_KEYS` and `LIVE_CLOSURE_REQUIRED_CONTRACT_CHECKS` |
+| Local sequence order | `run_strategygroup_runtime_local_monitor_sequence.py` runs `daily_check -> live_cutover_readiness -> goal_progress -> completion_audit` |
+| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover packets under `tmp_path`, not `output/runtime-monitor/latest-live-cutover-readiness.json` |
+| Automation prompt | `tokyo-runtime-quiet-monitor` now names live-cutover readiness refresh inside the local zero-remote sequence |
+| Current audit output | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, `blockers=[]`, `non_market_gaps=[]`, `remote_interaction_count=0` |
+| Verification | `46 passed` for completion-audit, local-monitor-sequence, monitor-frequency, and goal-progress tests; `py_compile` passed for the touched runtime monitor/audit scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

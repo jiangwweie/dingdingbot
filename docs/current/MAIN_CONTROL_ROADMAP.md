@@ -385,7 +385,7 @@ L1 read-only snapshot
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
 | Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into an Owner-readable engineering blocker instead of triggering an extra Tokyo probe |
 | Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become an Owner-readable engineering blocker instead of mixing new code with stale cached fields |
-| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should start from `local_monitor_sequence_check`: daily-check, goal-progress, and P0 completion-audit run in strict local/cache order; explicit signal or regression investigation may still force one L1 refresh through the daily-check step |
+| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should start from `local_monitor_sequence_check`: daily-check, live-cutover readiness refresh, goal-progress, and P0 completion-audit run in strict local/cache order; explicit signal or regression investigation may still force one L1 refresh through the daily-check step |
 | Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `local_monitor_sequence_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
 | Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including the local sequence command and its quiet/noise boundary, using `L0` / 0 remote interactions |
 | Quiet-monitor drift cache | The same audit writes `output/runtime-monitor/latest-quiet-monitor-audit.json` and `output/runtime-monitor/latest-quiet-monitor-audit.md`, keeping automation drift review local and reusable |
@@ -1685,10 +1685,10 @@ healthy waiting-for-market semantics.
 ### 2026-06-18 Local Monitor Sequence Checkpoint
 
 The goal-mode status tools now have a cache-only sequence runner that refreshes
-daily-check, goal-progress, and P0 completion-audit in strict order. This keeps
-the completion audit strict about stale input sources while avoiding false
-`goal_progress:generated_before_daily_check` gaps caused by parallel local
-commands.
+daily-check, live-cutover readiness, goal-progress, and P0 completion-audit in
+strict order. This keeps the completion audit strict about stale input sources
+while avoiding false `goal_progress:generated_before_daily_check` gaps caused by
+parallel local commands.
 
 | Item | Result |
 | --- | --- |
@@ -1698,6 +1698,24 @@ commands.
 | Local validation | `py_compile` passed; related monitor/audit tests: `90 passed` |
 | Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
 | Deployment | Not deployed; this is a local goal-mode/automation tooling improvement only |
+| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Local Sequence Live-Cutover Refresh Checkpoint
+
+The local monitor sequence now refreshes the live-cutover readiness packet
+before goal-progress and P0 completion audit. This prevents stale
+`latest-live-cutover-readiness.json` packets from hiding or inventing
+first-live-order closure gaps after the live-closure contract gains stricter
+proof requirements.
+
+| Item | Result |
+| --- | --- |
+| Local sequence order | `daily_check -> live_cutover_readiness -> goal_progress -> completion_audit` |
+| Completion audit strictness | `runtime_first_bounded_live_order_completion_audit.py` now requires all 13 first-live closure evidence keys and all first-order live proof guards from the cutover contract |
+| Test isolation | `test_strategygroup_runtime_local_monitor_sequence.py` writes fake live-cutover packets to `tmp_path`, not the runtime-monitor cache |
+| Automation prompt | `tokyo-runtime-quiet-monitor` describes live-cutover readiness refresh inside the local zero-remote sequence |
+| Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
+| Deployment | Not deployed; this is local monitor/audit hardening only |
 | Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ## Boundaries

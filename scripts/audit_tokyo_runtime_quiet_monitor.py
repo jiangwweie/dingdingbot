@@ -117,6 +117,7 @@ def _checks_from_text(
         "latest_local_monitor_sequence_md": (
             "output/runtime-monitor/latest-local-monitor-sequence.md"
         ),
+        "live_cutover_readiness_refresh": "live-cutover readiness refresh",
         "dont_notify": "DONT_NOTIFY",
         "waiting_for_market": "waiting_for_market",
         "not_complete_waiting_for_market": "not_complete_waiting_for_market",

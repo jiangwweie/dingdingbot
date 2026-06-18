@@ -50,6 +50,19 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
+        elif script == "runtime_live_cutover_readiness.py":
+            _write_output(
+                command,
+                {
+                    "status": "live_cutover_waiting_for_fresh_signal",
+                    "interaction": {
+                        "level": "L0_local_cutover_readiness",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
         elif script == "run_strategygroup_runtime_goal_progress_audit.py":
             _write_output(
                 command,
@@ -82,6 +95,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     report = module.build_local_monitor_sequence_report(
         daily_check_json=tmp_path / "daily.json",
         daily_owner_progress=tmp_path / "daily.md",
+        live_cutover_json=tmp_path / "cutover.json",
+        live_cutover_md=tmp_path / "cutover.md",
         goal_progress_json=tmp_path / "goal.json",
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
@@ -91,6 +106,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
 
     assert calls == [
         "run_strategygroup_runtime_daily_check.py",
+        "runtime_live_cutover_readiness.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
     ]
@@ -111,6 +127,12 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         script = Path(command[1]).name
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "runtime_live_cutover_readiness.py":
+            _write_output(
+                command,
+                {"status": "live_cutover_waiting_for_fresh_signal", "interaction": {}},
+            )
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_goal_progress_audit.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -137,6 +159,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
     report = module.build_local_monitor_sequence_report(
         daily_check_json=tmp_path / "daily.json",
         daily_owner_progress=tmp_path / "daily.md",
+        live_cutover_json=tmp_path / "cutover.json",
+        live_cutover_md=tmp_path / "cutover.md",
         goal_progress_json=tmp_path / "goal.json",
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
