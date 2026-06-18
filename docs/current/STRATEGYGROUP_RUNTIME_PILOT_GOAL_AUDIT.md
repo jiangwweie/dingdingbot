@@ -791,6 +791,7 @@ settlement, and submit-outcome review recording.
 | Item | Evidence |
 | --- | --- |
 | Contract close-loop truth | `runtime_live_cutover_readiness.py` adds `post_submit_finalize_not_complete`, `post_submit_reconciliation_not_matched`, `post_submit_budget_not_settled`, and `submit_outcome_review_not_recorded` to the post-submit closure reject contract |
+| Official producer truth fields | `runtime_official_post_submit_finalize_proof.py` emits `post_submit_finalize_complete`, `post_submit_reconciliation_matched`, `post_submit_budget_settled`, and `submit_outcome_review_recorded` from the official post-submit proof packet |
 | Packet builder close-loop truth | `runtime_live_closure_evidence_packet.py` emits `finalize_complete`, `reconciliation_matched`, `budget_settled`, and `review_recorded` inside `post_submit_close_loop_proof` |
 | Verifier close-loop truth guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when bound post-submit evidence is present but any close-loop truth field is not true |
 | Weak proof rejection | `test_live_closure_evidence_packet_rejects_incomplete_post_submit_truth` and `test_live_closure_evidence_verifier_rejects_incomplete_post_submit_truth` reject ids-only post-submit closure evidence |

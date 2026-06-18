@@ -582,6 +582,22 @@ def _post_submit_finalize_proof_packet(
                 "post_submit_budget_settlement_status"
             ),
         },
+        "post_submit_finalize_complete": (
+            checks["post_submit_finalize_http_ok"]
+            and checks["post_submit_finalize_next_attempt_blocked"]
+        ),
+        "post_submit_reconciliation_matched": (
+            checks["submit_outcome_review_policy_ready"]
+            and bool(getattr(review, "post_submit_reconciliation_evidence_id", None))
+        ),
+        "post_submit_budget_settled": (
+            checks["post_submit_budget_consumed_recorded"]
+            and checks["runtime_budget_settlement_applied_once"]
+        ),
+        "submit_outcome_review_recorded": (
+            checks["submit_outcome_review_created"]
+            and checks["submit_outcome_review_policy_ready"]
+        ),
         "post_submit_finalize": {
             "http_status": post_submit_finalize.get("http_status"),
             "packet_id": finalize_body.get("packet_id"),
