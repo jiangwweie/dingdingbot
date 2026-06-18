@@ -49,6 +49,21 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _input_source_summary(path: Path, packet: dict[str, Any]) -> dict[str, Any]:
+    source = _dict(packet.get("source"))
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "scope": packet.get("scope"),
+        "status": packet.get("status"),
+        "schema": packet.get("schema") or packet.get("schema_version"),
+        "generated_at_utc": packet.get("generated_at_utc"),
+        "generated_at_ms": packet.get("generated_at_ms"),
+        "source_runtime_head": source.get("runtime_head"),
+        "source_expected_runtime_head": source.get("expected_runtime_head"),
+    }
+
+
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -395,6 +410,7 @@ def build_completion_audit_report(
     goal_progress: dict[str, Any],
     dry_run_audit: dict[str, Any],
     live_cutover: dict[str, Any],
+    input_sources: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     items = _audit_items(
@@ -472,6 +488,7 @@ def build_completion_audit_report(
         "goal_complete": goal_complete,
         "non_market_gaps": non_market_gaps,
         "market_dependent_remaining": market_dependent_remaining,
+        "input_sources": input_sources or {},
         "safety_invariants": {
             "server_files_mutated": False,
             "calls_finalgate": False,
@@ -487,7 +504,10 @@ def build_completion_audit_report(
 
 def _owner_progress_text(report: dict[str, Any]) -> str:
     non_market = report.get("non_market_gaps") or []
-    market_remaining = [str(item) for item in report.get("market_dependent_remaining") or []]
+    market_remaining = [
+        str(item) for item in report.get("market_dependent_remaining") or []
+    ]
+    input_sources = _dict(report.get("input_sources"))
     non_market_text = "无" if not non_market else str(len(non_market))
     lines = [
         "## P0 First Bounded Live Order Closure Completion Audit",
@@ -507,6 +527,22 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     ]
     if market_remaining:
         lines.extend(f"- {item}" for item in market_remaining)
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Input Sources", ""])
+    if input_sources:
+        for name in sorted(input_sources):
+            source = _dict(input_sources.get(name))
+            generated = (
+                source.get("generated_at_utc")
+                or source.get("generated_at_ms")
+                or "unknown"
+            )
+            schema = source.get("schema") or "unknown"
+            lines.append(
+                f"- {name}: status={source.get('status')}, schema={schema}, "
+                f"generated={generated}, path={source.get('path')}"
+            )
     else:
         lines.append("- none")
     lines.extend(["", "## Non-Market Gaps", ""])
@@ -538,11 +574,31 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    daily_check_path = Path(args.daily_check_json)
+    goal_progress_path = Path(args.goal_progress_json)
+    dry_run_audit_path = Path(args.dry_run_audit_json)
+    live_cutover_path = Path(args.live_cutover_json)
+    daily_check = _read_json(daily_check_path)
+    goal_progress = _read_json(goal_progress_path)
+    dry_run_audit = _read_json(dry_run_audit_path)
+    live_cutover = _read_json(live_cutover_path)
     report = build_completion_audit_report(
-        daily_check=_read_json(Path(args.daily_check_json)),
-        goal_progress=_read_json(Path(args.goal_progress_json)),
-        dry_run_audit=_read_json(Path(args.dry_run_audit_json)),
-        live_cutover=_read_json(Path(args.live_cutover_json)),
+        daily_check=daily_check,
+        goal_progress=goal_progress,
+        dry_run_audit=dry_run_audit,
+        live_cutover=live_cutover,
+        input_sources={
+            "daily_check": _input_source_summary(daily_check_path, daily_check),
+            "goal_progress": _input_source_summary(
+                goal_progress_path,
+                goal_progress,
+            ),
+            "dry_run_audit": _input_source_summary(
+                dry_run_audit_path,
+                dry_run_audit,
+            ),
+            "live_cutover": _input_source_summary(live_cutover_path, live_cutover),
+        },
     )
     _write_json(Path(args.output_json), report)
     owner_progress = _owner_progress_text(report)

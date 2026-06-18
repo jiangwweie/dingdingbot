@@ -300,7 +300,15 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     cutover = tmp_path / "cutover.json"
     output = tmp_path / "audit.json"
     owner = tmp_path / "audit.md"
-    daily.write_text(json.dumps(_daily_check()), encoding="utf-8")
+    daily.write_text(
+        json.dumps(
+            _daily_check(
+                schema=12,
+                generated_at_utc="2026-06-18T08:00:00+00:00",
+            )
+        ),
+        encoding="utf-8",
+    )
     goal.write_text(json.dumps(_goal_progress()), encoding="utf-8")
     dry.write_text(json.dumps(_dry_run_audit()), encoding="utf-8")
     cutover.write_text(json.dumps(_live_cutover()), encoding="utf-8")
@@ -326,8 +334,20 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     packet = json.loads(output.read_text(encoding="utf-8"))
     owner_text = owner.read_text(encoding="utf-8")
     assert packet["status"] == "not_complete_waiting_for_market"
+    assert packet["input_sources"]["daily_check"] == {
+        "exists": True,
+        "generated_at_ms": None,
+        "generated_at_utc": "2026-06-18T08:00:00+00:00",
+        "path": str(daily),
+        "schema": 12,
+        "scope": None,
+        "source_expected_runtime_head": None,
+        "source_runtime_head": None,
+        "status": "waiting_for_market",
+    }
     assert "- 非市场缺口: 无" in owner_text
     assert "- Exchange write: 否" in owner_text
+    assert "- daily_check: status=waiting_for_market, schema=12" in owner_text
 
 
 def test_completion_audit_cli_treats_runtime_processing_as_success(tmp_path):
