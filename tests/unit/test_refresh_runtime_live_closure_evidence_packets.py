@@ -224,6 +224,49 @@ def test_refresh_skips_passive_runtime_reports_with_sample_or_stale_ids(tmp_path
     assert verification["status"] == "live_closure_not_started"
 
 
+def test_refresh_tolerates_malformed_legacy_json_by_default(tmp_path):
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "reconciliation-refresh-old.json").write_text(
+        "INFO not json",
+        encoding="utf-8",
+    )
+
+    refresh = refresher.build_refresh_report(
+        report_dir=report_dir,
+        generated_at_ms=1781755000000,
+    )
+
+    assert refresh["status"] == "live_closure_refresh_not_started"
+    assert refresh["source_counts"] == {
+        "discovered_json": 1,
+        "included_json": 0,
+        "skipped_json": 0,
+        "read_errors": 1,
+    }
+    assert refresh["read_errors"][0]["path"].endswith(
+        "reconciliation-refresh-old.json"
+    )
+
+
+def test_refresh_can_strictly_block_on_malformed_json(tmp_path):
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "reconciliation-refresh-old.json").write_text(
+        "INFO not json",
+        encoding="utf-8",
+    )
+
+    refresh = refresher.build_refresh_report(
+        report_dir=report_dir,
+        strict_read_errors=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert refresh["status"] == "live_closure_refresh_read_error"
+    assert refresh["strict_read_errors"] is True
+
+
 def test_refresh_rejects_exchange_result_without_live_submit_markers(tmp_path):
     report_dir = tmp_path / "reports"
     report_dir.mkdir()

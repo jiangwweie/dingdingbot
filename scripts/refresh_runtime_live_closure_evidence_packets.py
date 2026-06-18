@@ -102,6 +102,7 @@ def build_refresh_report(
     refresh_output_json: Path | None = None,
     recursive: bool = False,
     include_all_json: bool = False,
+    strict_read_errors: bool = False,
     generated_at_ms: int | None = None,
 ) -> dict[str, Any]:
     generated_at_ms = generated_at_ms or int(time.time() * 1000)
@@ -167,6 +168,7 @@ def build_refresh_report(
         read_errors=read_errors,
         recursive=recursive,
         include_all_json=include_all_json,
+        strict_read_errors=strict_read_errors,
         generated_at_ms=generated_at_ms,
     )
 
@@ -190,10 +192,11 @@ def _refresh_report(
     read_errors: list[dict[str, str]],
     recursive: bool,
     include_all_json: bool,
+    strict_read_errors: bool,
     generated_at_ms: int,
 ) -> dict[str, Any]:
     verification_status = str(verification_packet.get("status") or "")
-    if read_errors:
+    if read_errors and strict_read_errors:
         status = "live_closure_refresh_read_error"
         owner_state = "需要介入"
     elif verification_status == "live_closure_complete":
@@ -222,6 +225,7 @@ def _refresh_report(
         "refresh_output_json": str(refresh_output_json),
         "recursive": recursive,
         "include_all_json": include_all_json,
+        "strict_read_errors": strict_read_errors,
         "source_counts": {
             "discovered_json": len(discovered),
             "included_json": len(included_packets),
@@ -346,6 +350,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Include controlled, dry-run, mock, synthetic, and sample JSON sources.",
     )
+    parser.add_argument(
+        "--strict-read-errors",
+        action="store_true",
+        help="Treat malformed JSON files in the report directory as refresh blockers.",
+    )
     return parser.parse_args(argv)
 
 
@@ -367,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         recursive=args.recursive,
         include_all_json=args.include_all_json,
+        strict_read_errors=args.strict_read_errors,
     )
     print(json.dumps(refresh_report, ensure_ascii=False, indent=2, sort_keys=True))
     success_statuses = {
