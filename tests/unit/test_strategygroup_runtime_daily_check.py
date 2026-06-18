@@ -323,6 +323,47 @@ def test_daily_check_projects_post_signal_live_closure_in_progress_as_processing
     }
 
 
+def test_daily_check_preserves_fresh_signal_processing_over_stale_waiting_summary():
+    module = _load_module()
+    snapshot = _snapshot()
+    snapshot["facts"]["reports"]["goal_status"] = {
+        "status": "fresh_signal_processing",
+        "fresh_signal_present": True,
+        "real_order_readiness_summary": {
+            "total": 3,
+            "pass": 2,
+            "waiting": 1,
+            "blocked": 0,
+            "submit_blocker_keys": [],
+            "waiting_keys": ["candidate_authorization"],
+        },
+    }
+
+    report = module.build_daily_check_report(snapshot=snapshot)
+
+    assert report["status"] == "processing"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["checks"]["real_order_readiness_summary"] == {
+        "total": 3,
+        "pass": 2,
+        "waiting": 1,
+        "blocked": 0,
+        "submit_blocker_keys": [],
+        "waiting_keys": ["candidate_authorization"],
+    }
+    assert report["owner_summary"]["state"] == "处理中"
+    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert report["owner_summary"]["visibility"]["category"] == "processing"
+    assert report["notification"] == {
+        "decision": "NOTIFY",
+        "reason": "processing",
+        "message": "系统正在处理真实订单闭环证据",
+        "owner_intervention_required": False,
+    }
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["interaction"]["places_order"] is False
+
+
 def test_daily_check_projects_rejected_live_closure_as_product_gap():
     module = _load_module()
 
@@ -505,7 +546,7 @@ def test_daily_check_exposes_missing_dry_run_required_checks():
     assert report["notification"]["reason"] == "blocker_present"
 
 
-def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
+def test_daily_check_notifies_when_fresh_signal_is_processing_not_waiting():
     module = _load_module()
     snapshot = _snapshot(
         owner_summary={
@@ -525,11 +566,13 @@ def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
 
     report = module.build_daily_check_report(snapshot=snapshot)
 
-    assert report["status"] == "ready"
+    assert report["status"] == "processing"
     assert report["checks"]["waiting_for_market"] is False
     assert report["checks"]["fresh_signal_notification_policy_checked"] is True
+    assert report["owner_summary"]["state"] == "处理中"
+    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
     assert report["notification"]["decision"] == "NOTIFY"
-    assert report["notification"]["reason"] == "running"
+    assert report["notification"]["reason"] == "processing"
 
 
 def test_daily_check_blocks_when_remote_interaction_budget_is_exceeded():

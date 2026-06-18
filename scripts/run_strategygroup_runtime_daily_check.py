@@ -33,7 +33,14 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 11
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 12
+
+ACTIVE_GOAL_STATUSES = {
+    "fresh_signal_detected",
+    "fresh_signal_processing",
+    "action_time_finalgate_ready",
+    "operation_layer_ready",
+}
 
 ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "fresh_signal_fast_auto_chain_checked",
@@ -312,7 +319,14 @@ def build_daily_check_report(
         str(item)
         for item in real_order_readiness_summary.get("waiting_keys") or []
     }
+    goal_status_value = str(goal_status.get("status") or "")
+    goal_processing = (
+        goal_status_value in ACTIVE_GOAL_STATUSES
+        or goal_status.get("fresh_signal_present") is True
+    )
     waiting_for_market = _is_waiting_for_market(owner_summary, goal_status)
+    if goal_processing:
+        waiting_for_market = False
     live_closure_processing = live_closure_processing_claimed and not (
         waiting_for_market and "fresh_signal" in real_order_waiting_keys
     )
@@ -327,6 +341,8 @@ def build_daily_check_report(
         status = "blocked"
     elif product_gaps:
         status = "degraded"
+    elif goal_processing and not waiting_for_market:
+        status = "processing"
     elif live_closure_processing:
         status = "processing"
     elif waiting_for_market:

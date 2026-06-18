@@ -313,6 +313,68 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert report["owner_summary"]["owner_intervention_required"] is False
 
 
+def test_tokyo_runtime_snapshot_preserves_fresh_signal_processing_over_stale_waiting_sources():
+    module = _load_module()
+    payload = _healthy_remote_payload()
+    goal_status = payload["reports"]["strategygroup-runtime-goal-status.json"][
+        "payload"
+    ]
+    goal_status["status"] = "fresh_signal_processing"
+    goal_status["checks"]["fresh_signal_present"] = True
+    goal_status["real_order_readiness_matrix"] = [
+        {
+            "key": "runtime_order_capable_profile",
+            "status": "pass",
+            "blocks_real_submit": False,
+        },
+        {
+            "key": "fresh_signal",
+            "status": "pass",
+            "blocks_real_submit": False,
+        },
+        {
+            "key": "candidate_authorization",
+            "status": "waiting_for_chain",
+            "blocks_real_submit": True,
+        },
+    ]
+
+    def runner(command: tuple[str, ...]):
+        return module.CommandResult(
+            stdout=json.dumps(payload),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head=None,
+        runner=runner,
+    )
+
+    assert report["status"] == "ready"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["owner_summary"]["state"] == "处理中"
+    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    goal_status_summary = report["facts"]["reports"]["goal_status"]
+    assert goal_status_summary["status"] == "fresh_signal_processing"
+    assert goal_status_summary["fresh_signal_present"] is True
+    assert goal_status_summary["real_order_readiness_summary"] == {
+        "blocked": 0,
+        "pass": 2,
+        "submit_blocker_keys": [],
+        "total": 3,
+        "waiting": 1,
+        "waiting_keys": ["candidate_authorization"],
+    }
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["interaction"]["places_order"] is False
+
+
 def test_tokyo_runtime_snapshot_auto_verifies_live_closure_evidence_packet():
     module = _load_module()
     payload = _healthy_remote_payload()

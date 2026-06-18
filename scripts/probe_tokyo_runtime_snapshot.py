@@ -72,6 +72,13 @@ REQUIRED_DRY_RUN_CHECKS = (
     "non_executing_prepare_auto_bridge_checked",
 )
 
+ACTIVE_GOAL_STATUSES = {
+    "fresh_signal_detected",
+    "fresh_signal_processing",
+    "action_time_finalgate_ready",
+    "operation_layer_ready",
+}
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -279,7 +286,10 @@ def evaluate_runtime_snapshot(
             for item in live_closure_verification.get("reject_reasons") or []
         )
 
-    waiting_for_market = (
+    goal_status_value = str(goal_status.get("status") or "")
+    fresh_signal_present = _packet_check(goal_status, "fresh_signal_present") is True
+    goal_processing = fresh_signal_present or goal_status_value in ACTIVE_GOAL_STATUSES
+    waiting_for_market = (not goal_processing) and (
         _packet_check(goal_status, "fresh_signal_present") is False
         or latest_summary.get("status") in {"waiting_for_signal", "waiting_for_market"}
         or source_readiness.get("owner_state") in {"等待机会", "waiting_for_opportunity"}
@@ -292,6 +302,11 @@ def evaluate_runtime_snapshot(
         owner_stage = "暂不可用"
     if ready_for_real_order:
         owner_stage = "处理中"
+    owner_current_action = (
+        "继续等待市场机会"
+        if waiting_for_market
+        else "等待系统完成收口"
+    )
 
     checks = {
         "blockers": _dedupe(blockers),
@@ -359,7 +374,7 @@ def evaluate_runtime_snapshot(
         },
         "owner_summary": {
             "state": owner_stage,
-            "current_action": "继续等待市场机会",
+            "current_action": owner_current_action,
             "owner_intervention_required": False if not checks["blockers"] else True,
             "runtime": "正常" if not checks["blockers"] else "暂不可用",
             "watcher": "运行中" if checks["watcher_timer_active"] else "暂不可用",
