@@ -26,5 +26,19 @@
     "quiet_monitor_audit_remote_interaction_count": 0,
     "mutates_remote_files": false,
     "approaches_real_order": false
+  },
+  "quiet_monitor_frequency_policy": {
+    "healthy_waiting_for_market_interval_minutes": 120,
+    "healthy_waiting_for_market_interaction_level": "L0_local_cache_read",
+    "healthy_waiting_for_market_remote_interaction_count": 0,
+    "fresh_signal_short_window_enabled": true,
+    "fresh_signal_short_window_interval_minutes": 5,
+    "cache_first_routine_checks": true,
+    "non_quiet_summary_required_fields": [
+      "interaction_level",
+      "remote_interaction_count",
+      "mutates_remote_files",
+      "approaches_real_order"
+    ]
   }
 }

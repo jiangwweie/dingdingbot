@@ -3720,10 +3720,35 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "mpg001_replay_corpus_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "mpg001_replay_corpus_cases_present"
+            )
+            is True
+        ),
         "synthetic_signal_fixture_set_checked": (
             runtime_replay_lab.get("status") == "passed"
             and runtime_replay_lab.get("checks", {}).get(
                 "synthetic_fixture_cases_present"
+            )
+            is True
+        ),
+        "post_submit_simulator_matrix_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "post_submit_simulator_cases_present"
+            )
+            is True
+            and runtime_replay_lab.get("checks", {}).get(
+                "post_submit_simulator_non_executing"
+            )
+            is True
+        ),
+        "cost_review_skeleton_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "cost_review_skeleton_present"
             )
             is True
         ),
@@ -3908,8 +3933,17 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "mpg001_replay_sample_checked": checks[
             "mpg001_replay_sample_checked"
         ],
+        "mpg001_replay_corpus_checked": checks[
+            "mpg001_replay_corpus_checked"
+        ],
         "synthetic_signal_fixture_set_checked": checks[
             "synthetic_signal_fixture_set_checked"
+        ],
+        "post_submit_simulator_matrix_checked": checks[
+            "post_submit_simulator_matrix_checked"
+        ],
+        "cost_review_skeleton_checked": checks[
+            "cost_review_skeleton_checked"
         ],
         "external_replay_adapter_sidecar_only_checked": checks[
             "external_replay_adapter_sidecar_only_checked"

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from src.domain.strategygroup_runtime_replay import (
     EXPECTED_SYNTHETIC_FIXTURE_CASES,
+    EXPECTED_MPG001_REPLAY_CORPUS_CASES,
+    EXPECTED_POST_SUBMIT_SIMULATOR_CASES,
     build_mpg001_replay_lab_packet,
 )
 
@@ -17,7 +19,11 @@ def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> Non
     assert packet.strategy_group_id == "MPG-001"
     assert packet.checks == {
         "mpg001_replay_sample_present": True,
+        "mpg001_replay_corpus_cases_present": True,
         "synthetic_fixture_cases_present": True,
+        "post_submit_simulator_cases_present": True,
+        "post_submit_simulator_non_executing": True,
+        "cost_review_skeleton_present": True,
         "fresh_pass_reaches_prepare_chain": True,
         "blocked_fixtures_do_not_reach_operation_layer": True,
         "replay_report_owner_readable": True,
@@ -119,3 +125,79 @@ def test_tracked_mpg001_replay_samples_match_runtime_contract() -> None:
     assert all(item["replay_only"] is True for item in fixtures["fixtures"])
     assert all(item["not_live_market_signal"] is True for item in fixtures["fixtures"])
     assert all(item["real_order_allowed"] is False for item in fixtures["fixtures"])
+
+
+def test_mpg001_replay_lab_covers_multi_window_replay_corpus_with_cost_review() -> None:
+    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+
+    corpus_cases = {item.fixture_case for item in packet.replay_samples}
+    assert corpus_cases == EXPECTED_MPG001_REPLAY_CORPUS_CASES
+    assert packet.checks["mpg001_replay_corpus_cases_present"] is True
+    assert packet.checks["cost_review_skeleton_present"] is True
+
+    for event in packet.replay_samples:
+        assert event.replay_only is True
+        assert event.not_live_market_signal is True
+        assert event.operation_layer_submit_allowed is False
+        assert event.exchange_write_allowed is False
+        assert event.real_order_allowed is False
+        assert event.cost_review.fee_estimate_usdt >= Decimal("0")
+        assert event.cost_review.slippage_estimate_usdt >= Decimal("0")
+        assert event.cost_review.funding_impact_usdt is not None
+        assert event.cost_review.min_qty_step_size_impact
+        assert event.cost_review.net_edge_note
+        assert event.cost_review.not_submit_authority is True
+
+
+def test_post_submit_simulator_matrix_is_non_executing_and_review_ready() -> None:
+    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+
+    simulator_cases = {item.case for item in packet.post_submit_simulator_matrix}
+    assert simulator_cases == EXPECTED_POST_SUBMIT_SIMULATOR_CASES
+    assert packet.checks["post_submit_simulator_cases_present"] is True
+    assert packet.checks["post_submit_simulator_non_executing"] is True
+
+    protection_failed = next(
+        item
+        for item in packet.post_submit_simulator_matrix
+        if item.case == "entry_filled_sl_creation_failed"
+    )
+    assert protection_failed.protection_status == "failed"
+    assert protection_failed.reduce_only_recovery_shape_reachable is True
+    assert protection_failed.operation_layer_live_submit_called is False
+    assert protection_failed.exchange_write_called is False
+
+    for item in packet.post_submit_simulator_matrix:
+        assert item.finalize_shape_checked is True
+        assert item.reconciliation_shape_checked is True
+        assert item.budget_settlement_shape_checked is True
+        assert item.review_shape_checked is True
+        assert item.real_order_created is False
+        assert item.exchange_write_called is False
+
+
+def test_tracked_mpg001_replay_corpus_and_post_submit_matrix_exist() -> None:
+    replay_dir = Path("docs/current/strategy-group-handoffs/MPG-001/replay")
+    corpus = json.loads(
+        (replay_dir / "mpg-001-replay-corpus.json").read_text(encoding="utf-8")
+    )
+    post_submit = json.loads(
+        (replay_dir / "post-submit-simulator-matrix.json").read_text(encoding="utf-8")
+    )
+
+    assert corpus["schema_version"] == "brc.strategygroup.runtime_replay_corpus.v1"
+    assert corpus["strategy_group_id"] == "MPG-001"
+    assert {item["fixture_case"] for item in corpus["replay_samples"]} == (
+        EXPECTED_MPG001_REPLAY_CORPUS_CASES
+    )
+    assert all(item["not_live_market_signal"] is True for item in corpus["replay_samples"])
+    assert all(item["real_order_allowed"] is False for item in corpus["replay_samples"])
+    assert all("cost_review" in item for item in corpus["replay_samples"])
+
+    assert post_submit["schema_version"] == "brc.strategygroup.post_submit_simulator_matrix.v1"
+    assert post_submit["strategy_group_id"] == "MPG-001"
+    assert {item["case"] for item in post_submit["cases"]} == (
+        EXPECTED_POST_SUBMIT_SIMULATOR_CASES
+    )
+    assert all(item["real_order_created"] is False for item in post_submit["cases"])
+    assert all(item["exchange_write_called"] is False for item in post_submit["cases"])

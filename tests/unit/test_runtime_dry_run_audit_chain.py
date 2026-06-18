@@ -26,7 +26,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "strategy_handoff_no_execution_pipeline_fields_checked": True,
         "runtime_replay_lab_checked": True,
         "mpg001_replay_sample_checked": True,
+        "mpg001_replay_corpus_checked": True,
         "synthetic_signal_fixture_set_checked": True,
+        "post_submit_simulator_matrix_checked": True,
+        "cost_review_skeleton_checked": True,
         "external_replay_adapter_sidecar_only_checked": True,
         "runtime_tier_policy_checked": True,
         "only_mpg_tiny_real_order_eligible_checked": True,
@@ -71,7 +74,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "strategy_handoff_no_execution_pipeline_fields_checked": True,
         "runtime_replay_lab_checked": True,
         "mpg001_replay_sample_checked": True,
+        "mpg001_replay_corpus_checked": True,
         "synthetic_signal_fixture_set_checked": True,
+        "post_submit_simulator_matrix_checked": True,
+        "cost_review_skeleton_checked": True,
         "external_replay_adapter_sidecar_only_checked": True,
         "runtime_tier_policy_checked": True,
         "only_mpg_tiny_real_order_eligible_checked": True,
@@ -249,8 +255,12 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert replay_lab["status"] == "passed"
     assert replay_lab["strategy_group_id"] == "MPG-001"
     assert replay_lab["checks"]["mpg001_replay_sample_present"] is True
+    assert replay_lab["checks"]["mpg001_replay_corpus_cases_present"] is True
     assert replay_lab["checks"]["synthetic_fixture_cases_present"] is True
+    assert replay_lab["checks"]["post_submit_simulator_cases_present"] is True
+    assert replay_lab["checks"]["cost_review_skeleton_present"] is True
     assert replay_lab["checks"]["external_framework_sidecar_only"] is True
+    assert replay_lab["post_submit_simulator_matrix"]
     assert replay_lab["safety_invariants"]["exchange_write_called"] is False
     assert replay_lab["safety_invariants"]["real_order_created"] is False
     assert packet["checks"][
