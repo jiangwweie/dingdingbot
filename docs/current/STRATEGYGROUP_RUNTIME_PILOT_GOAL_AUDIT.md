@@ -860,3 +860,23 @@ reconciliation.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `81 passed` for the live-closure verifier/packet/cutover/refresh/goal-progress/snapshot tests; `144 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Exchange-Native Protection Truth Checkpoint
+
+The `exchange_native_protection` stage now requires the hard-stop proof to
+show more than a hard-stop id source-bound to the entry exchange result. The
+matched protection source must also prove that the hard stop is exchange-native,
+accepted by the exchange, and reduce-only. This prevents a local-only stop
+shape, an unaccepted protection order, or a non-reduce-only stop from being
+treated as sufficient first-live-order closure protection.
+
+| Item | Evidence |
+| --- | --- |
+| Contract protection truth guard | `runtime_live_cutover_readiness.py` adds `hard_stop_not_accepted` and `hard_stop_not_reduce_only` beside `local_only_stop` in the `exchange_native_protection` reject reasons and contract check |
+| Packet builder protection truth | `runtime_live_closure_evidence_packet.py` derives `exchange_native_protection_proof.exchange_native`, `hard_stop_accepted`, and `reduce_only` only from source packets carrying the bound hard-stop evidence |
+| Verifier protection truth | `runtime_live_closure_evidence_verifier.py` rejects official live closure evidence when protection proof is missing exchange-native, accepted, or reduce-only truth |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_local_unaccepted_non_reduce_only_stop` and `test_live_closure_evidence_verifier_rejects_local_unaccepted_non_reduce_only_stop` reject local/unaccepted/non-reduce-only hard-stop shapes |
+| Product-state compatibility | Refresh, goal-progress, and Tokyo snapshot fixtures now include the same exchange-native protection truth proof, so complete official packets still verify while weak packets are rejected |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `83 passed` for the live-closure verifier/packet/cutover/refresh/goal-progress/snapshot tests; `146 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

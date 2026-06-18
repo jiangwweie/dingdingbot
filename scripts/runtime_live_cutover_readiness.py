@@ -247,6 +247,8 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "reject_if": [
             "hard_stop_missing",
             "local_only_stop",
+            "hard_stop_not_accepted",
+            "hard_stop_not_reduce_only",
             "exchange_native_protection_proof_missing",
             "exchange_native_protection_result_id_mismatch",
             "exchange_native_protection_result_source_missing",
@@ -460,6 +462,9 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
             "exchange_native_protection_proof_missing" in reject_reasons
             and "exchange_native_protection_result_id_mismatch" in reject_reasons
             and "exchange_native_protection_result_source_missing" in reject_reasons
+            and "local_only_stop" in reject_reasons
+            and "hard_stop_not_accepted" in reject_reasons
+            and "hard_stop_not_reduce_only" in reject_reasons
         ),
         "live_closure_contract_requires_post_submit_reconciliation": (
             "post_submit_reconciliation_evidence_id" in evidence_keys

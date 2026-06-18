@@ -49,6 +49,9 @@ def _official_packet(
                 "hard_stop_present": True,
                 "result_source_matched": True,
                 "result_source_count": 1,
+                "exchange_native": True,
+                "hard_stop_accepted": True,
+                "reduce_only": True,
                 "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
                 "exchange_native_hard_stop_order_id": _evidence_id(
                     evidence["exchange_native_hard_stop_order_id"]
@@ -240,6 +243,9 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
                 "hard_stop_present": True,
                 "result_source_matched": True,
                 "result_source_count": 1,
+                "exchange_native": True,
+                "hard_stop_accepted": True,
+                "reduce_only": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
                 "exchange_native_hard_stop_order_id": (
                     "exchange_native_hard_stop_order_id-1"
@@ -731,6 +737,9 @@ def test_live_closure_evidence_verifier_rejects_unbound_exchange_native_protecti
         "hard_stop_present": True,
         "result_source_matched": False,
         "result_source_count": 1,
+        "exchange_native": True,
+        "hard_stop_accepted": True,
+        "reduce_only": True,
         "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
         "exchange_native_hard_stop_order_id": "exchange_native_hard_stop_order_id-1",
     }
@@ -744,6 +753,33 @@ def test_live_closure_evidence_verifier_rejects_unbound_exchange_native_protecti
     assert verification["completion"]["first_bounded_real_order_complete"] is False
     assert verification["reject_reasons"] == [
         "exchange_native_protection_result_source_missing"
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_local_unaccepted_non_reduce_only_stop():
+    packet = _official_packet(_complete_evidence())
+    packet["exchange_native_protection_proof"] = {
+        "hard_stop_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
+        "exchange_native": False,
+        "hard_stop_accepted": False,
+        "reduce_only": False,
+        "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+        "exchange_native_hard_stop_order_id": "exchange_native_hard_stop_order_id-1",
+    }
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "hard_stop_not_accepted",
+        "hard_stop_not_reduce_only",
+        "local_only_stop",
     ]
 
 

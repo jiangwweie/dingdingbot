@@ -50,6 +50,9 @@ def _official_complete_sources() -> list[dict]:
                 "live_exchange_called": True,
                 "real_order_placed": True,
                 "exchange_submit_accepted": True,
+                "exchange_native_protection": True,
+                "hard_stop_accepted": True,
+                "reduce_only": True,
             },
             "exchange_order_id": "entry-order-1",
         },
@@ -119,6 +122,9 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
         "hard_stop_present": True,
         "result_source_matched": True,
         "result_source_count": 1,
+        "exchange_native": True,
+        "hard_stop_accepted": True,
+        "reduce_only": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
         "exchange_native_hard_stop_order_id": "hard-stop-1",
     }
@@ -491,10 +497,47 @@ def test_live_closure_evidence_packet_rejects_unbound_exchange_native_protection
         "hard_stop_present": True,
         "result_source_matched": False,
         "result_source_count": 1,
+        "exchange_native": False,
+        "hard_stop_accepted": False,
+        "reduce_only": False,
         "exchange_submit_execution_result_id": "exchange-result-1",
         "exchange_native_hard_stop_order_id": "hard-stop-1",
     }
     assert "exchange_native_protection_result_source_missing" in packet["reject_reasons"]
+    assert "local_only_stop" in packet["reject_reasons"]
+    assert "hard_stop_not_accepted" in packet["reject_reasons"]
+    assert "hard_stop_not_reduce_only" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_local_unaccepted_non_reduce_only_stop():
+    sources = _official_complete_sources()
+    sources[2]["safety_invariants"]["exchange_native_protection"] = False
+    sources[2]["safety_invariants"]["hard_stop_accepted"] = False
+    sources[2]["safety_invariants"]["reduce_only"] = False
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["exchange_native_protection_proof"] == {
+        "hard_stop_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
+        "exchange_native": False,
+        "hard_stop_accepted": False,
+        "reduce_only": False,
+        "exchange_submit_execution_result_id": "exchange-result-1",
+        "exchange_native_hard_stop_order_id": "hard-stop-1",
+    }
+    assert "local_only_stop" in packet["reject_reasons"]
+    assert "hard_stop_not_accepted" in packet["reject_reasons"]
+    assert "hard_stop_not_reduce_only" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

@@ -57,6 +57,9 @@ GLOBAL_REJECT_REASONS = {
     "exchange_native_protection_proof_missing",
     "exchange_native_protection_result_id_mismatch",
     "exchange_native_protection_result_source_missing",
+    "local_only_stop",
+    "hard_stop_not_accepted",
+    "hard_stop_not_reduce_only",
     "post_submit_close_loop_proof_missing",
     "post_submit_finalize_result_source_missing",
     "post_submit_close_loop_result_source_missing",
@@ -609,6 +612,12 @@ def _exchange_native_protection_reject_reasons(
         reject_reasons.add("exchange_native_protection_result_id_mismatch")
     if proof.get("result_source_matched") is not True:
         reject_reasons.add("exchange_native_protection_result_source_missing")
+    if proof.get("exchange_native") is not True:
+        reject_reasons.add("local_only_stop")
+    if proof.get("hard_stop_accepted") is not True:
+        reject_reasons.add("hard_stop_not_accepted")
+    if proof.get("reduce_only") is not True:
+        reject_reasons.add("hard_stop_not_reduce_only")
     return reject_reasons
 
 

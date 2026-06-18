@@ -145,6 +145,26 @@ EXCHANGE_ORDER_ID_KEYS = (
     "entry_order_id",
     "order_id",
 )
+EXCHANGE_NATIVE_PROTECTION_KEYS = (
+    "exchange_native_protection",
+    "exchange_native_hard_stop",
+    "exchange_native_stop",
+    "hard_stop_exchange_native",
+    "native_exchange_stop",
+)
+HARD_STOP_ACCEPTED_KEYS = (
+    "hard_stop_accepted",
+    "exchange_native_hard_stop_accepted",
+    "stop_order_accepted",
+    "protection_order_accepted",
+    "accepted_by_exchange",
+)
+REDUCE_ONLY_KEYS = (
+    "reduce_only",
+    "reduceOnly",
+    "stop_reduce_only",
+    "hard_stop_reduce_only",
+)
 RUNTIME_BOUNDARY_FIELDS = (
     "strategy_group_id",
     "runtime_profile_id",
@@ -423,6 +443,13 @@ def _derive_reject_reasons(
             and not exchange_native_protection_proof.get("result_source_matched")
         ):
             reasons.add("exchange_native_protection_result_source_missing")
+        if _present(evidence.get(PROTECTION_EVIDENCE_KEY)):
+            if not exchange_native_protection_proof.get("exchange_native"):
+                reasons.add("local_only_stop")
+            if not exchange_native_protection_proof.get("hard_stop_accepted"):
+                reasons.add("hard_stop_not_accepted")
+            if not exchange_native_protection_proof.get("reduce_only"):
+                reasons.add("hard_stop_not_reduce_only")
         close_loop_missing = set(
             str(item)
             for item in post_submit_close_loop_proof.get(
@@ -602,6 +629,18 @@ def _exchange_native_protection_proof(
         "hard_stop_present": exchange_native_hard_stop_order_id is not None,
         "result_source_matched": result_source_matched,
         "result_source_count": len(protection_source_packets),
+        "exchange_native": _any_true(
+            protection_source_packets,
+            EXCHANGE_NATIVE_PROTECTION_KEYS,
+        ),
+        "hard_stop_accepted": _any_true(
+            protection_source_packets,
+            HARD_STOP_ACCEPTED_KEYS,
+        ),
+        "reduce_only": _any_true(
+            protection_source_packets,
+            REDUCE_ONLY_KEYS,
+        ),
     }
     if exchange_submit_execution_result_id:
         proof["exchange_submit_execution_result_id"] = (

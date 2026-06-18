@@ -1234,6 +1234,9 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                     "hard_stop_present": True,
                     "result_source_matched": True,
                     "result_source_count": 1,
+                    "exchange_native": True,
+                    "hard_stop_accepted": True,
+                    "reduce_only": True,
                     "exchange_submit_execution_result_id": (
                         "exchange_submit_execution_result_id-1"
                     ),
