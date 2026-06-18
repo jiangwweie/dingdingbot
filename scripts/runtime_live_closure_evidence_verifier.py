@@ -36,6 +36,7 @@ GLOBAL_REJECT_REASONS = {
     "local_rehearsal_evidence",
     "dry_run_or_rehearsal_evidence",
     "controlled_in_memory_execution",
+    "live_submit_proof_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
 }
@@ -49,8 +50,12 @@ def build_live_closure_evidence_verification(
 ) -> dict[str, Any]:
     contract = contract or live_cutover.build_live_closure_cutover_contract()
     evidence = _evidence_map(evidence_packet)
-    reject_reasons = _reject_reasons(evidence_packet)
     source_ready = _official_live_source_ready(evidence_packet)
+    reject_reasons = _reject_reasons(
+        evidence_packet,
+        evidence=evidence,
+        source_ready=source_ready,
+    )
     stages = _stage_verifications(
         contract=contract, evidence=evidence, reject_reasons=reject_reasons
     )
@@ -203,7 +208,12 @@ def _evidence_map(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _reject_reasons(packet: dict[str, Any]) -> list[str]:
+def _reject_reasons(
+    packet: dict[str, Any],
+    *,
+    evidence: dict[str, Any],
+    source_ready: bool,
+) -> list[str]:
     reasons: set[str] = set()
     for key in ("reject_reasons", "rejected_reasons"):
         items = packet.get(key)
@@ -218,6 +228,17 @@ def _reject_reasons(packet: dict[str, Any]) -> list[str]:
             reasons.add("synthetic_signal")
         if safety.get("disabled_smoke_treated_as_real_execution_proof") is True:
             reasons.add("disabled_smoke_only")
+    if source_ready and _evidence_present(evidence.get("exchange_submit_execution_result_id")):
+        proof = packet.get("live_submit_proof")
+        if not isinstance(proof, dict):
+            reasons.add("live_submit_proof_missing")
+        else:
+            if proof.get("exchange_result_present") is not True:
+                reasons.add("live_submit_proof_missing")
+            if proof.get("live_exchange_called") is not True:
+                reasons.add("live_exchange_not_called")
+            if proof.get("real_order_placed") is not True:
+                reasons.add("real_order_not_placed")
     return sorted(reasons)
 
 

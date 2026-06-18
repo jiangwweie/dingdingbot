@@ -122,11 +122,16 @@ def build_live_closure_evidence_packet(
     )
     present_keys = [key for key in required_keys if _present(evidence.get(key))]
     missing_keys = [key for key in required_keys if not _present(evidence.get(key))]
+    live_submit_proof = _live_submit_proof(
+        source_packets=source_packets,
+        evidence=evidence,
+    )
     reject_reasons = _derive_reject_reasons(
         source_packets=source_packets,
         source_kind=source_kind,
         official_live_source=official_live_source,
         evidence=evidence,
+        live_submit_proof=live_submit_proof,
     )
     return {
         "scope": "runtime_live_closure_evidence_packet",
@@ -139,6 +144,7 @@ def build_live_closure_evidence_packet(
         "required_evidence_keys": required_keys,
         "present_evidence_keys": present_keys,
         "missing_evidence_keys": missing_keys,
+        "live_submit_proof": live_submit_proof,
         "reject_reasons": reject_reasons,
         "evidence": evidence,
         "input_count": len(source_packets),
@@ -201,6 +207,7 @@ def _derive_reject_reasons(
     source_kind: str,
     official_live_source: bool,
     evidence: dict[str, Any],
+    live_submit_proof: dict[str, bool],
 ) -> list[str]:
     reasons: set[str] = set()
     source_kind_value = str(source_kind)
@@ -219,25 +226,9 @@ def _derive_reject_reasons(
 
     exchange_result_present = _present(evidence.get("exchange_submit_execution_result_id"))
     if exchange_result_present:
-        live_exchange_positive = _any_true(
-            source_packets,
-            (
-                "live_exchange_called",
-                "exchange_write_called",
-                "exchange_called",
-            ),
-        )
-        real_order_positive = _any_true(
-            source_packets,
-            (
-                "real_order_placed",
-                "places_order",
-                "exchange_order_submitted",
-            ),
-        )
-        if not live_exchange_positive:
+        if not live_submit_proof["live_exchange_called"]:
             reasons.add("live_exchange_not_called")
-        if not real_order_positive:
+        if not live_submit_proof["real_order_placed"]:
             reasons.add("real_order_not_placed")
         if False in _bool_values(source_packets, "executes_real_submit"):
             reasons.add("real_order_not_placed")
@@ -250,6 +241,33 @@ def _derive_reject_reasons(
         if True in _bool_values(source_packets, "controlled_in_memory_execution_result_recorded"):
             reasons.add("controlled_in_memory_execution")
     return sorted(reasons)
+
+
+def _live_submit_proof(
+    *,
+    source_packets: list[dict[str, Any]],
+    evidence: dict[str, Any],
+) -> dict[str, bool]:
+    exchange_result_present = _present(evidence.get("exchange_submit_execution_result_id"))
+    return {
+        "exchange_result_present": exchange_result_present,
+        "live_exchange_called": _any_true(
+            source_packets,
+            (
+                "live_exchange_called",
+                "exchange_write_called",
+                "exchange_called",
+            ),
+        ),
+        "real_order_placed": _any_true(
+            source_packets,
+            (
+                "real_order_placed",
+                "places_order",
+                "exchange_order_submitted",
+            ),
+        ),
+    }
 
 
 def _status_like_values(source_packets: list[dict[str, Any]]) -> list[str]:

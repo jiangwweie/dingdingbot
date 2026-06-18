@@ -87,6 +87,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "live_closure_contract_rejects_synthetic_signal": True,
         "live_closure_contract_rejects_disabled_smoke": True,
         "live_closure_contract_requires_exchange_acceptance": True,
+        "live_closure_contract_requires_live_submit_truth": True,
         "live_closure_contract_requires_exchange_native_protection": True,
         "live_closure_contract_requires_post_submit_reconciliation": True,
         "live_closure_contract_has_no_owner_chat_confirmation_stage": True,

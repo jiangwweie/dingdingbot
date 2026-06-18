@@ -88,6 +88,7 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "live_closure_contract_rejects_synthetic_signal",
         "live_closure_contract_rejects_disabled_smoke",
         "live_closure_contract_requires_exchange_acceptance",
+        "live_closure_contract_requires_live_submit_truth",
         "live_closure_contract_requires_exchange_native_protection",
         "live_closure_contract_requires_post_submit_reconciliation",
         "live_closure_contract_has_no_owner_chat_confirmation_stage",
@@ -153,7 +154,12 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "name": "real_exchange_acceptance",
         "market_dependent": True,
         "required_evidence_keys": ["exchange_submit_execution_result_id"],
-        "reject_if": ["exchange_submit_failed_before_acceptance"],
+        "reject_if": [
+            "exchange_submit_failed_before_acceptance",
+            "live_submit_proof_missing",
+            "live_exchange_not_called",
+            "real_order_not_placed",
+        ],
         "next_action": "attach_exchange_native_protection",
     },
     {
@@ -290,6 +296,11 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_requires_exchange_acceptance": (
             "exchange_submit_execution_result_id" in evidence_keys
+        ),
+        "live_closure_contract_requires_live_submit_truth": (
+            "live_submit_proof_missing" in reject_reasons
+            and "live_exchange_not_called" in reject_reasons
+            and "real_order_not_placed" in reject_reasons
         ),
         "live_closure_contract_requires_exchange_native_protection": (
             "exchange_native_hard_stop_order_id" in evidence_keys

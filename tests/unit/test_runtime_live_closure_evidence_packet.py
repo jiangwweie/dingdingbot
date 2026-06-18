@@ -57,6 +57,11 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
     )
 
     assert packet["official_live_closure_evidence"] is True
+    assert packet["live_submit_proof"] == {
+        "exchange_result_present": True,
+        "live_exchange_called": True,
+        "real_order_placed": True,
+    }
     assert packet["reject_reasons"] == []
     assert packet["missing_evidence_keys"] == []
     assert packet["evidence"] == {
@@ -87,6 +92,11 @@ def test_live_closure_evidence_packet_keeps_partial_official_packet_in_progress(
     )
 
     assert packet["reject_reasons"] == []
+    assert packet["live_submit_proof"] == {
+        "exchange_result_present": False,
+        "live_exchange_called": False,
+        "real_order_placed": False,
+    }
     assert packet["present_evidence_keys"] == [
         "live_watcher_signal_packet_id",
         "required_facts_readiness_packet_id",
@@ -117,6 +127,11 @@ def test_live_closure_evidence_packet_rejects_controlled_local_cycle_shape():
     assert "controlled_in_memory_execution" in packet["reject_reasons"]
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    assert packet["live_submit_proof"] == {
+        "exchange_result_present": True,
+        "live_exchange_called": False,
+        "real_order_placed": False,
+    }
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False
@@ -135,6 +150,11 @@ def test_live_closure_evidence_packet_rejects_exchange_result_without_live_marke
 
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    assert packet["live_submit_proof"] == {
+        "exchange_result_present": True,
+        "live_exchange_called": False,
+        "real_order_placed": False,
+    }
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

@@ -14,11 +14,22 @@ def _complete_evidence() -> dict[str, str]:
     }
 
 
-def _official_packet(evidence: dict[str, str]) -> dict[str, object]:
-    return {
+def _official_packet(
+    evidence: dict[str, str],
+    *,
+    live_submit_proof: dict[str, bool] | None = None,
+) -> dict[str, object]:
+    packet = {
         "source_kind": "official_live_closure_evidence",
         "evidence": evidence,
     }
+    if "exchange_submit_execution_result_id" in evidence:
+        packet["live_submit_proof"] = live_submit_proof or {
+            "exchange_result_present": True,
+            "live_exchange_called": True,
+            "real_order_placed": True,
+        }
+    return packet
 
 
 def test_live_closure_evidence_verifier_marks_complete_when_all_contract_keys_present():
@@ -81,6 +92,11 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
         {
             "source_kind": "official_live_closure_evidence",
             "evidence": evidence,
+            "live_submit_proof": {
+                "exchange_result_present": True,
+                "live_exchange_called": True,
+                "real_order_placed": True,
+            },
             "reject_reasons": ["replay_signal", "disabled_smoke_only"],
         },
         generated_at_ms=1781755000000,
@@ -102,6 +118,47 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
     assert [stage["name"] for stage in rejected] == [
         "live_fresh_signal",
         "official_operation_layer_ready",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_missing_live_submit_proof():
+    packet = verifier.build_live_closure_evidence_verification(
+        {
+            "source_kind": "official_live_closure_evidence",
+            "evidence": _complete_evidence(),
+        },
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "blocked_live_closure_rejected"
+    assert packet["owner_state"] == "需要介入"
+    assert packet["completion"]["first_bounded_real_order_complete"] is False
+    assert packet["reject_reasons"] == ["live_submit_proof_missing"]
+    real_exchange_stage = next(
+        stage for stage in packet["stages"] if stage["name"] == "real_exchange_acceptance"
+    )
+    assert real_exchange_stage["status"] == "rejected"
+    assert real_exchange_stage["reject_reasons"] == ["live_submit_proof_missing"]
+
+
+def test_live_closure_evidence_verifier_rejects_false_live_submit_proof():
+    packet = verifier.build_live_closure_evidence_verification(
+        _official_packet(
+            _complete_evidence(),
+            live_submit_proof={
+                "exchange_result_present": True,
+                "live_exchange_called": False,
+                "real_order_placed": False,
+            },
+        ),
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "blocked_live_closure_rejected"
+    assert packet["completion"]["real_order_closure_proven"] is False
+    assert packet["reject_reasons"] == [
+        "live_exchange_not_called",
+        "real_order_not_placed",
     ]
 
 

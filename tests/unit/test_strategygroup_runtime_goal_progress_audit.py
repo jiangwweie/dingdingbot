@@ -1133,6 +1133,11 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
             {
                 "source_kind": "official_live_closure_evidence",
                 "official_live_closure_evidence": True,
+                "live_submit_proof": {
+                    "exchange_result_present": True,
+                    "live_exchange_called": True,
+                    "real_order_placed": True,
+                },
                 "evidence": evidence,
             },
             ensure_ascii=False,

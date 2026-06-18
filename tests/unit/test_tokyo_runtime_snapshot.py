@@ -211,6 +211,11 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
         "status": "live_closure_evidence_packet_built",
         "source_kind": "official_live_closure_evidence" if official else "local_rehearsal",
         "official_live_closure_evidence": official,
+        "live_submit_proof": {
+            "exchange_result_present": True,
+            "live_exchange_called": True,
+            "real_order_placed": True,
+        },
         "evidence": evidence,
         "reject_reasons": [],
     }
