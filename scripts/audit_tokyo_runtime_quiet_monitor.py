@@ -58,6 +58,7 @@ def build_quiet_monitor_audit(
     automation_path: Path,
 ) -> dict[str, Any]:
     checks = _checks_from_text(baseline=baseline, automation_text=automation_text)
+    checks.extend(_checks_from_baseline(baseline=baseline))
     blockers = [
         check["id"]
         for check in checks
@@ -131,6 +132,36 @@ def _checks_from_text(
             "required_text": required,
         })
     return checks
+
+
+def _checks_from_baseline(*, baseline: dict[str, Any]) -> list[dict[str, str]]:
+    p0_completion_audit_check = str(baseline.get("p0_completion_audit_check") or "")
+    required_fragments = [
+        "python3 scripts/runtime_first_bounded_live_order_completion_audit.py",
+        "--output-json output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
+        "--output-owner-progress output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md",
+    ]
+    missing_fragments = [
+        fragment
+        for fragment in required_fragments
+        if fragment not in p0_completion_audit_check
+    ]
+    forbidden_fragments = ["run_tokyo", "ssh ", "scp ", "rsync "]
+    forbidden_present = [
+        fragment for fragment in forbidden_fragments if fragment in p0_completion_audit_check
+    ]
+    status = (
+        "pass"
+        if p0_completion_audit_check and not missing_fragments and not forbidden_present
+        else "fail"
+    )
+    return [
+        {
+            "id": "p0_completion_audit_check_registered",
+            "status": status,
+            "required_text": " | ".join(required_fragments),
+        }
+    ]
 
 
 def _owner_progress_text(report: dict[str, Any]) -> str:

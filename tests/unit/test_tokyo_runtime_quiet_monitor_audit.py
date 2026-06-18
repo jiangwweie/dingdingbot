@@ -27,6 +27,7 @@ def _baseline():
     return {
         "heartbeat_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md",
         "goal_progress_audit_check": "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md",
+        "p0_completion_audit_check": "python3 scripts/runtime_first_bounded_live_order_completion_audit.py --owner-progress --output-json output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json --output-owner-progress output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md",
     }
 
 
@@ -59,6 +60,8 @@ def test_quiet_monitor_audit_passes_when_prompt_matches_baseline(tmp_path):
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["checks"]["blockers"] == []
     assert all(check["status"] == "pass" for check in report["required_checks"])
+    checks = {check["id"]: check for check in report["required_checks"]}
+    assert checks["p0_completion_audit_check_registered"]["status"] == "pass"
 
 
 def test_quiet_monitor_audit_blocks_when_goal_progress_command_missing(tmp_path):
@@ -78,6 +81,38 @@ def test_quiet_monitor_audit_blocks_when_goal_progress_command_missing(tmp_path)
     assert "goal_progress_audit_check" in report["checks"]["blockers"]
     checks = {check["id"]: check for check in report["required_checks"]}
     assert checks["goal_progress_audit_check"]["status"] == "fail"
+
+
+def test_quiet_monitor_audit_blocks_when_p0_completion_audit_unregistered(tmp_path):
+    module = _load_module()
+    baseline = dict(_baseline())
+    baseline["p0_completion_audit_check"] = ""
+
+    report = module.build_quiet_monitor_audit(
+        baseline=baseline,
+        automation_text=_prompt_text(),
+        automation_path=tmp_path / "automation.toml",
+    )
+
+    assert report["status"] == "blocked"
+    assert "p0_completion_audit_check_registered" in report["checks"]["blockers"]
+    checks = {check["id"]: check for check in report["required_checks"]}
+    assert checks["p0_completion_audit_check_registered"]["status"] == "fail"
+
+
+def test_quiet_monitor_audit_blocks_when_p0_completion_audit_uses_remote_probe(tmp_path):
+    module = _load_module()
+    baseline = dict(_baseline())
+    baseline["p0_completion_audit_check"] += " && ssh tokyo.example true"
+
+    report = module.build_quiet_monitor_audit(
+        baseline=baseline,
+        automation_text=_prompt_text(),
+        automation_path=tmp_path / "automation.toml",
+    )
+
+    assert report["status"] == "blocked"
+    assert "p0_completion_audit_check_registered" in report["checks"]["blockers"]
 
 
 def test_quiet_monitor_owner_progress_is_readable(tmp_path):
