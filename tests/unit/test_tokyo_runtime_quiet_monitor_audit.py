@@ -34,16 +34,14 @@ def _baseline():
 
 def _prompt_text():
     return (
-        "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache "
-        "--heartbeat --output-json output/runtime-monitor/latest-daily-check.json "
-        "--output-owner-progress output/runtime-monitor/latest-owner-progress.md "
-        "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py "
-        "--owner-progress --output-json output/runtime-monitor/latest-goal-progress.json "
-        "--output-owner-progress output/runtime-monitor/latest-goal-progress.md "
-        "output/runtime-monitor/latest-goal-progress.md DONT_NOTIFY "
-        "P0 waiting_for_market P0.5 ready 0 remote interactions "
-        "exactly one L1 read-only Tokyo snapshot "
-        "prefer output/runtime-monitor/latest-goal-progress.md"
+        "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py "
+        "--daily-check-mode cache --owner-progress "
+        "--output-json output/runtime-monitor/latest-local-monitor-sequence.json "
+        "--output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md "
+        "DONT_NOTIFY waiting_for_market not_complete_waiting_for_market "
+        "blockers none non-market gaps none remote interaction count 0 "
+        "fresh/runtime-ready signal "
+        "Do not advance frontend or historical-debt cleanup"
     )
 
 
@@ -66,10 +64,10 @@ def test_quiet_monitor_audit_passes_when_prompt_matches_baseline(tmp_path):
     assert checks["local_monitor_sequence_check_registered"]["status"] == "pass"
 
 
-def test_quiet_monitor_audit_blocks_when_goal_progress_command_missing(tmp_path):
+def test_quiet_monitor_audit_blocks_when_local_sequence_command_missing(tmp_path):
     module = _load_module()
     text = _prompt_text().replace(
-        _baseline()["goal_progress_audit_check"],
+        _baseline()["local_monitor_sequence_check"],
         "python3 missing.py",
     )
 
@@ -80,9 +78,9 @@ def test_quiet_monitor_audit_blocks_when_goal_progress_command_missing(tmp_path)
     )
 
     assert report["status"] == "blocked"
-    assert "goal_progress_audit_check" in report["checks"]["blockers"]
+    assert "local_monitor_sequence_check" in report["checks"]["blockers"]
     checks = {check["id"]: check for check in report["required_checks"]}
-    assert checks["goal_progress_audit_check"]["status"] == "fail"
+    assert checks["local_monitor_sequence_check"]["status"] == "fail"
 
 
 def test_quiet_monitor_audit_blocks_when_p0_completion_audit_unregistered(tmp_path):
@@ -131,7 +129,7 @@ def test_quiet_monitor_owner_progress_is_readable(tmp_path):
     assert "- 当前阶段: 自动化配置已对齐" in text
     assert "- 交互等级: L0_local_automation_audit" in text
     assert "- 远端交互次数: 0" in text
-    assert "| heartbeat_check | pass |" in text
+    assert "| local_monitor_sequence_check | pass |" in text
 
 
 def test_quiet_monitor_cli_writes_json_and_owner_progress(tmp_path):

@@ -385,9 +385,9 @@ L1 read-only snapshot
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
 | Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into an Owner-readable engineering blocker instead of triggering an extra Tokyo probe |
 | Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become an Owner-readable engineering blocker instead of mixing new code with stale cached fields |
-| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should use the baseline check modes: default status review is `--auto-cache`; explicit signal or regression investigation may force one L1 refresh and write `output/runtime-monitor/latest-daily-check.json` plus `output/runtime-monitor/latest-owner-progress.md` |
-| Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `heartbeat_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
-| Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including daily check and goal-progress commands, using `L0` / 0 remote interactions |
+| Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should start from `local_monitor_sequence_check`: daily-check, goal-progress, and P0 completion-audit run in strict local/cache order; explicit signal or regression investigation may still force one L1 refresh through the daily-check step |
+| Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `local_monitor_sequence_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
+| Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including the local sequence command and its quiet/noise boundary, using `L0` / 0 remote interactions |
 | Quiet-monitor drift cache | The same audit writes `output/runtime-monitor/latest-quiet-monitor-audit.json` and `output/runtime-monitor/latest-quiet-monitor-audit.md`, keeping automation drift review local and reusable |
 | Cache freshness visibility | Owner progress output includes `报告时间`, `缓存年龄`, and `缓存状态`; the default stale threshold is 35 minutes and can be adjusted with `--max-cache-age-minutes` |
 | Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reads local daily-check cache plus monitor baseline and reports P0/P0.5 track status with `L0` / 0 remote interactions |
@@ -1694,7 +1694,7 @@ commands.
 | --- | --- |
 | New local entrypoint | `scripts/run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache` |
 | Baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records `local_monitor_sequence_check` with `local_monitor_sequence_remote_interaction_count=0` |
-| Quiet-monitor audit | `audit_tokyo_runtime_quiet_monitor.py` checks that the local sequence command is registered and contains no remote probe command |
+| Quiet-monitor audit | `audit_tokyo_runtime_quiet_monitor.py` checks that the heartbeat automation prompt uses the registered local sequence command and that the baseline command contains no remote probe command |
 | Local validation | `py_compile` passed; related monitor/audit tests: `90 passed` |
 | Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
 | Deployment | Not deployed; this is a local goal-mode/automation tooling improvement only |

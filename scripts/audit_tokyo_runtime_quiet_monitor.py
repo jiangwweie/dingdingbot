@@ -111,16 +111,21 @@ def _checks_from_text(
     automation_text: str,
 ) -> list[dict[str, str]]:
     required_terms = {
-        "heartbeat_check": str(baseline.get("heartbeat_check") or ""),
-        "goal_progress_audit_check": str(baseline.get("goal_progress_audit_check") or ""),
-        "latest_goal_progress_md": "output/runtime-monitor/latest-goal-progress.md",
+        "local_monitor_sequence_check": str(
+            baseline.get("local_monitor_sequence_check") or ""
+        ),
+        "latest_local_monitor_sequence_md": (
+            "output/runtime-monitor/latest-local-monitor-sequence.md"
+        ),
         "dont_notify": "DONT_NOTIFY",
-        "p0_waiting_for_market": "P0 waiting_for_market",
-        "p05_ready": "P0.5 ready",
-        "zero_remote_interaction": "0 remote interactions",
-        "fresh_l1_refresh_limit": "exactly one L1 read-only Tokyo snapshot",
-        "manual_status_prefers_goal_progress": (
-            "prefer output/runtime-monitor/latest-goal-progress.md"
+        "waiting_for_market": "waiting_for_market",
+        "not_complete_waiting_for_market": "not_complete_waiting_for_market",
+        "blockers_none": "blockers none",
+        "non_market_gaps_none": "non-market gaps none",
+        "zero_remote_interaction": "remote interaction count 0",
+        "fresh_signal_notify": "fresh/runtime-ready signal",
+        "no_frontend_or_history_debt": (
+            "Do not advance frontend or historical-debt cleanup"
         ),
     }
     checks = []
