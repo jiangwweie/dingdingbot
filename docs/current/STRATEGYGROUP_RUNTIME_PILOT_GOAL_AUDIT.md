@@ -120,6 +120,23 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Live Closure Evidence Snapshot Projection
+
+The low-noise Tokyo snapshot and daily-check path now consumes first-live
+closure evidence without adding another remote interaction. The same L1
+read-only snapshot reads the closure packet files when present, verifies an
+evidence packet locally when a verification packet is absent, and projects the
+result into daily-check fields that goal-progress already understands.
+
+| Item | Evidence |
+| --- | --- |
+| Snapshot files | `probe_tokyo_runtime_snapshot.py` reads `runtime-live-closure-evidence.json` and `runtime-live-closure-evidence-verification.json` in the existing report directory |
+| Snapshot projection | `first_bounded_real_order_complete`, `real_order_closure_proven`, and `runtime_live_closure_evidence_status` are exposed in snapshot checks |
+| Daily-check projection | `run_strategygroup_runtime_daily_check.py` carries those fields through L1/L0 reports and marks waiting false when real closure is proven |
+| Rejected evidence | Rejected live closure evidence becomes a product gap, not a completed first-live goal |
+| Interaction budget | This reuses the existing L1 read-only snapshot and does not add a second Tokyo interaction |
+| Safety | Read/projection/test work only; no server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Live Closure Evidence Packet Builder
 
 The first bounded live-order closure path now has a local packet builder that

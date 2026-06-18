@@ -165,6 +165,11 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
     assert report["checks"]["runtime_dry_run_scenario_count"] == 14
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "not_generated"
+    )
+    assert report["checks"]["first_bounded_real_order_complete"] is False
+    assert report["checks"]["real_order_closure_proven"] is False
     assert report["checks"]["runtime_execution_chain_ready_segment_count"] == 21
     assert report["checks"]["entry_fast_chain_boundary_ready"] is True
     assert report["checks"]["exit_hardening_boundary_ready"] is True
@@ -219,6 +224,31 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         "message": "自动化正常运行，当前没有可用市场机会",
         "owner_intervention_required": False,
     }
+
+
+def test_daily_check_projects_first_bounded_live_closure_completion():
+    module = _load_module()
+
+    report = module.build_daily_check_report(
+        snapshot=_snapshot(
+            checks={
+                "runtime_live_closure_evidence_status": "live_closure_complete",
+                "first_bounded_real_order_complete": True,
+                "real_order_closure_proven": True,
+            }
+        )
+    )
+
+    assert report["status"] == "ready"
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "live_closure_complete"
+    )
+    assert report["checks"]["first_bounded_real_order_complete"] is True
+    assert report["checks"]["real_order_closure_proven"] is True
+    assert report["owner_summary"]["progress"]["live_closure"] == (
+        "live_closure_complete"
+    )
 
 
 def test_daily_check_does_not_require_frontend_publish_for_quiet_waiting():

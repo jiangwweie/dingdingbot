@@ -282,7 +282,13 @@ def build_daily_check_report(
     if product_gaps:
         warnings.extend(f"product_gap:{item}" for item in product_gaps)
 
+    first_bounded_real_order_complete = (
+        checks.get("first_bounded_real_order_complete") is True
+    )
+    real_order_closure_proven = checks.get("real_order_closure_proven") is True
     waiting_for_market = _is_waiting_for_market(owner_summary, goal_status)
+    if first_bounded_real_order_complete and real_order_closure_proven:
+        waiting_for_market = False
     status = "ready"
     if blockers or hard_failures:
         status = "blocked"
@@ -317,6 +323,14 @@ def build_daily_check_report(
         "runtime_execution_chain_closure_status_ready": (
             checks.get("runtime_execution_chain_closure_status_ready") is True
         ),
+        "runtime_live_closure_evidence_status": (
+            checks.get("runtime_live_closure_evidence_status") or "not_generated"
+        ),
+        "runtime_live_closure_evidence_reject_reasons": list(
+            checks.get("runtime_live_closure_evidence_reject_reasons") or []
+        ),
+        "first_bounded_real_order_complete": first_bounded_real_order_complete,
+        "real_order_closure_proven": real_order_closure_proven,
         "runtime_execution_chain_ready_segment_count": (
             len(chain_ready_segments)
             if chain_ready_segments is not None
@@ -411,6 +425,10 @@ def build_daily_check_report(
                     strategygroup_tier_boundary_ready
                 ),
                 "real_order_readiness": dict(real_order_readiness_summary),
+                "live_closure": (
+                    checks.get("runtime_live_closure_evidence_status")
+                    or "not_generated"
+                ),
                 "frontend": owner_summary.get("frontend") or "外部项目",
             },
         },

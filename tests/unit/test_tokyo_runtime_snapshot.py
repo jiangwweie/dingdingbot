@@ -190,6 +190,32 @@ def _healthy_remote_payload(*, frontend_release: dict | None = None) -> dict:
     }
 
 
+def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
+    evidence = {
+        "live_watcher_signal_packet_id": "live-signal-1",
+        "required_facts_readiness_packet_id": "facts-ready-1",
+        "candidate_id": "candidate-1",
+        "runtime_grant_id": "grant-1",
+        "fresh_submit_authorization_id": "fresh-auth-1",
+        "action_time_finalgate_packet_id": "finalgate-1",
+        "operation_layer_submit_authorization_id": "operation-auth-1",
+        "exchange_submit_execution_result_id": "exchange-result-1",
+        "exchange_native_hard_stop_order_id": "hard-stop-1",
+        "runtime_post_submit_finalize_packet_id": "finalize-1",
+        "post_submit_reconciliation_evidence_id": "reconcile-1",
+        "post_submit_budget_settlement_id": "settlement-1",
+        "submit_outcome_review_id": "review-1",
+    }
+    return {
+        "scope": "runtime_live_closure_evidence_packet",
+        "status": "live_closure_evidence_packet_built",
+        "source_kind": "official_live_closure_evidence" if official else "local_rehearsal",
+        "official_live_closure_evidence": official,
+        "evidence": evidence,
+        "reject_reasons": [],
+    }
+
+
 def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     module = _load_module()
     calls = []
@@ -215,6 +241,8 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert len(calls) == 1
     assert calls[0][0] == "ssh"
     assert "runtime-execution-chain-closure-status.json" in calls[0][-1]
+    assert "runtime-live-closure-evidence.json" in calls[0][-1]
+    assert "runtime-live-closure-evidence-verification.json" in calls[0][-1]
     assert "nginx.service" not in calls[0][-1]
     assert report["interaction"]["level"] == "L1_readonly_snapshot"
     assert report["interaction"]["remote_interaction_count"] == 1
@@ -234,6 +262,11 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
         "waiting": 1,
         "waiting_keys": ["fresh_signal"],
     }
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "not_generated"
+    )
+    assert report["checks"]["first_bounded_real_order_complete"] is False
+    assert report["checks"]["real_order_closure_proven"] is False
     assert report["facts"]["reports"]["goal_status"][
         "real_order_readiness_summary"
     ] == {
@@ -278,6 +311,78 @@ def test_tokyo_runtime_snapshot_collects_all_facts_with_one_ssh_call():
     assert goal_status["submit_blocker_keys"] == []
     assert report["owner_summary"]["state"] == "等待机会"
     assert report["owner_summary"]["owner_intervention_required"] is False
+
+
+def test_tokyo_runtime_snapshot_auto_verifies_live_closure_evidence_packet():
+    module = _load_module()
+    payload = _healthy_remote_payload()
+    payload["reports"]["runtime-live-closure-evidence.json"] = {
+        "exists": True,
+        "payload": _complete_live_closure_evidence_packet(),
+    }
+
+    def runner(command: tuple[str, ...]):
+        return module.CommandResult(
+            stdout=json.dumps(payload),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head=None,
+        runner=runner,
+    )
+
+    assert report["status"] == "ready"
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "live_closure_complete"
+    )
+    assert report["checks"]["first_bounded_real_order_complete"] is True
+    assert report["checks"]["real_order_closure_proven"] is True
+    assert report["checks"]["waiting_for_market"] is False
+    assert report["facts"]["reports"]["runtime_live_closure_evidence_verification"][
+        "status"
+    ] == "live_closure_complete"
+
+
+def test_tokyo_runtime_snapshot_rejects_unmarked_live_closure_evidence_packet():
+    module = _load_module()
+    payload = _healthy_remote_payload()
+    payload["reports"]["runtime-live-closure-evidence.json"] = {
+        "exists": True,
+        "payload": _complete_live_closure_evidence_packet(official=False),
+    }
+
+    def runner(command: tuple[str, ...]):
+        return module.CommandResult(
+            stdout=json.dumps(payload),
+            stderr="",
+            returncode=0,
+        )
+
+    report = module.build_tokyo_runtime_snapshot(
+        host="tokyo",
+        deploy_root="/home/ubuntu/brc-deploy",
+        report_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
+        frontend_root="/var/www/brc-owner-console",
+        expected_runtime_head="runtime-head",
+        expected_frontend_head=None,
+        runner=runner,
+    )
+
+    assert report["status"] == "product_gap"
+    assert report["checks"]["runtime_live_closure_evidence_status"] == (
+        "blocked_live_closure_rejected"
+    )
+    assert "live_closure_evidence:official_live_closure_source_missing" in (
+        report["checks"]["product_gaps"]
+    )
+    assert report["checks"]["first_bounded_real_order_complete"] is False
 
 
 def test_tokyo_runtime_snapshot_blocks_on_goal_status_submit_blocker():

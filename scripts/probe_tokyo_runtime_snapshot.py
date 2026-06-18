@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts import runtime_live_closure_evidence_verifier  # noqa: E402
+
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
 DEFAULT_REPORT_DIR = (
@@ -33,6 +39,8 @@ DEFAULT_REPORT_FILES = (
     "owner-console-source-readiness.json",
     "runtime-dry-run-audit-chain.json",
     "runtime-execution-chain-closure-status.json",
+    "runtime-live-closure-evidence.json",
+    "runtime-live-closure-evidence-verification.json",
 )
 
 REQUIRED_DRY_RUN_CHECKS = (
@@ -224,6 +232,14 @@ def evaluate_runtime_snapshot(
         reports,
         "runtime-execution-chain-closure-status.json",
     )
+    live_closure_evidence = _report_payload(
+        reports,
+        "runtime-live-closure-evidence.json",
+    )
+    live_closure_verification = _live_closure_verification_from_reports(
+        reports=reports,
+        live_closure_evidence=live_closure_evidence,
+    )
     latest_summary = _report_payload(reports, "latest-summary.json")
 
     if source_readiness.get("status") not in {"ready", "ok"}:
@@ -250,12 +266,26 @@ def evaluate_runtime_snapshot(
         f"runtime_goal_status_submit_blocker:{key}"
         for key in goal_status_submit_blockers
     )
+    live_closure_completion = _as_dict(live_closure_verification.get("completion"))
+    first_bounded_real_order_complete = (
+        live_closure_completion.get("first_bounded_real_order_complete") is True
+    )
+    real_order_closure_proven = (
+        live_closure_completion.get("real_order_closure_proven") is True
+    )
+    if live_closure_verification.get("status") == "blocked_live_closure_rejected":
+        product_gaps.extend(
+            f"live_closure_evidence:{item}"
+            for item in live_closure_verification.get("reject_reasons") or []
+        )
 
     waiting_for_market = (
         _packet_check(goal_status, "fresh_signal_present") is False
         or latest_summary.get("status") in {"waiting_for_signal", "waiting_for_market"}
         or source_readiness.get("owner_state") in {"等待机会", "waiting_for_opportunity"}
     )
+    if first_bounded_real_order_complete and real_order_closure_proven:
+        waiting_for_market = False
     ready_for_real_order = bool(goal_status.get("ready_for_real_order_action"))
     owner_stage = "等待机会" if waiting_for_market else "处理中"
     if blockers:
@@ -285,6 +315,15 @@ def evaluate_runtime_snapshot(
             _as_dict(chain_closure.get("real_execution")).get("real_order_allowed")
             is True
         ),
+        "runtime_live_closure_evidence_status": (
+            live_closure_verification.get("status") or "not_generated"
+        ),
+        "runtime_live_closure_evidence_reject_reasons": list(
+            live_closure_verification.get("reject_reasons") or []
+        ),
+        "first_bounded_real_order_complete": first_bounded_real_order_complete,
+        "real_order_closure_proven": real_order_closure_proven,
+        "waiting_for_market": waiting_for_market,
         "runtime_goal_status_submit_blocker_keys": goal_status_submit_blockers,
         "runtime_goal_status_real_order_readiness_summary": (
             goal_status_real_order_readiness_summary
@@ -354,6 +393,12 @@ def evaluate_runtime_snapshot(
                 "runtime_execution_chain_closure_status": (
                     _summary_from_packet(chain_closure)
                 ),
+                "runtime_live_closure_evidence": (
+                    _summary_from_packet(live_closure_evidence)
+                ),
+                "runtime_live_closure_evidence_verification": (
+                    _summary_from_packet(live_closure_verification)
+                ),
             },
         },
         "checks": checks,
@@ -401,6 +446,8 @@ report_files = [
     "owner-console-source-readiness.json",
     "runtime-dry-run-audit-chain.json",
     "runtime-execution-chain-closure-status.json",
+    "runtime-live-closure-evidence.json",
+    "runtime-live-closure-evidence-verification.json",
 ]
 
 def run(args):
@@ -503,6 +550,25 @@ def _report_payload(reports: dict[str, Any], filename: str) -> dict[str, Any]:
     item = _as_dict(reports.get(filename))
     payload = item.get("payload")
     return payload if isinstance(payload, dict) else {}
+
+
+def _live_closure_verification_from_reports(
+    *,
+    reports: dict[str, Any],
+    live_closure_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    verification = _report_payload(
+        reports,
+        "runtime-live-closure-evidence-verification.json",
+    )
+    if verification:
+        return verification
+    if live_closure_evidence:
+        return (
+            runtime_live_closure_evidence_verifier
+            .build_live_closure_evidence_verification(live_closure_evidence)
+        )
+    return {}
 
 
 def _missing_dry_run_required_checks(checks: dict[str, Any]) -> list[str]:
