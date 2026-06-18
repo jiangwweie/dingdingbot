@@ -656,3 +656,18 @@ keys, and no reject reasons.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `15 passed` for `tests/unit/test_runtime_first_bounded_live_order_completion_audit.py`; `py_compile` passed for `runtime_first_bounded_live_order_completion_audit.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Completion Audit Input Freshness Checkpoint
+
+The P0 completion audit now checks that `goal_progress` is not older than the
+`daily_check` input when both inputs expose generated timestamps. This prevents
+a stale goal-progress packet from being used as completion evidence after a
+newer daily check has refreshed runtime state.
+
+| Item | Evidence |
+| --- | --- |
+| Input freshness guard | `runtime_first_bounded_live_order_completion_audit.py` reports `goal_progress:generated_before_daily_check` when `goal_progress.generated_at_utc < daily_check.generated_at_utc` |
+| Stale input rejection | `test_completion_audit_rejects_goal_progress_older_than_daily_check` marks that shape as `needs_non_market_repair` under the input-source traceability requirement |
+| Current audit output | Sequential local refresh reports `status=not_complete_waiting_for_market`, `input_source_gaps=[]`, `non_market_gaps=[]`, `remote_interaction_count=0` |
+| Verification | `16 passed` for `tests/unit/test_runtime_first_bounded_live_order_completion_audit.py`; `py_compile` passed for `runtime_first_bounded_live_order_completion_audit.py` |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

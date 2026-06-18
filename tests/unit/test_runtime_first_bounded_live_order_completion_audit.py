@@ -262,6 +262,47 @@ def test_completion_audit_reports_missing_input_source_gap():
     ]
 
 
+def test_completion_audit_rejects_goal_progress_older_than_daily_check():
+    input_sources = _input_sources(
+        daily_check={
+            "exists": True,
+            "generated_at_utc": "2026-06-18T09:10:00+00:00",
+            "path": "/tmp/latest-daily-check.json",
+            "schema": 12,
+            "status": "waiting_for_market",
+        },
+        goal_progress={
+            "exists": True,
+            "generated_at_utc": "2026-06-18T09:09:59+00:00",
+            "path": "/tmp/latest-goal-progress.json",
+            "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
+            "status": "waiting_for_market",
+        },
+    )
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        input_sources=input_sources,
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["input_source_gaps"] == [
+        "goal_progress:generated_before_daily_check"
+    ]
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "P0 completion audit input sources are traceable",
+            "missing_or_false": [
+                "goal_progress:generated_before_daily_check"
+            ],
+        }
+    ]
+
+
 def test_completion_audit_requires_live_submit_truth_contract_check():
     live_cutover = _live_cutover()
     live_cutover["live_closure_cutover_contract"]["checks"].pop(

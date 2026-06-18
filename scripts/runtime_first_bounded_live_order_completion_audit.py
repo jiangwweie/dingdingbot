@@ -88,7 +88,32 @@ def _input_source_gaps(input_sources: dict[str, Any] | None) -> list[str]:
         for field in ("path", "status", "schema"):
             if not source.get(field):
                 gaps.append(f"{name}:{field}")
+    daily_generated = _source_generated_at(_dict(sources.get("daily_check")))
+    goal_generated = _source_generated_at(_dict(sources.get("goal_progress")))
+    if daily_generated and goal_generated and goal_generated < daily_generated:
+        gaps.append("goal_progress:generated_before_daily_check")
     return gaps
+
+
+def _source_generated_at(source: dict[str, Any]) -> datetime | None:
+    generated_at_utc = source.get("generated_at_utc")
+    if isinstance(generated_at_utc, str) and generated_at_utc.strip():
+        value = generated_at_utc.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    generated_at_ms = source.get("generated_at_ms")
+    try:
+        if generated_at_ms is None:
+            return None
+        return datetime.fromtimestamp(float(generated_at_ms) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _local_completion_audit_interaction() -> dict[str, Any]:
