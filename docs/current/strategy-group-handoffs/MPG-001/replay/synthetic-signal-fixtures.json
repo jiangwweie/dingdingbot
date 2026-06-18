@@ -1,0 +1,86 @@
+{
+  "schema_version": "brc.strategygroup.synthetic_fixture_set.v1",
+  "strategy_group_id": "MPG-001",
+  "purpose": "P0.5 local replay rehearsal fixtures. These are never live market signals and never authorize a real order.",
+  "fixtures": [
+    {
+      "fixture_case": "no_signal",
+      "expected_blocker_class": "waiting_for_market",
+      "expected_owner_state": "waiting_for_opportunity",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "fresh_signal_pass",
+      "expected_blocker_class": "none",
+      "expected_owner_state": "processing",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": true,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "stale_signal",
+      "expected_blocker_class": "missing_fact",
+      "expected_owner_state": "temporarily_unavailable",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "missing_required_facts",
+      "expected_blocker_class": "missing_fact",
+      "expected_owner_state": "temporarily_unavailable",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "active_position_conflict",
+      "expected_blocker_class": "active_position_resolution",
+      "expected_owner_state": "needs_intervention",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "open_order_conflict",
+      "expected_blocker_class": "active_position_resolution",
+      "expected_owner_state": "needs_intervention",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "protection_missing",
+      "expected_blocker_class": "hard_safety_stop",
+      "expected_owner_state": "needs_intervention",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    },
+    {
+      "fixture_case": "allocated_profile_boundary_mismatch",
+      "expected_blocker_class": "hard_safety_stop",
+      "expected_owner_state": "needs_intervention",
+      "replay_only": true,
+      "not_live_market_signal": true,
+      "operation_layer_shape_reachable": false,
+      "real_order_allowed": false
+    }
+  ],
+  "safety_invariants": {
+    "finalgate_bypassed": false,
+    "operation_layer_bypassed": false,
+    "exchange_write_called": false,
+    "real_order_created": false,
+    "withdrawal_or_transfer_created": false
+  }
+}

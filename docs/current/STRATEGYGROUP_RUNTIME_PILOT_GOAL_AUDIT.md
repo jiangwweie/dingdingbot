@@ -76,6 +76,7 @@ cleanup plan.
 | `python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md` | `DONT_NOTIFY`, waiting for market |
 | `python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md` | `P0=waiting_for_market`, `P0.5=ready`, no blockers |
 | `python3 scripts/runtime_dry_run_audit_chain.py --output-json output/strategygroup-runtime-pilot/runtime-dry-run-audit-chain-current.json` | `status=passed`, `scenario_count=14`, all required checks true |
+| `python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/strategygroup-runtime-pilot/replay-lab/runtime-replay-report.json --output-owner-progress output/strategygroup-runtime-pilot/replay-lab/runtime-replay-owner-progress.md` | `status=passed`, `strategy_group_id=MPG-001`, replay-only safety flags true |
 
 ## Completion Boundary
 
@@ -117,6 +118,23 @@ fresh selected StrategyGroup signal exists.
 | disabled smoke treated as real execution proof | false |
 
 ## Latest Checkpoint
+
+### 2026-06-18 Runtime Replay Lab Checkpoint
+
+The P0.5 Runtime Replay Lab now has a local MPG-001 contract, a tracked
+historical-style replay sample, a tracked synthetic signal fixture set, and a
+unified dry-run audit integration. This checkpoint is local-only and does not
+deploy to Tokyo.
+
+| Item | Evidence |
+| --- | --- |
+| Replay contract | `src/domain/strategygroup_runtime_replay.py` defines replay events, report packets, review recommendations, safety invariants, and external sidecar policy |
+| MPG-001 sample | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-sample.json` |
+| Synthetic fixtures | `docs/current/strategy-group-handoffs/MPG-001/replay/synthetic-signal-fixtures.json` covers no-signal, fresh-pass, stale, missing-fact, conflict, protection-missing, and profile-boundary branches |
+| Local runner | `scripts/run_strategygroup_runtime_replay_lab.py` emits a replay report and Owner-readable local progress note |
+| Dry-run audit | `runtime-dry-run-audit-chain` includes `runtime_replay_lab_checked`, `mpg001_replay_sample_checked`, `synthetic_signal_fixture_set_checked`, and `external_replay_adapter_sidecar_only_checked` |
+| External framework policy | Freqtrade or similar tools are future sidecar research adapters only, not FinalGate, Operation Layer, Owner state, live signal identity, or real-submit authority |
+| Safety | Local test/replay work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Fresh Signal TTL Guard
 

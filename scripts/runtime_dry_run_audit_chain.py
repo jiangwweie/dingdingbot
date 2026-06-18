@@ -34,6 +34,9 @@ from src.domain.runtime_executable_submit_readiness import (  # noqa: E402
 from src.domain.runtime_official_submit_handoff import (  # noqa: E402
     build_runtime_official_submit_handoff_packet,
 )
+from src.domain.strategygroup_runtime_replay import (  # noqa: E402
+    build_mpg001_replay_lab_packet,
+)
 
 
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/dry-run-audit-chain")
@@ -3529,6 +3532,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     ]
     shared_pipeline = _shared_runtime_pipeline_validation()
     runtime_tier_policy = _runtime_tier_policy_validation()
+    runtime_replay_lab = build_mpg001_replay_lab_packet(
+        generated_at_ms=int(time.time() * 1000)
+    ).model_dump(mode="json")
     blockers = [
         f"{scenario['name']}:{blocker}"
         for scenario in scenarios
@@ -3542,6 +3548,10 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
     blockers.extend(
         f"runtime_tier_policy_validation:{blocker}"
         for blocker in runtime_tier_policy.get("blockers", [])
+    )
+    blockers.extend(
+        f"runtime_replay_lab_validation:{blocker}"
+        for blocker in runtime_replay_lab.get("blockers", [])
     )
     dangerous_effects = _dangerous_effects(*scenarios)
     checks = {
@@ -3695,6 +3705,34 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 value is True
                 for value in (runtime_tier_policy.get("checks") or {}).values()
             )
+        ),
+        "runtime_replay_lab_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and all(
+                value is True
+                for value in (runtime_replay_lab.get("checks") or {}).values()
+            )
+        ),
+        "mpg001_replay_sample_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "mpg001_replay_sample_present"
+            )
+            is True
+        ),
+        "synthetic_signal_fixture_set_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "synthetic_fixture_cases_present"
+            )
+            is True
+        ),
+        "external_replay_adapter_sidecar_only_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "external_framework_sidecar_only"
+            )
+            is True
         ),
         "only_mpg_tiny_real_order_eligible_checked": (
             runtime_tier_policy.get("status") == "passed"
@@ -3864,6 +3902,18 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "runtime_tier_policy_checked": checks[
             "runtime_tier_policy_checked"
         ],
+        "runtime_replay_lab_checked": checks[
+            "runtime_replay_lab_checked"
+        ],
+        "mpg001_replay_sample_checked": checks[
+            "mpg001_replay_sample_checked"
+        ],
+        "synthetic_signal_fixture_set_checked": checks[
+            "synthetic_signal_fixture_set_checked"
+        ],
+        "external_replay_adapter_sidecar_only_checked": checks[
+            "external_replay_adapter_sidecar_only_checked"
+        ],
         "only_mpg_tiny_real_order_eligible_checked": checks[
             "only_mpg_tiny_real_order_eligible_checked"
         ],
@@ -3921,6 +3971,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         "scenarios": scenarios,
         "shared_runtime_pipeline_validation": shared_pipeline,
         "runtime_tier_policy_validation": runtime_tier_policy,
+        "runtime_replay_lab_validation": runtime_replay_lab,
         "checks": checks,
         "scenario_count": checks["scenario_count"],
         "required_checks": required_checks,
