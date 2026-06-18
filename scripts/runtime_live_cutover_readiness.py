@@ -40,6 +40,15 @@ MARKET_DEPENDENT_WAITING_KEYS = [
     "real_exchange_acceptance",
     "post_submit_real_reconciliation",
 ]
+RUNTIME_BOUNDARY_MISSING_REJECT_IF = [
+    "strategy_group_boundary_missing",
+    "runtime_profile_boundary_missing",
+    "subaccount_boundary_missing",
+    "symbol_boundary_missing",
+    "side_boundary_missing",
+    "notional_boundary_missing",
+    "leverage_boundary_missing",
+]
 
 SECTION_CHECKS: dict[str, list[str]] = {
     "strategy_scope": [
@@ -143,6 +152,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "strategy_scope_mismatch",
             "profile_boundary_mismatch",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -169,6 +179,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "budget_missing",
             "duplicate_submit_risk",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -190,6 +201,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "operation_layer_not_ready",
             "disabled_smoke_only",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -215,6 +227,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "live_exchange_not_called",
             "real_order_not_placed",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -236,6 +249,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "exchange_native_protection_result_id_mismatch",
             "exchange_native_protection_result_source_missing",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -256,6 +270,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "post_submit_close_loop_proof_missing",
             "post_submit_finalize_result_source_missing",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -281,6 +296,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "post_submit_close_loop_proof_missing",
             "post_submit_close_loop_result_source_missing",
             "runtime_boundary_proof_missing",
+            *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
             "runtime_profile_boundary_mismatch",
             "subaccount_boundary_mismatch",
@@ -414,6 +430,7 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_requires_runtime_boundary_binding": (
             "runtime_boundary_proof_missing" in reject_reasons
+            and all(item in reject_reasons for item in RUNTIME_BOUNDARY_MISSING_REJECT_IF)
             and "strategy_group_boundary_mismatch" in reject_reasons
             and "runtime_profile_boundary_mismatch" in reject_reasons
             and "subaccount_boundary_mismatch" in reject_reasons

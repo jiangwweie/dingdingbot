@@ -5,18 +5,31 @@ import json
 from scripts import refresh_runtime_live_closure_evidence_packets as refresher
 
 
+BOUNDARY_FIELDS = {
+    "strategy_group_id": "MPG-001",
+    "runtime_profile_id": "owner-runtime-console-v1",
+    "subaccount_id": "tokyo-runtime-subaccount",
+    "symbol": "MSTR/USDT:USDT",
+    "side": "long",
+    "notional": "100",
+    "leverage": "1",
+}
+
+
 def _official_complete_sources() -> list[dict]:
     return [
         {
             "scope": "runtime_signal_watcher_live_signal",
             "status": "fresh_signal_ready",
             "signal_packet_id": "live-signal-packet-1",
+            **BOUNDARY_FIELDS,
         },
         {
             "scope": "strategy_group_live_facts_readiness",
             "status": "ready",
             "signal_packet_id": "live-signal-packet-1",
             "required_facts_readiness_packet_id": "facts-ready-1",
+            **BOUNDARY_FIELDS,
         },
         {
             "scope": "official_entry_chain",
@@ -31,6 +44,7 @@ def _official_complete_sources() -> list[dict]:
                 "exchange_submit_execution_result_id": "exchange-result-1",
                 "exchange_native_hard_stop_order_id": "hard-stop-1",
             },
+            **BOUNDARY_FIELDS,
             "safety_invariants": {
                 "live_exchange_called": True,
                 "real_order_placed": True,
@@ -46,6 +60,7 @@ def _official_complete_sources() -> list[dict]:
                 "post_submit_budget_settlement_id": "settlement-1",
                 "submit_outcome_review_id": "review-1",
             },
+            **BOUNDARY_FIELDS,
         },
     ]
 

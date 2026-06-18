@@ -187,6 +187,15 @@ RUNTIME_BOUNDARY_REJECT_REASONS = {
     "notional": "notional_boundary_mismatch",
     "leverage": "leverage_boundary_mismatch",
 }
+RUNTIME_BOUNDARY_MISSING_REJECT_REASONS = {
+    "strategy_group_id": "strategy_group_boundary_missing",
+    "runtime_profile_id": "runtime_profile_boundary_missing",
+    "subaccount_id": "subaccount_boundary_missing",
+    "symbol": "symbol_boundary_missing",
+    "side": "side_boundary_missing",
+    "notional": "notional_boundary_missing",
+    "leverage": "leverage_boundary_missing",
+}
 
 
 def build_live_closure_evidence_packet(
@@ -408,6 +417,11 @@ def _derive_reject_reasons(
                 reasons.add("post_submit_finalize_result_source_missing")
             if close_loop_missing - {"runtime_post_submit_finalize_packet_id"}:
                 reasons.add("post_submit_close_loop_result_source_missing")
+    if _runtime_boundary_required(evidence):
+        for field in runtime_boundary_proof.get("missing_fields") or []:
+            reason = RUNTIME_BOUNDARY_MISSING_REJECT_REASONS.get(str(field))
+            if reason:
+                reasons.add(reason)
     for field in runtime_boundary_proof.get("conflict_fields") or []:
         reason = RUNTIME_BOUNDARY_REJECT_REASONS.get(str(field))
         if reason:
@@ -675,6 +689,20 @@ def _runtime_boundary_source_packets(
             matched.append(packet)
             matched_ids.add(packet_id)
     return matched
+
+
+def _runtime_boundary_required(evidence: dict[str, Any]) -> bool:
+    return any(
+        _present(evidence.get(key))
+        for key in (
+            "candidate_id",
+            "runtime_grant_id",
+            "fresh_submit_authorization_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+            "exchange_submit_execution_result_id",
+        )
+    )
 
 
 def _source_packets_for_evidence_id(

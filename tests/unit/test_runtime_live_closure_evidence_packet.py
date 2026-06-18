@@ -321,6 +321,30 @@ def test_live_closure_evidence_packet_rejects_runtime_boundary_mismatch():
     assert verification["completion"]["first_bounded_real_order_complete"] is False
 
 
+def test_live_closure_evidence_packet_rejects_runtime_boundary_missing_after_candidate():
+    sources = _official_complete_sources()
+    for source in sources:
+        source.pop("subaccount_id", None)
+        source.pop("notional", None)
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["runtime_boundary_proof"]["missing_fields"] == [
+        "subaccount_id",
+        "notional",
+    ]
+    assert "subaccount_boundary_missing" in packet["reject_reasons"]
+    assert "notional_boundary_missing" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
 def test_live_closure_evidence_packet_rejects_unbound_live_signal_chain():
     sources = _official_complete_sources()
     sources[1].pop("signal_packet_id")

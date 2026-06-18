@@ -74,6 +74,7 @@ def _official_packet(
 
 def _runtime_boundary_proof(
     *,
+    missing_fields: list[str] | None = None,
     conflict_fields: list[str] | None = None,
 ) -> dict[str, object]:
     values = {
@@ -85,13 +86,15 @@ def _runtime_boundary_proof(
         "notional": ["100"],
         "leverage": ["1"],
     }
+    for field in missing_fields or []:
+        values[field] = []
     if conflict_fields:
         for field in conflict_fields:
             values[field].append(f"other-{field}")
     return {
         "source_packet_count": 4,
-        "observed_fields": list(values),
-        "missing_fields": [],
+        "observed_fields": [field for field, items in values.items() if items],
+        "missing_fields": missing_fields or [],
         "conflict_fields": conflict_fields or [],
         "values": values,
     }
@@ -478,6 +481,39 @@ def test_live_closure_evidence_verifier_rejects_runtime_boundary_mismatch():
     assert verification["reject_reasons"] == [
         "leverage_boundary_mismatch",
         "symbol_boundary_mismatch",
+    ]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "candidate_authorization_bound",
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
+        "real_exchange_acceptance",
+        "exchange_native_protection",
+        "post_submit_finalize",
+        "reconciliation_settlement_review",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_runtime_boundary_missing_fields():
+    packet = _official_packet(_complete_evidence())
+    packet["runtime_boundary_proof"] = _runtime_boundary_proof(
+        missing_fields=["subaccount_id", "notional"]
+    )
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "notional_boundary_missing",
+        "subaccount_boundary_missing",
     ]
     rejected = [
         stage

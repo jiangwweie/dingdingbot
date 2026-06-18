@@ -59,6 +59,13 @@ GLOBAL_REJECT_REASONS = {
     "post_submit_finalize_result_source_missing",
     "post_submit_close_loop_result_source_missing",
     "runtime_boundary_proof_missing",
+    "strategy_group_boundary_missing",
+    "runtime_profile_boundary_missing",
+    "subaccount_boundary_missing",
+    "symbol_boundary_missing",
+    "side_boundary_missing",
+    "notional_boundary_missing",
+    "leverage_boundary_missing",
     "strategy_group_boundary_mismatch",
     "runtime_profile_boundary_mismatch",
     "subaccount_boundary_mismatch",
@@ -124,6 +131,15 @@ RUNTIME_BOUNDARY_REJECT_REASONS = {
     "side": "side_boundary_mismatch",
     "notional": "notional_boundary_mismatch",
     "leverage": "leverage_boundary_mismatch",
+}
+RUNTIME_BOUNDARY_MISSING_REJECT_REASONS = {
+    "strategy_group_id": "strategy_group_boundary_missing",
+    "runtime_profile_id": "runtime_profile_boundary_missing",
+    "subaccount_id": "subaccount_boundary_missing",
+    "symbol": "symbol_boundary_missing",
+    "side": "side_boundary_missing",
+    "notional": "notional_boundary_missing",
+    "leverage": "leverage_boundary_missing",
 }
 
 
@@ -336,7 +352,7 @@ def _reject_reasons(
         _required_evidence_id_present(evidence.get(key))
         for key in required_evidence_keys
     ):
-        reasons.update(_runtime_boundary_reject_reasons(packet))
+        reasons.update(_runtime_boundary_reject_reasons(packet, evidence))
     live_submit_ready = False
     if source_ready and exchange_submit_execution_result_id:
         proof = packet.get("live_submit_proof")
@@ -525,19 +541,44 @@ def _pre_submit_authorization_chain_proof_id(
     return None
 
 
-def _runtime_boundary_reject_reasons(packet: dict[str, Any]) -> set[str]:
+def _runtime_boundary_reject_reasons(
+    packet: dict[str, Any],
+    evidence: dict[str, Any],
+) -> set[str]:
     proof = packet.get("runtime_boundary_proof")
     if not isinstance(proof, dict):
         return {"runtime_boundary_proof_missing"}
+    missing_fields = {
+        str(item)
+        for item in proof.get("missing_fields") or []
+    }
     conflict_fields = {
         str(item)
         for item in proof.get("conflict_fields") or []
     }
     reject_reasons: set[str] = set()
+    if _runtime_boundary_required(evidence):
+        for field in RUNTIME_BOUNDARY_FIELDS:
+            if field in missing_fields:
+                reject_reasons.add(RUNTIME_BOUNDARY_MISSING_REJECT_REASONS[field])
     for field in RUNTIME_BOUNDARY_FIELDS:
         if field in conflict_fields:
             reject_reasons.add(RUNTIME_BOUNDARY_REJECT_REASONS[field])
     return reject_reasons
+
+
+def _runtime_boundary_required(evidence: dict[str, Any]) -> bool:
+    return any(
+        _required_evidence_id_present(evidence.get(key))
+        for key in (
+            "candidate_id",
+            "runtime_grant_id",
+            "fresh_submit_authorization_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+            "exchange_submit_execution_result_id",
+        )
+    )
 
 
 def _exchange_native_protection_reject_reasons(
