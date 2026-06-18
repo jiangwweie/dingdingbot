@@ -61,6 +61,7 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
         "exchange_result_present": True,
         "live_exchange_called": True,
         "real_order_placed": True,
+        "exchange_submit_execution_result_id": "exchange-result-1",
     }
     assert packet["reject_reasons"] == []
     assert packet["missing_evidence_keys"] == []
@@ -131,6 +132,7 @@ def test_live_closure_evidence_packet_rejects_controlled_local_cycle_shape():
         "exchange_result_present": True,
         "live_exchange_called": False,
         "real_order_placed": False,
+        "exchange_submit_execution_result_id": "exchange-result-1",
     }
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
@@ -154,6 +156,7 @@ def test_live_closure_evidence_packet_rejects_exchange_result_without_live_marke
         "exchange_result_present": True,
         "live_exchange_called": False,
         "real_order_placed": False,
+        "exchange_submit_execution_result_id": "exchange-result-1",
     }
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"

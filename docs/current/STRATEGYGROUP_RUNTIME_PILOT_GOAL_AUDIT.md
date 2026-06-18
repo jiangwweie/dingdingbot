@@ -704,3 +704,21 @@ carry an id-like field such as `id`, `evidence_id`, `packet_id`, `ref_id`, or
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `10 passed` for `tests/unit/test_runtime_live_closure_evidence_verifier.py`; `111 passed` for the P0 runtime-monitor/live-closure regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Live Submit Proof Result-ID Binding Checkpoint
+
+The first-live-closure contract now requires live submit proof to bind back to
+the same `exchange_submit_execution_result_id` used as real exchange acceptance
+evidence. A packet with `live_exchange_called=true` and `real_order_placed=true`
+is no longer enough if the proof omits or mismatches the accepted exchange
+submit execution result id.
+
+| Item | Evidence |
+| --- | --- |
+| Contract binding | `runtime_live_cutover_readiness.py` adds `live_submit_proof_result_id_mismatch` to the `real_exchange_acceptance` reject reasons |
+| Verifier binding | `runtime_live_closure_evidence_verifier.py` rejects live closure evidence when `live_submit_proof.exchange_submit_execution_result_id` does not match the required `exchange_submit_execution_result_id` |
+| Packet builder binding | `runtime_live_closure_evidence_packet.py` copies the accepted `exchange_submit_execution_result_id` into `live_submit_proof` when building official live closure evidence |
+| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mismatch` rejects a packet where live submit proof points to a different exchange result |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `19 passed` for the live-closure verifier/packet/cutover tests; `123 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

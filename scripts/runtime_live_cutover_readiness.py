@@ -157,6 +157,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "reject_if": [
             "exchange_submit_failed_before_acceptance",
             "live_submit_proof_missing",
+            "live_submit_proof_result_id_mismatch",
             "live_exchange_not_called",
             "real_order_not_placed",
         ],
@@ -299,6 +300,7 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_requires_live_submit_truth": (
             "live_submit_proof_missing" in reject_reasons
+            and "live_submit_proof_result_id_mismatch" in reject_reasons
             and "live_exchange_not_called" in reject_reasons
             and "real_order_not_placed" in reject_reasons
         ),

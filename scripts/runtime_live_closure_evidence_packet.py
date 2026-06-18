@@ -207,7 +207,7 @@ def _derive_reject_reasons(
     source_kind: str,
     official_live_source: bool,
     evidence: dict[str, Any],
-    live_submit_proof: dict[str, bool],
+    live_submit_proof: dict[str, Any],
 ) -> list[str]:
     reasons: set[str] = set()
     source_kind_value = str(source_kind)
@@ -247,9 +247,9 @@ def _live_submit_proof(
     *,
     source_packets: list[dict[str, Any]],
     evidence: dict[str, Any],
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     exchange_result_present = _present(evidence.get("exchange_submit_execution_result_id"))
-    return {
+    proof: dict[str, Any] = {
         "exchange_result_present": exchange_result_present,
         "live_exchange_called": _any_true(
             source_packets,
@@ -268,6 +268,14 @@ def _live_submit_proof(
             ),
         ),
     }
+    exchange_submit_execution_result_id = _evidence_id(
+        evidence.get("exchange_submit_execution_result_id")
+    )
+    if exchange_submit_execution_result_id:
+        proof["exchange_submit_execution_result_id"] = (
+            exchange_submit_execution_result_id
+        )
+    return proof
 
 
 def _status_like_values(source_packets: list[dict[str, Any]]) -> list[str]:
@@ -333,6 +341,18 @@ def _present(value: Any) -> bool:
     if isinstance(value, (list, tuple, set, dict)):
         return bool(value)
     return True
+
+
+def _evidence_id(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, dict):
+        for field in ("id", "evidence_id", "packet_id", "ref_id", "reference_id"):
+            nested = value.get(field)
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return None
 
 
 def _read_json(path: Path) -> dict[str, Any]:

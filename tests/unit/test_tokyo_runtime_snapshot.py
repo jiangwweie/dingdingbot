@@ -215,6 +215,7 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
             "exchange_result_present": True,
             "live_exchange_called": True,
             "real_order_placed": True,
+            "exchange_submit_execution_result_id": "exchange-result-1",
         },
         "evidence": evidence,
         "reject_reasons": [],

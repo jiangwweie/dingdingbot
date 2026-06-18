@@ -1165,6 +1165,9 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                     "exchange_result_present": True,
                     "live_exchange_called": True,
                     "real_order_placed": True,
+                    "exchange_submit_execution_result_id": (
+                        "exchange_submit_execution_result_id-1"
+                    ),
                 },
                 "evidence": evidence,
             },

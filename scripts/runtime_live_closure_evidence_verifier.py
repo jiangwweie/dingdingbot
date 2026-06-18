@@ -39,10 +39,17 @@ GLOBAL_REJECT_REASONS = {
     "duplicate_evidence_id",
     "malformed_evidence_id",
     "live_submit_proof_missing",
+    "live_submit_proof_result_id_mismatch",
     "live_exchange_not_called",
     "real_order_not_placed",
 }
 EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
+LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
+    "exchange_submit_execution_result_id",
+    "durable_exchange_submit_execution_result_id",
+    "execution_result_id",
+    "result_id",
+)
 
 
 def build_live_closure_evidence_verification(
@@ -237,13 +244,21 @@ def _reject_reasons(
             reasons.add("synthetic_signal")
         if safety.get("disabled_smoke_treated_as_real_execution_proof") is True:
             reasons.add("disabled_smoke_only")
-    if source_ready and _evidence_present(evidence.get("exchange_submit_execution_result_id")):
+    exchange_submit_execution_result_id = _required_evidence_id(
+        evidence.get("exchange_submit_execution_result_id")
+    )
+    if source_ready and exchange_submit_execution_result_id:
         proof = packet.get("live_submit_proof")
         if not isinstance(proof, dict):
             reasons.add("live_submit_proof_missing")
         else:
             if proof.get("exchange_result_present") is not True:
                 reasons.add("live_submit_proof_missing")
+            if (
+                _live_submit_proof_result_id(proof)
+                != exchange_submit_execution_result_id
+            ):
+                reasons.add("live_submit_proof_result_id_mismatch")
             if proof.get("live_exchange_called") is not True:
                 reasons.add("live_exchange_not_called")
             if proof.get("real_order_placed") is not True:
@@ -297,6 +312,14 @@ def _required_evidence_id(value: Any) -> str | None:
             nested = value.get(field)
             if isinstance(nested, str) and nested.strip():
                 return nested.strip()
+    return None
+
+
+def _live_submit_proof_result_id(proof: dict[str, Any]) -> str | None:
+    for field in LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS:
+        value = _required_evidence_id(proof.get(field))
+        if value:
+            return value
     return None
 
 
