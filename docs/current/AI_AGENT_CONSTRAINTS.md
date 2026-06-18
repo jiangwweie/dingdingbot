@@ -32,6 +32,23 @@ profit is not the engineering acceptance test. Engineering work is valuable
 only when it improves opportunity discovery, runtime capture, execution
 quality, risk-capital governance, or the review loop.
 
+The project is aggressive inside explicit constraints. The Owner-provided
+subaccount allocation is already the risk-control result and may be treated as
+loss-capable experiment capital. Agents must not add hidden conservatism on top
+of that allocation by lowering leverage, reducing exposure, shrinking notional,
+or slowing eligible submits merely because the trade is risky. Risk is not the
+first-order blocker in this project; missed right-tail opportunity is also a
+core failure mode.
+
+The hard boundaries are operational and authority boundaries, not a mandate to
+be cautious. They prevent wrong-account actions, stale-fact execution,
+duplicate submits, missing protection, conflicting active exposure, Operation
+Layer bypass, FinalGate bypass, withdrawals, transfers, credential mutation,
+and live-profile or sizing-default mutation outside explicit Owner direction.
+Inside the selected StrategyGroup, selected symbol/side universe, allocated
+subaccount capital, and configured leverage/notional profile, the system should
+prefer fast opportunity capture over additional discretionary de-risking.
+
 When the system is healthy but waiting for market opportunity, agents should
 not treat `waiting_for_market` as a blocker. Non-market-dependent progress
 should happen through replay, synthetic signal fixtures, paper/simulator
@@ -41,9 +58,9 @@ market signals and must never feed a real Operation Layer submit.
 
 Testnet is not a mainline value layer for this project. If used at all, it is a
 temporary API-shape diagnostic tool. Meaningful execution-quality evidence comes
-from the official live path with selected StrategyGroup, tiny risk, fresh
-signal, RequiredFacts, candidate/authorization evidence, action-time FinalGate,
-and official Operation Layer all passing.
+from the official live path with selected StrategyGroup, allocated subaccount
+risk budget, fresh signal, RequiredFacts, candidate/authorization evidence,
+action-time FinalGate, and official Operation Layer all passing.
 
 ## Owner Supervisor Constraint
 
@@ -115,6 +132,13 @@ This does not authorize FinalGate bypass, Operation Layer bypass, withdrawals,
 transfers, credential changes, live-profile expansion, order-sizing default
 expansion, stale-fact execution, missing protection, duplicate-submit risk, or
 conflicting active position/open order execution.
+
+This also does not authorize agents to reinterpret the Owner's allocated
+subaccount budget as needing additional risk cuts. If a live profile, leverage,
+notional, exposure, or sizing default is already selected by the Owner or by the
+current official profile, agents should preserve and use it rather than reduce
+it for caution. Changes to those defaults still require explicit Owner
+direction because they are authority changes, not routine safety fixes.
 
 Do not deploy to Tokyo for every small local change. Routine status review
 should use local cache or local goal-progress artifacts first, then at most one

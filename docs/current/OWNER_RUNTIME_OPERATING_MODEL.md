@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-06-15
+last_verified: 2026-06-18
 ---
 
 # Owner Runtime Operating Model
@@ -22,10 +22,18 @@ enable StrategyGroup
 The Owner decides:
 
 - which StrategyGroup is enabled, paused, parked, or killed;
-- the small bounded risk profile;
+- the allocated subaccount risk budget and official runtime profile;
 - whether to adjust risk or pause automation when an abnormal state appears;
 - whether to keep, revise, promote, park, or kill a StrategyGroup after review;
 - when the project moves from development-stage pilot to production operations.
+
+The Owner-provided subaccount allocation is already the upstream risk-control
+decision. Within that allocation and the selected official runtime profile, the
+system should behave aggressively toward eligible right-tail opportunities. It
+should not ask the Owner to re-confirm or re-risk-assess every in-boundary
+opportunity, and it should not silently reduce leverage, notional, or exposure
+because the opportunity is risky. A 100% loss of the allocated experiment
+capital is within the project premise.
 
 ## System Responsibilities
 
@@ -42,6 +50,13 @@ The system handles:
 - post-submit finalize, reconciliation, budget settlement, and review evidence.
 
 Those are system responsibilities, not normal Owner workflow steps.
+
+The system's hard stops are operational boundaries: wrong account, out-of-scope
+StrategyGroup/symbol/side/profile, stale facts, duplicate submit risk, missing
+protection, conflicting active position or open order, FinalGate bypass,
+Operation Layer bypass, withdrawal, transfer, credential mutation, or
+unauthorized live-profile/sizing mutation. They are not generic reasons to make
+the system conservative after the Owner has allocated loss-capable capital.
 
 ## Owner-Facing State
 

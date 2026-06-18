@@ -24,8 +24,9 @@ reconciles, settles, records, and reports Owner-readable state.
 The first-stage acceptance target is narrower and more operational:
 
 ```text
-Complete the first selected StrategyGroup + tiny risk bounded real-order loop
-when a fresh signal exists and all official runtime gates pass.
+Complete the first selected StrategyGroup + allocated subaccount risk budget
+bounded-aggressive real-order loop when a fresh signal exists and all official
+runtime gates pass.
 ```
 
 Dry-run audit and source readiness are support tracks for that target. Frontend
@@ -58,12 +59,30 @@ Use this frame to prevent drift:
 | Strategy Edge | Find regime-specific right-tail opportunities | Strategy research and handoff packs propose candidate edges |
 | Runtime Capture | Turn fresh signals into official bounded actions | Watcher, RequiredFacts, candidate/auth, FinalGate, Operation Layer |
 | Execution Quality | Preserve net edge after market friction | Fee, funding, slippage, filters, partial fill, retry and error taxonomy |
-| Risk Capital | Keep small-capital trials survivable | Probe, trial, promotion, parked, and kill capital states |
+| Risk Capital | Use Owner-allocated loss-capable subaccount capital aggressively inside explicit boundaries | Probe, trial, promotion, parked, and kill capital states |
 | Learning Loop | Convert outcomes into better decisions | Review ledger, negative evidence, promote/revise/park/kill |
 
 Engineering work is mainline only when it improves one of those layers. Extra
 evidence fields, broad UI work, historical cleanup, or strategy expansion are
 not mainline unless they directly support this profitability-oriented loop.
+
+## Bounded-Aggressive Risk Frame
+
+The Owner-funded subaccount allocation is already the upstream risk-control
+decision. The runtime system should not re-risk-assess that allocation into a
+smaller, slower, or lower-leverage trade merely because right-tail strategies
+are risky. The project is constrained, but aggressive inside those constraints.
+
+| Boundary type | Meaning | Mainline behavior |
+| --- | --- | --- |
+| Owner capital boundary | The subaccount amount is loss-capable experiment capital | Use the selected allocation/profile instead of applying hidden haircuts |
+| StrategyGroup boundary | Only selected StrategyGroups, symbols, sides, and profiles are eligible | Block out-of-scope actions, but do not de-risk in-scope ones |
+| Execution authority boundary | FinalGate and Operation Layer remain mandatory | Prevent wrong execution path, not opportunity capture |
+| Mechanical safety boundary | No stale facts, duplicate submits, missing protection, conflicting active position/open order, withdrawal, transfer, credential mutation, or unauthorized profile/sizing mutation | Fail closed only for these concrete conditions |
+
+Do not use risk language as a generic reason to delay, reduce, or avoid an
+otherwise eligible live action. Missing a valid right-tail opportunity is a
+project failure mode.
 
 ## No-Signal Progress Policy
 
@@ -79,7 +98,7 @@ real funds:
 | Paper/Simulator Operation Layer | Exercise order lifecycle branches without real funds | Uses non-live simulation only; testnet is not a mainline value layer |
 | Post-Submit Simulator | Exercise fill, partial fill, reject, protection failure, recovery, reconcile and settle branches | Non-executing simulation only |
 | Cost/Slippage/Funding Model | Estimate whether strategy gross edge can survive friction | Research/review input, not submit authority |
-| Tiny Real Loop | Validate real exchange friction, protection, reconciliation, and settlement with small bounded funds | Uses the official live path only after selected StrategyGroup, tiny risk, fresh signal, RequiredFacts, candidate/auth, FinalGate, and Operation Layer pass |
+| Tiny Real Loop | Validate real exchange friction, protection, reconciliation, and settlement with allocated subaccount experiment funds | Uses the official live path only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, FinalGate, and Operation Layer pass |
 
 The no-signal lanes exist to reduce the chance that a real market opportunity
 arrives before the runtime chain, execution shape, or review loop is ready.
@@ -94,7 +113,7 @@ deploys are intentionally less frequent now.
 | Routine monitor review | Use L0 cache/local progress first |
 | Fresh status refresh | At most one L1 read-only Tokyo snapshot when cache is stale or schema-stale |
 | Bounded Tokyo deploy apply | Only after a stage-worthy fix, deployable milestone, or explicit Owner request |
-| Real order path | Only after selected StrategyGroup, tiny risk, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass |
+| Real order path | Only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass |
 | Frontend work | External project; not part of this runtime branch unless the Owner explicitly reopens it |
 
 Do not deploy for every small documentation change, planning adjustment, or
@@ -111,7 +130,7 @@ market-dependent first real-order proof.
 
 | Track | Owner outcome | Current owner | Current status | Next checkpoint |
 | --- | --- | --- | --- | --- |
-| P0 First Bounded Live Order Closure | First selected StrategyGroup + tiny risk real order completes through official gates, finalize, reconciliation, settlement, and review | Main runtime window | active, waiting for fresh signal | On fresh signal, pause lower tracks and drive RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer -> real submit -> close loop |
+| P0 First Bounded Live Order Closure | First selected StrategyGroup + allocated subaccount risk-budget real order completes through official gates, finalize, reconciliation, settlement, and review | Main runtime window | active, waiting for fresh signal | On fresh signal, pause lower tracks and drive RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer -> real submit -> close loop |
 | P0 Runtime Product State Repair | Owner Console can read one stable source-readiness state instead of interpreting packets | Main runtime window | mainline implemented | Keep `owner-console-source-readiness.json` / API stable and refresh it from Tokyo watcher packets |
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
@@ -820,7 +839,7 @@ The current architecture judgment is verified as a runtime audit invariant:
 | Share | Scope | Verification result |
 | --- | --- | --- |
 | 80% | Common runtime pipe | `runtime-dry-run-audit-chain.json` proves MPG / TEQ / FBS / PMR / SOR share the same admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, submit, finalize, reconciliation, settlement, review, and Owner readmodel stages |
-| 20% | StrategyGroup adapter | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, tiny risk defaults, hard stops, and sample packets |
+| 20% | StrategyGroup adapter | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, hard stops, and sample packets |
 
 Current local validation:
 
@@ -1138,7 +1157,8 @@ runtime state from already-written evidence.
 The builder only reads local JSON packets. It does not call Tokyo APIs,
 FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawals,
 transfers, secrets, live profile, or order sizing. It must never mark a real
-order action ready unless selected StrategyGroup, tiny risk, fresh signal,
+order action ready unless selected StrategyGroup, allocated subaccount risk
+budget, fresh signal,
 RequiredFacts, candidate/grant/authorization evidence, action-time FinalGate,
 and official Operation Layer evidence are all represented by current packets.
 
@@ -1159,7 +1179,7 @@ healthy:
 | `mock_operation_layer_closed_loop_checked` | Confirms fake submit/finalize/reconcile/budget/review shape remains covered without exchange write. |
 | `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked packets rather than project-stopping chat confirmations, while real submit remains forbidden. |
 | `common_execution_chain_reuse_checked` | Confirms MPG / TEQ / FBS / PMR / SOR reuse the shared execution chain and remain input-only StrategyGroup adapters. |
-| `strategygroup_adapter_boundary_checked` | Confirms each StrategyGroup handoff only supplies symbols, sides, signal rule, RequiredFacts, tiny risk defaults, and hard stops, while candidate/auth, FinalGate, Operation Layer, finalize, reconciliation, settlement, and Owner readmodel remain in the shared runtime pipe. |
+| `strategygroup_adapter_boundary_checked` | Confirms each StrategyGroup handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, and hard stops, while candidate/auth, FinalGate, Operation Layer, finalize, reconciliation, settlement, and Owner readmodel remain in the shared runtime pipe. |
 | `selected_strategygroup_dispatch_guard_checked` | Confirms selected MPG-001 mock fresh signal can reach FinalGate dispatch while an out-of-scope StrategyGroup signal is blocked before FinalGate or Operation Layer. |
 
 Operation Layer blockers such as active position, open order, missing protection,
@@ -1276,7 +1296,7 @@ The current first-real-submit blocker mix is treated as:
 | Share | Scope | Meaning |
 | --- | --- | --- |
 | 80% | Common runtime pipe | Fresh signal, RequiredFacts readiness, candidate/auth, FinalGate, Operation Layer evidence, live boundary enablement, submit, finalize, reconcile, settle, and Owner readmodel are shared infrastructure. |
-| 20% | StrategyGroup adapter | Each StrategyGroup supplies signal semantics, RequiredFacts definitions, supported symbol/side, tiny risk defaults, hard stops, and conflict policy. |
+| 20% | StrategyGroup adapter | Each StrategyGroup supplies signal semantics, RequiredFacts definitions, supported symbol/side, allocated risk/profile defaults, hard stops, and conflict policy. |
 
 ### 2026-06-16 Runtime Boundary Repair
 
