@@ -1663,6 +1663,25 @@ already returned to waiting-for-market semantics.
 | Deployment | Not deployed in this checkpoint; deploy only after batching or if the Tokyo monitor keeps emitting false processing from stale wakeup evidence |
 | Safety proof | Local code/tests/cache reads only; no server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Stale Wakeup Waiting Resume Deploy Checkpoint
+
+The stale-wakeup status fix was deployed because the live monitor kept reading
+the old server-side goal-status packet as `processing`. After deploy and one
+fresh L1 postdeploy check, the server-side Owner progress layer returned to
+healthy waiting-for-market semantics.
+
+| Item | Result |
+| --- | --- |
+| Deployed runtime head | `6239199be96111585e9d1b2bf51816b2d71746b0` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-6239199b-stale-wakeup-waiting-resume` |
+| Runtime deploy apply | `output/tokyo-git-deploy-apply-6239199b.json`: `status=applied`, interaction `L3_bounded_deploy_apply`, remote interactions `7` |
+| Deploy session | `output/tokyo-runtime-deploy-session-6239199b.json`: `status=waiting_for_market`, remote interactions `8`, blockers/product gaps/warnings all empty |
+| Daily check cache | `output/runtime-monitor/latest-daily-check.json`: `status=waiting_for_market`, notification `DONT_NOTIFY`, waiting keys `fresh_signal`, `candidate_authorization`, `action_time_finalgate`, `official_operation_layer` |
+| Goal progress | `output/runtime-monitor/latest-goal-progress.json`: `status=waiting_for_market`, `P0.5=ready`, blockers/product gaps empty |
+| Completion audit | `output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json`: `not_complete_waiting_for_market`, non-market gaps empty, market-dependent remaining `5` |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects runtime head `6239199be96111585e9d1b2bf51816b2d71746b0` |
+| Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
