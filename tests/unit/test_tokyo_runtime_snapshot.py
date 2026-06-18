@@ -219,6 +219,22 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
             "real_order_placed": True,
             "exchange_submit_execution_result_id": "exchange-result-1",
         },
+        "post_submit_close_loop_proof": {
+            "exchange_submit_execution_result_id": "exchange-result-1",
+            "present_evidence_keys": [
+                "runtime_post_submit_finalize_packet_id",
+                "post_submit_reconciliation_evidence_id",
+                "post_submit_budget_settlement_id",
+                "submit_outcome_review_id",
+            ],
+            "matched_evidence_keys": [
+                "runtime_post_submit_finalize_packet_id",
+                "post_submit_reconciliation_evidence_id",
+                "post_submit_budget_settlement_id",
+                "submit_outcome_review_id",
+            ],
+            "missing_source_match_keys": [],
+        },
         "evidence": evidence,
         "reject_reasons": [],
     }

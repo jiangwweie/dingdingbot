@@ -175,7 +175,12 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "name": "post_submit_finalize",
         "market_dependent": True,
         "required_evidence_keys": ["runtime_post_submit_finalize_packet_id"],
-        "reject_if": ["finalize_missing", "next_attempt_gate_missing"],
+        "reject_if": [
+            "finalize_missing",
+            "next_attempt_gate_missing",
+            "post_submit_close_loop_proof_missing",
+            "post_submit_finalize_result_source_missing",
+        ],
         "next_action": "reconcile_settle_and_review",
     },
     {
@@ -186,7 +191,13 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "post_submit_budget_settlement_id",
             "submit_outcome_review_id",
         ],
-        "reject_if": ["reconciliation_missing", "settlement_missing", "review_missing"],
+        "reject_if": [
+            "reconciliation_missing",
+            "settlement_missing",
+            "review_missing",
+            "post_submit_close_loop_proof_missing",
+            "post_submit_close_loop_result_source_missing",
+        ],
         "next_action": "mark_first_bounded_live_order_closure_complete",
     },
 ]
@@ -313,6 +324,11 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
             "post_submit_reconciliation_evidence_id" in evidence_keys
             and "post_submit_budget_settlement_id" in evidence_keys
             and "submit_outcome_review_id" in evidence_keys
+        ),
+        "live_closure_contract_requires_post_submit_result_binding": (
+            "post_submit_close_loop_proof_missing" in reject_reasons
+            and "post_submit_finalize_result_source_missing" in reject_reasons
+            and "post_submit_close_loop_result_source_missing" in reject_reasons
         ),
         "live_closure_contract_has_no_owner_chat_confirmation_stage": all(
             "owner_chat_confirmation" not in stage["name"]

@@ -1171,6 +1171,24 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                         "exchange_submit_execution_result_id-1"
                     ),
                 },
+                "post_submit_close_loop_proof": {
+                    "exchange_submit_execution_result_id": (
+                        "exchange_submit_execution_result_id-1"
+                    ),
+                    "present_evidence_keys": [
+                        "runtime_post_submit_finalize_packet_id",
+                        "post_submit_reconciliation_evidence_id",
+                        "post_submit_budget_settlement_id",
+                        "submit_outcome_review_id",
+                    ],
+                    "matched_evidence_keys": [
+                        "runtime_post_submit_finalize_packet_id",
+                        "post_submit_reconciliation_evidence_id",
+                        "post_submit_budget_settlement_id",
+                        "submit_outcome_review_id",
+                    ],
+                    "missing_source_match_keys": [],
+                },
                 "evidence": evidence,
             },
             ensure_ascii=False,

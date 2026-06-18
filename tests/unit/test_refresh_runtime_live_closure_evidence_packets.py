@@ -38,6 +38,7 @@ def _official_complete_sources() -> list[dict]:
             "scope": "official_post_submit_close_loop",
             "status": "settled",
             "ids": {
+                "exchange_submit_execution_result_id": "exchange-result-1",
                 "post_submit_finalize_packet_id": "finalize-1",
                 "post_submit_reconciliation_evidence_id": "reconcile-1",
                 "post_submit_budget_settlement_id": "settlement-1",

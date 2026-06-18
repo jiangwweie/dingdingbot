@@ -43,8 +43,17 @@ GLOBAL_REJECT_REASONS = {
     "live_submit_proof_result_source_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
+    "post_submit_close_loop_proof_missing",
+    "post_submit_finalize_result_source_missing",
+    "post_submit_close_loop_result_source_missing",
 }
 EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
+POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
+    "runtime_post_submit_finalize_packet_id",
+    "post_submit_reconciliation_evidence_id",
+    "post_submit_budget_settlement_id",
+    "submit_outcome_review_id",
+)
 LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
     "exchange_submit_execution_result_id",
     "durable_exchange_submit_execution_result_id",
@@ -248,24 +257,30 @@ def _reject_reasons(
     exchange_submit_execution_result_id = _required_evidence_id(
         evidence.get("exchange_submit_execution_result_id")
     )
+    live_submit_ready = False
     if source_ready and exchange_submit_execution_result_id:
         proof = packet.get("live_submit_proof")
         if not isinstance(proof, dict):
             reasons.add("live_submit_proof_missing")
         else:
+            proof_reasons: set[str] = set()
             if proof.get("exchange_result_present") is not True:
-                reasons.add("live_submit_proof_missing")
+                proof_reasons.add("live_submit_proof_missing")
             if (
                 _live_submit_proof_result_id(proof)
                 != exchange_submit_execution_result_id
             ):
-                reasons.add("live_submit_proof_result_id_mismatch")
+                proof_reasons.add("live_submit_proof_result_id_mismatch")
             if proof.get("result_source_matched") is not True:
-                reasons.add("live_submit_proof_result_source_missing")
+                proof_reasons.add("live_submit_proof_result_source_missing")
             if proof.get("live_exchange_called") is not True:
-                reasons.add("live_exchange_not_called")
+                proof_reasons.add("live_exchange_not_called")
             if proof.get("real_order_placed") is not True:
-                reasons.add("real_order_not_placed")
+                proof_reasons.add("real_order_not_placed")
+            reasons.update(proof_reasons)
+            live_submit_ready = not proof_reasons
+    if source_ready and exchange_submit_execution_result_id and live_submit_ready:
+        reasons.update(_post_submit_close_loop_reject_reasons(packet, evidence))
     if _duplicate_required_evidence_ids(evidence, required_evidence_keys):
         reasons.add("duplicate_evidence_id")
     if _malformed_required_evidence_keys(evidence, required_evidence_keys):
@@ -324,6 +339,39 @@ def _live_submit_proof_result_id(proof: dict[str, Any]) -> str | None:
         if value:
             return value
     return None
+
+
+def _post_submit_close_loop_reject_reasons(
+    packet: dict[str, Any],
+    evidence: dict[str, Any],
+) -> set[str]:
+    present_keys = [
+        key
+        for key in POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS
+        if _required_evidence_id_present(evidence.get(key))
+    ]
+    if not present_keys:
+        return set()
+    proof = packet.get("post_submit_close_loop_proof")
+    if not isinstance(proof, dict):
+        return {"post_submit_close_loop_proof_missing"}
+    matched_keys = {
+        str(item)
+        for item in proof.get("matched_evidence_keys") or []
+    }
+    missing_keys = {
+        str(item)
+        for item in proof.get("missing_source_match_keys") or []
+    }
+    reject_reasons: set[str] = set()
+    for key in present_keys:
+        if key in matched_keys and key not in missing_keys:
+            continue
+        if key == "runtime_post_submit_finalize_packet_id":
+            reject_reasons.add("post_submit_finalize_result_source_missing")
+        else:
+            reject_reasons.add("post_submit_close_loop_result_source_missing")
+    return reject_reasons
 
 
 def _official_live_source_ready(packet: dict[str, Any]) -> bool:

@@ -740,3 +740,23 @@ different exchange result.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `21 passed` for the live-closure verifier/packet/cutover tests; `125 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Post-Submit Close-Loop Result Binding Checkpoint
+
+The live-closure evidence packet builder now requires post-submit close-loop
+evidence to be source-bound to the same accepted
+`exchange_submit_execution_result_id`. `runtime_post_submit_finalize_packet_id`,
+`post_submit_reconciliation_evidence_id`, `post_submit_budget_settlement_id`,
+and `submit_outcome_review_id` can no longer complete first-live-order closure
+when they come from a source packet that does not reference the same exchange
+submit execution result.
+
+| Item | Evidence |
+| --- | --- |
+| Contract close-loop binding | `runtime_live_cutover_readiness.py` adds `post_submit_close_loop_proof_missing`, `post_submit_finalize_result_source_missing`, and `post_submit_close_loop_result_source_missing` to post-submit closure reject reasons |
+| Packet builder close-loop proof | `runtime_live_closure_evidence_packet.py` emits `post_submit_close_loop_proof` with present, matched, and missing source-match evidence keys |
+| Verifier close-loop guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when post-submit evidence is present but `post_submit_close_loop_proof` is missing or does not bind to the accepted exchange result |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_post_submit_close_loop` and verifier tests reject unbound post-submit closure evidence |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `24 passed` for the live-closure verifier/packet/cutover tests; `128 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

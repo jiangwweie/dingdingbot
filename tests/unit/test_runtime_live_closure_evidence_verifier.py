@@ -35,6 +35,23 @@ def _official_packet(
             "real_order_placed": True,
             "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
         }
+        close_loop_keys = [
+            key
+            for key in (
+                "runtime_post_submit_finalize_packet_id",
+                "post_submit_reconciliation_evidence_id",
+                "post_submit_budget_settlement_id",
+                "submit_outcome_review_id",
+            )
+            if key in evidence
+        ]
+        if close_loop_keys:
+            packet["post_submit_close_loop_proof"] = {
+                "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
+                "present_evidence_keys": close_loop_keys,
+                "matched_evidence_keys": close_loop_keys,
+                "missing_source_match_keys": [],
+            }
     return packet
 
 
@@ -115,6 +132,22 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
                 "live_exchange_called": True,
                 "real_order_placed": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+            },
+            "post_submit_close_loop_proof": {
+                "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+                "present_evidence_keys": [
+                    "runtime_post_submit_finalize_packet_id",
+                    "post_submit_reconciliation_evidence_id",
+                    "post_submit_budget_settlement_id",
+                    "submit_outcome_review_id",
+                ],
+                "matched_evidence_keys": [
+                    "runtime_post_submit_finalize_packet_id",
+                    "post_submit_reconciliation_evidence_id",
+                    "post_submit_budget_settlement_id",
+                    "submit_outcome_review_id",
+                ],
+                "missing_source_match_keys": [],
             },
             "reject_reasons": ["replay_signal", "disabled_smoke_only"],
         },
@@ -245,6 +278,63 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_without_source
     assert real_exchange_stage["status"] == "rejected"
     assert real_exchange_stage["reject_reasons"] == [
         "live_submit_proof_result_source_missing"
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_missing_post_submit_close_loop_proof():
+    packet = _official_packet(_complete_evidence())
+    packet.pop("post_submit_close_loop_proof")
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["owner_state"] == "需要介入"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["completion"]["real_order_closure_proven"] is False
+    assert verification["reject_reasons"] == ["post_submit_close_loop_proof_missing"]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "post_submit_finalize",
+        "reconciliation_settlement_review",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_unbound_post_submit_close_loop_proof():
+    packet = _official_packet(_complete_evidence())
+    packet["post_submit_close_loop_proof"] = {
+        "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+        "present_evidence_keys": [
+            "runtime_post_submit_finalize_packet_id",
+            "post_submit_reconciliation_evidence_id",
+            "post_submit_budget_settlement_id",
+            "submit_outcome_review_id",
+        ],
+        "matched_evidence_keys": [],
+        "missing_source_match_keys": [
+            "runtime_post_submit_finalize_packet_id",
+            "post_submit_reconciliation_evidence_id",
+            "post_submit_budget_settlement_id",
+            "submit_outcome_review_id",
+        ],
+    }
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "post_submit_close_loop_result_source_missing",
+        "post_submit_finalize_result_source_missing",
     ]
 
 
