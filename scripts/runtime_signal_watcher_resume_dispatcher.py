@@ -589,6 +589,13 @@ def _operation_layer_command_plan(*, authorization_id: str) -> dict[str, Any]:
         ),
         "official_query_mode": "real_gateway_action_after_required_evidence",
         "owner_confirmed_for_first_real_submit_action": True,
+        "standing_authorized_first_real_submit": True,
+        "standing_authorization_scope": (
+            "selected_strategygroup_allocated_subaccount_first_bounded_live_order"
+        ),
+        "owner_chat_confirmation_required_for_real_submit": False,
+        "legacy_owner_confirmation_env_required": False,
+        "standing_authorization_consumed_only_after_evidence_ready": True,
         "requires_official_operation_layer": True,
         "requires_standing_authorization": True,
         "requires_evidence_ids": list(OPERATION_LAYER_REQUIRED_EVIDENCE_IDS),
@@ -641,6 +648,12 @@ def _operation_layer_submit_precondition_blockers(packet: dict[str, Any]) -> lis
         blockers.append("operation_layer_submit_endpoint_not_official_action")
     if command_plan.get("owner_confirmed_for_first_real_submit_action") is not True:
         blockers.append("standing_authorized_submit_action_not_confirmed")
+    if command_plan.get("standing_authorized_first_real_submit") is not True:
+        blockers.append("standing_authorization_not_bound_for_first_real_submit")
+    if command_plan.get("owner_chat_confirmation_required_for_real_submit") is not False:
+        blockers.append("owner_chat_confirmation_still_required_for_first_real_submit")
+    if command_plan.get("legacy_owner_confirmation_env_required") is not False:
+        blockers.append("legacy_owner_confirmation_env_still_required")
     if finalgate_result.get("called") is not True:
         blockers.append("action_time_finalgate_preflight_not_called")
     if finalgate_result.get("error") is True:
@@ -3021,6 +3034,21 @@ def _execute_operation_layer_submit(
         "owner_confirmed_for_first_real_submit_action": (
             operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
         ),
+        "standing_authorized_first_real_submit": bool(
+            command_plan.get("standing_authorized_first_real_submit")
+        ),
+        "standing_authorization_scope": command_plan.get(
+            "standing_authorization_scope"
+        ),
+        "owner_chat_confirmation_required_for_real_submit": bool(
+            command_plan.get("owner_chat_confirmation_required_for_real_submit")
+        ),
+        "legacy_owner_confirmation_env_required": bool(
+            command_plan.get("legacy_owner_confirmation_env_required")
+        ),
+        "standing_authorization_consumed_for_real_submit": (
+            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+        ),
         "operation_layer_submit_mode": operation_layer_submit_mode,
         "official_operation_layer_submit_called": True,
         "official_operation_layer_endpoint": True,
@@ -3287,7 +3315,21 @@ def _packet_from_operation_layer_submit(
             "official_operation_layer_submit_http_status": submit_result.get(
                 "http_status"
             ),
-            "mutates_pg": bool(called or _dict(packet.get("safety_invariants")).get("mutates_pg")),
+            "standing_authorized_first_real_submit": bool(
+                submit_result.get("standing_authorized_first_real_submit")
+            ),
+            "owner_chat_confirmation_required_for_real_submit": bool(
+                submit_result.get("owner_chat_confirmation_required_for_real_submit")
+            ),
+            "legacy_owner_confirmation_env_required": bool(
+                submit_result.get("legacy_owner_confirmation_env_required")
+            ),
+            "standing_authorization_consumed_for_real_submit": bool(
+                submit_result.get("standing_authorization_consumed_for_real_submit")
+            ),
+            "mutates_pg": bool(
+                called or _dict(packet.get("safety_invariants")).get("mutates_pg")
+            ),
             "pg_submit_evidence_mutated": called,
             "places_order": exchange_order_submitted,
             "calls_order_lifecycle": order_lifecycle_submit_called,

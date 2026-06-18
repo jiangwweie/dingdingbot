@@ -1738,6 +1738,26 @@ confirmation.
 | Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
 | Safety proof | Local code/tests only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Operation Layer Standing Authorization Relay Checkpoint
+
+The automatic resume dispatcher now makes the first bounded live-order cutover
+authorization model explicit all the way to the official Operation Layer submit
+packet. The official endpoint still receives
+`owner_confirmed_for_first_real_submit_action=true` for real submit, but the
+dispatcher now records that this is satisfied by standing authorization inside
+the selected StrategyGroup and allocated subaccount boundary, not by a new
+per-order chat confirmation.
+
+| Item | Result |
+| --- | --- |
+| Automatic path | `runtime_signal_watcher_resume_dispatcher.py` carries `standing_authorized_first_real_submit=true`, `owner_chat_confirmation_required_for_real_submit=false`, and `legacy_owner_confirmation_env_required=false` in Operation Layer command and submit packets |
+| Regression guard | Official Operation Layer submit is blocked before POST if a packet regresses to missing standing authorization, chat confirmation required, or legacy env required |
+| Disabled smoke boundary | Disabled smoke keeps `standing_authorization_consumed_for_real_submit=false`, so it remains rehearsal proof only |
+| Local validation | `py_compile` passed; dispatcher tests: `40 passed` |
+| Local monitor sequence | `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
+| Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
+| Safety proof | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

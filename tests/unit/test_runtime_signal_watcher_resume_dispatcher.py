@@ -927,6 +927,20 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
         ]
         is True
     )
+    assert (
+        packet["operation_layer_command_plan"]["standing_authorized_first_real_submit"]
+        is True
+    )
+    assert (
+        packet["operation_layer_command_plan"][
+            "owner_chat_confirmation_required_for_real_submit"
+        ]
+        is False
+    )
+    assert (
+        packet["operation_layer_command_plan"]["legacy_owner_confirmation_env_required"]
+        is False
+    )
     assert "exchange_submit_action_authorization_id" in (
         packet["operation_layer_command_plan"]["requires_evidence_ids"]
     )
@@ -1269,6 +1283,47 @@ def test_dispatcher_translates_operation_layer_evidence_ready():
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
+def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regress(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+
+    resume_pack = _finalgate_ready_dispatch_packet()
+    operation_layer_command_plan = dict(resume_pack["operation_layer_command_plan"])
+    operation_layer_command_plan["standing_authorized_first_real_submit"] = False
+    operation_layer_command_plan["owner_chat_confirmation_required_for_real_submit"] = True
+    operation_layer_command_plan["legacy_owner_confirmation_env_required"] = True
+    resume_pack["operation_layer_command_plan"] = operation_layer_command_plan
+
+    packet = build_dispatch_packet(
+        resume_pack=resume_pack,
+        source_path=Path("/tmp/resume-dispatch-packet.json"),
+        operation_layer_evidence_report=_operation_layer_ready_report(),
+        operation_layer_evidence_report_path=(
+            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+        ),
+        execute_operation_layer_submit=True,
+    )
+
+    assert packet["status"] == "operation_layer_submit_blocked"
+    assert packet["dispatch_status"] == "blocked_before_official_operation_layer_submit"
+    assert "standing_authorization_not_bound_for_first_real_submit" in (
+        packet["blockers"]
+    )
+    assert "owner_chat_confirmation_still_required_for_first_real_submit" in (
+        packet["blockers"]
+    )
+    assert "legacy_owner_confirmation_env_still_required" in packet["blockers"]
+    assert packet["operation_layer_submit_result"]["called"] is False
+    assert packet["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert packet["safety_invariants"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
 def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
@@ -1322,7 +1377,45 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
     )
     assert packet["owner_state"]["status"] == "submitted"
     assert packet["operation_layer_submit_result"]["called"] is True
+    assert (
+        packet["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
+        is True
+    )
+    assert (
+        packet["operation_layer_submit_result"][
+            "owner_chat_confirmation_required_for_real_submit"
+        ]
+        is False
+    )
+    assert (
+        packet["operation_layer_submit_result"]["legacy_owner_confirmation_env_required"]
+        is False
+    )
+    assert (
+        packet["operation_layer_submit_result"][
+            "standing_authorization_consumed_for_real_submit"
+        ]
+        is True
+    )
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert (
+        packet["safety_invariants"]["standing_authorized_first_real_submit"] is True
+    )
+    assert (
+        packet["safety_invariants"][
+            "owner_chat_confirmation_required_for_real_submit"
+        ]
+        is False
+    )
+    assert (
+        packet["safety_invariants"]["legacy_owner_confirmation_env_required"] is False
+    )
+    assert (
+        packet["safety_invariants"][
+            "standing_authorization_consumed_for_real_submit"
+        ]
+        is True
+    )
     assert packet["safety_invariants"]["places_order"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is True
     assert packet["safety_invariants"]["calls_order_lifecycle"] is True
@@ -1390,7 +1483,23 @@ def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
     assert packet["operation_layer_submit_result"][
         "owner_confirmed_for_first_real_submit_action"
     ] is False
+    assert (
+        packet["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
+        is True
+    )
+    assert (
+        packet["operation_layer_submit_result"][
+            "standing_authorization_consumed_for_real_submit"
+        ]
+        is False
+    )
     assert packet["safety_invariants"]["official_operation_layer_submit_called"] is True
+    assert (
+        packet["safety_invariants"][
+            "standing_authorization_consumed_for_real_submit"
+        ]
+        is False
+    )
     assert packet["safety_invariants"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["calls_order_lifecycle"] is False

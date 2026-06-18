@@ -956,3 +956,23 @@ official Operation Layer readiness.
 | Verification | `py_compile` passed; targeted tests `57 passed` across first-real-submit API flow, action authorization packet, and active-observation followup |
 | Deployment | Not deployed in this checkpoint; deploy only after a stage-worthy batch, fresh-signal unblock, or explicit Owner request |
 | Safety | Local code/tests only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Operation Layer Standing Authorization Relay Checkpoint
+
+The Runtime Signal Watcher resume dispatcher now carries the same standing
+authorization semantics into the official Operation Layer command and submit
+packets. The API-compatible `owner_confirmed_for_first_real_submit_action=true`
+query parameter remains the official real-submit switch, but the packet now
+states that it is satisfied by the selected bounded standing authorization, not
+by a new per-order chat confirmation or legacy env confirmation.
+
+| Item | Evidence |
+| --- | --- |
+| Command plan semantics | `runtime_signal_watcher_resume_dispatcher.py` now emits `standing_authorized_first_real_submit=true`, `owner_chat_confirmation_required_for_real_submit=false`, and `legacy_owner_confirmation_env_required=false` for the official Operation Layer command plan |
+| Submit precondition guard | The dispatcher blocks before official Operation Layer submit if standing authorization semantics regress back to missing standing authorization, chat confirmation required, or legacy env required |
+| Submit result semantics | Real submit packets mark `standing_authorization_consumed_for_real_submit=true`; disabled smoke packets keep it `false` so disabled smoke cannot be treated as real execution proof |
+| Regression test | `test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regress` fixes the first-live cutover rule that old Owner confirmation semantics must not become an in-boundary real-submit blocker |
+| Local validation | `py_compile` passed for the dispatcher; `test_runtime_signal_watcher_resume_dispatcher.py`: `40 passed` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
+| Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
+| Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
