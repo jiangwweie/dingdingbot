@@ -44,6 +44,12 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "modifies_order_sizing_defaults": False,
         "replay_or_synthetic_signal_used_as_live_signal": False,
     }
+    assert packet["legacy_confirmation_regression_checks"] == {
+        "disabled_smoke_not_real_execution_proof": True,
+        "legacy_local_registration_probe_tolerated_without_blocking_cutover": True,
+        "post_submit_outcomes_do_not_require_owner_chat_confirmation": True,
+        "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation": True,
+    }
 
     sections = {item["name"]: item for item in packet["sections"]}
     assert set(sections) == {
@@ -53,6 +59,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "hard_blocker_policy",
         "exit_protection_recovery",
         "post_submit_close_loop",
+        "legacy_confirmation_regression",
         "dry_run_safety",
     }
     for section in sections.values():

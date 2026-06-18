@@ -75,6 +75,12 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "post_submit_finalize_result_identity_guard_checked",
         "mock_operation_layer_closed_loop_checked",
     ],
+    "legacy_confirmation_regression": [
+        "disabled_smoke_not_real_execution_proof",
+        "legacy_local_registration_probe_tolerated_without_blocking_cutover",
+        "post_submit_outcomes_do_not_require_owner_chat_confirmation",
+        "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation",
+    ],
     "dry_run_safety": [
         "dangerous_effects_absent",
         "disabled_smoke_not_real_execution_proof",
@@ -103,6 +109,64 @@ def _section(name: str, checks: dict[str, Any]) -> dict[str, Any]:
         "status": "ready" if not missing else "blocked",
         "required_checks": required,
         "missing_checks": missing,
+    }
+
+
+def _scenario_artifact(
+    dry_run_packet: dict[str, Any],
+    scenario_name: str,
+    artifact_name: str,
+) -> dict[str, Any]:
+    scenarios = dry_run_packet.get("scenarios")
+    if not isinstance(scenarios, list):
+        return {}
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            continue
+        if scenario.get("name") != scenario_name:
+            continue
+        artifacts = scenario.get("artifacts")
+        if not isinstance(artifacts, dict):
+            return {}
+        value = artifacts.get(artifact_name)
+        return value if isinstance(value, dict) else {}
+    return {}
+
+
+def _legacy_confirmation_regression_checks(
+    dry_run_packet: dict[str, Any],
+    checks: dict[str, Any],
+) -> dict[str, bool]:
+    guard = _scenario_artifact(
+        dry_run_packet,
+        "post_submit_closed_loop_evidence_guard",
+        "post_submit_closed_loop_evidence_guard",
+    )
+    exit_matrix = guard.get("exit_outcome_matrix")
+    if not isinstance(exit_matrix, dict):
+        exit_matrix = {}
+    exit_checks = exit_matrix.get("checks")
+    if not isinstance(exit_checks, dict):
+        exit_checks = {}
+    return {
+        "disabled_smoke_not_real_execution_proof": checks.get(
+            "disabled_smoke_not_real_execution_proof"
+        )
+        is True,
+        "legacy_local_registration_probe_tolerated_without_blocking_cutover": (
+            checks.get("legacy_local_registration_probe_tolerance_checked") is True
+        ),
+        "post_submit_outcomes_do_not_require_owner_chat_confirmation": (
+            exit_checks.get("no_post_submit_case_requires_owner_chat_confirmation")
+            is True
+        ),
+        "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation": (
+            checks.get("reduce_only_recovery_standing_authorization_checked") is True
+            and exit_checks.get(
+                "protection_failure_recovery_uses_standing_authorization"
+            )
+            is True
+        ),
     }
 
 
@@ -200,7 +264,9 @@ def build_cutover_readiness_packet(
     checks = dry_run_packet.get("checks")
     if not isinstance(checks, dict):
         checks = {}
-    sections = [_section(name, checks) for name in SECTION_CHECKS]
+    legacy_checks = _legacy_confirmation_regression_checks(dry_run_packet, checks)
+    effective_checks = {**checks, **legacy_checks}
+    sections = [_section(name, effective_checks) for name in SECTION_CHECKS]
     non_market_blockers = [
         f"{section['name']}:{check}"
         for section in sections
@@ -241,6 +307,7 @@ def build_cutover_readiness_packet(
             "dry_run_audit_status": dry_run_packet.get("status"),
             "dry_run_scenario_count": dry_run_packet.get("scenario_count"),
         },
+        "legacy_confirmation_regression_checks": legacy_checks,
         "safety_invariants": safety,
     }
 
