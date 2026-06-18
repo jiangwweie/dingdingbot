@@ -162,6 +162,24 @@ def test_live_closure_evidence_verifier_rejects_false_live_submit_proof():
     ]
 
 
+def test_live_closure_evidence_verifier_rejects_duplicate_required_evidence_id():
+    evidence = _complete_evidence()
+    evidence["required_facts_readiness_packet_id"] = evidence[
+        "live_watcher_signal_packet_id"
+    ]
+
+    packet = verifier.build_live_closure_evidence_verification(
+        _official_packet(evidence),
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "blocked_live_closure_rejected"
+    assert packet["owner_state"] == "需要介入"
+    assert packet["completion"]["first_bounded_real_order_complete"] is False
+    assert packet["completion"]["real_order_closure_proven"] is False
+    assert packet["reject_reasons"] == ["duplicate_evidence_id"]
+
+
 def test_live_closure_evidence_verifier_rejects_unmarked_complete_shape():
     packet = verifier.build_live_closure_evidence_verification(
         {"evidence": _complete_evidence()},

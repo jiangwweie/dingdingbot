@@ -36,6 +36,7 @@ GLOBAL_REJECT_REASONS = {
     "local_rehearsal_evidence",
     "dry_run_or_rehearsal_evidence",
     "controlled_in_memory_execution",
+    "duplicate_evidence_id",
     "live_submit_proof_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
@@ -55,6 +56,7 @@ def build_live_closure_evidence_verification(
         evidence_packet,
         evidence=evidence,
         source_ready=source_ready,
+        required_evidence_keys=_required_evidence_keys(contract),
     )
     stages = _stage_verifications(
         contract=contract, evidence=evidence, reject_reasons=reject_reasons
@@ -213,6 +215,7 @@ def _reject_reasons(
     *,
     evidence: dict[str, Any],
     source_ready: bool,
+    required_evidence_keys: list[str],
 ) -> list[str]:
     reasons: set[str] = set()
     for key in ("reject_reasons", "rejected_reasons"):
@@ -239,7 +242,27 @@ def _reject_reasons(
                 reasons.add("live_exchange_not_called")
             if proof.get("real_order_placed") is not True:
                 reasons.add("real_order_not_placed")
+    if _duplicate_required_evidence_ids(evidence, required_evidence_keys):
+        reasons.add("duplicate_evidence_id")
     return sorted(reasons)
+
+
+def _duplicate_required_evidence_ids(
+    evidence: dict[str, Any],
+    required_evidence_keys: list[str],
+) -> bool:
+    seen: set[str] = set()
+    for key in required_evidence_keys:
+        value = evidence.get(key)
+        if not isinstance(value, str):
+            continue
+        evidence_id = value.strip()
+        if not evidence_id:
+            continue
+        if evidence_id in seen:
+            return True
+        seen.add(evidence_id)
+    return False
 
 
 def _official_live_source_ready(packet: dict[str, Any]) -> bool:

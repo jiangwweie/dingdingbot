@@ -671,3 +671,18 @@ newer daily check has refreshed runtime state.
 | Current audit output | Sequential local refresh reports `status=not_complete_waiting_for_market`, `input_source_gaps=[]`, `non_market_gaps=[]`, `remote_interaction_count=0` |
 | Verification | `16 passed` for `tests/unit/test_runtime_first_bounded_live_order_completion_audit.py`; `py_compile` passed for `runtime_first_bounded_live_order_completion_audit.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Live Closure Evidence Duplicate-ID Guard Checkpoint
+
+The live-closure evidence verifier now rejects a completion packet when two or
+more required closure evidence fields reuse the same non-empty evidence id.
+This keeps the first bounded live-order closure proof stage-specific instead of
+allowing one artifact id to satisfy multiple required closure stages.
+
+| Item | Evidence |
+| --- | --- |
+| Duplicate-id guard | `runtime_live_closure_evidence_verifier.py` adds `duplicate_evidence_id` as a global reject reason when required closure evidence ids repeat |
+| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_duplicate_required_evidence_id` rejects a packet where `required_facts_readiness_packet_id` reuses `live_watcher_signal_packet_id` |
+| Complete proof compatibility | `test_live_closure_evidence_verifier_marks_complete_when_all_contract_keys_present` still passes with distinct official live evidence ids and live submit proof |
+| Verification | `8 passed` for `tests/unit/test_runtime_live_closure_evidence_verifier.py`; `py_compile` passed for `runtime_live_closure_evidence_verifier.py` |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
