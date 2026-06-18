@@ -716,7 +716,9 @@ def _live_closure_evidence_boundary(
             if no_signal_waiting:
                 return {
                     "status": "not_generated",
-                    "source_status": source_status,
+                    "source_status": "no_live_closure_evidence",
+                    "raw_source_status": source_status,
+                    "normalization_reason": "waiting_for_market_no_fresh_signal",
                     "owner_state": "未生成",
                     "first_bounded_real_order_complete": False,
                     "real_order_closure_proven": False,
@@ -729,6 +731,8 @@ def _live_closure_evidence_boundary(
             return {
                 "status": "in_progress",
                 "source_status": source_status,
+                "raw_source_status": source_status,
+                "normalization_reason": None,
                 "owner_state": "处理中",
                 "first_bounded_real_order_complete": False,
                 "real_order_closure_proven": False,
@@ -742,6 +746,8 @@ def _live_closure_evidence_boundary(
             return {
                 "status": "rejected",
                 "source_status": source_status,
+                "raw_source_status": source_status,
+                "normalization_reason": None,
                 "owner_state": "工程状态暂不可用",
                 "first_bounded_real_order_complete": False,
                 "real_order_closure_proven": False,
@@ -754,6 +760,8 @@ def _live_closure_evidence_boundary(
         return {
             "status": "not_generated",
             "source_status": source_status,
+            "raw_source_status": source_status,
+            "normalization_reason": None,
             "owner_state": "未生成",
             "first_bounded_real_order_complete": False,
             "real_order_closure_proven": False,
@@ -778,6 +786,8 @@ def _live_closure_evidence_boundary(
     return {
         "status": status,
         "source_status": source_status,
+        "raw_source_status": source_status,
+        "normalization_reason": None,
         "owner_state": str(live_closure_evidence_verification.get("owner_state") or ""),
         "first_bounded_real_order_complete": (
             completion.get("first_bounded_real_order_complete") is True
@@ -1327,6 +1337,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         f"- Status: {live_closure['status']}",
         f"- Source status: {live_closure.get('source_status') or 'none'}",
+        f"- Raw source status: {live_closure.get('raw_source_status') or 'none'}",
+        f"- Normalization reason: {live_closure.get('normalization_reason') or 'none'}",
         "- Completed stages: "
         + f"{live_closure['completed_stage_count']}/{live_closure['stage_count']}",
         "- First incomplete stage: "

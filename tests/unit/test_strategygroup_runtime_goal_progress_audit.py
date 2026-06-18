@@ -411,7 +411,13 @@ def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp
     )
     assert report["live_closure_evidence_boundary"]["status"] == "not_generated"
     assert report["live_closure_evidence_boundary"]["source_status"] == (
+        "no_live_closure_evidence"
+    )
+    assert report["live_closure_evidence_boundary"]["raw_source_status"] == (
         "live_closure_in_progress"
+    )
+    assert report["live_closure_evidence_boundary"]["normalization_reason"] == (
+        "waiting_for_market_no_fresh_signal"
     )
     assert report["p0_completion_audit_boundary"]["status"] == (
         "not_complete_waiting_for_market"
@@ -445,6 +451,8 @@ def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
     assert report["live_closure_evidence_boundary"] == {
         "status": "complete",
         "source_status": "live_closure_complete",
+        "raw_source_status": "live_closure_complete",
+        "normalization_reason": None,
         "owner_state": "完成",
         "first_bounded_real_order_complete": True,
         "real_order_closure_proven": True,
