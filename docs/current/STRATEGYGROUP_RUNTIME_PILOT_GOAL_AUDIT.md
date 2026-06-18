@@ -24,10 +24,10 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` before apply |
-| Latest deployed runtime head | `58f0fc29452e8af1f4ab5a383e0d399c8789a57c` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order` |
-| Latest verified deploy target | `fc1f47ab459b4a45f0179c734d937fef137257f3`; regenerate dry-run before apply if newer commits exist |
-| Latest deploy plan | `output/tokyo-git-deploy-dry-run-fc1f47ab.json`: `status=dry_run_ready`, `blockers=[]`, `commands_planned=11`, `commands_executed=0`, `remote_files_modified=false` |
+| Latest deployed runtime head | `e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249` |
+| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-e5f8c13b-cutover-ready-current` |
+| Latest deploy apply | `output/tokyo-git-deploy-apply-e5f8c13b.json`: `status=applied`, `blockers=[]`, `remote_interaction_count=7`, `remote_files_modified=true`, `calls_exchange_write=false`, `places_order=false` |
+| Latest postdeploy acceptance | `output/tokyo-runtime-deploy-session-e5f8c13b.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -80,7 +80,7 @@ cleanup plan.
 | `python3 scripts/runtime_dry_run_audit_chain.py --output-json output/strategygroup-runtime-pilot/runtime-dry-run-audit-chain-current.json` | `status=passed`, `scenario_count=14`, all required checks true |
 | `python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/strategygroup-runtime-pilot/replay-lab/runtime-replay-report.json --output-owner-progress output/strategygroup-runtime-pilot/replay-lab/runtime-replay-owner-progress.md` | `status=passed`, `strategy_group_id=MPG-001`, replay-only safety flags true |
 | `python3 scripts/runtime_live_cutover_readiness.py --output-json output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json --output-owner-progress output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.md` | `status=live_cutover_waiting_for_fresh_signal`, `next_fresh_signal_cutover_ready=true`, `non_market_blockers=[]` |
-| `python3 scripts/execute_tokyo_runtime_governance_git_deploy.py --json --git-ref codex/owner-runtime-console-v1 --target-commit fc1f47ab459b4a45f0179c734d937fef137257f3 --release-name brc-runtime-governance-fc1f47ab-cutover-readiness-checkpoint --previous-release /home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order --expected-deployed-head 58f0fc29452e8af1f4ab5a383e0d399c8789a57c --expected-remote-migration-count 84 --expected-remote-latest-migration 2026-06-11-084_create_runtime_post_submit_budget_settlements.py` | `status=dry_run_ready`, `blockers=[]`, `apply_requested=false`, `commands_executed=0`, `remote_files_modified=false` |
+| `python3 scripts/execute_tokyo_runtime_governance_git_deploy.py --json --apply --git-ref codex/owner-runtime-console-v1 --target-commit e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249 --release-name brc-runtime-governance-e5f8c13b-cutover-ready-current --previous-release /home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order --expected-deployed-head 58f0fc29452e8af1f4ab5a383e0d399c8789a57c --expected-remote-migration-count 84 --expected-remote-latest-migration 2026-06-11-084_create_runtime_post_submit_budget_settlements.py` | `status=applied`, `blockers=[]`, `remote_interaction_count=7`, `calls_exchange_write=false`, `places_order=false` |
 
 ## Completion Boundary
 
@@ -122,6 +122,21 @@ fresh selected StrategyGroup signal exists.
 | disabled smoke treated as real execution proof | false |
 
 ## Latest Checkpoint
+
+### 2026-06-18 Cutover Ready Current Tokyo Deploy
+
+The cutover source-visibility and deploy-readiness checkpoint is now deployed
+to Tokyo through the bounded git deploy path. Postdeploy acceptance remains
+healthy waiting-for-market with no blockers or product gaps.
+
+| Item | Evidence |
+| --- | --- |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-e5f8c13b-cutover-ready-current` |
+| Deploy dry-run | `output/tokyo-git-deploy-dry-run-e5f8c13b.json`: `status=dry_run_ready`, `blockers=[]`, `apply_requested=false`, `commands_executed=0`, `remote_files_modified=false` |
+| Deploy apply | `output/tokyo-git-deploy-apply-e5f8c13b.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-e5f8c13b.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` including one L1 postdeploy daily check |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249` |
+| Boundary | Bounded deploy only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Live Cutover Same-Tick Visibility Contract
 
