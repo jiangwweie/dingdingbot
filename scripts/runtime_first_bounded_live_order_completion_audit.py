@@ -26,7 +26,7 @@ if str(ROOT_DIR) not in sys.path:
 
 
 DEFAULT_DAILY_CHECK_JSON = (
-    ROOT_DIR / "output/runtime-monitor/latest-daily-check-cache-only.json"
+    ROOT_DIR / "output/runtime-monitor/latest-daily-check.json"
 )
 DEFAULT_GOAL_PROGRESS_JSON = ROOT_DIR / "output/runtime-monitor/latest-goal-progress.json"
 DEFAULT_DRY_RUN_AUDIT_JSON = (

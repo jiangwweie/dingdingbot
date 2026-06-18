@@ -131,6 +131,11 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     )
 
 
+def test_completion_audit_default_daily_check_uses_current_schema_packet():
+    assert script.DEFAULT_DAILY_CHECK_JSON.name == "latest-daily-check.json"
+    assert "cache-only" not in str(script.DEFAULT_DAILY_CHECK_JSON)
+
+
 def test_completion_audit_reports_non_market_gap():
     dry_run = _dry_run_audit()
     dry_run["checks"]["operation_layer_evidence_relay_checked"] = False
