@@ -168,6 +168,62 @@ def test_refresh_writes_not_started_when_only_non_live_sources_exist(tmp_path):
     assert verification["completion"]["first_bounded_real_order_complete"] is False
 
 
+def test_refresh_skips_passive_runtime_reports_with_sample_or_stale_ids(tmp_path):
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    _write_json(
+        report_dir / "main-control-handoff.json",
+        {
+            "scope": "strategy_group_handoff_main_control_intake",
+            "status": "ready_for_main_control_intake",
+            "strategy_group_id": "MI-001",
+            "candidate_id": "MI-001-SOL-LONG",
+            "symbol": "SOL/USDT:USDT",
+            "side": "long",
+        },
+    )
+    _write_json(
+        report_dir / "post-signal-resume-pack.json",
+        {
+            "scope": "runtime_signal_watcher_post_signal_resume_pack",
+            "status": "waiting_for_market",
+            "signal_packet_id": "runtime-signal-input:old",
+            "authorization_id": "runtime-submit-authorization-intent_old",
+        },
+    )
+    _write_json(
+        report_dir / "strategygroup-runtime-goal-status.json",
+        {
+            "scope": "strategygroup_runtime_goal_status",
+            "status": "fresh_signal_processing",
+            "checks": {"fresh_signal_present": True},
+            "ready_for_real_order_action": False,
+        },
+    )
+
+    refresh = refresher.build_refresh_report(
+        report_dir=report_dir,
+        generated_at_ms=1781755000000,
+    )
+
+    evidence = json.loads(
+        (report_dir / refresher.EVIDENCE_FILENAME).read_text(encoding="utf-8")
+    )
+    verification = json.loads(
+        (report_dir / refresher.VERIFICATION_FILENAME).read_text(encoding="utf-8")
+    )
+    assert refresh["status"] == "live_closure_refresh_not_started"
+    assert refresh["source_counts"] == {
+        "discovered_json": 3,
+        "included_json": 0,
+        "skipped_json": 3,
+        "read_errors": 0,
+    }
+    assert evidence["present_evidence_keys"] == []
+    assert evidence["reject_reasons"] == []
+    assert verification["status"] == "live_closure_not_started"
+
+
 def test_refresh_rejects_exchange_result_without_live_submit_markers(tmp_path):
     report_dir = tmp_path / "reports"
     report_dir.mkdir()

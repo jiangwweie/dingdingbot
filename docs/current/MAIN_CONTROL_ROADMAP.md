@@ -1610,6 +1610,24 @@ budget settlement, and review actually completed.
 | Deployment | Not deployed in this checkpoint; deploy only after a stage-worthy batch or explicit Owner request |
 | Safety proof | Local tests and one read-only cache refresh only; no server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Live Closure Evidence Source Filter Checkpoint
+
+Postdeploy acceptance for `90ab93c1` exposed a product-state false alarm:
+`runtime-live-closure-evidence.json` was rebuilt as an official live closure
+packet from passive runtime reports such as handoff/intake, goal-status, and
+waiting-for-market resume packets. Those reports can carry sample or stale
+signal/candidate IDs, but they are not official closure sources.
+
+| Item | Result |
+| --- | --- |
+| Root cause | `refresh_runtime_live_closure_evidence_packets.py` included every non-dry-run JSON in the watcher report directory and then marked the aggregate as `official_live_closure_evidence` |
+| Symptom | Fresh postdeploy daily check returned `degraded` with `live_closure_evidence:*_mismatch` and `*_missing` product gaps despite no exchange write and no real submit |
+| Fix | Passive report scopes such as `handoff`, `intake`, `goal_status`, `product_state_refresh`, `source_readiness`, `deployment_readiness`, `bootstrap`, and observation reports are skipped before live closure packet assembly |
+| Preserved path | Real closure sources still include live signal, RequiredFacts/live facts, candidate authorization, action-time FinalGate, Operation Layer, exchange submit, hard stop/protection, reconciliation, settlement, and review markers |
+| Validation | `py_compile` passed; `test_refresh_runtime_live_closure_evidence_packets.py`, `test_strategygroup_runtime_product_state_refresh.py`, `test_tokyo_runtime_snapshot.py`, `test_strategygroup_runtime_daily_check.py`, `test_strategygroup_runtime_goal_progress_audit.py`, `test_runtime_first_bounded_live_order_completion_audit.py`, and `test_tokyo_runtime_deploy_session.py` passed |
+| Deployment | Stage-worthy because Tokyo currently regenerates a false official closure packet; deploy in the next bounded git apply only |
+| Safety proof | Local script/tests only in this checkpoint; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

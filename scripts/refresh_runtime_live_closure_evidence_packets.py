@@ -55,6 +55,43 @@ NON_LIVE_SOURCE_TOKENS = {
     "synthetic",
     "testnet",
 }
+PASSIVE_REPORT_SOURCE_TOKENS = {
+    "active_observation",
+    "attempt_budget",
+    "bootstrap",
+    "catalog",
+    "deployment_readiness",
+    "goal_status",
+    "handoff",
+    "intake",
+    "operator_packet",
+    "product_state_refresh",
+    "runtime_execution_chain_closure_status",
+    "source_readiness",
+}
+LIVE_CLOSURE_SOURCE_MARKERS = {
+    "action_time_finalgate",
+    "action_time_final_gate",
+    "candidate_authorization",
+    "exchange_submit",
+    "finalgate",
+    "final_gate",
+    "fresh_signal_ready",
+    "hard_stop",
+    "live_facts",
+    "operation_layer",
+    "official_entry_chain",
+    "official_operation_layer_submit_ready",
+    "official_post_submit_close_loop",
+    "post_submit",
+    "protection",
+    "reconciliation",
+    "required_facts",
+    "runtime_grant",
+    "runtime_signal_watcher_live_signal",
+    "settlement",
+    "submit_outcome_review",
+}
 
 
 def build_refresh_report(
@@ -240,6 +277,11 @@ def _non_live_source_reason(*, path: Path, packet: dict[str, Any]) -> str | None
     for token in sorted(NON_LIVE_SOURCE_TOKENS):
         if token in text:
             return f"non_live_source_token:{token}"
+    for token in sorted(PASSIVE_REPORT_SOURCE_TOKENS):
+        if token in text:
+            return f"passive_report_source_token:{token}"
+    if not _looks_like_live_closure_source(text):
+        return "not_live_closure_source"
     return None
 
 
@@ -256,6 +298,10 @@ def _status_text(packet: dict[str, Any]) -> str:
         },
     )
     return " ".join(str(item) for item in values if str(item))
+
+
+def _looks_like_live_closure_source(text: str) -> bool:
+    return any(token in text for token in LIVE_CLOSURE_SOURCE_MARKERS)
 
 
 def _collect_values_for_keys(value: Any, keys: set[str]) -> list[Any]:
