@@ -563,3 +563,25 @@ authorization evidence.
 | Monitor baseline | At that checkpoint, `docs/current/RUNTIME_MONITOR_BASELINE.json` expected `ea34594badc066bc0c714d02c385341106665e07` |
 | Verification | `84 passed` for readiness pack, daily check, goal progress, goal status, and dry-run audit tests; `py_compile` passed for watcher readiness / daily check / goal status scripts |
 | Safety | Fix and deploy did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Cutover Target Mode Audit Checkpoint
+
+The active target mode is **P0 First Bounded Live Order Closure Cutover**. The
+goal is not complete until a real fresh selected StrategyGroup signal produces
+the first bounded live order closure with exchange acceptance, exchange-native
+protection, post-submit finalize, reconciliation, budget settlement, and review
+evidence. This checkpoint confirms the non-market cutover chain remains ready
+and the remaining blockers are market-dependent.
+
+| Item | Evidence |
+| --- | --- |
+| Active goal | `P0 First Bounded Live Order Closure Cutover` |
+| Current state | `waiting_for_market`; next fresh signal cutover ready; current real submit not allowed without a real fresh signal |
+| Dispatcher audit | `runtime_signal_watcher_resume_dispatcher.py` keeps the path as fresh signal -> candidate/auth -> action-time FinalGate -> Operation Layer evidence -> official Operation Layer submit -> post-submit finalize |
+| Legacy confirmation posture | Non-executing prepare, fresh authorization binding, real submit, and reduce-only recovery use standing authorization inside the selected boundary; no per-order chat confirmation is reintroduced |
+| Local cutover readiness | `runtime_live_cutover_readiness.py`: `status=live_cutover_waiting_for_fresh_signal`; all cutover sections ready |
+| Replay lab | `run_strategygroup_runtime_replay_lab.py`: `P0.5 replay_ready`, 8 replay samples, 7 post-submit simulator cases, and synthetic fixtures for no signal, stale signal, missing facts, active position, open order, protection missing, boundary mismatch, and fresh-signal pass |
+| Low-noise monitor | `run_strategygroup_runtime_daily_check.py --from-cache --require-fresh-cache --owner-progress`: `DONT_NOTIFY`, `healthy_waiting_for_market`, `L0_local_cache_read`, `remote_interaction_count=0`, `10 pass / 4 waiting / 0 blocked` |
+| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `not_complete_waiting_for_market`, P0.5 ready, non-market blockers none |
+| Verification | `94 passed` for dispatcher, systemd unit, live closure evidence, execution-chain closure, and StrategyGroup goal-status tests |
+| Safety | This checkpoint did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
