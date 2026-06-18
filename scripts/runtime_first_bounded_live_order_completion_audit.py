@@ -152,6 +152,10 @@ def _audit_items(
                     dry_run_audit,
                     "only_mpg_tiny_real_order_eligible_checked",
                 ),
+                "allocated_subaccount_profile_boundary_checked": _flag(
+                    dry_run_audit,
+                    "allocated_subaccount_profile_boundary_checked",
+                ),
                 "strategygroup_adapter_boundary_checked": _flag(
                     dry_run_audit,
                     "strategygroup_adapter_boundary_checked",

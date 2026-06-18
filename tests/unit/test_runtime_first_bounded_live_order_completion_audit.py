@@ -41,6 +41,7 @@ def _dry_run_audit(**overrides):
         "fresh_signal_fast_auto_chain_checked": True,
         "non_executing_prepare_auto_bridge_checked": True,
         "only_mpg_tiny_real_order_eligible_checked": True,
+        "allocated_subaccount_profile_boundary_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
         "operation_layer_evidence_relay_checked": True,
@@ -152,6 +153,28 @@ def test_completion_audit_reports_non_market_gap():
                 "Layer evidence relay"
             ),
             "missing_or_false": ["operation_layer_evidence_relay_checked"],
+        }
+    ]
+
+
+def test_completion_audit_requires_allocated_subaccount_boundary():
+    dry_run = _dry_run_audit()
+    dry_run["checks"]["allocated_subaccount_profile_boundary_checked"] = False
+    dry_run["summary"]["allocated_subaccount_profile_boundary_checked"] = False
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=dry_run,
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "selected StrategyGroup and allocated subaccount boundary",
+            "missing_or_false": ["allocated_subaccount_profile_boundary_checked"],
         }
     ]
 

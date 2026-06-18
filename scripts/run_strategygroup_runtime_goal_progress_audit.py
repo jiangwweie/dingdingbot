@@ -50,6 +50,7 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
 )
 
 P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
+    "allocated_subaccount_profile_boundary_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     "disabled_smoke_not_real_execution_proof",
     "expanded_watcher_scope_execution_guard_checked",
@@ -451,6 +452,10 @@ def _strategygroup_tier_boundary(
         checks,
         "strategygroup_adapter_boundary_checked",
     )
+    allocated_subaccount_boundary_checked = _dry_run_required_check_present(
+        checks,
+        "allocated_subaccount_profile_boundary_checked",
+    )
     selected_dispatch_checked = _dry_run_required_check_present(
         checks,
         "selected_strategygroup_dispatch_guard_checked",
@@ -471,6 +476,9 @@ def _strategygroup_tier_boundary(
         "only_mpg_tiny_real_order_eligible_checked": only_mpg_l4_checked,
         "new_strategygroups_default_observe_only_checked": new_defaults_checked,
         "strategygroup_adapter_boundary_checked": adapter_boundary_checked,
+        "allocated_subaccount_profile_boundary_checked": (
+            allocated_subaccount_boundary_checked
+        ),
         "selected_strategygroup_dispatch_guard_checked": selected_dispatch_checked,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
             all_selected_finalgate_checked

@@ -3692,6 +3692,16 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "allocated_subaccount_profile_boundary_checked": (
+            shared_pipeline.get("status") == "passed"
+            and shared_pipeline.get("checks", {}).get(
+                "all_strategy_groups_keep_allocated_subaccount_profile_boundary"
+            )
+            is True
+            and runtime_tier_policy.get("status") == "passed"
+            and "allocated_subaccount_profile_boundary"
+            in (runtime_tier_policy.get("l4_real_order_requirements") or [])
+        ),
         "strategy_handoff_no_execution_pipeline_fields_checked": (
             shared_pipeline.get("status") == "passed"
             and shared_pipeline.get("checks", {}).get(
@@ -3920,6 +3930,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "strategygroup_adapter_boundary_checked": checks[
             "strategygroup_adapter_boundary_checked"
+        ],
+        "allocated_subaccount_profile_boundary_checked": checks[
+            "allocated_subaccount_profile_boundary_checked"
         ],
         "strategy_handoff_no_execution_pipeline_fields_checked": checks[
             "strategy_handoff_no_execution_pipeline_fields_checked"

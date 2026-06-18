@@ -44,6 +44,7 @@ SECTION_CHECKS: dict[str, list[str]] = {
     "strategy_scope": [
         "runtime_tier_policy_checked",
         "only_mpg_tiny_real_order_eligible_checked",
+        "allocated_subaccount_profile_boundary_checked",
         "common_execution_chain_reuse_checked",
         "strategygroup_adapter_boundary_checked",
         "strategy_handoff_no_execution_pipeline_fields_checked",

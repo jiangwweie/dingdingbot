@@ -108,6 +108,7 @@ def _daily_check(**overrides):
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
             "fresh_signal_notification_policy_checked": True,
+            "allocated_subaccount_profile_boundary_checked": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_dry_run_scenario_count": 14,
             "runtime_execution_chain_ready_segment_count": 3,
@@ -278,6 +279,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert report["strategygroup_tier_boundary"] == {
         "checks": {
             "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
+            "allocated_subaccount_profile_boundary_checked": True,
             "new_strategygroups_default_observe_only_checked": True,
             "only_mpg_tiny_real_order_eligible_checked": True,
             "runtime_tier_policy_checked": True,
@@ -618,6 +620,7 @@ def test_goal_progress_marks_non_market_gap_as_degraded():
 def test_goal_progress_marks_exit_hardening_boundary_needs_work_when_matrix_missing():
     module = _load_module()
     checks = dict(_daily_check()["checks"])
+    checks["allocated_subaccount_profile_boundary_checked"] = False
     checks["runtime_dry_run_required_checks_present"] = False
     checks["runtime_dry_run_missing_required_checks"] = [
         "post_submit_exit_outcome_matrix_checked"
@@ -699,6 +702,32 @@ def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_l4_guar
     assert "missing_dry_run_check:only_mpg_tiny_real_order_eligible_checked" in report[
         "checks"
     ]["product_gaps"]
+
+
+def test_goal_progress_marks_tier_boundary_needs_work_when_allocated_subaccount_missing():
+    module = _load_module()
+    checks = dict(_daily_check()["checks"])
+    checks["allocated_subaccount_profile_boundary_checked"] = False
+    checks["runtime_dry_run_required_checks_present"] = False
+    checks["runtime_dry_run_missing_required_checks"] = [
+        "allocated_subaccount_profile_boundary_checked"
+    ]
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(checks=checks),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["strategygroup_tier_boundary"]["status"] == "needs_work"
+    assert report["strategygroup_tier_boundary"]["checks"][
+        "allocated_subaccount_profile_boundary_checked"
+    ] is False
+    assert (
+        "missing_dry_run_check:allocated_subaccount_profile_boundary_checked"
+        in report["checks"]["product_gaps"]
+    )
+    assert "strategygroup_tier_boundary_not_ready" in report["checks"]["product_gaps"]
 
 
 def test_goal_progress_marks_strategygroup_tier_boundary_needs_work_when_policy_missing():
