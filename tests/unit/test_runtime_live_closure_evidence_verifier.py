@@ -27,6 +27,10 @@ def _official_packet(
         exchange_submit_execution_result_id = _evidence_id(
             evidence["exchange_submit_execution_result_id"]
         )
+        if "fresh_submit_authorization_id" in evidence:
+            packet["pre_submit_authorization_chain_proof"] = (
+                _pre_submit_authorization_chain_proof(evidence)
+            )
         packet["live_submit_proof"] = live_submit_proof or {
             "exchange_result_present": True,
             "result_source_matched": True,
@@ -63,6 +67,29 @@ def _official_packet(
                 "missing_source_match_keys": [],
             }
     return packet
+
+
+def _pre_submit_authorization_chain_proof(
+    evidence: dict[str, object],
+) -> dict[str, object]:
+    pre_submit_keys = [
+        key
+        for key in (
+            "candidate_id",
+            "runtime_grant_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        )
+        if key in evidence
+    ]
+    return {
+        "fresh_submit_authorization_id": _evidence_id(
+            evidence["fresh_submit_authorization_id"]
+        ),
+        "present_evidence_keys": pre_submit_keys,
+        "matched_evidence_keys": pre_submit_keys,
+        "missing_source_match_keys": [],
+    }
 
 
 def _evidence_id(value: object) -> str:
@@ -152,6 +179,22 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
                     "exchange_native_hard_stop_order_id-1"
                 ),
             },
+            "pre_submit_authorization_chain_proof": {
+                "fresh_submit_authorization_id": "fresh_submit_authorization_id-1",
+                "present_evidence_keys": [
+                    "candidate_id",
+                    "runtime_grant_id",
+                    "action_time_finalgate_packet_id",
+                    "operation_layer_submit_authorization_id",
+                ],
+                "matched_evidence_keys": [
+                    "candidate_id",
+                    "runtime_grant_id",
+                    "action_time_finalgate_packet_id",
+                    "operation_layer_submit_authorization_id",
+                ],
+                "missing_source_match_keys": [],
+            },
             "post_submit_close_loop_proof": {
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
                 "present_evidence_keys": [
@@ -193,10 +236,14 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
 
 
 def test_live_closure_evidence_verifier_rejects_missing_live_submit_proof():
+    evidence = _complete_evidence()
     packet = verifier.build_live_closure_evidence_verification(
         {
             "source_kind": "official_live_closure_evidence",
-            "evidence": _complete_evidence(),
+            "evidence": evidence,
+            "pre_submit_authorization_chain_proof": (
+                _pre_submit_authorization_chain_proof(evidence)
+            ),
         },
         generated_at_ms=1781755000000,
     )
@@ -297,6 +344,75 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_without_source
     assert real_exchange_stage["status"] == "rejected"
     assert real_exchange_stage["reject_reasons"] == [
         "live_submit_proof_result_source_missing"
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_missing_pre_submit_authorization_chain_proof():
+    packet = _official_packet(_complete_evidence())
+    packet.pop("pre_submit_authorization_chain_proof")
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["owner_state"] == "需要介入"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "pre_submit_authorization_chain_proof_missing"
+    ]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "candidate_authorization_bound",
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_unbound_pre_submit_authorization_chain():
+    packet = _official_packet(_complete_evidence())
+    packet["pre_submit_authorization_chain_proof"] = {
+        "fresh_submit_authorization_id": "fresh_submit_authorization_id-1",
+        "present_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        ],
+        "matched_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+        ],
+        "missing_source_match_keys": [
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        ],
+    }
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "finalgate_authorization_chain_source_missing",
+        "operation_layer_authorization_chain_source_missing",
+    ]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
     ]
 
 

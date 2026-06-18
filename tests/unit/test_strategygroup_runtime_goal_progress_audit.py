@@ -1161,6 +1161,24 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
             {
                 "source_kind": "official_live_closure_evidence",
                 "official_live_closure_evidence": True,
+                "pre_submit_authorization_chain_proof": {
+                    "fresh_submit_authorization_id": (
+                        "fresh_submit_authorization_id-1"
+                    ),
+                    "present_evidence_keys": [
+                        "candidate_id",
+                        "runtime_grant_id",
+                        "action_time_finalgate_packet_id",
+                        "operation_layer_submit_authorization_id",
+                    ],
+                    "matched_evidence_keys": [
+                        "candidate_id",
+                        "runtime_grant_id",
+                        "action_time_finalgate_packet_id",
+                        "operation_layer_submit_authorization_id",
+                    ],
+                    "missing_source_match_keys": [],
+                },
                 "live_submit_proof": {
                     "exchange_result_present": True,
                     "result_source_matched": True,

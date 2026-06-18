@@ -87,6 +87,7 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "live_closure_contract_defined",
         "live_closure_contract_rejects_synthetic_signal",
         "live_closure_contract_rejects_disabled_smoke",
+        "live_closure_contract_requires_pre_submit_authorization_chain_binding",
         "live_closure_contract_requires_exchange_acceptance",
         "live_closure_contract_requires_live_submit_truth",
         "live_closure_contract_requires_exchange_native_protection",
@@ -130,7 +131,13 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "runtime_grant_id",
             "fresh_submit_authorization_id",
         ],
-        "reject_if": ["strategy_scope_mismatch", "profile_boundary_mismatch"],
+        "reject_if": [
+            "strategy_scope_mismatch",
+            "profile_boundary_mismatch",
+            "pre_submit_authorization_chain_proof_missing",
+            "pre_submit_authorization_chain_id_mismatch",
+            "candidate_authorization_chain_source_missing",
+        ],
         "next_action": "run_action_time_finalgate",
     },
     {
@@ -142,6 +149,9 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "open_order",
             "budget_missing",
             "duplicate_submit_risk",
+            "pre_submit_authorization_chain_proof_missing",
+            "pre_submit_authorization_chain_id_mismatch",
+            "finalgate_authorization_chain_source_missing",
         ],
         "next_action": "prepare_official_operation_layer_submit",
     },
@@ -149,7 +159,13 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "name": "official_operation_layer_ready",
         "market_dependent": True,
         "required_evidence_keys": ["operation_layer_submit_authorization_id"],
-        "reject_if": ["operation_layer_not_ready", "disabled_smoke_only"],
+        "reject_if": [
+            "operation_layer_not_ready",
+            "disabled_smoke_only",
+            "pre_submit_authorization_chain_proof_missing",
+            "pre_submit_authorization_chain_id_mismatch",
+            "operation_layer_authorization_chain_source_missing",
+        ],
         "next_action": "submit_through_official_operation_layer",
     },
     {
@@ -314,6 +330,14 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_rejects_disabled_smoke": (
             "disabled_smoke_only" in reject_reasons
+        ),
+        "live_closure_contract_requires_pre_submit_authorization_chain_binding": (
+            "pre_submit_authorization_chain_proof_missing" in reject_reasons
+            and "pre_submit_authorization_chain_id_mismatch" in reject_reasons
+            and "candidate_authorization_chain_source_missing" in reject_reasons
+            and "finalgate_authorization_chain_source_missing" in reject_reasons
+            and "operation_layer_authorization_chain_source_missing"
+            in reject_reasons
         ),
         "live_closure_contract_requires_exchange_acceptance": (
             "exchange_submit_execution_result_id" in evidence_keys

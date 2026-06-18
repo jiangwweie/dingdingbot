@@ -86,6 +86,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "live_closure_contract_defined": True,
         "live_closure_contract_rejects_synthetic_signal": True,
         "live_closure_contract_rejects_disabled_smoke": True,
+        "live_closure_contract_requires_pre_submit_authorization_chain_binding": True,
         "live_closure_contract_requires_exchange_acceptance": True,
         "live_closure_contract_requires_live_submit_truth": True,
         "live_closure_contract_requires_exchange_native_protection": True,

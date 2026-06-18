@@ -779,3 +779,21 @@ exchange submit execution result.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `27 passed` for the live-closure verifier/packet/cutover tests; `131 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Pre-Submit Authorization Chain Binding Checkpoint
+
+The live-closure evidence packet builder now requires the candidate,
+runtime-grant, action-time FinalGate, and official Operation Layer authorization
+evidence to bind to the same `fresh_submit_authorization_id`. This prevents a
+future real signal from being marked ready by stitching together stale
+FinalGate or Operation Layer arm evidence from another authorization chain.
+
+| Item | Evidence |
+| --- | --- |
+| Contract pre-submit binding | `runtime_live_cutover_readiness.py` adds `pre_submit_authorization_chain_proof_missing`, `pre_submit_authorization_chain_id_mismatch`, `candidate_authorization_chain_source_missing`, `finalgate_authorization_chain_source_missing`, and `operation_layer_authorization_chain_source_missing` to the relevant pre-submit stage reject reasons |
+| Packet builder chain proof | `runtime_live_closure_evidence_packet.py` emits `pre_submit_authorization_chain_proof` anchored by `fresh_submit_authorization_id` with present, matched, and missing source-match evidence keys |
+| Verifier chain guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when candidate/auth, FinalGate, or Operation Layer evidence is present but not bound to the same fresh submit authorization chain |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_pre_submit_authorization_chain`, `test_live_closure_evidence_verifier_rejects_missing_pre_submit_authorization_chain_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_pre_submit_authorization_chain` reject missing or stale-chain pre-submit evidence |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `30 passed` for the live-closure verifier/packet/cutover tests; `134 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

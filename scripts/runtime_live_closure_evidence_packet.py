@@ -101,7 +101,14 @@ EVIDENCE_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 EXCHANGE_RESULT_EVIDENCE_KEY = "exchange_submit_execution_result_id"
+PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY = "fresh_submit_authorization_id"
 PROTECTION_EVIDENCE_KEY = "exchange_native_hard_stop_order_id"
+PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS = (
+    "candidate_id",
+    "runtime_grant_id",
+    "action_time_finalgate_packet_id",
+    "operation_layer_submit_authorization_id",
+)
 POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
     "runtime_post_submit_finalize_packet_id",
     "post_submit_reconciliation_evidence_id",
@@ -140,6 +147,10 @@ def build_live_closure_evidence_packet(
     )
     present_keys = [key for key in required_keys if _present(evidence.get(key))]
     missing_keys = [key for key in required_keys if not _present(evidence.get(key))]
+    pre_submit_authorization_chain_proof = _pre_submit_authorization_chain_proof(
+        source_packets=source_packets,
+        evidence=evidence,
+    )
     live_submit_proof = _live_submit_proof(
         source_packets=source_packets,
         evidence=evidence,
@@ -157,6 +168,9 @@ def build_live_closure_evidence_packet(
         source_kind=source_kind,
         official_live_source=official_live_source,
         evidence=evidence,
+        pre_submit_authorization_chain_proof=(
+            pre_submit_authorization_chain_proof
+        ),
         live_submit_proof=live_submit_proof,
         exchange_native_protection_proof=exchange_native_protection_proof,
         post_submit_close_loop_proof=post_submit_close_loop_proof,
@@ -172,6 +186,9 @@ def build_live_closure_evidence_packet(
         "required_evidence_keys": required_keys,
         "present_evidence_keys": present_keys,
         "missing_evidence_keys": missing_keys,
+        "pre_submit_authorization_chain_proof": (
+            pre_submit_authorization_chain_proof
+        ),
         "live_submit_proof": live_submit_proof,
         "exchange_native_protection_proof": exchange_native_protection_proof,
         "post_submit_close_loop_proof": post_submit_close_loop_proof,
@@ -237,6 +254,7 @@ def _derive_reject_reasons(
     source_kind: str,
     official_live_source: bool,
     evidence: dict[str, Any],
+    pre_submit_authorization_chain_proof: dict[str, Any],
     live_submit_proof: dict[str, Any],
     exchange_native_protection_proof: dict[str, Any],
     post_submit_close_loop_proof: dict[str, Any],
@@ -255,6 +273,21 @@ def _derive_reject_reasons(
         reasons.add("dry_run_or_rehearsal_evidence")
     if any(token in status_text for token in ("controlled_", "in_memory_simulation")):
         reasons.add("controlled_in_memory_execution")
+
+    authorization_chain_missing = set(
+        str(item)
+        for item in pre_submit_authorization_chain_proof.get(
+            "missing_source_match_keys"
+        )
+        or []
+    )
+    if authorization_chain_missing:
+        if authorization_chain_missing & {"candidate_id", "runtime_grant_id"}:
+            reasons.add("candidate_authorization_chain_source_missing")
+        if "action_time_finalgate_packet_id" in authorization_chain_missing:
+            reasons.add("finalgate_authorization_chain_source_missing")
+        if "operation_layer_submit_authorization_id" in authorization_chain_missing:
+            reasons.add("operation_layer_authorization_chain_source_missing")
 
     exchange_result_present = _present(evidence.get("exchange_submit_execution_result_id"))
     if exchange_result_present:
@@ -290,6 +323,49 @@ def _derive_reject_reasons(
             if close_loop_missing - {"runtime_post_submit_finalize_packet_id"}:
                 reasons.add("post_submit_close_loop_result_source_missing")
     return sorted(reasons)
+
+
+def _pre_submit_authorization_chain_proof(
+    *,
+    source_packets: list[dict[str, Any]],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    fresh_submit_authorization_id = _evidence_id(
+        evidence.get(PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY)
+    )
+    present_keys: list[str] = []
+    matched_keys: list[str] = []
+    missing_source_match_keys: list[str] = []
+    for key in PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS:
+        evidence_id = _evidence_id(evidence.get(key))
+        if not evidence_id:
+            continue
+        present_keys.append(key)
+        key_source_packets = _source_packets_for_evidence_id(
+            source_packets,
+            aliases=EVIDENCE_ALIASES[key],
+            evidence_id=evidence_id,
+        )
+        authorization_bound = bool(fresh_submit_authorization_id) and any(
+            _packet_has_evidence_id(
+                packet,
+                aliases=EVIDENCE_ALIASES[PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY],
+                evidence_id=fresh_submit_authorization_id,
+            )
+            for packet in key_source_packets
+        )
+        if authorization_bound:
+            matched_keys.append(key)
+        else:
+            missing_source_match_keys.append(key)
+    proof: dict[str, Any] = {
+        "present_evidence_keys": present_keys,
+        "matched_evidence_keys": matched_keys,
+        "missing_source_match_keys": missing_source_match_keys,
+    }
+    if fresh_submit_authorization_id:
+        proof["fresh_submit_authorization_id"] = fresh_submit_authorization_id
+    return proof
 
 
 def _live_submit_proof(

@@ -58,6 +58,22 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
     )
 
     assert packet["official_live_closure_evidence"] is True
+    assert packet["pre_submit_authorization_chain_proof"] == {
+        "fresh_submit_authorization_id": "fresh-auth-1",
+        "present_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        ],
+        "matched_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        ],
+        "missing_source_match_keys": [],
+    }
     assert packet["live_submit_proof"] == {
         "exchange_result_present": True,
         "result_source_matched": True,
@@ -226,6 +242,56 @@ def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers()
     }
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_unbound_pre_submit_authorization_chain():
+    sources = _official_complete_sources()
+    sources[2]["ids"].pop("action_time_finalgate_packet_id")
+    sources[2]["ids"].pop("operation_layer_submit_authorization_id")
+    sources.append(
+        {
+            "scope": "stale_operation_layer_arm_evidence",
+            "status": "official_operation_layer_submit_ready",
+            "ids": {
+                "fresh_submit_authorization_id": "stale-auth",
+                "action_time_finalgate_packet_id": "finalgate-1",
+                "operation_layer_submit_authorization_id": "op-auth-1",
+            },
+        }
+    )
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["pre_submit_authorization_chain_proof"] == {
+        "fresh_submit_authorization_id": "fresh-auth-1",
+        "present_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        ],
+        "matched_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+        ],
+        "missing_source_match_keys": [
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+        ],
+    }
+    assert "finalgate_authorization_chain_source_missing" in packet["reject_reasons"]
+    assert (
+        "operation_layer_authorization_chain_source_missing"
+        in packet["reject_reasons"]
+    )
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

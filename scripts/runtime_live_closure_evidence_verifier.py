@@ -38,6 +38,11 @@ GLOBAL_REJECT_REASONS = {
     "controlled_in_memory_execution",
     "duplicate_evidence_id",
     "malformed_evidence_id",
+    "pre_submit_authorization_chain_proof_missing",
+    "pre_submit_authorization_chain_id_mismatch",
+    "candidate_authorization_chain_source_missing",
+    "finalgate_authorization_chain_source_missing",
+    "operation_layer_authorization_chain_source_missing",
     "live_submit_proof_missing",
     "live_submit_proof_result_id_mismatch",
     "live_submit_proof_result_source_missing",
@@ -51,11 +56,24 @@ GLOBAL_REJECT_REASONS = {
     "post_submit_close_loop_result_source_missing",
 }
 EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
+PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY = "fresh_submit_authorization_id"
+PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS = (
+    "candidate_id",
+    "runtime_grant_id",
+    "action_time_finalgate_packet_id",
+    "operation_layer_submit_authorization_id",
+)
 POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
     "runtime_post_submit_finalize_packet_id",
     "post_submit_reconciliation_evidence_id",
     "post_submit_budget_settlement_id",
     "submit_outcome_review_id",
+)
+AUTHORIZATION_CHAIN_PROOF_ID_FIELDS = (
+    "fresh_submit_authorization_id",
+    "submit_authorization_id",
+    "authorization_id",
+    "chain_authorization_id",
 )
 PROTECTION_EVIDENCE_KEY = "exchange_native_hard_stop_order_id"
 LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
@@ -262,6 +280,11 @@ def _reject_reasons(
     exchange_submit_execution_result_id = _required_evidence_id(
         evidence.get("exchange_submit_execution_result_id")
     )
+    fresh_submit_authorization_id = _required_evidence_id(
+        evidence.get(PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY)
+    )
+    if source_ready and fresh_submit_authorization_id:
+        reasons.update(_pre_submit_authorization_chain_reject_reasons(packet, evidence))
     live_submit_ready = False
     if source_ready and exchange_submit_execution_result_id:
         proof = packet.get("live_submit_proof")
@@ -341,6 +364,61 @@ def _required_evidence_id(value: Any) -> str | None:
 
 def _live_submit_proof_result_id(proof: dict[str, Any]) -> str | None:
     for field in LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS:
+        value = _required_evidence_id(proof.get(field))
+        if value:
+            return value
+    return None
+
+
+def _pre_submit_authorization_chain_reject_reasons(
+    packet: dict[str, Any],
+    evidence: dict[str, Any],
+) -> set[str]:
+    fresh_submit_authorization_id = _required_evidence_id(
+        evidence.get(PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY)
+    )
+    if not fresh_submit_authorization_id:
+        return set()
+    present_keys = [
+        key
+        for key in PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS
+        if _required_evidence_id_present(evidence.get(key))
+    ]
+    if not present_keys:
+        return set()
+    proof = packet.get("pre_submit_authorization_chain_proof")
+    if not isinstance(proof, dict):
+        return {"pre_submit_authorization_chain_proof_missing"}
+    reject_reasons: set[str] = set()
+    if (
+        _pre_submit_authorization_chain_proof_id(proof)
+        != fresh_submit_authorization_id
+    ):
+        reject_reasons.add("pre_submit_authorization_chain_id_mismatch")
+    matched_keys = {
+        str(item)
+        for item in proof.get("matched_evidence_keys") or []
+    }
+    missing_keys = {
+        str(item)
+        for item in proof.get("missing_source_match_keys") or []
+    }
+    for key in present_keys:
+        if key in matched_keys and key not in missing_keys:
+            continue
+        if key in {"candidate_id", "runtime_grant_id"}:
+            reject_reasons.add("candidate_authorization_chain_source_missing")
+        elif key == "action_time_finalgate_packet_id":
+            reject_reasons.add("finalgate_authorization_chain_source_missing")
+        elif key == "operation_layer_submit_authorization_id":
+            reject_reasons.add("operation_layer_authorization_chain_source_missing")
+    return reject_reasons
+
+
+def _pre_submit_authorization_chain_proof_id(
+    proof: dict[str, Any]
+) -> str | None:
+    for field in AUTHORIZATION_CHAIN_PROOF_ID_FIELDS:
         value = _required_evidence_id(proof.get(field))
         if value:
             return value
