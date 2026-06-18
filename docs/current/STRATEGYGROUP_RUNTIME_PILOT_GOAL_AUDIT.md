@@ -24,8 +24,8 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
-| Latest deployed runtime head | `57676b728e1ecc950c9b74fd14faad2c5cf093aa` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-57676b72-live-closure-refresh-hook` |
+| Latest deployed runtime head | `58f0fc29452e8af1f4ab5a383e0d399c8789a57c` |
+| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -133,6 +133,11 @@ tick later.
 | Refresh order | `refresh_strategygroup_runtime_product_state_packets.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, then goal-status refresh when all optional flags are enabled |
 | Test coverage | `test_refresh_packets_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status` |
 | Owner impact | When the first live closure evidence is complete, goal-status can observe it in the same watcher post-step instead of waiting for another tick |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order` |
+| Deploy dry-run | `output/tokyo-git-deploy-dry-run-58f0fc29.json`: `status=dry_run_ready`, `blockers=[]`, `interaction.level=L1_deploy_plan_only`, `remote_interaction_count=0` |
+| Deploy apply | `output/tokyo-git-deploy-apply-58f0fc29.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-58f0fc29.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` including one L1 postdeploy daily check |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `58f0fc29452e8af1f4ab5a383e0d399c8789a57c` |
 | Boundary | Readmodel/report refresh only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Live Closure Refresh Hook Tokyo Deploy
@@ -148,7 +153,7 @@ waiting-for-market with no blockers or product gaps.
 | Deploy dry-run | `output/tokyo-git-deploy-dry-run-57676b72.json`: `status=dry_run_ready`, `blockers=[]`, `interaction.level=L1_deploy_plan_only`, `remote_interaction_count=0` |
 | Deploy apply | `output/tokyo-git-deploy-apply-57676b72.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
 | Postdeploy acceptance | `output/tokyo-runtime-deploy-session-57676b72.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` including one L1 postdeploy daily check |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `57676b728e1ecc950c9b74fd14faad2c5cf093aa` |
+| Monitor baseline | At that checkpoint, `docs/current/RUNTIME_MONITOR_BASELINE.json` expected `57676b728e1ecc950c9b74fd14faad2c5cf093aa` |
 | Safety | Bounded deploy only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Live Closure Evidence Product-State Refresh Hook
