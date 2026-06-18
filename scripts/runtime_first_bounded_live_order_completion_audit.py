@@ -41,6 +41,12 @@ DEFAULT_OUTPUT_JSON = (
 DEFAULT_OWNER_PROGRESS = (
     ROOT_DIR / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md"
 )
+REQUIRED_INPUT_SOURCES = (
+    "daily_check",
+    "goal_progress",
+    "dry_run_audit",
+    "live_cutover",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -62,6 +68,25 @@ def _input_source_summary(path: Path, packet: dict[str, Any]) -> dict[str, Any]:
         "source_runtime_head": source.get("runtime_head"),
         "source_expected_runtime_head": source.get("expected_runtime_head"),
     }
+
+
+def _input_source_gaps(input_sources: dict[str, Any] | None) -> list[str]:
+    if input_sources is None:
+        return []
+
+    sources = _dict(input_sources)
+    gaps: list[str] = []
+    for name in REQUIRED_INPUT_SOURCES:
+        source = sources.get(name)
+        if not isinstance(source, dict):
+            gaps.append(f"{name}:missing_source")
+            continue
+        if source.get("exists") is not True:
+            gaps.append(f"{name}:exists")
+        for field in ("path", "status", "schema"):
+            if not source.get(field):
+                gaps.append(f"{name}:{field}")
+    return gaps
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -470,6 +495,14 @@ def build_completion_audit_report(
                 "missing_or_false": ["live_closure_evidence_boundary_rejected"],
             }
         )
+    input_source_gaps = _input_source_gaps(input_sources)
+    if input_source_gaps:
+        non_market_gaps.append(
+            {
+                "requirement": "P0 completion audit input sources are traceable",
+                "missing_or_false": input_source_gaps,
+            }
+        )
     if goal_complete and not non_market_gaps:
         status = "complete"
         market_dependent_remaining = []
@@ -488,6 +521,7 @@ def build_completion_audit_report(
         "goal_complete": goal_complete,
         "non_market_gaps": non_market_gaps,
         "market_dependent_remaining": market_dependent_remaining,
+        "input_source_gaps": input_source_gaps,
         "input_sources": input_sources or {},
         "safety_invariants": {
             "server_files_mutated": False,
@@ -508,6 +542,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         str(item) for item in report.get("market_dependent_remaining") or []
     ]
     input_sources = _dict(report.get("input_sources"))
+    input_source_gaps = [str(item) for item in report.get("input_source_gaps") or []]
     non_market_text = "无" if not non_market else str(len(non_market))
     lines = [
         "## P0 First Bounded Live Order Closure Completion Audit",
@@ -543,6 +578,11 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
                 f"- {name}: status={source.get('status')}, schema={schema}, "
                 f"generated={generated}, path={source.get('path')}"
             )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Input Source Gaps", ""])
+    if input_source_gaps:
+        lines.extend(f"- {gap}" for gap in input_source_gaps)
     else:
         lines.append("- none")
     lines.extend(["", "## Non-Market Gaps", ""])

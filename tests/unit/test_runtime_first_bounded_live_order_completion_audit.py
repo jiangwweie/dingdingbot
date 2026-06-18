@@ -7,6 +7,7 @@ from scripts import runtime_first_bounded_live_order_completion_audit as script
 
 def _daily_check(**overrides):
     base = {
+        "schema": 12,
         "status": "waiting_for_market",
         "current_read_interaction": {
             "level": "L0_local_cache_read",
@@ -21,6 +22,8 @@ def _daily_check(**overrides):
 
 def _goal_progress(**overrides):
     base = {
+        "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
+        "status": "waiting_for_market",
         "interaction": {"remote_interaction_count": 0},
         "completion_boundary": {
             "goal_complete": False,
@@ -56,6 +59,7 @@ def _dry_run_audit(**overrides):
         "strategygroup_adapter_boundary_checked": True,
     }
     base = {
+        "schema": "brc.runtime_dry_run_audit_chain.v1",
         "status": "passed",
         "checks": checks,
         "summary": dict(checks),
@@ -66,6 +70,7 @@ def _dry_run_audit(**overrides):
 
 def _live_cutover(**overrides):
     base = {
+        "schema": "brc.runtime_live_cutover_readiness.v1",
         "status": "live_cutover_waiting_for_fresh_signal",
         "selected_strategy_group_id": "MPG-001",
         "first_live_lane": "selected_strategygroup_allocated_subaccount",
@@ -96,6 +101,37 @@ def _live_cutover(**overrides):
     return base
 
 
+def _input_sources(**overrides):
+    base = {
+        "daily_check": {
+            "exists": True,
+            "path": "/tmp/latest-daily-check.json",
+            "schema": 12,
+            "status": "waiting_for_market",
+        },
+        "goal_progress": {
+            "exists": True,
+            "path": "/tmp/latest-goal-progress.json",
+            "schema": "brc.strategygroup_runtime_goal_progress_audit.v1",
+            "status": "waiting_for_market",
+        },
+        "dry_run_audit": {
+            "exists": True,
+            "path": "/tmp/latest-runtime-dry-run-audit-chain.json",
+            "schema": "brc.runtime_dry_run_audit_chain.v1",
+            "status": "passed",
+        },
+        "live_cutover": {
+            "exists": True,
+            "path": "/tmp/latest-live-cutover-readiness.json",
+            "schema": "brc.runtime_live_cutover_readiness.v1",
+            "status": "live_cutover_waiting_for_fresh_signal",
+        },
+    }
+    base.update(overrides)
+    return base
+
+
 def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     report = script.build_completion_audit_report(
         daily_check=_daily_check(),
@@ -108,6 +144,7 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     assert report["status"] == "not_complete_waiting_for_market"
     assert report["goal_complete"] is False
     assert report["non_market_gaps"] == []
+    assert report["input_source_gaps"] == []
     assert report["market_dependent_remaining"] == [
         "fresh signal -> RequiredFacts -> candidate/auth fast chain",
         "candidate/auth -> action-time FinalGate -> official Operation Layer evidence relay",
@@ -158,6 +195,57 @@ def test_completion_audit_reports_non_market_gap():
                 "Layer evidence relay"
             ),
             "missing_or_false": ["operation_layer_evidence_relay_checked"],
+        }
+    ]
+
+
+def test_completion_audit_reports_missing_input_source_schema_gap():
+    input_sources = _input_sources(
+        goal_progress={
+            "exists": True,
+            "path": "/tmp/latest-goal-progress.json",
+            "status": "waiting_for_market",
+        }
+    )
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        input_sources=input_sources,
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["input_source_gaps"] == ["goal_progress:schema"]
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "P0 completion audit input sources are traceable",
+            "missing_or_false": ["goal_progress:schema"],
+        }
+    ]
+
+
+def test_completion_audit_reports_missing_input_source_gap():
+    input_sources = _input_sources()
+    input_sources.pop("live_cutover")
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        input_sources=input_sources,
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["input_source_gaps"] == ["live_cutover:missing_source"]
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "P0 completion audit input sources are traceable",
+            "missing_or_false": ["live_cutover:missing_source"],
         }
     ]
 
@@ -334,6 +422,7 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     packet = json.loads(output.read_text(encoding="utf-8"))
     owner_text = owner.read_text(encoding="utf-8")
     assert packet["status"] == "not_complete_waiting_for_market"
+    assert packet["input_source_gaps"] == []
     assert packet["input_sources"]["daily_check"] == {
         "exists": True,
         "generated_at_ms": None,
@@ -348,6 +437,7 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     assert "- 非市场缺口: 无" in owner_text
     assert "- Exchange write: 否" in owner_text
     assert "- daily_check: status=waiting_for_market, schema=12" in owner_text
+    assert "## Input Source Gaps" in owner_text
 
 
 def test_completion_audit_cli_treats_runtime_processing_as_success(tmp_path):
