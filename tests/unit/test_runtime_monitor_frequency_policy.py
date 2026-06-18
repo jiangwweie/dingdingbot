@@ -33,3 +33,10 @@ def test_runtime_monitor_baseline_uses_low_frequency_for_healthy_waiting_market(
         "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json"
     ) in p0_completion_audit_check
     assert "run_tokyo" not in p0_completion_audit_check
+    local_monitor_sequence_check = baseline["local_monitor_sequence_check"]
+    assert local_monitor_sequence_check.startswith(
+        "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py "
+    )
+    assert "--daily-check-mode cache" in local_monitor_sequence_check
+    assert "run_tokyo" not in local_monitor_sequence_check
+    assert "ssh " not in local_monitor_sequence_check

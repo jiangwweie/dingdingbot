@@ -136,30 +136,57 @@ def _checks_from_text(
 
 def _checks_from_baseline(*, baseline: dict[str, Any]) -> list[dict[str, str]]:
     p0_completion_audit_check = str(baseline.get("p0_completion_audit_check") or "")
-    required_fragments = [
+    p0_required_fragments = [
         "python3 scripts/runtime_first_bounded_live_order_completion_audit.py",
         "--output-json output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json",
         "--output-owner-progress output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md",
     ]
-    missing_fragments = [
+    missing_p0_fragments = [
         fragment
-        for fragment in required_fragments
+        for fragment in p0_required_fragments
         if fragment not in p0_completion_audit_check
     ]
     forbidden_fragments = ["run_tokyo", "ssh ", "scp ", "rsync "]
-    forbidden_present = [
+    p0_forbidden_present = [
         fragment for fragment in forbidden_fragments if fragment in p0_completion_audit_check
     ]
-    status = (
+    p0_status = (
         "pass"
-        if p0_completion_audit_check and not missing_fragments and not forbidden_present
+        if p0_completion_audit_check and not missing_p0_fragments and not p0_forbidden_present
+        else "fail"
+    )
+    local_sequence_check = str(baseline.get("local_monitor_sequence_check") or "")
+    sequence_required_fragments = [
+        "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py",
+        "--daily-check-mode cache",
+        "--output-json output/runtime-monitor/latest-local-monitor-sequence.json",
+        "--output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md",
+    ]
+    missing_sequence_fragments = [
+        fragment
+        for fragment in sequence_required_fragments
+        if fragment not in local_sequence_check
+    ]
+    sequence_forbidden_present = [
+        fragment for fragment in forbidden_fragments if fragment in local_sequence_check
+    ]
+    sequence_status = (
+        "pass"
+        if local_sequence_check
+        and not missing_sequence_fragments
+        and not sequence_forbidden_present
         else "fail"
     )
     return [
         {
             "id": "p0_completion_audit_check_registered",
-            "status": status,
-            "required_text": " | ".join(required_fragments),
+            "status": p0_status,
+            "required_text": " | ".join(p0_required_fragments),
+        },
+        {
+            "id": "local_monitor_sequence_check_registered",
+            "status": sequence_status,
+            "required_text": " | ".join(sequence_required_fragments),
         }
     ]
 

@@ -28,6 +28,7 @@ def _baseline():
         "heartbeat_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md",
         "goal_progress_audit_check": "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md",
         "p0_completion_audit_check": "python3 scripts/runtime_first_bounded_live_order_completion_audit.py --owner-progress --output-json output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json --output-owner-progress output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md",
+        "local_monitor_sequence_check": "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress --output-json output/runtime-monitor/latest-local-monitor-sequence.json --output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md",
     }
 
 
@@ -62,6 +63,7 @@ def test_quiet_monitor_audit_passes_when_prompt_matches_baseline(tmp_path):
     assert all(check["status"] == "pass" for check in report["required_checks"])
     checks = {check["id"]: check for check in report["required_checks"]}
     assert checks["p0_completion_audit_check_registered"]["status"] == "pass"
+    assert checks["local_monitor_sequence_check_registered"]["status"] == "pass"
 
 
 def test_quiet_monitor_audit_blocks_when_goal_progress_command_missing(tmp_path):

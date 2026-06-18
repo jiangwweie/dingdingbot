@@ -1682,6 +1682,24 @@ healthy waiting-for-market semantics.
 | Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects runtime head `6239199be96111585e9d1b2bf51816b2d71746b0` |
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Local Monitor Sequence Checkpoint
+
+The goal-mode status tools now have a cache-only sequence runner that refreshes
+daily-check, goal-progress, and P0 completion-audit in strict order. This keeps
+the completion audit strict about stale input sources while avoiding false
+`goal_progress:generated_before_daily_check` gaps caused by parallel local
+commands.
+
+| Item | Result |
+| --- | --- |
+| New local entrypoint | `scripts/run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache` |
+| Baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records `local_monitor_sequence_check` with `local_monitor_sequence_remote_interaction_count=0` |
+| Quiet-monitor audit | `audit_tokyo_runtime_quiet_monitor.py` checks that the local sequence command is registered and contains no remote probe command |
+| Local validation | `py_compile` passed; related monitor/audit tests: `90 passed` |
+| Live local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: `status=waiting_for_market`, interaction `L0_local_monitor_sequence`, remote interactions `0`, blockers empty, non-market gaps empty |
+| Deployment | Not deployed; this is a local goal-mode/automation tooling improvement only |
+| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

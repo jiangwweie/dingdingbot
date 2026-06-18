@@ -1337,6 +1337,13 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "--output-json output/runtime-monitor/latest-goal-progress.json "
         "--output-owner-progress output/runtime-monitor/latest-goal-progress.md"
     )
+    assert baseline["local_monitor_sequence_check"].endswith(
+        "run_strategygroup_runtime_local_monitor_sequence.py "
+        "--daily-check-mode cache "
+        "--owner-progress "
+        "--output-json output/runtime-monitor/latest-local-monitor-sequence.json "
+        "--output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md"
+    )
     assert baseline["quiet_monitor_audit_check"].endswith(
         "audit_tokyo_runtime_quiet_monitor.py "
         "--owner-progress "
@@ -1356,4 +1363,5 @@ def test_runtime_monitor_baseline_defaults_to_low_interaction_auto_cache():
         "deploy_postdeploy_daily_check_remote_interaction_count"
     ] == 1
     assert baseline["interaction_policy"]["goal_progress_audit_remote_interaction_count"] == 0
+    assert baseline["interaction_policy"]["local_monitor_sequence_remote_interaction_count"] == 0
     assert baseline["interaction_policy"]["quiet_monitor_audit_remote_interaction_count"] == 0

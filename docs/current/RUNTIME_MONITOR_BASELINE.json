@@ -1,6 +1,6 @@
 {
   "schema": "brc.runtime_monitor_baseline.v1",
-  "updated_at_utc": "2026-06-18T11:50:49Z",
+  "updated_at_utc": "2026-06-18T12:01:20Z",
   "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and runtime check modes.",
   "expected_runtime_head": "6239199be96111585e9d1b2bf51816b2d71746b0",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
@@ -13,6 +13,7 @@
   "deploy_session_owner_progress_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress",
   "goal_progress_audit_check": "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md",
   "p0_completion_audit_check": "python3 scripts/runtime_first_bounded_live_order_completion_audit.py --owner-progress --output-json output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json --output-owner-progress output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md",
+  "local_monitor_sequence_check": "python3 scripts/run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress --output-json output/runtime-monitor/latest-local-monitor-sequence.json --output-owner-progress output/runtime-monitor/latest-local-monitor-sequence.md",
   "quiet_monitor_audit_check": "python3 scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress --output-json output/runtime-monitor/latest-quiet-monitor-audit.json --output-owner-progress output/runtime-monitor/latest-quiet-monitor-audit.md",
   "signal_detection_source": "tokyo_runtime_signal_watcher_feishu_webhook",
   "signal_detection_note": "Local auto-cache checks are for low-noise status review; fresh market opportunity detection remains server-side watcher and notification driven.",
@@ -24,6 +25,7 @@
     "deploy_postdeploy_daily_check_level": "L1_daily_check_from_snapshot",
     "deploy_postdeploy_daily_check_remote_interaction_count": 1,
     "goal_progress_audit_remote_interaction_count": 0,
+    "local_monitor_sequence_remote_interaction_count": 0,
     "quiet_monitor_audit_remote_interaction_count": 0,
     "mutates_remote_files": false,
     "approaches_real_order": false
