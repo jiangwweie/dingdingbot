@@ -286,6 +286,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
 
     def opener(request, timeout):
         path = request.full_url.replace("http://unit", "")
+        events.append(f"api:{path}")
         return _FakeResponse(payloads[path])
 
     def dry_run_builder(output_dir):
@@ -382,7 +383,18 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
     )
 
     assert packet["status"] == "refreshed"
-    assert events == ["dry_run", "chain_closure", "live_closure", "goal_status"]
+    assert events == [
+        "dry_run",
+        "chain_closure",
+        "live_closure",
+        "goal_status",
+        "api:/api/trading-console/strategy-group-live-facts-readiness",
+        "api:/api/trading-console/owner-console-source-readiness",
+        "api:/api/trading-console/strategygroup-runtime-pilot-status",
+    ]
+    assert events.index("goal_status") < events.index(
+        "api:/api/trading-console/owner-console-source-readiness"
+    )
     assert packet["dry_run_audit_refresh"] == {
         "enabled": True,
         "status": "passed",

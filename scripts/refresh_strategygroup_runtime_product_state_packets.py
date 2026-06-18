@@ -776,6 +776,63 @@ def refresh_packets(
                 "report_dir": str(resolved_live_closure_report_dir),
             }
 
+    goal_status_refresh: dict[str, Any] = {
+        "enabled": refresh_goal_status,
+        "status": "skipped",
+    }
+    if refresh_goal_status:
+        from scripts.build_strategygroup_runtime_goal_status import (
+            DEFAULT_OUTPUT_JSON as DEFAULT_GOAL_STATUS_OUTPUT_JSON,
+            build_goal_status_packet,
+        )
+
+        builder = goal_status_builder or build_goal_status_packet
+        resolved_goal_status_output_json = (
+            goal_status_output_json or output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
+        )
+        try:
+            goal_status_packet = builder(
+                report_dir=output_dir,
+                release_manifest=release_manifest,
+                expected_head=expected_head,
+            )
+            _write_json(resolved_goal_status_output_json, goal_status_packet)
+            fallback_goal_status_json = output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
+            if (
+                resolved_goal_status_output_json.resolve()
+                != fallback_goal_status_json.resolve()
+            ):
+                _write_json(fallback_goal_status_json, goal_status_packet)
+            goal_status_refresh = {
+                "enabled": True,
+                "status": goal_status_packet.get("status"),
+                "output_json": str(resolved_goal_status_output_json),
+                "fallback_input_json": str(fallback_goal_status_json),
+                "next_safe_checkpoint": (
+                    goal_status_packet.get("next_safe_checkpoint")
+                    or (goal_status_packet.get("owner_state") or {}).get(
+                        "next_safe_checkpoint"
+                    )
+                ),
+                "runtime_dry_run_audit_passed": (
+                    (goal_status_packet.get("checks") or {}).get(
+                        "runtime_dry_run_audit_passed"
+                    )
+                    is True
+                ),
+                "ready_for_real_order_action": (
+                    _goal_status_ready_for_real_order_action(goal_status_packet)
+                ),
+            }
+        except Exception as exc:
+            blockers.append(f"strategygroup_runtime_goal_status_failed:{type(exc).__name__}")
+            warnings.append(str(exc))
+            goal_status_refresh = {
+                "enabled": True,
+                "status": "failed",
+                "output_json": str(resolved_goal_status_output_json),
+            }
+
     if cookie is None:
         try:
             cookie = _operator_cookie()
@@ -858,63 +915,6 @@ def refresh_packets(
             except Exception as exc:
                 blockers.append(f"{filename}:refresh_failed:{type(exc).__name__}")
                 warnings.append(str(exc))
-
-    goal_status_refresh: dict[str, Any] = {
-        "enabled": refresh_goal_status,
-        "status": "skipped",
-    }
-    if refresh_goal_status:
-        from scripts.build_strategygroup_runtime_goal_status import (
-            DEFAULT_OUTPUT_JSON as DEFAULT_GOAL_STATUS_OUTPUT_JSON,
-            build_goal_status_packet,
-        )
-
-        builder = goal_status_builder or build_goal_status_packet
-        resolved_goal_status_output_json = (
-            goal_status_output_json or output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
-        )
-        try:
-            goal_status_packet = builder(
-                report_dir=output_dir,
-                release_manifest=release_manifest,
-                expected_head=expected_head,
-            )
-            _write_json(resolved_goal_status_output_json, goal_status_packet)
-            fallback_goal_status_json = output_dir / DEFAULT_GOAL_STATUS_OUTPUT_JSON.name
-            if (
-                resolved_goal_status_output_json.resolve()
-                != fallback_goal_status_json.resolve()
-            ):
-                _write_json(fallback_goal_status_json, goal_status_packet)
-            goal_status_refresh = {
-                "enabled": True,
-                "status": goal_status_packet.get("status"),
-                "output_json": str(resolved_goal_status_output_json),
-                "fallback_input_json": str(fallback_goal_status_json),
-                "next_safe_checkpoint": (
-                    goal_status_packet.get("next_safe_checkpoint")
-                    or (goal_status_packet.get("owner_state") or {}).get(
-                        "next_safe_checkpoint"
-                    )
-                ),
-                "runtime_dry_run_audit_passed": (
-                    (goal_status_packet.get("checks") or {}).get(
-                        "runtime_dry_run_audit_passed"
-                    )
-                    is True
-                ),
-                "ready_for_real_order_action": (
-                    _goal_status_ready_for_real_order_action(goal_status_packet)
-                ),
-            }
-        except Exception as exc:
-            blockers.append(f"strategygroup_runtime_goal_status_failed:{type(exc).__name__}")
-            warnings.append(str(exc))
-            goal_status_refresh = {
-                "enabled": True,
-                "status": "failed",
-                "output_json": str(resolved_goal_status_output_json),
-            }
 
     if cookie is None:
         fallback_path = output_dir / "owner-console-source-readiness.json"

@@ -120,6 +120,21 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Same-Tick Source Readiness Visibility Fix
+
+The watcher product-state post-step now refreshes
+`strategygroup-runtime-goal-status.json` before it refreshes
+`owner-console-source-readiness.json` and the other local readmodel packets.
+This closes the remaining one-tick visibility gap after the live closure
+evidence and goal-status refresh hook.
+
+| Item | Evidence |
+| --- | --- |
+| Refresh order | `refresh_strategygroup_runtime_product_state_packets.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, goal-status refresh, then readmodel/API packet refresh |
+| Source-readiness impact | `owner-console-source-readiness.json` can consume the same-tick `strategygroup-runtime-goal-status.json` instead of reading the previous watcher tick |
+| Test coverage | `test_refresh_packets_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status -> owner-console-source-readiness API` |
+| Boundary | Local report/readmodel refresh only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Same-Tick Goal Status Visibility Fix
 
 The watcher product-state post-step now refreshes `strategygroup-runtime-goal-status.json`
