@@ -48,6 +48,7 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
     / "output/strategygroup-runtime-pilot/live-closure-evidence/"
     "runtime-live-closure-evidence.json"
 )
+SCHEMA = "brc.strategygroup_runtime_goal_progress_audit.v1"
 
 P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "allocated_subaccount_profile_boundary_checked",
@@ -299,6 +300,7 @@ def build_goal_progress_report(
             status = "degraded"
 
     return {
+        "schema": SCHEMA,
         "status": status,
         "scope": "strategygroup_runtime_goal_progress_audit",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

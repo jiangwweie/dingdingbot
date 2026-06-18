@@ -30,6 +30,7 @@ from scripts import runtime_dry_run_audit_chain as dry_run_audit  # noqa: E402
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/live-cutover-readiness")
 DEFAULT_OUTPUT_JSON = DEFAULT_OUTPUT_DIR / "runtime-live-cutover-readiness.json"
 DEFAULT_OWNER_PROGRESS = DEFAULT_OUTPUT_DIR / "runtime-live-cutover-readiness.md"
+SCHEMA = "brc.runtime_live_cutover_readiness.v1"
 
 MARKET_DEPENDENT_WAITING_KEYS = [
     "fresh_signal",
@@ -625,6 +626,7 @@ def build_cutover_readiness_packet(
 
     ready = not non_market_blockers
     return {
+        "schema": SCHEMA,
         "scope": "runtime_live_cutover_readiness",
         "status": (
             "live_cutover_waiting_for_fresh_signal"

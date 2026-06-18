@@ -45,6 +45,7 @@ DEFAULT_HANDOFF_ROOT = ROOT_DIR / "docs/current/strategy-group-handoffs"
 DEFAULT_RUNTIME_TIER_POLICY_JSON = (
     DEFAULT_HANDOFF_ROOT / "main-control-runtime-tier-policy.json"
 )
+SCHEMA = "brc.runtime_dry_run_audit_chain.v1"
 RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
@@ -4008,6 +4009,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
     }
     return {
+        "schema": SCHEMA,
         "scope": "runtime_dry_run_audit_chain",
         "status": status,
         "generated_at_ms": int(time.time() * 1000),

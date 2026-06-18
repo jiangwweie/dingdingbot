@@ -14,6 +14,8 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         generated_at_ms=1781753000000,
     )
 
+    assert packet["schema"] == "brc.runtime_live_cutover_readiness.v1"
+    assert packet["scope"] == "runtime_live_cutover_readiness"
     assert packet["status"] == "live_cutover_waiting_for_fresh_signal"
     assert packet["owner_state"] == "等待机会"
     assert packet["next_safe_action"] == (

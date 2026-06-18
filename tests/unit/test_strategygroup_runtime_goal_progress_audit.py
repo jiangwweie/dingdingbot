@@ -218,6 +218,8 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
         tier_policy=_tier_policy(),
     )
 
+    assert report["schema"] == "brc.strategygroup_runtime_goal_progress_audit.v1"
+    assert report["scope"] == "strategygroup_runtime_goal_progress_audit"
     assert report["status"] == "waiting_for_market"
     assert report["interaction"]["level"] == "L0_local_goal_progress_audit"
     assert report["interaction"]["remote_interaction_count"] == 0

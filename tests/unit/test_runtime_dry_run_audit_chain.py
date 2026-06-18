@@ -9,6 +9,8 @@ from scripts import runtime_dry_run_audit_chain as audit_chain
 def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     packet = audit_chain.build_audit_chain(tmp_path)
 
+    assert packet["schema"] == "brc.runtime_dry_run_audit_chain.v1"
+    assert packet["scope"] == "runtime_dry_run_audit_chain"
     assert packet["status"] == "passed"
     assert packet["scenario_count"] == 14
     assert packet["checks"]["scenario_count"] == 14
