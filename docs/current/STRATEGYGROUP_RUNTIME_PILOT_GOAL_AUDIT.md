@@ -937,3 +937,22 @@ or hiding a real contract regression during the no-signal waiting window.
 | Current audit output | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, `blockers=[]`, `non_market_gaps=[]`, `remote_interaction_count=0` |
 | Verification | `46 passed` for completion-audit, local-monitor-sequence, monitor-frequency, and goal-progress tests; `py_compile` passed for the touched runtime monitor/audit scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Standing First-Real-Submit Authorization Checkpoint
+
+The first-real-submit API flow now treats Owner standing authorization as a
+valid execution guard for the selected bounded runtime path. This removes a
+non-market chat-confirmation style blocker where `execute` mode required an
+extra `OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT` env value even after the
+runtime path had already produced scoped evidence, action-time FinalGate, and
+official Operation Layer readiness.
+
+| Item | Evidence |
+| --- | --- |
+| Execute guard | `runtime_first_real_submit_api_flow.py` still requires `--execute-real-submit`; when `--standing-authorized-first-real-submit` is present, it no longer requires the legacy env confirmation string |
+| Evidence guard | Real submit still requires prearmed evidence ids for trusted submit facts, idempotency, attempt outcome, protection failure, local registration, Owner real-submit authorization, OrderLifecycle submit enablement, exchange adapter enablement, exchange action authorization, deployment readiness, and exchange adapter result |
+| Followup wording | `runtime_active_observation_followup.py` now points from disabled smoke to fresh-signal standing-authorized official Operation Layer chain instead of waiting for explicit per-order authorization |
+| Action packet wording | `build_runtime_first_real_submit_action_authorization_packet.py` can mark the authorization guard satisfied by standing authorization while still waiting for prearmed exchange-submit evidence |
+| Verification | `py_compile` passed; targeted tests `57 passed` across first-real-submit API flow, action authorization packet, and active-observation followup |
+| Deployment | Not deployed in this checkpoint; deploy only after a stage-worthy batch, fresh-signal unblock, or explicit Owner request |
+| Safety | Local code/tests only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

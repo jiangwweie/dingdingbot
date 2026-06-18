@@ -1718,6 +1718,26 @@ proof requirements.
 | Deployment | Not deployed; this is local monitor/audit hardening only |
 | Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Standing First-Real-Submit Authorization Checkpoint
+
+The first-real-submit execute flow no longer treats the legacy
+`OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT` env value as mandatory when the
+runtime is using the selected bounded standing authorization path. This keeps
+the first bounded live-order cutover aligned with the current operating model:
+inside selected StrategyGroup, allocated subaccount boundary, fresh signal,
+RequiredFacts, candidate/auth evidence, action-time FinalGate, and official
+Operation Layer, the system should not ask for another per-order chat
+confirmation.
+
+| Item | Result |
+| --- | --- |
+| Removed non-market blocker | `--standing-authorized-first-real-submit` satisfies the first-real-submit execution guard without the legacy env string |
+| Preserved hard gates | `--execute-real-submit`, prearmed evidence ids, action-time FinalGate, official Operation Layer, protection, idempotency, deployment readiness, and post-submit accounting remain required |
+| Followup next step | Disabled-smoke completion now points to waiting for a fresh signal and then running the standing-authorized official Operation Layer chain |
+| Local validation | `py_compile` passed; first-real-submit API flow, action authorization packet, and active-observation followup tests: `57 passed` |
+| Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
+| Safety proof | Local code/tests only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

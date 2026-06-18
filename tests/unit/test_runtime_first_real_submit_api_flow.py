@@ -1003,6 +1003,59 @@ def test_execute_requires_exact_env_confirmation(monkeypatch):
     assert not any("first-real-submit-actions" in path for path in paths)
 
 
+def test_execute_standing_authorized_submit_does_not_require_env_confirmation(
+    monkeypatch,
+):
+    monkeypatch.delenv(APPROVAL_ENV, raising=False)
+    client = _FakeClient()
+    reconciliation_calls = []
+    flow = FirstRealSubmitApiFlow(
+        client=client,
+        config=FlowConfig(
+            api_base="http://unit",
+            mode="execute",
+            authorization_id="auth-1",
+            execute_real_submit=True,
+            standing_authorized_first_real_submit=True,
+            next_attempt_symbol="AVAX/USDT:USDT",
+            trusted_submit_fact_snapshot_id="facts-1",
+            submit_idempotency_policy_id="idem-1",
+            attempt_outcome_policy_id="policy-1",
+            protection_creation_failure_policy_id="protect-fail-1",
+            local_registration_enablement_decision_id="local-enable-1",
+            owner_real_submit_authorization_id="owner-real-submit-auth-1",
+            order_lifecycle_submit_enablement_id="order-lifecycle-submit-enable-1",
+            exchange_submit_adapter_enablement_id="exchange-adapter-enable-1",
+            exchange_submit_action_authorization_id="exchange-action-1",
+            deployment_readiness_evidence_id="gateway-ready-1",
+            exchange_submit_adapter_result_id="exchange-adapter-1",
+        ),
+        post_submit_reconciliation_runner=lambda symbol: reconciliation_calls.append(
+            symbol
+        )
+        or {
+            "exit_code": 0,
+            "body": {"status": "recorded", "results": [{"is_consistent": True}]},
+            "blockers": [],
+            "warnings": [],
+        },
+    )
+
+    report = flow.run()
+
+    assert report["blockers"] == []
+    assert report["ids"]["execution_result_id"] == "exec-1"
+    assert APPROVAL_ENV not in os.environ
+    assert reconciliation_calls == ["AVAX/USDT:USDT"]
+    assert report["safety"]["real_submit_requires_env_confirmation"] is False
+    assert (
+        report["safety"]["real_submit_guard_satisfied_by_standing_authorization"]
+        is True
+    )
+    paths = [call["path"] for call in client.calls]
+    assert any("first-real-submit-actions" in path for path in paths)
+
+
 def test_execute_blocks_without_prearmed_exchange_submit_evidence(monkeypatch):
     monkeypatch.setenv(APPROVAL_ENV, _approval_value("auth-1"))
     client = _FakeClient()

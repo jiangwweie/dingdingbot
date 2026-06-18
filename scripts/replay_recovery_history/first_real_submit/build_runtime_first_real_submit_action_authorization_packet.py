@@ -38,6 +38,9 @@ def main(argv: list[str] | None = None) -> int:
         final_review_packet=_load_json_object(Path(args.final_review_packet_path)),
         authorization_id=args.authorization_id,
         owner_confirmation_value=args.owner_confirmation_value,
+        standing_authorized_first_real_submit=(
+            args.standing_authorized_first_real_submit
+        ),
         api_base=args.api_base,
         env_file=args.env_file,
     )
@@ -60,6 +63,7 @@ def build_first_real_submit_action_authorization_packet(
     final_review_packet: dict[str, Any],
     authorization_id: str | None = None,
     owner_confirmation_value: str | None = None,
+    standing_authorized_first_real_submit: bool = False,
     api_base: str = DEFAULT_API_BASE,
     env_file: str | None = None,
 ) -> dict[str, Any]:
@@ -100,6 +104,9 @@ def build_first_real_submit_action_authorization_packet(
     confirmation_matches = bool(
         expected_confirmation and supplied_confirmation == expected_confirmation
     )
+    authorization_guard_satisfied = bool(
+        standing_authorized_first_real_submit or confirmation_matches
+    )
 
     blockers: list[str] = []
     if not final_review_ready:
@@ -117,7 +124,7 @@ def build_first_real_submit_action_authorization_packet(
     prearmed_exchange_submit_evidence_available = False
     action_authorized = (
         ready_for_owner_action_authorization
-        and confirmation_matches
+        and authorization_guard_satisfied
         and prearmed_exchange_submit_evidence_available
     )
 
@@ -125,6 +132,8 @@ def build_first_real_submit_action_authorization_packet(
         status = "blocked_before_first_real_submit_action_authorization"
     elif action_authorized:
         status = "owner_first_real_submit_action_authorization_packet_ready"
+    elif authorization_guard_satisfied:
+        status = "waiting_for_prearmed_exchange_submit_evidence"
     else:
         status = "waiting_for_owner_first_real_submit_action_authorization"
 
@@ -133,6 +142,7 @@ def build_first_real_submit_action_authorization_packet(
         api_base=api_base,
         env_file=env_file,
         expected_confirmation=expected_confirmation,
+        standing_authorized_first_real_submit=standing_authorized_first_real_submit,
     )
 
     return {
@@ -161,9 +171,13 @@ def build_first_real_submit_action_authorization_packet(
             "env_name": APPROVAL_ENV,
             "required_value": expected_confirmation,
             "supplied_value_matches": confirmation_matches,
+            "standing_authorized_first_real_submit": (
+                standing_authorized_first_real_submit
+            ),
+            "authorization_guard_satisfied": authorization_guard_satisfied,
             "action_authorized": action_authorized,
             "must_be_supplied_out_of_band_before_execute_command": (
-                not action_authorized
+                not authorization_guard_satisfied
             ),
         },
         "checks": {
@@ -183,6 +197,10 @@ def build_first_real_submit_action_authorization_packet(
                 action_context_authoritative
             ),
             "owner_confirmation_value_matches": confirmation_matches,
+            "standing_authorized_first_real_submit": (
+                standing_authorized_first_real_submit
+            ),
+            "authorization_guard_satisfied": authorization_guard_satisfied,
             "prearmed_exchange_submit_evidence_available": (
                 prearmed_exchange_submit_evidence_available
             ),
@@ -238,6 +256,7 @@ def _command_plan(
     api_base: str,
     env_file: str | None,
     expected_confirmation: str | None,
+    standing_authorized_first_real_submit: bool,
 ) -> dict[str, Any]:
     if not authorization_id:
         return {
@@ -272,9 +291,14 @@ def _command_plan(
         "uses_official_api_flow": True,
         "api_base_env": API_BASE_ENV,
         "api_base": api_base,
+        "standing_authorized_first_real_submit": (
+            standing_authorized_first_real_submit
+        ),
         "disabled_smoke_command": disabled_smoke,
         "execute_command": None,
-        "execute_env_required": {
+        "execute_env_required": None
+        if standing_authorized_first_real_submit
+        else {
             "name": APPROVAL_ENV,
             "value": expected_confirmation,
         },
@@ -336,6 +360,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--final-review-packet-path", required=True)
     parser.add_argument("--authorization-id")
     parser.add_argument("--owner-confirmation-value")
+    parser.add_argument("--standing-authorized-first-real-submit", action="store_true")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--env-file")
     parser.add_argument("--output-json")

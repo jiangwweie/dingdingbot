@@ -391,6 +391,10 @@ def test_followup_runs_disabled_smoke_only_after_ready_and_allow_flag():
     assert packet["safety_invariants"]["real_submit_requested"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
     assert packet["safety_invariants"]["attempt_counter_mutated"] is False
+    assert packet["operator_command_plan"]["next_step"] == (
+        "wait_for_fresh_signal_then_run_standing_authorized_official_"
+        "operation_layer_chain"
+    )
 
 
 def test_followup_runs_arm_preview_before_disabled_smoke_when_allowed():

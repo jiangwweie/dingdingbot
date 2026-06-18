@@ -977,7 +977,10 @@ def _next_step(
     if status == "ready_for_disabled_smoke":
         return "rerun_with_allow_disabled_smoke_after_operator_review"
     if status == "disabled_smoke_completed":
-        return "review_disabled_smoke_report_then_wait_for_explicit_real_submit_authorization"
+        return (
+            "wait_for_fresh_signal_then_run_standing_authorized_official_"
+            "operation_layer_chain"
+        )
     if status == "disabled_smoke_blocked":
         if readiness.get("ready_for_local_registration_authorization_packet") is True:
             return (

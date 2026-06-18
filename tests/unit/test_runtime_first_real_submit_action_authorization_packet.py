@@ -94,8 +94,9 @@ def test_action_authorization_packet_marks_ready_with_exact_owner_value_only():
         owner_confirmation_value=APPROVAL_VALUE,
     )
 
-    assert packet["status"] == "waiting_for_owner_first_real_submit_action_authorization"
+    assert packet["status"] == "waiting_for_prearmed_exchange_submit_evidence"
     assert packet["checks"]["owner_confirmation_value_matches"] is True
+    assert packet["checks"]["authorization_guard_satisfied"] is True
     assert packet["checks"]["action_authorized"] is False
     assert packet["owner_gate"]["authorized_execute_step_available"] is False
     assert (
@@ -103,6 +104,29 @@ def test_action_authorization_packet_marks_ready_with_exact_owner_value_only():
         in packet["checks"]["warnings"]
     )
     assert packet["safety_invariants"]["api_called"] is False
+    assert packet["safety_invariants"]["exchange_order_submitted"] is False
+
+
+def test_action_authorization_packet_accepts_standing_authorization_without_env():
+    module = _load_module()
+
+    packet = module.build_first_real_submit_action_authorization_packet(
+        final_review_packet=_final_review_packet(),
+        authorization_id=AUTHORIZATION_ID,
+        standing_authorized_first_real_submit=True,
+    )
+
+    assert packet["status"] == "waiting_for_prearmed_exchange_submit_evidence"
+    assert packet["checks"]["owner_confirmation_value_matches"] is False
+    assert packet["checks"]["standing_authorized_first_real_submit"] is True
+    assert packet["checks"]["authorization_guard_satisfied"] is True
+    assert packet["owner_confirmation"]["must_be_supplied_out_of_band_before_execute_command"] is False
+    assert packet["operator_command_plan"]["execute_env_required"] is None
+    assert (
+        "prearmed_exchange_submit_evidence_required_for_execute_command"
+        in packet["operator_command_plan"]["execute_command_blockers"]
+    )
+    assert packet["safety_invariants"]["exchange_called"] is False
     assert packet["safety_invariants"]["exchange_order_submitted"] is False
 
 
@@ -176,7 +200,7 @@ def test_action_authorization_packet_cli_reads_json(tmp_path: Path, capsys):
     assert payload["checks"]["owner_confirmation_value_matches"] is True
     assert payload["checks"]["action_authorized"] is False
     assert json.loads(output_path.read_text())["status"] == (
-        "waiting_for_owner_first_real_submit_action_authorization"
+        "waiting_for_prearmed_exchange_submit_evidence"
     )
 
 

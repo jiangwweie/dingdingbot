@@ -100,6 +100,7 @@ class FlowConfig:
     record_gateway_readiness: bool = True
     preview_disabled_first_real_submit_action: bool = False
     execute_real_submit: bool = False
+    standing_authorized_first_real_submit: bool = False
     record_attempt_consumption: bool = False
     standing_authorized_scoped_evidence_preparation: bool = False
     record_post_submit_accounting: bool = True
@@ -1236,6 +1237,8 @@ class FirstRealSubmitApiFlow:
         if not self._config.execute_real_submit:
             self.state.add_blockers(["execute_real_submit_cli_flag_missing"])
             return
+        if self._config.standing_authorized_first_real_submit:
+            return
         expected = _approval_value(authorization_id)
         actual = os.environ.get(APPROVAL_ENV, "").strip()
         if actual != expected:
@@ -1291,7 +1294,18 @@ class FirstRealSubmitApiFlow:
                 "uses_official_trading_console_api": True,
                 "owner_authorization_required_for_real_submit": True,
                 "real_submit_requires_cli_flag": True,
-                "real_submit_requires_env_confirmation": True,
+                "owner_chat_confirmation_required_for_real_submit": False,
+                "standing_authorized_first_real_submit": (
+                    self._config.standing_authorized_first_real_submit
+                ),
+                "real_submit_guard_satisfied_by_standing_authorization": (
+                    self._config.mode == "execute"
+                    and self._config.execute_real_submit
+                    and self._config.standing_authorized_first_real_submit
+                ),
+                "real_submit_requires_env_confirmation": (
+                    not self._config.standing_authorized_first_real_submit
+                ),
                 "env_confirmation_name": APPROVAL_ENV,
                 "local_registration_requires_env_confirmation": True,
                 "local_registration_env_confirmation_name": (
@@ -1603,6 +1617,16 @@ def _parse_args(argv: list[str]) -> FlowConfig:
         ),
     )
     parser.add_argument("--execute-real-submit", action="store_true")
+    parser.add_argument(
+        "--standing-authorized-first-real-submit",
+        action="store_true",
+        help=(
+            "Treat the current Owner standing authorization as the first-real-submit "
+            "execution guard. The real submit still requires --execute-real-submit, "
+            "all prearmed evidence ids, action-time FinalGate, and the official "
+            "Operation Layer endpoint."
+        ),
+    )
     parser.add_argument("--skip-post-submit-accounting", action="store_true")
     parser.add_argument(
         "--skip-post-submit-reconciliation",
@@ -1675,6 +1699,9 @@ def _parse_args(argv: list[str]) -> FlowConfig:
             args.preview_disabled_first_real_submit_action
         ),
         execute_real_submit=args.execute_real_submit,
+        standing_authorized_first_real_submit=(
+            args.standing_authorized_first_real_submit
+        ),
         record_attempt_consumption=(
             args.record_attempt_consumption or args.mode == "execute"
         ),
