@@ -111,6 +111,20 @@ def _live_closure_boundary_complete(live_closure: dict[str, Any]) -> bool:
     }
 
 
+def _live_closure_boundary_rejected(live_closure: dict[str, Any]) -> bool:
+    return str(live_closure.get("status") or "") in {
+        "rejected",
+        "blocked_live_closure_rejected",
+    }
+
+
+def _live_closure_boundary_in_progress(live_closure: dict[str, Any]) -> bool:
+    return str(live_closure.get("status") or "") in {
+        "in_progress",
+        "live_closure_in_progress",
+    }
+
+
 def _proof_missing_or_false(
     proof: dict[str, Any],
     *,
@@ -433,11 +447,20 @@ def build_completion_audit_report(
                 "missing_or_false": ["live_closure_evidence_boundary_complete"],
             }
         )
+    if _live_closure_boundary_rejected(live_closure):
+        non_market_gaps.append(
+            {
+                "requirement": "official live closure evidence boundary is usable",
+                "missing_or_false": ["live_closure_evidence_boundary_rejected"],
+            }
+        )
     if goal_complete and not non_market_gaps:
         status = "complete"
         market_dependent_remaining = []
     elif non_market_gaps:
         status = "needs_non_market_repair"
+    elif _live_closure_boundary_in_progress(live_closure):
+        status = "not_complete_runtime_processing"
     else:
         status = "not_complete_waiting_for_market"
     return {

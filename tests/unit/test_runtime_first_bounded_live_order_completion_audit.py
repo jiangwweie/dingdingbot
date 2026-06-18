@@ -250,6 +250,44 @@ def test_completion_audit_rejects_completion_flags_without_live_closure_boundary
     ]
 
 
+def test_completion_audit_marks_live_closure_in_progress_as_runtime_processing():
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(status="ready"),
+        goal_progress=_goal_progress(
+            live_closure_evidence_boundary={"status": "in_progress"},
+        ),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "not_complete_runtime_processing"
+    assert report["goal_complete"] is False
+    assert report["non_market_gaps"] == []
+    assert report["market_dependent_remaining"]
+
+
+def test_completion_audit_rejects_rejected_live_closure_evidence_boundary():
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(status="ready"),
+        goal_progress=_goal_progress(
+            live_closure_evidence_boundary={"status": "rejected"},
+        ),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["goal_complete"] is False
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "official live closure evidence boundary is usable",
+            "missing_or_false": ["live_closure_evidence_boundary_rejected"],
+        }
+    ]
+
+
 def test_completion_audit_cli_writes_outputs(tmp_path):
     daily = tmp_path / "daily.json"
     goal = tmp_path / "goal.json"
