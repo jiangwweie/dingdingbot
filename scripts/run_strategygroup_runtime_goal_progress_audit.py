@@ -232,6 +232,13 @@ def build_goal_progress_report(
             f"live_closure_evidence:{item}"
             for item in live_closure_evidence_boundary["reject_reasons"]
         )
+    if (
+        checks.get("first_bounded_real_order_complete") is True
+        or checks.get("real_order_closure_proven") is True
+    ) and live_closure_evidence_boundary["status"] != "complete":
+        boundary_product_gaps.append(
+            "live_closure_completion_claim_without_verified_evidence"
+        )
     product_gaps = _dedupe([*product_gaps, *boundary_product_gaps])
     status = "ready"
     if hard_blockers:
@@ -829,13 +836,12 @@ def _completion_boundary(
     live_closure_evidence_boundary: dict[str, Any],
 ) -> dict[str, Any]:
     first_bounded_real_order_complete = (
-        checks.get("first_bounded_real_order_complete") is True
-        or live_closure_evidence_boundary["first_bounded_real_order_complete"]
+        live_closure_evidence_boundary["status"] == "complete"
+        and live_closure_evidence_boundary["first_bounded_real_order_complete"]
     )
     real_order_closure_proven = (
-        checks.get("real_order_closure_proven") is True
-        or first_bounded_real_order_complete
-        or live_closure_evidence_boundary["real_order_closure_proven"]
+        live_closure_evidence_boundary["status"] == "complete"
+        and live_closure_evidence_boundary["real_order_closure_proven"]
     )
     live_closure_in_progress = live_closure_evidence_boundary["status"] == "in_progress"
     goal_complete = (

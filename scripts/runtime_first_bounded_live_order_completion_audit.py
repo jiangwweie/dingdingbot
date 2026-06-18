@@ -104,6 +104,13 @@ def _live_closure_boundary(goal_progress: dict[str, Any]) -> dict[str, Any]:
     return _dict(goal_progress.get("live_closure_evidence_boundary"))
 
 
+def _live_closure_boundary_complete(live_closure: dict[str, Any]) -> bool:
+    return str(live_closure.get("status") or "") in {
+        "complete",
+        "live_closure_complete",
+    }
+
+
 def _proof_missing_or_false(
     proof: dict[str, Any],
     *,
@@ -402,11 +409,30 @@ def build_completion_audit_report(
         )
     ]
     completion = _completion_boundary(goal_progress)
+    live_closure = _live_closure_boundary(goal_progress)
     goal_complete = (
         completion.get("goal_complete") is True
         and completion.get("first_bounded_real_order_complete") is True
         and completion.get("real_order_closure_proven") is True
+        and _live_closure_boundary_complete(live_closure)
     )
+    completion_claimed_without_live_closure_boundary = (
+        (
+            completion.get("goal_complete") is True
+            or completion.get("first_bounded_real_order_complete") is True
+            or completion.get("real_order_closure_proven") is True
+        )
+        and not _live_closure_boundary_complete(live_closure)
+    )
+    if completion_claimed_without_live_closure_boundary:
+        non_market_gaps.append(
+            {
+                "requirement": (
+                    "official live closure evidence boundary proves completion"
+                ),
+                "missing_or_false": ["live_closure_evidence_boundary_complete"],
+            }
+        )
     if goal_complete and not non_market_gaps:
         status = "complete"
         market_dependent_remaining = []

@@ -398,6 +398,31 @@ def test_goal_progress_degrades_on_rejected_live_closure_evidence():
     assert report["completion_boundary"]["goal_complete"] is False
 
 
+def test_goal_progress_rejects_completion_flags_without_live_closure_evidence():
+    module = _load_module()
+    daily_check = _daily_check(status="ready")
+    daily_check["checks"]["waiting_for_market"] = False
+    daily_check["checks"]["first_bounded_real_order_complete"] = True
+    daily_check["checks"]["real_order_closure_proven"] = True
+    daily_check["owner_summary"]["visibility"]["category"] = "running"
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=_live_cutover_readiness(),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["completion_boundary"]["goal_complete"] is False
+    assert report["completion_boundary"]["first_bounded_real_order_complete"] is False
+    assert report["completion_boundary"]["real_order_closure_proven"] is False
+    assert (
+        "live_closure_completion_claim_without_verified_evidence"
+        in report["checks"]["product_gaps"]
+    )
+
+
 def test_goal_progress_owner_progress_text_has_track_table():
     module = _load_module()
     report = module.build_goal_progress_report(
