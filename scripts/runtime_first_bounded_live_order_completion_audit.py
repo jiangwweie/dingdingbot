@@ -395,6 +395,28 @@ def _audit_items(
             },
         },
         {
+            "requirement": "live closure complete requires explicit live submit proof",
+            "evidence_source": "runtime_live_cutover_readiness",
+            "status": "ready_non_market",
+            "proof": {
+                "live_closure_contract_requires_exchange_acceptance": (
+                    contract_checks.get(
+                        "live_closure_contract_requires_exchange_acceptance"
+                    )
+                ),
+                "live_closure_contract_requires_live_submit_truth": (
+                    contract_checks.get(
+                        "live_closure_contract_requires_live_submit_truth"
+                    )
+                ),
+                "live_closure_contract_requires_exchange_native_protection": (
+                    contract_checks.get(
+                        "live_closure_contract_requires_exchange_native_protection"
+                    )
+                ),
+            },
+        },
+        {
             "requirement": (
                 "low-noise monitor stays quiet when healthy waiting and wakes on "
                 "fresh signal"

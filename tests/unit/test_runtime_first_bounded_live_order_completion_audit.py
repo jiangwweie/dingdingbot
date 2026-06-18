@@ -94,6 +94,9 @@ def _live_cutover(**overrides):
             "checks": {
                 "live_closure_contract_rejects_synthetic_signal": True,
                 "live_closure_contract_rejects_disabled_smoke": True,
+                "live_closure_contract_requires_exchange_acceptance": True,
+                "live_closure_contract_requires_live_submit_truth": True,
+                "live_closure_contract_requires_exchange_native_protection": True,
             },
         },
     }
@@ -246,6 +249,31 @@ def test_completion_audit_reports_missing_input_source_gap():
         {
             "requirement": "P0 completion audit input sources are traceable",
             "missing_or_false": ["live_cutover:missing_source"],
+        }
+    ]
+
+
+def test_completion_audit_requires_live_submit_truth_contract_check():
+    live_cutover = _live_cutover()
+    live_cutover["live_closure_cutover_contract"]["checks"].pop(
+        "live_closure_contract_requires_live_submit_truth"
+    )
+
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=live_cutover,
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "live closure complete requires explicit live submit proof",
+            "missing_or_false": [
+                "live_closure_contract_requires_live_submit_truth"
+            ],
         }
     ]
 
