@@ -32,6 +32,11 @@ DEFAULT_LIVE_CUTOVER_READINESS_JSON = (
     REPO_ROOT
     / "output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json"
 )
+DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON = (
+    REPO_ROOT
+    / "output/strategygroup-runtime-pilot/live-closure-evidence/"
+    "runtime-live-closure-evidence-verification.json"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
         baseline=_read_json(Path(args.baseline_json)),
         tier_policy=_read_json(Path(args.tier_policy_json)),
         live_cutover_readiness=live_cutover_readiness,
+        live_closure_evidence_verification=_read_optional_json(
+            Path(args.live_closure_evidence_verification_json)
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -74,6 +82,7 @@ def build_goal_progress_report(
     baseline: dict[str, Any],
     tier_policy: dict[str, Any] | None = None,
     live_cutover_readiness: dict[str, Any] | None = None,
+    live_closure_evidence_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -168,6 +177,9 @@ def build_goal_progress_report(
         exit_hardening_boundary=exit_hardening_boundary,
         strategygroup_tier_boundary=strategygroup_tier_boundary,
     )
+    live_closure_evidence_boundary = _live_closure_evidence_boundary(
+        live_closure_evidence_verification=live_closure_evidence_verification
+    )
     boundary_product_gaps = []
     if entry_fast_chain_boundary["status"] != "ready":
         boundary_product_gaps.append("entry_fast_chain_boundary_not_ready")
@@ -179,6 +191,11 @@ def build_goal_progress_report(
         boundary_product_gaps.extend(
             f"live_cutover_readiness:{item}"
             for item in live_cutover_readiness_boundary["non_market_blockers"]
+        )
+    if live_closure_evidence_boundary["status"] == "rejected":
+        boundary_product_gaps.extend(
+            f"live_closure_evidence:{item}"
+            for item in live_closure_evidence_boundary["reject_reasons"]
         )
     product_gaps = _dedupe([*product_gaps, *boundary_product_gaps])
     status = "ready"
@@ -195,6 +212,7 @@ def build_goal_progress_report(
         engineering_rehearsal_ready=engineering_rehearsal_ready,
         hard_blockers=hard_blockers,
         product_gaps=product_gaps,
+        live_closure_evidence_boundary=live_closure_evidence_boundary,
     )
 
     return {
@@ -230,6 +248,7 @@ def build_goal_progress_report(
         "exit_hardening_boundary": exit_hardening_boundary,
         "strategygroup_tier_boundary": strategygroup_tier_boundary,
         "live_cutover_readiness_boundary": live_cutover_readiness_boundary,
+        "live_closure_evidence_boundary": live_closure_evidence_boundary,
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
@@ -244,6 +263,9 @@ def build_goal_progress_report(
             "baseline_json": str(DEFAULT_BASELINE_JSON),
             "tier_policy_json": str(DEFAULT_TIER_POLICY_JSON),
             "live_cutover_readiness_json": str(DEFAULT_LIVE_CUTOVER_READINESS_JSON),
+            "live_closure_evidence_verification_json": str(
+                DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON
+            ),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
@@ -555,6 +577,63 @@ def _live_cutover_readiness_boundary(
     }
 
 
+def _live_closure_evidence_boundary(
+    *,
+    live_closure_evidence_verification: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not live_closure_evidence_verification:
+        return {
+            "status": "not_generated",
+            "owner_state": "未生成",
+            "first_bounded_real_order_complete": False,
+            "real_order_closure_proven": False,
+            "completed_stage_count": 0,
+            "stage_count": 0,
+            "first_incomplete_stage": None,
+            "missing_evidence_keys": [],
+            "reject_reasons": [],
+        }
+    source_status = str(live_closure_evidence_verification.get("status") or "")
+    completion = live_closure_evidence_verification.get("completion")
+    if not isinstance(completion, dict):
+        completion = {}
+    if source_status == "blocked_live_closure_rejected":
+        status = "rejected"
+    elif source_status == "live_closure_complete":
+        status = "complete"
+    elif source_status in {"live_closure_in_progress", "live_closure_not_started"}:
+        status = "in_progress"
+    else:
+        status = "needs_work"
+    return {
+        "status": status,
+        "source_status": source_status,
+        "owner_state": str(live_closure_evidence_verification.get("owner_state") or ""),
+        "first_bounded_real_order_complete": (
+            completion.get("first_bounded_real_order_complete") is True
+        ),
+        "real_order_closure_proven": (
+            completion.get("real_order_closure_proven") is True
+        ),
+        "completed_stage_count": int(
+            live_closure_evidence_verification.get("completed_stage_count") or 0
+        ),
+        "stage_count": int(live_closure_evidence_verification.get("stage_count") or 0),
+        "first_incomplete_stage": live_closure_evidence_verification.get(
+            "first_incomplete_stage"
+        ),
+        "missing_evidence_keys": [
+            str(item)
+            for item in live_closure_evidence_verification.get("missing_evidence_keys")
+            or []
+        ],
+        "reject_reasons": [
+            str(item)
+            for item in live_closure_evidence_verification.get("reject_reasons") or []
+        ],
+    }
+
+
 def _dry_run_required_check_present(checks: dict[str, Any], name: str) -> bool:
     if checks.get(name) is not None:
         return checks.get(name) is True
@@ -574,14 +653,18 @@ def _completion_boundary(
     engineering_rehearsal_ready: bool,
     hard_blockers: list[str],
     product_gaps: list[str],
+    live_closure_evidence_boundary: dict[str, Any],
 ) -> dict[str, Any]:
     first_bounded_real_order_complete = (
         checks.get("first_bounded_real_order_complete") is True
+        or live_closure_evidence_boundary["first_bounded_real_order_complete"]
     )
     real_order_closure_proven = (
         checks.get("real_order_closure_proven") is True
         or first_bounded_real_order_complete
+        or live_closure_evidence_boundary["real_order_closure_proven"]
     )
+    live_closure_in_progress = live_closure_evidence_boundary["status"] == "in_progress"
     goal_complete = (
         first_bounded_real_order_complete
         and real_order_closure_proven
@@ -607,6 +690,10 @@ def _completion_boundary(
         status = "not_complete_product_gap"
         blocker_class = "missing_fact"
         reason = "non_market_product_gap_present"
+    elif live_closure_in_progress:
+        status = "not_complete_runtime_processing"
+        blocker_class = "runtime_processing"
+        reason = "first_bounded_live_order_closure_in_progress"
     else:
         status = "not_complete_runtime_processing"
         blocker_class = "runtime_processing"
@@ -622,6 +709,7 @@ def _completion_boundary(
         "dry_run_readiness_proven": engineering_rehearsal_ready,
         "mock_signal_treated_as_real_signal": False,
         "disabled_smoke_treated_as_real_execution_proof": False,
+        "live_closure_evidence_status": live_closure_evidence_boundary["status"],
     }
 
 
@@ -854,6 +942,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     exit_hardening = report["exit_hardening_boundary"]
     tier_boundary = report["strategygroup_tier_boundary"]
     live_cutover = report["live_cutover_readiness_boundary"]
+    live_closure = report["live_closure_evidence_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -967,6 +1056,21 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
             [str(item) for item in live_cutover["market_dependent_waiting_keys"]]
         ),
         "",
+        "## Live Closure Evidence Boundary",
+        "",
+        f"- Status: {live_closure['status']}",
+        f"- Source status: {live_closure.get('source_status') or 'none'}",
+        "- Completed stages: "
+        + f"{live_closure['completed_stage_count']}/{live_closure['stage_count']}",
+        "- First incomplete stage: "
+        + str(live_closure["first_incomplete_stage"] or "none"),
+        "- Missing evidence keys: "
+        + _list_or_none(
+            [str(item) for item in live_closure["missing_evidence_keys"]]
+        ),
+        "- Reject reasons: "
+        + _list_or_none([str(item) for item in live_closure["reject_reasons"]]),
+        "",
         "## Tracks",
         "",
         "| Track | Status | Owner state | Next action | Blockers |",
@@ -1072,6 +1176,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--live-cutover-readiness-json",
         default=str(DEFAULT_LIVE_CUTOVER_READINESS_JSON),
+    )
+    parser.add_argument(
+        "--live-closure-evidence-verification-json",
+        default=str(DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON),
     )
     parser.add_argument(
         "--no-auto-live-cutover-readiness",

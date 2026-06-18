@@ -120,6 +120,24 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Live Closure Evidence Verifier
+
+The P0 first bounded live-order goal now has a local evidence verifier for the
+future real closure packet. It verifies a supplied live evidence packet against
+the first-live-closure contract and can distinguish complete, in-progress, and
+rejected closure evidence without calling any live execution path.
+
+| Item | Evidence |
+| --- | --- |
+| Verifier | `scripts/runtime_live_closure_evidence_verifier.py` |
+| Complete status | `live_closure_complete` only when all 13 contract evidence keys are present in order |
+| Official source guard | Complete evidence must also carry an official live closure source marker; shape-only mock/rehearsal packets are rejected |
+| In-progress status | Missing exchange-native hard stop blocks later finalize/reconciliation stages with `blocked_by_previous_stage` |
+| Rejected status | Replay, synthetic signal, or disabled-smoke evidence becomes `blocked_live_closure_rejected` |
+| Goal-progress integration | `run_strategygroup_runtime_goal_progress_audit.py` accepts `--live-closure-evidence-verification-json` and only marks the goal complete when verifier completion is true |
+| Boundary | Verifier is local evidence classification only; it does not create evidence, does not call FinalGate, and does not call Operation Layer |
+| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Chain Closure Live-Proof Contract Alignment
 
 The runtime chain-closure status now consumes the same first-live-closure

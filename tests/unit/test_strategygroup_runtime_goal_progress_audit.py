@@ -184,6 +184,27 @@ def _live_cutover_readiness(**overrides):
     return base
 
 
+def _live_closure_evidence_verification(**overrides):
+    base = {
+        "scope": "runtime_live_closure_evidence_verification",
+        "status": "live_closure_complete",
+        "owner_state": "完成",
+        "completed_stage_count": 9,
+        "stage_count": 9,
+        "first_incomplete_stage": None,
+        "missing_evidence_keys": [],
+        "reject_reasons": [],
+        "completion": {
+            "first_bounded_real_order_complete": True,
+            "real_order_closure_proven": True,
+            "mock_signal_treated_as_real_signal": False,
+            "disabled_smoke_treated_as_real_execution_proof": False,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
 def test_goal_progress_waiting_for_market_with_p05_ready():
     module = _load_module()
 
@@ -208,6 +229,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
         "dry_run_readiness_proven": True,
         "first_bounded_real_order_complete": False,
         "goal_complete": False,
+        "live_closure_evidence_status": "not_generated",
         "mock_signal_treated_as_real_signal": False,
         "real_order_closure_proven": False,
         "reason": "waiting_for_real_fresh_selected_strategygroup_signal",
@@ -302,6 +324,73 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     ]["evidence"]
     assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
     assert tracks["p05_safety_invariants"]["status"] == "ready"
+
+
+def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
+    module = _load_module()
+    daily_check = _daily_check(status="ready")
+    daily_check["checks"]["waiting_for_market"] = False
+    daily_check["owner_summary"]["visibility"]["category"] = "running"
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=_live_cutover_readiness(),
+        live_closure_evidence_verification=_live_closure_evidence_verification(),
+    )
+
+    assert report["status"] == "ready"
+    assert report["completion_boundary"]["goal_complete"] is True
+    assert (
+        report["completion_boundary"]["status"]
+        == "complete"
+    )
+    assert report["completion_boundary"]["reason"] == "first_bounded_real_order_closed"
+    assert report["live_closure_evidence_boundary"] == {
+        "status": "complete",
+        "source_status": "live_closure_complete",
+        "owner_state": "完成",
+        "first_bounded_real_order_complete": True,
+        "real_order_closure_proven": True,
+        "completed_stage_count": 9,
+        "stage_count": 9,
+        "first_incomplete_stage": None,
+        "missing_evidence_keys": [],
+        "reject_reasons": [],
+    }
+
+
+def test_goal_progress_degrades_on_rejected_live_closure_evidence():
+    module = _load_module()
+    daily_check = _daily_check(status="ready")
+    daily_check["checks"]["waiting_for_market"] = False
+    daily_check["owner_summary"]["visibility"]["category"] = "running"
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=_live_cutover_readiness(),
+        live_closure_evidence_verification=_live_closure_evidence_verification(
+            status="blocked_live_closure_rejected",
+            owner_state="需要介入",
+            completed_stage_count=0,
+            first_incomplete_stage="live_fresh_signal",
+            reject_reasons=["replay_signal"],
+            completion={
+                "first_bounded_real_order_complete": False,
+                "real_order_closure_proven": False,
+                "mock_signal_treated_as_real_signal": True,
+                "disabled_smoke_treated_as_real_execution_proof": False,
+            },
+        ),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["live_closure_evidence_boundary"]["status"] == "rejected"
+    assert "live_closure_evidence:replay_signal" in report["checks"]["product_gaps"]
+    assert report["completion_boundary"]["goal_complete"] is False
 
 
 def test_goal_progress_owner_progress_text_has_track_table():
