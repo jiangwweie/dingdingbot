@@ -155,6 +155,15 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
         "entry accepted -> exchange-native hard stop/protection/recovery",
         "post-submit finalize / reconciliation / budget settlement / review closure",
     ]
+    assert report["interaction"]["level"] == "L0_local_completion_audit"
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["interaction"]["max_remote_interactions"] == 0
+    assert report["interaction"]["mutates_remote_files"] is False
+    assert report["interaction"]["approaches_real_order"] is False
+    assert report["interaction"]["calls_finalgate"] is False
+    assert report["interaction"]["calls_operation_layer"] is False
+    assert report["interaction"]["calls_exchange_write"] is False
+    assert report["interaction"]["places_order"] is False
     assert report["safety_invariants"] == {
         "approaches_real_order": False,
         "calls_exchange_write": False,
@@ -463,6 +472,8 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
         "status": "waiting_for_market",
     }
     assert "- 非市场缺口: 无" in owner_text
+    assert "- 交互等级: L0_local_completion_audit" in owner_text
+    assert "- 远端交互次数: 0" in owner_text
     assert "- Exchange write: 否" in owner_text
     assert "- daily_check: status=waiting_for_market, schema=12" in owner_text
     assert "## Input Source Gaps" in owner_text

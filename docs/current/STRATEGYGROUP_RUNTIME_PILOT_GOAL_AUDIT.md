@@ -607,3 +607,19 @@ of making healthy waiting look like another Tokyo probe.
 | Completion audit | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5` |
 | Verification | `89 passed` for daily check, goal progress, P0 completion audit, live cutover readiness, quiet monitor, and monitor frequency tests |
 | Safety | Deploy apply mutated server files only for the bounded runtime release. Postdeploy and cache checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Completion Audit Interaction Field Checkpoint
+
+The P0 completion audit now exposes its own machine-readable interaction
+classification. This prevents downstream status readers from inferring whether
+the completion audit contacted Tokyo, touched server files, or approached a
+real order from prose-only Owner progress text.
+
+| Item | Evidence |
+| --- | --- |
+| Completion audit interaction | `runtime_first_bounded_live_order_completion_audit.py` emits `interaction.level=L0_local_completion_audit`, `remote_interaction_count=0`, `mutates_remote_files=false`, `approaches_real_order=false`, `calls_finalgate=false`, `calls_operation_layer=false`, `calls_exchange_write=false`, and `places_order=false` |
+| Completion audit safety | `safety_invariants` still reports `server_files_mutated=false`, `calls_finalgate=false`, `calls_operation_layer=false`, `calls_exchange_write=false`, `places_order=false`, `approaches_real_order=false`, and `withdrawal_or_transfer_created=false` |
+| Owner progress | The completion audit Owner progress includes `交互等级: L0_local_completion_audit` and `远端交互次数: 0` |
+| Current audit output | `output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `interaction.remote_interaction_count=0` |
+| Verification | `40 passed` for P0 completion audit, goal progress audit, and daily-check cache-read coverage; `py_compile` passed for `runtime_first_bounded_live_order_completion_audit.py` |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

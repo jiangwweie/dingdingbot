@@ -24,6 +24,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.runtime_interaction_levels import annotate_interaction
+
 
 DEFAULT_DAILY_CHECK_JSON = (
     ROOT_DIR / "output/runtime-monitor/latest-daily-check.json"
@@ -87,6 +89,20 @@ def _input_source_gaps(input_sources: dict[str, Any] | None) -> list[str]:
             if not source.get(field):
                 gaps.append(f"{name}:{field}")
     return gaps
+
+
+def _local_completion_audit_interaction() -> dict[str, Any]:
+    return annotate_interaction({
+        "level": "L0_local_completion_audit",
+        "remote_interaction_count": 0,
+        "max_remote_interactions": 0,
+        "mutates_remote_files": False,
+        "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+    })
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -545,6 +561,7 @@ def build_completion_audit_report(
         "market_dependent_remaining": market_dependent_remaining,
         "input_source_gaps": input_source_gaps,
         "input_sources": input_sources or {},
+        "interaction": _local_completion_audit_interaction(),
         "safety_invariants": {
             "server_files_mutated": False,
             "calls_finalgate": False,
@@ -563,6 +580,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     market_remaining = [
         str(item) for item in report.get("market_dependent_remaining") or []
     ]
+    interaction = _dict(report.get("interaction"))
     input_sources = _dict(report.get("input_sources"))
     input_source_gaps = [str(item) for item in report.get("input_source_gaps") or []]
     non_market_text = "无" if not non_market else str(len(non_market))
@@ -573,6 +591,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Goal complete: {'是' if report.get('goal_complete') else '否'}",
         f"- 非市场缺口: {non_market_text}",
         f"- 市场依赖剩余项: {len(market_remaining)}",
+        f"- 交互等级: {interaction.get('level') or 'unknown'}",
+        f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}",
         "- 服务器修改: 否",
         "- Live FinalGate: 否",
         "- Live Operation Layer: 否",
