@@ -101,6 +101,10 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "strategy-group-live-facts-input.json" in text
     assert "--refresh-chain-closure-status" in text
     assert "runtime-execution-chain-closure-status.json" in text
+    assert "--refresh-live-closure-evidence" in text
+    assert "runtime-live-closure-evidence.json" in text
+    assert "runtime-live-closure-evidence-verification.json" in text
+    assert "runtime-live-closure-evidence-refresh.json" in text
     assert "product-state-refresh-packet.json" in text
     assert "owner-console-source-readiness" not in text
     assert "FinalGate" in text

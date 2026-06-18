@@ -120,6 +120,25 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Live Closure Evidence Product-State Refresh Hook
+
+The first bounded live-order closure refresher is now wired into the watcher
+product-state post-step. After a future real fresh-signal execution run writes
+official reports, the same post-step that refreshes product state can also
+generate live closure evidence and verification before the goal-status packet
+is rebuilt.
+
+| Item | Evidence |
+| --- | --- |
+| Product-state integration | `refresh_strategygroup_runtime_product_state_packets.py` accepts `--refresh-live-closure-evidence` |
+| Watcher hook | `80-product-state-refresh.conf` enables `--refresh-live-closure-evidence` and writes `runtime-live-closure-evidence*.json` under the watcher report directory |
+| Refresh ordering | Live closure evidence refresh runs before `strategygroup-runtime-goal-status.json` refresh, so goal status can observe first-live completion in the same watcher post-step |
+| Refresh summary | `product-state-refresh-packet.json` includes `live_closure_evidence_refresh` with verification status, completion booleans, and reject reasons |
+| Healthy no-signal behavior | `live_closure_refresh_not_started` is not a blocker and remains Owner state `等待机会` |
+| Rejected evidence behavior | `live_closure_refresh_rejected` becomes a refresh blocker instead of silently completing the goal |
+| Boundary | This remains report projection only; it does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Verification | Product-state refresh and systemd unit tests cover the new hook and safety invariants |
+
 ### 2026-06-18 Live Closure Evidence Refresh
 
 The first bounded live-order closure path now has a local refresher that scans

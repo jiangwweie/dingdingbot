@@ -92,6 +92,7 @@ def test_refresh_packets_writes_readmodel_packets_without_side_effects(tmp_path)
         "optional_signed_get_live_facts_precollect": False,
         "optional_dry_run_audit_chain_refresh": False,
         "optional_chain_closure_status_refresh": False,
+        "optional_live_closure_evidence_refresh": False,
         "optional_goal_status_refresh": False,
         "optional_source_readiness_fallback": False,
         "exchange_write_called": False,
@@ -179,6 +180,7 @@ def test_refresh_packets_can_precollect_live_facts_before_readmodel_refresh(tmp_
     }
     assert packet["safety_invariants"]["optional_signed_get_live_facts_precollect"] is True
     assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is False
+    assert packet["safety_invariants"]["optional_live_closure_evidence_refresh"] is False
     assert packet["safety_invariants"]["optional_goal_status_refresh"] is False
     assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -330,6 +332,26 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
             },
         }
 
+    def live_closure_evidence_refresher(**kwargs):
+        assert kwargs["report_dir"] == tmp_path
+        assert kwargs["output_json"] == tmp_path / "runtime-live-closure-evidence.json"
+        assert kwargs["verification_output_json"] == (
+            tmp_path / "runtime-live-closure-evidence-verification.json"
+        )
+        assert kwargs["refresh_output_json"] == (
+            tmp_path / "runtime-live-closure-evidence-refresh.json"
+        )
+        return {
+            "scope": "runtime_live_closure_evidence_refresh",
+            "status": "live_closure_refresh_not_started",
+            "verification": {
+                "status": "live_closure_not_started",
+                "first_bounded_real_order_complete": False,
+                "real_order_closure_proven": False,
+                "reject_reasons": [],
+            },
+        }
+
     packet = refresh_packets(
         api_base="http://unit",
         output_dir=tmp_path,
@@ -345,6 +367,8 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         refresh_chain_closure_status=True,
         chain_closure_output_json=tmp_path / "runtime-execution-chain-closure-status.json",
         chain_closure_status_builder=chain_closure_status_builder,
+        refresh_live_closure_evidence=True,
+        live_closure_evidence_refresher=live_closure_evidence_refresher,
         refresh_goal_status=True,
         goal_status_output_json=tmp_path / "strategygroup-runtime-goal-status.json",
         release_manifest=tmp_path / "manifest.json",
@@ -370,6 +394,22 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         "real_order_allowed": False,
         "missing_live_proof_count": 2,
     }
+    assert packet["live_closure_evidence_refresh"] == {
+        "enabled": True,
+        "status": "live_closure_refresh_not_started",
+        "output_json": str(tmp_path / "runtime-live-closure-evidence.json"),
+        "verification_output_json": str(
+            tmp_path / "runtime-live-closure-evidence-verification.json"
+        ),
+        "refresh_output_json": str(
+            tmp_path / "runtime-live-closure-evidence-refresh.json"
+        ),
+        "report_dir": str(tmp_path),
+        "verification_status": "live_closure_not_started",
+        "first_bounded_real_order_complete": False,
+        "real_order_closure_proven": False,
+        "reject_reasons": [],
+    }
     assert packet["goal_status_refresh"] == {
         "enabled": True,
         "status": "waiting_for_signal",
@@ -384,6 +424,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
     assert (tmp_path / "strategygroup-runtime-goal-status.json").exists()
     assert packet["safety_invariants"]["optional_dry_run_audit_chain_refresh"] is True
     assert packet["safety_invariants"]["optional_chain_closure_status_refresh"] is True
+    assert packet["safety_invariants"]["optional_live_closure_evidence_refresh"] is True
     assert packet["safety_invariants"]["optional_goal_status_refresh"] is True
     assert packet["safety_invariants"]["optional_source_readiness_fallback"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False

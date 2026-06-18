@@ -514,6 +514,12 @@ def refresh_packets(
     refresh_chain_closure_status: bool = False,
     chain_closure_output_json: Path | None = None,
     chain_closure_status_builder: Callable[..., dict[str, Any]] | None = None,
+    refresh_live_closure_evidence: bool = False,
+    live_closure_evidence_report_dir: Path | None = None,
+    live_closure_evidence_output_json: Path | None = None,
+    live_closure_evidence_verification_output_json: Path | None = None,
+    live_closure_evidence_refresh_output_json: Path | None = None,
+    live_closure_evidence_refresher: Callable[..., dict[str, Any]] | None = None,
     refresh_goal_status: bool = False,
     goal_status_output_json: Path | None = None,
     release_manifest: Path | None = None,
@@ -691,6 +697,85 @@ def refresh_packets(
                 "output_json": str(resolved_chain_closure_output_json),
             }
 
+    live_closure_evidence_refresh: dict[str, Any] = {
+        "enabled": refresh_live_closure_evidence,
+        "status": "skipped",
+    }
+    if refresh_live_closure_evidence:
+        from scripts.refresh_runtime_live_closure_evidence_packets import (
+            EVIDENCE_FILENAME as LIVE_CLOSURE_EVIDENCE_FILENAME,
+            REFRESH_FILENAME as LIVE_CLOSURE_REFRESH_FILENAME,
+            VERIFICATION_FILENAME as LIVE_CLOSURE_VERIFICATION_FILENAME,
+            build_refresh_report,
+        )
+
+        refresher = live_closure_evidence_refresher or build_refresh_report
+        resolved_live_closure_report_dir = (
+            live_closure_evidence_report_dir or output_dir
+        )
+        resolved_live_closure_evidence_output_json = (
+            live_closure_evidence_output_json
+            or output_dir / LIVE_CLOSURE_EVIDENCE_FILENAME
+        )
+        resolved_live_closure_verification_output_json = (
+            live_closure_evidence_verification_output_json
+            or output_dir / LIVE_CLOSURE_VERIFICATION_FILENAME
+        )
+        resolved_live_closure_refresh_output_json = (
+            live_closure_evidence_refresh_output_json
+            or output_dir / LIVE_CLOSURE_REFRESH_FILENAME
+        )
+        try:
+            refresh_report = refresher(
+                report_dir=resolved_live_closure_report_dir,
+                output_json=resolved_live_closure_evidence_output_json,
+                verification_output_json=(
+                    resolved_live_closure_verification_output_json
+                ),
+                refresh_output_json=resolved_live_closure_refresh_output_json,
+            )
+            verification = (
+                refresh_report.get("verification")
+                if isinstance(refresh_report.get("verification"), dict)
+                else {}
+            )
+            live_closure_evidence_refresh = {
+                "enabled": True,
+                "status": refresh_report.get("status"),
+                "output_json": str(resolved_live_closure_evidence_output_json),
+                "verification_output_json": str(
+                    resolved_live_closure_verification_output_json
+                ),
+                "refresh_output_json": str(resolved_live_closure_refresh_output_json),
+                "report_dir": str(resolved_live_closure_report_dir),
+                "verification_status": verification.get("status"),
+                "first_bounded_real_order_complete": (
+                    verification.get("first_bounded_real_order_complete") is True
+                ),
+                "real_order_closure_proven": (
+                    verification.get("real_order_closure_proven") is True
+                ),
+                "reject_reasons": list(verification.get("reject_reasons") or []),
+            }
+            if refresh_report.get("status") in {
+                "live_closure_refresh_read_error",
+                "live_closure_refresh_rejected",
+            }:
+                blockers.append(str(refresh_report.get("status")))
+        except Exception as exc:
+            blockers.append(f"runtime_live_closure_evidence_failed:{type(exc).__name__}")
+            warnings.append(str(exc))
+            live_closure_evidence_refresh = {
+                "enabled": True,
+                "status": "failed",
+                "output_json": str(resolved_live_closure_evidence_output_json),
+                "verification_output_json": str(
+                    resolved_live_closure_verification_output_json
+                ),
+                "refresh_output_json": str(resolved_live_closure_refresh_output_json),
+                "report_dir": str(resolved_live_closure_report_dir),
+            }
+
     if cookie is None:
         try:
             cookie = _operator_cookie()
@@ -864,6 +949,7 @@ def refresh_packets(
         "live_facts_precollect": live_facts_precollect,
         "dry_run_audit_refresh": dry_run_audit_refresh,
         "chain_closure_status_refresh": chain_closure_status_refresh,
+        "live_closure_evidence_refresh": live_closure_evidence_refresh,
         "goal_status_refresh": goal_status_refresh,
         "source_readiness_fallback": source_readiness_fallback,
         "blockers": blockers,
@@ -879,6 +965,7 @@ def refresh_packets(
             "optional_signed_get_live_facts_precollect": collect_live_facts_before_refresh,
             "optional_dry_run_audit_chain_refresh": refresh_dry_run_audit_chain,
             "optional_chain_closure_status_refresh": refresh_chain_closure_status,
+            "optional_live_closure_evidence_refresh": refresh_live_closure_evidence,
             "optional_goal_status_refresh": refresh_goal_status,
             "optional_source_readiness_fallback": source_readiness_fallback.get(
                 "enabled"
@@ -915,6 +1002,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run-output-json")
     parser.add_argument("--refresh-chain-closure-status", action="store_true")
     parser.add_argument("--chain-closure-output-json")
+    parser.add_argument("--refresh-live-closure-evidence", action="store_true")
+    parser.add_argument("--live-closure-evidence-report-dir")
+    parser.add_argument("--live-closure-evidence-output-json")
+    parser.add_argument("--live-closure-evidence-verification-output-json")
+    parser.add_argument("--live-closure-evidence-refresh-output-json")
     parser.add_argument("--refresh-goal-status", action="store_true")
     parser.add_argument("--goal-status-output-json")
     parser.add_argument("--release-manifest")
@@ -1035,6 +1127,27 @@ def main(argv: list[str] | None = None) -> int:
         chain_closure_output_json=(
             Path(args.chain_closure_output_json).expanduser()
             if args.chain_closure_output_json
+            else None
+        ),
+        refresh_live_closure_evidence=args.refresh_live_closure_evidence,
+        live_closure_evidence_report_dir=(
+            Path(args.live_closure_evidence_report_dir).expanduser()
+            if args.live_closure_evidence_report_dir
+            else None
+        ),
+        live_closure_evidence_output_json=(
+            Path(args.live_closure_evidence_output_json).expanduser()
+            if args.live_closure_evidence_output_json
+            else None
+        ),
+        live_closure_evidence_verification_output_json=(
+            Path(args.live_closure_evidence_verification_output_json).expanduser()
+            if args.live_closure_evidence_verification_output_json
+            else None
+        ),
+        live_closure_evidence_refresh_output_json=(
+            Path(args.live_closure_evidence_refresh_output_json).expanduser()
+            if args.live_closure_evidence_refresh_output_json
             else None
         ),
         refresh_goal_status=args.refresh_goal_status,
