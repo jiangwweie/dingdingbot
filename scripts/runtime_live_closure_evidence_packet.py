@@ -219,9 +219,25 @@ def _derive_reject_reasons(
 
     exchange_result_present = _present(evidence.get("exchange_submit_execution_result_id"))
     if exchange_result_present:
-        if False in _bool_values(source_packets, "live_exchange_called"):
+        live_exchange_positive = _any_true(
+            source_packets,
+            (
+                "live_exchange_called",
+                "exchange_write_called",
+                "exchange_called",
+            ),
+        )
+        real_order_positive = _any_true(
+            source_packets,
+            (
+                "real_order_placed",
+                "places_order",
+                "exchange_order_submitted",
+            ),
+        )
+        if not live_exchange_positive:
             reasons.add("live_exchange_not_called")
-        if False in _bool_values(source_packets, "real_order_placed"):
+        if not real_order_positive:
             reasons.add("real_order_not_placed")
         if False in _bool_values(source_packets, "executes_real_submit"):
             reasons.add("real_order_not_placed")
@@ -250,6 +266,15 @@ def _bool_values(source_packets: list[dict[str, Any]], target_key: str) -> list[
         for item in _collect_values_for_keys(packet, {target_key})
         if isinstance(item, bool)
     ]
+
+
+def _any_true(source_packets: list[dict[str, Any]], target_keys: tuple[str, ...]) -> bool:
+    return any(
+        item is True
+        for packet in source_packets
+        for item in _collect_values_for_keys(packet, set(target_keys))
+        if isinstance(item, bool)
+    )
 
 
 def _collect_values_for_keys(value: Any, keys: set[str]) -> list[Any]:

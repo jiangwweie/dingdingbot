@@ -122,6 +122,24 @@ def test_live_closure_evidence_packet_rejects_controlled_local_cycle_shape():
     assert verification["completion"]["first_bounded_real_order_complete"] is False
 
 
+def test_live_closure_evidence_packet_rejects_exchange_result_without_live_markers():
+    sources = _official_complete_sources()
+    sources[2]["safety_invariants"] = {}
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert "live_exchange_not_called" in packet["reject_reasons"]
+    assert "real_order_not_placed" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
 def test_live_closure_evidence_packet_cli_writes_packet_and_verification(tmp_path, capsys):
     input_json = tmp_path / "source.json"
     output_json = tmp_path / "packet.json"

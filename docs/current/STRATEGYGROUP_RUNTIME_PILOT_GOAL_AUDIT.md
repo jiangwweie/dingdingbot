@@ -120,6 +120,26 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Live Closure Evidence Refresh
+
+The first bounded live-order closure path now has a local refresher that scans
+a report directory and writes the canonical evidence packet plus verification
+packet consumed by the low-noise monitor and goal-progress audit. This removes
+the manual packet-assembly gap after a future real fresh-signal execution run.
+
+| Item | Evidence |
+| --- | --- |
+| Refresh command | `scripts/refresh_runtime_live_closure_evidence_packets.py --report-dir <reports-dir>` |
+| Generated evidence | Writes `runtime-live-closure-evidence.json` |
+| Generated verification | Writes `runtime-live-closure-evidence-verification.json` |
+| Generated refresh report | Writes `runtime-live-closure-evidence-refresh.json` |
+| No-evidence behavior | Emits `live_closure_refresh_not_started` / `live_closure_not_started`, which remains Owner state `等待机会` |
+| Partial-evidence behavior | Emits `live_closure_refresh_in_progress` when official live evidence has started but later closure stages are not complete |
+| Complete-evidence behavior | Emits `live_closure_refresh_complete` only when all 13 first-live closure evidence keys pass verifier checks |
+| Anti-false-positive guard | Skips non-live dry-run/mock/sample/controlled inputs by default and rejects any exchange-result shape that lacks positive live-exchange and real-order markers |
+| Boundary | This is report projection only; it does not create evidence and does not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+| Verification | `test_refresh_runtime_live_closure_evidence_packets.py` covers complete, in-progress, no-live-evidence, and no-live-marker rejection paths |
+
 ### 2026-06-18 Live Closure Evidence Snapshot Projection
 
 The low-noise Tokyo snapshot and daily-check path now consumes first-live
