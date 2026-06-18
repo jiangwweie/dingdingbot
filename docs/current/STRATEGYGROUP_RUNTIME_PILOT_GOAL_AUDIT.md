@@ -799,6 +799,21 @@ settlement, and submit-outcome review recording.
 | Verification | `85 passed` for the targeted live-closure/cutover/snapshot tests; `148 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Official Proof Auth Env Isolation Checkpoint
+
+The official proof login helper now resets proof-local operator credentials
+immediately before each TestClient login. This prevents `src.interfaces.api`
+composition-root import from reloading `.env.local` with `override=True` and
+overwriting the proof credentials that the local official proof chain expects.
+
+| Item | Evidence |
+| --- | --- |
+| Root cause | `src.interfaces.api` imports load `.env.local` with `override=True`; after import, the proof password hash and TOTP secret no longer matched the local proof login payload |
+| Fix | `runtime_official_server_prepare_integration_proof.py` resets proof credentials inside `_login()` immediately before posting `/api/auth/login` |
+| Scope | This changes local official proof/test credential isolation only; it does not modify production secrets, live profile, order sizing, Tokyo files, FinalGate, Operation Layer, exchange write, or real order behavior |
+| Verification | `36 passed` for `test_runtime_official_*proof.py`; post-submit proof no longer fails with `rtf088_login_failed:401` |
+| Known warning | The official proof suite still emits an existing async cleanup warning: `coroutine 'Connection._cancel' was never awaited`; all assertions pass |
+
 ### 2026-06-18 Pre-Submit Authorization Chain Binding Checkpoint
 
 The live-closure evidence packet builder now requires the candidate,

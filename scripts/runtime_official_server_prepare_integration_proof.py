@@ -917,6 +917,9 @@ def _configure_auth_env() -> None:
 
 
 def _login(client: TestClient):
+    # Importing the FastAPI composition root reloads .env.local with override=True,
+    # so reset proof credentials immediately before the login request.
+    _configure_auth_env()
     return client.post(
         "/api/auth/login",
         json={
