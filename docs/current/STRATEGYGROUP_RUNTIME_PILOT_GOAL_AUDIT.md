@@ -120,6 +120,21 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Same-Tick Goal Status Visibility Fix
+
+The watcher product-state post-step now refreshes `strategygroup-runtime-goal-status.json`
+after `runtime-live-closure-evidence*.json` is generated. This prevents a
+future first bounded real-order closure from being visible only one watcher
+tick later.
+
+| Item | Evidence |
+| --- | --- |
+| Systemd hook | `80-product-state-refresh.conf` now passes `--refresh-goal-status`, `--goal-status-output-json`, and `--release-manifest` |
+| Refresh order | `refresh_strategygroup_runtime_product_state_packets.py` runs dry-run refresh, chain-closure refresh, live-closure refresh, then goal-status refresh when all optional flags are enabled |
+| Test coverage | `test_refresh_packets_can_refresh_dry_run_and_goal_status` asserts the order `dry_run -> chain_closure -> live_closure -> goal_status` |
+| Owner impact | When the first live closure evidence is complete, goal-status can observe it in the same watcher post-step instead of waiting for another tick |
+| Boundary | Readmodel/report refresh only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Live Closure Refresh Hook Tokyo Deploy
 
 The product-state live closure refresh hook was pushed and deployed to Tokyo

@@ -262,6 +262,7 @@ def test_refresh_packets_passes_selected_strategygroup_scope_to_pilot_status(tmp
 
 
 def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
+    events = []
     payloads = {
         "/api/trading-console/strategy-group-live-facts-readiness": {
             "freshness_status": "fresh",
@@ -288,6 +289,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         return _FakeResponse(payloads[path])
 
     def dry_run_builder(output_dir):
+        events.append("dry_run")
         assert output_dir == tmp_path / "dry"
         return {
             "scope": "runtime_dry_run_audit_chain",
@@ -302,6 +304,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         }
 
     def goal_status_builder(**kwargs):
+        events.append("goal_status")
         assert kwargs["report_dir"] == tmp_path
         assert kwargs["release_manifest"] == tmp_path / "manifest.json"
         assert kwargs["expected_head"] == "abc123"
@@ -319,6 +322,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         }
 
     def chain_closure_status_builder(**kwargs):
+        events.append("chain_closure")
         assert kwargs["audit_packet"]["scope"] == "runtime_dry_run_audit_chain"
         return {
             "scope": "runtime_execution_chain_closure_status",
@@ -333,6 +337,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
         }
 
     def live_closure_evidence_refresher(**kwargs):
+        events.append("live_closure")
         assert kwargs["report_dir"] == tmp_path
         assert kwargs["output_json"] == tmp_path / "runtime-live-closure-evidence.json"
         assert kwargs["verification_output_json"] == (
@@ -377,6 +382,7 @@ def test_refresh_packets_can_refresh_dry_run_and_goal_status(tmp_path):
     )
 
     assert packet["status"] == "refreshed"
+    assert events == ["dry_run", "chain_closure", "live_closure", "goal_status"]
     assert packet["dry_run_audit_refresh"] == {
         "enabled": True,
         "status": "passed",

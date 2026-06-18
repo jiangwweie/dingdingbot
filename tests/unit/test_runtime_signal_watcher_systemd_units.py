@@ -105,6 +105,9 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "runtime-live-closure-evidence.json" in text
     assert "runtime-live-closure-evidence-verification.json" in text
     assert "runtime-live-closure-evidence-refresh.json" in text
+    assert "--refresh-goal-status" in text
+    assert "strategygroup-runtime-goal-status.json" in text
+    assert "--release-manifest /home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json" in text
     assert "product-state-refresh-packet.json" in text
     assert "owner-console-source-readiness" not in text
     assert "FinalGate" in text
