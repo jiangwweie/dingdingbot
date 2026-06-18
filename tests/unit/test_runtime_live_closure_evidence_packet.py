@@ -6,18 +6,31 @@ from scripts import runtime_live_closure_evidence_packet as packet_builder
 from scripts import runtime_live_closure_evidence_verifier as verifier
 
 
+BOUNDARY_FIELDS = {
+    "strategy_group_id": "MPG-001",
+    "runtime_profile_id": "owner-runtime-console-v1",
+    "subaccount_id": "tokyo-runtime-subaccount",
+    "symbol": "MSTR/USDT:USDT",
+    "side": "long",
+    "notional": "100",
+    "leverage": "1",
+}
+
+
 def _official_complete_sources() -> list[dict]:
     return [
         {
             "scope": "runtime_signal_watcher_live_signal",
             "status": "fresh_signal_ready",
             "signal_packet_id": "live-signal-packet-1",
+            **BOUNDARY_FIELDS,
         },
         {
             "scope": "strategy_group_live_facts_readiness",
             "status": "ready",
             "signal_packet_id": "live-signal-packet-1",
             "required_facts_readiness_packet_id": "facts-ready-1",
+            **BOUNDARY_FIELDS,
         },
         {
             "scope": "official_entry_chain",
@@ -32,6 +45,7 @@ def _official_complete_sources() -> list[dict]:
                 "exchange_submit_execution_result_id": "exchange-result-1",
                 "exchange_native_hard_stop_order_id": "hard-stop-1",
             },
+            **BOUNDARY_FIELDS,
             "safety_invariants": {
                 "live_exchange_called": True,
                 "real_order_placed": True,
@@ -47,6 +61,7 @@ def _official_complete_sources() -> list[dict]:
                 "post_submit_budget_settlement_id": "settlement-1",
                 "submit_outcome_review_id": "review-1",
             },
+            **BOUNDARY_FIELDS,
         },
     ]
 
@@ -118,6 +133,29 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
             "submit_outcome_review_id",
         ],
         "missing_source_match_keys": [],
+    }
+    assert packet["runtime_boundary_proof"] == {
+        "source_packet_count": 4,
+        "observed_fields": [
+            "strategy_group_id",
+            "runtime_profile_id",
+            "subaccount_id",
+            "symbol",
+            "side",
+            "notional",
+            "leverage",
+        ],
+        "missing_fields": [],
+        "conflict_fields": [],
+        "values": {
+            "strategy_group_id": ["MPG-001"],
+            "runtime_profile_id": ["owner-runtime-console-v1"],
+            "subaccount_id": ["tokyo-runtime-subaccount"],
+            "symbol": ["MSTR/USDT:USDT"],
+            "side": ["long"],
+            "notional": ["100"],
+            "leverage": ["1"],
+        },
     }
     assert packet["reject_reasons"] == []
     assert packet["missing_evidence_keys"] == []
@@ -256,6 +294,28 @@ def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers()
     }
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_runtime_boundary_mismatch():
+    sources = _official_complete_sources()
+    sources[1]["symbol"] = "TSLA/USDT:USDT"
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["runtime_boundary_proof"]["conflict_fields"] == ["symbol"]
+    assert packet["runtime_boundary_proof"]["values"]["symbol"] == [
+        "MSTR/USDT:USDT",
+        "TSLA/USDT:USDT",
+    ]
+    assert "symbol_boundary_mismatch" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

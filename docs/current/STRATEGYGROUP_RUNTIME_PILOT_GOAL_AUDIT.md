@@ -814,3 +814,24 @@ together stale facts or stale candidates from another signal window.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `33 passed` for the live-closure verifier/packet/cutover tests; `137 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Runtime Boundary Binding Checkpoint
+
+The live-closure evidence packet builder now emits `runtime_boundary_proof`
+for the first bounded live-order closure chain. A complete live-closure packet
+must not only show live signal, RequiredFacts, candidate/auth, FinalGate,
+Operation Layer, exchange acceptance, exchange-native protection, finalize,
+reconciliation, settlement, and review evidence. It must also prove that those
+source packets remain inside the same selected StrategyGroup, runtime profile,
+allocated subaccount, symbol, side, notional, and leverage boundary.
+
+| Item | Evidence |
+| --- | --- |
+| Boundary proof | `runtime_live_closure_evidence_packet.py` emits `runtime_boundary_proof` with observed, missing, conflicting, and normalized boundary values from source packets that carry the required live-closure evidence ids |
+| Contract guard | `runtime_live_cutover_readiness.py` adds `live_closure_contract_requires_runtime_boundary_binding=true` and rejects missing proof or mismatches from `candidate_authorization_bound` through close-loop completion |
+| Verifier guard | `runtime_live_closure_evidence_verifier.py` rejects official live closure evidence when `runtime_boundary_proof` is missing or reports conflicts for StrategyGroup, runtime profile, subaccount, symbol, side, notional, or leverage |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_runtime_boundary_mismatch`, `test_live_closure_evidence_verifier_rejects_missing_runtime_boundary_proof`, and `test_live_closure_evidence_verifier_rejects_runtime_boundary_mismatch` reject stitched or unbounded completion shapes |
+| Product-state compatibility | Goal-progress and Tokyo snapshot auto-verification fixtures now include the same runtime boundary proof, so the Owner progress layer remains `waiting_for_market` with no product gaps when no real live closure has started |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `36 passed` for the live-closure verifier/packet/cutover tests; `140 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

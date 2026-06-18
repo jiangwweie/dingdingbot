@@ -22,6 +22,7 @@ def _official_packet(
     packet = {
         "source_kind": "official_live_closure_evidence",
         "evidence": evidence,
+        "runtime_boundary_proof": _runtime_boundary_proof(),
     }
     if "exchange_submit_execution_result_id" in evidence:
         exchange_submit_execution_result_id = _evidence_id(
@@ -69,6 +70,31 @@ def _official_packet(
                 "missing_source_match_keys": [],
             }
     return packet
+
+
+def _runtime_boundary_proof(
+    *,
+    conflict_fields: list[str] | None = None,
+) -> dict[str, object]:
+    values = {
+        "strategy_group_id": ["MPG-001"],
+        "runtime_profile_id": ["owner-runtime-console-v1"],
+        "subaccount_id": ["tokyo-runtime-subaccount"],
+        "symbol": ["MSTR/USDT:USDT"],
+        "side": ["long"],
+        "notional": ["100"],
+        "leverage": ["1"],
+    }
+    if conflict_fields:
+        for field in conflict_fields:
+            values[field].append(f"other-{field}")
+    return {
+        "source_packet_count": 4,
+        "observed_fields": list(values),
+        "missing_fields": [],
+        "conflict_fields": conflict_fields or [],
+        "values": values,
+    }
 
 
 def _live_signal_chain_proof(evidence: dict[str, object]) -> dict[str, object]:
@@ -244,6 +270,7 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
                 ],
                 "missing_source_match_keys": [],
             },
+            "runtime_boundary_proof": _runtime_boundary_proof(),
             "reject_reasons": ["replay_signal", "disabled_smoke_only"],
         },
         generated_at_ms=1781755000000,
@@ -278,6 +305,7 @@ def test_live_closure_evidence_verifier_rejects_missing_live_submit_proof():
             "pre_submit_authorization_chain_proof": (
                 _pre_submit_authorization_chain_proof(evidence)
             ),
+            "runtime_boundary_proof": _runtime_boundary_proof(),
         },
         generated_at_ms=1781755000000,
     )
@@ -402,6 +430,68 @@ def test_live_closure_evidence_verifier_rejects_missing_live_signal_chain_proof(
     assert [stage["name"] for stage in rejected] == [
         "required_facts_ready",
         "candidate_authorization_bound",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_missing_runtime_boundary_proof():
+    packet = _official_packet(_complete_evidence())
+    packet.pop("runtime_boundary_proof")
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["owner_state"] == "需要介入"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == ["runtime_boundary_proof_missing"]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "candidate_authorization_bound",
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
+        "real_exchange_acceptance",
+        "exchange_native_protection",
+        "post_submit_finalize",
+        "reconciliation_settlement_review",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_runtime_boundary_mismatch():
+    packet = _official_packet(_complete_evidence())
+    packet["runtime_boundary_proof"] = _runtime_boundary_proof(
+        conflict_fields=["symbol", "leverage"]
+    )
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "leverage_boundary_mismatch",
+        "symbol_boundary_mismatch",
+    ]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "candidate_authorization_bound",
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
+        "real_exchange_acceptance",
+        "exchange_native_protection",
+        "post_submit_finalize",
+        "reconciliation_settlement_review",
     ]
 
 

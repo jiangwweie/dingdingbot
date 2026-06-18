@@ -58,6 +58,14 @@ GLOBAL_REJECT_REASONS = {
     "post_submit_close_loop_proof_missing",
     "post_submit_finalize_result_source_missing",
     "post_submit_close_loop_result_source_missing",
+    "runtime_boundary_proof_missing",
+    "strategy_group_boundary_mismatch",
+    "runtime_profile_boundary_mismatch",
+    "subaccount_boundary_mismatch",
+    "symbol_boundary_mismatch",
+    "side_boundary_mismatch",
+    "notional_boundary_mismatch",
+    "leverage_boundary_mismatch",
 }
 EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
 LIVE_SIGNAL_CHAIN_KEY = "live_watcher_signal_packet_id"
@@ -99,6 +107,24 @@ LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
     "result_id",
 )
 PROTECTION_PROOF_RESULT_ID_FIELDS = LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS
+RUNTIME_BOUNDARY_FIELDS = (
+    "strategy_group_id",
+    "runtime_profile_id",
+    "subaccount_id",
+    "symbol",
+    "side",
+    "notional",
+    "leverage",
+)
+RUNTIME_BOUNDARY_REJECT_REASONS = {
+    "strategy_group_id": "strategy_group_boundary_mismatch",
+    "runtime_profile_id": "runtime_profile_boundary_mismatch",
+    "subaccount_id": "subaccount_boundary_mismatch",
+    "symbol": "symbol_boundary_mismatch",
+    "side": "side_boundary_mismatch",
+    "notional": "notional_boundary_mismatch",
+    "leverage": "leverage_boundary_mismatch",
+}
 
 
 def build_live_closure_evidence_verification(
@@ -306,6 +332,11 @@ def _reject_reasons(
     )
     if source_ready and fresh_submit_authorization_id:
         reasons.update(_pre_submit_authorization_chain_reject_reasons(packet, evidence))
+    if source_ready and any(
+        _required_evidence_id_present(evidence.get(key))
+        for key in required_evidence_keys
+    ):
+        reasons.update(_runtime_boundary_reject_reasons(packet))
     live_submit_ready = False
     if source_ready and exchange_submit_execution_result_id:
         proof = packet.get("live_submit_proof")
@@ -492,6 +523,21 @@ def _pre_submit_authorization_chain_proof_id(
         if value:
             return value
     return None
+
+
+def _runtime_boundary_reject_reasons(packet: dict[str, Any]) -> set[str]:
+    proof = packet.get("runtime_boundary_proof")
+    if not isinstance(proof, dict):
+        return {"runtime_boundary_proof_missing"}
+    conflict_fields = {
+        str(item)
+        for item in proof.get("conflict_fields") or []
+    }
+    reject_reasons: set[str] = set()
+    for field in RUNTIME_BOUNDARY_FIELDS:
+        if field in conflict_fields:
+            reject_reasons.add(RUNTIME_BOUNDARY_REJECT_REASONS[field])
+    return reject_reasons
 
 
 def _exchange_native_protection_reject_reasons(

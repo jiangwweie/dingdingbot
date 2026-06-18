@@ -177,9 +177,15 @@ def _live_cutover_readiness(**overrides):
                 "live_closure_contract_defined": True,
                 "live_closure_contract_rejects_synthetic_signal": True,
                 "live_closure_contract_rejects_disabled_smoke": True,
+                "live_closure_contract_requires_live_signal_chain_binding": True,
+                "live_closure_contract_requires_pre_submit_authorization_chain_binding": True,
+                "live_closure_contract_requires_runtime_boundary_binding": True,
                 "live_closure_contract_requires_exchange_acceptance": True,
+                "live_closure_contract_requires_live_submit_truth": True,
                 "live_closure_contract_requires_exchange_native_protection": True,
+                "live_closure_contract_requires_exchange_native_protection_binding": True,
                 "live_closure_contract_requires_post_submit_reconciliation": True,
+                "live_closure_contract_requires_post_submit_result_binding": True,
                 "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
             },
         },
@@ -207,6 +213,25 @@ def _live_closure_evidence_verification(**overrides):
     }
     base.update(overrides)
     return base
+
+
+def _runtime_boundary_proof() -> dict[str, object]:
+    values = {
+        "strategy_group_id": ["MPG-001"],
+        "runtime_profile_id": ["owner-runtime-console-v1"],
+        "subaccount_id": ["tokyo-runtime-subaccount"],
+        "symbol": ["MSTR/USDT:USDT"],
+        "side": ["long"],
+        "notional": ["100"],
+        "leverage": ["1"],
+    }
+    return {
+        "source_packet_count": 4,
+        "observed_fields": list(values),
+        "missing_fields": [],
+        "conflict_fields": [],
+        "values": values,
+    }
 
 
 def test_goal_progress_waiting_for_market_with_p05_ready():
@@ -1232,6 +1257,7 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                     ],
                     "missing_source_match_keys": [],
                 },
+                "runtime_boundary_proof": _runtime_boundary_proof(),
                 "evidence": evidence,
             },
             ensure_ascii=False,

@@ -9,6 +9,7 @@ Tokyo, FinalGate, Operation Layer, exchange write paths, or OrderLifecycle.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
 import sys
@@ -130,6 +131,62 @@ REAL_ORDER_PLACED_KEYS = (
     "places_order",
     "exchange_order_submitted",
 )
+RUNTIME_BOUNDARY_FIELDS = (
+    "strategy_group_id",
+    "runtime_profile_id",
+    "subaccount_id",
+    "symbol",
+    "side",
+    "notional",
+    "leverage",
+)
+RUNTIME_BOUNDARY_ALIASES: dict[str, tuple[str, ...]] = {
+    "strategy_group_id": (
+        "strategy_group_id",
+        "strategyGroupId",
+        "strategy_group",
+        "strategy_id",
+    ),
+    "runtime_profile_id": (
+        "runtime_profile_id",
+        "live_profile_id",
+        "profile_id",
+        "runtime_profile",
+    ),
+    "subaccount_id": (
+        "allocated_subaccount_id",
+        "subaccount_id",
+        "sub_account_id",
+    ),
+    "symbol": (
+        "symbol",
+        "market_symbol",
+        "instrument",
+    ),
+    "side": (
+        "side",
+        "direction",
+    ),
+    "notional": (
+        "notional",
+        "order_notional",
+        "notional_usdt",
+        "max_notional",
+    ),
+    "leverage": (
+        "leverage",
+        "leverage_x",
+    ),
+}
+RUNTIME_BOUNDARY_REJECT_REASONS = {
+    "strategy_group_id": "strategy_group_boundary_mismatch",
+    "runtime_profile_id": "runtime_profile_boundary_mismatch",
+    "subaccount_id": "subaccount_boundary_mismatch",
+    "symbol": "symbol_boundary_mismatch",
+    "side": "side_boundary_mismatch",
+    "notional": "notional_boundary_mismatch",
+    "leverage": "leverage_boundary_mismatch",
+}
 
 
 def build_live_closure_evidence_packet(
@@ -172,6 +229,10 @@ def build_live_closure_evidence_packet(
         source_packets=source_packets,
         evidence=evidence,
     )
+    runtime_boundary_proof = _runtime_boundary_proof(
+        source_packets=source_packets,
+        evidence=evidence,
+    )
     reject_reasons = _derive_reject_reasons(
         source_packets=source_packets,
         source_kind=source_kind,
@@ -184,6 +245,7 @@ def build_live_closure_evidence_packet(
         live_submit_proof=live_submit_proof,
         exchange_native_protection_proof=exchange_native_protection_proof,
         post_submit_close_loop_proof=post_submit_close_loop_proof,
+        runtime_boundary_proof=runtime_boundary_proof,
     )
     return {
         "scope": "runtime_live_closure_evidence_packet",
@@ -203,6 +265,7 @@ def build_live_closure_evidence_packet(
         "live_submit_proof": live_submit_proof,
         "exchange_native_protection_proof": exchange_native_protection_proof,
         "post_submit_close_loop_proof": post_submit_close_loop_proof,
+        "runtime_boundary_proof": runtime_boundary_proof,
         "reject_reasons": reject_reasons,
         "evidence": evidence,
         "input_count": len(source_packets),
@@ -270,6 +333,7 @@ def _derive_reject_reasons(
     live_submit_proof: dict[str, Any],
     exchange_native_protection_proof: dict[str, Any],
     post_submit_close_loop_proof: dict[str, Any],
+    runtime_boundary_proof: dict[str, Any],
 ) -> list[str]:
     reasons: set[str] = set()
     source_kind_value = str(source_kind)
@@ -344,6 +408,10 @@ def _derive_reject_reasons(
                 reasons.add("post_submit_finalize_result_source_missing")
             if close_loop_missing - {"runtime_post_submit_finalize_packet_id"}:
                 reasons.add("post_submit_close_loop_result_source_missing")
+    for field in runtime_boundary_proof.get("conflict_fields") or []:
+        reason = RUNTIME_BOUNDARY_REJECT_REASONS.get(str(field))
+        if reason:
+            reasons.add(reason)
     return sorted(reasons)
 
 
@@ -550,6 +618,65 @@ def _post_submit_close_loop_proof(
     return proof
 
 
+def _runtime_boundary_proof(
+    *,
+    source_packets: list[dict[str, Any]],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    boundary_source_packets = _runtime_boundary_source_packets(
+        source_packets=source_packets,
+        evidence=evidence,
+    )
+    values: dict[str, list[str]] = {}
+    for field in RUNTIME_BOUNDARY_FIELDS:
+        field_values: list[str] = []
+        for packet in boundary_source_packets:
+            for alias in RUNTIME_BOUNDARY_ALIASES[field]:
+                for value in _collect_values_for_keys(packet, {alias}):
+                    normalized = _normalize_boundary_value(field, value)
+                    if normalized and normalized not in field_values:
+                        field_values.append(normalized)
+        values[field] = field_values
+    observed_fields = [field for field, field_values in values.items() if field_values]
+    missing_fields = [
+        field for field, field_values in values.items() if not field_values
+    ]
+    conflict_fields = [
+        field for field, field_values in values.items() if len(field_values) > 1
+    ]
+    return {
+        "source_packet_count": len(boundary_source_packets),
+        "observed_fields": observed_fields,
+        "missing_fields": missing_fields,
+        "conflict_fields": conflict_fields,
+        "values": values,
+    }
+
+
+def _runtime_boundary_source_packets(
+    *,
+    source_packets: list[dict[str, Any]],
+    evidence: dict[str, Any],
+) -> list[dict[str, Any]]:
+    matched: list[dict[str, Any]] = []
+    matched_ids: set[int] = set()
+    for key, aliases in EVIDENCE_ALIASES.items():
+        evidence_id = _evidence_id(evidence.get(key))
+        if not evidence_id:
+            continue
+        for packet in _source_packets_for_evidence_id(
+            source_packets,
+            aliases=aliases,
+            evidence_id=evidence_id,
+        ):
+            packet_id = id(packet)
+            if packet_id in matched_ids:
+                continue
+            matched.append(packet)
+            matched_ids.add(packet_id)
+    return matched
+
+
 def _source_packets_for_evidence_id(
     source_packets: list[dict[str, Any]],
     *,
@@ -619,6 +746,26 @@ def _collect_values_for_keys(value: Any, keys: set[str]) -> list[Any]:
         for child in value:
             values.extend(_collect_values_for_keys(child, keys))
     return values
+
+
+def _normalize_boundary_value(field: str, value: Any) -> str | None:
+    text = _string_or_none(value)
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    if field in {"strategy_group_id", "symbol"}:
+        return text.upper()
+    if field == "side":
+        return text.lower()
+    if field in {"notional", "leverage"}:
+        try:
+            number = Decimal(text)
+        except (InvalidOperation, ValueError):
+            return text
+        return format(number.normalize(), "f")
+    return text
 
 
 def _input_summary(packet: dict[str, Any]) -> dict[str, str | None]:
