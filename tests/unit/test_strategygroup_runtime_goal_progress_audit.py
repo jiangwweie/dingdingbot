@@ -133,6 +133,27 @@ def _daily_check(**overrides):
     return base
 
 
+def _live_cutover_readiness(**overrides):
+    base = {
+        "scope": "runtime_live_cutover_readiness",
+        "status": "live_cutover_waiting_for_fresh_signal",
+        "owner_state": "等待机会",
+        "next_fresh_signal_cutover_ready": True,
+        "current_real_submit_allowed": False,
+        "market_dependent_waiting_keys": [
+            "fresh_signal",
+            "candidate_authorization",
+            "action_time_finalgate",
+            "official_operation_layer",
+            "real_exchange_acceptance",
+            "post_submit_real_reconciliation",
+        ],
+        "non_market_blockers": [],
+    }
+    base.update(overrides)
+    return base
+
+
 def test_goal_progress_waiting_for_market_with_p05_ready():
     module = _load_module()
 
@@ -296,6 +317,10 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- Tier policy is execution authority: 否" in text
     assert "- Tier policy bypasses FinalGate: 否" in text
     assert "- Tier policy bypasses Operation Layer: 否" in text
+    assert "## Live Cutover Readiness Boundary" in text
+    assert "- Status: not_generated" in text
+    assert "- Next fresh signal cutover ready: 否" in text
+    assert "- Current real submit allowed: 否" in text
     assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
     assert "## Evidence" in text
     assert "chain_ready_segments=3" in text
@@ -303,6 +328,63 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "goal_chain_ready_segments=7" in text
     assert "missing_goal_chain_segments=0" in text
     assert "- P0.5 ready: 是" in text
+
+
+def test_goal_progress_accepts_live_cutover_readiness_boundary():
+    module = _load_module()
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=_live_cutover_readiness(),
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["live_cutover_readiness_boundary"] == {
+        "current_real_submit_allowed": False,
+        "entry_fast_chain_ready": True,
+        "exit_hardening_ready": True,
+        "market_dependent_waiting_keys": [
+            "fresh_signal",
+            "candidate_authorization",
+            "action_time_finalgate",
+            "official_operation_layer",
+            "real_exchange_acceptance",
+            "post_submit_real_reconciliation",
+        ],
+        "next_fresh_signal_cutover_ready": True,
+        "non_market_blockers": [],
+        "owner_state": "等待机会",
+        "source_status": "live_cutover_waiting_for_fresh_signal",
+        "status": "ready",
+        "strategygroup_tier_ready": True,
+    }
+    assert report["checks"]["product_gaps"] == []
+
+
+def test_goal_progress_degrades_on_live_cutover_non_market_gap():
+    module = _load_module()
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=_live_cutover_readiness(
+            status="blocked_non_market_cutover_gap",
+            owner_state="需要介入",
+            next_fresh_signal_cutover_ready=False,
+            non_market_blockers=[
+                "operation_layer_relay:operation_layer_evidence_relay_checked"
+            ],
+        ),
+    )
+
+    assert report["status"] == "degraded"
+    assert report["live_cutover_readiness_boundary"]["status"] == "blocked"
+    assert report["completion_boundary"]["status"] == "not_complete_product_gap"
+    assert (
+        "live_cutover_readiness:operation_layer_relay:"
+        "operation_layer_evidence_relay_checked"
+    ) in report["checks"]["product_gaps"]
 
 
 def test_goal_progress_marks_non_market_gap_as_degraded():
@@ -535,6 +617,7 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     daily_check_path = tmp_path / "daily-check.json"
     baseline_path = tmp_path / "baseline.json"
     tier_policy_path = tmp_path / "tier-policy.json"
+    live_cutover_path = tmp_path / "live-cutover.json"
     output_json = tmp_path / "goal-progress.json"
     output_md = tmp_path / "goal-progress.md"
     daily_check_path.write_text(
@@ -549,6 +632,10 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
         json.dumps(_tier_policy(), ensure_ascii=False),
         encoding="utf-8",
     )
+    live_cutover_path.write_text(
+        json.dumps(_live_cutover_readiness(), ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     exit_code = module.main(
         [
@@ -558,6 +645,8 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
             str(baseline_path),
             "--tier-policy-json",
             str(tier_policy_path),
+            "--live-cutover-readiness-json",
+            str(live_cutover_path),
             "--output-json",
             str(output_json),
             "--output-owner-progress",
@@ -591,6 +680,13 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     assert payload["strategygroup_tier_boundary"][
         "new_strategy_groups_default_non_l4"
     ] is True
+    assert payload["live_cutover_readiness_boundary"]["status"] == "ready"
+    assert (
+        payload["live_cutover_readiness_boundary"][
+            "next_fresh_signal_cutover_ready"
+        ]
+        is True
+    )
     assert (
         payload["exit_hardening_boundary"][
             "real_post_submit_close_reconcile_settle_proven"
@@ -603,6 +699,8 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     assert "## Entry Fast Chain Boundary" in progress
     assert "## Exit Hardening Boundary" in progress
     assert "## StrategyGroup Tier Boundary" in progress
+    assert "## Live Cutover Readiness Boundary" in progress
+    assert "- Next fresh signal cutover ready: 是" in progress
     assert "- P0.5 ready: 是" in progress
     assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []

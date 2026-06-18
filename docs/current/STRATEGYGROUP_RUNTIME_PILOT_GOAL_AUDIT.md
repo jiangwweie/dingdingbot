@@ -77,6 +77,7 @@ cleanup plan.
 | `python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md` | `P0=waiting_for_market`, `P0.5=ready`, no blockers |
 | `python3 scripts/runtime_dry_run_audit_chain.py --output-json output/strategygroup-runtime-pilot/runtime-dry-run-audit-chain-current.json` | `status=passed`, `scenario_count=14`, all required checks true |
 | `python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/strategygroup-runtime-pilot/replay-lab/runtime-replay-report.json --output-owner-progress output/strategygroup-runtime-pilot/replay-lab/runtime-replay-owner-progress.md` | `status=passed`, `strategy_group_id=MPG-001`, replay-only safety flags true |
+| `python3 scripts/runtime_live_cutover_readiness.py --output-json output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json --output-owner-progress output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.md` | `status=live_cutover_waiting_for_fresh_signal`, `next_fresh_signal_cutover_ready=true`, `non_market_blockers=[]` |
 
 ## Completion Boundary
 
@@ -118,6 +119,22 @@ fresh selected StrategyGroup signal exists.
 | disabled smoke treated as real execution proof | false |
 
 ## Latest Checkpoint
+
+### 2026-06-18 P0 Live Cutover Readiness Packet
+
+The P0 first bounded live-order goal now has a local cutover-readiness packet
+that compresses the existing dry-run audit into one Owner-readable question:
+are non-market blockers cleared for the next fresh selected StrategyGroup
+signal?
+
+| Item | Evidence |
+| --- | --- |
+| Cutover packet | `scripts/runtime_live_cutover_readiness.py` builds `runtime-live-cutover-readiness.json` and Owner-readable Markdown |
+| Current cutover state | `status=live_cutover_waiting_for_fresh_signal`, `owner_state=等待机会`, `next_fresh_signal_cutover_ready=true`, `current_real_submit_allowed=false` |
+| Non-market blockers | `non_market_blockers=[]`; strategy scope, entry fast chain, Operation Layer relay, hard blocker policy, exit/protection recovery, post-submit close loop, and dry-run safety sections are all `ready` |
+| Goal progress integration | `run_strategygroup_runtime_goal_progress_audit.py` reads the packet and exposes `live_cutover_readiness_boundary.status=ready` with `product_gaps=[]` |
+| Boundary | This is cutover readiness, not real submit authority. Current real submit remains blocked by absence of a live fresh selected StrategyGroup signal |
+| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Replay Corpus and Post-Submit Simulator Expansion
 

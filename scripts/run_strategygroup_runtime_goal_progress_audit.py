@@ -22,6 +22,10 @@ DEFAULT_GOAL_PROGRESS_JSON = REPO_ROOT / "output/runtime-monitor/latest-goal-pro
 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-goal-progress.md"
 )
+DEFAULT_LIVE_CUTOVER_READINESS_JSON = (
+    REPO_ROOT
+    / "output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
         daily_check=_read_json(Path(args.daily_check_json)),
         baseline=_read_json(Path(args.baseline_json)),
         tier_policy=_read_json(Path(args.tier_policy_json)),
+        live_cutover_readiness=_read_optional_json(
+            Path(args.live_cutover_readiness_json)
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -55,6 +62,7 @@ def build_goal_progress_report(
     daily_check: dict[str, Any],
     baseline: dict[str, Any],
     tier_policy: dict[str, Any] | None = None,
+    live_cutover_readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checks = daily_check.get("checks") if isinstance(daily_check.get("checks"), dict) else {}
     owner = (
@@ -143,6 +151,12 @@ def build_goal_progress_report(
         checks=checks,
         tier_policy=tier_policy or {},
     )
+    live_cutover_readiness_boundary = _live_cutover_readiness_boundary(
+        live_cutover_readiness=live_cutover_readiness,
+        entry_fast_chain_boundary=entry_fast_chain_boundary,
+        exit_hardening_boundary=exit_hardening_boundary,
+        strategygroup_tier_boundary=strategygroup_tier_boundary,
+    )
     boundary_product_gaps = []
     if entry_fast_chain_boundary["status"] != "ready":
         boundary_product_gaps.append("entry_fast_chain_boundary_not_ready")
@@ -150,6 +164,11 @@ def build_goal_progress_report(
         boundary_product_gaps.append("exit_hardening_boundary_not_ready")
     if strategygroup_tier_boundary["status"] != "ready":
         boundary_product_gaps.append("strategygroup_tier_boundary_not_ready")
+    if live_cutover_readiness_boundary["status"] == "blocked":
+        boundary_product_gaps.extend(
+            f"live_cutover_readiness:{item}"
+            for item in live_cutover_readiness_boundary["non_market_blockers"]
+        )
     product_gaps = _dedupe([*product_gaps, *boundary_product_gaps])
     status = "ready"
     if hard_blockers:
@@ -199,6 +218,7 @@ def build_goal_progress_report(
         "entry_fast_chain_boundary": entry_fast_chain_boundary,
         "exit_hardening_boundary": exit_hardening_boundary,
         "strategygroup_tier_boundary": strategygroup_tier_boundary,
+        "live_cutover_readiness_boundary": live_cutover_readiness_boundary,
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
@@ -212,6 +232,7 @@ def build_goal_progress_report(
             "daily_check_json": str(DEFAULT_DAILY_CHECK_JSON),
             "baseline_json": str(DEFAULT_BASELINE_JSON),
             "tier_policy_json": str(DEFAULT_TIER_POLICY_JSON),
+            "live_cutover_readiness_json": str(DEFAULT_LIVE_CUTOVER_READINESS_JSON),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
@@ -448,6 +469,57 @@ def _exit_hardening_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         "real_order_dependent_remaining": (
             checks.get("real_post_submit_close_reconcile_settle_proven") is not True
         ),
+    }
+
+
+def _live_cutover_readiness_boundary(
+    *,
+    live_cutover_readiness: dict[str, Any] | None,
+    entry_fast_chain_boundary: dict[str, Any],
+    exit_hardening_boundary: dict[str, Any],
+    strategygroup_tier_boundary: dict[str, Any],
+) -> dict[str, Any]:
+    if not live_cutover_readiness:
+        return {
+            "status": "not_generated",
+            "owner_state": "未生成",
+            "next_fresh_signal_cutover_ready": False,
+            "current_real_submit_allowed": False,
+            "non_market_blockers": [],
+            "market_dependent_waiting_keys": [],
+            "source_status": None,
+            "entry_fast_chain_ready": entry_fast_chain_boundary["status"] == "ready",
+            "exit_hardening_ready": exit_hardening_boundary["status"] == "ready",
+            "strategygroup_tier_ready": strategygroup_tier_boundary["status"]
+            == "ready",
+        }
+    blockers = [str(item) for item in live_cutover_readiness.get("non_market_blockers") or []]
+    source_status = str(live_cutover_readiness.get("status") or "")
+    ready = (
+        source_status == "live_cutover_waiting_for_fresh_signal"
+        and not blockers
+        and live_cutover_readiness.get("next_fresh_signal_cutover_ready") is True
+        and live_cutover_readiness.get("current_real_submit_allowed") is False
+    )
+    return {
+        "status": "ready" if ready else "blocked",
+        "owner_state": str(live_cutover_readiness.get("owner_state") or ""),
+        "next_fresh_signal_cutover_ready": bool(
+            live_cutover_readiness.get("next_fresh_signal_cutover_ready")
+        ),
+        "current_real_submit_allowed": bool(
+            live_cutover_readiness.get("current_real_submit_allowed")
+        ),
+        "non_market_blockers": blockers,
+        "market_dependent_waiting_keys": [
+            str(item)
+            for item in live_cutover_readiness.get("market_dependent_waiting_keys")
+            or []
+        ],
+        "source_status": source_status,
+        "entry_fast_chain_ready": entry_fast_chain_boundary["status"] == "ready",
+        "exit_hardening_ready": exit_hardening_boundary["status"] == "ready",
+        "strategygroup_tier_ready": strategygroup_tier_boundary["status"] == "ready",
     }
 
 
@@ -749,6 +821,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     entry_fast_chain = report["entry_fast_chain_boundary"]
     exit_hardening = report["exit_hardening_boundary"]
     tier_boundary = report["strategygroup_tier_boundary"]
+    live_cutover = report["live_cutover_readiness_boundary"]
     lines = [
         "## StrategyGroup Runtime Goal Progress",
         "",
@@ -845,6 +918,23 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "- Tier policy bypasses Operation Layer: "
         + _yes_no(bool(tier_boundary["tier_policy_bypasses_operation_layer"])),
         "",
+        "## Live Cutover Readiness Boundary",
+        "",
+        f"- Status: {live_cutover['status']}",
+        f"- Source status: {live_cutover['source_status'] or 'none'}",
+        "- Next fresh signal cutover ready: "
+        + _yes_no(bool(live_cutover["next_fresh_signal_cutover_ready"])),
+        "- Current real submit allowed: "
+        + _yes_no(bool(live_cutover["current_real_submit_allowed"])),
+        "- Non-market blockers: "
+        + _list_or_none(
+            [str(item) for item in live_cutover["non_market_blockers"]]
+        ),
+        "- Market-dependent waiting keys: "
+        + _list_or_none(
+            [str(item) for item in live_cutover["market_dependent_waiting_keys"]]
+        ),
+        "",
         "## Tracks",
         "",
         "| Track | Status | Owner state | Next action | Blockers |",
@@ -909,6 +999,12 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _read_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return _read_json(path)
+
+
 def _write_text_atomic(path: Path, text: str) -> None:
     path = path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -930,6 +1026,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--daily-check-json", default=str(DEFAULT_DAILY_CHECK_JSON))
     parser.add_argument("--baseline-json", default=str(DEFAULT_BASELINE_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
+    parser.add_argument(
+        "--live-cutover-readiness-json",
+        default=str(DEFAULT_LIVE_CUTOVER_READINESS_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
     parser.add_argument(
         "--output-owner-progress",
