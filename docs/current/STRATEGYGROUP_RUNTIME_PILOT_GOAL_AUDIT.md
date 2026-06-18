@@ -133,7 +133,7 @@ signal?
 | Current cutover state | `status=live_cutover_waiting_for_fresh_signal`, `owner_state=等待机会`, `next_fresh_signal_cutover_ready=true`, `current_real_submit_allowed=false` |
 | Non-market blockers | `non_market_blockers=[]`; strategy scope, entry fast chain, Operation Layer relay, hard blocker policy, exit/protection recovery, post-submit close loop, and dry-run safety sections are all `ready` |
 | Legacy confirmation regression guard | Cutover packet checks `disabled_smoke_not_real_execution_proof`, `legacy_local_registration_probe_tolerated_without_blocking_cutover`, `post_submit_outcomes_do_not_require_owner_chat_confirmation`, and `standing_reduce_only_recovery_does_not_require_owner_chat_confirmation` |
-| Goal progress integration | `run_strategygroup_runtime_goal_progress_audit.py` reads the packet and exposes `live_cutover_readiness_boundary.status=ready` with `product_gaps=[]` |
+| Goal progress integration | `run_strategygroup_runtime_goal_progress_audit.py` reads or locally auto-generates the packet and exposes `live_cutover_readiness_boundary.status=ready` with `product_gaps=[]` |
 | Boundary | This is cutover readiness, not real submit authority. Current real submit remains blocked by absence of a live fresh selected StrategyGroup signal |
 | Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 

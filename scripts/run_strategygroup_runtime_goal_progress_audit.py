@@ -6,12 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts import runtime_live_cutover_readiness  # noqa: E402
+
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
 DEFAULT_DAILY_CHECK_JSON = REPO_ROOT / "output/runtime-monitor/latest-daily-check.json"
 DEFAULT_TIER_POLICY_JSON = (
@@ -30,13 +36,18 @@ DEFAULT_LIVE_CUTOVER_READINESS_JSON = (
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    live_cutover_readiness = _read_optional_json(
+        Path(args.live_cutover_readiness_json)
+    )
+    if live_cutover_readiness is None and not args.no_auto_live_cutover_readiness:
+        live_cutover_readiness = _build_live_cutover_readiness(
+            Path(args.live_cutover_readiness_json)
+        )
     report = build_goal_progress_report(
         daily_check=_read_json(Path(args.daily_check_json)),
         baseline=_read_json(Path(args.baseline_json)),
         tier_policy=_read_json(Path(args.tier_policy_json)),
-        live_cutover_readiness=_read_optional_json(
-            Path(args.live_cutover_readiness_json)
-        ),
+        live_cutover_readiness=live_cutover_readiness,
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -1005,6 +1016,17 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
     return _read_json(path)
 
 
+def _build_live_cutover_readiness(path: Path) -> dict[str, Any]:
+    packet = runtime_live_cutover_readiness.build_cutover_readiness_packet(
+        path.parent / "artifacts"
+    )
+    _write_text_atomic(
+        path,
+        json.dumps(packet, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
+    return packet
+
+
 def _write_text_atomic(path: Path, text: str) -> None:
     path = path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1029,6 +1051,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--live-cutover-readiness-json",
         default=str(DEFAULT_LIVE_CUTOVER_READINESS_JSON),
+    )
+    parser.add_argument(
+        "--no-auto-live-cutover-readiness",
+        action="store_true",
+        help="Do not build a local live-cutover readiness packet when missing.",
     )
     parser.add_argument("--output-json", default=str(DEFAULT_GOAL_PROGRESS_JSON))
     parser.add_argument(

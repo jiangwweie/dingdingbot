@@ -704,3 +704,57 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     assert "- P0.5 ready: 是" in progress
     assert list(tmp_path.glob(".goal-progress.json.*.tmp")) == []
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []
+
+
+def test_goal_progress_cli_auto_generates_live_cutover_readiness_when_missing(
+    tmp_path,
+):
+    module = _load_module()
+    daily_check_path = tmp_path / "daily-check.json"
+    baseline_path = tmp_path / "baseline.json"
+    tier_policy_path = tmp_path / "tier-policy.json"
+    live_cutover_path = tmp_path / "generated-live-cutover.json"
+    output_json = tmp_path / "goal-progress.json"
+    output_md = tmp_path / "goal-progress.md"
+    daily_check_path.write_text(
+        json.dumps(_daily_check(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    baseline_path.write_text(
+        json.dumps(_baseline(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    tier_policy_path.write_text(
+        json.dumps(_tier_policy(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(
+        [
+            "--daily-check-json",
+            str(daily_check_path),
+            "--baseline-json",
+            str(baseline_path),
+            "--tier-policy-json",
+            str(tier_policy_path),
+            "--live-cutover-readiness-json",
+            str(live_cutover_path),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ]
+    )
+
+    assert exit_code == 0
+    assert live_cutover_path.exists()
+    generated_cutover = json.loads(live_cutover_path.read_text(encoding="utf-8"))
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert generated_cutover["status"] == "live_cutover_waiting_for_fresh_signal"
+    assert payload["live_cutover_readiness_boundary"]["status"] == "ready"
+    assert (
+        payload["live_cutover_readiness_boundary"][
+            "next_fresh_signal_cutover_ready"
+        ]
+        is True
+    )
