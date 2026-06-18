@@ -120,6 +120,21 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Live Cutover Same-Tick Visibility Contract
+
+The local live-cutover readiness packet now includes a
+`same_tick_product_state_visibility_contract`. This upgrades the source-readiness
+ordering fix from unit-test coverage into the same P0.5 readiness surface used
+by goal-progress and Owner-readable status checks.
+
+| Item | Evidence |
+| --- | --- |
+| Cutover section | `runtime_live_cutover_readiness.py` adds `same_tick_product_state_visibility` with four required checks |
+| Required order | The local contract verifies `dry_run -> chain_closure -> live_closure -> goal_status -> owner-console-source-readiness API` |
+| Current run | `runtime-live-cutover-readiness.json` reports `status=live_cutover_waiting_for_fresh_signal`, `next_fresh_signal_cutover_ready=true`, `non_market_blockers=[]`, and same-tick visibility `status=ready` |
+| Goal progress | Latest local goal-progress reports `P0=waiting_for_market`, `P0.5=ready`, `blockers=none`, `product_gaps=none` |
+| Boundary | Local readiness/audit projection only; no server file mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Same-Tick Source Readiness Visibility Fix
 
 The watcher product-state post-step now refreshes

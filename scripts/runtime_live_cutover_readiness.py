@@ -90,6 +90,12 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "live_closure_contract_requires_post_submit_reconciliation",
         "live_closure_contract_has_no_owner_chat_confirmation_stage",
     ],
+    "same_tick_product_state_visibility": [
+        "product_state_refresh_status_ok",
+        "product_state_live_closure_before_goal_status",
+        "product_state_goal_status_before_source_readiness",
+        "product_state_refresh_has_no_dangerous_effects",
+    ],
     "dry_run_safety": [
         "dangerous_effects_absent",
         "disabled_smoke_not_real_execution_proof",
@@ -313,6 +319,187 @@ def build_live_closure_cutover_contract() -> dict[str, Any]:
     return _live_closure_cutover_contract()
 
 
+class _FakeReadModelResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def __enter__(self) -> "_FakeReadModelResponse":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
+
+
+def _same_tick_product_state_visibility_contract(output_dir: Path) -> dict[str, Any]:
+    from scripts.refresh_strategygroup_runtime_product_state_packets import (
+        refresh_packets,
+    )
+
+    contract_dir = output_dir / "same-tick-product-state-refresh"
+    events: list[str] = []
+    payloads = {
+        "/api/trading-console/strategy-group-live-facts-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "strategy_group_live_facts_ready_for_armed_observation"},
+        },
+        "/api/trading-console/owner-console-source-readiness": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "ready"},
+        },
+        "/api/trading-console/strategygroup-runtime-pilot-status": {
+            "freshness_status": "fresh",
+            "blockers": [],
+            "warnings": [],
+            "data": {"status": "waiting_for_market"},
+        },
+    }
+
+    def opener(request: Any, timeout: int) -> _FakeReadModelResponse:
+        path = str(request.full_url).replace("http://cutover.local", "")
+        events.append(f"api:{path}")
+        return _FakeReadModelResponse(payloads[path])
+
+    def dry_run_builder(_output_dir: Path) -> dict[str, Any]:
+        events.append("dry_run")
+        return {
+            "scope": "runtime_dry_run_audit_chain",
+            "status": "passed",
+            "scenario_count": 14,
+            "checks": {"dangerous_effects_absent": True},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+
+    def chain_closure_status_builder(**kwargs: Any) -> dict[str, Any]:
+        events.append("chain_closure")
+        return {
+            "scope": "runtime_execution_chain_closure_status",
+            "status": "non_market_execution_chain_ready",
+            "real_execution": {
+                "real_order_allowed": False,
+                "missing_live_proofs": ["live_fresh_signal"],
+            },
+        }
+
+    def live_closure_evidence_refresher(**kwargs: Any) -> dict[str, Any]:
+        events.append("live_closure")
+        return {
+            "scope": "runtime_live_closure_evidence_refresh",
+            "status": "live_closure_refresh_not_started",
+            "verification": {
+                "status": "live_closure_not_started",
+                "first_bounded_real_order_complete": False,
+                "real_order_closure_proven": False,
+                "reject_reasons": [],
+            },
+        }
+
+    def goal_status_builder(**kwargs: Any) -> dict[str, Any]:
+        events.append("goal_status")
+        return {
+            "scope": "strategygroup_runtime_goal_status",
+            "status": "waiting_for_market",
+            "ready_for_real_order_action": False,
+            "checks": {
+                "runtime_dry_run_audit_passed": True,
+                "ready_for_real_order_action": False,
+            },
+            "owner_state": {
+                "status": "waiting_for_opportunity",
+                "next_safe_checkpoint": "continue_watcher_observation",
+            },
+            "real_order_boundary": {"ready_for_real_order_action": False},
+        }
+
+    refresh = refresh_packets(
+        api_base="http://cutover.local",
+        output_dir=contract_dir,
+        label="local-cutover-contract",
+        timeout_seconds=7,
+        cookie="session=test",
+        opener=opener,
+        generated_at_ms=1,
+        refresh_dry_run_audit_chain=True,
+        dry_run_output_dir=contract_dir / "dry-run-audit-chain",
+        dry_run_output_json=contract_dir / "runtime-dry-run-audit-chain.json",
+        dry_run_builder=dry_run_builder,
+        refresh_chain_closure_status=True,
+        chain_closure_output_json=(
+            contract_dir / "runtime-execution-chain-closure-status.json"
+        ),
+        chain_closure_status_builder=chain_closure_status_builder,
+        refresh_live_closure_evidence=True,
+        live_closure_evidence_refresher=live_closure_evidence_refresher,
+        refresh_goal_status=True,
+        goal_status_output_json=contract_dir / "strategygroup-runtime-goal-status.json",
+        release_manifest=contract_dir / "manifest.json",
+        expected_head="local-cutover-contract",
+        goal_status_builder=goal_status_builder,
+    )
+    safety = refresh.get("safety_invariants") if isinstance(refresh, dict) else {}
+    checks = {
+        "product_state_refresh_status_ok": refresh.get("status") == "refreshed",
+        "product_state_live_closure_before_goal_status": (
+            "live_closure" in events
+            and "goal_status" in events
+            and events.index("live_closure") < events.index("goal_status")
+        ),
+        "product_state_goal_status_before_source_readiness": (
+            "goal_status" in events
+            and "api:/api/trading-console/owner-console-source-readiness" in events
+            and events.index("goal_status")
+            < events.index("api:/api/trading-console/owner-console-source-readiness")
+        ),
+        "product_state_refresh_has_no_dangerous_effects": (
+            isinstance(safety, dict)
+            and safety.get("exchange_write_called") is False
+            and safety.get("order_created") is False
+            and safety.get("order_lifecycle_called") is False
+            and safety.get("withdrawal_or_transfer_created") is False
+            and safety.get("places_order") is False
+            and safety.get("mutates_pg") is False
+        ),
+    }
+    return {
+        "scope": "same_tick_product_state_visibility_contract",
+        "status": "ready" if all(checks.values()) else "blocked",
+        "events": events,
+        "checks": checks,
+        "refresh_status": refresh.get("status"),
+        "refresh_blockers": list(refresh.get("blockers") or []),
+        "refresh_output_dir": str(contract_dir),
+        "safety_invariants": {
+            "calls_tokyo_api": False,
+            "mutates_server_files": False,
+            "calls_live_finalgate": False,
+            "calls_live_operation_layer": False,
+            "exchange_write_called": bool(
+                isinstance(safety, dict) and safety.get("exchange_write_called")
+            ),
+            "order_lifecycle_called": bool(
+                isinstance(safety, dict) and safety.get("order_lifecycle_called")
+            ),
+            "real_order_created": bool(
+                isinstance(safety, dict) and safety.get("order_created")
+            ),
+            "withdrawal_or_transfer_created": bool(
+                isinstance(safety, dict)
+                and safety.get("withdrawal_or_transfer_created")
+            ),
+        },
+    }
+
+
 def _safety_invariants(dry_run_packet: dict[str, Any]) -> dict[str, bool]:
     safety = dry_run_packet.get("safety_invariants")
     if not isinstance(safety, dict):
@@ -412,7 +599,16 @@ def build_cutover_readiness_packet(
     contract_checks = live_closure_contract.get("checks")
     if not isinstance(contract_checks, dict):
         contract_checks = {}
-    effective_checks = {**checks, **legacy_checks, **contract_checks}
+    same_tick_visibility = _same_tick_product_state_visibility_contract(output_dir)
+    same_tick_checks = same_tick_visibility.get("checks")
+    if not isinstance(same_tick_checks, dict):
+        same_tick_checks = {}
+    effective_checks = {
+        **checks,
+        **legacy_checks,
+        **contract_checks,
+        **same_tick_checks,
+    }
     sections = [_section(name, effective_checks) for name in SECTION_CHECKS]
     non_market_blockers = [
         f"{section['name']}:{check}"
@@ -450,6 +646,7 @@ def build_cutover_readiness_packet(
         "non_market_blockers": non_market_blockers,
         "sections": sections,
         "live_closure_cutover_contract": live_closure_contract,
+        "same_tick_product_state_visibility_contract": same_tick_visibility,
         "source_packets": {
             "dry_run_audit_scope": dry_run_packet.get("scope"),
             "dry_run_audit_status": dry_run_packet.get("status"),

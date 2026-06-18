@@ -89,6 +89,23 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "live_closure_contract_requires_post_submit_reconciliation": True,
         "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
     }
+    visibility = packet["same_tick_product_state_visibility_contract"]
+    assert visibility["status"] == "ready"
+    assert visibility["events"] == [
+        "dry_run",
+        "chain_closure",
+        "live_closure",
+        "goal_status",
+        "api:/api/trading-console/strategy-group-live-facts-readiness",
+        "api:/api/trading-console/owner-console-source-readiness",
+        "api:/api/trading-console/strategygroup-runtime-pilot-status",
+    ]
+    assert visibility["checks"] == {
+        "product_state_refresh_status_ok": True,
+        "product_state_live_closure_before_goal_status": True,
+        "product_state_goal_status_before_source_readiness": True,
+        "product_state_refresh_has_no_dangerous_effects": True,
+    }
 
     sections = {item["name"]: item for item in packet["sections"]}
     assert set(sections) == {
@@ -100,6 +117,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "post_submit_close_loop",
         "legacy_confirmation_regression",
         "live_closure_cutover_contract",
+        "same_tick_product_state_visibility",
         "dry_run_safety",
     }
     for section in sections.values():
