@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import runtime_live_closure_evidence_verifier  # noqa: E402
+from scripts import runtime_first_bounded_live_order_completion_audit  # noqa: E402
 from scripts import runtime_live_cutover_readiness  # noqa: E402
 
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
@@ -28,6 +29,10 @@ DEFAULT_TIER_POLICY_JSON = (
 DEFAULT_GOAL_PROGRESS_JSON = REPO_ROOT / "output/runtime-monitor/latest-goal-progress.json"
 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-goal-progress.md"
+)
+DEFAULT_P0_COMPLETION_AUDIT_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json"
 )
 DEFAULT_LIVE_CUTOVER_READINESS_JSON = (
     REPO_ROOT
@@ -42,6 +47,27 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
     REPO_ROOT
     / "output/strategygroup-runtime-pilot/live-closure-evidence/"
     "runtime-live-closure-evidence.json"
+)
+
+P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
+    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    "disabled_smoke_not_real_execution_proof",
+    "expanded_watcher_scope_execution_guard_checked",
+    "fresh_signal_fast_auto_chain_checked",
+    "non_executing_prepare_auto_bridge_checked",
+    "only_mpg_tiny_real_order_eligible_checked",
+    "operation_layer_authorization_chain_guard_checked",
+    "operation_layer_blocker_review_policy_checked",
+    "operation_layer_evidence_relay_checked",
+    "operation_layer_hard_safety_blocker_matrix_checked",
+    "post_submit_closed_loop_evidence_guard_checked",
+    "post_submit_exit_outcome_matrix_checked",
+    "post_submit_finalize_result_identity_guard_checked",
+    "reduce_only_recovery_standing_authorization_checked",
+    "required_facts_readiness_checked",
+    "scoped_pipeline_operation_layer_handoff_checked",
+    "selected_strategygroup_dispatch_guard_checked",
+    "strategygroup_adapter_boundary_checked",
 )
 
 
@@ -222,6 +248,41 @@ def build_goal_progress_report(
         product_gaps=product_gaps,
         live_closure_evidence_boundary=live_closure_evidence_boundary,
     )
+    p0_completion_audit_boundary = _p0_completion_audit_boundary(
+        daily_check=daily_check,
+        checks=checks,
+        live_cutover_readiness=live_cutover_readiness,
+        completion_boundary=completion_boundary,
+        live_closure_evidence_boundary=live_closure_evidence_boundary,
+    )
+    if p0_completion_audit_boundary["status"] == "needs_non_market_repair":
+        product_gaps = _dedupe(
+            [
+                *product_gaps,
+                *[
+                    f"p0_completion_audit:{item}"
+                    for item in p0_completion_audit_boundary["non_market_gap_keys"]
+                ],
+            ]
+        )
+        completion_boundary = _completion_boundary(
+            checks=checks,
+            waiting_for_market=waiting_for_market,
+            p05_ready=p05_ready,
+            engineering_rehearsal_ready=engineering_rehearsal_ready,
+            hard_blockers=hard_blockers,
+            product_gaps=product_gaps,
+            live_closure_evidence_boundary=live_closure_evidence_boundary,
+        )
+        p0_completion_audit_boundary = _p0_completion_audit_boundary(
+            daily_check=daily_check,
+            checks=checks,
+            live_cutover_readiness=live_cutover_readiness,
+            completion_boundary=completion_boundary,
+            live_closure_evidence_boundary=live_closure_evidence_boundary,
+        )
+        if not hard_blockers and (product_gaps or not p05_ready):
+            status = "degraded"
 
     return {
         "status": status,
@@ -257,6 +318,7 @@ def build_goal_progress_report(
         "strategygroup_tier_boundary": strategygroup_tier_boundary,
         "live_cutover_readiness_boundary": live_cutover_readiness_boundary,
         "live_closure_evidence_boundary": live_closure_evidence_boundary,
+        "p0_completion_audit_boundary": p0_completion_audit_boundary,
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
@@ -279,6 +341,7 @@ def build_goal_progress_report(
             "goal_progress_owner_progress_md": str(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
             ),
+            "p0_completion_audit_json": str(DEFAULT_P0_COMPLETION_AUDIT_JSON),
         },
     }
 
@@ -659,6 +722,83 @@ def _live_closure_evidence_boundary(
     }
 
 
+def _p0_completion_audit_boundary(
+    *,
+    daily_check: dict[str, Any],
+    checks: dict[str, Any],
+    live_cutover_readiness: dict[str, Any] | None,
+    completion_boundary: dict[str, Any],
+    live_closure_evidence_boundary: dict[str, Any],
+) -> dict[str, Any]:
+    if not live_cutover_readiness:
+        return {
+            "status": "not_generated",
+            "goal_complete": bool(completion_boundary.get("goal_complete")),
+            "non_market_gap_count": 0,
+            "non_market_gap_keys": [],
+            "market_dependent_remaining": [],
+            "market_dependent_remaining_count": 0,
+            "source_status": None,
+        }
+    has_full_audit_inputs = (
+        bool(live_cutover_readiness.get("selected_strategy_group_id"))
+        and bool(live_cutover_readiness.get("first_live_lane"))
+        and isinstance(live_cutover_readiness.get("sections"), list)
+    )
+    if not has_full_audit_inputs:
+        return {
+            "status": "not_generated_legacy_cutover_packet",
+            "goal_complete": bool(completion_boundary.get("goal_complete")),
+            "non_market_gap_count": 0,
+            "non_market_gap_keys": [],
+            "market_dependent_remaining": [],
+            "market_dependent_remaining_count": 0,
+            "source_status": str(live_cutover_readiness.get("status") or ""),
+        }
+    audit_checks = dict(checks)
+    for check_name in P0_COMPLETION_AUDIT_REQUIRED_CHECKS:
+        audit_checks.setdefault(
+            check_name,
+            _dry_run_required_check_present(checks, check_name),
+        )
+    audit = runtime_first_bounded_live_order_completion_audit.build_completion_audit_report(
+        daily_check=daily_check,
+        goal_progress={
+            "interaction": {
+                "level": "L0_local_goal_progress_audit",
+                "remote_interaction_count": 0,
+            },
+            "completion_boundary": completion_boundary,
+            "live_closure_evidence_boundary": live_closure_evidence_boundary,
+        },
+        dry_run_audit={
+            "checks": audit_checks,
+            "summary": audit_checks,
+        },
+        live_cutover=live_cutover_readiness,
+    )
+    non_market_gaps = [
+        item for item in audit.get("non_market_gaps") or [] if isinstance(item, dict)
+    ]
+    non_market_gap_keys = [
+        f"{gap.get('requirement')}:{item}"
+        for gap in non_market_gaps
+        for item in gap.get("missing_or_false") or []
+    ]
+    market_dependent_remaining = [
+        str(item) for item in audit.get("market_dependent_remaining") or []
+    ]
+    return {
+        "status": str(audit.get("status") or "unknown"),
+        "goal_complete": bool(audit.get("goal_complete")),
+        "non_market_gap_count": len(non_market_gaps),
+        "non_market_gap_keys": non_market_gap_keys,
+        "market_dependent_remaining": market_dependent_remaining,
+        "market_dependent_remaining_count": len(market_dependent_remaining),
+        "source_status": str(live_cutover_readiness.get("status") or ""),
+    }
+
+
 def _dry_run_required_check_present(checks: dict[str, Any], name: str) -> bool:
     if checks.get(name) is not None:
         return checks.get(name) is True
@@ -963,6 +1103,7 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
     interaction = report["interaction"]
     checks = report["checks"]
     completion = report["completion_boundary"]
+    p0_completion = report["p0_completion_audit_boundary"]
     entry_fast_chain = report["entry_fast_chain_boundary"]
     exit_hardening = report["exit_hardening_boundary"]
     tier_boundary = report["strategygroup_tier_boundary"]
@@ -995,6 +1136,16 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + _yes_no(bool(completion["waiting_for_real_fresh_signal"])),
         "- Dry-run readiness proven: "
         + _yes_no(bool(completion["dry_run_readiness_proven"])),
+        "",
+        "## P0 Completion Audit Boundary",
+        "",
+        f"- Status: {p0_completion['status']}",
+        "- Non-market gaps: "
+        + str(p0_completion["non_market_gap_count"]),
+        "- Market-dependent remaining: "
+        + str(p0_completion["market_dependent_remaining_count"]),
+        "- Goal complete by audit: "
+        + _yes_no(bool(p0_completion["goal_complete"])),
         "",
         "## Entry Fast Chain Boundary",
         "",

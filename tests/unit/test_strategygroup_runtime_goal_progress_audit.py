@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from scripts import runtime_live_cutover_readiness as live_cutover_script
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_strategygroup_runtime_goal_progress_audit.py"
@@ -494,6 +496,45 @@ def test_goal_progress_accepts_live_cutover_readiness_boundary():
             "post_submit_budget_settlement_id",
             "submit_outcome_review_id",
         ],
+    }
+    assert report["checks"]["product_gaps"] == []
+
+
+def test_goal_progress_embeds_p0_completion_audit_boundary(tmp_path):
+    module = _load_module()
+    live_cutover = live_cutover_script.build_cutover_readiness_packet(
+        output_dir=tmp_path / "cutover",
+        generated_at_ms=1781753000000,
+    )
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=live_cutover,
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["p0_completion_audit_boundary"] == {
+        "goal_complete": False,
+        "market_dependent_remaining": [
+            "fresh signal -> RequiredFacts -> candidate/auth fast chain",
+            (
+                "candidate/auth -> action-time FinalGate -> official Operation "
+                "Layer evidence relay"
+            ),
+            "real submit must happen only through official Operation Layer",
+            "entry accepted -> exchange-native hard stop/protection/recovery",
+            (
+                "post-submit finalize / reconciliation / budget settlement / "
+                "review closure"
+            ),
+        ],
+        "market_dependent_remaining_count": 5,
+        "non_market_gap_count": 0,
+        "non_market_gap_keys": [],
+        "source_status": "live_cutover_waiting_for_fresh_signal",
+        "status": "not_complete_waiting_for_market",
     }
     assert report["checks"]["product_gaps"] == []
 
