@@ -42,6 +42,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
+        "operation_layer_standing_authorization_relay_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
         "post_submit_exit_outcome_matrix_checked": True,
         "reduce_only_recovery_standing_authorization_checked": True,
@@ -64,6 +65,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "expanded_watcher_scope_execution_guard_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
+        "operation_layer_standing_authorization_relay_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
         "post_submit_exit_outcome_matrix_checked": True,
         "reduce_only_recovery_standing_authorization_checked": True,
@@ -158,6 +160,9 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "no_missing_evidence_ids": True,
         "operation_layer_ready_flag_true": True,
         "operation_layer_official_endpoint_selected": True,
+        "standing_authorization_bound_for_first_real_submit": True,
+        "owner_chat_confirmation_not_required_for_first_real_submit": True,
+        "legacy_owner_confirmation_env_not_required": True,
         "same_authorization_chain": True,
         "action_time_finalgate_called": True,
         "action_time_finalgate_passed": True,
@@ -251,6 +256,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
             "real_submit_allowed"
         ] is False
     assert packet["checks"]["operation_layer_evidence_relay_checked"] is True
+    assert (
+        packet["checks"]["operation_layer_standing_authorization_relay_checked"]
+        is True
+    )
     assert packet["checks"]["scoped_pipeline_operation_layer_handoff_checked"] is True
     assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
     assert packet["checks"]["required_facts_readiness_checked"] is True

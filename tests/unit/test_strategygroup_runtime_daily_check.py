@@ -97,6 +97,7 @@ def _snapshot(**overrides):
                         "operation_layer_evidence_relay_checked",
                         "scoped_pipeline_operation_layer_handoff_checked",
                         "operation_layer_authorization_chain_guard_checked",
+                        "operation_layer_standing_authorization_relay_checked",
                         "operation_layer_blocker_review_policy_checked",
                         "post_submit_exit_outcome_matrix_checked",
                         "reduce_only_recovery_standing_authorization_checked",
@@ -171,7 +172,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     )
     assert report["checks"]["first_bounded_real_order_complete"] is False
     assert report["checks"]["real_order_closure_proven"] is False
-    assert report["checks"]["runtime_execution_chain_ready_segment_count"] == 21
+    assert report["checks"]["runtime_execution_chain_ready_segment_count"] == 22
     assert report["checks"]["entry_fast_chain_boundary_ready"] is True
     assert report["checks"]["exit_hardening_boundary_ready"] is True
     assert report["checks"]["strategygroup_tier_boundary_ready"] is True
@@ -196,7 +197,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
         == []
     )
     assert report["owner_summary"]["progress"]["dry_run_audit_scenarios"] == 14
-    assert report["owner_summary"]["progress"]["chain_closure_ready_segments"] == 21
+    assert report["owner_summary"]["progress"]["chain_closure_ready_segments"] == 22
     assert (
         report["owner_summary"]["progress"][
             "chain_closure_missing_or_failed_segments"
@@ -718,7 +719,7 @@ def test_daily_check_owner_progress_text_keeps_healthy_waiting_readable():
     assert "- 交易所写入: 否" in text
     assert "- Runtime: 正常" in text
     assert "- 演练场景: 14" in text
-    assert "- 链路段: 21 ready / 0 missing" in text
+    assert "- 链路段: 22 ready / 0 missing" in text
     assert "- 入场快链: ready" in text
     assert "- 出场硬化: ready" in text
     assert "- 策略组分层: ready" in text

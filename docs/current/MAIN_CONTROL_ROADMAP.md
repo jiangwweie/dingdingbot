@@ -1758,6 +1758,24 @@ per-order chat confirmation.
 | Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
 | Safety proof | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Standing Authorization Dry-Run Audit Checkpoint
+
+The first-live submit standing authorization relay is now a required local
+dry-run audit check. This means the quiet monitor can detect a regression where
+the automatic Operation Layer path starts requiring per-order chat confirmation
+or the legacy `OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT` env gate again.
+
+| Item | Result |
+| --- | --- |
+| New required check | `operation_layer_standing_authorization_relay_checked=true` |
+| Relay details | `operation_layer_relay_checks` proves standing authorization is bound, chat confirmation is not required, and the legacy env gate is not required |
+| Monitor integration | Daily check and goal-progress entry fast-chain readiness include the new required check |
+| Local validation | `py_compile` passed; dry-run, goal-progress, and daily-check tests: `67 passed` |
+| Local packet refresh | `output/runtime-monitor/latest-runtime-dry-run-audit-chain.json` now reports `operation_layer_standing_authorization_relay_checked=true` |
+| Local monitor sequence | `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
+| Deployment | Not deployed; this is local audit/monitor hardening |
+| Safety proof | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

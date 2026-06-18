@@ -50,6 +50,7 @@ ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "operation_layer_evidence_relay_checked",
     "scoped_pipeline_operation_layer_handoff_checked",
     "operation_layer_authorization_chain_guard_checked",
+    "operation_layer_standing_authorization_relay_checked",
 )
 EXIT_HARDENING_REQUIRED_SEGMENTS = (
     "post_submit_exit_outcome_matrix_checked",

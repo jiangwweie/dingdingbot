@@ -499,6 +499,16 @@ def _operation_layer_relay_checks(
             and "runtime-execution-first-real-submit-actions/authorizations/"
             in str(command_plan.get("official_endpoint_path") or "")
         ),
+        "standing_authorization_bound_for_first_real_submit": (
+            command_plan.get("standing_authorized_first_real_submit") is True
+        ),
+        "owner_chat_confirmation_not_required_for_first_real_submit": (
+            command_plan.get("owner_chat_confirmation_required_for_real_submit")
+            is False
+        ),
+        "legacy_owner_confirmation_env_not_required": (
+            command_plan.get("legacy_owner_confirmation_env_required") is False
+        ),
         "same_authorization_chain": same_authorization,
         "action_time_finalgate_called": finalgate.get("called") is True,
         "action_time_finalgate_passed": (
@@ -3618,6 +3628,19 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
                 "operation_layer_relay_checks",
             ).values()
         ),
+        "operation_layer_standing_authorization_relay_checked": all(
+            _scenario_artifact(
+                scenarios,
+                "mock_fresh_signal_dry_run_pass",
+                "operation_layer_relay_checks",
+            ).get(name)
+            is True
+            for name in (
+                "standing_authorization_bound_for_first_real_submit",
+                "owner_chat_confirmation_not_required_for_first_real_submit",
+                "legacy_owner_confirmation_env_not_required",
+            )
+        ),
         "fresh_signal_fast_auto_chain_checked": all(
             _scenario_artifact(
                 scenarios,
@@ -4032,6 +4055,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "operation_layer_authorization_chain_guard_checked": checks[
             "operation_layer_authorization_chain_guard_checked"
+        ],
+        "operation_layer_standing_authorization_relay_checked": checks[
+            "operation_layer_standing_authorization_relay_checked"
         ],
         "post_submit_closed_loop_evidence_guard_checked": checks[
             "post_submit_closed_loop_evidence_guard_checked"

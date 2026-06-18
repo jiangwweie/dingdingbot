@@ -976,3 +976,21 @@ by a new per-order chat confirmation or legacy env confirmation.
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; batch with the next stage-worthy runtime cutover fix or fresh-signal unblock |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Standing Authorization Dry-Run Audit Checkpoint
+
+The standing authorization relay check is now part of the daily dry-run audit
+contract, not just a dispatcher unit test. This lets the low-noise goal monitor
+detect a future regression where the first-live submit path silently reverts to
+per-order chat confirmation or legacy env confirmation semantics.
+
+| Item | Evidence |
+| --- | --- |
+| Dry-run relay check | `runtime_dry_run_audit_chain.py` adds `standing_authorization_bound_for_first_real_submit`, `owner_chat_confirmation_not_required_for_first_real_submit`, and `legacy_owner_confirmation_env_not_required` to `operation_layer_relay_checks` |
+| Required check | `operation_layer_standing_authorization_relay_checked` is now emitted in `checks`, `required_checks`, and `summary` |
+| Monitor integration | `run_strategygroup_runtime_daily_check.py` and `run_strategygroup_runtime_goal_progress_audit.py` include the new check in the entry fast-chain readiness boundary |
+| Local validation | `py_compile` passed; dry-run, goal-progress, and daily-check tests: `67 passed` |
+| Generated packet | `runtime_dry_run_audit_chain.py --output-json output/runtime-monitor/latest-runtime-dry-run-audit-chain.json`: `status=passed`, `scenario_count=14`, `operation_layer_standing_authorization_relay_checked=true` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
+| Deployment | Not deployed; this is local audit/monitor hardening |
+| Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

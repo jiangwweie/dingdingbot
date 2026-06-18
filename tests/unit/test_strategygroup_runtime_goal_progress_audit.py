@@ -275,6 +275,7 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
             "operation_layer_authorization_chain_guard_checked": True,
             "operation_layer_blocker_review_policy_checked": True,
             "operation_layer_evidence_relay_checked": True,
+            "operation_layer_standing_authorization_relay_checked": True,
             "required_facts_readiness_checked": True,
             "scoped_pipeline_operation_layer_handoff_checked": True,
             "selected_strategygroup_dispatch_guard_checked": True,

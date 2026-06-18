@@ -60,6 +60,7 @@ P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "operation_layer_authorization_chain_guard_checked",
     "operation_layer_blocker_review_policy_checked",
     "operation_layer_evidence_relay_checked",
+    "operation_layer_standing_authorization_relay_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
     "post_submit_closed_loop_evidence_guard_checked",
     "post_submit_exit_outcome_matrix_checked",
@@ -402,6 +403,12 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
                 "operation_layer_authorization_chain_guard_checked",
             )
         ),
+        "operation_layer_standing_authorization_relay_checked": (
+            _dry_run_required_check_present(
+                checks,
+                "operation_layer_standing_authorization_relay_checked",
+            )
+        ),
         "operation_layer_blocker_review_policy_checked": (
             _dry_run_required_check_present(
                 checks,
@@ -431,7 +438,8 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
         ),
         "operation_layer_authorization_guard_covered": fast_chain_checks[
             "operation_layer_authorization_chain_guard_checked"
-        ],
+        ]
+        and fast_chain_checks["operation_layer_standing_authorization_relay_checked"],
         "operation_layer_blocker_review_policy_covered": fast_chain_checks[
             "operation_layer_blocker_review_policy_checked"
         ],
