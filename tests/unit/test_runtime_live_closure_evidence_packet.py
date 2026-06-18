@@ -49,7 +49,9 @@ def _official_complete_sources() -> list[dict]:
             "safety_invariants": {
                 "live_exchange_called": True,
                 "real_order_placed": True,
+                "exchange_submit_accepted": True,
             },
+            "exchange_order_id": "entry-order-1",
         },
         {
             "scope": "official_post_submit_close_loop",
@@ -109,6 +111,8 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
         "result_source_count": 2,
         "live_exchange_called": True,
         "real_order_placed": True,
+        "exchange_accepted": True,
+        "exchange_order_id_present": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
     }
     assert packet["exchange_native_protection_proof"] == {
@@ -193,6 +197,8 @@ def test_live_closure_evidence_packet_keeps_partial_official_packet_in_progress(
         "result_source_count": 0,
         "live_exchange_called": False,
         "real_order_placed": False,
+        "exchange_accepted": False,
+        "exchange_order_id_present": False,
     }
     assert packet["present_evidence_keys"] == [
         "live_watcher_signal_packet_id",
@@ -230,6 +236,8 @@ def test_live_closure_evidence_packet_rejects_controlled_local_cycle_shape():
         "result_source_count": 2,
         "live_exchange_called": False,
         "real_order_placed": False,
+        "exchange_accepted": False,
+        "exchange_order_id_present": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
     }
     verification = verifier.build_live_closure_evidence_verification(packet)
@@ -256,6 +264,8 @@ def test_live_closure_evidence_packet_rejects_exchange_result_without_live_marke
         "result_source_count": 2,
         "live_exchange_called": False,
         "real_order_placed": False,
+        "exchange_accepted": False,
+        "exchange_order_id_present": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
     }
     verification = verifier.build_live_closure_evidence_verification(packet)
@@ -273,7 +283,9 @@ def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers()
             "safety_invariants": {
                 "live_exchange_called": True,
                 "real_order_placed": True,
+                "exchange_submit_accepted": True,
             },
+            "exchange_order_id": "unrelated-entry-order",
         }
     )
 
@@ -290,10 +302,41 @@ def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers()
         "result_source_count": 2,
         "live_exchange_called": False,
         "real_order_placed": False,
+        "exchange_accepted": False,
+        "exchange_order_id_present": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
     }
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_exchange_result_without_acceptance():
+    sources = _official_complete_sources()
+    sources[2]["safety_invariants"]["exchange_submit_accepted"] = False
+    sources[2].pop("exchange_order_id")
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["live_submit_proof"] == {
+        "exchange_result_present": True,
+        "result_source_matched": True,
+        "result_source_count": 2,
+        "live_exchange_called": True,
+        "real_order_placed": True,
+        "exchange_accepted": False,
+        "exchange_order_id_present": False,
+        "exchange_submit_execution_result_id": "exchange-result-1",
+    }
+    assert "exchange_submit_not_accepted" in packet["reject_reasons"]
+    assert "exchange_order_id_missing" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

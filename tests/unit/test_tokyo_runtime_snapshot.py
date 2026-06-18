@@ -245,6 +245,8 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
             "result_source_count": 1,
             "live_exchange_called": True,
             "real_order_placed": True,
+            "exchange_accepted": True,
+            "exchange_order_id_present": True,
             "exchange_submit_execution_result_id": "exchange-result-1",
         },
         "exchange_native_protection_proof": {

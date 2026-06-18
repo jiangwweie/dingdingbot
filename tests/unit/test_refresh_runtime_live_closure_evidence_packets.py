@@ -48,7 +48,9 @@ def _official_complete_sources() -> list[dict]:
             "safety_invariants": {
                 "live_exchange_called": True,
                 "real_order_placed": True,
+                "exchange_submit_accepted": True,
             },
+            "exchange_order_id": "entry-order-1",
         },
         {
             "scope": "official_post_submit_close_loop",

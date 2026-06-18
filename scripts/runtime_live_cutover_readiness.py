@@ -226,6 +226,8 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "live_submit_proof_result_source_missing",
             "live_exchange_not_called",
             "real_order_not_placed",
+            "exchange_submit_not_accepted",
+            "exchange_order_id_missing",
             "runtime_boundary_proof_missing",
             *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
@@ -448,6 +450,8 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
             and "live_submit_proof_result_source_missing" in reject_reasons
             and "live_exchange_not_called" in reject_reasons
             and "real_order_not_placed" in reject_reasons
+            and "exchange_submit_not_accepted" in reject_reasons
+            and "exchange_order_id_missing" in reject_reasons
         ),
         "live_closure_contract_requires_exchange_native_protection": (
             "exchange_native_hard_stop_order_id" in evidence_keys

@@ -40,6 +40,8 @@ def _official_packet(
             "result_source_count": 1,
             "live_exchange_called": True,
             "real_order_placed": True,
+            "exchange_accepted": True,
+            "exchange_order_id_present": True,
             "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
         }
         if "exchange_native_hard_stop_order_id" in evidence:
@@ -230,6 +232,8 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
                 "result_source_count": 1,
                 "live_exchange_called": True,
                 "real_order_placed": True,
+                "exchange_accepted": True,
+                "exchange_order_id_present": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
             },
             "exchange_native_protection_proof": {
@@ -334,6 +338,8 @@ def test_live_closure_evidence_verifier_rejects_false_live_submit_proof():
                 "result_source_count": 1,
                 "live_exchange_called": False,
                 "real_order_placed": False,
+                "exchange_accepted": True,
+                "exchange_order_id_present": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
             },
         ),
@@ -348,6 +354,42 @@ def test_live_closure_evidence_verifier_rejects_false_live_submit_proof():
     ]
 
 
+def test_live_closure_evidence_verifier_rejects_unaccepted_live_submit_proof():
+    packet = verifier.build_live_closure_evidence_verification(
+        _official_packet(
+            _complete_evidence(),
+            live_submit_proof={
+                "exchange_result_present": True,
+                "result_source_matched": True,
+                "result_source_count": 1,
+                "live_exchange_called": True,
+                "real_order_placed": True,
+                "exchange_accepted": False,
+                "exchange_order_id_present": False,
+                "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+            },
+        ),
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "blocked_live_closure_rejected"
+    assert packet["completion"]["real_order_closure_proven"] is False
+    assert packet["reject_reasons"] == [
+        "exchange_order_id_missing",
+        "exchange_submit_not_accepted",
+    ]
+    real_exchange_stage = next(
+        stage
+        for stage in packet["stages"]
+        if stage["name"] == "real_exchange_acceptance"
+    )
+    assert real_exchange_stage["status"] == "rejected"
+    assert real_exchange_stage["reject_reasons"] == [
+        "exchange_submit_not_accepted",
+        "exchange_order_id_missing",
+    ]
+
+
 def test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mismatch():
     packet = verifier.build_live_closure_evidence_verification(
         _official_packet(
@@ -358,6 +400,8 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mism
                 "result_source_count": 1,
                 "live_exchange_called": True,
                 "real_order_placed": True,
+                "exchange_accepted": True,
+                "exchange_order_id_present": True,
                 "exchange_submit_execution_result_id": "other-exchange-result",
             },
         ),
@@ -390,6 +434,8 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_without_source
                 "result_source_count": 0,
                 "live_exchange_called": True,
                 "real_order_placed": True,
+                "exchange_accepted": True,
+                "exchange_order_id_present": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
             },
         ),

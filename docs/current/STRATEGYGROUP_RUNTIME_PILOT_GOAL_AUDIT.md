@@ -838,3 +838,25 @@ remain in progress without being mislabeled as failed closure.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `43 passed` for the live-closure verifier/packet/cutover/refresh tests; `142 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Exchange Acceptance Proof Checkpoint
+
+The `real_exchange_acceptance` stage now requires more than an exchange submit
+execution result id plus generic live-submit markers. A first-live-order
+closure packet must prove that the matched result source says the entry submit
+was accepted by the exchange and carries an entry exchange order id. This keeps
+`exchange_submit_execution_result_id` from being treated as enough proof when
+the submit attempt was only called, locally shaped, rejected before acceptance,
+or missing the exchange order identity needed for protection and
+reconciliation.
+
+| Item | Evidence |
+| --- | --- |
+| Contract acceptance guard | `runtime_live_cutover_readiness.py` adds `exchange_submit_not_accepted` and `exchange_order_id_missing` to `real_exchange_acceptance` reject reasons and to the live-submit truth contract check |
+| Packet builder acceptance proof | `runtime_live_closure_evidence_packet.py` derives `live_submit_proof.exchange_accepted` and `live_submit_proof.exchange_order_id_present` only from source packets bound to the same `exchange_submit_execution_result_id` |
+| Verifier acceptance guard | `runtime_live_closure_evidence_verifier.py` rejects official live closure evidence when matched live-submit proof does not show exchange acceptance or an entry exchange order id |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_exchange_result_without_acceptance` and `test_live_closure_evidence_verifier_rejects_unaccepted_live_submit_proof` reject called-but-not-accepted live submit shapes |
+| Product-state compatibility | Refresh, goal-progress, and Tokyo snapshot fixtures now include the same exchange acceptance proof, so complete official packets still verify while weak packets are rejected |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `81 passed` for the live-closure verifier/packet/cutover/refresh/goal-progress/snapshot tests; `144 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

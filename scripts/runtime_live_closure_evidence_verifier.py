@@ -52,6 +52,8 @@ GLOBAL_REJECT_REASONS = {
     "live_submit_proof_result_source_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
+    "exchange_submit_not_accepted",
+    "exchange_order_id_missing",
     "exchange_native_protection_proof_missing",
     "exchange_native_protection_result_id_mismatch",
     "exchange_native_protection_result_source_missing",
@@ -373,6 +375,10 @@ def _reject_reasons(
                 proof_reasons.add("live_exchange_not_called")
             if proof.get("real_order_placed") is not True:
                 proof_reasons.add("real_order_not_placed")
+            if proof.get("exchange_accepted") is not True:
+                proof_reasons.add("exchange_submit_not_accepted")
+            if proof.get("exchange_order_id_present") is not True:
+                proof_reasons.add("exchange_order_id_missing")
             reasons.update(proof_reasons)
             live_submit_ready = not proof_reasons
     if source_ready and exchange_submit_execution_result_id and live_submit_ready:

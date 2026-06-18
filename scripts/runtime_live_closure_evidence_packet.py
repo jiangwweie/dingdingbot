@@ -131,6 +131,20 @@ REAL_ORDER_PLACED_KEYS = (
     "places_order",
     "exchange_order_submitted",
 )
+EXCHANGE_ACCEPTED_KEYS = (
+    "exchange_submit_accepted",
+    "exchange_accepted",
+    "exchange_order_accepted",
+    "accepted_by_exchange",
+    "order_accepted",
+)
+EXCHANGE_ORDER_ID_KEYS = (
+    "exchange_order_id",
+    "accepted_exchange_order_id",
+    "entry_exchange_order_id",
+    "entry_order_id",
+    "order_id",
+)
 RUNTIME_BOUNDARY_FIELDS = (
     "strategy_group_id",
     "runtime_profile_id",
@@ -390,6 +404,10 @@ def _derive_reject_reasons(
             reasons.add("live_exchange_not_called")
         if not live_submit_proof["real_order_placed"]:
             reasons.add("real_order_not_placed")
+        if not live_submit_proof["exchange_accepted"]:
+            reasons.add("exchange_submit_not_accepted")
+        if not live_submit_proof["exchange_order_id_present"]:
+            reasons.add("exchange_order_id_missing")
         if False in _bool_values(source_packets, "executes_real_submit"):
             reasons.add("real_order_not_placed")
         if False in _bool_values(source_packets, "live_submit_allowed"):
@@ -539,6 +557,15 @@ def _live_submit_proof(
             result_source_packets,
             REAL_ORDER_PLACED_KEYS,
         ),
+        "exchange_accepted": _any_true(
+            result_source_packets,
+            EXCHANGE_ACCEPTED_KEYS,
+        ),
+        "exchange_order_id_present": _first_present_value(
+            result_source_packets,
+            EXCHANGE_ORDER_ID_KEYS,
+        )
+        is not None,
     }
     if exchange_submit_execution_result_id:
         proof["exchange_submit_execution_result_id"] = (
