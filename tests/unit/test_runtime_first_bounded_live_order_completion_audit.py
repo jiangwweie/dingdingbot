@@ -12,6 +12,7 @@ def _daily_check(**overrides):
             "level": "L0_local_cache_read",
             "remote_interaction_count": 0,
         },
+        "checks": {"fresh_signal_notification_policy_checked": True},
         "notification": {"decision": "DONT_NOTIFY"},
     }
     base.update(overrides)
@@ -151,6 +152,29 @@ def test_completion_audit_reports_non_market_gap():
                 "Layer evidence relay"
             ),
             "missing_or_false": ["operation_layer_evidence_relay_checked"],
+        }
+    ]
+
+
+def test_completion_audit_requires_fresh_signal_notification_policy_check():
+    daily_check = _daily_check(checks={})
+
+    report = script.build_completion_audit_report(
+        daily_check=daily_check,
+        goal_progress=_goal_progress(),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": (
+                "low-noise monitor stays quiet when healthy waiting and wakes on "
+                "fresh signal"
+            ),
+            "missing_or_false": ["fresh_signal_notification_policy_checked"],
         }
     ]
 

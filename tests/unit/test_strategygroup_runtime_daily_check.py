@@ -163,6 +163,7 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     }
     assert report["checks"]["waiting_for_market"] is True
     assert report["checks"]["runtime_dry_run_required_checks_present"] is True
+    assert report["checks"]["fresh_signal_notification_policy_checked"] is True
     assert report["checks"]["runtime_dry_run_missing_required_checks"] == []
     assert report["checks"]["runtime_dry_run_scenario_count"] == 14
     assert report["checks"]["runtime_live_closure_evidence_status"] == (
@@ -422,6 +423,7 @@ def test_daily_check_notifies_when_runtime_is_ready_not_waiting():
 
     assert report["status"] == "ready"
     assert report["checks"]["waiting_for_market"] is False
+    assert report["checks"]["fresh_signal_notification_policy_checked"] is True
     assert report["notification"]["decision"] == "NOTIFY"
     assert report["notification"]["reason"] == "running"
 

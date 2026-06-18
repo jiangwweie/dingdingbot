@@ -33,7 +33,7 @@ DEFAULT_DAILY_CHECK_OWNER_PROGRESS_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-owner-progress.md"
 )
 DEFAULT_MAX_CACHE_AGE_MINUTES = 35
-DAILY_CHECK_REPORT_SCHEMA_VERSION = 8
+DAILY_CHECK_REPORT_SCHEMA_VERSION = 9
 
 ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "fresh_signal_fast_auto_chain_checked",
@@ -316,6 +316,7 @@ def build_daily_check_report(
         "runtime_dry_run_required_checks_present": (
             checks.get("runtime_dry_run_required_checks_present") is True
         ),
+        "fresh_signal_notification_policy_checked": True,
         "runtime_dry_run_missing_required_checks": list(
             checks.get("runtime_dry_run_missing_required_checks") or []
         ),
@@ -755,6 +756,7 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "source_readiness_ready": False,
             "runtime_dry_run_audit_passed": False,
             "runtime_dry_run_required_checks_present": False,
+            "fresh_signal_notification_policy_checked": False,
             "runtime_dry_run_missing_required_checks": [],
             "frontend_scope": "externalized",
         },

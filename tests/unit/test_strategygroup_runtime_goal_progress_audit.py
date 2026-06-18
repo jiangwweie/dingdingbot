@@ -107,6 +107,7 @@ def _daily_check(**overrides):
             "source_readiness_ready": True,
             "runtime_dry_run_audit_passed": True,
             "runtime_dry_run_required_checks_present": True,
+            "fresh_signal_notification_policy_checked": True,
             "runtime_dry_run_missing_required_checks": [],
             "runtime_dry_run_scenario_count": 14,
             "runtime_execution_chain_ready_segment_count": 3,

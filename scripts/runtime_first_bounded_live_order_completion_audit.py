@@ -330,7 +330,10 @@ def _audit_items(
             },
         },
         {
-            "requirement": "low-noise monitor stays quiet when healthy waiting",
+            "requirement": (
+                "low-noise monitor stays quiet when healthy waiting and wakes on "
+                "fresh signal"
+            ),
             "evidence_source": "daily_check + goal_progress",
             "status": "ready_non_market",
             "proof": {
@@ -338,6 +341,9 @@ def _audit_items(
                 "notification_decision": _dict(daily_check.get("notification")).get(
                     "decision"
                 ),
+                "fresh_signal_notification_policy_checked": _dict(
+                    daily_check.get("checks")
+                ).get("fresh_signal_notification_policy_checked"),
                 "current_read_interaction_level": current_read.get("level"),
                 "current_read_remote_interaction_count": current_read.get(
                     "remote_interaction_count"
