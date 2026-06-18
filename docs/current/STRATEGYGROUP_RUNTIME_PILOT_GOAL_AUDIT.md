@@ -137,15 +137,17 @@ window while a synthetic stale signal is rejected by the same TTL boundary.
 ### 2026-06-18 L4 Runtime Requirement Guard
 
 The StrategyGroup tier policy now carries a machine-readable
-`l4_real_order_requirements` list. This makes `L4 tiny_real_order_eligible`
-auditable as eligibility for the official runtime chain, not direct execution
-authority. The dry-run audit fails if the L4 requirement list omits any
-required step or drifts from the current first-live-order boundary.
+`l4_real_order_requirements` list. The legacy label
+`L4 tiny_real_order_eligible` means allocated-subaccount bounded-aggressive
+real-order eligibility for the official runtime chain, not a request to lower
+leverage, shrink notional, or avoid eligible live actions. The dry-run audit
+fails if the L4 requirement list omits any required step or drifts from the
+current first-live-order boundary.
 
 | Item | Evidence |
 | --- | --- |
 | Policy source | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` includes `l4_real_order_requirements` |
-| Required chain | selected scope, tiny risk, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, official Operation Layer, exchange-native protection, finalize, reconciliation, budget settlement, review |
+| Required chain | selected scope, Owner-allocated subaccount/profile boundary, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, official Operation Layer, exchange-native protection, finalize, reconciliation, budget settlement, review |
 | New dry-run check | `l4_real_order_requirements_complete=true` inside `runtime_tier_policy_validation.checks` |
 | Boundary | L4 remains limited to `MPG-001`; tier policy is not execution authority, FinalGate input, Operation Layer input, or sizing default |
 | Safety | Local dry-run/test work only; no Tokyo call, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
@@ -157,7 +159,7 @@ the six covered post-submit outcomes reintroduce per-order Owner chat
 confirmation as a next-step gate. Recovery after protection failure still
 requires standing authorization, action-time FinalGate, and the official
 Operation Layer; it does not require a new chat approval inside the selected
-tiny-risk runtime boundary.
+Owner-allocated subaccount/profile boundary.
 
 | Item | Evidence |
 | --- | --- |

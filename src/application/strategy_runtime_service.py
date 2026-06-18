@@ -625,5 +625,5 @@ def _require_profile_confirmation_ready(
         raise StrategyRuntimeError("runtime profile proposal snapshot is required")
     if proposal.side == "short" and not runtime.short_side_conservative_profile_confirmed:
         raise StrategyRuntimeError(
-            "short-side runtime profile confirmation is required"
+            "Owner-selected short-side profile boundary acknowledgment is required"
         )

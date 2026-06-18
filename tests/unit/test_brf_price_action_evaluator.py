@@ -280,7 +280,10 @@ async def test_brf_evaluator_supplies_short_squeeze_fact_for_shadow_candidate():
     assert candidate_semantics.exit.plan_kind == ExitPlanKind.PARTIAL_TP_PLUS_RUNNER
     assert candidate_semantics.exit.runner is not None
     assert candidate_semantics.exit.runner.preserve_right_tail is True
-    assert "short_side_conservative_profile_required" in candidate_semantics.quality.warnings
+    assert (
+        "short_side_allocated_profile_boundary_required"
+        in candidate_semantics.quality.warnings
+    )
     assert output.not_order is True
     assert output.not_execution_intent is True
     assert not _contains_forbidden_key(output.model_dump(mode="json"))

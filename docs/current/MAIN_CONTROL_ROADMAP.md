@@ -98,7 +98,7 @@ real funds:
 | Paper/Simulator Operation Layer | Exercise order lifecycle branches without real funds | Uses non-live simulation only; testnet is not a mainline value layer |
 | Post-Submit Simulator | Exercise fill, partial fill, reject, protection failure, recovery, reconcile and settle branches | Non-executing simulation only |
 | Cost/Slippage/Funding Model | Estimate whether strategy gross edge can survive friction | Research/review input, not submit authority |
-| Tiny Real Loop | Validate real exchange friction, protection, reconciliation, and settlement with allocated subaccount experiment funds | Uses the official live path only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, FinalGate, and Operation Layer pass |
+| Allocated-Subaccount Real Loop | Validate real exchange friction, protection, reconciliation, and settlement with allocated subaccount experiment funds | Uses the official live path only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, FinalGate, and Operation Layer pass |
 
 The no-signal lanes exist to reduce the chance that a real market opportunity
 arrives before the runtime chain, execution shape, or review loop is ready.
@@ -138,9 +138,9 @@ market-dependent first real-order proof.
 | P0.5 Replay Lab | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | planned | Define replay event format and first MPG-001 historical replay report; no real submit |
 | P0.5 Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | planned | Build fixtures for the four real-order waiting keys and hard-safety branches |
 | P1 Paper/Simulator Operation Layer | Official submit lifecycle branches can be exercised without real funds | Main runtime window | planned | Use paper/simulator for lifecycle branches; do not make testnet a mainline milestone |
-| P1 Tiny Real Execution Quality | Exchange filters, fees, slippage, funding, protection, reconciliation, and settlement are validated with bounded real funds | Main runtime window | planned after P0 signal | Use the official live path, not testnet, for meaningful execution-quality evidence |
+| P1 Allocated-Subaccount Execution Quality | Exchange filters, fees, slippage, funding, protection, reconciliation, and settlement are validated with allocated subaccount funds | Main runtime window | planned after P0 signal | Use the official live path, not testnet, for meaningful execution-quality evidence |
 | P1 Execution Cost Model | StrategyGroup review can compare gross edge against fee, funding, slippage, and filter costs | Strategy research window first, main runtime consumes summaries | planned | Define cost-survival fields in StrategyGroup review output |
-| P1 Capital Promotion Policy | Probe/trial/promotion/park/kill decisions are tied to evidence and small-capital bounds | Main runtime window | planned | Add promotion/demotion criteria after first tiny real loop and replay evidence |
+| P1 Capital Promotion Policy | Probe/trial/promotion/park/kill decisions are tied to evidence and allocated subaccount experiment results | Main runtime window | planned | Add promotion/demotion criteria after first allocated-subaccount real loop and replay evidence |
 | P0 Standing Reduce-Only Recovery | Protection-failure recovery is standing-authorized but still gated by FinalGate and official Operation Layer | Main runtime window | deployed | Keep the old owner-close confirmation path out of the primary runtime handoff |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
@@ -347,7 +347,7 @@ L1 read-only snapshot
 
 | Item | Result |
 | --- | --- |
-| Interaction taxonomy | `scripts/runtime_interaction_levels.py` defines L0-L5 as a machine-readable policy for local read, read-only remote checks, dry-run rehearsal, bounded server mutation, action-time pre-execution checks, and official tiny real-order actions |
+| Interaction taxonomy | `scripts/runtime_interaction_levels.py` defines L0-L5 as a machine-readable policy for local read, read-only remote checks, dry-run rehearsal, bounded server mutation, action-time pre-execution checks, and official allocated-subaccount real-order actions |
 | Unified snapshot | `scripts/probe_tokyo_runtime_snapshot.py` collects runtime release, watcher timer/service, backend service, source-readiness, goal-status, latest-summary, dry-run audit, and execution-chain closure facts through one read-only SSH interaction |
 | Interaction labels | Snapshot reports `L1_readonly_snapshot`; deploy executor reports `L1_deploy_plan_only` or `L3_bounded_deploy_apply` |
 | Deploy summary | `scripts/execute_tokyo_runtime_governance_git_deploy.py` now emits `owner_summary`, changed/not-changed fields, safety flags, and whether frontend static publishing is included |
@@ -664,11 +664,12 @@ mock or disabled-smoke proof as a real-order proof.
 
 ### 2026-06-17 Order-Capable Experiment Profile Checkpoint
 
-The runtime pilot now treats Tokyo as an experimental bounded-capital server:
-inside the selected StrategyGroup and tiny-risk boundary, trading permission is
-not itself a risk blocker. The system must still fail closed on stale facts,
-missing protection, duplicate-submit risk, conflicting active positions or open
-orders, FinalGate failure, or Operation Layer failure.
+The runtime pilot now treats Tokyo as an experimental allocated-subaccount
+server: inside the selected StrategyGroup and Owner-allocated subaccount/profile
+boundary, trading permission is not itself a risk blocker. The system must
+still fail closed on stale facts, missing protection, duplicate-submit risk,
+conflicting active positions or open orders, FinalGate failure, or Operation
+Layer failure.
 
 | Item | Result |
 | --- | --- |
@@ -1087,7 +1088,7 @@ Each StrategyGroup may only swap its adapter inputs:
 | supported sides | `long`, `short` | limit direction |
 | signal ready rule | momentum, funding stress, session breakout | decide whether a fresh signal exists |
 | RequiredFacts definition | mark, funding, session, OI, position | declare required evidence |
-| risk defaults | tiny notional, `1x` | cap risk |
+| allocated profile defaults | notional/leverage from Owner-selected subaccount profile | keep execution inside the selected profile without adding hidden de-risking |
 | hard stops | stale signal, conflict, low liquidity | stop unsafe strategy-specific conditions |
 | conflict policy | TEQ / MPG same beta concentration | prevent stacked exposure |
 
@@ -1254,7 +1255,7 @@ This keeps the project moving while preserving the live-funds boundary:
 | No fresh signal | Continue watcher observation | Closed |
 | Fresh signal with candidate/auth/FinalGate progress | Continue automatic evidence chain | Closed until Operation Layer and matrix pass |
 | Operation Layer evidence ready but matrix blocker exists | Record submit-blocker review packet | Closed |
-| Operation Layer evidence ready and matrix has no submit blockers | Call official Operation Layer only | Open inside selected tiny boundary |
+| Operation Layer evidence ready and matrix has no submit blockers | Call official Operation Layer only | Open inside selected Owner-allocated subaccount/profile boundary |
 
 Submit blockers such as active position, open order, missing protection,
 missing budget, duplicate-submit risk, and symbol/side/notional/leverage
@@ -1486,11 +1487,12 @@ runaway-loss protection on the exchange.
 
 StrategyGroup expansion is now separated from first-live-order eligibility.
 New strategy groups can enter the catalog or observation layers without
-competing with the first selected `MPG-001` tiny real-order loop.
+competing with the first selected `MPG-001` allocated-subaccount real-order
+loop.
 
 | Item | Result |
 | --- | --- |
-| Tier model | `L0 catalog_only`, `L1 observe_only`, `L2 shadow_candidate`, `L3 armed_observation`, `L4 tiny_real_order_eligible` |
+| Tier model | `L0 catalog_only`, `L1 observe_only`, `L2 shadow_candidate`, `L3 armed_observation`, `L4 tiny_real_order_eligible` as a legacy compatibility label for allocated-subaccount real-order eligibility |
 | Current L4 lane | Only `MPG-001` is `L4` for the first bounded live-order pilot |
 | Current non-L4 lanes | `TEQ-001=L2`, `FBS-001=L3`, `SOR-001=L3 conditional`, `PMR-001=L1` |
 | New group default | `BRF`, `BTPC`, `VCB`, `LSR`, and `RBR` default to `L1 observe_only` unless reviewed and promoted |
@@ -1518,12 +1520,12 @@ P0 exit-hardening change.
 StrategyGroup tier governance is now part of the non-executing dry-run audit
 chain instead of remaining only a planning document. This makes strategy
 expansion auditable without letting new StrategyGroups compete with the first
-selected `MPG-001` tiny real-order loop.
+selected `MPG-001` allocated-subaccount real-order loop.
 
 | Item | Result |
 | --- | --- |
-| Required dry-run checks | `runtime_tier_policy_checked`, `only_mpg_tiny_real_order_eligible_checked`, and `new_strategygroups_default_observe_only_checked` |
-| Current L4 lane | Only `MPG-001` may be `tiny_real_order_eligible` for the first bounded live-order pilot |
+| Required dry-run checks | `runtime_tier_policy_checked`, `only_mpg_tiny_real_order_eligible_checked`, and `new_strategygroups_default_observe_only_checked`; legacy `tiny` names mean allocated-subaccount bounded-aggressive eligibility |
+| Current L4 lane | Only `MPG-001` may be `tiny_real_order_eligible` for the first allocated-subaccount live-order pilot |
 | New group default | `BRF`, `BTPC`, `VCB`, `LSR`, and `RBR` must remain `L1 observe_only` unless promoted through reviewed intake |
 | Shared pipeline | Tier policy is validated as an input boundary; it does not define candidate, FinalGate, Operation Layer, submit, finalize, reconciliation, budget settlement, live profile, or sizing defaults |
 | Daily-check schema | `DAILY_CHECK_REPORT_SCHEMA_VERSION=6` so cache artifacts that predate the tier-policy required checks are refreshed |

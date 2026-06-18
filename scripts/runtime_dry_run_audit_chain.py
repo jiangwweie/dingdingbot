@@ -57,7 +57,7 @@ EXPECTED_RUNTIME_TIERS = {
 EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS = {"BRF", "BTPC", "VCB", "LSR", "RBR"}
 EXPECTED_L4_REAL_ORDER_REQUIREMENTS = [
     "selected_strategygroup_scope",
-    "tiny_risk_boundary",
+    "allocated_subaccount_profile_boundary",
     "fresh_signal",
     "required_facts_readiness",
     "candidate_authorization_evidence",
@@ -1232,7 +1232,7 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             "does_not_authorize_execution_boundary": all(
                 boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
             ),
-            "tiny_risk_boundary": (
+            "allocated_subaccount_profile_boundary": (
                 str(risk_defaults.get("risk_tier") or "") == "tiny"
                 and str(risk_defaults.get("max_notional_per_action_usdt") or "") == "8"
                 and str(risk_defaults.get("default_leverage") or "") == "1"
@@ -1305,8 +1305,10 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             row.get("checks", {}).get("no_execution_pipeline_fields") is True
             for row in rows
         ),
-        "all_strategy_groups_keep_tiny_risk_boundary": all(
-            row.get("checks", {}).get("tiny_risk_boundary") is True for row in rows
+        "all_strategy_groups_keep_allocated_subaccount_profile_boundary": all(
+            row.get("checks", {}).get("allocated_subaccount_profile_boundary")
+            is True
+            for row in rows
         ),
         "common_execution_chain_reused_by_all_strategygroups": (
             len(rows) == len(EXPECTED_STRATEGY_GROUPS)
@@ -3676,7 +3678,7 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
             and shared_pipeline.get("checks", {}).get(
-                "all_strategy_groups_keep_tiny_risk_boundary"
+                "all_strategy_groups_keep_allocated_subaccount_profile_boundary"
             )
             is True
         ),

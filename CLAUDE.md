@@ -1,6 +1,6 @@
 # CLAUDE.md - BRC Claude Worker Guide
 
-Last updated: 2026-06-15
+Last updated: 2026-06-18
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Role
@@ -50,6 +50,13 @@ is the Owner operating surface for state, blockers, candidate readiness,
 FinalGate state, active position/protection, pause/revoke controls, and review
 outcomes.
 
+The project posture is bounded-aggressive. The Owner-provided subaccount
+allocation is already the risk-control result and may be treated as
+loss-capable experiment capital. Claude tasks must not reinterpret that budget
+into lower leverage, lower exposure, smaller notional, or slower eligible
+submits for caution. Stop only for explicit authority or mechanical boundaries
+listed below.
+
 ## Standing Authorization
 
 During the development-stage pilot, do not block task progress on fresh chat
@@ -65,7 +72,8 @@ Operation Layer bypass
 withdrawal or transfer
 secret / credential / live profile mutation
 order-sizing default expansion
-higher risk profile or max exposure
+unauthorized live profile, sizing default, selected StrategyGroup, symbol, side,
+leverage, notional, or exposure expansion beyond the Owner-selected profile
 stale account facts
 missing protection
 missing budget

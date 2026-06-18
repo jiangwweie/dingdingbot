@@ -636,7 +636,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         assert row["checks"]["does_not_authorize_execution_boundary"] is True
         assert row["checks"]["no_execution_pipeline_fields"] is True
         assert row["forbidden_execution_fields_present"] == []
-        assert row["checks"]["tiny_risk_boundary"] is True
+        assert row["checks"]["allocated_subaccount_profile_boundary"] is True
         assert row["checks"]["uses_standard_signal_status"] is True
         assert row["checks"]["uses_pilot_signal_freshness_window"] is True
         assert row["sample_input_contract"]["freshness_window_seconds"] == 120
@@ -668,7 +668,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     }
     assert tier_policy["l4_real_order_requirements"] == [
         "selected_strategygroup_scope",
-        "tiny_risk_boundary",
+        "allocated_subaccount_profile_boundary",
         "fresh_signal",
         "required_facts_readiness",
         "candidate_authorization_evidence",

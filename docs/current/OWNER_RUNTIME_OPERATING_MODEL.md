@@ -56,7 +56,8 @@ StrategyGroup/symbol/side/profile, stale facts, duplicate submit risk, missing
 protection, conflicting active position or open order, FinalGate bypass,
 Operation Layer bypass, withdrawal, transfer, credential mutation, or
 unauthorized live-profile/sizing mutation. They are not generic reasons to make
-the system conservative after the Owner has allocated loss-capable capital.
+the system reduce leverage, shrink notional, slow eligible submits, or avoid
+right-tail opportunities after the Owner has allocated loss-capable capital.
 
 ## Owner-Facing State
 

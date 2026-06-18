@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-06-15
+Last updated: 2026-06-18
 Current phase: StrategyGroup runtime-governance pilot
 
 ## Current Document Authority
@@ -46,6 +46,14 @@ surface says intervention is needed.
 
 The system is not an institutional quant platform, a raw packet browser, or a
 manual evidence-interpretation workflow.
+
+The project is a bounded-aggressive real-profit experiment. The Owner-provided
+subaccount allocation is already the upstream risk-control decision and may be
+treated as loss-capable experiment capital. Agents must not add hidden
+conservatism by lowering leverage, shrinking notional, reducing exposure, or
+slowing eligible submits merely because the trade is risky. Hard stops protect
+operational authority and mechanical correctness; they are not generic reasons
+to avoid in-boundary right-tail opportunities.
 
 The Owner is not an operator. Owner-facing product surfaces must not turn
 internal execution gates, evidence objects, API routes, proof chains, or blocker

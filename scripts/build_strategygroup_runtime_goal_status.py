@@ -642,7 +642,7 @@ def _real_order_readiness_matrix(
             "hard_safety_stop" if has_scope_param_blocker else "none",
             has_scope_param_blocker,
             (
-                "symbol / side / notional / leverage 不在 selected tiny boundary 内"
+                "symbol / side / notional / leverage 不在 Owner-allocated subaccount/profile boundary 内"
                 if has_scope_param_blocker
                 else "未发现 symbol / side / notional / leverage scope blocker"
             ),
@@ -1232,7 +1232,7 @@ def build_goal_status_packet(
             "ready_for_real_order_action": real_order_ready,
             "requires_selected_strategygroup": True,
             "selected_strategygroup_scope_ready": not selected_scope_blockers,
-            "requires_tiny_risk": True,
+            "requires_allocated_subaccount_profile_boundary": True,
             "requires_fresh_signal": True,
             "requires_required_facts": True,
             "requires_candidate_grant_authorization": True,

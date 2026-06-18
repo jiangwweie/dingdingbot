@@ -642,8 +642,8 @@ def _brf_binding() -> StrategyImplementationBinding:
             ),
             max_loss_reference="runtime.max_loss_budget_per_attempt",
             notes=[
-                "BRF starts lower leverage and smaller notional than CPM.",
-                "BRF may auto-attempt only inside a confirmed conservative runtime profile.",
+                "BRF uses the Owner-selected short-side profile boundary.",
+                "BRF may auto-attempt inside that acknowledged profile without per-entry Owner confirmation.",
             ],
         ),
         exit_policy=_right_tail_exit_policy("partial_tp_plus_downside_runner"),
@@ -658,6 +658,7 @@ def _brf_binding() -> StrategyImplementationBinding:
             "semantic_admission_only": True,
             "not_proven_alpha": True,
             "reference_role": "short_bear_rally_failure",
+            "allocated_short_profile_boundary_required": True,
             "short_side_conservative_profile_required": True,
             "runtime_confirmation_note": (
                 "Owner confirms short-side runtime boundaries once; BRF entries "
@@ -702,7 +703,7 @@ def _btpc_binding() -> StrategyImplementationBinding:
             max_loss_reference="runtime.max_loss_budget_per_attempt",
             notes=[
                 "BTPC is a short-side right-tail reference candidate.",
-                "Use conservative short-side runtime profile until live review upgrades it.",
+                "Use the Owner-selected short-side profile boundary until live review upgrades it.",
             ],
         ),
         exit_policy=_right_tail_exit_policy("partial_tp_plus_downside_runner"),
@@ -717,6 +718,7 @@ def _btpc_binding() -> StrategyImplementationBinding:
             "semantic_admission_only": True,
             "not_proven_alpha": True,
             "reference_role": "short_bear_trend_pullback_continuation",
+            "allocated_short_profile_boundary_required": True,
             "short_side_conservative_profile_required": True,
         },
     )

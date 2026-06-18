@@ -1,6 +1,6 @@
 # Runtime Order-Capable Experiment Profile
 
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 ## Purpose
 
@@ -9,13 +9,18 @@ pilot:
 
 ```text
 Tokyo is an experimental bounded-capital server.
-Within the selected StrategyGroup and tiny-risk boundary, trading permission is
-not itself a risk blocker.
+Within the selected StrategyGroup and Owner-allocated subaccount risk budget,
+trading permission is not itself a risk blocker.
 ```
 
 The system must therefore avoid internal read-only defaults that prevent a
 fresh signal from reaching the official real-order path after all runtime
 evidence is ready.
+
+The allocated subaccount capital is loss-capable experiment capital. This
+profile is not a request to reduce leverage, notional, exposure, or submit speed
+for caution after the Owner has selected the official runtime profile. It is a
+permission profile for fast in-boundary opportunity capture.
 
 ## Required Server Overlay
 
