@@ -551,7 +551,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         print(owner_progress)
-    return 0 if report["status"] in {"complete", "not_complete_waiting_for_market"} else 2
+    return 0 if report["status"] in {
+        "complete",
+        "not_complete_waiting_for_market",
+        "not_complete_runtime_processing",
+    } else 2
 
 
 if __name__ == "__main__":

@@ -173,6 +173,77 @@ def test_deploy_session_surfaces_product_gap_without_safety_blocking():
     assert report["checks"]["blockers"] == []
 
 
+def test_deploy_session_accepts_postdeploy_processing_state():
+    module = _load_module()
+
+    report = module.build_deploy_session_report(
+        reports=[
+            ("runtime_deploy", _deploy_report()),
+            (
+                "postdeploy_daily_check",
+                _daily_check_report(
+                    status="processing",
+                    owner_summary={
+                        "state": "处理中",
+                        "current_action": "等待系统完成收口",
+                    },
+                    checks={
+                        "blockers": [],
+                        "warnings": [],
+                        "product_gaps": [],
+                        "waiting_for_market": False,
+                    },
+                ),
+            ),
+        ]
+    )
+
+    assert report["status"] == "processing"
+    assert report["owner_summary"]["state"] == "处理中"
+    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["product_gaps"] == []
+    assert report["checks"]["all_steps_safe_for_deploy_session_summary"] is True
+
+
+def test_deploy_session_cli_treats_processing_as_success(tmp_path):
+    module = _load_module()
+    daily_check = tmp_path / "daily-check.json"
+    output = tmp_path / "deploy-session.json"
+    daily_check.write_text(
+        json.dumps(
+            _daily_check_report(
+                status="processing",
+                owner_summary={
+                    "state": "处理中",
+                    "current_action": "等待系统完成收口",
+                },
+                checks={
+                    "blockers": [],
+                    "warnings": [],
+                    "product_gaps": [],
+                    "waiting_for_market": False,
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(
+        [
+            "--daily-check-json",
+            str(daily_check),
+            "--output-json",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output.read_text(encoding="utf-8"))
+    assert packet["status"] == "processing"
+
+
 def test_deploy_session_blocks_if_any_step_blocks():
     module = _load_module()
 

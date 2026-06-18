@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
-    return 0 if report["status"] in {"ready", "waiting_for_market"} else 2
+    return 0 if report["status"] in {"ready", "waiting_for_market", "processing"} else 2
 
 
 def build_deploy_session_report(
@@ -92,12 +92,15 @@ def build_deploy_session_report(
     calls_exchange_write = any(bool(step["calls_exchange_write"]) for step in steps)
     places_order = any(bool(step["places_order"]) for step in steps)
     waiting_for_market = any(step["status"] == "waiting_for_market" for step in steps)
+    processing = any(step["status"] == "processing" for step in steps)
 
     status = "ready"
     if blockers:
         status = "blocked"
     elif product_gaps:
         status = "degraded"
+    elif processing:
+        status = "processing"
     elif waiting_for_market:
         status = "waiting_for_market"
 
@@ -241,6 +244,8 @@ def _owner_state_for_status(*, status: str, highest_level: str) -> str:
         return "暂不可用"
     if status == "degraded":
         return "需要修复产品状态缺口"
+    if status == "processing":
+        return "处理中"
     if status == "waiting_for_market":
         return "等待机会"
     if highest_level.startswith("L3"):
@@ -258,6 +263,8 @@ def _current_action_for_status(
         return "处理部署或运行阻断"
     if product_gaps:
         return "修复产品状态缺口"
+    if status == "processing":
+        return "等待系统完成收口"
     if status == "waiting_for_market":
         return "继续等待市场机会"
     return "继续低噪音监控"

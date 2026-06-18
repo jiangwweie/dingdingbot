@@ -323,3 +323,44 @@ def test_completion_audit_cli_writes_outputs(tmp_path):
     assert packet["status"] == "not_complete_waiting_for_market"
     assert "- 非市场缺口: 无" in owner_text
     assert "- Exchange write: 否" in owner_text
+
+
+def test_completion_audit_cli_treats_runtime_processing_as_success(tmp_path):
+    daily = tmp_path / "daily.json"
+    goal = tmp_path / "goal.json"
+    dry = tmp_path / "dry.json"
+    cutover = tmp_path / "cutover.json"
+    output = tmp_path / "audit.json"
+    owner = tmp_path / "audit.md"
+    daily.write_text(json.dumps(_daily_check(status="processing")), encoding="utf-8")
+    goal.write_text(
+        json.dumps(
+            _goal_progress(
+                live_closure_evidence_boundary={"status": "in_progress"},
+            )
+        ),
+        encoding="utf-8",
+    )
+    dry.write_text(json.dumps(_dry_run_audit()), encoding="utf-8")
+    cutover.write_text(json.dumps(_live_cutover()), encoding="utf-8")
+
+    exit_code = script.main(
+        [
+            "--daily-check-json",
+            str(daily),
+            "--goal-progress-json",
+            str(goal),
+            "--dry-run-audit-json",
+            str(dry),
+            "--live-cutover-json",
+            str(cutover),
+            "--output-json",
+            str(output),
+            "--output-owner-progress",
+            str(owner),
+        ]
+    )
+
+    assert exit_code == 0
+    packet = json.loads(output.read_text(encoding="utf-8"))
+    assert packet["status"] == "not_complete_runtime_processing"
