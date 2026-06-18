@@ -37,10 +37,12 @@ GLOBAL_REJECT_REASONS = {
     "dry_run_or_rehearsal_evidence",
     "controlled_in_memory_execution",
     "duplicate_evidence_id",
+    "malformed_evidence_id",
     "live_submit_proof_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
 }
+EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
 
 
 def build_live_closure_evidence_verification(
@@ -64,12 +66,12 @@ def build_live_closure_evidence_verification(
     present_evidence_keys = [
         key
         for key in _required_evidence_keys(contract)
-        if _evidence_present(evidence.get(key))
+        if _required_evidence_id_present(evidence.get(key))
     ]
     missing_evidence_keys = [
         key
         for key in _required_evidence_keys(contract)
-        if not _evidence_present(evidence.get(key))
+        if not _required_evidence_id_present(evidence.get(key))
     ]
     if present_evidence_keys and not source_ready:
         reject_reasons = sorted(
@@ -116,6 +118,10 @@ def build_live_closure_evidence_verification(
         "first_incomplete_stage": first_incomplete_stage,
         "present_evidence_keys": present_evidence_keys,
         "missing_evidence_keys": missing_evidence_keys,
+        "malformed_evidence_keys": _malformed_required_evidence_keys(
+            evidence,
+            _required_evidence_keys(contract),
+        ),
         "reject_reasons": reject_reasons,
         "stages": stages,
         "completion": {
@@ -163,7 +169,7 @@ def _stage_verifications(
             if str(item) in reject_reasons
         ]
         missing = [
-            key for key in required_keys if not _evidence_present(evidence.get(key))
+            key for key in required_keys if not _required_evidence_id_present(evidence.get(key))
         ]
         if stage_reject_reasons:
             status = "rejected"
@@ -244,6 +250,8 @@ def _reject_reasons(
                 reasons.add("real_order_not_placed")
     if _duplicate_required_evidence_ids(evidence, required_evidence_keys):
         reasons.add("duplicate_evidence_id")
+    if _malformed_required_evidence_keys(evidence, required_evidence_keys):
+        reasons.add("malformed_evidence_id")
     return sorted(reasons)
 
 
@@ -253,16 +261,43 @@ def _duplicate_required_evidence_ids(
 ) -> bool:
     seen: set[str] = set()
     for key in required_evidence_keys:
-        value = evidence.get(key)
-        if not isinstance(value, str):
-            continue
-        evidence_id = value.strip()
+        evidence_id = _required_evidence_id(evidence.get(key))
         if not evidence_id:
             continue
         if evidence_id in seen:
             return True
         seen.add(evidence_id)
     return False
+
+
+def _malformed_required_evidence_keys(
+    evidence: dict[str, Any],
+    required_evidence_keys: list[str],
+) -> list[str]:
+    malformed: list[str] = []
+    for key in required_evidence_keys:
+        value = evidence.get(key)
+        if not _evidence_present(value):
+            continue
+        if not _required_evidence_id_present(value):
+            malformed.append(key)
+    return malformed
+
+
+def _required_evidence_id_present(value: Any) -> bool:
+    return _required_evidence_id(value) is not None
+
+
+def _required_evidence_id(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, dict):
+        for field in EVIDENCE_ID_FIELDS:
+            nested = value.get(field)
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return None
 
 
 def _official_live_source_ready(packet: dict[str, Any]) -> bool:

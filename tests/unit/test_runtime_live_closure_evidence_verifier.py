@@ -180,6 +180,50 @@ def test_live_closure_evidence_verifier_rejects_duplicate_required_evidence_id()
     assert packet["reject_reasons"] == ["duplicate_evidence_id"]
 
 
+def test_live_closure_evidence_verifier_rejects_malformed_required_evidence_id():
+    evidence: dict[str, object] = _complete_evidence()
+    evidence["candidate_id"] = {"candidate": "candidate-1"}
+    evidence["runtime_grant_id"] = True
+
+    packet = verifier.build_live_closure_evidence_verification(
+        _official_packet(evidence),  # type: ignore[arg-type]
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "blocked_live_closure_rejected"
+    assert packet["owner_state"] == "需要介入"
+    assert packet["completion"]["first_bounded_real_order_complete"] is False
+    assert packet["completion"]["real_order_closure_proven"] is False
+    assert packet["reject_reasons"] == ["malformed_evidence_id"]
+    assert packet["malformed_evidence_keys"] == [
+        "candidate_id",
+        "runtime_grant_id",
+    ]
+    assert packet["missing_evidence_keys"] == [
+        "candidate_id",
+        "runtime_grant_id",
+    ]
+
+
+def test_live_closure_evidence_verifier_accepts_structured_evidence_id_values():
+    evidence = {
+        key: {"id": f"{key}-1"}
+        for key in live_cutover.build_live_closure_cutover_contract()[
+            "required_evidence_keys"
+        ]
+    }
+
+    packet = verifier.build_live_closure_evidence_verification(
+        _official_packet(evidence),  # type: ignore[arg-type]
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "live_closure_complete"
+    assert packet["missing_evidence_keys"] == []
+    assert packet["malformed_evidence_keys"] == []
+    assert packet["reject_reasons"] == []
+
+
 def test_live_closure_evidence_verifier_rejects_unmarked_complete_shape():
     packet = verifier.build_live_closure_evidence_verification(
         {"evidence": _complete_evidence()},

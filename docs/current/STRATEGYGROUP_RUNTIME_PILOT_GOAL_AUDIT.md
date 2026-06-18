@@ -686,3 +686,21 @@ allowing one artifact id to satisfy multiple required closure stages.
 | Complete proof compatibility | `test_live_closure_evidence_verifier_marks_complete_when_all_contract_keys_present` still passes with distinct official live evidence ids and live submit proof |
 | Verification | `8 passed` for `tests/unit/test_runtime_live_closure_evidence_verifier.py`; `py_compile` passed for `runtime_live_closure_evidence_verifier.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Live Closure Evidence-ID Shape Guard Checkpoint
+
+The live-closure evidence verifier now requires required closure evidence
+values to resolve to evidence-id strings. Non-empty arbitrary objects, lists,
+or booleans can no longer satisfy required first-live-closure evidence keys
+just because they are truthy. Structured values remain compatible when they
+carry an id-like field such as `id`, `evidence_id`, `packet_id`, `ref_id`, or
+`reference_id`.
+
+| Item | Evidence |
+| --- | --- |
+| Evidence-id shape guard | `runtime_live_closure_evidence_verifier.py` adds `malformed_evidence_id` as a global reject reason when a required evidence key is present but cannot resolve to an evidence id |
+| Weak proof rejection | `test_live_closure_evidence_verifier_rejects_malformed_required_evidence_id` rejects a packet where `candidate_id` is an arbitrary dict and `runtime_grant_id` is `true` |
+| Structured evidence compatibility | `test_live_closure_evidence_verifier_accepts_structured_evidence_id_values` still accepts structured evidence values that carry an `id` field |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `10 passed` for `tests/unit/test_runtime_live_closure_evidence_verifier.py`; `111 passed` for the P0 runtime-monitor/live-closure regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
