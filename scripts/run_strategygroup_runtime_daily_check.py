@@ -990,14 +990,34 @@ def _gated_cache_report(
 
 def _annotate_current_read_interaction(report: dict[str, Any]) -> dict[str, Any]:
     annotated = dict(report)
-    annotated["current_read_interaction"] = annotate_interaction({
+    cached_interaction = (
+        dict(annotated.get("interaction"))
+        if isinstance(annotated.get("interaction"), dict)
+        else {}
+    )
+    current_read_interaction = annotate_interaction({
         "level": "L0_local_cache_read",
+        "uses_snapshot_level": cached_interaction.get("uses_snapshot_level")
+        or cached_interaction.get("level"),
         "remote_interaction_count": 0,
+        "max_remote_interactions": 0,
         "mutates_remote_files": False,
         "approaches_real_order": False,
+        "calls_finalgate": False,
+        "calls_operation_layer": False,
         "calls_exchange_write": False,
         "places_order": False,
     })
+    annotated["cached_report_interaction"] = cached_interaction
+    annotated["current_read_interaction"] = current_read_interaction
+    annotated["interaction"] = current_read_interaction
+    owner = (
+        dict(annotated.get("owner_summary"))
+        if isinstance(annotated.get("owner_summary"), dict)
+        else {}
+    )
+    owner["risk_level"] = "L0 local cache only"
+    annotated["owner_summary"] = owner
     return annotated
 
 
@@ -1104,16 +1124,20 @@ def _owner_progress_text(
     current_read_interaction = report.get("current_read_interaction")
     if not isinstance(current_read_interaction, dict):
         current_read_interaction = {}
+    cached_report_interaction = report.get("cached_report_interaction")
+    if not isinstance(cached_report_interaction, dict):
+        cached_report_interaction = {}
+    report_collection_interaction = cached_report_interaction or interaction
     notification = report.get("notification")
     if not isinstance(notification, dict):
         notification = {}
     progress = owner.get("progress")
     if not isinstance(progress, dict):
         progress = {}
-    interaction_policy = interaction.get("policy")
+    interaction_policy = report_collection_interaction.get("policy")
     if not isinstance(interaction_policy, dict):
         interaction_policy = policy_for_interaction_level(
-            str(interaction.get("level") or "unknown")
+            str(report_collection_interaction.get("level") or "unknown")
         )
     current_read_policy = current_read_interaction.get("policy")
     if not isinstance(current_read_policy, dict):
@@ -1180,7 +1204,7 @@ def _owner_progress_text(
             else f"- 远端交互次数: {interaction.get('remote_interaction_count', 0)}"
         ),
         (
-            f"- 报告采集等级: {interaction.get('level') or 'unknown'}"
+            f"- 报告采集等级: {report_collection_interaction.get('level') or 'unknown'}"
             if current_read_interaction
             else f"- 远端交互预算: {interaction.get('max_remote_interactions', 1)}"
         ),
@@ -1190,20 +1214,37 @@ def _owner_progress_text(
             else []
         ),
         (
-            f"- 报告采集远端交互次数: {interaction.get('remote_interaction_count', 0)}"
+            f"- 报告采集远端交互次数: {report_collection_interaction.get('remote_interaction_count', 0)}"
             if current_read_interaction
             else "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files")))
         ),
         *(
             [
-                f"- 报告采集远端交互预算: {interaction.get('max_remote_interactions', 1)}",
-                "- 服务器修改: " + _yes_no(bool(interaction.get("mutates_remote_files"))),
+                f"- 报告采集远端交互预算: {report_collection_interaction.get('max_remote_interactions', 1)}",
+                "- 服务器修改: "
+                + _yes_no(bool(current_read_interaction.get("mutates_remote_files"))),
             ]
             if current_read_interaction
             else []
         ),
-        "- 接近真实订单: " + _yes_no(bool(interaction.get("approaches_real_order"))),
-        "- 交易所写入: " + _yes_no(bool(interaction.get("calls_exchange_write"))),
+        "- 接近真实订单: "
+        + _yes_no(
+            bool(
+                (
+                    current_read_interaction
+                    or interaction
+                ).get("approaches_real_order")
+            )
+        ),
+        "- 交易所写入: "
+        + _yes_no(
+            bool(
+                (
+                    current_read_interaction
+                    or interaction
+                ).get("calls_exchange_write")
+            )
+        ),
         "",
         "## Progress",
         "",

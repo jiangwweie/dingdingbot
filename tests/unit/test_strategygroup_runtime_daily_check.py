@@ -227,6 +227,36 @@ def test_daily_check_keeps_healthy_waiting_for_market_low_noise():
     }
 
 
+def test_daily_check_cache_read_reports_l0_and_preserves_cached_collection():
+    module = _load_module()
+
+    report = module.build_daily_check_report(snapshot=_snapshot())
+    annotated = module._annotate_current_read_interaction(report)
+
+    assert annotated["interaction"]["level"] == "L0_local_cache_read"
+    assert annotated["interaction"]["remote_interaction_count"] == 0
+    assert annotated["interaction"]["max_remote_interactions"] == 0
+    assert annotated["interaction"]["mutates_remote_files"] is False
+    assert annotated["interaction"]["approaches_real_order"] is False
+    assert annotated["interaction"]["calls_exchange_write"] is False
+    assert annotated["current_read_interaction"] == annotated["interaction"]
+    assert annotated["cached_report_interaction"]["level"] == (
+        "L1_daily_check_from_snapshot"
+    )
+    assert annotated["cached_report_interaction"]["remote_interaction_count"] == 1
+    assert annotated["owner_summary"]["risk_level"] == "L0 local cache only"
+
+    owner_progress = module._owner_progress_text(
+        annotated,
+        now_utc=datetime.fromisoformat(annotated["generated_at_utc"]),
+    )
+
+    assert "- 本次读取等级: L0_local_cache_read" in owner_progress
+    assert "- 本次远端交互次数: 0" in owner_progress
+    assert "- 报告采集等级: L1_daily_check_from_snapshot" in owner_progress
+    assert "- 报告采集远端交互次数: 1" in owner_progress
+
+
 def test_daily_check_projects_first_bounded_live_closure_completion():
     module = _load_module()
 
