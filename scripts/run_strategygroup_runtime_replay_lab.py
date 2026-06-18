@@ -51,6 +51,8 @@ def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
         "",
         f"- StrategyGroup: {packet.strategy_group_id}",
         f"- Replay samples: {len(packet.replay_samples)}",
+        f"- Post-submit simulator cases: {len(packet.post_submit_simulator_matrix)}",
+        "- Cost review skeleton: present",
         f"- Synthetic fixtures: {fixture_cases}",
         "- Freqtrade: future sidecar research adapter only",
         "",

@@ -10,6 +10,7 @@ from src.domain.strategygroup_runtime_replay import (
     EXPECTED_POST_SUBMIT_SIMULATOR_CASES,
     build_mpg001_replay_lab_packet,
 )
+from scripts.run_strategygroup_runtime_replay_lab import _owner_markdown
 
 
 def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> None:
@@ -174,6 +175,18 @@ def test_post_submit_simulator_matrix_is_non_executing_and_review_ready() -> Non
         assert item.review_shape_checked is True
         assert item.real_order_created is False
         assert item.exchange_write_called is False
+
+
+def test_owner_markdown_summarizes_replay_corpus_post_submit_and_cost_review() -> None:
+    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+
+    text = _owner_markdown(packet)
+
+    assert "- Replay samples: 8" in text
+    assert "- Post-submit simulator cases: 7" in text
+    assert "- Cost review skeleton: present" in text
+    assert "- Exchange write: 否" in text
+    assert "- 接近真实订单: 否" in text
 
 
 def test_tracked_mpg001_replay_corpus_and_post_submit_matrix_exist() -> None:

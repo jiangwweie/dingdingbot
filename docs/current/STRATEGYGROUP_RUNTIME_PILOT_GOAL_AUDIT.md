@@ -119,6 +119,20 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Replay Corpus and Post-Submit Simulator Expansion
+
+The P0.5 rehearsal loop now covers a broader local corpus instead of a single
+sample. This checkpoint remains local-only and does not deploy to Tokyo.
+
+| Item | Evidence |
+| --- | --- |
+| MPG-001 replay corpus | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-corpus.json` covers `trend_continuation`, `false_breakout`, `fast_reversal`, `choppy_no_trade`, `stale_signal`, `missing_facts`, `active_position_conflict`, and `protection_missing` |
+| Cost review skeleton | Replay events carry `fee_estimate_usdt`, `slippage_estimate_usdt`, `funding_impact_usdt`, `min_qty_step_size_impact`, `net_edge_note`, and `not_submit_authority=true` |
+| Post-submit simulator | `docs/current/strategy-group-handoffs/MPG-001/replay/post-submit-simulator-matrix.json` covers accepted/protected, SL creation failed, partial fill, rejected before acceptance, closed by SL, closed by TP1, and still-open paths |
+| Dry-run required checks | Runtime dry-run audit exposes `mpg001_replay_corpus_checked`, `post_submit_simulator_matrix_checked`, and `cost_review_skeleton_checked` |
+| Quiet monitor retune | `tokyo-runtime-quiet-monitor` heartbeat changed from 30 minutes to 2 hours; baseline records `healthy_waiting_for_market_interval_minutes=120` |
+| Safety | Local test/replay/simulator/automation-frequency work only; no Tokyo deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Runtime Replay Lab Checkpoint
 
 The P0.5 Runtime Replay Lab now has a local MPG-001 contract, a tracked

@@ -38,7 +38,10 @@ to iterate. It is not an execution authority.
 | Report runner | `scripts/run_strategygroup_runtime_replay_lab.py` |
 | Dry-run integration | `scripts/runtime_dry_run_audit_chain.py` includes replay-lab validation |
 | Output intent | local audit packet and Owner-readable local progress note |
-| Server deployment | out of scope for the first P0.5 checkpoint |
+| Replay corpus | `MPG-001` now has eight local replay windows |
+| Post-submit simulator | local matrix covers accepted, failed-protection, partial-fill, reject, closed, and still-open shapes |
+| Cost review | fee, slippage, funding, min-qty/step-size, and net-edge note fields are review inputs only |
+| Server deployment | out of scope for the P0.5 replay/simulator checkpoint |
 | Real order | out of scope |
 | Exchange write | out of scope |
 
@@ -86,6 +89,52 @@ bounded-aggressive live pilot:
 | `protection_missing` | Proves missing protection blocks the path |
 | `allocated_profile_boundary_mismatch` | Proves wrong profile/symbol/side/leverage boundary blocks the path |
 
+## MPG-001 Replay Corpus
+
+The current local corpus covers eight window shapes:
+
+| Case | Purpose |
+| --- | --- |
+| `trend_continuation` | Exercises the target right-tail continuation path |
+| `false_breakout` | Keeps execution shape valid while review downgrades signal quality |
+| `fast_reversal` | Exercises fast exit and review downgrade behavior |
+| `choppy_no_trade` | Proves noisy regimes stay quiet and do not generate candidate/auth |
+| `stale_signal` | Proves freshness rejection before submit authority |
+| `missing_facts` | Proves RequiredFacts stop the path before execution-cost authority matters |
+| `active_position_conflict` | Proves duplicate exposure is blocked |
+| `protection_missing` | Proves missing protection remains a mechanical hard stop |
+
+Every replay window carries a cost-review skeleton:
+
+```text
+fee_estimate_usdt
+slippage_estimate_usdt
+funding_impact_usdt
+min_qty_step_size_impact
+net_edge_note
+not_submit_authority=true
+```
+
+These fields support review and profitability iteration. They do not authorize
+submit.
+
+## Post-Submit Simulator Matrix
+
+The local post-submit simulator matrix covers:
+
+| Case | Purpose |
+| --- | --- |
+| `entry_accepted_protection_ok` | Normal accepted-entry close-loop shape |
+| `entry_filled_sl_creation_failed` | Protection failure shape with reduce-only recovery reachable |
+| `partial_fill` | Partial-fill reconciliation and budget shape |
+| `submit_rejected_before_acceptance` | Rejected submit does not become active exposure |
+| `position_closed_by_sl` | SL closure finalize/reconcile/settle/review shape |
+| `position_closed_by_tp1` | TP1 closure and runner/remainder review shape |
+| `active_position_remains_open` | Open protected position remains monitored, not falsely completed |
+
+The simulator checks finalize, reconciliation, budget settlement, and review
+shapes without calling live Operation Layer submit or exchange write.
+
 ## External Framework Policy
 
 External replay frameworks such as Freqtrade may be useful later as sidecar
@@ -120,7 +169,9 @@ Operation Layer, protection, reconciliation, settlement, and review.
 | Local runner | `scripts/run_strategygroup_runtime_replay_lab.py` |
 | Dry-run audit integration | `scripts/runtime_dry_run_audit_chain.py` |
 | MPG replay sample | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-sample.json` |
+| MPG replay corpus | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-corpus.json` |
 | MPG synthetic fixtures | `docs/current/strategy-group-handoffs/MPG-001/replay/synthetic-signal-fixtures.json` |
+| Post-submit simulator matrix | `docs/current/strategy-group-handoffs/MPG-001/replay/post-submit-simulator-matrix.json` |
 | Unit tests | `tests/unit/test_strategygroup_runtime_replay_lab.py` |
 | Dry-run audit tests | `tests/unit/test_runtime_dry_run_audit_chain.py` |
 
@@ -128,11 +179,14 @@ Operation Layer, protection, reconciliation, settlement, and review.
 
 The current P0.5 checkpoint is accepted when:
 
-1. `MPG-001` replay sample validates locally.
+1. `MPG-001` replay corpus validates locally.
 2. The synthetic fixture set covers no-signal, fresh-pass, stale, missing-fact,
    conflict, protection-missing, and profile-boundary branches.
-3. Runtime dry-run audit exposes replay-lab checks in the unified packet.
-4. All replay and dry-run paths prove:
+3. Post-submit simulator matrix covers accepted, failed-protection, partial-fill,
+   reject, closed-by-SL, closed-by-TP1, and still-open shapes.
+4. Cost-review fields are present as review inputs only.
+5. Runtime dry-run audit exposes replay-lab checks in the unified packet.
+6. All replay and dry-run paths prove:
 
 ```text
 no Tokyo deploy
@@ -150,11 +204,11 @@ no order-sizing default mutation
 ## Next Expansion
 
 The next useful expansion is not testnet. The next useful expansion is a
-larger local replay corpus:
+larger local replay/review corpus:
 
 | Expansion | Why it matters |
 | --- | --- |
 | More MPG historical windows | Better entry/exit review before live signals arrive |
-| Cost, slippage, and funding annotations | Better estimate of whether gross edge can survive execution friction |
+| Better cost, slippage, and funding estimates | Better estimate of whether gross edge can survive execution friction |
 | Cross-StrategyGroup replay after first live loop | Avoid expanding strategy count before the shared live path proves itself |
-| Post-submit simulator linkage | Exercise fill, partial fill, reject, protection failure, recovery, reconciliation, and settlement branches |
+| Simulator-to-review scoring | Turn fill/protection/reconciliation outcomes into promote/revise/park evidence |

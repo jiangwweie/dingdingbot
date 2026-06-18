@@ -135,8 +135,10 @@ market-dependent first real-order proof.
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
-| P0.5 Replay Lab | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local minimum ready | Keep MPG-001 replay contract wired into local dry-run audit; expand from sample window to broader historical windows and execution-cost review |
+| P0.5 Replay Corpus | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local corpus ready | Keep MPG-001 eight-window corpus wired into local dry-run audit; expand to broader historical windows after first live loop |
 | P0.5 Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | local minimum ready | Keep MPG-001 synthetic fixtures wired into dry-run audit; expand fixture matrix after the first real live loop |
+| P0.5 Post-Submit Simulator | Entry acceptance, protection failure, partial fill, rejection, SL/TP closure, and still-open lifecycle branches can be rehearsed locally | Main runtime window | local matrix ready | Keep simulator matrix non-executing and link outcomes into review evidence |
+| P0.5 Cost Review Skeleton | Replay outputs carry fee, slippage, funding, min-qty/step-size, and net-edge note fields | Main runtime window + strategy research input | local skeleton ready | Improve estimates from real allocated-subaccount outcomes after first live loop |
 | P1 Paper/Simulator Operation Layer | Official submit lifecycle branches can be exercised without real funds | Main runtime window | planned | Use paper/simulator for lifecycle branches; do not make testnet a mainline milestone |
 | P1 Allocated-Subaccount Execution Quality | Exchange filters, fees, slippage, funding, protection, reconciliation, and settlement are validated with allocated subaccount funds | Main runtime window | planned after P0 signal | Use the official live path, not testnet, for meaningful execution-quality evidence |
 | P1 Execution Cost Model | StrategyGroup review can compare gross edge against fee, funding, slippage, and filter costs | Strategy research window first, main runtime consumes summaries | planned | Define cost-survival fields in StrategyGroup review output |
@@ -144,7 +146,7 @@ market-dependent first real-order proof.
 | P0 Standing Reduce-Only Recovery | Protection-failure recovery is standing-authorized but still gated by FinalGate and official Operation Layer | Main runtime window | deployed | Keep the old owner-close confirmation path out of the primary runtime handoff |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |
-| P0.5 Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active | Use one L1 runtime snapshot for routine checks and L3 summaries for deploy/static publish actions |
+| P0.5 Runtime Interaction Optimization | Owner can see what Codex did on Tokyo without reading many SSH fragments | Main runtime window | active, low-frequency retuned | Healthy waiting-for-market heartbeat is 2 hours / L0 cache-first; fresh-signal short window remains high-priority |
 | P1 Owner Console Mainline Stabilization | External frontend can consume one stable source-readiness/readmodel contract | Main runtime window | paused in mainline | Keep readmodel/API stable; do not maintain static frontend or UI QA in this worktree |
 | P1 StrategyGroup Research Handoff | Strategy research enters main control only through reviewed handoff packs | Strategy research window | active separately | Keep research artifacts out of main runtime worktree except reviewed handoff input |
 | P2 Historical Debt Reduction | Historical docs/code do not obscure current pilot behavior | Main runtime window | pending | Compress/archive only after P0 source and runtime state are stable |
@@ -342,6 +344,17 @@ L1 read-only snapshot
 -> product gaps or blockers
 -> next safe action
 ```
+
+### 2026-06-18 Quiet Monitor Frequency Retune
+
+| Item | Result |
+| --- | --- |
+| Healthy waiting frequency | `tokyo-runtime-quiet-monitor` heartbeat retuned from `30` minutes to `2` hours |
+| Baseline policy | `docs/current/RUNTIME_MONITOR_BASELINE.json` records `healthy_waiting_for_market_interval_minutes=120` |
+| Routine interaction level | Healthy waiting uses `L0_local_cache_read` and `remote_interaction_count=0` when cache is fresh |
+| Fresh signal behavior | Fresh-signal short window remains enabled at `5` minutes for event-driven escalation |
+| Non-quiet summary | Any non-quiet output must state interaction level, remote interaction count, server mutation, and real-order proximity |
+| Safety | Retune changes automation frequency and local baseline only; it does not deploy, call FinalGate, call Operation Layer, exchange write, or create orders |
 
 ### 2026-06-17 Checkpoint
 
