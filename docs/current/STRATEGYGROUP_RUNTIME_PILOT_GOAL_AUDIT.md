@@ -585,3 +585,25 @@ and the remaining blockers are market-dependent.
 | Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `not_complete_waiting_for_market`, P0.5 ready, non-market blockers none |
 | Verification | `94 passed` for dispatcher, systemd unit, live closure evidence, execution-chain closure, and StrategyGroup goal-status tests |
 | Safety | This checkpoint did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
+
+The first bounded live-order closure target remains active and waiting for a
+real fresh selected StrategyGroup signal. The current deployed runtime includes
+the live-submit-proof closure contract, and local low-noise status checks now
+report cache reads as `L0_local_cache_read` / zero remote interactions instead
+of making healthy waiting look like another Tokyo probe.
+
+| Item | Evidence |
+| --- | --- |
+| Deployed runtime head | `1e97edf52eba8b2fc6a6cec588c3ad6d0490d8c6` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-1e97edf5-live-submit-proof` |
+| Deploy apply | `output/tokyo-git-deploy-apply-1e97edf5.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_finalgate=false`, `calls_operation_layer=false`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-1e97edf5.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, `remote_interaction_count=1`, `mutates_remote_files=false`, `approaches_real_order=false` |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` expects runtime head `1e97edf52eba8b2fc6a6cec588c3ad6d0490d8c6` |
+| Cache-read fix | `81745bfb fix(runtime): report cache heartbeat as local read` keeps `interaction.level=L0_local_cache_read`, `remote_interaction_count=0`, and stores the prior collection in `cached_report_interaction` |
+| Low-noise monitor | `run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat`: `DONT_NOTIFY`, `waiting_for_market`, `interaction.level=L0_local_cache_read`, `remote_interaction_count=0` |
+| Goal progress | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress`: `P0=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]`, `remote_interaction_count=0` |
+| Completion audit | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5` |
+| Verification | `89 passed` for daily check, goal progress, P0 completion audit, live cutover readiness, quiet monitor, and monitor frequency tests |
+| Safety | Deploy apply mutated server files only for the bounded runtime release. Postdeploy and cache checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
