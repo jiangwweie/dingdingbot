@@ -23,9 +23,10 @@ cleanup plan.
 | --- | --- |
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
-| Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
+| Branch head | `4027a97c8edb5b9419451d7da6114cb366320282` pushed to `origin/codex/owner-runtime-console-v1` |
 | Latest deployed runtime head | `58f0fc29452e8af1f4ab5a383e0d399c8789a57c` |
 | Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order` |
+| Next deploy plan | `output/tokyo-git-deploy-dry-run-4027a97c.json`: `status=dry_run_ready`, `blockers=[]`, `commands_planned=11`, `commands_executed=0`, `remote_files_modified=false` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -78,6 +79,7 @@ cleanup plan.
 | `python3 scripts/runtime_dry_run_audit_chain.py --output-json output/strategygroup-runtime-pilot/runtime-dry-run-audit-chain-current.json` | `status=passed`, `scenario_count=14`, all required checks true |
 | `python3 scripts/run_strategygroup_runtime_replay_lab.py --output-json output/strategygroup-runtime-pilot/replay-lab/runtime-replay-report.json --output-owner-progress output/strategygroup-runtime-pilot/replay-lab/runtime-replay-owner-progress.md` | `status=passed`, `strategy_group_id=MPG-001`, replay-only safety flags true |
 | `python3 scripts/runtime_live_cutover_readiness.py --output-json output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json --output-owner-progress output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.md` | `status=live_cutover_waiting_for_fresh_signal`, `next_fresh_signal_cutover_ready=true`, `non_market_blockers=[]` |
+| `python3 scripts/execute_tokyo_runtime_governance_git_deploy.py --json --git-ref codex/owner-runtime-console-v1 --target-commit 4027a97c8edb5b9419451d7da6114cb366320282 --release-name brc-runtime-governance-4027a97c-cutover-source-visibility --previous-release /home/ubuntu/brc-deploy/releases/brc-runtime-governance-58f0fc29-live-closure-goal-status-order --expected-deployed-head 58f0fc29452e8af1f4ab5a383e0d399c8789a57c --expected-remote-migration-count 84 --expected-remote-latest-migration 2026-06-11-084_create_runtime_post_submit_budget_settlements.py` | `status=dry_run_ready`, `blockers=[]`, `apply_requested=false`, `commands_executed=0`, `remote_files_modified=false` |
 
 ## Completion Boundary
 
