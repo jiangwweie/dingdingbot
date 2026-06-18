@@ -1245,6 +1245,10 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + str(p0_completion["non_market_gap_count"]),
         "- Market-dependent remaining: "
         + str(p0_completion["market_dependent_remaining_count"]),
+        "- Market-dependent remaining items: "
+        + _list_or_none(
+            [str(item) for item in p0_completion["market_dependent_remaining"]]
+        ),
         "- Goal complete by audit: "
         + _yes_no(bool(p0_completion["goal_complete"])),
         "",

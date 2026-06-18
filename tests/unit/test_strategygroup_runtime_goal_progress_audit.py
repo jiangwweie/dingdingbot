@@ -521,12 +521,16 @@ def test_goal_progress_rejects_completion_flags_without_live_closure_evidence():
     )
 
 
-def test_goal_progress_owner_progress_text_has_track_table():
+def test_goal_progress_owner_progress_text_has_track_table(tmp_path):
     module = _load_module()
     report = module.build_goal_progress_report(
         daily_check=_daily_check(),
         baseline=_baseline(),
         tier_policy=_tier_policy(),
+        live_cutover_readiness=live_cutover_script.build_cutover_readiness_packet(
+            output_dir=tmp_path / "cutover-owner-text",
+            generated_at_ms=1781753000000,
+        ),
     )
 
     text = module._owner_progress_text(report)
@@ -543,6 +547,16 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- Real order closure proven: 否" in text
     assert "- Waiting for real fresh signal: 是" in text
     assert "- Dry-run readiness proven: 是" in text
+    assert "- Market-dependent remaining: 5" in text
+    assert (
+        "- Market-dependent remaining items: "
+        "fresh signal -> RequiredFacts -> candidate/auth fast chain, "
+        "candidate/auth -> action-time FinalGate -> official Operation Layer "
+        "evidence relay, real submit must happen only through official "
+        "Operation Layer, entry accepted -> exchange-native hard "
+        "stop/protection/recovery, post-submit finalize / reconciliation / "
+        "budget settlement / review closure"
+    ) in text
     assert "## Entry Fast Chain Boundary" in text
     assert "- Fresh signal to candidate/auth covered: 是" in text
     assert "- RequiredFacts gate covered: 是" in text
@@ -566,7 +580,7 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- Tier policy bypasses Operation Layer: 否" in text
     assert "## Live Cutover Readiness Boundary" in text
     assert "- Status: not_generated" in text
-    assert "- Next fresh signal cutover ready: 否" in text
+    assert "- Next fresh signal cutover ready: 是" in text
     assert "- Current real submit allowed: 否" in text
     assert "| P0.5 Runtime Interaction Optimization | ready | 已就绪 |" in text
     assert "## Evidence" in text
@@ -577,13 +591,16 @@ def test_goal_progress_owner_progress_text_has_track_table():
     assert "- P0.5 ready: 是" in text
 
 
-def test_goal_progress_accepts_live_cutover_readiness_boundary():
+def test_goal_progress_accepts_live_cutover_readiness_boundary(tmp_path):
     module = _load_module()
     report = module.build_goal_progress_report(
         daily_check=_daily_check(),
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        live_cutover_readiness=_live_cutover_readiness(),
+        live_cutover_readiness=live_cutover_script.build_cutover_readiness_packet(
+            output_dir=tmp_path / "cutover",
+            generated_at_ms=1781753000000,
+        ),
     )
 
     assert report["status"] == "waiting_for_market"
