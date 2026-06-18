@@ -1,6 +1,6 @@
 {
   "schema": "brc.runtime_monitor_baseline.v1",
-  "updated_at_utc": "2026-06-18T06:07:31Z",
+  "updated_at_utc": "2026-06-18T06:55:39Z",
   "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and runtime check modes.",
   "expected_runtime_head": "e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
@@ -12,6 +12,7 @@
   "deploy_session_routine_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode auto-cache --json",
   "deploy_session_owner_progress_check": "python3 scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode cache --owner-progress",
   "goal_progress_audit_check": "python3 scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress --output-json output/runtime-monitor/latest-goal-progress.json --output-owner-progress output/runtime-monitor/latest-goal-progress.md",
+  "p0_completion_audit_check": "python3 scripts/runtime_first_bounded_live_order_completion_audit.py --owner-progress --output-json output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json --output-owner-progress output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md",
   "quiet_monitor_audit_check": "python3 scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress --output-json output/runtime-monitor/latest-quiet-monitor-audit.json --output-owner-progress output/runtime-monitor/latest-quiet-monitor-audit.md",
   "signal_detection_source": "tokyo_runtime_signal_watcher_feishu_webhook",
   "signal_detection_note": "Local auto-cache checks are for low-noise status review; fresh market opportunity detection remains server-side watcher and notification driven.",

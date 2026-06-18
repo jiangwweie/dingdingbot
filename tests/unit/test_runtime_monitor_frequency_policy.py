@@ -24,3 +24,12 @@ def test_runtime_monitor_baseline_uses_low_frequency_for_healthy_waiting_market(
         "mutates_remote_files",
         "approaches_real_order",
     ]
+    p0_completion_audit_check = baseline["p0_completion_audit_check"]
+    assert p0_completion_audit_check.startswith(
+        "python3 scripts/runtime_first_bounded_live_order_completion_audit.py "
+    )
+    assert (
+        "--output-json "
+        "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json"
+    ) in p0_completion_audit_check
+    assert "run_tokyo" not in p0_completion_audit_check
