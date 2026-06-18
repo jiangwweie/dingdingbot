@@ -1163,6 +1163,8 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                 "official_live_closure_evidence": True,
                 "live_submit_proof": {
                     "exchange_result_present": True,
+                    "result_source_matched": True,
+                    "result_source_count": 1,
                     "live_exchange_called": True,
                     "real_order_placed": True,
                     "exchange_submit_execution_result_id": (

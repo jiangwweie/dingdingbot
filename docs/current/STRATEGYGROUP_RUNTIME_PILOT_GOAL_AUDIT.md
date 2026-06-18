@@ -722,3 +722,21 @@ submit execution result id.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `19 passed` for the live-closure verifier/packet/cutover tests; `123 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Live Submit Proof Source-Consistency Checkpoint
+
+The live-closure evidence packet builder now derives `live_exchange_called` and
+`real_order_placed` only from source packets that carry the same accepted
+`exchange_submit_execution_result_id`. It no longer allows an unrelated source
+packet with true submit markers to complete the live submit proof for a
+different exchange result.
+
+| Item | Evidence |
+| --- | --- |
+| Contract source guard | `runtime_live_cutover_readiness.py` adds `live_submit_proof_result_source_missing` to the `real_exchange_acceptance` reject reasons |
+| Verifier source guard | `runtime_live_closure_evidence_verifier.py` requires `live_submit_proof.result_source_matched=true` before real exchange acceptance can complete |
+| Packet builder source binding | `runtime_live_closure_evidence_packet.py` reads live submit markers only from packets matching the accepted `exchange_submit_execution_result_id` |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers` rejects a packet where submit markers exist only in an unrelated source |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `21 passed` for the live-closure verifier/packet/cutover tests; `125 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

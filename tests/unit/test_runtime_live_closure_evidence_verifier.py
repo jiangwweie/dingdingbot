@@ -29,6 +29,8 @@ def _official_packet(
         )
         packet["live_submit_proof"] = live_submit_proof or {
             "exchange_result_present": True,
+            "result_source_matched": True,
+            "result_source_count": 1,
             "live_exchange_called": True,
             "real_order_placed": True,
             "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
@@ -108,6 +110,8 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
             "evidence": evidence,
             "live_submit_proof": {
                 "exchange_result_present": True,
+                "result_source_matched": True,
+                "result_source_count": 1,
                 "live_exchange_called": True,
                 "real_order_placed": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
@@ -162,6 +166,8 @@ def test_live_closure_evidence_verifier_rejects_false_live_submit_proof():
             _complete_evidence(),
             live_submit_proof={
                 "exchange_result_present": True,
+                "result_source_matched": True,
+                "result_source_count": 1,
                 "live_exchange_called": False,
                 "real_order_placed": False,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
@@ -184,6 +190,8 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mism
             _complete_evidence(),
             live_submit_proof={
                 "exchange_result_present": True,
+                "result_source_matched": True,
+                "result_source_count": 1,
                 "live_exchange_called": True,
                 "real_order_placed": True,
                 "exchange_submit_execution_result_id": "other-exchange-result",
@@ -205,6 +213,38 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_result_id_mism
     assert real_exchange_stage["status"] == "rejected"
     assert real_exchange_stage["reject_reasons"] == [
         "live_submit_proof_result_id_mismatch"
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_live_submit_proof_without_source_match():
+    packet = verifier.build_live_closure_evidence_verification(
+        _official_packet(
+            _complete_evidence(),
+            live_submit_proof={
+                "exchange_result_present": True,
+                "result_source_matched": False,
+                "result_source_count": 0,
+                "live_exchange_called": True,
+                "real_order_placed": True,
+                "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+            },
+        ),
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["status"] == "blocked_live_closure_rejected"
+    assert packet["owner_state"] == "需要介入"
+    assert packet["completion"]["first_bounded_real_order_complete"] is False
+    assert packet["completion"]["real_order_closure_proven"] is False
+    assert packet["reject_reasons"] == ["live_submit_proof_result_source_missing"]
+    real_exchange_stage = next(
+        stage
+        for stage in packet["stages"]
+        if stage["name"] == "real_exchange_acceptance"
+    )
+    assert real_exchange_stage["status"] == "rejected"
+    assert real_exchange_stage["reject_reasons"] == [
+        "live_submit_proof_result_source_missing"
     ]
 
 

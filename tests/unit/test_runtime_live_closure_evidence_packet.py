@@ -59,6 +59,8 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
     assert packet["official_live_closure_evidence"] is True
     assert packet["live_submit_proof"] == {
         "exchange_result_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
         "live_exchange_called": True,
         "real_order_placed": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
@@ -95,6 +97,8 @@ def test_live_closure_evidence_packet_keeps_partial_official_packet_in_progress(
     assert packet["reject_reasons"] == []
     assert packet["live_submit_proof"] == {
         "exchange_result_present": False,
+        "result_source_matched": False,
+        "result_source_count": 0,
         "live_exchange_called": False,
         "real_order_placed": False,
     }
@@ -130,6 +134,8 @@ def test_live_closure_evidence_packet_rejects_controlled_local_cycle_shape():
     assert "real_order_not_placed" in packet["reject_reasons"]
     assert packet["live_submit_proof"] == {
         "exchange_result_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
         "live_exchange_called": False,
         "real_order_placed": False,
         "exchange_submit_execution_result_id": "exchange-result-1",
@@ -154,10 +160,48 @@ def test_live_closure_evidence_packet_rejects_exchange_result_without_live_marke
     assert "real_order_not_placed" in packet["reject_reasons"]
     assert packet["live_submit_proof"] == {
         "exchange_result_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
         "live_exchange_called": False,
         "real_order_placed": False,
         "exchange_submit_execution_result_id": "exchange-result-1",
     }
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers():
+    sources = _official_complete_sources()
+    sources[2]["safety_invariants"] = {}
+    sources.append(
+        {
+            "scope": "unrelated_submit_marker",
+            "status": "submitted",
+            "safety_invariants": {
+                "live_exchange_called": True,
+                "real_order_placed": True,
+            },
+        }
+    )
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["live_submit_proof"] == {
+        "exchange_result_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
+        "live_exchange_called": False,
+        "real_order_placed": False,
+        "exchange_submit_execution_result_id": "exchange-result-1",
+    }
+    assert "live_exchange_not_called" in packet["reject_reasons"]
+    assert "real_order_not_placed" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

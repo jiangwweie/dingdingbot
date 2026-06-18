@@ -40,6 +40,7 @@ GLOBAL_REJECT_REASONS = {
     "malformed_evidence_id",
     "live_submit_proof_missing",
     "live_submit_proof_result_id_mismatch",
+    "live_submit_proof_result_source_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
 }
@@ -259,6 +260,8 @@ def _reject_reasons(
                 != exchange_submit_execution_result_id
             ):
                 reasons.add("live_submit_proof_result_id_mismatch")
+            if proof.get("result_source_matched") is not True:
+                reasons.add("live_submit_proof_result_source_missing")
             if proof.get("live_exchange_called") is not True:
                 reasons.add("live_exchange_not_called")
             if proof.get("real_order_placed") is not True:

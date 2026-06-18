@@ -100,6 +100,17 @@ EVIDENCE_ALIASES: dict[str, tuple[str, ...]] = {
         "review_id",
     ),
 }
+EXCHANGE_RESULT_EVIDENCE_KEY = "exchange_submit_execution_result_id"
+LIVE_EXCHANGE_CALLED_KEYS = (
+    "live_exchange_called",
+    "exchange_write_called",
+    "exchange_called",
+)
+REAL_ORDER_PLACED_KEYS = (
+    "real_order_placed",
+    "places_order",
+    "exchange_order_submitted",
+)
 
 
 def build_live_closure_evidence_packet(
@@ -248,34 +259,52 @@ def _live_submit_proof(
     source_packets: list[dict[str, Any]],
     evidence: dict[str, Any],
 ) -> dict[str, Any]:
-    exchange_result_present = _present(evidence.get("exchange_submit_execution_result_id"))
+    exchange_submit_execution_result_id = _evidence_id(
+        evidence.get(EXCHANGE_RESULT_EVIDENCE_KEY)
+    )
+    exchange_result_present = exchange_submit_execution_result_id is not None
+    result_source_packets = _source_packets_for_evidence_id(
+        source_packets,
+        aliases=EVIDENCE_ALIASES[EXCHANGE_RESULT_EVIDENCE_KEY],
+        evidence_id=exchange_submit_execution_result_id,
+    )
     proof: dict[str, Any] = {
         "exchange_result_present": exchange_result_present,
+        "result_source_matched": bool(result_source_packets),
+        "result_source_count": len(result_source_packets),
         "live_exchange_called": _any_true(
-            source_packets,
-            (
-                "live_exchange_called",
-                "exchange_write_called",
-                "exchange_called",
-            ),
+            result_source_packets,
+            LIVE_EXCHANGE_CALLED_KEYS,
         ),
         "real_order_placed": _any_true(
-            source_packets,
-            (
-                "real_order_placed",
-                "places_order",
-                "exchange_order_submitted",
-            ),
+            result_source_packets,
+            REAL_ORDER_PLACED_KEYS,
         ),
     }
-    exchange_submit_execution_result_id = _evidence_id(
-        evidence.get("exchange_submit_execution_result_id")
-    )
     if exchange_submit_execution_result_id:
         proof["exchange_submit_execution_result_id"] = (
             exchange_submit_execution_result_id
         )
     return proof
+
+
+def _source_packets_for_evidence_id(
+    source_packets: list[dict[str, Any]],
+    *,
+    aliases: tuple[str, ...],
+    evidence_id: str | None,
+) -> list[dict[str, Any]]:
+    if not evidence_id:
+        return []
+    matched: list[dict[str, Any]] = []
+    for packet in source_packets:
+        packet_matches = any(
+            _evidence_id(_find_key(packet, alias)) == evidence_id
+            for alias in aliases
+        )
+        if packet_matches:
+            matched.append(packet)
+    return matched
 
 
 def _status_like_values(source_packets: list[dict[str, Any]]) -> list[str]:
