@@ -82,6 +82,11 @@ def test_post_submit_finalize_ready_after_no_fill_settlement():
     )
     assert packet.next_attempt_gate.requires_fresh_strategy_signal is True
     assert packet.next_attempt_gate.requires_fresh_authorization is True
+    assert packet.post_submit_reconciliation_evidence_id
+    assert packet.post_submit_finalize_complete is True
+    assert packet.post_submit_reconciliation_matched is True
+    assert packet.post_submit_budget_settled is True
+    assert packet.submit_outcome_review_recorded is True
     assert packet.exchange_called is False
     assert packet.order_lifecycle_called is False
 
@@ -118,6 +123,11 @@ def test_post_submit_finalize_blocks_next_attempt_when_active_position_slot_used
         RuntimePostSubmitFinalizeStatus.FINALIZED_NEXT_ATTEMPT_BLOCKED
     )
     assert packet.blockers == []
+    assert packet.post_submit_reconciliation_evidence_id
+    assert packet.post_submit_finalize_complete is True
+    assert packet.post_submit_reconciliation_matched is True
+    assert packet.post_submit_budget_settled is True
+    assert packet.submit_outcome_review_recorded is True
     assert "runtime_active_position_slot_in_use" in (
         packet.next_attempt_gate.blockers
     )

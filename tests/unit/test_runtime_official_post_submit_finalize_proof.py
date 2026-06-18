@@ -20,6 +20,13 @@ def test_official_post_submit_finalize_passes(tmp_path):
     assert report["post_submit_budget_settlement_id"].startswith(
         "runtime-post-submit-budget-settlement-"
     )
+    assert report["post_submit_reconciliation_evidence_id"].startswith(
+        "post-submit-reconciliation-"
+    )
+    assert report["post_submit_finalize_complete"] is True
+    assert report["post_submit_reconciliation_matched"] is True
+    assert report["post_submit_budget_settled"] is True
+    assert report["submit_outcome_review_recorded"] is True
 
     checks = report["checks"]
     assert checks["controlled_gateway_action_passed"] is True

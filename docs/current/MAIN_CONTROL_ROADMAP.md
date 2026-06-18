@@ -1591,6 +1591,25 @@ waiting-for-market state.
 | Monitor baseline | `expected_runtime_head=001bf2667a766279fba928215780ad94fa0d6370` |
 | Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Post-Submit Closure Truth Local Checkpoint
+
+The first bounded live-order closure chain now requires post-submit closure
+truth, not only post-submit evidence IDs. This keeps the official runtime path
+from treating a present `submit_outcome_review_id` or
+`post_submit_budget_settlement_id` as proof that finalize, reconciliation,
+budget settlement, and review actually completed.
+
+| Item | Result |
+| --- | --- |
+| Domain contract | `RuntimePostSubmitFinalizePacket` now emits `post_submit_reconciliation_evidence_id`, `post_submit_finalize_complete`, `post_submit_reconciliation_matched`, `post_submit_budget_settled`, and `submit_outcome_review_recorded` |
+| Dispatcher guard | `runtime_signal_watcher_resume_dispatcher.py` blocks `finalized_ready_for_next_attempt` when any close-loop truth field is absent or false |
+| Dry-run audit | `post_submit_closed_loop_evidence_guard` now covers missing reconciliation evidence plus false finalize/reconciliation/budget/review truth cases |
+| Official proof | `runtime_official_post_submit_finalize_proof.py` carries the same close-loop truth fields into its proof packet and top-level report |
+| Local validation | `python3 -m py_compile ...`; targeted tests `54 passed`; expanded post-submit/closure/readmodel tests `314 passed, 1 skipped`; dry-run audit `status=passed` |
+| Current owner progress | `status=not_complete_runtime_processing`, `non_market_gaps=0`, `P0.5=ready`, `owner_intervention_required=false`, `remote_interaction_count=0` for goal-progress; one L1 read-only daily-check refresh reported `remote_interaction_count=1` |
+| Deployment | Not deployed in this checkpoint; deploy only after a stage-worthy batch or explicit Owner request |
+| Safety proof | Local tests and one read-only cache refresh only; no server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

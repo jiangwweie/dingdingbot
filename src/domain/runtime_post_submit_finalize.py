@@ -81,6 +81,10 @@ class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
         default=None,
         max_length=540,
     )
+    post_submit_reconciliation_evidence_id: Optional[str] = Field(
+        default=None,
+        max_length=260,
+    )
     submit_outcome_review_id: Optional[str] = Field(default=None, max_length=620)
     post_submit_budget_settlement_id: Optional[str] = Field(
         default=None,
@@ -93,6 +97,10 @@ class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
         default=None,
         max_length=96,
     )
+    post_submit_finalize_complete: bool
+    post_submit_reconciliation_matched: bool
+    post_submit_budget_settled: bool
+    submit_outcome_review_recorded: bool
     consumed_authorization_replay_only: Literal[True] = True
     old_authorization_submit_retry_allowed: Literal[False] = False
     pre_submit_rehearsal_retry_allowed: Literal[False] = False
@@ -135,6 +143,23 @@ class RuntimePostSubmitFinalizePacket(RuntimePostSubmitFinalizeModel):
             and self.next_attempt_gate.status != RuntimeNextAttemptGateStatus.BLOCKED
         ):
             raise ValueError("blocked next-attempt finalize packet requires gate block")
+        if self.status != RuntimePostSubmitFinalizeStatus.BLOCKED:
+            required_truth = {
+                "post_submit_finalize_complete": self.post_submit_finalize_complete,
+                "post_submit_reconciliation_matched": (
+                    self.post_submit_reconciliation_matched
+                ),
+                "post_submit_budget_settled": self.post_submit_budget_settled,
+                "submit_outcome_review_recorded": self.submit_outcome_review_recorded,
+            }
+            missing_truth = [
+                name for name, value in required_truth.items() if value is not True
+            ]
+            if missing_truth:
+                raise ValueError(
+                    "finalized post-submit packet requires closed-loop truth: "
+                    + ", ".join(missing_truth)
+                )
         return self
 
 
@@ -240,6 +265,11 @@ def build_runtime_post_submit_finalize_packet(
             if exchange_submit_execution_result is not None
             else None
         ),
+        post_submit_reconciliation_evidence_id=(
+            submit_outcome_review.post_submit_reconciliation_evidence_id
+            if submit_outcome_review is not None
+            else None
+        ),
         submit_outcome_review_id=(
             submit_outcome_review.review_id
             if submit_outcome_review is not None
@@ -266,6 +296,17 @@ def build_runtime_post_submit_finalize_packet(
             if post_submit_budget_settlement is not None
             else None
         ),
+        post_submit_finalize_complete=status
+        != RuntimePostSubmitFinalizeStatus.BLOCKED,
+        post_submit_reconciliation_matched=_post_submit_reconciliation_matched(
+            submit_outcome_review
+        ),
+        post_submit_budget_settled=_post_submit_budget_settled(
+            post_submit_budget_settlement
+        ),
+        submit_outcome_review_recorded=_submit_outcome_review_recorded(
+            submit_outcome_review
+        ),
         next_attempt_gate=next_gate,
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
@@ -277,6 +318,58 @@ def build_runtime_post_submit_finalize_packet(
             "does_not_require_local_orders_created": True,
             "requires_fresh_signal_for_next_attempt": True,
         },
+    )
+
+
+def _post_submit_reconciliation_matched(
+    review: RuntimeExecutionSubmitOutcomeReview | None,
+) -> bool:
+    if review is None:
+        return False
+    if review.status != (
+        RuntimeExecutionSubmitOutcomeReviewStatus
+        .CLASSIFIED_READY_FOR_ATTEMPT_OUTCOME_POLICY
+    ):
+        return False
+    if review.blockers:
+        return False
+    if not review.post_submit_reconciliation_required:
+        return True
+    return (
+        bool(review.post_submit_reconciliation_evidence_id)
+        and review.post_submit_reconciliation_status == "clean"
+        and review.post_submit_reconciliation_severe_count == 0
+    )
+
+
+def _post_submit_budget_settled(
+    settlement: RuntimeExecutionPostSubmitBudgetSettlement | None,
+) -> bool:
+    if settlement is None:
+        return False
+    return (
+        settlement.status != RuntimeExecutionPostSubmitBudgetSettlementStatus.BLOCKED
+        and not settlement.blockers
+        and (
+            settlement.budget_released
+            or settlement.budget_consumption_recorded
+            or settlement.reserved_budget_remains_held
+        )
+    )
+
+
+def _submit_outcome_review_recorded(
+    review: RuntimeExecutionSubmitOutcomeReview | None,
+) -> bool:
+    if review is None:
+        return False
+    return (
+        review.status
+        == RuntimeExecutionSubmitOutcomeReviewStatus
+        .CLASSIFIED_READY_FOR_ATTEMPT_OUTCOME_POLICY
+        and review.attempt_outcome_policy_ready
+        and not review.blockers
+        and bool(review.review_id)
     )
 
 

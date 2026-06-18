@@ -456,9 +456,14 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "actual_dangerous_effects_absent": True,
     }
     assert set(closed_loop_guard["cases"]) == {
+        "missing_reconciliation_evidence",
         "missing_budget_settlement",
         "missing_review",
         "next_attempt_gate_not_ready",
+        "finalize_not_complete",
+        "reconciliation_not_matched",
+        "budget_not_settled",
+        "review_not_recorded",
     }
     for result in closed_loop_guard["cases"].values():
         assert result["packet"]["status"] == "post_submit_finalize_blocked"
@@ -466,6 +471,21 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         assert result["packet"]["owner_state"]["downgrade_mode"] == (
             "halt_new_entries_until_post_submit_settled"
         )
+    assert "post_submit_finalize_reconciliation_evidence_id_missing" in (
+        closed_loop_guard["cases"]["missing_reconciliation_evidence"]["blockers"]
+    )
+    assert "post_submit_finalize_not_complete" in (
+        closed_loop_guard["cases"]["finalize_not_complete"]["blockers"]
+    )
+    assert "post_submit_reconciliation_not_matched" in (
+        closed_loop_guard["cases"]["reconciliation_not_matched"]["blockers"]
+    )
+    assert "post_submit_budget_not_settled" in (
+        closed_loop_guard["cases"]["budget_not_settled"]["blockers"]
+    )
+    assert "submit_outcome_review_not_recorded" in (
+        closed_loop_guard["cases"]["review_not_recorded"]["blockers"]
+    )
     exit_outcome_matrix = closed_loop_guard["exit_outcome_matrix"]
     assert exit_outcome_matrix["status"] == "passed"
     assert exit_outcome_matrix["actual_exchange_write_called"] is False

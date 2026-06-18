@@ -3482,6 +3482,9 @@ def _post_submit_finalize_closed_loop_blockers(body: dict[str, Any]) -> list[str
         "exchange_submit_execution_result_id": (
             "post_submit_finalize_exchange_submit_execution_result_id_missing"
         ),
+        "post_submit_reconciliation_evidence_id": (
+            "post_submit_finalize_reconciliation_evidence_id_missing"
+        ),
         "post_submit_budget_settlement_id": (
             "post_submit_finalize_budget_settlement_id_missing"
         ),
@@ -3489,6 +3492,18 @@ def _post_submit_finalize_closed_loop_blockers(body: dict[str, Any]) -> list[str
     }
     for field, blocker in required_ids.items():
         if not _nonempty(body.get(field)):
+            blockers.append(blocker)
+
+    required_truth = {
+        "post_submit_finalize_complete": "post_submit_finalize_not_complete",
+        "post_submit_reconciliation_matched": (
+            "post_submit_reconciliation_not_matched"
+        ),
+        "post_submit_budget_settled": "post_submit_budget_not_settled",
+        "submit_outcome_review_recorded": "submit_outcome_review_not_recorded",
+    }
+    for field, blocker in required_truth.items():
+        if body.get(field) is not True:
             blockers.append(blocker)
 
     next_attempt_gate = _dict(body.get("next_attempt_gate"))

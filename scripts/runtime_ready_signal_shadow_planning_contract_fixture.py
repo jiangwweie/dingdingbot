@@ -470,7 +470,24 @@ def _post_submit_finalize_packet(
             "packet_id": "post-submit-rtf075-contract",
             "authorization_id": "auth-rtf075-consumed",
             "runtime_instance_id": runtime.runtime_instance_id,
+            "exchange_submit_execution_result_id": "submit-result-rtf075-contract",
+            "post_submit_reconciliation_evidence_id": (
+                "post-submit-reconciliation-rtf075-contract"
+            ),
+            "submit_outcome_review_id": "submit-review-rtf075-contract",
+            "post_submit_budget_settlement_id": (
+                "budget-settlement-rtf075-contract"
+            ),
             "status": "finalized_ready_for_next_attempt",
+            "submit_result_status": "exchange_submit_orders_submitted",
+            "submit_outcome_review_status": (
+                "classified_ready_for_attempt_outcome_policy"
+            ),
+            "post_submit_budget_settlement_status": "released_reserved_budget",
+            "post_submit_finalize_complete": True,
+            "post_submit_reconciliation_matched": True,
+            "post_submit_budget_settled": True,
+            "submit_outcome_review_recorded": True,
             "next_attempt_gate": {
                 "status": "ready_for_fresh_signal",
                 "runtime_instance_id": runtime.runtime_instance_id,

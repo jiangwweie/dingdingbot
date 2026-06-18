@@ -1422,8 +1422,15 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
                     "authorization_id": "auth-ready-1",
                     "runtime_instance_id": "runtime-mpg-1",
                     "exchange_submit_execution_result_id": "submit-result-1",
+                    "post_submit_reconciliation_evidence_id": (
+                        "reconciliation-1"
+                    ),
                     "submit_outcome_review_id": "review-1",
                     "post_submit_budget_settlement_id": "settlement-1",
+                    "post_submit_finalize_complete": True,
+                    "post_submit_reconciliation_matched": True,
+                    "post_submit_budget_settled": True,
+                    "submit_outcome_review_recorded": True,
                     "blockers": [],
                     "warnings": ["reservation_id_resolved_from_attempt_reservation"],
                     "next_attempt_gate": {
@@ -1592,6 +1599,13 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
     )
     assert "post_submit_finalize_budget_settlement_id_missing" in packet["blockers"]
     assert "post_submit_finalize_review_id_missing" in packet["blockers"]
+    assert "post_submit_finalize_reconciliation_evidence_id_missing" in (
+        packet["blockers"]
+    )
+    assert "post_submit_finalize_not_complete" in packet["blockers"]
+    assert "post_submit_reconciliation_not_matched" in packet["blockers"]
+    assert "post_submit_budget_not_settled" in packet["blockers"]
+    assert "submit_outcome_review_not_recorded" in packet["blockers"]
     assert packet["dispatch_action"] is None
     assert packet["owner_state"]["status"] == "post_submit_finalize_blocked"
     assert packet["owner_state"]["downgrade_mode"] == (

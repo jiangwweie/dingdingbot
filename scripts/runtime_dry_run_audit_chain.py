@@ -544,6 +544,13 @@ def _fresh_loop_packet(
                 "packet_id": "dry-run-post-submit-finalize-1",
                 "authorization_id": "dry-run-consumed-auth-1",
                 "runtime_instance_id": RUNTIME_ID,
+                "post_submit_reconciliation_evidence_id": (
+                    "dry-run-reconciliation-1"
+                ),
+                "post_submit_finalize_complete": True,
+                "post_submit_reconciliation_matched": True,
+                "post_submit_budget_settled": True,
+                "submit_outcome_review_recorded": True,
                 "status": "finalized_ready_for_next_attempt",
                 "next_attempt_gate": {
                     "status": "ready_for_fresh_signal",
@@ -1139,6 +1146,11 @@ def _fake_closed_loop_shape() -> dict[str, Any]:
             "status": "finalized_ready_for_next_attempt",
             "runtime_instance_id": RUNTIME_ID,
             "authorization_id": FRESH_AUTHORIZATION_ID,
+            "post_submit_reconciliation_evidence_id": "dry-run-reconciliation-1",
+            "post_submit_finalize_complete": True,
+            "post_submit_reconciliation_matched": True,
+            "post_submit_budget_settled": True,
+            "submit_outcome_review_recorded": True,
             "next_attempt_gate": {
                 "status": "ready_for_fresh_signal",
                 "blockers": [],
@@ -2572,8 +2584,15 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
                     "exchange_submit_execution_result_id": (
                         "dry-run-submit-result-1"
                     ),
+                    "post_submit_reconciliation_evidence_id": (
+                        "dry-run-reconciliation-1"
+                    ),
                     "submit_outcome_review_id": "dry-run-review-1",
                     "post_submit_budget_settlement_id": "dry-run-settlement-1",
+                    "post_submit_finalize_complete": True,
+                    "post_submit_reconciliation_matched": True,
+                    "post_submit_budget_settled": True,
+                    "submit_outcome_review_recorded": True,
                     "blockers": [],
                     "warnings": ["dry_run_non_executing_finalize_shape"],
                     "next_attempt_gate": {
@@ -2738,8 +2757,13 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
         "authorization_id": FRESH_AUTHORIZATION_ID,
         "runtime_instance_id": RUNTIME_ID,
         "exchange_submit_execution_result_id": "dry-run-submit-result-1",
+        "post_submit_reconciliation_evidence_id": "dry-run-reconciliation-1",
         "submit_outcome_review_id": "dry-run-review-1",
         "post_submit_budget_settlement_id": "dry-run-settlement-1",
+        "post_submit_finalize_complete": True,
+        "post_submit_reconciliation_matched": True,
+        "post_submit_budget_settled": True,
+        "submit_outcome_review_recorded": True,
         "blockers": [],
         "warnings": ["dry_run_non_executing_finalize_shape"],
         "next_attempt_gate": {
@@ -2756,6 +2780,11 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
         "order_created": False,
     }
     case_bodies = {
+        "missing_reconciliation_evidence": {
+            key: value
+            for key, value in base_finalize_body.items()
+            if key != "post_submit_reconciliation_evidence_id"
+        },
         "missing_budget_settlement": {
             key: value
             for key, value in base_finalize_body.items()
@@ -2772,6 +2801,22 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
                 "status": "blocked",
                 "blockers": ["review_required_before_next_action"],
             },
+        },
+        "finalize_not_complete": {
+            **base_finalize_body,
+            "post_submit_finalize_complete": False,
+        },
+        "reconciliation_not_matched": {
+            **base_finalize_body,
+            "post_submit_reconciliation_matched": False,
+        },
+        "budget_not_settled": {
+            **base_finalize_body,
+            "post_submit_budget_settled": False,
+        },
+        "review_not_recorded": {
+            **base_finalize_body,
+            "submit_outcome_review_recorded": False,
         },
     }
     results: dict[str, Any] = {}
@@ -3270,8 +3315,13 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
         "runtime_instance_id": RUNTIME_ID,
         "reservation_id": "dry-run-attempt-reservation-1",
         "exchange_submit_execution_result_id": "dry-run-submit-result-1",
+        "post_submit_reconciliation_evidence_id": "dry-run-reconciliation-1",
         "submit_outcome_review_id": "dry-run-review-1",
         "post_submit_budget_settlement_id": "dry-run-settlement-1",
+        "post_submit_finalize_complete": True,
+        "post_submit_reconciliation_matched": True,
+        "post_submit_budget_settled": True,
+        "submit_outcome_review_recorded": True,
         "blockers": [],
         "warnings": ["dry_run_non_executing_finalize_shape"],
         "next_attempt_gate": {
