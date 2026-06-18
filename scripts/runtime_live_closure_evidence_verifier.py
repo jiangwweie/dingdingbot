@@ -63,6 +63,10 @@ GLOBAL_REJECT_REASONS = {
     "post_submit_close_loop_proof_missing",
     "post_submit_finalize_result_source_missing",
     "post_submit_close_loop_result_source_missing",
+    "post_submit_finalize_not_complete",
+    "post_submit_reconciliation_not_matched",
+    "post_submit_budget_not_settled",
+    "submit_outcome_review_not_recorded",
     "runtime_boundary_proof_missing",
     "strategy_group_boundary_missing",
     "runtime_profile_boundary_missing",
@@ -98,6 +102,24 @@ POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
     "post_submit_budget_settlement_id",
     "submit_outcome_review_id",
 )
+POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS: dict[str, tuple[str, str]] = {
+    "runtime_post_submit_finalize_packet_id": (
+        "finalize_complete",
+        "post_submit_finalize_not_complete",
+    ),
+    "post_submit_reconciliation_evidence_id": (
+        "reconciliation_matched",
+        "post_submit_reconciliation_not_matched",
+    ),
+    "post_submit_budget_settlement_id": (
+        "budget_settled",
+        "post_submit_budget_not_settled",
+    ),
+    "submit_outcome_review_id": (
+        "review_recorded",
+        "submit_outcome_review_not_recorded",
+    ),
+}
 AUTHORIZATION_CHAIN_PROOF_ID_FIELDS = (
     "fresh_submit_authorization_id",
     "submit_authorization_id",
@@ -655,12 +677,15 @@ def _post_submit_close_loop_reject_reasons(
     }
     reject_reasons: set[str] = set()
     for key in present_keys:
-        if key in matched_keys and key not in missing_keys:
+        if key not in matched_keys or key in missing_keys:
+            if key == "runtime_post_submit_finalize_packet_id":
+                reject_reasons.add("post_submit_finalize_result_source_missing")
+            else:
+                reject_reasons.add("post_submit_close_loop_result_source_missing")
             continue
-        if key == "runtime_post_submit_finalize_packet_id":
-            reject_reasons.add("post_submit_finalize_result_source_missing")
-        else:
-            reject_reasons.add("post_submit_close_loop_result_source_missing")
+        truth_field, reject_reason = POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS[key]
+        if proof.get(truth_field) is not True:
+            reject_reasons.add(reject_reason)
     return reject_reasons
 
 

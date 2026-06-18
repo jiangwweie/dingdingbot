@@ -780,6 +780,24 @@ exchange submit execution result.
 | Verification | `27 passed` for the live-closure verifier/packet/cutover tests; `131 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Post-Submit Close-Loop Truth Checkpoint
+
+The first bounded live-order closure proof now requires post-submit evidence to
+prove the four close-loop outcomes, not only carry evidence ids bound to the
+accepted exchange submit result. A live closure cannot complete unless the
+source packets prove finalize completion, reconciliation match, budget
+settlement, and submit-outcome review recording.
+
+| Item | Evidence |
+| --- | --- |
+| Contract close-loop truth | `runtime_live_cutover_readiness.py` adds `post_submit_finalize_not_complete`, `post_submit_reconciliation_not_matched`, `post_submit_budget_not_settled`, and `submit_outcome_review_not_recorded` to the post-submit closure reject contract |
+| Packet builder close-loop truth | `runtime_live_closure_evidence_packet.py` emits `finalize_complete`, `reconciliation_matched`, `budget_settled`, and `review_recorded` inside `post_submit_close_loop_proof` |
+| Verifier close-loop truth guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when bound post-submit evidence is present but any close-loop truth field is not true |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_incomplete_post_submit_truth` and `test_live_closure_evidence_verifier_rejects_incomplete_post_submit_truth` reject ids-only post-submit closure evidence |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `85 passed` for the targeted live-closure/cutover/snapshot tests; `148 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
 ### 2026-06-18 Pre-Submit Authorization Chain Binding Checkpoint
 
 The live-closure evidence packet builder now requires the candidate,

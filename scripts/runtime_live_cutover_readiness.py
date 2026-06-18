@@ -273,6 +273,7 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "next_attempt_gate_missing",
             "post_submit_close_loop_proof_missing",
             "post_submit_finalize_result_source_missing",
+            "post_submit_finalize_not_complete",
             "runtime_boundary_proof_missing",
             *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
@@ -299,6 +300,9 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "review_missing",
             "post_submit_close_loop_proof_missing",
             "post_submit_close_loop_result_source_missing",
+            "post_submit_reconciliation_not_matched",
+            "post_submit_budget_not_settled",
+            "submit_outcome_review_not_recorded",
             "runtime_boundary_proof_missing",
             *RUNTIME_BOUNDARY_MISSING_REJECT_IF,
             "strategy_group_boundary_mismatch",
@@ -475,6 +479,10 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
             "post_submit_close_loop_proof_missing" in reject_reasons
             and "post_submit_finalize_result_source_missing" in reject_reasons
             and "post_submit_close_loop_result_source_missing" in reject_reasons
+            and "post_submit_finalize_not_complete" in reject_reasons
+            and "post_submit_reconciliation_not_matched" in reject_reasons
+            and "post_submit_budget_not_settled" in reject_reasons
+            and "submit_outcome_review_not_recorded" in reject_reasons
         ),
         "live_closure_contract_has_no_owner_chat_confirmation_stage": all(
             "owner_chat_confirmation" not in stage["name"]

@@ -67,6 +67,10 @@ def _official_complete_sources() -> list[dict]:
                 "submit_outcome_review_id": "review-1",
             },
             **BOUNDARY_FIELDS,
+            "post_submit_finalize_complete": True,
+            "post_submit_reconciliation_matched": True,
+            "post_submit_budget_settled": True,
+            "submit_outcome_review_recorded": True,
         },
     ]
 
@@ -143,6 +147,10 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
             "submit_outcome_review_id",
         ],
         "missing_source_match_keys": [],
+        "finalize_complete": True,
+        "reconciliation_matched": True,
+        "budget_settled": True,
+        "review_recorded": True,
     }
     assert packet["runtime_boundary_proof"] == {
         "source_packet_count": 4,
@@ -569,9 +577,56 @@ def test_live_closure_evidence_packet_rejects_unbound_post_submit_close_loop():
             "post_submit_budget_settlement_id",
             "submit_outcome_review_id",
         ],
+        "finalize_complete": False,
+        "reconciliation_matched": False,
+        "budget_settled": False,
+        "review_recorded": False,
     }
     assert "post_submit_finalize_result_source_missing" in packet["reject_reasons"]
     assert "post_submit_close_loop_result_source_missing" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_incomplete_post_submit_truth():
+    sources = _official_complete_sources()
+    sources[3]["post_submit_finalize_complete"] = False
+    sources[3]["post_submit_reconciliation_matched"] = False
+    sources[3]["post_submit_budget_settled"] = False
+    sources[3]["submit_outcome_review_recorded"] = False
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["post_submit_close_loop_proof"] == {
+        "exchange_submit_execution_result_id": "exchange-result-1",
+        "present_evidence_keys": [
+            "runtime_post_submit_finalize_packet_id",
+            "post_submit_reconciliation_evidence_id",
+            "post_submit_budget_settlement_id",
+            "submit_outcome_review_id",
+        ],
+        "matched_evidence_keys": [
+            "runtime_post_submit_finalize_packet_id",
+            "post_submit_reconciliation_evidence_id",
+            "post_submit_budget_settlement_id",
+            "submit_outcome_review_id",
+        ],
+        "missing_source_match_keys": [],
+        "finalize_complete": False,
+        "reconciliation_matched": False,
+        "budget_settled": False,
+        "review_recorded": False,
+    }
+    assert "post_submit_finalize_not_complete" in packet["reject_reasons"]
+    assert "post_submit_reconciliation_not_matched" in packet["reject_reasons"]
+    assert "post_submit_budget_not_settled" in packet["reject_reasons"]
+    assert "submit_outcome_review_not_recorded" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

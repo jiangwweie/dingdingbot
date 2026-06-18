@@ -121,6 +121,52 @@ POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
     "post_submit_budget_settlement_id",
     "submit_outcome_review_id",
 )
+POST_SUBMIT_FINALIZE_COMPLETE_KEYS = (
+    "post_submit_finalize_complete",
+    "runtime_post_submit_finalize_complete",
+    "finalize_complete",
+    "post_submit_finalized",
+)
+POST_SUBMIT_RECONCILIATION_MATCHED_KEYS = (
+    "post_submit_reconciliation_matched",
+    "reconciliation_matched",
+    "reconciliation_ok",
+    "order_reconciled",
+)
+POST_SUBMIT_BUDGET_SETTLED_KEYS = (
+    "post_submit_budget_settled",
+    "budget_settled",
+    "budget_settlement_complete",
+    "budget_released",
+)
+SUBMIT_OUTCOME_REVIEW_RECORDED_KEYS = (
+    "submit_outcome_review_recorded",
+    "review_recorded",
+    "submit_review_recorded",
+    "outcome_review_recorded",
+)
+POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "runtime_post_submit_finalize_packet_id": (
+        "finalize_complete",
+        POST_SUBMIT_FINALIZE_COMPLETE_KEYS,
+        "post_submit_finalize_not_complete",
+    ),
+    "post_submit_reconciliation_evidence_id": (
+        "reconciliation_matched",
+        POST_SUBMIT_RECONCILIATION_MATCHED_KEYS,
+        "post_submit_reconciliation_not_matched",
+    ),
+    "post_submit_budget_settlement_id": (
+        "budget_settled",
+        POST_SUBMIT_BUDGET_SETTLED_KEYS,
+        "post_submit_budget_not_settled",
+    ),
+    "submit_outcome_review_id": (
+        "review_recorded",
+        SUBMIT_OUTCOME_REVIEW_RECORDED_KEYS,
+        "submit_outcome_review_not_recorded",
+    ),
+}
 LIVE_EXCHANGE_CALLED_KEYS = (
     "live_exchange_called",
     "exchange_write_called",
@@ -462,6 +508,17 @@ def _derive_reject_reasons(
                 reasons.add("post_submit_finalize_result_source_missing")
             if close_loop_missing - {"runtime_post_submit_finalize_packet_id"}:
                 reasons.add("post_submit_close_loop_result_source_missing")
+        close_loop_matched = {
+            str(item)
+            for item in post_submit_close_loop_proof.get("matched_evidence_keys") or []
+        }
+        for key, (truth_field, _aliases, reject_reason) in (
+            POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS.items()
+        ):
+            if not _present(evidence.get(key)) or key not in close_loop_matched:
+                continue
+            if post_submit_close_loop_proof.get(truth_field) is not True:
+                reasons.add(reject_reason)
     if _runtime_boundary_required(evidence):
         for field in runtime_boundary_proof.get("missing_fields") or []:
             reason = RUNTIME_BOUNDARY_MISSING_REJECT_REASONS.get(str(field))
@@ -664,6 +721,12 @@ def _post_submit_close_loop_proof(
     present_keys: list[str] = []
     matched_keys: list[str] = []
     missing_source_match_keys: list[str] = []
+    truth_values = {
+        truth_field: False
+        for truth_field, _aliases, _reject_reason in (
+            POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS.values()
+        )
+    }
     for key in POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS:
         evidence_id = _evidence_id(evidence.get(key))
         if not evidence_id:
@@ -684,12 +747,17 @@ def _post_submit_close_loop_proof(
         )
         if result_bound:
             matched_keys.append(key)
+            truth_field, truth_aliases, _reject_reason = (
+                POST_SUBMIT_CLOSE_LOOP_TRUTH_CHECKS[key]
+            )
+            truth_values[truth_field] = _any_true(key_source_packets, truth_aliases)
         else:
             missing_source_match_keys.append(key)
     proof: dict[str, Any] = {
         "present_evidence_keys": present_keys,
         "matched_evidence_keys": matched_keys,
         "missing_source_match_keys": missing_source_match_keys,
+        **truth_values,
     }
     if exchange_submit_execution_result_id:
         proof["exchange_submit_execution_result_id"] = (

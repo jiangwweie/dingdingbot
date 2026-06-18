@@ -274,6 +274,10 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
                 "submit_outcome_review_id",
             ],
             "missing_source_match_keys": [],
+            "finalize_complete": True,
+            "reconciliation_matched": True,
+            "budget_settled": True,
+            "review_recorded": True,
         },
         "runtime_boundary_proof": {
             "source_packet_count": 4,

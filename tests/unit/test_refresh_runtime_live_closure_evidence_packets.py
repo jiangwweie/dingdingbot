@@ -66,6 +66,10 @@ def _official_complete_sources() -> list[dict]:
                 "submit_outcome_review_id": "review-1",
             },
             **BOUNDARY_FIELDS,
+            "post_submit_finalize_complete": True,
+            "post_submit_reconciliation_matched": True,
+            "post_submit_budget_settled": True,
+            "submit_outcome_review_recorded": True,
         },
     ]
 
