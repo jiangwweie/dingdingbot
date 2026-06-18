@@ -43,6 +43,9 @@ GLOBAL_REJECT_REASONS = {
     "live_submit_proof_result_source_missing",
     "live_exchange_not_called",
     "real_order_not_placed",
+    "exchange_native_protection_proof_missing",
+    "exchange_native_protection_result_id_mismatch",
+    "exchange_native_protection_result_source_missing",
     "post_submit_close_loop_proof_missing",
     "post_submit_finalize_result_source_missing",
     "post_submit_close_loop_result_source_missing",
@@ -54,12 +57,14 @@ POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
     "post_submit_budget_settlement_id",
     "submit_outcome_review_id",
 )
+PROTECTION_EVIDENCE_KEY = "exchange_native_hard_stop_order_id"
 LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
     "exchange_submit_execution_result_id",
     "durable_exchange_submit_execution_result_id",
     "execution_result_id",
     "result_id",
 )
+PROTECTION_PROOF_RESULT_ID_FIELDS = LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS
 
 
 def build_live_closure_evidence_verification(
@@ -280,6 +285,7 @@ def _reject_reasons(
             reasons.update(proof_reasons)
             live_submit_ready = not proof_reasons
     if source_ready and exchange_submit_execution_result_id and live_submit_ready:
+        reasons.update(_exchange_native_protection_reject_reasons(packet, evidence))
         reasons.update(_post_submit_close_loop_reject_reasons(packet, evidence))
     if _duplicate_required_evidence_ids(evidence, required_evidence_keys):
         reasons.add("duplicate_evidence_id")
@@ -335,6 +341,41 @@ def _required_evidence_id(value: Any) -> str | None:
 
 def _live_submit_proof_result_id(proof: dict[str, Any]) -> str | None:
     for field in LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS:
+        value = _required_evidence_id(proof.get(field))
+        if value:
+            return value
+    return None
+
+
+def _exchange_native_protection_reject_reasons(
+    packet: dict[str, Any],
+    evidence: dict[str, Any],
+) -> set[str]:
+    exchange_submit_execution_result_id = _required_evidence_id(
+        evidence.get("exchange_submit_execution_result_id")
+    )
+    if not exchange_submit_execution_result_id:
+        return set()
+    if not _required_evidence_id_present(evidence.get(PROTECTION_EVIDENCE_KEY)):
+        return set()
+    proof = packet.get("exchange_native_protection_proof")
+    if not isinstance(proof, dict):
+        return {"exchange_native_protection_proof_missing"}
+    reject_reasons: set[str] = set()
+    if (
+        _exchange_native_protection_proof_result_id(proof)
+        != exchange_submit_execution_result_id
+    ):
+        reject_reasons.add("exchange_native_protection_result_id_mismatch")
+    if proof.get("result_source_matched") is not True:
+        reject_reasons.add("exchange_native_protection_result_source_missing")
+    return reject_reasons
+
+
+def _exchange_native_protection_proof_result_id(
+    proof: dict[str, Any]
+) -> str | None:
+    for field in PROTECTION_PROOF_RESULT_ID_FIELDS:
         value = _required_evidence_id(proof.get(field))
         if value:
             return value

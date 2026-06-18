@@ -90,7 +90,9 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "live_closure_contract_requires_exchange_acceptance",
         "live_closure_contract_requires_live_submit_truth",
         "live_closure_contract_requires_exchange_native_protection",
+        "live_closure_contract_requires_exchange_native_protection_binding",
         "live_closure_contract_requires_post_submit_reconciliation",
+        "live_closure_contract_requires_post_submit_result_binding",
         "live_closure_contract_has_no_owner_chat_confirmation_stage",
     ],
     "same_tick_product_state_visibility": [
@@ -168,7 +170,13 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "name": "exchange_native_protection",
         "market_dependent": True,
         "required_evidence_keys": ["exchange_native_hard_stop_order_id"],
-        "reject_if": ["hard_stop_missing", "local_only_stop"],
+        "reject_if": [
+            "hard_stop_missing",
+            "local_only_stop",
+            "exchange_native_protection_proof_missing",
+            "exchange_native_protection_result_id_mismatch",
+            "exchange_native_protection_result_source_missing",
+        ],
         "next_action": "run_post_submit_finalize",
     },
     {
@@ -319,6 +327,11 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_requires_exchange_native_protection": (
             "exchange_native_hard_stop_order_id" in evidence_keys
+        ),
+        "live_closure_contract_requires_exchange_native_protection_binding": (
+            "exchange_native_protection_proof_missing" in reject_reasons
+            and "exchange_native_protection_result_id_mismatch" in reject_reasons
+            and "exchange_native_protection_result_source_missing" in reject_reasons
         ),
         "live_closure_contract_requires_post_submit_reconciliation": (
             "post_submit_reconciliation_evidence_id" in evidence_keys

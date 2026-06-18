@@ -219,6 +219,13 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
             "real_order_placed": True,
             "exchange_submit_execution_result_id": "exchange-result-1",
         },
+        "exchange_native_protection_proof": {
+            "hard_stop_present": True,
+            "result_source_matched": True,
+            "result_source_count": 1,
+            "exchange_submit_execution_result_id": "exchange-result-1",
+            "exchange_native_hard_stop_order_id": "hard-stop-1",
+        },
         "post_submit_close_loop_proof": {
             "exchange_submit_execution_result_id": "exchange-result-1",
             "present_evidence_keys": [

@@ -66,6 +66,13 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
         "real_order_placed": True,
         "exchange_submit_execution_result_id": "exchange-result-1",
     }
+    assert packet["exchange_native_protection_proof"] == {
+        "hard_stop_present": True,
+        "result_source_matched": True,
+        "result_source_count": 1,
+        "exchange_submit_execution_result_id": "exchange-result-1",
+        "exchange_native_hard_stop_order_id": "hard-stop-1",
+    }
     assert packet["post_submit_close_loop_proof"] == {
         "exchange_submit_execution_result_id": "exchange-result-1",
         "present_evidence_keys": [
@@ -219,6 +226,37 @@ def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers()
     }
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_unbound_exchange_native_protection():
+    sources = _official_complete_sources()
+    sources[2]["ids"].pop("exchange_native_hard_stop_order_id")
+    sources.append(
+        {
+            "scope": "unrelated_hard_stop_source",
+            "status": "protected",
+            "ids": {"exchange_native_hard_stop_order_id": "hard-stop-1"},
+        }
+    )
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["exchange_native_protection_proof"] == {
+        "hard_stop_present": True,
+        "result_source_matched": False,
+        "result_source_count": 1,
+        "exchange_submit_execution_result_id": "exchange-result-1",
+        "exchange_native_hard_stop_order_id": "hard-stop-1",
+    }
+    assert "exchange_native_protection_result_source_missing" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

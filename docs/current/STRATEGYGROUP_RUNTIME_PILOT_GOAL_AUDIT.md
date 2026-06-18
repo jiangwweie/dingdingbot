@@ -760,3 +760,22 @@ submit execution result.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `24 passed` for the live-closure verifier/packet/cutover tests; `128 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched runtime-monitor and live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Exchange-Native Protection Result Binding Checkpoint
+
+The live-closure evidence packet builder now requires exchange-native
+protection evidence to be source-bound to the same accepted
+`exchange_submit_execution_result_id`. A standalone
+`exchange_native_hard_stop_order_id` can no longer complete the
+first-live-order closure unless its source packet also references the same
+exchange submit execution result.
+
+| Item | Evidence |
+| --- | --- |
+| Contract protection binding | `runtime_live_cutover_readiness.py` adds `exchange_native_protection_proof_missing`, `exchange_native_protection_result_id_mismatch`, and `exchange_native_protection_result_source_missing` to the `exchange_native_protection` reject reasons |
+| Packet builder protection proof | `runtime_live_closure_evidence_packet.py` emits `exchange_native_protection_proof` with the hard-stop id, accepted exchange result id, source match status, and source count |
+| Verifier protection guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when exchange-native protection evidence is present but the protection proof is missing, mismatched, or not source-bound to the accepted exchange result |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_exchange_native_protection`, `test_live_closure_evidence_verifier_rejects_missing_exchange_native_protection_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_exchange_native_protection` reject isolated or unbound protection evidence |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `27 passed` for the live-closure verifier/packet/cutover tests; `131 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

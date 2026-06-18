@@ -35,6 +35,16 @@ def _official_packet(
             "real_order_placed": True,
             "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
         }
+        if "exchange_native_hard_stop_order_id" in evidence:
+            packet["exchange_native_protection_proof"] = {
+                "hard_stop_present": True,
+                "result_source_matched": True,
+                "result_source_count": 1,
+                "exchange_submit_execution_result_id": exchange_submit_execution_result_id,
+                "exchange_native_hard_stop_order_id": _evidence_id(
+                    evidence["exchange_native_hard_stop_order_id"]
+                ),
+            }
         close_loop_keys = [
             key
             for key in (
@@ -132,6 +142,15 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
                 "live_exchange_called": True,
                 "real_order_placed": True,
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+            },
+            "exchange_native_protection_proof": {
+                "hard_stop_present": True,
+                "result_source_matched": True,
+                "result_source_count": 1,
+                "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+                "exchange_native_hard_stop_order_id": (
+                    "exchange_native_hard_stop_order_id-1"
+                ),
             },
             "post_submit_close_loop_proof": {
                 "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
@@ -303,6 +322,54 @@ def test_live_closure_evidence_verifier_rejects_missing_post_submit_close_loop_p
     assert [stage["name"] for stage in rejected] == [
         "post_submit_finalize",
         "reconciliation_settlement_review",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_missing_exchange_native_protection_proof():
+    packet = _official_packet(_complete_evidence())
+    packet.pop("exchange_native_protection_proof")
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["owner_state"] == "需要介入"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["completion"]["real_order_closure_proven"] is False
+    assert verification["reject_reasons"] == [
+        "exchange_native_protection_proof_missing"
+    ]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "exchange_native_protection"
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_unbound_exchange_native_protection():
+    packet = _official_packet(_complete_evidence())
+    packet["exchange_native_protection_proof"] = {
+        "hard_stop_present": True,
+        "result_source_matched": False,
+        "result_source_count": 1,
+        "exchange_submit_execution_result_id": "exchange_submit_execution_result_id-1",
+        "exchange_native_hard_stop_order_id": "exchange_native_hard_stop_order_id-1",
+    }
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "exchange_native_protection_result_source_missing"
     ]
 
 

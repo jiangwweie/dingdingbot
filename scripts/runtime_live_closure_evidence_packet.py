@@ -101,6 +101,7 @@ EVIDENCE_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 EXCHANGE_RESULT_EVIDENCE_KEY = "exchange_submit_execution_result_id"
+PROTECTION_EVIDENCE_KEY = "exchange_native_hard_stop_order_id"
 POST_SUBMIT_CLOSE_LOOP_EVIDENCE_KEYS = (
     "runtime_post_submit_finalize_packet_id",
     "post_submit_reconciliation_evidence_id",
@@ -147,12 +148,17 @@ def build_live_closure_evidence_packet(
         source_packets=source_packets,
         evidence=evidence,
     )
+    exchange_native_protection_proof = _exchange_native_protection_proof(
+        source_packets=source_packets,
+        evidence=evidence,
+    )
     reject_reasons = _derive_reject_reasons(
         source_packets=source_packets,
         source_kind=source_kind,
         official_live_source=official_live_source,
         evidence=evidence,
         live_submit_proof=live_submit_proof,
+        exchange_native_protection_proof=exchange_native_protection_proof,
         post_submit_close_loop_proof=post_submit_close_loop_proof,
     )
     return {
@@ -167,6 +173,7 @@ def build_live_closure_evidence_packet(
         "present_evidence_keys": present_keys,
         "missing_evidence_keys": missing_keys,
         "live_submit_proof": live_submit_proof,
+        "exchange_native_protection_proof": exchange_native_protection_proof,
         "post_submit_close_loop_proof": post_submit_close_loop_proof,
         "reject_reasons": reject_reasons,
         "evidence": evidence,
@@ -231,6 +238,7 @@ def _derive_reject_reasons(
     official_live_source: bool,
     evidence: dict[str, Any],
     live_submit_proof: dict[str, Any],
+    exchange_native_protection_proof: dict[str, Any],
     post_submit_close_loop_proof: dict[str, Any],
 ) -> list[str]:
     reasons: set[str] = set()
@@ -264,6 +272,11 @@ def _derive_reject_reasons(
             reasons.add("controlled_in_memory_execution")
         if True in _bool_values(source_packets, "controlled_in_memory_execution_result_recorded"):
             reasons.add("controlled_in_memory_execution")
+        if (
+            _present(evidence.get(PROTECTION_EVIDENCE_KEY))
+            and not exchange_native_protection_proof.get("result_source_matched")
+        ):
+            reasons.add("exchange_native_protection_result_source_missing")
         close_loop_missing = set(
             str(item)
             for item in post_submit_close_loop_proof.get(
@@ -309,6 +322,46 @@ def _live_submit_proof(
     if exchange_submit_execution_result_id:
         proof["exchange_submit_execution_result_id"] = (
             exchange_submit_execution_result_id
+        )
+    return proof
+
+
+def _exchange_native_protection_proof(
+    *,
+    source_packets: list[dict[str, Any]],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    exchange_submit_execution_result_id = _evidence_id(
+        evidence.get(EXCHANGE_RESULT_EVIDENCE_KEY)
+    )
+    exchange_native_hard_stop_order_id = _evidence_id(
+        evidence.get(PROTECTION_EVIDENCE_KEY)
+    )
+    protection_source_packets = _source_packets_for_evidence_id(
+        source_packets,
+        aliases=EVIDENCE_ALIASES[PROTECTION_EVIDENCE_KEY],
+        evidence_id=exchange_native_hard_stop_order_id,
+    )
+    result_source_matched = bool(exchange_submit_execution_result_id) and any(
+        _packet_has_evidence_id(
+            packet,
+            aliases=EVIDENCE_ALIASES[EXCHANGE_RESULT_EVIDENCE_KEY],
+            evidence_id=exchange_submit_execution_result_id,
+        )
+        for packet in protection_source_packets
+    )
+    proof: dict[str, Any] = {
+        "hard_stop_present": exchange_native_hard_stop_order_id is not None,
+        "result_source_matched": result_source_matched,
+        "result_source_count": len(protection_source_packets),
+    }
+    if exchange_submit_execution_result_id:
+        proof["exchange_submit_execution_result_id"] = (
+            exchange_submit_execution_result_id
+        )
+    if exchange_native_hard_stop_order_id:
+        proof["exchange_native_hard_stop_order_id"] = (
+            exchange_native_hard_stop_order_id
         )
     return proof
 

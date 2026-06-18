@@ -1171,6 +1171,17 @@ def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
                         "exchange_submit_execution_result_id-1"
                     ),
                 },
+                "exchange_native_protection_proof": {
+                    "hard_stop_present": True,
+                    "result_source_matched": True,
+                    "result_source_count": 1,
+                    "exchange_submit_execution_result_id": (
+                        "exchange_submit_execution_result_id-1"
+                    ),
+                    "exchange_native_hard_stop_order_id": (
+                        "exchange_native_hard_stop_order_id-1"
+                    ),
+                },
                 "post_submit_close_loop_proof": {
                     "exchange_submit_execution_result_id": (
                         "exchange_submit_execution_result_id-1"
