@@ -866,6 +866,83 @@ def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     assert list(tmp_path.glob(".goal-progress.md.*.tmp")) == []
 
 
+def test_goal_progress_cli_auto_verifies_live_closure_evidence_packet(tmp_path):
+    module = _load_module()
+    daily_check_path = tmp_path / "daily-check.json"
+    baseline_path = tmp_path / "baseline.json"
+    tier_policy_path = tmp_path / "tier-policy.json"
+    live_cutover_path = tmp_path / "live-cutover.json"
+    live_closure_evidence_path = tmp_path / "live-closure-evidence.json"
+    missing_verification_path = tmp_path / "missing-verification.json"
+    output_json = tmp_path / "goal-progress.json"
+    output_md = tmp_path / "goal-progress.md"
+    daily_check = _daily_check(status="ready")
+    daily_check["checks"]["waiting_for_market"] = False
+    daily_check["owner_summary"]["visibility"]["category"] = "running"
+    daily_check_path.write_text(
+        json.dumps(daily_check, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    baseline_path.write_text(
+        json.dumps(_baseline(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    tier_policy_path.write_text(
+        json.dumps(_tier_policy(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    live_cutover = _live_cutover_readiness()
+    live_cutover_path.write_text(
+        json.dumps(live_cutover, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    evidence = {
+        key: f"{key}-1"
+        for key in live_cutover["live_closure_cutover_contract"][
+            "required_evidence_keys"
+        ]
+    }
+    live_closure_evidence_path.write_text(
+        json.dumps(
+            {
+                "source_kind": "official_live_closure_evidence",
+                "official_live_closure_evidence": True,
+                "evidence": evidence,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(
+        [
+            "--daily-check-json",
+            str(daily_check_path),
+            "--baseline-json",
+            str(baseline_path),
+            "--tier-policy-json",
+            str(tier_policy_path),
+            "--live-cutover-readiness-json",
+            str(live_cutover_path),
+            "--live-closure-evidence-verification-json",
+            str(missing_verification_path),
+            "--live-closure-evidence-json",
+            str(live_closure_evidence_path),
+            "--output-json",
+            str(output_json),
+            "--output-owner-progress",
+            str(output_md),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["live_closure_evidence_boundary"]["status"] == "complete"
+    assert payload["completion_boundary"]["goal_complete"] is True
+    assert payload["completion_boundary"]["reason"] == "first_bounded_real_order_closed"
+    assert not missing_verification_path.exists()
+
+
 def test_goal_progress_cli_auto_generates_live_cutover_readiness_when_missing(
     tmp_path,
 ):

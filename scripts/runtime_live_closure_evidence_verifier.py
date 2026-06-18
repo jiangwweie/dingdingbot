@@ -31,7 +31,14 @@ OFFICIAL_LIVE_SOURCE_KINDS = {
     "official_runtime_live_closure",
     "runtime_live_closure_evidence",
 }
-GLOBAL_REJECT_REASONS = {"official_live_closure_source_missing"}
+GLOBAL_REJECT_REASONS = {
+    "official_live_closure_source_missing",
+    "local_rehearsal_evidence",
+    "dry_run_or_rehearsal_evidence",
+    "controlled_in_memory_execution",
+    "live_exchange_not_called",
+    "real_order_not_placed",
+}
 
 
 def build_live_closure_evidence_verification(
@@ -44,12 +51,18 @@ def build_live_closure_evidence_verification(
     evidence = _evidence_map(evidence_packet)
     reject_reasons = _reject_reasons(evidence_packet)
     source_ready = _official_live_source_ready(evidence_packet)
-    stages = _stage_verifications(contract=contract, evidence=evidence, reject_reasons=reject_reasons)
+    stages = _stage_verifications(
+        contract=contract, evidence=evidence, reject_reasons=reject_reasons
+    )
     present_evidence_keys = [
-        key for key in _required_evidence_keys(contract) if _evidence_present(evidence.get(key))
+        key
+        for key in _required_evidence_keys(contract)
+        if _evidence_present(evidence.get(key))
     ]
     missing_evidence_keys = [
-        key for key in _required_evidence_keys(contract) if not _evidence_present(evidence.get(key))
+        key
+        for key in _required_evidence_keys(contract)
+        if not _evidence_present(evidence.get(key))
     ]
     if present_evidence_keys and not source_ready:
         reject_reasons = sorted(

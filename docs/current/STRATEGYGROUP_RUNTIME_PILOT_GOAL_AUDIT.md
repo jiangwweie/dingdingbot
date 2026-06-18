@@ -120,6 +120,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Live Closure Evidence Packet Builder
+
+The first bounded live-order closure path now has a local packet builder that
+collects official report evidence ids into the same 13-key contract consumed by
+the live closure verifier. This is the handoff layer between a future real
+fresh-signal execution run and the goal-progress completion boundary.
+
+| Item | Evidence |
+| --- | --- |
+| Packet builder | `scripts/runtime_live_closure_evidence_packet.py` |
+| Contract mapping | Maps official source reports into `live_watcher_signal_packet_id` through `submit_outcome_review_id` |
+| Goal-progress integration | `run_strategygroup_runtime_goal_progress_audit.py` can auto-verify `runtime-live-closure-evidence.json` when a separate verification packet is absent |
+| Anti-false-positive guard | Controlled, dry-run, rehearsal, no-live-exchange, or no-real-order evidence is emitted with reject reasons and cannot complete the first-live goal |
+| Boundary | The builder only reads existing JSON reports and writes a local packet; it does not create execution evidence and does not call FinalGate or Operation Layer |
+| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Live Closure Evidence Verifier
 
 The P0 first bounded live-order goal now has a local evidence verifier for the

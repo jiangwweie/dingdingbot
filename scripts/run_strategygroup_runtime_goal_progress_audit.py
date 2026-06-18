@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts import runtime_live_closure_evidence_verifier  # noqa: E402
 from scripts import runtime_live_cutover_readiness  # noqa: E402
 
 DEFAULT_BASELINE_JSON = REPO_ROOT / "docs/current/RUNTIME_MONITOR_BASELINE.json"
@@ -37,6 +38,11 @@ DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON = (
     / "output/strategygroup-runtime-pilot/live-closure-evidence/"
     "runtime-live-closure-evidence-verification.json"
 )
+DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON = (
+    REPO_ROOT
+    / "output/strategygroup-runtime-pilot/live-closure-evidence/"
+    "runtime-live-closure-evidence.json"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,14 +54,16 @@ def main(argv: list[str] | None = None) -> int:
         live_cutover_readiness = _build_live_cutover_readiness(
             Path(args.live_cutover_readiness_json)
         )
+    live_closure_evidence_verification = _live_closure_evidence_verification(
+        verification_json=Path(args.live_closure_evidence_verification_json),
+        evidence_json=Path(args.live_closure_evidence_json),
+    )
     report = build_goal_progress_report(
         daily_check=_read_json(Path(args.daily_check_json)),
         baseline=_read_json(Path(args.baseline_json)),
         tier_policy=_read_json(Path(args.tier_policy_json)),
         live_cutover_readiness=live_cutover_readiness,
-        live_closure_evidence_verification=_read_optional_json(
-            Path(args.live_closure_evidence_verification_json)
-        ),
+        live_closure_evidence_verification=live_closure_evidence_verification,
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -266,6 +274,7 @@ def build_goal_progress_report(
             "live_closure_evidence_verification_json": str(
                 DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON
             ),
+            "live_closure_evidence_json": str(DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON),
             "goal_progress_json": str(DEFAULT_GOAL_PROGRESS_JSON),
             "goal_progress_owner_progress_md": str(
                 DEFAULT_GOAL_PROGRESS_OWNER_PROGRESS_MD
@@ -575,6 +584,22 @@ def _live_cutover_readiness_boundary(
             str(item) for item in contract.get("required_evidence_keys") or []
         ],
     }
+
+
+def _live_closure_evidence_verification(
+    *,
+    verification_json: Path,
+    evidence_json: Path,
+) -> dict[str, Any] | None:
+    verification = _read_optional_json(verification_json)
+    if verification is not None:
+        return verification
+    evidence = _read_optional_json(evidence_json)
+    if evidence is None:
+        return None
+    return runtime_live_closure_evidence_verifier.build_live_closure_evidence_verification(
+        evidence
+    )
 
 
 def _live_closure_evidence_boundary(
@@ -1180,6 +1205,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--live-closure-evidence-verification-json",
         default=str(DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON),
+    )
+    parser.add_argument(
+        "--live-closure-evidence-json",
+        default=str(DEFAULT_LIVE_CLOSURE_EVIDENCE_JSON),
     )
     parser.add_argument(
         "--no-auto-live-cutover-readiness",
