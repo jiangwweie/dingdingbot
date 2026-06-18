@@ -15,12 +15,14 @@ def _official_complete_sources() -> list[dict]:
         {
             "scope": "strategy_group_live_facts_readiness",
             "status": "ready",
+            "signal_packet_id": "live-signal-packet-1",
             "required_facts_readiness_packet_id": "facts-ready-1",
         },
         {
             "scope": "official_entry_chain",
             "status": "official_operation_layer_submit_ready",
             "ids": {
+                "signal_packet_id": "live-signal-packet-1",
                 "order_candidate_id": "candidate-1",
                 "runtime_grant_id": "runtime-grant-1",
                 "fresh_submit_authorization_id": "fresh-auth-1",

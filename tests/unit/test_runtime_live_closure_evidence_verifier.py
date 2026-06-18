@@ -27,6 +27,8 @@ def _official_packet(
         exchange_submit_execution_result_id = _evidence_id(
             evidence["exchange_submit_execution_result_id"]
         )
+        if "live_watcher_signal_packet_id" in evidence:
+            packet["live_signal_chain_proof"] = _live_signal_chain_proof(evidence)
         if "fresh_submit_authorization_id" in evidence:
             packet["pre_submit_authorization_chain_proof"] = (
                 _pre_submit_authorization_chain_proof(evidence)
@@ -67,6 +69,25 @@ def _official_packet(
                 "missing_source_match_keys": [],
             }
     return packet
+
+
+def _live_signal_chain_proof(evidence: dict[str, object]) -> dict[str, object]:
+    live_signal_keys = [
+        key
+        for key in (
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        )
+        if key in evidence
+    ]
+    return {
+        "live_watcher_signal_packet_id": _evidence_id(
+            evidence["live_watcher_signal_packet_id"]
+        ),
+        "present_evidence_keys": live_signal_keys,
+        "matched_evidence_keys": live_signal_keys,
+        "missing_source_match_keys": [],
+    }
 
 
 def _pre_submit_authorization_chain_proof(
@@ -162,6 +183,18 @@ def test_live_closure_evidence_verifier_rejects_synthetic_or_disabled_live_proof
         {
             "source_kind": "official_live_closure_evidence",
             "evidence": evidence,
+            "live_signal_chain_proof": {
+                "live_watcher_signal_packet_id": "live_watcher_signal_packet_id-1",
+                "present_evidence_keys": [
+                    "required_facts_readiness_packet_id",
+                    "candidate_id",
+                ],
+                "matched_evidence_keys": [
+                    "required_facts_readiness_packet_id",
+                    "candidate_id",
+                ],
+                "missing_source_match_keys": [],
+            },
             "live_submit_proof": {
                 "exchange_result_present": True,
                 "result_source_matched": True,
@@ -241,6 +274,7 @@ def test_live_closure_evidence_verifier_rejects_missing_live_submit_proof():
         {
             "source_kind": "official_live_closure_evidence",
             "evidence": evidence,
+            "live_signal_chain_proof": _live_signal_chain_proof(evidence),
             "pre_submit_authorization_chain_proof": (
                 _pre_submit_authorization_chain_proof(evidence)
             ),
@@ -344,6 +378,58 @@ def test_live_closure_evidence_verifier_rejects_live_submit_proof_without_source
     assert real_exchange_stage["status"] == "rejected"
     assert real_exchange_stage["reject_reasons"] == [
         "live_submit_proof_result_source_missing"
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_missing_live_signal_chain_proof():
+    packet = _official_packet(_complete_evidence())
+    packet.pop("live_signal_chain_proof")
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["owner_state"] == "需要介入"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == ["live_signal_chain_proof_missing"]
+    rejected = [
+        stage
+        for stage in verification["stages"]
+        if stage["status"] == "rejected"
+    ]
+    assert [stage["name"] for stage in rejected] == [
+        "required_facts_ready",
+        "candidate_authorization_bound",
+    ]
+
+
+def test_live_closure_evidence_verifier_rejects_unbound_live_signal_chain():
+    packet = _official_packet(_complete_evidence())
+    packet["live_signal_chain_proof"] = {
+        "live_watcher_signal_packet_id": "live_watcher_signal_packet_id-1",
+        "present_evidence_keys": [
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        ],
+        "matched_evidence_keys": [],
+        "missing_source_match_keys": [
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        ],
+    }
+
+    verification = verifier.build_live_closure_evidence_verification(
+        packet,
+        generated_at_ms=1781755000000,
+    )
+
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+    assert verification["reject_reasons"] == [
+        "candidate_signal_source_missing",
+        "required_facts_signal_source_missing",
     ]
 
 

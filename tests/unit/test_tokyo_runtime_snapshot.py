@@ -211,6 +211,18 @@ def _complete_live_closure_evidence_packet(*, official: bool = True) -> dict:
         "status": "live_closure_evidence_packet_built",
         "source_kind": "official_live_closure_evidence" if official else "local_rehearsal",
         "official_live_closure_evidence": official,
+        "live_signal_chain_proof": {
+            "live_watcher_signal_packet_id": "live-signal-1",
+            "present_evidence_keys": [
+                "required_facts_readiness_packet_id",
+                "candidate_id",
+            ],
+            "matched_evidence_keys": [
+                "required_facts_readiness_packet_id",
+                "candidate_id",
+            ],
+            "missing_source_match_keys": [],
+        },
         "pre_submit_authorization_chain_proof": {
             "fresh_submit_authorization_id": "fresh-auth-1",
             "present_evidence_keys": [

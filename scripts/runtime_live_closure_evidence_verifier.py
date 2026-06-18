@@ -38,6 +38,10 @@ GLOBAL_REJECT_REASONS = {
     "controlled_in_memory_execution",
     "duplicate_evidence_id",
     "malformed_evidence_id",
+    "live_signal_chain_proof_missing",
+    "live_signal_chain_id_mismatch",
+    "required_facts_signal_source_missing",
+    "candidate_signal_source_missing",
     "pre_submit_authorization_chain_proof_missing",
     "pre_submit_authorization_chain_id_mismatch",
     "candidate_authorization_chain_source_missing",
@@ -56,6 +60,11 @@ GLOBAL_REJECT_REASONS = {
     "post_submit_close_loop_result_source_missing",
 }
 EVIDENCE_ID_FIELDS = ("id", "evidence_id", "packet_id", "ref_id", "reference_id")
+LIVE_SIGNAL_CHAIN_KEY = "live_watcher_signal_packet_id"
+LIVE_SIGNAL_CHAIN_EVIDENCE_KEYS = (
+    "required_facts_readiness_packet_id",
+    "candidate_id",
+)
 PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY = "fresh_submit_authorization_id"
 PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS = (
     "candidate_id",
@@ -74,6 +83,13 @@ AUTHORIZATION_CHAIN_PROOF_ID_FIELDS = (
     "submit_authorization_id",
     "authorization_id",
     "chain_authorization_id",
+)
+LIVE_SIGNAL_CHAIN_PROOF_ID_FIELDS = (
+    "live_watcher_signal_packet_id",
+    "watcher_signal_packet_id",
+    "signal_packet_id",
+    "signal_evaluation_id",
+    "evaluation_id",
 )
 PROTECTION_EVIDENCE_KEY = "exchange_native_hard_stop_order_id"
 LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS = (
@@ -280,6 +296,11 @@ def _reject_reasons(
     exchange_submit_execution_result_id = _required_evidence_id(
         evidence.get("exchange_submit_execution_result_id")
     )
+    live_watcher_signal_packet_id = _required_evidence_id(
+        evidence.get(LIVE_SIGNAL_CHAIN_KEY)
+    )
+    if source_ready and live_watcher_signal_packet_id:
+        reasons.update(_live_signal_chain_reject_reasons(packet, evidence))
     fresh_submit_authorization_id = _required_evidence_id(
         evidence.get(PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY)
     )
@@ -364,6 +385,54 @@ def _required_evidence_id(value: Any) -> str | None:
 
 def _live_submit_proof_result_id(proof: dict[str, Any]) -> str | None:
     for field in LIVE_SUBMIT_PROOF_RESULT_ID_FIELDS:
+        value = _required_evidence_id(proof.get(field))
+        if value:
+            return value
+    return None
+
+
+def _live_signal_chain_reject_reasons(
+    packet: dict[str, Any],
+    evidence: dict[str, Any],
+) -> set[str]:
+    live_watcher_signal_packet_id = _required_evidence_id(
+        evidence.get(LIVE_SIGNAL_CHAIN_KEY)
+    )
+    if not live_watcher_signal_packet_id:
+        return set()
+    present_keys = [
+        key
+        for key in LIVE_SIGNAL_CHAIN_EVIDENCE_KEYS
+        if _required_evidence_id_present(evidence.get(key))
+    ]
+    if not present_keys:
+        return set()
+    proof = packet.get("live_signal_chain_proof")
+    if not isinstance(proof, dict):
+        return {"live_signal_chain_proof_missing"}
+    reject_reasons: set[str] = set()
+    if _live_signal_chain_proof_id(proof) != live_watcher_signal_packet_id:
+        reject_reasons.add("live_signal_chain_id_mismatch")
+    matched_keys = {
+        str(item)
+        for item in proof.get("matched_evidence_keys") or []
+    }
+    missing_keys = {
+        str(item)
+        for item in proof.get("missing_source_match_keys") or []
+    }
+    for key in present_keys:
+        if key in matched_keys and key not in missing_keys:
+            continue
+        if key == "required_facts_readiness_packet_id":
+            reject_reasons.add("required_facts_signal_source_missing")
+        elif key == "candidate_id":
+            reject_reasons.add("candidate_signal_source_missing")
+    return reject_reasons
+
+
+def _live_signal_chain_proof_id(proof: dict[str, Any]) -> str | None:
+    for field in LIVE_SIGNAL_CHAIN_PROOF_ID_FIELDS:
         value = _required_evidence_id(proof.get(field))
         if value:
             return value

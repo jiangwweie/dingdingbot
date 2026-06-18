@@ -16,12 +16,14 @@ def _official_complete_sources() -> list[dict]:
         {
             "scope": "strategy_group_live_facts_readiness",
             "status": "ready",
+            "signal_packet_id": "live-signal-packet-1",
             "required_facts_readiness_packet_id": "facts-ready-1",
         },
         {
             "scope": "official_entry_chain",
             "status": "official_operation_layer_submit_ready",
             "ids": {
+                "signal_packet_id": "live-signal-packet-1",
                 "order_candidate_id": "candidate-1",
                 "runtime_grant_id": "runtime-grant-1",
                 "fresh_submit_authorization_id": "fresh-auth-1",
@@ -58,6 +60,18 @@ def test_live_closure_evidence_packet_builds_official_complete_packet():
     )
 
     assert packet["official_live_closure_evidence"] is True
+    assert packet["live_signal_chain_proof"] == {
+        "live_watcher_signal_packet_id": "live-signal-packet-1",
+        "present_evidence_keys": [
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        ],
+        "matched_evidence_keys": [
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        ],
+        "missing_source_match_keys": [],
+    }
     assert packet["pre_submit_authorization_chain_proof"] == {
         "fresh_submit_authorization_id": "fresh-auth-1",
         "present_evidence_keys": [
@@ -242,6 +256,37 @@ def test_live_closure_evidence_packet_rejects_cross_source_live_submit_markers()
     }
     assert "live_exchange_not_called" in packet["reject_reasons"]
     assert "real_order_not_placed" in packet["reject_reasons"]
+    verification = verifier.build_live_closure_evidence_verification(packet)
+    assert verification["status"] == "blocked_live_closure_rejected"
+    assert verification["completion"]["first_bounded_real_order_complete"] is False
+
+
+def test_live_closure_evidence_packet_rejects_unbound_live_signal_chain():
+    sources = _official_complete_sources()
+    sources[1].pop("signal_packet_id")
+    sources[2]["ids"].pop("signal_packet_id")
+
+    packet = packet_builder.build_live_closure_evidence_packet(
+        sources,
+        source_kind="official_live_closure_evidence",
+        official_live_source=True,
+        generated_at_ms=1781755000000,
+    )
+
+    assert packet["live_signal_chain_proof"] == {
+        "live_watcher_signal_packet_id": "live-signal-packet-1",
+        "present_evidence_keys": [
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        ],
+        "matched_evidence_keys": [],
+        "missing_source_match_keys": [
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+        ],
+    }
+    assert "required_facts_signal_source_missing" in packet["reject_reasons"]
+    assert "candidate_signal_source_missing" in packet["reject_reasons"]
     verification = verifier.build_live_closure_evidence_verification(packet)
     assert verification["status"] == "blocked_live_closure_rejected"
     assert verification["completion"]["first_bounded_real_order_complete"] is False

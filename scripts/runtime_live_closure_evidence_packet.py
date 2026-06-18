@@ -101,8 +101,13 @@ EVIDENCE_ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 EXCHANGE_RESULT_EVIDENCE_KEY = "exchange_submit_execution_result_id"
+LIVE_SIGNAL_CHAIN_KEY = "live_watcher_signal_packet_id"
 PRE_SUBMIT_AUTHORIZATION_CHAIN_KEY = "fresh_submit_authorization_id"
 PROTECTION_EVIDENCE_KEY = "exchange_native_hard_stop_order_id"
+LIVE_SIGNAL_CHAIN_EVIDENCE_KEYS = (
+    "required_facts_readiness_packet_id",
+    "candidate_id",
+)
 PRE_SUBMIT_AUTHORIZATION_CHAIN_EVIDENCE_KEYS = (
     "candidate_id",
     "runtime_grant_id",
@@ -147,6 +152,10 @@ def build_live_closure_evidence_packet(
     )
     present_keys = [key for key in required_keys if _present(evidence.get(key))]
     missing_keys = [key for key in required_keys if not _present(evidence.get(key))]
+    live_signal_chain_proof = _live_signal_chain_proof(
+        source_packets=source_packets,
+        evidence=evidence,
+    )
     pre_submit_authorization_chain_proof = _pre_submit_authorization_chain_proof(
         source_packets=source_packets,
         evidence=evidence,
@@ -168,6 +177,7 @@ def build_live_closure_evidence_packet(
         source_kind=source_kind,
         official_live_source=official_live_source,
         evidence=evidence,
+        live_signal_chain_proof=live_signal_chain_proof,
         pre_submit_authorization_chain_proof=(
             pre_submit_authorization_chain_proof
         ),
@@ -186,6 +196,7 @@ def build_live_closure_evidence_packet(
         "required_evidence_keys": required_keys,
         "present_evidence_keys": present_keys,
         "missing_evidence_keys": missing_keys,
+        "live_signal_chain_proof": live_signal_chain_proof,
         "pre_submit_authorization_chain_proof": (
             pre_submit_authorization_chain_proof
         ),
@@ -254,6 +265,7 @@ def _derive_reject_reasons(
     source_kind: str,
     official_live_source: bool,
     evidence: dict[str, Any],
+    live_signal_chain_proof: dict[str, Any],
     pre_submit_authorization_chain_proof: dict[str, Any],
     live_submit_proof: dict[str, Any],
     exchange_native_protection_proof: dict[str, Any],
@@ -273,6 +285,16 @@ def _derive_reject_reasons(
         reasons.add("dry_run_or_rehearsal_evidence")
     if any(token in status_text for token in ("controlled_", "in_memory_simulation")):
         reasons.add("controlled_in_memory_execution")
+
+    live_signal_chain_missing = set(
+        str(item)
+        for item in live_signal_chain_proof.get("missing_source_match_keys") or []
+    )
+    if live_signal_chain_missing:
+        if "required_facts_readiness_packet_id" in live_signal_chain_missing:
+            reasons.add("required_facts_signal_source_missing")
+        if "candidate_id" in live_signal_chain_missing:
+            reasons.add("candidate_signal_source_missing")
 
     authorization_chain_missing = set(
         str(item)
@@ -323,6 +345,47 @@ def _derive_reject_reasons(
             if close_loop_missing - {"runtime_post_submit_finalize_packet_id"}:
                 reasons.add("post_submit_close_loop_result_source_missing")
     return sorted(reasons)
+
+
+def _live_signal_chain_proof(
+    *,
+    source_packets: list[dict[str, Any]],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    live_watcher_signal_packet_id = _evidence_id(evidence.get(LIVE_SIGNAL_CHAIN_KEY))
+    present_keys: list[str] = []
+    matched_keys: list[str] = []
+    missing_source_match_keys: list[str] = []
+    for key in LIVE_SIGNAL_CHAIN_EVIDENCE_KEYS:
+        evidence_id = _evidence_id(evidence.get(key))
+        if not evidence_id:
+            continue
+        present_keys.append(key)
+        key_source_packets = _source_packets_for_evidence_id(
+            source_packets,
+            aliases=EVIDENCE_ALIASES[key],
+            evidence_id=evidence_id,
+        )
+        signal_bound = bool(live_watcher_signal_packet_id) and any(
+            _packet_has_evidence_id(
+                packet,
+                aliases=EVIDENCE_ALIASES[LIVE_SIGNAL_CHAIN_KEY],
+                evidence_id=live_watcher_signal_packet_id,
+            )
+            for packet in key_source_packets
+        )
+        if signal_bound:
+            matched_keys.append(key)
+        else:
+            missing_source_match_keys.append(key)
+    proof: dict[str, Any] = {
+        "present_evidence_keys": present_keys,
+        "matched_evidence_keys": matched_keys,
+        "missing_source_match_keys": missing_source_match_keys,
+    }
+    if live_watcher_signal_packet_id:
+        proof["live_watcher_signal_packet_id"] = live_watcher_signal_packet_id
+    return proof
 
 
 def _pre_submit_authorization_chain_proof(

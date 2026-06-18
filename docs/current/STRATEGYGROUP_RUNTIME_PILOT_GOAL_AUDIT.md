@@ -797,3 +797,20 @@ FinalGate or Operation Layer arm evidence from another authorization chain.
 | Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
 | Verification | `30 passed` for the live-closure verifier/packet/cutover tests; `134 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Live Signal Chain Binding Checkpoint
+
+The live-closure evidence packet builder now requires RequiredFacts readiness
+and candidate evidence to bind to the same `live_watcher_signal_packet_id`.
+This prevents a future real signal from being marked ready by stitching
+together stale facts or stale candidates from another signal window.
+
+| Item | Evidence |
+| --- | --- |
+| Contract signal binding | `runtime_live_cutover_readiness.py` adds `live_signal_chain_proof_missing`, `live_signal_chain_id_mismatch`, `required_facts_signal_source_missing`, and `candidate_signal_source_missing` to the relevant signal/facts/candidate stage reject reasons |
+| Packet builder signal proof | `runtime_live_closure_evidence_packet.py` emits `live_signal_chain_proof` anchored by `live_watcher_signal_packet_id` with present, matched, and missing source-match evidence keys |
+| Verifier signal guard | `runtime_live_closure_evidence_verifier.py` rejects complete live closure when RequiredFacts or candidate evidence is present but not bound to the same live signal |
+| Weak proof rejection | `test_live_closure_evidence_packet_rejects_unbound_live_signal_chain`, `test_live_closure_evidence_verifier_rejects_missing_live_signal_chain_proof`, and `test_live_closure_evidence_verifier_rejects_unbound_live_signal_chain` reject missing or stale-signal facts/candidate evidence |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `33 passed` for the live-closure verifier/packet/cutover tests; `137 passed` for the P0 runtime-monitor/live-closure/snapshot regression set; `py_compile` passed for the touched live-closure scripts |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

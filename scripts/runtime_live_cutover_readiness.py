@@ -87,6 +87,7 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "live_closure_contract_defined",
         "live_closure_contract_rejects_synthetic_signal",
         "live_closure_contract_rejects_disabled_smoke",
+        "live_closure_contract_requires_live_signal_chain_binding",
         "live_closure_contract_requires_pre_submit_authorization_chain_binding",
         "live_closure_contract_requires_exchange_acceptance",
         "live_closure_contract_requires_live_submit_truth",
@@ -120,7 +121,13 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
         "name": "required_facts_ready",
         "market_dependent": True,
         "required_evidence_keys": ["required_facts_readiness_packet_id"],
-        "reject_if": ["missing_fact", "stale_fact"],
+        "reject_if": [
+            "missing_fact",
+            "stale_fact",
+            "live_signal_chain_proof_missing",
+            "live_signal_chain_id_mismatch",
+            "required_facts_signal_source_missing",
+        ],
         "next_action": "prepare_candidate_authorization",
     },
     {
@@ -136,6 +143,9 @@ LIVE_CLOSURE_CUTOVER_STAGES = [
             "profile_boundary_mismatch",
             "pre_submit_authorization_chain_proof_missing",
             "pre_submit_authorization_chain_id_mismatch",
+            "live_signal_chain_proof_missing",
+            "live_signal_chain_id_mismatch",
+            "candidate_signal_source_missing",
             "candidate_authorization_chain_source_missing",
         ],
         "next_action": "run_action_time_finalgate",
@@ -330,6 +340,12 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
         ),
         "live_closure_contract_rejects_disabled_smoke": (
             "disabled_smoke_only" in reject_reasons
+        ),
+        "live_closure_contract_requires_live_signal_chain_binding": (
+            "live_signal_chain_proof_missing" in reject_reasons
+            and "live_signal_chain_id_mismatch" in reject_reasons
+            and "required_facts_signal_source_missing" in reject_reasons
+            and "candidate_signal_source_missing" in reject_reasons
         ),
         "live_closure_contract_requires_pre_submit_authorization_chain_binding": (
             "pre_submit_authorization_chain_proof_missing" in reject_reasons
