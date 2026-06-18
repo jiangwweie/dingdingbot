@@ -1629,6 +1629,40 @@ signal/candidate IDs, but they are not official closure sources.
 | Deployment | Stage-worthy because Tokyo currently regenerates a false official closure packet; deploy in the next bounded git apply only |
 | Safety proof | Local script/tests only in this checkpoint; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-18 Closure Truth And Source Filter Deploy Checkpoint
+
+The first bounded live-order closure fixes were deployed through the bounded git
+deploy path. The final postdeploy acceptance is `processing`, not complete:
+there is still no first bounded real-order closure proof, but non-market
+product gaps and blockers are cleared.
+
+| Item | Result |
+| --- | --- |
+| Post-submit closure truth deploy | `90ab93c1d3f9623ebc6a579d8ed5365cf4051df5` deployed as `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-90ab93c1-closure-truth` |
+| Source filter deploy | `a57f3c5e54f1de56a266c229d0051319901a7ef3` deployed as `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-a57f3c5e-live-closure-source-filter` |
+| Read-error tolerance deploy | `1eccf446c393ac58095a4174ec0730d8f53bf99b` deployed as `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-1eccf446-closure-read-error-tolerance` |
+| Final postdeploy acceptance | `output/tokyo-runtime-deploy-session-1eccf446.json`: `status=processing`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects runtime head `1eccf446c393ac58095a4174ec0730d8f53bf99b` |
+| Current P0 state | `processing`; first bounded real-order closure is not complete because real action-time FinalGate, official Operation Layer submit, exchange acceptance, and post-submit reconciliation remain market-dependent |
+| Safety proof | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Stale Wakeup Waiting Resume Local Checkpoint
+
+The low-noise monitor exposed a status-classification edge case: a stale
+`wakeup-packet.json` could still push the Owner progress layer into
+`fresh_signal_processing` even when the authoritative `latest-summary`,
+`post-signal-resume-pack`, `resume-dispatch-packet`, and pilot status had
+already returned to waiting-for-market semantics.
+
+| Item | Result |
+| --- | --- |
+| Root cause | `_current_status` still considered `wakeup-packet.json` fresh-chain statuses even after `_has_fresh_signal` had correctly returned `false` |
+| Fix | `build_strategygroup_runtime_goal_status.py` now returns `waiting_for_signal` when fresh signal is absent and authoritative latest/post-resume evidence is waiting; `wakeup` participates in chain progression only when `fresh_signal_present=true` |
+| Regression test | Added `test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market` |
+| Validation | `test_strategygroup_runtime_goal_status.py`: `32 passed`; monitor/readmodel suite: `122 passed`; expanded runtime monitor/deploy-session suite: `151 passed`; py_compile passed |
+| Deployment | Not deployed in this checkpoint; deploy only after batching or if the Tokyo monitor keeps emitting false processing from stale wakeup evidence |
+| Safety proof | Local code/tests/cache reads only; no server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

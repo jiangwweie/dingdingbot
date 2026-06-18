@@ -648,6 +648,81 @@ def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degr
     assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
 
 
+def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+    _write_base_packets(report_dir)
+    _write(
+        report_dir / "watcher-tick.json",
+        {
+            "status": "owner_attention_pending",
+            "blockers": [],
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "wakeup-packet.json",
+        {
+            "status": "runtime_signal_ready_for_non_executing_prepare",
+            "summary": {"runtime_ready_signal_count": 1},
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        },
+    )
+    _write(
+        report_dir / "strategygroup-runtime-pilot-status.json",
+        {
+            "scope": "strategygroup_runtime_pilot_status",
+            "status": "blocked_operator_review",
+            "blockers": [],
+            "owner_state": {
+                "blocker_class": "review_only_warning",
+                "status": "blocked_operator_review",
+            },
+            "watcher_scope_alignment": {
+                "status": "aligned",
+                "selected_strategy_group_id": "MPG-001",
+                "matched_runtime_signal_summaries": [
+                    {
+                        "runtime_instance_id": "runtime-mpg-1",
+                        "strategy_family_id": "MPG-001",
+                        "symbol": "MSTR/USDT:USDT",
+                        "side": "long",
+                        "status": "waiting_for_signal",
+                    }
+                ],
+                "out_of_scope_runtime_signal_summaries": [],
+            },
+        },
+    )
+
+    packet = build_goal_status_packet(
+        report_dir=report_dir,
+        release_manifest=_manifest(tmp_path / "manifest.json"),
+        expected_head=HEAD,
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["checks"]["fresh_signal_present"] is False
+    assert packet["checks"]["watcher_liveness_healthy"] is True
+    assert packet["owner_state"]["next_safe_checkpoint"] == (
+        "continue_watcher_observation"
+    )
+    matrix = _matrix_by_key(packet)
+    assert matrix["fresh_signal"]["status"] == "waiting_for_market"
+    assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
+
+
 def test_goal_status_surfaces_watcher_liveness_blockers(
     tmp_path: Path,
 ) -> None:

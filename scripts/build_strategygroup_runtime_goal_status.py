@@ -728,6 +728,32 @@ def _runtime_dry_run_missing_required_checks(checks: dict[str, Any]) -> list[str
 
 
 def _has_fresh_signal(packets: dict[str, dict[str, Any] | None]) -> bool:
+    authoritative_names = (
+        "latest_summary",
+        "post_signal_resume",
+        "resume_dispatch",
+        "pilot_status",
+    )
+    authoritative_statuses = {
+        _status(packets.get(name))
+        for name in authoritative_names
+        if packets.get(name) is not None
+    }
+    authoritative_ready_signal_count = sum(
+        _ready_runtime_signal_count(packets.get(name))
+        for name in authoritative_names
+    )
+    if (
+        authoritative_statuses
+        and not (authoritative_statuses & FRESH_SIGNAL_STATUSES)
+        and authoritative_ready_signal_count == 0
+        and all(
+            status in WAITING_STATUSES
+            or status in {"blocked_operator_review", "owner_attention_pending"}
+            for status in authoritative_statuses
+        )
+    ):
+        return False
     if any(
         _ready_runtime_signal_count(packets.get(name)) > 0
         for name in (
@@ -833,10 +859,8 @@ def _watcher_liveness_blockers(
         if status and status not in WAITING_STATUSES and status not in FRESH_SIGNAL_STATUSES:
             if status not in {"blocked", "owner_attention_pending"}:
                 blockers.append(f"{name}:unexpected_status:{status}")
-            elif not _non_waiting_blockers(packet) and not (
-                status == "owner_attention_pending" and fresh_signal_present
-            ):
-                blockers.append(f"{name}:status:{status}")
+            elif not _non_waiting_blockers(packet):
+                continue
     return sorted(set(blockers))
 
 
@@ -929,12 +953,25 @@ def _current_status(
         )
 
     dispatch_status = _dispatch_status(packets.get("resume_dispatch"))
+    latest_status = _status(packets.get("latest_summary"))
+    post_status = _status(packets.get("post_signal_resume"))
+    if not checks["fresh_signal_present"] and (
+        latest_status in WAITING_STATUSES or post_status in WAITING_STATUSES
+    ):
+        return (
+            "waiting_for_signal",
+            "continue_watcher_observation",
+            "系统健康，当前等待市场机会",
+            False,
+        )
+
     chain_statuses = {
         _status(packets.get("resume_dispatch")),
         _status(packets.get("post_signal_resume")),
         _status(packets.get("pilot_status")),
-        _status(packets.get("wakeup")),
     }
+    if checks["fresh_signal_present"]:
+        chain_statuses.add(_status(packets.get("wakeup")))
     chain_statuses.discard("")
 
     if dispatch_status == "official_operation_layer_evidence_ready":
@@ -974,8 +1011,6 @@ def _current_status(
             False,
         )
 
-    latest_status = _status(packets.get("latest_summary"))
-    post_status = _status(packets.get("post_signal_resume"))
     if latest_status in WAITING_STATUSES or post_status in WAITING_STATUSES:
         return (
             "waiting_for_signal",
