@@ -331,6 +331,51 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert tracks["p05_safety_invariants"]["status"] == "ready"
 
 
+def test_goal_progress_accepts_processing_owner_visibility_without_product_gap():
+    module = _load_module()
+    daily_check = _daily_check(status="processing")
+    daily_check["checks"]["waiting_for_market"] = False
+    daily_check["checks"]["runtime_live_closure_evidence_status"] = (
+        "live_closure_in_progress"
+    )
+    daily_check["owner_summary"]["state"] = "处理中"
+    daily_check["owner_summary"]["current_action"] = "等待系统完成收口"
+    daily_check["owner_summary"]["visibility"] = {
+        "category": "processing",
+        "label": "处理中",
+    }
+    daily_check["notification"] = {
+        "decision": "NOTIFY",
+        "reason": "processing",
+        "message": "系统正在处理真实订单闭环证据",
+        "owner_intervention_required": False,
+    }
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=_live_cutover_readiness(),
+    )
+
+    assert report["status"] == "processing"
+    assert report["owner_summary"]["state"] == "处理中"
+    assert report["owner_summary"]["current_action"] == "等待系统完成收口"
+    assert report["owner_summary"]["p0"] == "processing"
+    assert report["owner_summary"]["p05"] == "ready"
+    assert report["checks"]["product_gaps"] == []
+    assert report["completion_boundary"]["status"] == (
+        "not_complete_runtime_processing"
+    )
+    assert report["completion_boundary"]["reason"] == (
+        "first_bounded_live_order_closure_in_progress"
+    )
+    assert report["live_closure_evidence_boundary"]["status"] == "in_progress"
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p0_live_closure"]["status"] == "processing"
+    assert tracks["p05_owner_visibility_loop"]["status"] == "ready"
+
+
 def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
     module = _load_module()
     daily_check = _daily_check(status="ready")

@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         _print_human_report(report)
-    return 0 if report["status"] in {"ready", "waiting_for_market"} else 2
+    return 0 if report["status"] in {"ready", "waiting_for_market", "processing"} else 2
 
 
 def build_goal_progress_report(
@@ -213,7 +213,8 @@ def build_goal_progress_report(
         strategygroup_tier_boundary=strategygroup_tier_boundary,
     )
     live_closure_evidence_boundary = _live_closure_evidence_boundary(
-        live_closure_evidence_verification=live_closure_evidence_verification
+        live_closure_evidence_verification=live_closure_evidence_verification,
+        checks=checks,
     )
     boundary_product_gaps = []
     if entry_fast_chain_boundary["status"] != "ready":
@@ -241,10 +242,15 @@ def build_goal_progress_report(
         )
     product_gaps = _dedupe([*product_gaps, *boundary_product_gaps])
     status = "ready"
+    processing = daily_check.get("status") == "processing" or (
+        visibility.get("category") == "processing"
+    )
     if hard_blockers:
         status = "blocked"
     elif product_gaps or not p05_ready:
         status = "degraded"
+    elif processing and p05_ready:
+        status = "processing"
     elif waiting_for_market and p05_ready:
         status = "waiting_for_market"
     completion_boundary = _completion_boundary(
@@ -311,6 +317,8 @@ def build_goal_progress_report(
             "current_action": (
                 "继续等待市场机会"
                 if status == "waiting_for_market"
+                else "等待系统完成收口"
+                if status == "processing"
                 else "处理非市场收口缺口"
                 if status == "degraded"
                 else "处理目标进度阻断"
@@ -683,10 +691,46 @@ def _live_closure_evidence_verification(
 def _live_closure_evidence_boundary(
     *,
     live_closure_evidence_verification: dict[str, Any] | None,
+    checks: dict[str, Any],
 ) -> dict[str, Any]:
     if not live_closure_evidence_verification:
+        source_status = str(
+            checks.get("runtime_live_closure_evidence_status") or "not_generated"
+        )
+        reject_reasons = [
+            str(item)
+            for item in checks.get("runtime_live_closure_evidence_reject_reasons")
+            or []
+        ]
+        if source_status in {"live_closure_in_progress", "in_progress"}:
+            return {
+                "status": "in_progress",
+                "source_status": source_status,
+                "owner_state": "处理中",
+                "first_bounded_real_order_complete": False,
+                "real_order_closure_proven": False,
+                "completed_stage_count": 0,
+                "stage_count": 0,
+                "first_incomplete_stage": None,
+                "missing_evidence_keys": [],
+                "reject_reasons": [],
+            }
+        if source_status in {"blocked_live_closure_rejected", "rejected"}:
+            return {
+                "status": "rejected",
+                "source_status": source_status,
+                "owner_state": "工程状态暂不可用",
+                "first_bounded_real_order_complete": False,
+                "real_order_closure_proven": False,
+                "completed_stage_count": 0,
+                "stage_count": 0,
+                "first_incomplete_stage": None,
+                "missing_evidence_keys": [],
+                "reject_reasons": reject_reasons or ["rejected"],
+            }
         return {
             "status": "not_generated",
+            "source_status": source_status,
             "owner_state": "未生成",
             "first_bounded_real_order_complete": False,
             "real_order_closure_proven": False,
@@ -901,6 +945,9 @@ def _p0_track(
 ) -> dict[str, Any]:
     blockers = [str(item) for item in checks.get("blockers") or []]
     waiting = checks.get("waiting_for_market") is True or daily_check.get("status") == "waiting_for_market"
+    processing = daily_check.get("status") == "processing" or (
+        visibility.get("category") == "processing"
+    )
     if blockers:
         status = "blocked"
         owner_state = "安全或工程阻断"
@@ -909,6 +956,10 @@ def _p0_track(
         status = "waiting_for_market"
         owner_state = "等待市场机会"
         next_action = "等待 fresh signal 后推进官方链路"
+    elif processing:
+        status = "processing"
+        owner_state = str(owner.get("state") or visibility.get("label") or "处理中")
+        next_action = "等待系统完成收口"
     else:
         status = "ready"
         owner_state = str(owner.get("state") or visibility.get("label") or "运行中")
@@ -1038,6 +1089,7 @@ def _owner_visibility_track(
     blockers: list[str] = []
     allowed_categories = {
         "waiting_for_market",
+        "processing",
         "running",
         "engineering_blocker",
         "safety_blocker",
@@ -1109,6 +1161,8 @@ def _owner_state(status: str) -> str:
         return "暂不可用"
     if status == "degraded":
         return "非市场收口待处理"
+    if status == "processing":
+        return "处理中"
     return "运行中"
 
 
