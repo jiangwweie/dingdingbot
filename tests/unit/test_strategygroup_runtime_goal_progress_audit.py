@@ -333,6 +333,19 @@ def test_goal_progress_waiting_for_market_with_p05_ready():
     assert tracks["p05_safety_invariants"]["status"] == "ready"
 
 
+def test_goal_progress_default_live_cutover_path_uses_runtime_monitor_latest():
+    module = _load_module()
+
+    assert (
+        module.DEFAULT_LIVE_CUTOVER_READINESS_JSON.name
+        == "latest-live-cutover-readiness.json"
+    )
+    assert "runtime-monitor" in str(module.DEFAULT_LIVE_CUTOVER_READINESS_JSON)
+    assert "strategygroup-runtime-pilot/live-cutover-readiness" not in str(
+        module.DEFAULT_LIVE_CUTOVER_READINESS_JSON
+    )
+
+
 def test_goal_progress_accepts_processing_owner_visibility_without_product_gap():
     module = _load_module()
     daily_check = _daily_check(status="processing")

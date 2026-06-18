@@ -35,8 +35,7 @@ DEFAULT_P0_COMPLETION_AUDIT_JSON = (
     / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json"
 )
 DEFAULT_LIVE_CUTOVER_READINESS_JSON = (
-    REPO_ROOT
-    / "output/strategygroup-runtime-pilot/live-cutover-readiness/runtime-live-cutover-readiness.json"
+    REPO_ROOT / "output/runtime-monitor/latest-live-cutover-readiness.json"
 )
 DEFAULT_LIVE_CLOSURE_EVIDENCE_VERIFICATION_JSON = (
     REPO_ROOT
