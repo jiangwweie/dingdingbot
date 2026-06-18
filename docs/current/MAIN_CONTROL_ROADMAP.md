@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-17
+last_verified: 2026-06-18
 ---
 
 # Main Control Roadmap
@@ -11,7 +11,9 @@ last_verified: 2026-06-17
 
 This is the short planning table for the main runtime window.
 
-The main goal is still the StrategyGroup runtime pilot:
+The main goal is still the StrategyGroup runtime pilot, but the global project
+objective is profitability through a small-capital right-tail experimentation
+system:
 
 ```text
 Owner enables a StrategyGroup.
@@ -29,8 +31,74 @@ when a fresh signal exists and all official runtime gates pass.
 Dry-run audit and source readiness are support tracks for that target. Frontend
 UI work has been externalized and is no longer part of the main runtime goal.
 
-This file is not a research backlog, frontend design spec, or historical packet
-index.
+This file is not a frontend design spec or historical packet index. It is also
+not a generic research backlog: research, replay, paper/simulator, and cost-model
+work are included only when they help the system find opportunities, capture
+them through the official runtime path, preserve net edge after execution costs,
+and feed review decisions.
+
+## Profitability-Oriented Operating Frame
+
+The final business target is profit. The current engineering acceptance target
+is not "prove profit now"; it is to build repeatable capability for:
+
+```text
+find opportunity
+-> validate signal/facts/risk
+-> capture through official runtime path
+-> protect and reconcile
+-> measure cost and outcome
+-> promote, revise, park, or kill the StrategyGroup
+```
+
+Use this frame to prevent drift:
+
+| Layer | Purpose | Current project meaning |
+| --- | --- | --- |
+| Strategy Edge | Find regime-specific right-tail opportunities | Strategy research and handoff packs propose candidate edges |
+| Runtime Capture | Turn fresh signals into official bounded actions | Watcher, RequiredFacts, candidate/auth, FinalGate, Operation Layer |
+| Execution Quality | Preserve net edge after market friction | Fee, funding, slippage, filters, partial fill, retry and error taxonomy |
+| Risk Capital | Keep small-capital trials survivable | Probe, trial, promotion, parked, and kill capital states |
+| Learning Loop | Convert outcomes into better decisions | Review ledger, negative evidence, promote/revise/park/kill |
+
+Engineering work is mainline only when it improves one of those layers. Extra
+evidence fields, broad UI work, historical cleanup, or strategy expansion are
+not mainline unless they directly support this profitability-oriented loop.
+
+## No-Signal Progress Policy
+
+Healthy `waiting_for_market` is not a project blocker. It means the real market
+has not supplied an eligible fresh signal. During no-signal periods, the main
+runtime window should advance non-market-dependent proof lanes without touching
+real funds:
+
+| Lane | Purpose | Boundary |
+| --- | --- | --- |
+| Replay Lab | Re-run historical market or signal windows through current runtime behavior | Does not create real orders or pretend historical signals are live |
+| Synthetic Signal Factory | Generate fresh/stale/wrong-scope/missing-fact/conflict fixtures | Never feeds synthetic signals into real Operation Layer submit |
+| Paper/Simulator Operation Layer | Exercise order lifecycle branches without real funds | Uses non-live simulation only; testnet is not a mainline value layer |
+| Post-Submit Simulator | Exercise fill, partial fill, reject, protection failure, recovery, reconcile and settle branches | Non-executing simulation only |
+| Cost/Slippage/Funding Model | Estimate whether strategy gross edge can survive friction | Research/review input, not submit authority |
+| Tiny Real Loop | Validate real exchange friction, protection, reconciliation, and settlement with small bounded funds | Uses the official live path only after selected StrategyGroup, tiny risk, fresh signal, RequiredFacts, candidate/auth, FinalGate, and Operation Layer pass |
+
+The no-signal lanes exist to reduce the chance that a real market opportunity
+arrives before the runtime chain, execution shape, or review loop is ready.
+
+## Server Interaction and Deploy Discipline
+
+Routine review should prefer local cache and local progress artifacts. Tokyo
+deploys are intentionally less frequent now.
+
+| Action | Default policy |
+| --- | --- |
+| Routine monitor review | Use L0 cache/local progress first |
+| Fresh status refresh | At most one L1 read-only Tokyo snapshot when cache is stale or schema-stale |
+| Bounded Tokyo deploy apply | Only after a stage-worthy fix, deployable milestone, or explicit Owner request |
+| Real order path | Only after selected StrategyGroup, tiny risk, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass |
+| Frontend work | External project; not part of this runtime branch unless the Owner explicitly reopens it |
+
+Do not deploy for every small documentation change, planning adjustment, or
+local-only replay/simulation improvement.
 
 ## Current Audit Surface
 
@@ -48,6 +116,12 @@ market-dependent first real-order proof.
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
+| P0.5 Replay Lab | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | planned | Define replay event format and first MPG-001 historical replay report; no real submit |
+| P0.5 Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | planned | Build fixtures for the four real-order waiting keys and hard-safety branches |
+| P1 Paper/Simulator Operation Layer | Official submit lifecycle branches can be exercised without real funds | Main runtime window | planned | Use paper/simulator for lifecycle branches; do not make testnet a mainline milestone |
+| P1 Tiny Real Execution Quality | Exchange filters, fees, slippage, funding, protection, reconciliation, and settlement are validated with bounded real funds | Main runtime window | planned after P0 signal | Use the official live path, not testnet, for meaningful execution-quality evidence |
+| P1 Execution Cost Model | StrategyGroup review can compare gross edge against fee, funding, slippage, and filter costs | Strategy research window first, main runtime consumes summaries | planned | Define cost-survival fields in StrategyGroup review output |
+| P1 Capital Promotion Policy | Probe/trial/promotion/park/kill decisions are tied to evidence and small-capital bounds | Main runtime window | planned | Add promotion/demotion criteria after first tiny real loop and replay evidence |
 | P0 Standing Reduce-Only Recovery | Protection-failure recovery is standing-authorized but still gated by FinalGate and official Operation Layer | Main runtime window | deployed | Keep the old owner-close confirmation path out of the primary runtime handoff |
 | P0 Safe Tokyo Operations | Tokyo watcher stays current, alive, bounded, and auditable | Main runtime window | active | Verify watcher reports and bounded deploys after each runtime-code change |
 | P0 Goal Status Summary | Main goal loop can decide waiting vs processing vs deploy/safety blocker from one read-only packet | Main runtime window | active | Refresh `strategygroup-runtime-goal-status.json` after watcher ticks and use it before advancing real-order actions |

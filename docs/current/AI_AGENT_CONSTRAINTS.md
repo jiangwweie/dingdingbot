@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-06-15
+last_verified: 2026-06-18
 ---
 
 # AI Agent Constraints
@@ -25,6 +25,25 @@ Owner enables a StrategyGroup
 
 The Owner should not need to read raw evidence packets to operate the system.
 Evidence packets are audit artifacts under the Owner-facing control board.
+
+The global business objective is profitability through a small-capital
+right-tail StrategyGroup experimentation system. During the current stage,
+profit is not the engineering acceptance test. Engineering work is valuable
+only when it improves opportunity discovery, runtime capture, execution
+quality, risk-capital governance, or the review loop.
+
+When the system is healthy but waiting for market opportunity, agents should
+not treat `waiting_for_market` as a blocker. Non-market-dependent progress
+should happen through replay, synthetic signal fixtures, paper/simulator
+operation-layer lifecycle tests, post-submit simulation, and cost/slippage
+review inputs. Synthetic and replay signals must never be represented as live
+market signals and must never feed a real Operation Layer submit.
+
+Testnet is not a mainline value layer for this project. If used at all, it is a
+temporary API-shape diagnostic tool. Meaningful execution-quality evidence comes
+from the official live path with selected StrategyGroup, tiny risk, fresh
+signal, RequiredFacts, candidate/authorization evidence, action-time FinalGate,
+and official Operation Layer all passing.
 
 ## Owner Supervisor Constraint
 
@@ -96,6 +115,13 @@ This does not authorize FinalGate bypass, Operation Layer bypass, withdrawals,
 transfers, credential changes, live-profile expansion, order-sizing default
 expansion, stale-fact execution, missing protection, duplicate-submit risk, or
 conflicting active position/open order execution.
+
+Do not deploy to Tokyo for every small local change. Routine status review
+should use local cache or local goal-progress artifacts first, then at most one
+L1 read-only Tokyo snapshot when cache is missing, stale, or schema-stale.
+Bounded Tokyo deploy apply should be reserved for a stage-worthy fix,
+deployable milestone, fresh-signal unblock, safety regression repair, or
+explicit Owner request.
 
 ## StrategyGroup Runtime Bootstrap
 
