@@ -640,3 +640,19 @@ cutover contract.
 | Contract source | Expected closure stages and waiting keys come from the current live cutover readiness contract, not from synthetic live evidence |
 | Verification | `25 passed` for `tests/unit/test_strategygroup_runtime_goal_progress_audit.py`; `py_compile` passed for `run_strategygroup_runtime_goal_progress_audit.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Completion Proof Strictness Checkpoint
+
+The P0 completion audit now requires a complete live-closure evidence boundary,
+not merely a `status=complete` label, before it can mark the first bounded live
+order closure goal complete. Completion proof now requires true live closure
+flags, nonzero stage count, all closure stages completed, no missing evidence
+keys, and no reject reasons.
+
+| Item | Evidence |
+| --- | --- |
+| Completion proof strictness | `_live_closure_boundary_complete()` requires `first_bounded_real_order_complete=true`, `real_order_closure_proven=true`, `completed_stage_count == stage_count > 0`, no `missing_evidence_keys`, and no `reject_reasons` |
+| Weak proof rejection | `test_completion_audit_rejects_weak_complete_live_closure_boundary` rejects `live_closure_evidence_boundary={"status": "complete"}` when the detailed proof fields are absent |
+| Current audit output | `runtime_first_bounded_live_order_completion_audit.py --owner-progress`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `remote_interaction_count=0` |
+| Verification | `15 passed` for `tests/unit/test_runtime_first_bounded_live_order_completion_audit.py`; `py_compile` passed for `runtime_first_bounded_live_order_completion_audit.py` |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

@@ -161,10 +161,21 @@ def _live_closure_boundary(goal_progress: dict[str, Any]) -> dict[str, Any]:
 
 
 def _live_closure_boundary_complete(live_closure: dict[str, Any]) -> bool:
-    return str(live_closure.get("status") or "") in {
+    status_complete = str(live_closure.get("status") or "") in {
         "complete",
         "live_closure_complete",
     }
+    stage_count = int(live_closure.get("stage_count") or 0)
+    completed_stage_count = int(live_closure.get("completed_stage_count") or 0)
+    return (
+        status_complete
+        and live_closure.get("first_bounded_real_order_complete") is True
+        and live_closure.get("real_order_closure_proven") is True
+        and stage_count > 0
+        and completed_stage_count == stage_count
+        and not _list(live_closure.get("missing_evidence_keys"))
+        and not _list(live_closure.get("reject_reasons"))
+    )
 
 
 def _live_closure_boundary_rejected(live_closure: dict[str, Any]) -> bool:

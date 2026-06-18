@@ -333,6 +333,37 @@ def test_completion_audit_requires_fresh_signal_notification_policy_check():
 
 
 def test_completion_audit_can_mark_live_closure_complete():
+    live_closure = {
+        "status": "complete",
+        "first_bounded_real_order_complete": True,
+        "real_order_closure_proven": True,
+        "completed_stage_count": 9,
+        "stage_count": 9,
+        "missing_evidence_keys": [],
+        "reject_reasons": [],
+    }
+    report = script.build_completion_audit_report(
+        daily_check=_daily_check(),
+        goal_progress=_goal_progress(
+            completion_boundary={
+                "goal_complete": True,
+                "first_bounded_real_order_complete": True,
+                "real_order_closure_proven": True,
+            },
+            live_closure_evidence_boundary=live_closure,
+        ),
+        dry_run_audit=_dry_run_audit(),
+        live_cutover=_live_cutover(),
+        generated_at_utc="2026-06-18T00:00:00+00:00",
+    )
+
+    assert report["status"] == "complete"
+    assert report["goal_complete"] is True
+    assert report["non_market_gaps"] == []
+    assert report["market_dependent_remaining"] == []
+
+
+def test_completion_audit_rejects_weak_complete_live_closure_boundary():
     report = script.build_completion_audit_report(
         daily_check=_daily_check(),
         goal_progress=_goal_progress(
@@ -348,10 +379,14 @@ def test_completion_audit_can_mark_live_closure_complete():
         generated_at_utc="2026-06-18T00:00:00+00:00",
     )
 
-    assert report["status"] == "complete"
-    assert report["goal_complete"] is True
-    assert report["non_market_gaps"] == []
-    assert report["market_dependent_remaining"] == []
+    assert report["status"] == "needs_non_market_repair"
+    assert report["goal_complete"] is False
+    assert report["non_market_gaps"] == [
+        {
+            "requirement": "official live closure evidence boundary proves completion",
+            "missing_or_false": ["live_closure_evidence_boundary_complete"],
+        }
+    ]
 
 
 def test_completion_audit_rejects_completion_flags_without_live_closure_boundary():
