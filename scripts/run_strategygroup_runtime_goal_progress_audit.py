@@ -215,6 +215,7 @@ def build_goal_progress_report(
     live_closure_evidence_boundary = _live_closure_evidence_boundary(
         live_closure_evidence_verification=live_closure_evidence_verification,
         checks=checks,
+        live_cutover_readiness_boundary=live_cutover_readiness_boundary,
     )
     boundary_product_gaps = []
     if entry_fast_chain_boundary["status"] != "ready":
@@ -693,7 +694,25 @@ def _live_closure_evidence_boundary(
     *,
     live_closure_evidence_verification: dict[str, Any] | None,
     checks: dict[str, Any],
+    live_cutover_readiness_boundary: dict[str, Any],
 ) -> dict[str, Any]:
+    expected_stage_count = int(
+        live_cutover_readiness_boundary.get("live_closure_required_stage_count") or 0
+    )
+    expected_evidence_keys = [
+        str(item)
+        for item in live_cutover_readiness_boundary.get(
+            "live_closure_required_evidence_keys"
+        )
+        or []
+    ]
+    market_waiting_keys = [
+        str(item)
+        for item in live_cutover_readiness_boundary.get(
+            "market_dependent_waiting_keys"
+        )
+        or []
+    ]
     if not live_closure_evidence_verification:
         source_status = str(
             checks.get("runtime_live_closure_evidence_status") or "not_generated"
@@ -724,8 +743,15 @@ def _live_closure_evidence_boundary(
                     "first_bounded_real_order_complete": False,
                     "real_order_closure_proven": False,
                     "completed_stage_count": 0,
-                    "stage_count": 0,
-                    "first_incomplete_stage": None,
+                    "stage_count": expected_stage_count,
+                    "expected_stage_count": expected_stage_count,
+                    "first_incomplete_stage": (
+                        market_waiting_keys[0]
+                        if market_waiting_keys
+                        else "fresh_signal"
+                    ),
+                    "expected_evidence_keys": expected_evidence_keys,
+                    "market_dependent_waiting_keys": market_waiting_keys,
                     "missing_evidence_keys": [],
                     "reject_reasons": [],
                 }
@@ -738,8 +764,11 @@ def _live_closure_evidence_boundary(
                 "first_bounded_real_order_complete": False,
                 "real_order_closure_proven": False,
                 "completed_stage_count": 0,
-                "stage_count": 0,
+                "stage_count": expected_stage_count,
+                "expected_stage_count": expected_stage_count,
                 "first_incomplete_stage": None,
+                "expected_evidence_keys": expected_evidence_keys,
+                "market_dependent_waiting_keys": market_waiting_keys,
                 "missing_evidence_keys": [],
                 "reject_reasons": [],
             }
@@ -753,8 +782,11 @@ def _live_closure_evidence_boundary(
                 "first_bounded_real_order_complete": False,
                 "real_order_closure_proven": False,
                 "completed_stage_count": 0,
-                "stage_count": 0,
+                "stage_count": expected_stage_count,
+                "expected_stage_count": expected_stage_count,
                 "first_incomplete_stage": None,
+                "expected_evidence_keys": expected_evidence_keys,
+                "market_dependent_waiting_keys": market_waiting_keys,
                 "missing_evidence_keys": [],
                 "reject_reasons": reject_reasons or ["rejected"],
             }
@@ -767,8 +799,11 @@ def _live_closure_evidence_boundary(
             "first_bounded_real_order_complete": False,
             "real_order_closure_proven": False,
             "completed_stage_count": 0,
-            "stage_count": 0,
+            "stage_count": expected_stage_count,
+            "expected_stage_count": expected_stage_count,
             "first_incomplete_stage": None,
+            "expected_evidence_keys": expected_evidence_keys,
+            "market_dependent_waiting_keys": market_waiting_keys,
             "missing_evidence_keys": [],
             "reject_reasons": [],
         }
@@ -800,9 +835,12 @@ def _live_closure_evidence_boundary(
             live_closure_evidence_verification.get("completed_stage_count") or 0
         ),
         "stage_count": int(live_closure_evidence_verification.get("stage_count") or 0),
+        "expected_stage_count": expected_stage_count,
         "first_incomplete_stage": live_closure_evidence_verification.get(
             "first_incomplete_stage"
         ),
+        "expected_evidence_keys": expected_evidence_keys,
+        "market_dependent_waiting_keys": market_waiting_keys,
         "missing_evidence_keys": [
             str(item)
             for item in live_closure_evidence_verification.get("missing_evidence_keys")
@@ -1346,8 +1384,17 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         f"- Normalization reason: {live_closure.get('normalization_reason') or 'none'}",
         "- Completed stages: "
         + f"{live_closure['completed_stage_count']}/{live_closure['stage_count']}",
+        "- Expected stages: "
+        + str(live_closure.get("expected_stage_count") or 0),
         "- First incomplete stage: "
         + str(live_closure["first_incomplete_stage"] or "none"),
+        "- Market-dependent waiting keys: "
+        + _list_or_none(
+            [
+                str(item)
+                for item in live_closure.get("market_dependent_waiting_keys") or []
+            ]
+        ),
         "- Missing evidence keys: "
         + _list_or_none(
             [str(item) for item in live_closure["missing_evidence_keys"]]

@@ -623,3 +623,20 @@ real order from prose-only Owner progress text.
 | Current audit output | `output/runtime-monitor/latest-p0-live-order-closure-completion-audit.json`: `status=not_complete_waiting_for_market`, `goal_complete=false`, `non_market_gaps=[]`, `market_dependent_remaining=5`, `interaction.remote_interaction_count=0` |
 | Verification | `40 passed` for P0 completion audit, goal progress audit, and daily-check cache-read coverage; `py_compile` passed for `runtime_first_bounded_live_order_completion_audit.py` |
 | Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-18 Live Closure Waiting-State Clarity Checkpoint
+
+The P0 first bounded live-order closure target remains active and waiting for a
+real fresh selected StrategyGroup signal. The local goal-progress report now
+keeps the live closure evidence boundary explicit while waiting for market:
+instead of showing `0/0` closure stages, it reports `0/9`, the first incomplete
+stage as `fresh_signal`, and the market-dependent waiting keys from the live
+cutover contract.
+
+| Item | Evidence |
+| --- | --- |
+| Owner progress clarity | `run_strategygroup_runtime_goal_progress_audit.py --owner-progress` reports `Live Closure Evidence Boundary` with `Completed stages: 0/9`, `Expected stages: 9`, and `First incomplete stage: fresh_signal` |
+| P0 state | `status=waiting_for_market`, `P0.5=ready`, `blockers=[]`, `product_gaps=[]`, `remote_interaction_count=0` |
+| Contract source | Expected closure stages and waiting keys come from the current live cutover readiness contract, not from synthetic live evidence |
+| Verification | `25 passed` for `tests/unit/test_strategygroup_runtime_goal_progress_audit.py`; `py_compile` passed for `run_strategygroup_runtime_goal_progress_audit.py` |
+| Safety | This is local audit/reporting work only. It did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |

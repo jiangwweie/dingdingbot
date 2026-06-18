@@ -434,6 +434,20 @@ def test_goal_progress_normalizes_no_signal_live_closure_residual_to_waiting(tmp
     assert report["live_closure_evidence_boundary"]["normalization_reason"] == (
         "waiting_for_market_no_fresh_signal"
     )
+    assert report["live_closure_evidence_boundary"]["completed_stage_count"] == 0
+    assert report["live_closure_evidence_boundary"]["stage_count"] == 9
+    assert report["live_closure_evidence_boundary"]["expected_stage_count"] == 9
+    assert report["live_closure_evidence_boundary"]["first_incomplete_stage"] == (
+        "fresh_signal"
+    )
+    assert report["live_closure_evidence_boundary"]["market_dependent_waiting_keys"] == [
+        "fresh_signal",
+        "candidate_authorization",
+        "action_time_finalgate",
+        "official_operation_layer",
+        "real_exchange_acceptance",
+        "post_submit_real_reconciliation",
+    ]
     assert report["p0_completion_audit_boundary"]["status"] == (
         "not_complete_waiting_for_market"
     )
@@ -447,12 +461,16 @@ def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
     daily_check = _daily_check(status="ready")
     daily_check["checks"]["waiting_for_market"] = False
     daily_check["owner_summary"]["visibility"]["category"] = "running"
+    live_cutover = _live_cutover_readiness()
+    expected_evidence_keys = live_cutover["live_closure_cutover_contract"][
+        "required_evidence_keys"
+    ]
 
     report = module.build_goal_progress_report(
         daily_check=daily_check,
         baseline=_baseline(),
         tier_policy=_tier_policy(),
-        live_cutover_readiness=_live_cutover_readiness(),
+        live_cutover_readiness=live_cutover,
         live_closure_evidence_verification=_live_closure_evidence_verification(),
     )
 
@@ -473,7 +491,17 @@ def test_goal_progress_marks_complete_from_live_closure_evidence_verification():
         "real_order_closure_proven": True,
         "completed_stage_count": 9,
         "stage_count": 9,
+        "expected_stage_count": 9,
         "first_incomplete_stage": None,
+        "expected_evidence_keys": expected_evidence_keys,
+        "market_dependent_waiting_keys": [
+            "fresh_signal",
+            "candidate_authorization",
+            "action_time_finalgate",
+            "official_operation_layer",
+            "real_exchange_acceptance",
+            "post_submit_real_reconciliation",
+        ],
         "missing_evidence_keys": [],
         "reject_reasons": [],
     }
