@@ -24,8 +24,8 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` |
-| Latest deployed runtime head | `ea34594badc066bc0c714d02c385341106665e07` |
-| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-ea34594b-watch-ready-normalization` |
+| Latest deployed runtime head | `57676b728e1ecc950c9b74fd14faad2c5cf093aa` |
+| Latest Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-57676b72-live-closure-refresh-hook` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
@@ -119,6 +119,22 @@ fresh selected StrategyGroup signal exists.
 | disabled smoke treated as real execution proof | false |
 
 ## Latest Checkpoint
+
+### 2026-06-18 Live Closure Refresh Hook Tokyo Deploy
+
+The product-state live closure refresh hook was pushed and deployed to Tokyo
+as a bounded runtime-governance release. Postdeploy acceptance reports healthy
+waiting-for-market with no blockers or product gaps.
+
+| Item | Evidence |
+| --- | --- |
+| Local commit | `57676b72 feat(runtime): hook live closure refresh into product state` |
+| Tokyo release | `/home/ubuntu/brc-deploy/releases/brc-runtime-governance-57676b72-live-closure-refresh-hook` |
+| Deploy dry-run | `output/tokyo-git-deploy-dry-run-57676b72.json`: `status=dry_run_ready`, `blockers=[]`, `interaction.level=L1_deploy_plan_only`, `remote_interaction_count=0` |
+| Deploy apply | `output/tokyo-git-deploy-apply-57676b72.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
+| Postdeploy acceptance | `output/tokyo-runtime-deploy-session-57676b72.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` including one L1 postdeploy daily check |
+| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `57676b728e1ecc950c9b74fd14faad2c5cf093aa` |
+| Safety | Bounded deploy only; no FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
 ### 2026-06-18 Live Closure Evidence Product-State Refresh Hook
 
@@ -454,7 +470,7 @@ regression guard, and standing recovery proof isolation guard.
 | Deploy dry-run | `output/tokyo-git-deploy-dry-run-18c30ae0.json`: `status=dry_run_ready`, `blockers=[]`, `interaction.level=L1_deploy_plan_only`, `remote_interaction_count=0` |
 | Deploy apply | `output/tokyo-git-deploy-apply-18c30ae0.json`: `status=applied`, `interaction.level=L3_bounded_deploy_apply`, `remote_interaction_count=7`, `mutates_remote_files=true`, `calls_exchange_write=false`, `places_order=false` |
 | Postdeploy acceptance | `output/tokyo-runtime-deploy-session-18c30ae0.json`: `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]`, `warnings=[]`, total remote interactions `8` including one L1 postdeploy daily check |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `18c30ae03dc735e6f4043fbdcdeedd75cc16faba` |
+| Monitor baseline | At that checkpoint, `docs/current/RUNTIME_MONITOR_BASELINE.json` expected `18c30ae03dc735e6f4043fbdcdeedd75cc16faba` |
 | Safety | Deploy and postdeploy checks did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
 ### 2026-06-18 Watcher Ready Normalization Deploy Checkpoint
@@ -476,6 +492,6 @@ authorization evidence.
 | Postdeploy acceptance | `output/tokyo-runtime-deploy-session-ea34594b.json`: `status=waiting_for_market`, `interaction.level=L1_daily_check_from_snapshot`, `remote_interaction_count=1`, `mutates_remote_files=false`, `calls_finalgate=false`, `calls_operation_layer=false`, `calls_exchange_write=false`, `places_order=false` |
 | Quiet monitor | `output/runtime-monitor/latest-daily-check.json`: `decision=DONT_NOTIFY`, `status=waiting_for_market`, `blockers=[]`, `product_gaps=[]` |
 | Goal progress | `output/runtime-monitor/latest-goal-progress.json`: `status=waiting_for_market`, `P0=waiting_for_market`, `P0.5=ready`, `remote_interaction_count=0` |
-| Monitor baseline | `docs/current/RUNTIME_MONITOR_BASELINE.json` now expects `ea34594badc066bc0c714d02c385341106665e07` |
+| Monitor baseline | At that checkpoint, `docs/current/RUNTIME_MONITOR_BASELINE.json` expected `ea34594badc066bc0c714d02c385341106665e07` |
 | Verification | `84 passed` for readiness pack, daily check, goal progress, goal status, and dry-run audit tests; `py_compile` passed for watcher readiness / daily check / goal status scripts |
 | Safety | Fix and deploy did not call FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
