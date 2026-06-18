@@ -106,12 +106,37 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
     assert packet["real_execution"]["status"] == "waiting_for_live_action_time_proof"
     assert packet["real_execution"]["real_order_allowed"] is False
     assert packet["real_execution"]["disabled_smoke_is_real_execution_proof"] is False
-    assert packet["real_execution"]["missing_live_proofs"] == [
+    assert packet["real_execution"]["live_closure_cutover_contract_status"] == "ready"
+    assert packet["real_execution"]["live_closure_stage_count"] == 9
+    assert packet["real_execution"]["missing_live_proof_stages"] == [
         "live_fresh_signal",
-        "same_run_action_time_finalgate_pass",
-        "official_operation_layer_real_gateway_action",
-        "post_submit_finalize_reconciliation_budget_settlement",
+        "required_facts_ready",
+        "candidate_authorization_bound",
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
+        "real_exchange_acceptance",
+        "exchange_native_protection",
+        "post_submit_finalize",
+        "reconciliation_settlement_review",
     ]
+    assert packet["real_execution"]["missing_live_proofs"] == [
+        "live_watcher_signal_packet_id",
+        "required_facts_readiness_packet_id",
+        "candidate_id",
+        "runtime_grant_id",
+        "fresh_submit_authorization_id",
+        "action_time_finalgate_packet_id",
+        "operation_layer_submit_authorization_id",
+        "exchange_submit_execution_result_id",
+        "exchange_native_hard_stop_order_id",
+        "runtime_post_submit_finalize_packet_id",
+        "post_submit_reconciliation_evidence_id",
+        "post_submit_budget_settlement_id",
+        "submit_outcome_review_id",
+    ]
+    assert packet["real_execution"]["missing_live_evidence_keys"] == packet[
+        "real_execution"
+    ]["missing_live_proofs"]
     assert packet["next_safe_actions"] == [
         "keep_watcher_running",
         "run_dry_run_audit_chain_after_runtime_changes",

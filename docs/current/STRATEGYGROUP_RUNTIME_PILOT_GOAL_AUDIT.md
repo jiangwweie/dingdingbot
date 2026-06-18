@@ -120,6 +120,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 Chain Closure Live-Proof Contract Alignment
+
+The runtime chain-closure status now consumes the same first-live-closure
+contract used by the P0 cutover-readiness packet. This prevents the monitor
+surface from reporting an older, shorter live-proof list while the cutover
+contract requires the full first-order closure evidence sequence.
+
+| Item | Evidence |
+| --- | --- |
+| Chain-closure source | `scripts/runtime_execution_chain_closure_status.py` imports `runtime_live_cutover_readiness.build_live_closure_cutover_contract()` |
+| Real execution status | Remains `waiting_for_live_action_time_proof`; `real_order_allowed=false` after local dry-run success |
+| Live stage count | `live_closure_stage_count=9` |
+| Missing live evidence count | `missing_live_proofs` now contains 13 contract evidence keys from `live_watcher_signal_packet_id` through `submit_outcome_review_id` |
+| Boundary | Local dry-run proof still cannot replace live same-run FinalGate, official Operation Layer, exchange acceptance, exchange-native protection, and post-submit settlement evidence |
+| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 First Live Closure Cutover Contract
 
 The P0 cutover readiness packet now includes a machine-readable first bounded

@@ -23,17 +23,12 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts import runtime_dry_run_audit_chain as audit_chain  # noqa: E402
+from scripts import runtime_live_cutover_readiness as live_cutover  # noqa: E402
 
 
 DEFAULT_OUTPUT_DIR = Path("output/strategygroup-runtime-pilot/chain-closure-status")
 DEFAULT_OUTPUT_JSON = DEFAULT_OUTPUT_DIR / "runtime-execution-chain-closure-status.json"
 DEFAULT_DRY_RUN_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "dry-run-audit-chain"
-REQUIRED_LIVE_PROOFS = [
-    "live_fresh_signal",
-    "same_run_action_time_finalgate_pass",
-    "official_operation_layer_real_gateway_action",
-    "post_submit_finalize_reconciliation_budget_settlement",
-]
 PROJECTED_DRY_RUN_CHECKS = [
     "fresh_signal_fast_auto_chain_checked",
     "required_facts_readiness_checked",
@@ -224,6 +219,10 @@ def _goal_chain_segment_evidence(
     return evidence
 
 
+def _live_closure_contract() -> dict[str, Any]:
+    return live_cutover.build_live_closure_cutover_contract()
+
+
 def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
     required_checks = _dict(audit_packet.get("required_checks"))
     safety = _dict(audit_packet.get("safety_invariants"))
@@ -231,6 +230,15 @@ def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
     dangerous_effects = _dangerous_effects(safety)
     projected_checks = _projected_dry_run_checks(required_checks)
     scenario_statuses = _scenario_statuses(audit_packet)
+    live_closure_contract = _live_closure_contract()
+    live_closure_stages = [
+        str(item)
+        for item in live_closure_contract.get("stage_order") or []
+    ]
+    live_closure_required_evidence_keys = [
+        str(item)
+        for item in live_closure_contract.get("required_evidence_keys") or []
+    ]
     goal_chain_segment_evidence = _goal_chain_segment_evidence(
         projected_checks=projected_checks,
         scenario_statuses=scenario_statuses,
@@ -319,10 +327,17 @@ def build_status_packet(*, audit_packet: dict[str, Any]) -> dict[str, Any]:
             "status": "waiting_for_live_action_time_proof",
             "real_order_allowed": False,
             "disabled_smoke_is_real_execution_proof": False,
-            "missing_live_proofs": list(REQUIRED_LIVE_PROOFS),
+            "live_closure_cutover_contract_status": live_closure_contract.get("status"),
+            "live_closure_stage_count": int(
+                live_closure_contract.get("stage_count") or 0
+            ),
+            "missing_live_proof_stages": live_closure_stages,
+            "missing_live_proofs": live_closure_required_evidence_keys,
+            "missing_live_evidence_keys": live_closure_required_evidence_keys,
             "reason": (
                 "local dry-run proof cannot replace live same-run FinalGate, "
-                "official Operation Layer, and post-submit settlement evidence"
+                "official Operation Layer, exchange acceptance, exchange-native "
+                "protection, and post-submit settlement evidence"
             ),
         },
         "next_safe_actions": next_safe_actions,

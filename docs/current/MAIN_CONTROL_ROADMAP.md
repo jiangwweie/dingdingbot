@@ -671,7 +671,7 @@ mock or disabled-smoke proof as a real-order proof.
 | --- | --- |
 | Non-market status | `non_market_execution_chain_ready` only when the dry-run audit passes, all required checks are true, and no dangerous effect is present |
 | Real-order status | Remains `waiting_for_live_action_time_proof` after local dry-run success |
-| Missing live proofs | `live_fresh_signal`, `same_run_action_time_finalgate_pass`, `official_operation_layer_real_gateway_action`, and `post_submit_finalize_reconciliation_budget_settlement` |
+| Missing live proofs | Sourced from the first-live-closure contract: live watcher signal, RequiredFacts, candidate/runtime grant/fresh authorization, action-time FinalGate, Operation Layer submit authorization, exchange acceptance, exchange-native hard stop, post-submit finalize, reconciliation, budget settlement, and review evidence IDs |
 | Next safe actions | Keep watcher running, rerun dry-run audit after runtime changes, and on fresh signal run same-run FinalGate then official Operation Layer |
 | Safety | The closure-status script does not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets, live profile, or sizing mutation |
 

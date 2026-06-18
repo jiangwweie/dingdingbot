@@ -309,6 +309,10 @@ def _live_closure_cutover_contract() -> dict[str, Any]:
     }
 
 
+def build_live_closure_cutover_contract() -> dict[str, Any]:
+    return _live_closure_cutover_contract()
+
+
 def _safety_invariants(dry_run_packet: dict[str, Any]) -> dict[str, bool]:
     safety = dry_run_packet.get("safety_invariants")
     if not isinstance(safety, dict):
