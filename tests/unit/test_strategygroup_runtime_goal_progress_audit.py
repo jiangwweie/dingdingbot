@@ -134,6 +134,21 @@ def _daily_check(**overrides):
 
 
 def _live_cutover_readiness(**overrides):
+    live_closure_required_evidence_keys = [
+        "live_watcher_signal_packet_id",
+        "required_facts_readiness_packet_id",
+        "candidate_id",
+        "runtime_grant_id",
+        "fresh_submit_authorization_id",
+        "action_time_finalgate_packet_id",
+        "operation_layer_submit_authorization_id",
+        "exchange_submit_execution_result_id",
+        "exchange_native_hard_stop_order_id",
+        "runtime_post_submit_finalize_packet_id",
+        "post_submit_reconciliation_evidence_id",
+        "post_submit_budget_settlement_id",
+        "submit_outcome_review_id",
+    ]
     base = {
         "scope": "runtime_live_cutover_readiness",
         "status": "live_cutover_waiting_for_fresh_signal",
@@ -149,6 +164,21 @@ def _live_cutover_readiness(**overrides):
             "post_submit_real_reconciliation",
         ],
         "non_market_blockers": [],
+        "live_closure_cutover_contract": {
+            "scope": "first_bounded_live_order_closure_cutover_contract",
+            "status": "ready",
+            "stage_count": 9,
+            "required_evidence_keys": live_closure_required_evidence_keys,
+            "checks": {
+                "live_closure_contract_defined": True,
+                "live_closure_contract_rejects_synthetic_signal": True,
+                "live_closure_contract_rejects_disabled_smoke": True,
+                "live_closure_contract_requires_exchange_acceptance": True,
+                "live_closure_contract_requires_exchange_native_protection": True,
+                "live_closure_contract_requires_post_submit_reconciliation": True,
+                "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
+            },
+        },
     }
     base.update(overrides)
     return base
@@ -358,8 +388,49 @@ def test_goal_progress_accepts_live_cutover_readiness_boundary():
         "source_status": "live_cutover_waiting_for_fresh_signal",
         "status": "ready",
         "strategygroup_tier_ready": True,
+        "live_closure_cutover_contract_ready": True,
+        "live_closure_required_stage_count": 9,
+        "live_closure_required_evidence_keys": [
+            "live_watcher_signal_packet_id",
+            "required_facts_readiness_packet_id",
+            "candidate_id",
+            "runtime_grant_id",
+            "fresh_submit_authorization_id",
+            "action_time_finalgate_packet_id",
+            "operation_layer_submit_authorization_id",
+            "exchange_submit_execution_result_id",
+            "exchange_native_hard_stop_order_id",
+            "runtime_post_submit_finalize_packet_id",
+            "post_submit_reconciliation_evidence_id",
+            "post_submit_budget_settlement_id",
+            "submit_outcome_review_id",
+        ],
     }
     assert report["checks"]["product_gaps"] == []
+
+
+def test_goal_progress_degrades_on_missing_live_closure_contract():
+    module = _load_module()
+    readiness = _live_cutover_readiness()
+    readiness.pop("live_closure_cutover_contract")
+
+    report = module.build_goal_progress_report(
+        daily_check=_daily_check(),
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+        live_cutover_readiness=readiness,
+    )
+
+    assert report["status"] == "degraded"
+    assert report["live_cutover_readiness_boundary"]["status"] == "blocked"
+    assert (
+        "live_closure_cutover_contract:missing_or_not_ready"
+        in report["live_cutover_readiness_boundary"]["non_market_blockers"]
+    )
+    assert (
+        "live_cutover_readiness:live_closure_cutover_contract:"
+        "missing_or_not_ready"
+    ) in report["checks"]["product_gaps"]
 
 
 def test_goal_progress_degrades_on_live_cutover_non_market_gap():

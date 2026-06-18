@@ -50,6 +50,45 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "post_submit_outcomes_do_not_require_owner_chat_confirmation": True,
         "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation": True,
     }
+    contract = packet["live_closure_cutover_contract"]
+    assert contract["scope"] == "first_bounded_live_order_closure_cutover_contract"
+    assert contract["status"] == "ready"
+    assert contract["stage_count"] == 9
+    assert contract["stage_order"] == [
+        "live_fresh_signal",
+        "required_facts_ready",
+        "candidate_authorization_bound",
+        "action_time_finalgate_passed",
+        "official_operation_layer_ready",
+        "real_exchange_acceptance",
+        "exchange_native_protection",
+        "post_submit_finalize",
+        "reconciliation_settlement_review",
+    ]
+    assert contract["required_evidence_keys"] == [
+        "live_watcher_signal_packet_id",
+        "required_facts_readiness_packet_id",
+        "candidate_id",
+        "runtime_grant_id",
+        "fresh_submit_authorization_id",
+        "action_time_finalgate_packet_id",
+        "operation_layer_submit_authorization_id",
+        "exchange_submit_execution_result_id",
+        "exchange_native_hard_stop_order_id",
+        "runtime_post_submit_finalize_packet_id",
+        "post_submit_reconciliation_evidence_id",
+        "post_submit_budget_settlement_id",
+        "submit_outcome_review_id",
+    ]
+    assert contract["checks"] == {
+        "live_closure_contract_defined": True,
+        "live_closure_contract_rejects_synthetic_signal": True,
+        "live_closure_contract_rejects_disabled_smoke": True,
+        "live_closure_contract_requires_exchange_acceptance": True,
+        "live_closure_contract_requires_exchange_native_protection": True,
+        "live_closure_contract_requires_post_submit_reconciliation": True,
+        "live_closure_contract_has_no_owner_chat_confirmation_stage": True,
+    }
 
     sections = {item["name"]: item for item in packet["sections"]}
     assert set(sections) == {
@@ -60,6 +99,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
         "exit_protection_recovery",
         "post_submit_close_loop",
         "legacy_confirmation_regression",
+        "live_closure_cutover_contract",
         "dry_run_safety",
     }
     for section in sections.values():

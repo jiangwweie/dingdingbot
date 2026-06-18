@@ -81,11 +81,99 @@ SECTION_CHECKS: dict[str, list[str]] = {
         "post_submit_outcomes_do_not_require_owner_chat_confirmation",
         "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation",
     ],
+    "live_closure_cutover_contract": [
+        "live_closure_contract_defined",
+        "live_closure_contract_rejects_synthetic_signal",
+        "live_closure_contract_rejects_disabled_smoke",
+        "live_closure_contract_requires_exchange_acceptance",
+        "live_closure_contract_requires_exchange_native_protection",
+        "live_closure_contract_requires_post_submit_reconciliation",
+        "live_closure_contract_has_no_owner_chat_confirmation_stage",
+    ],
     "dry_run_safety": [
         "dangerous_effects_absent",
         "disabled_smoke_not_real_execution_proof",
     ],
 }
+
+LIVE_CLOSURE_CUTOVER_STAGES = [
+    {
+        "name": "live_fresh_signal",
+        "market_dependent": True,
+        "required_evidence_keys": ["live_watcher_signal_packet_id"],
+        "reject_if": ["synthetic_signal", "replay_signal", "stale_signal"],
+        "next_action": "build_required_facts_readiness",
+    },
+    {
+        "name": "required_facts_ready",
+        "market_dependent": True,
+        "required_evidence_keys": ["required_facts_readiness_packet_id"],
+        "reject_if": ["missing_fact", "stale_fact"],
+        "next_action": "prepare_candidate_authorization",
+    },
+    {
+        "name": "candidate_authorization_bound",
+        "market_dependent": True,
+        "required_evidence_keys": [
+            "candidate_id",
+            "runtime_grant_id",
+            "fresh_submit_authorization_id",
+        ],
+        "reject_if": ["strategy_scope_mismatch", "profile_boundary_mismatch"],
+        "next_action": "run_action_time_finalgate",
+    },
+    {
+        "name": "action_time_finalgate_passed",
+        "market_dependent": True,
+        "required_evidence_keys": ["action_time_finalgate_packet_id"],
+        "reject_if": [
+            "active_position",
+            "open_order",
+            "budget_missing",
+            "duplicate_submit_risk",
+        ],
+        "next_action": "prepare_official_operation_layer_submit",
+    },
+    {
+        "name": "official_operation_layer_ready",
+        "market_dependent": True,
+        "required_evidence_keys": ["operation_layer_submit_authorization_id"],
+        "reject_if": ["operation_layer_not_ready", "disabled_smoke_only"],
+        "next_action": "submit_through_official_operation_layer",
+    },
+    {
+        "name": "real_exchange_acceptance",
+        "market_dependent": True,
+        "required_evidence_keys": ["exchange_submit_execution_result_id"],
+        "reject_if": ["exchange_submit_failed_before_acceptance"],
+        "next_action": "attach_exchange_native_protection",
+    },
+    {
+        "name": "exchange_native_protection",
+        "market_dependent": True,
+        "required_evidence_keys": ["exchange_native_hard_stop_order_id"],
+        "reject_if": ["hard_stop_missing", "local_only_stop"],
+        "next_action": "run_post_submit_finalize",
+    },
+    {
+        "name": "post_submit_finalize",
+        "market_dependent": True,
+        "required_evidence_keys": ["runtime_post_submit_finalize_packet_id"],
+        "reject_if": ["finalize_missing", "next_attempt_gate_missing"],
+        "next_action": "reconcile_settle_and_review",
+    },
+    {
+        "name": "reconciliation_settlement_review",
+        "market_dependent": True,
+        "required_evidence_keys": [
+            "post_submit_reconciliation_evidence_id",
+            "post_submit_budget_settlement_id",
+            "submit_outcome_review_id",
+        ],
+        "reject_if": ["reconciliation_missing", "settlement_missing", "review_missing"],
+        "next_action": "mark_first_bounded_live_order_closure_complete",
+    },
+]
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -167,6 +255,57 @@ def _legacy_confirmation_regression_checks(
             )
             is True
         ),
+    }
+
+
+def _live_closure_cutover_contract() -> dict[str, Any]:
+    evidence_keys = [
+        evidence_key
+        for stage in LIVE_CLOSURE_CUTOVER_STAGES
+        for evidence_key in stage["required_evidence_keys"]
+    ]
+    stage_names = [stage["name"] for stage in LIVE_CLOSURE_CUTOVER_STAGES]
+    reject_reasons = [
+        reason
+        for stage in LIVE_CLOSURE_CUTOVER_STAGES
+        for reason in stage["reject_if"]
+    ]
+    checks = {
+        "live_closure_contract_defined": bool(LIVE_CLOSURE_CUTOVER_STAGES),
+        "live_closure_contract_rejects_synthetic_signal": (
+            "synthetic_signal" in reject_reasons
+            and "replay_signal" in reject_reasons
+            and "stale_signal" in reject_reasons
+        ),
+        "live_closure_contract_rejects_disabled_smoke": (
+            "disabled_smoke_only" in reject_reasons
+        ),
+        "live_closure_contract_requires_exchange_acceptance": (
+            "exchange_submit_execution_result_id" in evidence_keys
+        ),
+        "live_closure_contract_requires_exchange_native_protection": (
+            "exchange_native_hard_stop_order_id" in evidence_keys
+        ),
+        "live_closure_contract_requires_post_submit_reconciliation": (
+            "post_submit_reconciliation_evidence_id" in evidence_keys
+            and "post_submit_budget_settlement_id" in evidence_keys
+            and "submit_outcome_review_id" in evidence_keys
+        ),
+        "live_closure_contract_has_no_owner_chat_confirmation_stage": all(
+            "owner_chat_confirmation" not in stage["name"]
+            and "owner_chat_confirmation" not in stage["next_action"]
+            and "owner_chat_confirmation" not in stage["required_evidence_keys"]
+            for stage in LIVE_CLOSURE_CUTOVER_STAGES
+        ),
+    }
+    return {
+        "scope": "first_bounded_live_order_closure_cutover_contract",
+        "status": "ready" if all(checks.values()) else "blocked",
+        "stage_count": len(LIVE_CLOSURE_CUTOVER_STAGES),
+        "stage_order": stage_names,
+        "required_evidence_keys": evidence_keys,
+        "stages": LIVE_CLOSURE_CUTOVER_STAGES,
+        "checks": checks,
     }
 
 
@@ -265,7 +404,11 @@ def build_cutover_readiness_packet(
     if not isinstance(checks, dict):
         checks = {}
     legacy_checks = _legacy_confirmation_regression_checks(dry_run_packet, checks)
-    effective_checks = {**checks, **legacy_checks}
+    live_closure_contract = _live_closure_cutover_contract()
+    contract_checks = live_closure_contract.get("checks")
+    if not isinstance(contract_checks, dict):
+        contract_checks = {}
+    effective_checks = {**checks, **legacy_checks, **contract_checks}
     sections = [_section(name, effective_checks) for name in SECTION_CHECKS]
     non_market_blockers = [
         f"{section['name']}:{check}"
@@ -302,6 +445,7 @@ def build_cutover_readiness_packet(
         "market_dependent_waiting_keys": MARKET_DEPENDENT_WAITING_KEYS,
         "non_market_blockers": non_market_blockers,
         "sections": sections,
+        "live_closure_cutover_contract": live_closure_contract,
         "source_packets": {
             "dry_run_audit_scope": dry_run_packet.get("scope"),
             "dry_run_audit_status": dry_run_packet.get("status"),

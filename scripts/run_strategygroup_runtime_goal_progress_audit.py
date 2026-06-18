@@ -503,9 +503,25 @@ def _live_cutover_readiness_boundary(
             "exit_hardening_ready": exit_hardening_boundary["status"] == "ready",
             "strategygroup_tier_ready": strategygroup_tier_boundary["status"]
             == "ready",
+            "live_closure_cutover_contract_ready": False,
+            "live_closure_required_stage_count": 0,
+            "live_closure_required_evidence_keys": [],
         }
     blockers = [str(item) for item in live_cutover_readiness.get("non_market_blockers") or []]
     source_status = str(live_cutover_readiness.get("status") or "")
+    contract = live_cutover_readiness.get("live_closure_cutover_contract")
+    if not isinstance(contract, dict):
+        contract = {}
+    contract_checks = contract.get("checks")
+    if not isinstance(contract_checks, dict):
+        contract_checks = {}
+    contract_ready = (
+        contract.get("status") == "ready"
+        and bool(contract_checks)
+        and all(value is True for value in contract_checks.values())
+    )
+    if not contract_ready:
+        blockers.append("live_closure_cutover_contract:missing_or_not_ready")
     ready = (
         source_status == "live_cutover_waiting_for_fresh_signal"
         and not blockers
@@ -531,6 +547,11 @@ def _live_cutover_readiness_boundary(
         "entry_fast_chain_ready": entry_fast_chain_boundary["status"] == "ready",
         "exit_hardening_ready": exit_hardening_boundary["status"] == "ready",
         "strategygroup_tier_ready": strategygroup_tier_boundary["status"] == "ready",
+        "live_closure_cutover_contract_ready": contract_ready,
+        "live_closure_required_stage_count": int(contract.get("stage_count") or 0),
+        "live_closure_required_evidence_keys": [
+            str(item) for item in contract.get("required_evidence_keys") or []
+        ],
     }
 
 

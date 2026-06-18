@@ -120,6 +120,22 @@ fresh selected StrategyGroup signal exists.
 
 ## Latest Checkpoint
 
+### 2026-06-18 First Live Closure Cutover Contract
+
+The P0 cutover readiness packet now includes a machine-readable first bounded
+live-order closure contract. This contract defines the exact evidence sequence
+that must be present after a real fresh selected StrategyGroup signal before the
+first live closure can be treated as complete.
+
+| Item | Evidence |
+| --- | --- |
+| Contract source | `scripts/runtime_live_cutover_readiness.py` emits `live_closure_cutover_contract` |
+| Ordered stages | live fresh signal, RequiredFacts ready, candidate/auth bound, action-time FinalGate, official Operation Layer ready, real exchange acceptance, exchange-native protection, post-submit finalize, reconciliation/settlement/review |
+| Required evidence keys | `live_watcher_signal_packet_id`, `required_facts_readiness_packet_id`, `candidate_id`, `runtime_grant_id`, `fresh_submit_authorization_id`, `action_time_finalgate_packet_id`, `operation_layer_submit_authorization_id`, `exchange_submit_execution_result_id`, `exchange_native_hard_stop_order_id`, `runtime_post_submit_finalize_packet_id`, `post_submit_reconciliation_evidence_id`, `post_submit_budget_settlement_id`, `submit_outcome_review_id` |
+| Regression guard | Goal-progress marks stale old cutover packets without this contract as `blocked` with `live_closure_cutover_contract:missing_or_not_ready` |
+| Boundary | The contract is not submit authority and does not authorize mock/replay/disabled-smoke evidence as live closure proof |
+| Safety | Local packet/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 P0 Live Cutover Readiness Packet
 
 The P0 first bounded live-order goal now has a local cutover-readiness packet
