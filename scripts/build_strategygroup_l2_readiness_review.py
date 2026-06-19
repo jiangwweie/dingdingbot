@@ -101,6 +101,12 @@ def build_l2_readiness_review(
             "conditional_l2_candidate_count": len(conditional_rows),
             "enabled_l2_count": len(enabled_rows),
             "blocked_count": len(blocked_rows),
+            "classifier_repair_spec_ready_count": sum(
+                1
+                for row in readiness_rows
+                if _as_dict(row.get("classifier_repair_spec")).get("status")
+                == "local_repair_spec_ready"
+            ),
             "forbidden_effect_count": len(forbidden_effects),
         },
         "readiness_rows": readiness_rows,
@@ -195,11 +201,38 @@ def _readiness_row(*, row: dict[str, Any], policy: dict[str, Any]) -> dict[str, 
         "blocking_gaps_before_l2": [
             str(item) for item in policy.get("blocking_gaps_before_l2") or []
         ],
+        "classifier_repair_spec": _classifier_repair_spec(policy),
         "conditional_l2_review_candidate": l2_readiness in READY_OR_CONDITIONAL,
         "l2_shadow_candidate_observation_enabled": l2_readiness in L2_ALREADY_ENABLED,
         "may_change_tier_policy_now": False,
         "may_create_shadow_candidate_now": False,
         "may_place_real_order_now": False,
+    }
+
+
+def _classifier_repair_spec(policy: dict[str, Any]) -> dict[str, Any]:
+    spec = _as_dict(policy.get("classifier_repair_spec"))
+    if not spec:
+        return {}
+    return {
+        "status": str(spec.get("status") or "unknown"),
+        "target_classifier": str(spec.get("target_classifier") or "unknown"),
+        "blocking_gap_keys": [
+            str(item) for item in spec.get("blocking_gap_keys") or []
+        ],
+        "required_entry_states": [
+            str(item) for item in spec.get("required_entry_states") or []
+        ],
+        "required_disable_states": [
+            str(item) for item in spec.get("required_disable_states") or []
+        ],
+        "replay_acceptance_cases": [
+            str(item) for item in spec.get("replay_acceptance_cases") or []
+        ],
+        "acceptance_signal": str(spec.get("acceptance_signal") or ""),
+        "not_execution_authority": spec.get("not_execution_authority") is True,
+        "not_l2_promotion_authority": spec.get("not_l2_promotion_authority") is True,
+        "not_l4_scope_change": spec.get("not_l4_scope_change") is True,
     }
 
 

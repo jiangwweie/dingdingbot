@@ -745,6 +745,23 @@ and completion signal.
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts work-queue counts, priority/type grouping, parked-item scheduling behavior, missing-replay queue behavior, CLI output, and safety invariants |
 | Safety | Local work-queue generation only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 LSR/VCB Classifier Repair Spec Checkpoint
+
+The highest-priority P0.5 work queue items for `LSR-001` and `VCB-001` now have
+machine-readable classifier repair specs tied to replay acceptance cases. This
+turns the classifier/disable-state gaps into a local closure contract instead
+of another report-only note.
+
+| Item | Evidence |
+| --- | --- |
+| Policy input | `main-control-signal-coverage-expansion-policy.json` defines `classifier_repair_spec` for `LSR-001` and `VCB-001` |
+| LSR target | `LSR-001` repair target is `side_specific_short_revival_classifier`, covering the lookahead rewrite and missing disable-state gaps |
+| VCB target | `VCB-001` repair target is `true_breakout_pre_entry_classifier`, covering the pre-entry classifier and false-breakout disable-state gaps |
+| Replay coverage | `latest-opportunity-decision-loop.json` reports `replay_case_coverage.covered=true` for all four LSR/VCB classifier work-queue items |
+| L2 boundary | The specs keep both groups at L1 observe-only; they are not L2 promotion authority, L4 scope expansion, FinalGate input, Operation Layer input, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert repair specs, replay-case coverage, no real-order authority, and no L4 scope change |
+| Safety | Local policy/specification and replay-coverage projection only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

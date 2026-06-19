@@ -93,6 +93,25 @@ def _l2_readiness() -> dict:
                     "false_breakout_disable_state_missing_from_runtime",
                     "volume_compression_cost_m2m_full_sequence_negative",
                 ],
+                "classifier_repair_spec": {
+                    "status": "local_repair_spec_ready",
+                    "target_classifier": "true_breakout_pre_entry_classifier",
+                    "blocking_gap_keys": [
+                        "false_breakout_disable_state_missing_from_runtime"
+                    ],
+                    "required_entry_states": [
+                        "breakout_close_confirmed",
+                        "volume_expansion_confirmed",
+                    ],
+                    "required_disable_states": [
+                        "false_breakout_reversal_detected"
+                    ],
+                    "replay_acceptance_cases": ["false_breakout_disable_needed"],
+                    "acceptance_signal": "disable false breakout before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
             },
             {
                 "strategy_group_id": "RBR-001",
@@ -162,7 +181,7 @@ def _replay_lab(*, include_rbr: bool = False) -> dict:
         },
         {
             "strategy_group_id": "VCB-001",
-            "fixture_case": "false_breakout_revision_needed",
+            "fixture_case": "false_breakout_disable_needed",
             "signal_status": "would_enter_but_disable_classifier_missing",
             "review_recommendation": "revise",
             "blocker_class": "review_only_warning",
@@ -236,6 +255,23 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     )
     assert rows["VCB-001"]["gap_work_items"][0]["owner_priority"] == "P0.5-high"
     assert rows["VCB-001"]["gap_work_items"][0]["blocks_l2_progression"] is True
+    assert rows["VCB-001"]["gap_work_items"][0]["repair_spec"][
+        "target_classifier"
+    ] == "true_breakout_pre_entry_classifier"
+    assert rows["VCB-001"]["gap_work_items"][0]["repair_spec"][
+        "required_disable_states"
+    ] == ["false_breakout_reversal_detected"]
+    assert rows["VCB-001"]["gap_work_items"][0]["repair_spec"][
+        "replay_case_coverage"
+    ] == {
+        "covered": True,
+        "covered_cases": ["false_breakout_disable_needed"],
+        "missing_cases": [],
+        "required_case_count": 1,
+    }
+    assert rows["VCB-001"]["gap_work_items"][0]["completion_signal"] == (
+        "disable false breakout before L2"
+    )
     assert rows["RBR-001"]["decision_action"] == "park_or_vocabulary_only"
     work_items = packet["work_queue"]["items"]
     assert packet["work_queue"]["status"] == "ready"
@@ -247,6 +283,10 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert work_items[0]["strategy_group_id"] == "VCB-001"
     assert work_items[0]["work_type"] == "classifier_or_rule_work"
     assert work_items[0]["scheduled"] is True
+    assert work_items[0]["repair_spec"]["replay_acceptance_cases"] == [
+        "false_breakout_disable_needed"
+    ]
+    assert work_items[0]["repair_spec"]["replay_case_coverage"]["covered"] is True
     parked_items = [
         item for item in work_items if item["strategy_group_id"] == "RBR-001"
     ]

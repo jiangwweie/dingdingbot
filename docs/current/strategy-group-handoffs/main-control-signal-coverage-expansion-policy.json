@@ -55,7 +55,37 @@
         "lookahead_failed_proxy_requires_rewrite",
         "lsr_disable_classifier_state_missing_from_runtime",
         "cost_fill_slot_m2m_and_leverage_boundary_missing"
-      ]
+      ],
+      "classifier_repair_spec": {
+        "status": "local_repair_spec_ready",
+        "target_classifier": "side_specific_short_revival_classifier",
+        "blocking_gap_keys": [
+          "lookahead_failed_proxy_requires_rewrite",
+          "lsr_disable_classifier_state_missing_from_runtime"
+        ],
+        "required_entry_states": [
+          "upper_range_liquidity_sweep_detected",
+          "reclaim_failure_or_rejection_confirmed",
+          "short_revival_confirmation_present",
+          "lookahead_proxy_absent"
+        ],
+        "required_disable_states": [
+          "current_broader_preview_side_long_conflicts_with_short_revival_lead",
+          "range_context_missing",
+          "sweep_reclaim_missing",
+          "stale_signal"
+        ],
+        "replay_acceptance_cases": [
+          "short_revival_rewrite_needed",
+          "liquidity_sweep_long_would_enter_current_v0",
+          "missing_range_context",
+          "stale_signal"
+        ],
+        "acceptance_signal": "LSR remains L1 until the short-revival rewrite produces a side-specific non-lookahead classifier and disables the current long preview conflict.",
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      }
     },
     "BRF-001": {
       "current_main_control_tier": "L1",
@@ -110,7 +140,37 @@
         "pre_entry_classifier_does_not_reproduce_post_entry_edge",
         "false_breakout_disable_state_missing_from_runtime",
         "slot_m2m_equity_and_leverage_ruin_state_missing"
-      ]
+      ],
+      "classifier_repair_spec": {
+        "status": "local_repair_spec_ready",
+        "target_classifier": "true_breakout_pre_entry_classifier",
+        "blocking_gap_keys": [
+          "pre_entry_classifier_does_not_reproduce_post_entry_edge",
+          "false_breakout_disable_state_missing_from_runtime"
+        ],
+        "required_entry_states": [
+          "compression_window_present",
+          "breakout_close_confirmed",
+          "volume_expansion_confirmed",
+          "post_entry_edge_proxy_reproducible_without_lookahead"
+        ],
+        "required_disable_states": [
+          "false_breakout_reversal_detected",
+          "compression_context_missing",
+          "slot_m2m_ruin_state_triggered",
+          "stale_signal"
+        ],
+        "replay_acceptance_cases": [
+          "compression_breakout_would_enter",
+          "false_breakout_disable_needed",
+          "missing_compression_context",
+          "stale_signal"
+        ],
+        "acceptance_signal": "VCB remains L1 until the pre-entry classifier reproduces the true-breakout edge and false-breakout disable state is represented in runtime review.",
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      }
     }
   },
   "safety_invariants": {

@@ -224,6 +224,7 @@ def _decision_row(
             or []
         )
     ]
+    classifier_repair_spec = _as_dict(readiness_row.get("classifier_repair_spec"))
     replay = _normalized_replay_summary(replay_summary)
     decision_action = _decision_action(
         current_tier=current_tier,
@@ -238,6 +239,8 @@ def _decision_row(
             current_tier=current_tier,
             readiness=readiness,
             decision_action=decision_action,
+            classifier_repair_spec=classifier_repair_spec,
+            replay=replay,
         )
         for gap in gaps
     ]
@@ -258,6 +261,7 @@ def _decision_row(
         "positive_evidence": [
             str(item) for item in readiness_row.get("positive_evidence") or []
         ],
+        "classifier_repair_spec": classifier_repair_spec,
         "blocking_gaps_before_l2": gaps,
         "gap_work_items": gap_work,
         "decision_action": decision_action,
@@ -383,6 +387,8 @@ def _gap_work_item(
     current_tier: str,
     readiness: str,
     decision_action: str,
+    classifier_repair_spec: dict[str, Any],
+    replay: dict[str, Any],
 ) -> dict[str, Any]:
     lowered = gap.lower()
     if any(token in lowered for token in ("classifier", "rewrite", "disable")):
@@ -403,6 +409,12 @@ def _gap_work_item(
         current_tier=current_tier,
         work_type=work_type,
     )
+    matching_repair_spec = _matching_classifier_repair_spec(
+        gap=gap,
+        work_type=work_type,
+        classifier_repair_spec=classifier_repair_spec,
+        replay=replay,
+    )
     return {
         "gap": gap,
         "work_type": work_type,
@@ -417,9 +429,11 @@ def _gap_work_item(
             work_type=work_type,
             strategy_group_id=strategy_group_id,
             decision_action=decision_action,
+            classifier_repair_spec=matching_repair_spec,
         ),
         "validation_command": _validation_command(work_type),
-        "completion_signal": _completion_signal(work_type),
+        "completion_signal": _completion_signal(work_type, matching_repair_spec),
+        "repair_spec": matching_repair_spec,
     }
 
 
@@ -492,6 +506,7 @@ def _queue_item(row: dict[str, Any], gap_item: dict[str, Any]) -> dict[str, Any]
         "actionable_task": gap_item.get("actionable_task"),
         "validation_command": gap_item.get("validation_command"),
         "completion_signal": gap_item.get("completion_signal"),
+        "repair_spec": _as_dict(gap_item.get("repair_spec")),
         "real_order_authority": False,
         "l4_scope_change_recommended": False,
     }
@@ -567,11 +582,18 @@ def _actionable_gap_task(
     work_type: str,
     strategy_group_id: str,
     decision_action: str,
+    classifier_repair_spec: dict[str, Any],
 ) -> str:
     prefix = f"{strategy_group_id}: {gap}"
     if decision_action == "park_or_vocabulary_only":
         return f"{prefix}; keep parked unless new evidence appears."
     if work_type == "classifier_or_rule_work":
+        target = classifier_repair_spec.get("target_classifier")
+        if target:
+            return (
+                f"{prefix}; repair `{target}` using the listed entry/disable "
+                "states and replay acceptance cases."
+            )
         return f"{prefix}; define the runtime classifier or disable-state rule that removes the false-positive path."
     if work_type == "required_fact_or_market_data_work":
         return f"{prefix}; attach or model the missing required fact source for replay and readiness review."
@@ -609,7 +631,9 @@ def _validation_command(work_type: str) -> str:
     )
 
 
-def _completion_signal(work_type: str) -> str:
+def _completion_signal(work_type: str, repair_spec: dict[str, Any] | None = None) -> str:
+    if repair_spec and repair_spec.get("acceptance_signal"):
+        return str(repair_spec["acceptance_signal"])
     return {
         "classifier_or_rule_work": "classifier gap removed or downgraded to review-only warning",
         "required_fact_or_market_data_work": "required fact gap removed or explicit non-blocking proxy documented",
@@ -617,6 +641,62 @@ def _completion_signal(work_type: str) -> str:
         "strategy_quality_review": "revise/park/kill decision recorded before promotion",
         "replay_corpus_work": "non-executing replay sample covers would-enter and no-action paths",
     }.get(work_type, "decision loop row no longer reports the gap")
+
+
+def _matching_classifier_repair_spec(
+    *,
+    gap: str,
+    work_type: str,
+    classifier_repair_spec: dict[str, Any],
+    replay: dict[str, Any],
+) -> dict[str, Any]:
+    if work_type != "classifier_or_rule_work" or not classifier_repair_spec:
+        return {}
+    gap_keys = [
+        str(item) for item in classifier_repair_spec.get("blocking_gap_keys") or []
+    ]
+    if gap not in gap_keys:
+        return {}
+    replay_acceptance_cases = [
+        str(item)
+        for item in classifier_repair_spec.get("replay_acceptance_cases") or []
+    ]
+    fixture_cases = [str(item) for item in replay.get("fixture_cases") or []]
+    fixture_case_set = set(fixture_cases)
+    covered_cases = [
+        item for item in replay_acceptance_cases if item in fixture_case_set
+    ]
+    missing_cases = [
+        item for item in replay_acceptance_cases if item not in fixture_case_set
+    ]
+    return {
+        "status": str(classifier_repair_spec.get("status") or "unknown"),
+        "target_classifier": str(
+            classifier_repair_spec.get("target_classifier") or "unknown"
+        ),
+        "required_entry_states": [
+            str(item) for item in classifier_repair_spec.get("required_entry_states") or []
+        ],
+        "required_disable_states": [
+            str(item)
+            for item in classifier_repair_spec.get("required_disable_states") or []
+        ],
+        "replay_acceptance_cases": replay_acceptance_cases,
+        "replay_case_coverage": {
+            "covered": bool(replay_acceptance_cases) and not missing_cases,
+            "required_case_count": len(replay_acceptance_cases),
+            "covered_cases": covered_cases,
+            "missing_cases": missing_cases,
+        },
+        "acceptance_signal": str(classifier_repair_spec.get("acceptance_signal") or ""),
+        "not_execution_authority": classifier_repair_spec.get("not_execution_authority")
+        is True,
+        "not_l2_promotion_authority": classifier_repair_spec.get(
+            "not_l2_promotion_authority"
+        )
+        is True,
+        "not_l4_scope_change": classifier_repair_spec.get("not_l4_scope_change") is True,
+    }
 
 
 def _queue_id(strategy_group_id: str, work_type: str, label: str) -> str:

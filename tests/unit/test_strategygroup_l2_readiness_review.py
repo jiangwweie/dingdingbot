@@ -83,7 +83,24 @@ def _policy() -> dict:
                 "coverage_review_priority": "P1",
                 "l2_readiness": "blocked_rewrite_required",
                 "recommended_action": "keep_l1_observe_only_until_side_specific_rewrite_handoff_exists",
-                "blocking_gaps_before_l2": ["side_specific_rewrite_missing"],
+                "blocking_gaps_before_l2": [
+                    "side_specific_rewrite_missing",
+                    "lsr_disable_classifier_state_missing_from_runtime",
+                ],
+                "classifier_repair_spec": {
+                    "status": "local_repair_spec_ready",
+                    "target_classifier": "side_specific_short_revival_classifier",
+                    "blocking_gap_keys": [
+                        "lsr_disable_classifier_state_missing_from_runtime"
+                    ],
+                    "required_entry_states": ["short_revival_confirmation_present"],
+                    "required_disable_states": ["range_context_missing"],
+                    "replay_acceptance_cases": ["short_revival_rewrite_needed"],
+                    "acceptance_signal": "rewrite before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
             },
             "RBR-001": {
                 "coverage_review_priority": "P2",
@@ -95,7 +112,24 @@ def _policy() -> dict:
                 "coverage_review_priority": "P1",
                 "l2_readiness": "blocked_classifier_redesign_required",
                 "recommended_action": "keep_l1_observe_only_until_false_breakout_disable",
-                "blocking_gaps_before_l2": ["cost_m2m_negative"],
+                "blocking_gaps_before_l2": [
+                    "cost_m2m_negative",
+                    "false_breakout_disable_state_missing_from_runtime",
+                ],
+                "classifier_repair_spec": {
+                    "status": "local_repair_spec_ready",
+                    "target_classifier": "true_breakout_pre_entry_classifier",
+                    "blocking_gap_keys": [
+                        "false_breakout_disable_state_missing_from_runtime"
+                    ],
+                    "required_entry_states": ["breakout_close_confirmed"],
+                    "required_disable_states": ["false_breakout_reversal_detected"],
+                    "replay_acceptance_cases": ["false_breakout_disable_needed"],
+                    "acceptance_signal": "disable false breakout before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
             },
         },
         "safety_invariants": {"policy_is_review_only": True},
@@ -115,6 +149,7 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
         "blocked_count": 3,
         "conditional_l2_candidate_count": 1,
         "enabled_l2_count": 0,
+        "classifier_repair_spec_ready_count": 2,
         "forbidden_effect_count": 0,
         "review_row_count": 4,
     }
@@ -126,8 +161,18 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     assert rows["BTPC-001"]["conditional_l2_review_candidate"] is True
     assert rows["BTPC-001"]["may_create_shadow_candidate_now"] is False
     assert rows["LSR-001"]["conditional_l2_review_candidate"] is False
+    assert rows["LSR-001"]["classifier_repair_spec"]["status"] == (
+        "local_repair_spec_ready"
+    )
+    assert rows["LSR-001"]["classifier_repair_spec"]["target_classifier"] == (
+        "side_specific_short_revival_classifier"
+    )
+    assert rows["LSR-001"]["classifier_repair_spec"]["not_execution_authority"] is True
     assert rows["RBR-001"]["conditional_l2_review_candidate"] is False
     assert rows["VCB-001"]["conditional_l2_review_candidate"] is False
+    assert rows["VCB-001"]["classifier_repair_spec"]["required_disable_states"] == [
+        "false_breakout_reversal_detected"
+    ]
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["safety_invariants"]["does_not_change_tier_policy"] is True
     assert packet["safety_invariants"]["does_not_expand_l4_real_order_scope"] is True
