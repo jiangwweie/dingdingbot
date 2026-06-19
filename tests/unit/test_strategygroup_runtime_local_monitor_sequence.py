@@ -90,13 +90,26 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
-        else:
+        elif script == "run_strategygroup_signal_coverage_diagnostic.py":
             _write_output(
                 command,
                 {
                     "status": "mainline_and_broader_no_signal",
                     "interaction": {
                         "level": "L0_local_signal_coverage",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+        else:
+            _write_output(
+                command,
+                {
+                    "status": "no_expansion_review_needed",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage_expansion_review",
                         "remote_interaction_count": 0,
                         "mutates_remote_files": False,
                         "approaches_real_order": False,
@@ -123,6 +136,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_signal_coverage_diagnostic.py",
+        "build_strategygroup_signal_coverage_expansion_review.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -170,11 +184,23 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             )
             return subprocess.CompletedProcess(command, 2, "", "")
 
+        if script == "run_strategygroup_signal_coverage_diagnostic.py":
+            _write_output(
+                command,
+                {
+                    "status": "mainline_and_broader_no_signal",
+                    "interaction": {"level": "L0_local_signal_coverage"},
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         _write_output(
             command,
             {
-                "status": "mainline_and_broader_no_signal",
-                "interaction": {"level": "L0_local_signal_coverage"},
+                "status": "no_expansion_review_needed",
+                "interaction": {
+                    "level": "L0_local_signal_coverage_expansion_review"
+                },
             },
         )
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -266,12 +292,27 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "run_strategygroup_signal_coverage_diagnostic.py":
+            _write_output(
+                command,
+                {
+                    "status": "mainline_and_broader_no_signal",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         _write_output(
             command,
             {
-                "status": "mainline_and_broader_no_signal",
+                "status": "no_expansion_review_needed",
                 "interaction": {
-                    "level": "L0_local_signal_coverage",
+                    "level": "L0_local_signal_coverage_expansion_review",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -332,12 +373,28 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "run_strategygroup_signal_coverage_diagnostic.py":
+            _write_output(
+                command,
+                {
+                    "status": "mainline_no_signal_broader_would_enter",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         _write_output(
             command,
             {
-                "status": "mainline_no_signal_broader_would_enter",
+                "status": "review_needed_broader_observe_only_would_enter",
+                "counts": {"review_row_count": 4},
                 "interaction": {
-                    "level": "L0_local_signal_coverage",
+                    "level": "L0_local_signal_coverage_expansion_review",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -357,6 +414,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         completion_audit_md=tmp_path / "completion.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
         signal_coverage_md=tmp_path / "signal-coverage.md",
+        signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
+        signal_coverage_expansion_review_md=tmp_path / "signal-expansion.md",
         command_runner=fake_runner,
     )
 
@@ -364,10 +423,11 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
     assert report["checks"]["blockers"] == []
     assert report["checks"]["non_market_gaps"] == [
         {
-            "source": "signal_coverage",
-            "requirement": "mainline runtime coverage should not miss broad observe-only opportunities silently",
+            "source": "signal_coverage_expansion_review",
+            "requirement": "broader observe-only opportunities should be reviewed for observation-scope expansion",
             "missing_or_false": [
-                "mainline_no_signal_but_broader_would_enter_observed"
+                "observation_scope_expansion_review_needed",
+                "review_row_count:4",
             ],
         }
     ]

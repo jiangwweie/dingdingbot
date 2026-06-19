@@ -68,6 +68,16 @@ def build_signal_coverage_expansion_review(
         "status": status,
         "owner_state": owner_state,
         "source_signal_coverage_status": signal_coverage_packet.get("status"),
+        "interaction": {
+            "level": "L0_local_signal_coverage_expansion_review",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
         "counts": {
             "broader_would_enter_signal_count": len(would_enter),
             "review_row_count": len(review_rows),

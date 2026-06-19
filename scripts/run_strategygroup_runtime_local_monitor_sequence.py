@@ -42,6 +42,12 @@ DEFAULT_SIGNAL_COVERAGE_JSON = (
 DEFAULT_SIGNAL_COVERAGE_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.md"
 )
+DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-expansion-review.json"
+)
+DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-expansion-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -68,6 +74,12 @@ def main(argv: list[str] | None = None) -> int:
         signal_coverage_json=Path(args.signal_coverage_json),
         signal_coverage_md=Path(args.signal_coverage_md),
         signal_coverage_source=args.signal_coverage_source,
+        signal_coverage_expansion_review_json=Path(
+            args.signal_coverage_expansion_review_json
+        ),
+        signal_coverage_expansion_review_md=Path(
+            args.signal_coverage_expansion_review_md
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -97,6 +109,12 @@ def build_local_monitor_sequence_report(
     signal_coverage_json: Path = DEFAULT_SIGNAL_COVERAGE_JSON,
     signal_coverage_md: Path = DEFAULT_SIGNAL_COVERAGE_MD,
     signal_coverage_source: str = "local_sqlite_fallback",
+    signal_coverage_expansion_review_json: Path = (
+        DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_JSON
+    ),
+    signal_coverage_expansion_review_md: Path = (
+        DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -169,6 +187,28 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    signal_coverage_expansion_review_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_signal_coverage_expansion_review.py"
+        ),
+        "--signal-coverage-json",
+        str(signal_coverage_json),
+        "--output-json",
+        str(signal_coverage_expansion_review_json),
+        "--output-owner-progress",
+        str(signal_coverage_expansion_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "signal_coverage_expansion_review",
+            signal_coverage_expansion_review_command,
+            signal_coverage_expansion_review_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -189,8 +229,10 @@ def build_local_monitor_sequence_report(
         packets["completion_audit"].get("non_market_gaps") or []
     )
     non_market_gaps = list(completion_non_market_gaps)
-    signal_coverage_gap = _signal_coverage_non_market_gap(
-        packets.get("signal_coverage", {})
+    signal_coverage_gap = _expansion_review_non_market_gap(
+        packets.get("signal_coverage_expansion_review", {})
+    ) or _signal_coverage_non_market_gap(
+        packets.get("signal_coverage", {}),
     )
     if signal_coverage_gap:
         non_market_gaps.append(signal_coverage_gap)
@@ -233,6 +275,9 @@ def build_local_monitor_sequence_report(
             "goal_progress_json": str(goal_progress_json),
             "completion_audit_json": str(completion_audit_json),
             "signal_coverage_json": str(signal_coverage_json),
+            "signal_coverage_expansion_review_json": str(
+                signal_coverage_expansion_review_json
+            ),
         },
     }
 
@@ -330,6 +375,12 @@ def _sequence_status(
         "mainline_no_signal_broader_would_enter",
     }:
         return "needs_non_market_repair"
+    expansion_review_status = _status(packets.get("signal_coverage_expansion_review"))
+    if expansion_review_status in {
+        "blocked_forbidden_effect",
+        "review_needed_broader_observe_only_would_enter",
+    }:
+        return "needs_non_market_repair"
     if (
         _status(packets["daily_check"]) == "waiting_for_market"
         and _status(packets["goal_progress"]) == "waiting_for_market"
@@ -375,6 +426,27 @@ def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | 
             "source": "signal_coverage",
             "requirement": "signal coverage diagnostic must stay non-executing",
             "missing_or_false": ["signal_coverage_forbidden_effect"],
+        }
+    return None
+
+
+def _expansion_review_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | None:
+    status = _status(packet)
+    if status == "review_needed_broader_observe_only_would_enter":
+        counts = packet.get("counts") if isinstance(packet.get("counts"), dict) else {}
+        return {
+            "source": "signal_coverage_expansion_review",
+            "requirement": "broader observe-only opportunities should be reviewed for observation-scope expansion",
+            "missing_or_false": [
+                "observation_scope_expansion_review_needed",
+                f"review_row_count:{_int(counts.get('review_row_count'))}",
+            ],
+        }
+    if status == "blocked_forbidden_effect":
+        return {
+            "source": "signal_coverage_expansion_review",
+            "requirement": "signal coverage expansion review must stay non-executing",
+            "missing_or_false": ["signal_coverage_expansion_review_forbidden_effect"],
         }
     return None
 
@@ -569,6 +641,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--completion-audit-md", default=str(DEFAULT_COMPLETION_AUDIT_MD))
     parser.add_argument("--signal-coverage-json", default=str(DEFAULT_SIGNAL_COVERAGE_JSON))
     parser.add_argument("--signal-coverage-md", default=str(DEFAULT_SIGNAL_COVERAGE_MD))
+    parser.add_argument(
+        "--signal-coverage-expansion-review-json",
+        default=str(DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--signal-coverage-expansion-review-md",
+        default=str(DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_MD),
+    )
     parser.add_argument(
         "--signal-coverage-source",
         choices=["sample", "local_sqlite_fallback", "live_market"],

@@ -122,6 +122,17 @@ def build_signal_coverage_diagnostic_packet(
             "broader_source_requested": source_name,
             "broader_market_source": broader_preview_packet.get("market_source"),
         },
+        "interaction": {
+            "level": "L0_local_signal_coverage",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+            "public_market_read_only": source_name == "live_market",
+        },
         "checks": {
             "runtime_signal_summary_count": len(runtime_rows),
             "runtime_ready_signal_count": len(runtime_ready_rows),

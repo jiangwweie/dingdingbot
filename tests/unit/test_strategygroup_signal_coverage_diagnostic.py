@@ -146,6 +146,10 @@ def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
     assert packet["checks"]["runtime_ready_signal_count"] == 0
     assert packet["checks"]["broader_would_enter_signal_count"] == 1
     assert packet["checks"]["coverage_gap"] is True
+    assert packet["interaction"]["level"] == "L0_local_signal_coverage"
+    assert packet["interaction"]["remote_interaction_count"] == 0
+    assert packet["interaction"]["mutates_remote_files"] is False
+    assert packet["interaction"]["approaches_real_order"] is False
     assert packet["diagnosis"]["broader_signals_are_observe_only"] is True
     assert packet["diagnosis"]["does_not_authorize_real_order"] is True
     assert packet["operator_command_plan"]["places_order"] is False

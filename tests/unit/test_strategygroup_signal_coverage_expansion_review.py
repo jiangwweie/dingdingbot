@@ -90,6 +90,12 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     assert packet["status"] == "review_needed_broader_observe_only_would_enter"
     assert packet["counts"]["broader_would_enter_signal_count"] == 2
     assert packet["counts"]["new_strategy_group_review_count"] == 2
+    assert packet["interaction"]["level"] == (
+        "L0_local_signal_coverage_expansion_review"
+    )
+    assert packet["interaction"]["remote_interaction_count"] == 0
+    assert packet["interaction"]["mutates_remote_files"] is False
+    assert packet["interaction"]["approaches_real_order"] is False
     assert packet["decision"]["observation_scope_review_recommended"] is True
     assert packet["decision"]["real_order_scope_change_recommended"] is False
     assert packet["decision"]["l4_promotion_recommended"] is False
