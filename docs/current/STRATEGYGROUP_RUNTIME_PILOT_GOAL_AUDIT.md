@@ -713,6 +713,21 @@ StrategyGroup signal.
 | Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_l2_intake_dry_run.py` assert the richer Owner rows, source states, and no-candidate reason |
 | Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Opportunity Decision Loop Checkpoint
+
+The P0.5 path now has a repeatable local decision loop instead of another
+report-only layer. The loop joins observed would-enter rows, replay coverage,
+blocking gaps, and L2 tier state into per-StrategyGroup decisions.
+
+| Item | Evidence |
+| --- | --- |
+| Decision loop script | `scripts/build_strategygroup_opportunity_decision_loop.py` consumes signal coverage expansion, L2 readiness, L2 intake, and replay lab artifacts |
+| Machine output | `latest-opportunity-decision-loop.json` emits per-StrategyGroup `observed_signal`, `replay_verification`, `blocking_gaps_before_l2`, `gap_work_items`, `decision_action`, and `next_checkpoint` |
+| Current decisions | Current local run maps `BTPC-001` to `continue_l2_shadow_quality_review`, `LSR-001` and `VCB-001` to `repair_blocking_gaps_with_replay_or_facts`, and `RBR-001` to `park_or_vocabulary_only` |
+| L4 boundary | The loop keeps `real_order_authorized_count=0`, `l4_scope_change_recommended_count=0`, `places_order=false`, `calls_finalgate=false`, `calls_operation_layer=false`, and `calls_exchange_write=false` |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` covers L2-enabled continuation, L1 replay-plus-gap repair, missing-replay-before-L2, forbidden source effects, and CLI output |
+| Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a
