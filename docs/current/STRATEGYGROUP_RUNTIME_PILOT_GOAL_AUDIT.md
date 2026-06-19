@@ -1006,6 +1006,25 @@ write, or real-order authority.
 | Verification | `tests/unit/test_strategygroup_btpc_live_derivatives_fact_source_mapping.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert live-source mapping, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
 | Safety | Local source-map work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
+### 2026-06-19 BTPC Classifier Rule Review Checkpoint
+
+The P0.5 loop now turns the BTPC strong-uptrend conflict and stale-signal
+action rows into a local classifier-rule review artifact, and the reference
+price-action evaluator now records those disable states in `btpc-001-price-action-v1`.
+This moves BTPC from explanatory replay rows toward a repeatable
+observe/replay/revise loop while keeping the StrategyGroup at L2 shadow
+observation only.
+
+| Item | Evidence |
+| --- | --- |
+| Evaluator revision | `BTPC001PriceActionEvaluator.logic_version=btpc-001-price-action-v1` adds `classifier_revision`, `entry_states`, and `disable_states` |
+| Strong-uptrend rule | Strong-uptrend conflict emits `btpc_disable_strong_uptrend_conflict` as no-action review evidence |
+| Freshness rule | Stale input emits `btpc_disable_stale_signal_before_l2_review` as no-action review evidence |
+| Review artifact | `scripts/build_strategygroup_btpc_classifier_rule_review.py` emits `status=btpc_classifier_rule_review_recorded_without_live_authority` when the BTPC keep/revise action rows and proxy replay cases are present |
+| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_classifier_rule_review` after `btpc_live_derivatives_fact_source_mapping` |
+| Verification | `tests/unit/test_reference_price_action_evaluators.py`, `tests/unit/test_strategygroup_btpc_classifier_rule_review.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert evaluator behavior, rule-review output, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
+| Safety | Local classifier-review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

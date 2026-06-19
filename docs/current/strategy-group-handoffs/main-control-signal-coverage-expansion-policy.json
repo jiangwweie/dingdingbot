@@ -36,7 +36,23 @@
         "top_trader_position_ratio_window_missing",
         "real_exchange_margin_liquidation_model_missing",
         "short_squeeze_risk_not_runtime_blocking"
-      ]
+      ],
+      "classifier_rule_review": {
+        "status": "local_classifier_rule_review_recorded",
+        "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+        "logic_version": "btpc-001-price-action-v1",
+        "reviewed_rules": [
+          "btpc_strong_uptrend_conflict_disable_rule",
+          "btpc_freshness_or_classifier_stale_signal_rule"
+        ],
+        "covered_replay_cases": [
+          "strong_uptrend_conflict",
+          "stale_signal"
+        ],
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      }
     },
     "LSR-001": {
       "current_main_control_tier": "L1",

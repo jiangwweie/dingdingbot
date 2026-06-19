@@ -83,6 +83,15 @@ def _mixed_context_4h() -> list[dict[str, Any]]:
     ]
 
 
+def _up_context_4h() -> list[dict[str, Any]]:
+    return [
+        _candle(0, "100", "102", "99", "100"),
+        _candle(1, "100", "104", "99", "102"),
+        _candle(2, "102", "106", "101", "104"),
+        _candle(3, "104", "109", "103", "108"),
+    ]
+
+
 def _btpc_1h() -> list[dict[str, Any]]:
     return [
         _candle(0, "110", "111", "108", "109"),
@@ -166,6 +175,7 @@ def _signal_input(
     version_id: str,
     one_hour: list[dict[str, Any]],
     four_hour: list[dict[str, Any]],
+    freshness: str = "fresh",
 ) -> StrategyFamilySignalInput:
     return StrategyFamilySignalInput(
         evaluation_id=f"eval-{family_id}",
@@ -219,7 +229,7 @@ def _signal_input(
             "allowed_symbols": ["ETH/USDT:USDT"],
         },
         source="unit_test",
-        freshness="fresh",
+        freshness=freshness,
     )
 
 
@@ -365,6 +375,55 @@ def test_reference_price_action_evaluator_candidate_semantics_and_fact_check(
     assert route.order_candidate_created is False
     assert route.execution_intent_created is False
     assert route.exchange_called is False
+
+
+def test_btpc001_revision_disables_strong_uptrend_and_stale_signal() -> None:
+    strong_uptrend_input = _signal_input(
+        family_id="BTPC-001",
+        version_id="BTPC-001-v0",
+        one_hour=_btpc_1h(),
+        four_hour=_up_context_4h(),
+    )
+    stale_input = _signal_input(
+        family_id="BTPC-001",
+        version_id="BTPC-001-v0",
+        one_hour=_btpc_1h(),
+        four_hour=_down_context_4h(),
+        freshness="stale",
+    )
+
+    strong_uptrend = BTPC001PriceActionEvaluator().evaluate(strong_uptrend_input)
+    stale = BTPC001PriceActionEvaluator().evaluate(stale_input)
+
+    assert strong_uptrend.signal_type == SignalType.NO_ACTION
+    assert strong_uptrend.reason_codes == ["btpc_disable_strong_uptrend_conflict"]
+    assert strong_uptrend.evidence_payload["logic_version"] == (
+        "btpc-001-price-action-v1"
+    )
+    assert strong_uptrend.evidence_payload["classifier_revision"] == {
+        "status": "local_classifier_revision_executed",
+        "target_classifier": "btpc_strong_uptrend_and_freshness_disable_rule",
+        "blocks_l2_promotion": True,
+        "not_execution_authority": True,
+        "not_l2_promotion_authority": True,
+        "not_l4_scope_change": True,
+    }
+    assert strong_uptrend.evidence_payload["disable_states"][
+        "strong_uptrend_disable_state"
+    ] is True
+    assert strong_uptrend.evidence_payload["disable_states"]["stale_signal"] is False
+    assert strong_uptrend.not_order is True
+    assert strong_uptrend.not_execution_intent is True
+
+    assert stale.signal_type == SignalType.NO_ACTION
+    assert stale.reason_codes == ["btpc_disable_stale_signal_before_l2_review"]
+    assert stale.evidence_payload["logic_version"] == "btpc-001-price-action-v1"
+    assert stale.evidence_payload["disable_states"]["stale_signal"] is True
+    assert stale.evidence_payload["entry_states"]["pullback_structure_loss"] is True
+    assert stale.not_order is True
+    assert stale.not_execution_intent is True
+    assert not _contains_forbidden_key(strong_uptrend.model_dump(mode="json"))
+    assert not _contains_forbidden_key(stale.model_dump(mode="json"))
 
 
 def test_lsr001_revision_disables_old_long_preview_conflict() -> None:

@@ -263,7 +263,7 @@ class _ReferencePriceActionEvaluator:
 
 class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
     family_id = BTPC_FAMILY_ID
-    logic_version = "btpc-001-price-action-v0"
+    logic_version = "btpc-001-price-action-v1"
 
     def _evaluate(
         self,
@@ -280,12 +280,34 @@ class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
         pullback_pct = _pct(pullback_high - pullback_low, pullback_low)
         htf_net_pct = _pct(four_hour[-1].close - four_hour[0].close, four_hour[0].close)
         trend_down = htf_net_pct <= Decimal("-1.0")
+        strong_uptrend = htf_net_pct >= Decimal("1.0")
         structure_loss = latest.close < previous.low and latest.close < latest.open
+        entry_states = {
+            "bear_trend_context": trend_down,
+            "weak_rally_or_pullback_depth": pullback_pct >= self._config.min_pullback_pct,
+            "pullback_structure_loss": structure_loss,
+            "regime_trend_down_state": trend_down,
+        }
+        disable_states = {
+            "strong_uptrend_disable_state": strong_uptrend,
+            "short_squeeze_disable_state": False,
+            "stale_signal": signal_input.freshness != "fresh",
+        }
         evidence = {
             "market_state": "TREND_DOWN" if trend_down else "UNCERTAIN",
             "htf_context": "trend_down" if trend_down else "mixed",
             "entry_pattern": "bear_trend_pullback_continuation" if structure_loss else "none",
             "latest_1h_open_time_ms": latest.open_time_ms,
+            "classifier_revision": {
+                "status": "local_classifier_revision_executed",
+                "target_classifier": "btpc_strong_uptrend_and_freshness_disable_rule",
+                "blocks_l2_promotion": True,
+                "not_execution_authority": True,
+                "not_l2_promotion_authority": True,
+                "not_l4_scope_change": True,
+            },
+            "entry_states": entry_states,
+            "disable_states": disable_states,
             "price_action_structure": {
                 "bear_trend_pullback_continuation": trend_down
                 and structure_loss
@@ -308,6 +330,22 @@ class BTPC001PriceActionEvaluator(_ReferencePriceActionEvaluator):
             ],
         }
         confirmed = evidence["price_action_structure"]["bear_trend_pullback_continuation"]
+        if disable_states["stale_signal"]:
+            return self._no_action(
+                signal_input,
+                ["btpc_disable_stale_signal_before_l2_review"],
+                "BTPC v1 rejects stale shadow signals before any L2 promotion review.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.PULLBACK_CONTINUATION,
+            )
+        if disable_states["strong_uptrend_disable_state"]:
+            return self._no_action(
+                signal_input,
+                ["btpc_disable_strong_uptrend_conflict"],
+                "BTPC v1 disables short continuation review during strong-uptrend conflict.",
+                evidence,
+                expected_risk_shape=ExpectedRiskShape.PULLBACK_CONTINUATION,
+            )
         if not confirmed:
             return self._no_action(
                 signal_input,
