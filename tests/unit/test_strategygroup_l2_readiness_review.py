@@ -218,3 +218,8 @@ def test_l2_readiness_review_cli_writes_json_and_owner_progress(tmp_path, capsys
     owner_text = owner_path.read_text(encoding="utf-8")
     assert "L2 观察面准备度评审" in owner_text
     assert "BTPC-001" in owner_text
+    assert (
+        "| StrategyGroup | Symbol | Side | Tier | Priority | L2 Readiness | "
+        "Action | Blocking gaps |"
+    ) in owner_text
+    assert "historical_open_interest_window_missing" in owner_text

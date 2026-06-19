@@ -37,11 +37,26 @@ def build_l2_intake_dry_run(
     l2_readiness_packet: dict[str, Any],
     handoff_root: Path = DEFAULT_HANDOFF_ROOT,
 ) -> dict[str, Any]:
-    rows = [
+    source_rows = [
         row
         for row in l2_readiness_packet.get("readiness_rows") or []
         if isinstance(row, dict)
-        and row.get("conditional_l2_review_candidate") is True
+    ]
+    rows = [
+        row
+        for row in source_rows
+        if row.get("conditional_l2_review_candidate") is True
+    ]
+    enabled_rows = [
+        row
+        for row in source_rows
+        if row.get("l2_shadow_candidate_observation_enabled") is True
+    ]
+    blocked_rows = [
+        row
+        for row in source_rows
+        if row.get("conditional_l2_review_candidate") is not True
+        and row.get("l2_shadow_candidate_observation_enabled") is not True
     ]
     dry_run_rows = [
         _dry_run_row(row=row, handoff_root=handoff_root)
@@ -86,11 +101,21 @@ def build_l2_intake_dry_run(
             "candidate_count": len(dry_run_rows),
             "passed_count": len(dry_run_rows) - len(failed_rows),
             "failed_count": len(failed_rows),
+            "source_readiness_row_count": len(source_rows),
+            "source_conditional_candidate_count": len(rows),
+            "source_enabled_l2_count": len(enabled_rows),
+            "source_blocked_count": len(blocked_rows),
             "forbidden_effect_count": len(forbidden_effects),
         },
         "dry_run_rows": dry_run_rows,
+        "source_readiness_rows": [_source_row(row) for row in source_rows],
         "decision": {
             "default_next_step": next_step,
+            "no_candidate_reason": (
+                "no_conditional_l2_review_candidates"
+                if not dry_run_rows
+                else None
+            ),
             "tier_policy_change_ready_for_review": (
                 status == "l2_intake_dry_run_passed"
             ),
@@ -98,6 +123,14 @@ def build_l2_intake_dry_run(
             "shadow_candidate_creation_recommended_now": False,
             "groups_ready_for_l2_policy_review": [
                 row["strategy_group_id"] for row in dry_run_rows if row["status"] == "passed"
+            ],
+            "enabled_l2_groups": [
+                str(row.get("strategy_group_id") or "unknown")
+                for row in enabled_rows
+            ],
+            "blocked_groups": [
+                str(row.get("strategy_group_id") or "unknown")
+                for row in blocked_rows
             ],
         },
         "operator_command_plan": {
@@ -146,6 +179,9 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         f"- Owner state: `{packet.get('owner_state')}`",
         f"- Candidate count: `{counts.get('candidate_count', 0)}`",
         f"- Passed count: `{counts.get('passed_count', 0)}`",
+        f"- Source enabled L2: `{counts.get('source_enabled_l2_count', 0)}`",
+        f"- Source blocked rows: `{counts.get('source_blocked_count', 0)}`",
+        f"- No-candidate reason: `{_dict(packet.get('decision')).get('no_candidate_reason')}`",
         "- Tier policy changed: `false`",
         "- L4 scope changed: `false`",
         "- Real order: `false`",
@@ -153,6 +189,16 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "## Rows",
         "",
         _rows_table([row for row in packet.get("dry_run_rows") or [] if isinstance(row, dict)]),
+        "",
+        "## Source Readiness Rows",
+        "",
+        _source_rows_table(
+            [
+                row
+                for row in packet.get("source_readiness_rows") or []
+                if isinstance(row, dict)
+            ]
+        ),
         "",
         "## 下一步",
         "",
@@ -210,6 +256,26 @@ def _dry_run_row(*, row: dict[str, Any], handoff_root: Path) -> dict[str, Any]:
     }
 
 
+def _source_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "strategy_group_id": str(row.get("strategy_group_id") or "unknown"),
+        "symbol": row.get("symbol"),
+        "side": row.get("side"),
+        "current_tier": row.get("current_tier"),
+        "l2_readiness": row.get("l2_readiness"),
+        "recommended_action": row.get("recommended_action"),
+        "conditional_l2_review_candidate": (
+            row.get("conditional_l2_review_candidate") is True
+        ),
+        "l2_shadow_candidate_observation_enabled": (
+            row.get("l2_shadow_candidate_observation_enabled") is True
+        ),
+        "blocking_gaps_before_l2": [
+            str(item) for item in row.get("blocking_gaps_before_l2") or []
+        ],
+    }
+
+
 def _source_forbidden_effects(packet: dict[str, Any]) -> list[str]:
     safety = _dict(packet.get("safety_invariants"))
     effects = [str(item) for item in safety.get("source_forbidden_effects") or []]
@@ -244,6 +310,45 @@ def _rows_table(rows: list[dict[str, Any]]) -> str:
             )
         )
     return "\n".join(output)
+
+
+def _source_rows_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return (
+            "| StrategyGroup | Symbol | Side | Tier | L2 Readiness | Source State | Blocking gaps |\n"
+            "| --- | --- | --- | --- | --- | --- | --- |\n"
+            "| none | - | - | - | - | - | - |"
+        )
+    output = [
+        "| StrategyGroup | Symbol | Side | Tier | L2 Readiness | Source State | Blocking gaps |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        output.append(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+                row.get("strategy_group_id"),
+                row.get("symbol"),
+                row.get("side"),
+                row.get("current_tier"),
+                row.get("l2_readiness"),
+                _source_state(row),
+                _join_codes(row.get("blocking_gaps_before_l2")),
+            )
+        )
+    return "\n".join(output)
+
+
+def _source_state(row: dict[str, Any]) -> str:
+    if row.get("conditional_l2_review_candidate") is True:
+        return "conditional_l2_candidate"
+    if row.get("l2_shadow_candidate_observation_enabled") is True:
+        return "enabled_l2"
+    return "blocked"
+
+
+def _join_codes(values: Any) -> str:
+    codes = [str(value) for value in values or [] if str(value or "").strip()]
+    return ", ".join(codes[:4]) if codes else "none"
 
 
 def _exchange_symbol(value: Any) -> str:

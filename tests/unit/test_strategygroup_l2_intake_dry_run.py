@@ -103,12 +103,17 @@ def test_l2_intake_dry_run_passes_for_btpc_observe_only_handoff(tmp_path):
         "failed_count": 0,
         "forbidden_effect_count": 0,
         "passed_count": 1,
+        "source_blocked_count": 0,
+        "source_conditional_candidate_count": 1,
+        "source_enabled_l2_count": 0,
+        "source_readiness_row_count": 1,
     }
     row = packet["dry_run_rows"][0]
     assert row["strategy_group_id"] == "BTPC-001"
     assert row["status"] == "passed"
     assert row["blockers"] == []
     assert packet["decision"]["tier_policy_change_ready_for_review"] is True
+    assert packet["decision"]["no_candidate_reason"] is None
     assert packet["decision"]["l4_scope_change_recommended"] is False
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["safety_invariants"]["tier_policy_changed"] is False
@@ -127,6 +132,66 @@ def test_l2_intake_dry_run_fails_when_handoff_missing(tmp_path):
     assert packet["counts"]["failed_count"] == 1
     assert "handoff_json_missing" in packet["dry_run_rows"][0]["blockers"]
     assert packet["operator_command_plan"]["places_order"] is False
+
+
+def test_l2_intake_dry_run_explains_no_candidates_from_source_rows(tmp_path):
+    module = _load_module()
+    l2_packet = _l2_packet()
+    l2_packet["status"] = "l2_readiness_review_already_enabled"
+    l2_packet["readiness_rows"] = [
+        {
+            "strategy_group_id": "BTPC-001",
+            "symbol": "AVAX/USDT:USDT",
+            "side": "short",
+            "current_tier": "L2",
+            "l2_readiness": "l2_shadow_candidate_observation_enabled",
+            "recommended_action": (
+                "continue_l2_shadow_candidate_observation_without_l4_scope_change"
+            ),
+            "blocking_gaps_before_l2": [],
+            "conditional_l2_review_candidate": False,
+            "l2_shadow_candidate_observation_enabled": True,
+            "may_create_shadow_candidate_now": False,
+            "may_place_real_order_now": False,
+        },
+        {
+            "strategy_group_id": "VCB-001",
+            "symbol": "LINK/USDT:USDT",
+            "side": "long",
+            "current_tier": "L1",
+            "l2_readiness": "blocked_classifier_redesign_required",
+            "recommended_action": (
+                "keep_l1_observe_only_until_false_breakout_disable_and_pre_entry_classifier_are_redesigned"
+            ),
+            "blocking_gaps_before_l2": ["false_breakout_disable_state_missing"],
+            "conditional_l2_review_candidate": False,
+            "l2_shadow_candidate_observation_enabled": False,
+            "may_create_shadow_candidate_now": False,
+            "may_place_real_order_now": False,
+        },
+    ]
+
+    packet = module.build_l2_intake_dry_run(
+        l2_readiness_packet=l2_packet,
+        handoff_root=tmp_path / "handoffs",
+    )
+
+    assert packet["status"] == "l2_intake_dry_run_no_candidates"
+    assert packet["counts"]["candidate_count"] == 0
+    assert packet["counts"]["source_enabled_l2_count"] == 1
+    assert packet["counts"]["source_blocked_count"] == 1
+    assert packet["decision"]["no_candidate_reason"] == (
+        "no_conditional_l2_review_candidates"
+    )
+    assert packet["decision"]["enabled_l2_groups"] == ["BTPC-001"]
+    assert packet["decision"]["blocked_groups"] == ["VCB-001"]
+    source_rows = {row["strategy_group_id"]: row for row in packet["source_readiness_rows"]}
+    assert source_rows["BTPC-001"]["l2_shadow_candidate_observation_enabled"] is True
+    assert source_rows["VCB-001"]["blocking_gaps_before_l2"] == [
+        "false_breakout_disable_state_missing"
+    ]
+    assert packet["interaction"]["remote_interaction_count"] == 0
+    assert packet["safety_invariants"]["order_created"] is False
 
 
 def test_l2_intake_dry_run_blocks_forbidden_source_effect(tmp_path):
@@ -175,4 +240,7 @@ def test_l2_intake_dry_run_cli_writes_outputs(tmp_path, capsys):
     file_payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert stdout_payload == file_payload
     assert file_payload["status"] == "l2_intake_dry_run_passed"
-    assert "L2 Intake Dry-Run" in owner_path.read_text(encoding="utf-8")
+    owner_text = owner_path.read_text(encoding="utf-8")
+    assert "L2 Intake Dry-Run" in owner_text
+    assert "Source Readiness Rows" in owner_text
+    assert "conditional_l2_candidate" in owner_text

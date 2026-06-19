@@ -242,21 +242,34 @@ def _forbidden_effects(
 
 def _readiness_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| StrategyGroup | Priority | L2 Readiness | Action |\n| --- | --- | --- | --- |\n| none | - | - | - |"
+        return (
+            "| StrategyGroup | Symbol | Side | Tier | Priority | L2 Readiness | Action | Blocking gaps |\n"
+            "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+            "| none | - | - | - | - | - | - | - |"
+        )
     output = [
-        "| StrategyGroup | Priority | L2 Readiness | Action |",
-        "| --- | --- | --- | --- |",
+        "| StrategyGroup | Symbol | Side | Tier | Priority | L2 Readiness | Action | Blocking gaps |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` |".format(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
                 row.get("strategy_group_id"),
+                row.get("symbol"),
+                row.get("side"),
+                row.get("current_tier"),
                 row.get("coverage_review_priority"),
                 row.get("l2_readiness"),
                 row.get("recommended_action"),
+                _join_codes(row.get("blocking_gaps_before_l2")),
             )
         )
     return "\n".join(output)
+
+
+def _join_codes(values: Any) -> str:
+    codes = [str(value) for value in values or [] if str(value or "").strip()]
+    return ", ".join(codes[:4]) if codes else "none"
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

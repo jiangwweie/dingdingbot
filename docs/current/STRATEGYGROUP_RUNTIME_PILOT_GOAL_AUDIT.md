@@ -697,6 +697,22 @@ execution boundary.
 | Verification | `tests/unit/test_strategygroup_signal_coverage_expansion_review.py` asserts the owner table header and row boundary text |
 | Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 L2 Opportunity Triage Explanation Checkpoint
+
+The P0.5 L2 readiness and intake dry-run Owner reports now explain why broader
+would-enter observations do or do not become new L2 intake candidates. This
+keeps market-opportunity review moving while P0 waits for a real fresh selected
+StrategyGroup signal.
+
+| Item | Evidence |
+| --- | --- |
+| L2 readiness table | `scripts/build_strategygroup_l2_readiness_review.py` emits StrategyGroup, symbol, side, current tier, priority, L2 readiness, recommended action, and blocking gaps |
+| Intake no-candidate explanation | `scripts/run_strategygroup_l2_intake_dry_run.py` reports source readiness rows, enabled L2 count, blocked row count, and `no_conditional_l2_review_candidates` when no new intake row exists |
+| Current interpretation | `BTPC-001` can continue L2 shadow-candidate observation; `LSR-001`, `RBR-001`, and `VCB-001` remain blocked by explicit L2 gaps |
+| L4 boundary | The reports still keep `tier_policy_change=false`, `l4_scope_change=false`, `shadow_candidate_now=false`, `FinalGate=false`, `Operation Layer=false`, and `real_order=false` |
+| Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_l2_intake_dry_run.py` assert the richer Owner rows, source states, and no-candidate reason |
+| Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a
