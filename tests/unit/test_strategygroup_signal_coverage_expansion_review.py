@@ -104,6 +104,9 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     assert rows["BTPC-001"]["suggested_next_tier"] == (
         "L2_after_handoff_review_and_dry_run"
     )
+    assert rows["BTPC-001"]["execution_boundary"] == (
+        "observe-only; no candidate/order"
+    )
     assert rows["BTPC-001"]["may_place_real_order_after_this_review"] is False
     assert packet["operator_command_plan"]["places_order"] is False
     assert packet["operator_command_plan"]["changes_tier_policy"] is False
@@ -167,3 +170,8 @@ def test_expansion_review_cli_writes_json_and_owner_progress(tmp_path, capsys):
     owner_text = owner_path.read_text(encoding="utf-8")
     assert "策略观察面扩展评审" in owner_text
     assert "BTPC-001" in owner_text
+    assert (
+        "| StrategyGroup | Symbol | Side | Confidence | Tier | Next tier | "
+        "Action | Boundary |"
+    ) in owner_text
+    assert "observe-only; no candidate/order" in owner_text

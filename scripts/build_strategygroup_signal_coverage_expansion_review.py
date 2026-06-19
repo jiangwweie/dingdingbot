@@ -206,6 +206,7 @@ def _review_row(
         ),
         "may_place_real_order_after_this_review": False,
         "requires_owner_live_lane_change_for_l4": True,
+        "execution_boundary": _execution_boundary(current_tier=current_tier),
     }
 
 
@@ -231,6 +232,18 @@ def _suggested_next_tier(*, source_category: str, current_tier: str) -> str:
     if current_tier == "L1":
         return "L2_after_handoff_review_and_dry_run"
     return current_tier
+
+
+def _execution_boundary(*, current_tier: str) -> str:
+    if current_tier == "L1":
+        return "observe-only; no candidate/order"
+    if current_tier == "L2":
+        return "shadow review only; no FinalGate/Operation Layer"
+    if current_tier == "L3":
+        return "armed observation review; no Operation Layer"
+    if current_tier == "L4":
+        return "official chain only; preview is not submit authority"
+    return "handoff classification required before observation"
 
 
 def _normalize_strategy_group_key(strategy_group_id: str) -> str:
@@ -276,19 +289,26 @@ def _forbidden_effects(packet: dict[str, Any]) -> list[str]:
 
 def _review_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| StrategyGroup | Symbol | Side | Tier | Action |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
+        return (
+            "| StrategyGroup | Symbol | Side | Confidence | Tier | Next tier | Action | Boundary |\n"
+            "| --- | --- | --- | ---: | --- | --- | --- | --- |\n"
+            "| none | - | - | - | - | - | - | - |"
+        )
     output = [
-        "| StrategyGroup | Symbol | Side | Tier | Action |",
-        "| --- | --- | --- | --- | --- |",
+        "| StrategyGroup | Symbol | Side | Confidence | Tier | Next tier | Action | Boundary |",
+        "| --- | --- | --- | ---: | --- | --- | --- | --- |",
     ]
     for row in rows:
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
                 row.get("strategy_group_id"),
                 row.get("symbol"),
                 row.get("side"),
+                row.get("confidence"),
                 row.get("current_tier"),
+                row.get("suggested_next_tier"),
                 row.get("suggested_scope_action"),
+                row.get("execution_boundary"),
             )
         )
     return "\n".join(output)

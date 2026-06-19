@@ -682,6 +682,21 @@ fresh selected StrategyGroup signal.
 | Verification | `tests/unit/test_strategygroup_runtime_replay_lab.py` asserts the Owner progress rows for `BTPC-001`, `BRF-001`, `VCB-001`, and `LSR-001` |
 | Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Signal Coverage Owner Opportunity Table Checkpoint
+
+The P0.5 signal coverage expansion review now makes broader observe-only
+would-enter rows directly reviewable. Each Owner progress table row includes
+the StrategyGroup tier, suggested next tier, suggested action, confidence, and
+execution boundary.
+
+| Item | Evidence |
+| --- | --- |
+| Owner opportunity table | `scripts/build_strategygroup_signal_coverage_expansion_review.py` emits `StrategyGroup`, `Symbol`, `Side`, `Confidence`, `Tier`, `Next tier`, `Action`, and `Boundary` columns |
+| Review use | Broader would-enter rows can now be triaged as observe-only, L2 shadow review, L3 armed-observation review, L4 official-chain-only, or unclassified handoff work |
+| L4 boundary | The table still reports `real_order_scope_change_recommended=false`, `l4_promotion_recommended=false`, and `may_place_real_order_after_this_review=false` |
+| Verification | `tests/unit/test_strategygroup_signal_coverage_expansion_review.py` asserts the owner table header and row boundary text |
+| Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a
