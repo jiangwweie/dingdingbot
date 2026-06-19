@@ -111,13 +111,21 @@ deploys are intentionally less frequent now.
 | Action | Default policy |
 | --- | --- |
 | Routine monitor review | Use L0 cache/local progress first |
-| Fresh status refresh | At most one L1 read-only Tokyo snapshot when cache is stale or schema-stale |
+| Fresh status refresh | At most one L1 read-only Tokyo snapshot when cache is missing, stale, schema-stale, or tied to an old runtime head |
 | Bounded Tokyo deploy apply | Only after a stage-worthy fix, deployable milestone, or explicit Owner request |
 | Real order path | Only after selected StrategyGroup, allocated subaccount risk budget, fresh signal, RequiredFacts, candidate/auth, action-time FinalGate, and official Operation Layer all pass |
 | Frontend work | External project; not part of this runtime branch unless the Owner explicitly reopens it |
 
 Do not deploy for every small documentation change, planning adjustment, or
 local-only replay/simulation improvement.
+
+Monitor freshness states are not trading blockers. If the only issue is
+`runtime_progress_cache_missing`, `runtime_progress_cache_stale`,
+`runtime_progress_cache_schema_stale`, or
+`runtime_progress_cache_runtime_head_stale`, classify the state as
+`monitor_refresh_needed`: notify automation to refresh, keep `checks.blockers`
+empty, keep Owner intervention false, and preserve P0 as waiting for market
+when the runtime chain itself remains ready.
 
 ## Current Audit Surface
 
@@ -383,8 +391,8 @@ L1 read-only snapshot
 | Local progress cache | `--output-json` and `--output-owner-progress` can persist the latest daily-check report and Owner progress text; `--from-cache --owner-progress` re-renders the default saved report locally with zero Tokyo interaction |
 | Auto cache mode | `--auto-cache --owner-progress` first uses a fresh local cache with `L0` / 0 remote interactions; only missing, stale, or schema-stale cache triggers one `L1` snapshot and refreshes the local cache/progress files |
 | Read-vs-collection clarity | Cache-only Owner progress separates `本次读取` from `报告采集`, so a local status review shows `本次远端交互次数: 0` while retaining the last L1 snapshot cost as audit context |
-| Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into an Owner-readable engineering blocker instead of triggering an extra Tokyo probe |
-| Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become an Owner-readable engineering blocker instead of mixing new code with stale cached fields |
+| Cache-only guard | `--from-cache --require-fresh-cache --owner-progress` reads only local cache and converts missing or stale cache into `monitor_refresh_needed` instead of triggering an extra Tokyo probe |
+| Cache schema guard | Cache-only progress checks require the current daily-check report schema; old local reports become `monitor_refresh_needed` instead of mixing new code with stale cached fields |
 | Heartbeat cache refresh | `tokyo-runtime-quiet-monitor` should start from `local_monitor_sequence_check`: daily-check, live-cutover readiness refresh, goal-progress, and P0 completion-audit run in strict local/cache order; explicit signal or regression investigation may still force one L1 refresh through the daily-check step |
 | Heartbeat SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` now records the exact `local_monitor_sequence_check` command used by `tokyo-runtime-quiet-monitor`, preventing automation prompt drift from the repository baseline |
 | Quiet-monitor drift audit | `scripts/audit_tokyo_runtime_quiet_monitor.py --owner-progress` compares the local heartbeat automation prompt with `RUNTIME_MONITOR_BASELINE.json`, including the local sequence command and its quiet/noise boundary, using `L0` / 0 remote interactions |

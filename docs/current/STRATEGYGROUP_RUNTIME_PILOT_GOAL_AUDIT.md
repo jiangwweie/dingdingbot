@@ -34,6 +34,28 @@ cleanup plan.
 | Product gaps | none |
 | Current safe action | continue watcher observation until fresh selected StrategyGroup signal |
 
+## Monitor Refresh Classification Constraint
+
+Local monitor cache freshness is an observability constraint, not a live-trading
+safety blocker.
+
+| Condition | Required classification | Constraint |
+| --- | --- | --- |
+| `runtime_progress_cache_missing` | `monitor_refresh_needed` | Notify automation to refresh, do not populate `checks.blockers` |
+| `runtime_progress_cache_stale` | `monitor_refresh_needed` | Notify automation to refresh, do not classify as `hard_safety_stop` |
+| `runtime_progress_cache_schema_stale` | `monitor_refresh_needed` | Refresh cache before trusting fields, do not mark P0 blocked |
+| `runtime_progress_cache_runtime_head_stale` | `monitor_refresh_needed` | Refresh cache against current runtime head, do not treat as a trading gate failure |
+
+When the runtime chain remains ready and the only issue is monitor freshness,
+the goal-progress layer must preserve the first-order truth:
+
+```text
+P0 = waiting_for_market
+P0.5 = ready
+Owner intervention = false
+checks.blockers = []
+```
+
 ## Requirement Audit
 
 ### P0 Real-Entry Fast Chain

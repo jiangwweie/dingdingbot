@@ -1052,6 +1052,43 @@ def test_goal_progress_rejects_remote_interaction_in_local_audit():
     ]
 
 
+def test_goal_progress_keeps_stale_monitor_cache_out_of_trade_blockers():
+    module = _load_module()
+    daily_check = _daily_check(status="needs_refresh")
+    daily_check["owner_summary"]["state"] = "监控状态需刷新"
+    daily_check["owner_summary"]["current_action"] = "刷新本地 runtime monitor 缓存"
+    daily_check["owner_summary"]["visibility"] = {
+        "category": "monitor_refresh",
+        "label": "监控状态需刷新",
+    }
+    daily_check["notification"] = {
+        "decision": "NOTIFY",
+        "reason": "runtime_progress_cache_stale",
+        "owner_intervention_required": False,
+    }
+    daily_check["checks"]["monitor_refresh_needed"] = True
+    daily_check["checks"]["monitor_refresh_reasons"] = [
+        "runtime_progress_cache_stale"
+    ]
+
+    report = module.build_goal_progress_report(
+        daily_check=daily_check,
+        baseline=_baseline(),
+        tier_policy=_tier_policy(),
+    )
+
+    assert report["status"] == "needs_refresh"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["product_gaps"] == []
+    assert report["checks"]["monitor_refresh_needed"] is True
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["completion_boundary"]["status"] == "not_complete_waiting_for_market"
+    assert report["completion_boundary"]["completion_blocker_class"] == "waiting_for_market"
+    tracks = {track["id"]: track for track in report["tracks"]}
+    assert tracks["p0_live_closure"]["status"] == "waiting_for_market"
+    assert tracks["p05_runtime_interaction_optimization"]["status"] == "ready"
+
+
 def test_goal_progress_cli_writes_json_and_owner_progress(tmp_path):
     module = _load_module()
     daily_check_path = tmp_path / "daily-check.json"

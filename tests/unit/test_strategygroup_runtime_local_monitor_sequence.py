@@ -173,3 +173,92 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
     assert report["checks"]["non_market_gaps"][0]["missing_or_false"] == [
         "goal_progress:generated_before_daily_check"
     ]
+
+
+def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+
+    def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        script = Path(command[1]).name
+        if script == "run_strategygroup_runtime_daily_check.py":
+            _write_output(
+                command,
+                {
+                    "status": "needs_refresh",
+                    "checks": {
+                        "blockers": [],
+                        "monitor_refresh_needed": True,
+                        "monitor_refresh_reasons": ["runtime_progress_cache_stale"],
+                    },
+                    "interaction": {
+                        "level": "L0_local_cache_gate",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 2, "", "")
+        if script == "runtime_live_cutover_readiness.py":
+            _write_output(
+                command,
+                {"status": "live_cutover_waiting_for_fresh_signal", "interaction": {}},
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "run_strategygroup_runtime_goal_progress_audit.py":
+            _write_output(
+                command,
+                {
+                    "status": "needs_refresh",
+                    "checks": {
+                        "blockers": [],
+                        "product_gaps": [],
+                        "monitor_refresh_needed": True,
+                    },
+                    "interaction": {
+                        "level": "L0_local_goal_progress_audit",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 2, "", "")
+
+        _write_output(
+            command,
+            {
+                "status": "not_complete_waiting_for_market",
+                "non_market_gaps": [],
+                "interaction": {
+                    "level": "L0_local_completion_audit",
+                    "remote_interaction_count": 0,
+                    "mutates_remote_files": False,
+                    "approaches_real_order": False,
+                },
+            },
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    report = module.build_local_monitor_sequence_report(
+        daily_check_json=tmp_path / "daily.json",
+        daily_owner_progress=tmp_path / "daily.md",
+        live_cutover_json=tmp_path / "cutover.json",
+        live_cutover_md=tmp_path / "cutover.md",
+        goal_progress_json=tmp_path / "goal.json",
+        goal_progress_md=tmp_path / "goal.md",
+        completion_audit_json=tmp_path / "completion.json",
+        completion_audit_md=tmp_path / "completion.md",
+        command_runner=fake_runner,
+    )
+
+    assert report["status"] == "needs_refresh"
+    assert report["owner_summary"]["state"] == "监控状态需刷新"
+    assert report["owner_summary"]["owner_intervention_required"] is False
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["monitor_refresh_needed"] is True
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["interaction"]["mutates_remote_files"] is False
+    assert report["interaction"]["approaches_real_order"] is False

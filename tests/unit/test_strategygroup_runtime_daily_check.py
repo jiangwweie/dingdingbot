@@ -910,7 +910,7 @@ def test_daily_check_reads_default_cache_without_snapshot_probe(tmp_path, monkey
     assert loaded["notification"]["decision"] == "DONT_NOTIFY"
 
 
-def test_daily_check_from_cache_missing_returns_owner_readable_blocker(tmp_path, monkeypatch):
+def test_daily_check_from_cache_missing_returns_monitor_refresh_state(tmp_path, monkeypatch):
     module = _load_module()
     missing_cache_path = tmp_path / "missing-daily-check.json"
 
@@ -923,15 +923,20 @@ def test_daily_check_from_cache_missing_returns_owner_readable_blocker(tmp_path,
 
     loaded = module._build_or_read_daily_check_report(args)
 
-    assert loaded["status"] == "blocked"
+    assert loaded["status"] == "needs_refresh"
     assert loaded["interaction"]["level"] == "L0_local_cache_read"
     assert loaded["interaction"]["remote_interaction_count"] == 0
     assert loaded["notification"]["decision"] == "NOTIFY"
-    assert "runtime_progress_cache_missing" in loaded["checks"]["blockers"]
-    assert loaded["owner_summary"]["state"] == "工程状态暂不可用"
+    assert loaded["notification"]["reason"] == "runtime_progress_cache_missing"
+    assert loaded["checks"]["blockers"] == []
+    assert loaded["checks"]["monitor_refresh_needed"] is True
+    assert loaded["checks"]["monitor_refresh_reasons"] == [
+        "runtime_progress_cache_missing"
+    ]
+    assert loaded["owner_summary"]["state"] == "监控状态需刷新"
 
 
-def test_daily_check_require_fresh_cache_blocks_stale_report():
+def test_daily_check_require_fresh_cache_marks_stale_report_for_refresh():
     module = _load_module()
     report = module.build_daily_check_report(snapshot=_snapshot())
     report["generated_at_utc"] = "2026-06-17T00:00:00+00:00"
@@ -943,17 +948,22 @@ def test_daily_check_require_fresh_cache_blocks_stale_report():
         max_cache_age_minutes=5,
     )
 
-    assert gated["status"] == "blocked"
+    assert gated["status"] == "needs_refresh"
     assert gated["notification"]["decision"] == "NOTIFY"
     assert gated["notification"]["reason"] == "runtime_progress_cache_stale"
-    assert "runtime_progress_cache_stale" in gated["checks"]["blockers"]
-    assert gated["owner_summary"]["state"] == "工程状态暂不可用"
+    assert gated["checks"]["blockers"] == []
+    assert gated["checks"]["monitor_refresh_needed"] is True
+    assert gated["checks"]["monitor_refresh_reasons"] == [
+        "runtime_progress_cache_stale"
+    ]
+    assert gated["checks"]["waiting_for_market"] is True
+    assert gated["owner_summary"]["state"] == "监控状态需刷新"
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
     assert gated["interaction"]["remote_interaction_count"] == 0
     assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
 
 
-def test_daily_check_require_fresh_cache_blocks_stale_schema():
+def test_daily_check_require_fresh_cache_marks_stale_schema_for_refresh():
     module = _load_module()
     report = module.build_daily_check_report(snapshot=_snapshot())
     report["schema_version"] = module.DAILY_CHECK_REPORT_SCHEMA_VERSION - 1
@@ -965,18 +975,22 @@ def test_daily_check_require_fresh_cache_blocks_stale_schema():
         max_cache_age_minutes=module.DEFAULT_MAX_CACHE_AGE_MINUTES,
     )
 
-    assert gated["status"] == "blocked"
+    assert gated["status"] == "needs_refresh"
     assert gated["notification"]["decision"] == "NOTIFY"
     assert gated["notification"]["reason"] == "runtime_progress_cache_schema_stale"
-    assert "runtime_progress_cache_schema_stale" in gated["checks"]["blockers"]
-    assert gated["owner_summary"]["state"] == "工程状态暂不可用"
-    assert gated["owner_summary"]["current_action"] == "等待自动化刷新本地 runtime monitor 缓存"
+    assert gated["checks"]["blockers"] == []
+    assert gated["checks"]["monitor_refresh_needed"] is True
+    assert gated["checks"]["monitor_refresh_reasons"] == [
+        "runtime_progress_cache_schema_stale"
+    ]
+    assert gated["owner_summary"]["state"] == "监控状态需刷新"
+    assert gated["owner_summary"]["current_action"] == "刷新本地 runtime monitor 缓存"
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
     assert gated["interaction"]["remote_interaction_count"] == 0
     assert gated["cached_report_interaction"]["remote_interaction_count"] == 1
 
 
-def test_daily_check_require_fresh_cache_blocks_runtime_head_mismatch():
+def test_daily_check_require_fresh_cache_marks_runtime_head_mismatch_for_refresh():
     module = _load_module()
     report = module.build_daily_check_report(snapshot=_snapshot())
     report["generated_at_utc"] = datetime(
@@ -996,13 +1010,17 @@ def test_daily_check_require_fresh_cache_blocks_runtime_head_mismatch():
         expected_runtime_head="runtime-head-2",
     )
 
-    assert gated["status"] == "blocked"
+    assert gated["status"] == "needs_refresh"
     assert gated["notification"]["decision"] == "NOTIFY"
     assert (
         gated["notification"]["reason"]
         == "runtime_progress_cache_runtime_head_stale"
     )
-    assert "runtime_progress_cache_runtime_head_stale" in gated["checks"]["blockers"]
+    assert gated["checks"]["blockers"] == []
+    assert gated["checks"]["monitor_refresh_needed"] is True
+    assert gated["checks"]["monitor_refresh_reasons"] == [
+        "runtime_progress_cache_runtime_head_stale"
+    ]
     assert gated["interaction"]["level"] == "L0_local_cache_gate"
 
 

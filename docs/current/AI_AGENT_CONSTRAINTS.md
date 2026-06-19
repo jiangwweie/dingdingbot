@@ -170,6 +170,7 @@ Every blocker must classify itself as one of:
 | `waiting_for_market` | No fresh signal exists |
 | `missing_fact` | Required fact or evidence is absent or stale |
 | `deployment_issue` | Tokyo or local deployment is behind current code |
+| `monitor_refresh_needed` | Local monitor cache is missing, stale, schema-stale, or tied to an old runtime head |
 | `active_position_resolution` | Position, open order, or protection state needs resolution |
 | `hard_safety_stop` | Execution would violate the safety boundary |
 | `review_only_warning` | Strategy evidence is weak but not a live-safety blocker |
@@ -177,12 +178,20 @@ Every blocker must classify itself as one of:
 Gates exist to preserve bounded real-funds safety. They must not become opaque
 all-AND project blockers.
 
+Monitor cache freshness is not a live-trading safety blocker. Cache missing,
+stale cache age, stale cache schema, or runtime-head mismatch must be classified
+as `monitor_refresh_needed`. These states may emit `NOTIFY` to trigger a local
+or one-shot L1 refresh, but they must not populate `checks.blockers`, must not
+be reported as `hard_safety_stop`, and must not flip P0 from
+`waiting_for_market` to blocked when the runtime chain itself remains ready.
+
 Gate classes are internal safety classifications. The main Owner UI should map
 them to one terse product sentence, for example:
 
 | Internal condition | Owner-facing sentence |
 | --- | --- |
 | stale or missing facts | 事实不可用，暂不能使用 |
+| monitor cache missing/stale/schema/head stale | 监控状态需刷新 |
 | open order conflict | 有订单处理中，暂不能使用 |
 | active position conflict | 有持仓处理中，暂不能使用 |
 | missing protection | 保护未就绪，暂不能使用 |

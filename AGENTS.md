@@ -101,12 +101,22 @@ Every blocker must classify itself as one of:
 | `waiting_for_market` | No fresh signal exists |
 | `missing_fact` | Required fact or evidence is absent or stale |
 | `deployment_issue` | Tokyo or local deployment is behind current code |
+| `monitor_refresh_needed` | Local monitor cache is missing, stale, schema-stale, or tied to an old runtime head |
 | `active_position_resolution` | Position, open order, or protection state needs resolution |
 | `hard_safety_stop` | Execution would violate the safety boundary |
 | `review_only_warning` | Strategy evidence is weak but not a live-safety blocker |
 
 Gates protect bounded real-funds safety. They must not become opaque all-AND
 project blockers.
+
+Monitor cache freshness is a reporting constraint, not a trading safety gate.
+`runtime_progress_cache_stale`, `runtime_progress_cache_missing`,
+`runtime_progress_cache_schema_stale`, and
+`runtime_progress_cache_runtime_head_stale` must be classified as
+`monitor_refresh_needed`. They may emit `NOTIFY` so automation refreshes the
+local monitor artifact, but they must not enter `checks.blockers`, must not
+become `hard_safety_stop`, and must not make P0 look blocked when the only
+remaining real condition is a market fresh signal.
 
 ## StrategyGroup Runtime Path
 

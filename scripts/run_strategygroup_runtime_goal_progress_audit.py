@@ -157,6 +157,10 @@ def build_goal_progress_report(
         if isinstance(daily_check.get("safety_invariants"), dict)
         else {}
     )
+    monitor_refresh_needed = checks.get("monitor_refresh_needed") is True
+    monitor_refresh_reasons = [
+        str(item) for item in checks.get("monitor_refresh_reasons") or []
+    ]
 
     p0 = _p0_track(
         daily_check=daily_check,
@@ -249,6 +253,8 @@ def build_goal_progress_report(
     )
     if hard_blockers:
         status = "blocked"
+    elif monitor_refresh_needed and waiting_for_market and p05_ready:
+        status = "needs_refresh"
     elif product_gaps or not p05_ready:
         status = "degraded"
     elif processing and p05_ready:
@@ -316,10 +322,16 @@ def build_goal_progress_report(
             "places_order": False,
         },
         "owner_summary": {
-            "state": "等待机会" if status == "waiting_for_market" else _owner_state(status),
+            "state": (
+                "等待机会"
+                if status == "waiting_for_market"
+                else _owner_state(status)
+            ),
             "current_action": (
                 "继续等待市场机会"
                 if status == "waiting_for_market"
+                else "刷新本地 runtime monitor 缓存"
+                if status == "needs_refresh"
                 else "等待系统完成收口"
                 if status == "processing"
                 else "处理非市场收口缺口"
@@ -341,6 +353,8 @@ def build_goal_progress_report(
         "checks": {
             "blockers": hard_blockers,
             "product_gaps": product_gaps,
+            "monitor_refresh_needed": monitor_refresh_needed,
+            "monitor_refresh_reasons": monitor_refresh_reasons,
             "waiting_for_market": waiting_for_market,
             "p05_ready": p05_ready,
             "daily_check_status": daily_check.get("status"),
@@ -1171,6 +1185,7 @@ def _owner_visibility_track(
         "waiting_for_market",
         "processing",
         "running",
+        "monitor_refresh",
         "engineering_blocker",
         "safety_blocker",
     }
@@ -1239,6 +1254,8 @@ def _track(
 def _owner_state(status: str) -> str:
     if status == "blocked":
         return "暂不可用"
+    if status == "needs_refresh":
+        return "监控状态需刷新"
     if status == "degraded":
         return "非市场收口待处理"
     if status == "processing":

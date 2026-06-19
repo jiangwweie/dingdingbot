@@ -549,6 +549,11 @@ def _notification_reason(
 ) -> str:
     if checks.get("blockers"):
         return "blocker_present"
+    if checks.get("monitor_refresh_needed") is True:
+        reasons = checks.get("monitor_refresh_reasons")
+        if isinstance(reasons, list) and reasons:
+            return str(reasons[0])
+        return "runtime_monitor_refresh_needed"
     if checks.get("product_gaps"):
         return "product_gap_present"
     if checks.get("warnings"):
@@ -779,7 +784,7 @@ def _write_text_atomic(path: Path, text: str) -> None:
 def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
     return {
         "schema_version": DAILY_CHECK_REPORT_SCHEMA_VERSION,
-        "status": "blocked",
+        "status": "needs_refresh",
         "scope": "strategygroup_runtime_daily_check",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "interaction": annotate_interaction({
@@ -795,15 +800,15 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             "places_order": False,
         }),
         "owner_summary": {
-            "state": "工程状态暂不可用",
-            "current_action": "等待自动化刷新本地 runtime monitor 缓存",
+            "state": "监控状态需刷新",
+            "current_action": "刷新本地 runtime monitor 缓存",
             "owner_intervention_required": False,
             "risk_level": "L0 local cache only",
             "visibility": {
-                "category": "engineering_blocker",
-                "label": "工程状态暂不可用",
+                "category": "monitor_refresh",
+                "label": "监控状态需刷新",
                 "detail": detail,
-                "next_action": "等待自动化刷新本地 runtime monitor 缓存",
+                "next_action": "刷新本地 runtime monitor 缓存",
                 "owner_intervention_required": False,
             },
             "progress": {
@@ -815,9 +820,11 @@ def _cache_unavailable_report(*, reason: str, detail: str) -> dict[str, Any]:
             },
         },
         "checks": {
-            "blockers": [reason],
+            "blockers": [],
             "warnings": [],
             "product_gaps": [],
+            "monitor_refresh_needed": True,
+            "monitor_refresh_reasons": [reason],
             "waiting_for_market": False,
             "runtime_ready": False,
             "watcher_ready": False,
@@ -959,19 +966,22 @@ def _gated_cache_report(
         "places_order": False,
     })
     checks = dict(gated.get("checks") if isinstance(gated.get("checks"), dict) else {})
-    blockers = _dedupe([*[str(item) for item in checks.get("blockers") or []], reason])
-    checks["blockers"] = blockers
-    gated["checks"] = checks
-    gated["status"] = "blocked"
-
-    visibility = _owner_visibility(
-        status="blocked",
-        blockers=blockers,
-        product_gaps=[str(item) for item in checks.get("product_gaps") or []],
-        waiting_for_market=False,
+    checks["cached_blockers"] = [str(item) for item in checks.get("blockers") or []]
+    checks["blockers"] = []
+    checks["monitor_refresh_needed"] = True
+    checks["monitor_refresh_reasons"] = _dedupe(
+        [*[str(item) for item in checks.get("monitor_refresh_reasons") or []], reason]
     )
-    visibility["detail"] = detail
-    visibility["next_action"] = "等待自动化刷新本地 runtime monitor 缓存"
+    gated["checks"] = checks
+    gated["status"] = "needs_refresh"
+
+    visibility = {
+        "category": "monitor_refresh",
+        "label": "监控状态需刷新",
+        "detail": detail,
+        "next_action": "刷新本地 runtime monitor 缓存",
+        "owner_intervention_required": False,
+    }
 
     owner = dict(gated.get("owner_summary") if isinstance(gated.get("owner_summary"), dict) else {})
     owner["state"] = visibility["label"]

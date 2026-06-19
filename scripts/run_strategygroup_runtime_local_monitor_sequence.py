@@ -148,6 +148,7 @@ def build_local_monitor_sequence_report(
         f"{step['name']}:returncode:{step['returncode']}"
         for step in steps
         if int(step.get("returncode") or 0) not in (0,)
+        and not _step_returncode_is_monitor_refresh(step, packets)
         and not (
             step["name"] == "completion_audit"
             and _status(packets["completion_audit"]) == "needs_non_market_repair"
@@ -173,6 +174,7 @@ def build_local_monitor_sequence_report(
         "checks": {
             "blockers": blockers,
             "non_market_gaps": non_market_gaps,
+            "monitor_refresh_needed": status == "needs_refresh",
             "waiting_for_market": status == "waiting_for_market",
             "goal_complete": status == "complete",
         },
@@ -259,6 +261,7 @@ def _sequence_status(
         step
         for step in steps
         if int(step.get("returncode") or 0) != 0
+        and not _step_returncode_is_monitor_refresh(step, packets)
         and not (
             step["name"] == "completion_audit"
             and _status(packets["completion_audit"]) == "needs_non_market_repair"
@@ -266,6 +269,10 @@ def _sequence_status(
     ]
     if failed_steps:
         return "needs_non_market_repair"
+    if _status(packets["daily_check"]) == "needs_refresh" or _status(
+        packets["goal_progress"]
+    ) == "needs_refresh":
+        return "needs_refresh"
 
     completion_status = _status(packets["completion_audit"])
     if completion_status in {"complete", "completed"}:
@@ -285,6 +292,17 @@ def _sequence_status(
     ) == "processing":
         return "processing"
     return "needs_non_market_repair"
+
+
+def _step_returncode_is_monitor_refresh(
+    step: dict[str, Any],
+    packets: dict[str, dict[str, Any]],
+) -> bool:
+    return (
+        step["name"] in {"daily_check", "goal_progress"}
+        and int(step.get("returncode") or 0) != 0
+        and _status(packets[step["name"]]) == "needs_refresh"
+    )
 
 
 def _sequence_interaction(steps: list[dict[str, Any]]) -> dict[str, Any]:
@@ -331,6 +349,8 @@ def _owner_state(status: str) -> str:
         return "处理中"
     if status == "complete":
         return "已完成"
+    if status == "needs_refresh":
+        return "监控状态需刷新"
     return "需要修复"
 
 
@@ -341,6 +361,8 @@ def _owner_action(status: str) -> str:
         return "等待系统完成当前链路"
     if status == "complete":
         return "归档第一笔边界内真实订单闭环"
+    if status == "needs_refresh":
+        return "刷新本地 runtime monitor 缓存"
     return "修复本地监控或非市场证据缺口"
 
 
