@@ -29,6 +29,10 @@ if str(REPO_ROOT) not in sys.path:
 DEFAULT_RUNTIME_SUMMARY = Path(
     "output/strategygroup-runtime-pilot/current-run-tokyo-reports/latest-summary.json"
 )
+DEFAULT_EXPANSION_POLICY_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/main-control-signal-coverage-expansion-policy.json"
+)
 
 
 FORBIDDEN_RUNTIME_FLAGS = (
@@ -66,11 +70,16 @@ def build_signal_coverage_diagnostic_packet(
     runtime_summary_packet: dict[str, Any],
     broader_preview_packet: dict[str, Any],
     source_name: str,
+    expansion_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return an execution-safe diagnostic packet from already-built inputs."""
 
+    policy_groups = _as_dict(_as_dict(expansion_policy).get("strategy_groups"))
     runtime_rows = _runtime_signal_rows(runtime_summary_packet)
-    broader_would_enter = _dict_rows(broader_preview_packet.get("would_enter_signals"))
+    broader_would_enter = [
+        _with_policy(row, policy_groups)
+        for row in _dict_rows(broader_preview_packet.get("would_enter_signals"))
+    ]
     broader_no_action = _dict_rows(broader_preview_packet.get("no_action_signals"))
     broader_invalid = _dict_rows(broader_preview_packet.get("invalid_signals"))
     runtime_forbidden = _runtime_forbidden_effects(runtime_summary_packet)
@@ -83,7 +92,13 @@ def build_signal_coverage_diagnostic_packet(
     runtime_no_action_rows = [
         row for row in runtime_rows if _signal_type(row) == "no_action"
     ]
-    coverage_gap = bool(broader_would_enter and not runtime_ready_rows)
+    actionable_broader_would_enter = [
+        row for row in broader_would_enter if _row_needs_priority_review(row)
+    ]
+    low_priority_broader_would_enter = [
+        row for row in broader_would_enter if not _row_needs_priority_review(row)
+    ]
+    coverage_gap = bool(actionable_broader_would_enter and not runtime_ready_rows)
 
     if forbidden_effects:
         status = "blocked_forbidden_effect"
@@ -97,6 +112,10 @@ def build_signal_coverage_diagnostic_packet(
         status = "mainline_no_signal_broader_would_enter"
         owner_state = "coverage_review_needed"
         next_step = "review_broader_observe_only_signals_before_runtime_scope_change"
+    elif low_priority_broader_would_enter and not runtime_ready_rows:
+        status = "mainline_no_signal_low_priority_broader_would_enter"
+        owner_state = "waiting_for_opportunity"
+        next_step = "continue_mainline_and_keep_low_priority_observation_parked"
     elif broader_invalid:
         status = "broader_preview_invalid_needs_review"
         owner_state = "coverage_review_needed"
@@ -146,6 +165,12 @@ def build_signal_coverage_diagnostic_packet(
                 )
             ),
             "broader_would_enter_signal_count": len(broader_would_enter),
+            "broader_actionable_would_enter_signal_count": len(
+                actionable_broader_would_enter
+            ),
+            "broader_low_priority_would_enter_signal_count": len(
+                low_priority_broader_would_enter
+            ),
             "broader_no_action_signal_count": len(broader_no_action),
             "broader_invalid_signal_count": len(broader_invalid),
             "coverage_gap": coverage_gap,
@@ -183,6 +208,12 @@ def build_signal_coverage_diagnostic_packet(
         "diagnosis": {
             "mainline_runtime_is_waiting": not runtime_ready_rows,
             "broader_observation_has_would_enter": bool(broader_would_enter),
+            "broader_observation_has_actionable_would_enter": bool(
+                actionable_broader_would_enter
+            ),
+            "broader_observation_has_low_priority_would_enter": bool(
+                low_priority_broader_would_enter
+            ),
             "broader_signals_are_observe_only": True,
             "does_not_expand_runtime_scope": True,
             "does_not_authorize_real_order": True,
@@ -244,12 +275,15 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         f"- Broader source: `{source.get('broader_source_requested')}` / `{source.get('broader_market_source')}`",
         f"- Mainline ready signals: `{checks.get('runtime_ready_signal_count', 0)}`",
         f"- Broader would-enter signals: `{checks.get('broader_would_enter_signal_count', 0)}`",
+        f"- Broader actionable would-enter signals: `{checks.get('broader_actionable_would_enter_signal_count', 0)}`",
+        f"- Broader low-priority would-enter signals: `{checks.get('broader_low_priority_would_enter_signal_count', 0)}`",
         f"- Coverage gap: `{checks.get('coverage_gap')}`",
         "",
         "## 判断",
         "",
         f"- Mainline runtime is waiting: `{diagnosis.get('mainline_runtime_is_waiting')}`",
         f"- Broader observe-only shelf has would-enter signals: `{diagnosis.get('broader_observation_has_would_enter')}`",
+        f"- Broader actionable would-enter exists: `{diagnosis.get('broader_observation_has_actionable_would_enter')}`",
         "- 宽观察信号只用于机会面诊断，不授权 candidate/auth/FinalGate/Operation Layer。",
         "",
         "## 主线未触发原因",
@@ -351,12 +385,41 @@ def _compact_broader_signal(row: dict[str, Any]) -> dict[str, Any]:
         "confidence": row.get("confidence"),
         "reason_codes": _reason_codes(row),
         "human_summary": row.get("human_summary"),
+        "coverage_review_priority": row.get("coverage_review_priority"),
+        "policy_l2_readiness": row.get("policy_l2_readiness"),
+        "policy_recommended_action": row.get("policy_recommended_action"),
         "not_order": row.get("not_order"),
         "not_execution_intent": row.get("not_execution_intent"),
         "no_execution_permission": row.get("no_execution_permission"),
         "no_order_permission": row.get("no_order_permission"),
         "no_runtime_start": row.get("no_runtime_start"),
     }
+
+
+def _with_policy(row: dict[str, Any], policy_groups: dict[str, Any]) -> dict[str, Any]:
+    strategy_group_id = str(row.get("strategy_group_id") or "")
+    policy = _as_dict(policy_groups.get(strategy_group_id))
+    if not policy:
+        return dict(row)
+    enriched = dict(row)
+    enriched["coverage_review_priority"] = str(
+        policy.get("coverage_review_priority") or "unknown"
+    )
+    enriched["policy_l2_readiness"] = str(policy.get("l2_readiness") or "unknown")
+    enriched["policy_recommended_action"] = str(
+        policy.get("recommended_action") or "require_policy_review"
+    )
+    return enriched
+
+
+def _row_needs_priority_review(row: dict[str, Any]) -> bool:
+    priority = str(row.get("coverage_review_priority") or "unknown")
+    readiness = str(row.get("policy_l2_readiness") or "unknown")
+    if priority in {"P2", "P2_low", "low"}:
+        return False
+    if readiness == "blocked_parked_negative_evidence":
+        return False
+    return True
 
 
 def _signal_type(row: dict[str, Any]) -> str:
@@ -429,6 +492,12 @@ def _recommended_actions(status: str) -> list[str]:
             "decide_future_strategygroup_scope_or_observe_only_promotion",
             "keep_current_live_submit_path_waiting_for_selected_runtime_signal",
         ]
+    if status == "mainline_no_signal_low_priority_broader_would_enter":
+        return [
+            "keep_low_priority_observation_parked",
+            "continue_waiting_for_selected_runtime_signal",
+            "continue_replay_review_for_higher_priority_lanes",
+        ]
     if status == "broader_preview_invalid_needs_review":
         return ["review_broader_preview_adapter_or_signal_contract"]
     return ["continue_monitoring", "run_replay_or_synthetic_rehearsal"]
@@ -441,6 +510,8 @@ def _owner_status_sentence(status: str) -> str:
         return "主线已经出现可处理信号，应暂停低优先级任务并进入官方实盘链路。"
     if status == "mainline_no_signal_broader_would_enter":
         return "主线暂未触发，但宽观察面已有观察级机会，需要评估是否扩展策略覆盖。"
+    if status == "mainline_no_signal_low_priority_broader_would_enter":
+        return "主线暂未触发，宽观察面只有低优先级或已停放机会，继续等待更高质量机会。"
     if status == "broader_preview_invalid_needs_review":
         return "宽观察面出现无效信号，需要检查策略适配或信号契约。"
     return "主线和宽观察面都未触发，当前属于健康等待机会。"
@@ -531,6 +602,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Read-only broader strategy preview source.",
     )
     parser.add_argument("--broader-preview-json")
+    parser.add_argument(
+        "--expansion-policy-json",
+        default=str(DEFAULT_EXPANSION_POLICY_JSON),
+    )
     parser.add_argument("--output-json")
     parser.add_argument("--output-owner-progress")
     args = parser.parse_args(argv)
@@ -545,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_summary_packet=runtime_packet,
         broader_preview_packet=preview_packet,
         source_name=args.source,
+        expansion_policy=_load_json_object(Path(args.expansion_policy_json).expanduser()),
     )
     payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:

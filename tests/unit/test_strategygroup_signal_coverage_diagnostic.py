@@ -132,6 +132,23 @@ def _preview(*, would_enter: bool = True, forbidden: bool = False) -> dict:
     }
 
 
+def _expansion_policy() -> dict:
+    return {
+        "strategy_groups": {
+            "BTPC-001": {
+                "coverage_review_priority": "P0_5",
+                "l2_readiness": "l2_shadow_candidate_observation_enabled",
+                "recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+            },
+            "RBR-001": {
+                "coverage_review_priority": "P2",
+                "l2_readiness": "blocked_parked_negative_evidence",
+                "recommended_action": "keep_l1_or_park_as_range_vocabulary_until_materially_new_classifier_exists",
+            },
+        }
+    }
+
+
 def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
     module = _load_module()
 
@@ -139,12 +156,15 @@ def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
         runtime_summary_packet=_runtime_summary(),
         broader_preview_packet=_preview(would_enter=True),
         source_name="sample",
+        expansion_policy=_expansion_policy(),
     )
 
     assert packet["status"] == "mainline_no_signal_broader_would_enter"
     assert packet["owner_state"] == "coverage_review_needed"
     assert packet["checks"]["runtime_ready_signal_count"] == 0
     assert packet["checks"]["broader_would_enter_signal_count"] == 1
+    assert packet["checks"]["broader_actionable_would_enter_signal_count"] == 1
+    assert packet["checks"]["broader_low_priority_would_enter_signal_count"] == 0
     assert packet["checks"]["coverage_gap"] is True
     assert packet["interaction"]["level"] == "L0_local_signal_coverage"
     assert packet["interaction"]["remote_interaction_count"] == 0
@@ -159,6 +179,51 @@ def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
     assert packet["safety_invariants"][
         "broader_signals_are_not_execution_authority"
     ] is True
+
+
+def test_diagnostic_records_low_priority_broader_would_enter_without_coverage_gap():
+    module = _load_module()
+    preview = _preview(would_enter=True)
+    preview["would_enter_signals"] = [
+        {
+            "candidate_id": "RBR-001-ADA-SHORT",
+            "strategy_group_id": "RBR-001",
+            "strategy_family_version_id": "RBR-001-v0",
+            "symbol": "ADA/USDT:USDT",
+            "side": "short",
+            "signal_type": "would_enter",
+            "confidence": "0.55",
+            "reason_codes": ["rbr_range_boundary_reversion"],
+            "human_summary": "RBR would enter",
+            "not_order": True,
+            "not_execution_intent": True,
+            "no_execution_permission": True,
+            "no_order_permission": True,
+            "no_runtime_start": True,
+        }
+    ]
+
+    packet = module.build_signal_coverage_diagnostic_packet(
+        runtime_summary_packet=_runtime_summary(),
+        broader_preview_packet=preview,
+        source_name="sample",
+        expansion_policy=_expansion_policy(),
+    )
+
+    assert packet["status"] == "mainline_no_signal_low_priority_broader_would_enter"
+    assert packet["owner_state"] == "waiting_for_opportunity"
+    assert packet["checks"]["broader_would_enter_signal_count"] == 1
+    assert packet["checks"]["broader_actionable_would_enter_signal_count"] == 0
+    assert packet["checks"]["broader_low_priority_would_enter_signal_count"] == 1
+    assert packet["checks"]["coverage_gap"] is False
+    assert packet["diagnosis"]["broader_observation_has_would_enter"] is True
+    assert (
+        packet["diagnosis"]["broader_observation_has_actionable_would_enter"] is False
+    )
+    row = packet["broader_observation"]["would_enter_signals"][0]
+    assert row["coverage_review_priority"] == "P2"
+    assert row["policy_l2_readiness"] == "blocked_parked_negative_evidence"
+    assert row["not_order"] is True
 
 
 def test_diagnostic_reports_waiting_when_mainline_and_broader_have_no_signal():

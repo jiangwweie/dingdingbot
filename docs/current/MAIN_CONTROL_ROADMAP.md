@@ -1819,6 +1819,22 @@ quality and replay closure, not on reviving parked vocabulary.
 | Deployment | Not deployed; local diagnostic classification only |
 | Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-19 Priority-Aware Signal Coverage Diagnostic Checkpoint
+
+The first coverage diagnostic now shares the same priority classification as
+the expansion review, so a low-priority parked would-enter observation no
+longer looks like a high-priority coverage gap at the top of the local monitor
+sequence.
+
+| Item | Result |
+| --- | --- |
+| Diagnostic status | RBR/P2 parked would-enter now reports `mainline_no_signal_low_priority_broader_would_enter` |
+| Count split | Diagnostic output separates actionable and low-priority broader would-enter counts |
+| Current local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: signal coverage low-priority parked, expansion review parked, blockers empty, non-market gaps empty, remote interactions `0` |
+| P0 posture | First bounded live-order path remains ready/waiting; low-priority observation work does not interrupt selected StrategyGroup readiness |
+| Deployment | Not deployed; local diagnostic classification only |
+| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness

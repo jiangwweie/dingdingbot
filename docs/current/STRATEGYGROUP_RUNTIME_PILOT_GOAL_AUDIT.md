@@ -1469,3 +1469,21 @@ from competing with P0/P0.5 work while still preserving the observation record.
 | Local monitor sequence | Current RBR observation is recorded as low-priority parked; blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local diagnostic priority classification only |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-19 Priority-Aware Signal Coverage Diagnostic Checkpoint
+
+The first signal coverage diagnostic now uses the same policy priority as the
+expansion review. A broader would-enter row only creates a coverage-review state
+when it belongs to an actionable `P0_5` or `P1` lane; a `P2` parked row remains
+visible but keeps the system in the waiting-for-opportunity posture.
+
+| Item | Evidence |
+| --- | --- |
+| Diagnostic status | `run_strategygroup_signal_coverage_diagnostic.py` emits `mainline_no_signal_low_priority_broader_would_enter` for low-priority parked would-enter rows |
+| Count split | Diagnostic checks now separate total, actionable, and low-priority broader would-enter counts |
+| Owner posture | Low-priority parked observations use `owner_state=waiting_for_opportunity` and `coverage_gap=false` |
+| Regression tests | Signal coverage diagnostic and local monitor sequence tests cover low-priority would-enter as waiting |
+| Local validation | Signal coverage diagnostic, expansion review, and local monitor sequence tests: `17 passed`; `py_compile` passed |
+| Local monitor sequence | `signal_coverage=mainline_no_signal_low_priority_broader_would_enter`, expansion review parked, blockers empty, non-market gaps empty, remote interactions `0` |
+| Deployment | Not deployed; this is local diagnostic classification only |
+| Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

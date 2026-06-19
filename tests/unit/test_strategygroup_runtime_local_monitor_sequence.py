@@ -1437,3 +1437,28 @@ def test_local_monitor_sequence_clears_expansion_gap_when_decision_loop_ready() 
     )
 
     assert status == "waiting_for_market"
+
+
+def test_local_monitor_sequence_treats_low_priority_would_enter_as_waiting() -> None:
+    module = _load_module()
+
+    status = module._sequence_status(
+        steps=[],
+        packets={
+            "daily_check": {"status": "waiting_for_market"},
+            "goal_progress": {"status": "waiting_for_market"},
+            "completion_audit": {"status": "not_complete_waiting_for_market"},
+            "signal_coverage": {
+                "status": "mainline_no_signal_low_priority_broader_would_enter"
+            },
+            "signal_coverage_expansion_review": {
+                "status": "low_priority_observe_only_would_enter_parked"
+            },
+            "l2_readiness_review": {"status": "l2_readiness_review_all_blocked"},
+            "l2_intake_dry_run": {"status": "l2_intake_dry_run_no_candidates"},
+            "l2_tier_policy_review": {"status": "l2_tier_policy_review_no_candidates"},
+            "opportunity_decision_loop": {"status": "decision_loop_ready"},
+        },
+    )
+
+    assert status == "waiting_for_market"
