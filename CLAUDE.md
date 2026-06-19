@@ -58,11 +58,13 @@ submits for caution. Stop only for explicit authority or mechanical boundaries
 listed below.
 
 Current mainline work after the P0 live path is ready is StrategyGroup learning:
-turn no-action and would-enter observations into replay-to-review decisions,
-then into Strategy Opportunity Review Ledger rows. Claude tasks in this area
-must keep all rows non-executing and must not treat replay, synthetic fixtures,
-or observe-only evidence as live signals, live RequiredFacts, FinalGate input,
-Operation Layer evidence, or real-order authority.
+turn high-priority no-action and would-enter observations into replay-to-review
+decisions, then into minimal StrategyGroup Decision Ledger rows. The ledger
+contract remains at `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` for
+compatibility. Claude tasks in this area must keep all rows non-executing and
+must not treat replay, synthetic fixtures, or observe-only evidence as live
+signals, live RequiredFacts, FinalGate input, Operation Layer evidence, or
+real-order authority.
 
 ## Standing Authorization
 

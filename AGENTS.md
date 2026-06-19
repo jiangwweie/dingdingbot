@@ -72,11 +72,14 @@ opportunity discovery, no-action diagnosis, replay coverage, fact/source
 mapping, classifier repair, and tier governance. Reports and markdown are
 mainline only when they feed this loop.
 
-`Strategy Opportunity Review Ledger` is the pre-live strategy-learning ledger.
-It records no-action, would-enter, stale, missing-fact, and classifier-conflict
-observations before they become real-order authority. It complements the
-post-action Review Ledger; it does not replace FinalGate, Operation Layer, live
-RequiredFacts, or real lifecycle review.
+`StrategyGroup Decision Ledger` is the minimal pre-live strategy-learning
+ledger. For compatibility, its active contract lives at
+`docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md`, but it must not become a
+large opportunity log. It records only high-priority observations that change a
+StrategyGroup decision: keep observing, revise, promote, park, kill, go live,
+do not go live, or block for safety. It complements the post-action Review
+Ledger; it does not replace FinalGate, Operation Layer, live RequiredFacts, or
+real lifecycle review.
 
 The Owner is not an operator. Owner-facing product surfaces must not turn
 internal execution gates, evidence objects, API routes, proof chains, or blocker

@@ -65,13 +65,16 @@ observation
 -> reason codes
 -> replay coverage
 -> classifier / facts / freshness / cost / tier gap
--> decision action
--> StrategyGroup keep / revise / prepare L2 / park / kill
+-> StrategyGroup keep / revise / promote / park / kill / go-live boundary decision
 ```
 
-Use `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` as the current contract
-for this pre-live learning loop. It is local/read-only decision support and must
-keep real-order authority false.
+Use `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` as the current
+compatibility path for the minimal StrategyGroup Decision Ledger. It is
+local/read-only decision support and must keep real-order authority false. It
+is not a full opportunity log: records enter the main control layer only when
+they change one of these decisions: `go_live`, `do_not_go_live`,
+`keep_observing`, `revise`, `park`, `kill`, `promote`, or
+`block_for_safety`.
 
 ## P0 / P0.5 Execution Discipline
 
@@ -85,14 +88,14 @@ Agents must obey these constraints:
 | --- | --- |
 | Fresh signal preempts local work | If a real fresh selected StrategyGroup signal appears, pause P0.5 work and return to RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer |
 | Local/deployed/planned split | Every status summary must distinguish deployed Tokyo capability, local committed capability, and planned work |
-| Decision-action requirement | P0.5 artifacts are useful only if they feed a `decision_action`, tier decision, gap repair, or replay/source task |
+| Decision-ledger requirement | P0.5 artifacts are useful only if they change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | Replay/proxy boundary | Replay, synthetic fixtures, proxy facts, and opportunity ledger rows must never become live signal, live RequiredFacts, FinalGate input, Operation Layer evidence, or submit authority |
 | Deploy threshold | Do not deploy for isolated wording, single report fields, or one-off local artifacts; deploy only after a stage-worthy closed local checkpoint or explicit Owner request |
 | Entry-point control | Prefer extending the local monitor sequence, replay lab, opportunity decision loop, or opportunity ledger producer over adding permanent standalone scripts |
 
 New P0.5 scripts or artifacts must satisfy at least one of:
 
-- produce or consume Strategy Opportunity Review Ledger rows;
+- produce or consume minimal StrategyGroup Decision Ledger rows;
 - feed the local monitor sequence;
 - replace and reduce older entry points;
 - create a bounded one-time migration or validation artifact with no long-term

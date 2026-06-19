@@ -69,16 +69,19 @@ observation:
 no-action / would-enter observation
 -> replay match or replay gap
 -> classifier, facts, freshness, cost, or tier diagnosis
--> keep, revise, prepare L2, park, or kill decision
+-> keep, revise, promote, park, kill, go-live, or block-for-safety decision
 ```
 
 This is not Owner-operated trading. It is system learning. The Owner should not
 manually interpret raw no-action packets, replay files, or RequiredFacts gaps in
 normal operation.
 
-The pre-live learning record is the Strategy Opportunity Review Ledger. The
-post-action record remains the Review Ledger. Both are review artifacts; neither
-bypasses the official live path.
+The pre-live learning record is the StrategyGroup Decision Ledger. Its
+compatibility path remains `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md`.
+The post-action record remains the Review Ledger. Both are review artifacts;
+neither bypasses the official live path. The pre-live ledger is not a general
+opportunity log; it records only high-priority observations that change a
+StrategyGroup decision.
 
 ## Owner-Facing State
 

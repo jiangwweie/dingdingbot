@@ -29,10 +29,11 @@ signal shape
 Replay exists to make the real live path faster to debug and more profitable
 to iterate. It is not an execution authority.
 
-Replay is now a required input to the Strategy Opportunity Review Ledger. A
-replay row is useful only when it changes a decision: add more replay, repair a
-classifier, map RequiredFacts, keep observing, prepare L2 intake, park, or kill.
-Replay output should not grow as a report-only surface.
+Replay is now a required input to the minimal StrategyGroup Decision Ledger
+when it changes a decision: keep observing, revise, promote, park, kill,
+go live, do not go live, or block for safety. Replay output should not grow as
+a report-only surface, and routine replay samples should remain lower-level
+evidence instead of becoming main-control rows.
 
 ## Current Scope
 

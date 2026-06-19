@@ -65,11 +65,23 @@
   "not_finalgate_input": true,
   "not_operation_layer_input": true,
   "not_order_sizing_default": true,
-  "strategy_opportunity_review": {
+  "strategygroup_decision_review": {
     "contract": "docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md",
+    "compatibility_path_retained": true,
+    "not_general_opportunity_log": true,
     "not_promotion_authority_by_itself": true,
+    "required_row_fields": [
+      "strategy_group_id",
+      "tier",
+      "opportunity_type",
+      "decision",
+      "reason",
+      "required_next_evidence",
+      "authority_boundary",
+      "next_checkpoint"
+    ],
     "tier_decision_inputs": [
-      "no_action_or_would_enter_rows",
+      "high_priority_no_action_or_would_enter_evidence",
       "replay_coverage",
       "required_facts_mapping",
       "classifier_state",
@@ -78,16 +90,17 @@
       "current_tier_policy"
     ],
     "allowed_decisions": [
-      "keep_observe_only",
-      "continue_l2_shadow",
-      "repair_classifier",
-      "map_required_facts",
-      "add_replay",
-      "prepare_l2_intake",
+      "go_live",
+      "do_not_go_live",
+      "keep_observing",
+      "revise",
       "park",
       "kill",
-      "future_l4_review_after_owner_lane_change_or_post_mpg_live_closure"
+      "promote",
+      "block_for_safety"
     ],
+    "one_current_row_per_strategy_group": true,
+    "raw_replay_samples_stay_lower_level": true,
     "real_order_authority": false
   },
   "safety_invariants": {

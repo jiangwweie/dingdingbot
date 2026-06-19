@@ -71,19 +71,20 @@ StrategyGroup tiers do not bypass:
 - official Operation Layer;
 - protection, reconciliation, budget settlement, and review.
 
-## Strategy Opportunity Review
+## StrategyGroup Decision Review
 
-StrategyGroup tier movement should now be driven by the Strategy Opportunity
-Review Ledger plus replay-to-review evidence, not by isolated reports.
+StrategyGroup tier movement should now be driven by the minimal StrategyGroup
+Decision Ledger plus replay-to-review evidence, not by isolated reports.
 
 | Tier decision | Required pre-live evidence |
 | --- | --- |
-| Keep `L1 observe_only` | No-action / would-enter rows exist but replay or facts are insufficient |
+| Keep `L1 observe_only` | High-priority no-action / would-enter evidence exists but replay or facts are insufficient |
 | Prepare `L2 shadow_candidate` | Replay coverage, RequiredFacts mapping, and classifier state support non-executing shadow review |
 | Keep `L2 shadow_candidate` | Shadow quality is useful but facts/classifier/cost gaps remain |
 | Park | Evidence is weak, negative, low-priority, or not tied to right-tail opportunity |
 | Future `L4` review | Requires explicit Owner lane change or post-MPG first live closure, plus the full official runtime chain |
 
-The opportunity ledger is not a promotion authority by itself. It records why a
-StrategyGroup should be kept, revised, prepared for L2, parked, or later
-reviewed.
+The decision ledger is not a promotion authority by itself. It records why a
+StrategyGroup should be kept, revised, promoted, parked, killed, reviewed for
+go-live, rejected for go-live, or blocked for safety. Routine observations and
+raw replay samples stay as lower-level evidence.

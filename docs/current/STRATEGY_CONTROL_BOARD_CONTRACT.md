@@ -28,20 +28,20 @@ tool, or operator workflow for internal execution gates.
 
 ## Strategy Learning Surface
 
-The main control board may summarize Strategy Opportunity Review Ledger state,
+The main control board may summarize StrategyGroup Decision Ledger state,
 but it must not become a raw diagnostic table.
 
 | Internal source | Main Owner meaning |
 | --- | --- |
 | high-priority no-action | 有观察机会，系统正在复盘 |
 | would-enter observe-only | 有观察机会，暂不具备实盘权限 |
-| missing replay coverage | 样本不足，等待本地补充 |
-| classifier / facts gap | 策略条件待调整 |
+| missing replay coverage that changes a decision | 样本不足，等待本地补充 |
+| classifier / facts gap that changes a decision | 策略条件待调整 |
 | parked low-priority vocabulary | 暂停观察，不影响主线 |
 
 The board should show one compact strategy-learning status only when it changes
-the Owner-relevant state. Healthy background replay or no-action review should
-stay quiet.
+the Owner-relevant state. Healthy background replay, low-priority observation,
+or no-action review should stay quiet.
 
 ### Review Outcome Vocabulary Mapping
 

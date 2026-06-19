@@ -5,22 +5,29 @@ authority: docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
 last_verified: 2026-06-19
 ---
 
-# Strategy Opportunity Review Ledger
+# StrategyGroup Decision Ledger
+
+Compatibility path:
+
+```text
+docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
+```
 
 ## Purpose
 
-The Strategy Opportunity Review Ledger is the pre-live learning ledger for the
-StrategyGroup runtime pilot.
+The StrategyGroup Decision Ledger is the minimal pre-live learning ledger for
+the StrategyGroup runtime pilot.
 
-Its job is to turn market observations into repeatable strategy decisions:
+Its job is not to record every opportunity. Its job is to turn high-priority
+market observations into repeatable StrategyGroup decisions:
 
 ```text
 read-only market observation
--> no-action / would-enter / stale / missing-fact row
--> replay match or replay gap
+-> high-priority no-action / would-enter / stale / missing-fact evidence
+-> replay support or replay gap
 -> classifier / facts / freshness / cost / tier diagnosis
--> decision action
--> future StrategyGroup tier or research handoff input
+-> keep / revise / promote / park / kill / go-live / do-not-go-live / safety-block decision
+-> next checkpoint
 ```
 
 This ledger exists because the project has moved beyond pure runtime-chain
@@ -29,58 +36,75 @@ closure. During healthy no-signal periods, `P0.5` must use local and read-only
 market evidence to improve StrategyGroup quality instead of waiting passively
 for live signals.
 
+The ledger is a decision surface, not a diagnostic archive. A record belongs
+here only when it changes one of these decisions:
+
+```text
+go_live
+do_not_go_live
+keep_observing
+revise
+park
+kill
+promote
+block_for_safety
+```
+
 ## Relationship To Existing Ledgers
 
 | Ledger | Stage | Purpose | Real-order authority |
 | --- | --- | --- | --- |
-| Strategy Opportunity Review Ledger | Before live submit | Learn from no-action, would-enter, replay, and strategy gaps | No |
-| Trade Intent Ledger | Before live submit | Preserve non-executable intent or observe-only evidence | No |
-| Gate Failure Ledger | Runtime gate review | Explain why a runtime gate stopped | No |
+| StrategyGroup Decision Ledger | Before live submit | Decide keep, revise, promote, park, kill, go live, do not go live, or safety block | No |
 | Review Ledger | After live action | Record entry, exit, protection, PnL, costs, and review decision | No direct submit authority |
+| Technical Debt Queue | After local review | Preserve non-urgent structure, test, and cleanup work | No |
 
-The opportunity ledger does not authorize shadow candidates, FinalGate,
+The decision ledger does not authorize shadow candidates, FinalGate,
 Operation Layer, exchange writes, or real orders. It is a decision-support
 surface for strategy learning and tier governance.
+
+Lower-level replay packets, diagnostics, no-action samples, and source-mapping
+files remain evidence. They should not be copied into the main control layer
+unless they change a decision.
 
 ## Required Row Shape
 
 | Field | Meaning |
 | --- | --- |
 | `strategy_group_id` | StrategyGroup that produced or missed the opportunity |
-| `symbol` | Observed symbol or normalized market |
-| `side` | `long`, `short`, or `none` |
-| `signal_type` | `would_enter`, `no_action`, `stale_signal`, `missing_fact`, or `classifier_conflict` |
-| `reason_codes` | Why the row exists |
-| `coverage_review_priority` | `P0_5`, `P1`, `P2`, or parked priority |
-| `replay_match_status` | `matched`, `missing_replay`, `partial`, or `not_applicable` |
-| `gap_type` | `classifier`, `facts`, `freshness`, `cost`, `edge`, `tier`, or `none` |
-| `decision_action` | `keep_observe_only`, `add_replay`, `repair_classifier`, `map_required_facts`, `prepare_l2_intake`, `continue_l2_shadow`, `park`, or `kill` |
-| `tier_effect` | Whether this supports L1 observation, L2 shadow review, L3 armed observation, or future L4 review |
-| `source_artifacts` | Diagnostic, replay, readiness, and decision-loop artifact paths |
-| `real_order_authority` | Must remain `false` |
+| `tier` | Current runtime tier, such as `L1`, `L2`, `L3`, or `L4` |
+| `opportunity_type` | `would_enter`, `no_action`, `stale_signal`, `missing_fact`, `classifier_conflict`, `replay_gap`, or `live_outcome` |
+| `decision` | `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
+| `reason` | One concise reason for the current decision |
+| `required_next_evidence` | The next evidence needed to change the decision, or `none` |
+| `authority_boundary` | Why this row does or does not affect live authority |
+| `next_checkpoint` | The next concrete checkpoint for this StrategyGroup |
+
+Each StrategyGroup should have at most one current main decision row. Historical
+or superseded details belong in lower-level artifacts, not in the main-control
+decision layer.
 
 ## Current StrategyGroup Use
 
-| StrategyGroup | Current role | Opportunity-ledger use |
+| StrategyGroup | Current role | Decision-ledger use |
 | --- | --- | --- |
 | `MPG-001` | First `L4` allocated-subaccount live lane | Preserve P0 waiting/live outcomes; live results later update Review Ledger |
-| `BTPC-001` | `L2` shadow candidate | Track stale, missing derivatives facts, strong-uptrend disable, and shadow quality rows |
-| `BRF-001` | `L1` observe-only | Track bear-rally-failure no-action, rally context, and short-squeeze classifier gaps |
-| `VCB-001` | `L1` observe-only | Track compression breakout, volume expansion, and false-breakout disable gaps |
-| `LSR-001` | `L1` observe-only | Track long-preview conflict and short-revival rewrite gaps |
+| `BTPC-001` | `L2` shadow candidate | Keep observing or revise based on shadow quality, live derivatives facts, and classifier evidence |
+| `BRF-001` | `L1` observe-only | Revise, keep observing, or park based on bear-rally-failure replay and squeeze-risk evidence |
+| `VCB-001` | `L1` observe-only | Revise, keep observing, or park based on compression breakout replay and false-breakout evidence |
+| `LSR-001` | `L1` observe-only | Revise, keep observing, or park based on liquidity-sweep and short-revival classifier evidence |
 | `RBR-001` | `L1` low-priority parked vocabulary | Keep parked unless materially new edge evidence appears |
 
 ## Replay Policy
 
 Replay is required strategy-learning input, not live evidence.
 
-Replay may prove:
+Replay may support a decision when it proves:
 
 - no-action was likely correct filtering;
 - no-action may be a classifier or facts miss;
 - would-enter needs cost, slippage, or funding survival review;
-- a StrategyGroup should keep observing, revise, prepare L2 intake, park, or
-  kill.
+- a StrategyGroup should keep observing, revise, promote, park, kill, go live,
+  avoid go-live, or remain safety-blocked.
 
 Replay must not be represented as:
 
@@ -97,27 +121,27 @@ The next deploy-worthy local checkpoint is:
 
 ```text
 high-priority no-action rows
--> Strategy Opportunity Review Ledger rows
+-> StrategyGroup Decision Ledger rows
 -> replay-to-review matching
--> decision_action
+-> one current decision per StrategyGroup
 -> local monitor sequence integration
 ```
 
 The checkpoint is complete only when current `BRF-001`, `BTPC-001`, `LSR-001`,
-and `VCB-001` high-priority no-action rows produce ledger/decision rows without
+and `VCB-001` high-priority no-action rows produce decision rows without
 creating FinalGate, Operation Layer, exchange-write, or real-order authority.
 
 ## Acceptance Constraints
 
-An opportunity-ledger implementation is not accepted unless it proves all of the
+A decision-ledger implementation is not accepted unless it proves all of the
 following:
 
 | Requirement | Acceptance rule |
 | --- | --- |
 | P0 priority preserved | The implementation cannot make `waiting_for_market` look blocked when P0 is merely waiting for a fresh signal |
-| Current high-priority rows covered | `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` high-priority no-action rows must produce ledger rows or explicit no-row reasons |
-| Decision action present | Every ledger row must carry a `decision_action`; explanatory rows without actions are not mainline |
-| Replay status present | Every ledger row must say whether replay is matched, partial, missing, or not applicable |
+| Current high-priority rows covered | `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` high-priority no-action rows must produce one current decision row or explicit no-row reasons |
+| Decision present | Every ledger row must carry a `decision` and `next_checkpoint`; explanatory rows without decisions are not mainline |
+| Minimal shape preserved | Main rows use the 8 required fields and do not duplicate raw replay samples or source artifact details |
 | Authority fields false | `real_order_authority`, `calls_finalgate`, `calls_operation_layer`, `calls_exchange_write`, and `places_order` must remain false |
 | Capability status explicit | Owner/developer summaries must label the result as deployed, local, planned, blocked, or market-dependent |
 | Monitor integration | The local monitor sequence must include the ledger status before the checkpoint is deploy-worthy |
@@ -125,3 +149,14 @@ following:
 Rows may support future tier decisions, but the ledger itself is never tier
 promotion authority. Promotion still follows the runtime tier policy and the
 official live chain.
+
+## Anti-Overengineering Rule
+
+Do not add a new main-control artifact unless it changes one of the eight
+allowed decisions. Routine diagnostics should stay in existing replay,
+coverage, readiness, or local monitor artifacts.
+
+Each P0.5 phase should have at most one main product. For this phase, the main
+product is the StrategyGroup Decision Ledger. Additional markdown summaries,
+script forests, or broad opportunity ledgers are out of scope unless they
+replace and reduce existing surfaces.
