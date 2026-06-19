@@ -214,6 +214,40 @@ def _write_ready_btpc_l2_keep_revise_fact_source_decision(command: list[str]) ->
     )
 
 
+def _write_ready_btpc_live_derivatives_fact_source_mapping(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "btpc_live_derivatives_fact_source_mapping_ready_without_live_authority",
+            "decision": {
+                "live_derivatives_fact_source_mapping_ready": True,
+                "mapping_satisfies_live_required_facts": False,
+                "l2_promotion_recommended_now": False,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+            },
+            "interaction": {
+                "level": "L0_local_btpc_live_derivatives_fact_source_mapping",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "mapping_is_not_live_required_fact": True,
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -243,6 +277,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
         ):
             _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
+        ):
+            _write_ready_btpc_live_derivatives_fact_source_mapping(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -414,6 +454,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         / "btpc-l2-decision.json",
         btpc_l2_keep_revise_fact_source_decision_md=tmp_path
         / "btpc-l2-decision.md",
+        btpc_live_derivatives_fact_source_mapping_json=tmp_path
+        / "btpc-live-source-mapping.json",
+        btpc_live_derivatives_fact_source_mapping_md=tmp_path
+        / "btpc-live-source-mapping.md",
         command_runner=fake_runner,
     )
 
@@ -435,6 +479,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_btpc_proxy_replay_quality_review.py",
         "build_strategygroup_opportunity_decision_loop.py",
         "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py",
+        "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py",
     ]
     assert len(decision_loop_commands) == 2
     assert "--btpc-proxy-replay-quality-json" not in decision_loop_commands[0]
@@ -477,6 +522,12 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
         ):
             _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
+        ):
+            _write_ready_btpc_live_derivatives_fact_source_mapping(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -617,6 +668,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         / "btpc-l2-decision.json",
         btpc_l2_keep_revise_fact_source_decision_md=tmp_path
         / "btpc-l2-decision.md",
+        btpc_live_derivatives_fact_source_mapping_json=tmp_path
+        / "btpc-live-source-mapping.json",
+        btpc_live_derivatives_fact_source_mapping_md=tmp_path
+        / "btpc-live-source-mapping.md",
         command_runner=fake_runner,
     )
 
@@ -654,6 +709,12 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
         ):
             _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
+        ):
+            _write_ready_btpc_live_derivatives_fact_source_mapping(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -856,6 +917,10 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         / "btpc-l2-decision.json",
         btpc_l2_keep_revise_fact_source_decision_md=tmp_path
         / "btpc-l2-decision.md",
+        btpc_live_derivatives_fact_source_mapping_json=tmp_path
+        / "btpc-live-source-mapping.json",
+        btpc_live_derivatives_fact_source_mapping_md=tmp_path
+        / "btpc-live-source-mapping.md",
         command_runner=fake_runner,
     )
 
@@ -896,6 +961,12 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
         ):
             _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
+        ):
+            _write_ready_btpc_live_derivatives_fact_source_mapping(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -1056,6 +1127,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         / "btpc-l2-decision.json",
         btpc_l2_keep_revise_fact_source_decision_md=tmp_path
         / "btpc-l2-decision.md",
+        btpc_live_derivatives_fact_source_mapping_json=tmp_path
+        / "btpc-live-source-mapping.json",
+        btpc_live_derivatives_fact_source_mapping_md=tmp_path
+        / "btpc-live-source-mapping.md",
         command_runner=fake_runner,
     )
 
@@ -1103,6 +1178,12 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
             == "build_strategygroup_btpc_l2_keep_revise_fact_source_decision.py"
         ):
             _write_ready_btpc_l2_keep_revise_fact_source_decision(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if (
+            script
+            == "build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
+        ):
+            _write_ready_btpc_live_derivatives_fact_source_mapping(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -1250,6 +1331,10 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         / "btpc-l2-decision.json",
         btpc_l2_keep_revise_fact_source_decision_md=tmp_path
         / "btpc-l2-decision.md",
+        btpc_live_derivatives_fact_source_mapping_json=tmp_path
+        / "btpc-live-source-mapping.json",
+        btpc_live_derivatives_fact_source_mapping_md=tmp_path
+        / "btpc-live-source-mapping.md",
         command_runner=fake_runner,
     )
 

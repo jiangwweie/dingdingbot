@@ -987,6 +987,25 @@ conflict disable rule, and review stale-signal freshness/classifier handling.
 | Verification | `tests/unit/test_strategygroup_btpc_l2_keep_revise_fact_source_decision.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert action rows, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
 | Safety | Local decision-packet work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
+### 2026-06-19 BTPC Live Derivatives Fact Source Mapping Checkpoint
+
+The P0.5 loop now turns the BTPC live fact-source action into a concrete local
+mapping artifact. This closes the next step after the keep/revise decision:
+BTPC can keep L2 shadow observation while the project knows exactly which live
+derivatives and margin/liquidation sources must be attached before any future
+live eligibility review. The mapping is not live RequiredFacts and does not
+grant L2 promotion, L4 scope, candidate, FinalGate, Operation Layer, exchange
+write, or real-order authority.
+
+| Item | Evidence |
+| --- | --- |
+| Mapping artifact | `latest-btpc-live-derivatives-fact-source-mapping.json` reports `status=btpc_live_derivatives_fact_source_mapping_ready_without_live_authority` |
+| Source rows | The packet maps `funding_72h`, `perp_spot_premium`, `open_interest_or_crowding_proxy`, `historical_open_interest_window`, `historical_global_long_short_ratio_window`, `top_trader_position_ratio_window`, `short_squeeze_risk`, and `real_exchange_margin_liquidation_model` |
+| Live authority split | `mapping_ready=true` while `live_required_fact_satisfied=false`, `can_feed_finalgate=false`, `can_feed_operation_layer=false`, and `real_order_authority=false` for every row |
+| Monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_live_derivatives_fact_source_mapping` after `btpc_l2_keep_revise_fact_source_decision` |
+| Verification | `tests/unit/test_strategygroup_btpc_live_derivatives_fact_source_mapping.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert live-source mapping, forbidden-effect blocking, monitor integration, zero remote interaction, and no live-authority expansion |
+| Safety | Local source-map work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

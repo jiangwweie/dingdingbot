@@ -107,6 +107,14 @@ DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_MD = (
     REPO_ROOT
     / "output/runtime-monitor/latest-btpc-l2-keep-revise-fact-source-decision.md"
 )
+DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.json"
+)
+DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_MD = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-btpc-live-derivatives-fact-source-mapping.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -172,6 +180,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         btpc_l2_keep_revise_fact_source_decision_md=Path(
             args.btpc_l2_keep_revise_fact_source_decision_md
+        ),
+        btpc_live_derivatives_fact_source_mapping_json=Path(
+            args.btpc_live_derivatives_fact_source_mapping_json
+        ),
+        btpc_live_derivatives_fact_source_mapping_md=Path(
+            args.btpc_live_derivatives_fact_source_mapping_md
         ),
     )
     owner_progress_text = _owner_progress_text(report)
@@ -243,6 +257,12 @@ def build_local_monitor_sequence_report(
     ),
     btpc_l2_keep_revise_fact_source_decision_md: Path = (
         DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_MD
+    ),
+    btpc_live_derivatives_fact_source_mapping_json: Path = (
+        DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_JSON
+    ),
+    btpc_live_derivatives_fact_source_mapping_md: Path = (
+        DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_MD
     ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
@@ -572,6 +592,28 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    btpc_live_derivatives_fact_source_mapping_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_btpc_live_derivatives_fact_source_mapping.py"
+        ),
+        "--btpc-l2-decision-json",
+        str(btpc_l2_keep_revise_fact_source_decision_json),
+        "--output-json",
+        str(btpc_live_derivatives_fact_source_mapping_json),
+        "--output-owner-progress",
+        str(btpc_live_derivatives_fact_source_mapping_md),
+    ]
+    steps.append(
+        _run_step(
+            "btpc_live_derivatives_fact_source_mapping",
+            btpc_live_derivatives_fact_source_mapping_command,
+            btpc_live_derivatives_fact_source_mapping_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -667,6 +709,9 @@ def build_local_monitor_sequence_report(
             ),
             "btpc_l2_keep_revise_fact_source_decision_json": str(
                 btpc_l2_keep_revise_fact_source_decision_json
+            ),
+            "btpc_live_derivatives_fact_source_mapping_json": str(
+                btpc_live_derivatives_fact_source_mapping_json
             ),
         },
     }
@@ -1253,6 +1298,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--btpc-l2-keep-revise-fact-source-decision-md",
         default=str(DEFAULT_BTPC_L2_KEEP_REVISE_FACT_SOURCE_DECISION_MD),
+    )
+    parser.add_argument(
+        "--btpc-live-derivatives-fact-source-mapping-json",
+        default=str(DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_JSON),
+    )
+    parser.add_argument(
+        "--btpc-live-derivatives-fact-source-mapping-md",
+        default=str(DEFAULT_BTPC_LIVE_DERIVATIVES_FACT_SOURCE_MAPPING_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",
