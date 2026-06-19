@@ -910,6 +910,25 @@ real-order eligible.
 | Verification | `tests/unit/test_strategygroup_btpc_l2_shadow_fact_quality_review.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert fact-gap classification, next-step handoff, monitor integration, and no live-authority expansion |
 | Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 BTPC Local Fact Proxy Review Checkpoint
+
+The P0.5 loop now attaches review-only local proxy coverage for the BTPC-001
+derivatives and margin/liquidation gaps. This gives replay and L2 shadow quality
+review a usable local model while keeping the live-order boundary explicit:
+proxy facts do not satisfy live RequiredFacts and cannot feed FinalGate,
+Operation Layer, exchange write, or real order.
+
+| Item | Evidence |
+| --- | --- |
+| Review artifact | `latest-btpc-local-fact-proxy-review.json` reports `status=btpc_local_fact_proxy_review_ready`, `expected_proxy_fact_count=5`, `proxy_attached_count=5`, `l2_quality_proxy_ready_count=5`, and `live_required_fact_satisfied_count=0` |
+| Proxy coverage | Historical OI, global long/short ratio, top-trader ratio, margin/liquidation shape, and short-squeeze review rule are attached as local P0.5 review proxies only |
+| Margin model | The review model carries research leverage cases from the BTPC handoff and marks `not_exchange_truth=true`, `live_exchange_maintenance_margin_required=true`, and `does_not_lower_owner_selected_leverage=true` |
+| Replay support | The review consumes the BTPC L2 replay corpus, requires non-executing replay boundaries, and keeps `local_proxy_can_feed_replay_review=true` while `local_proxy_satisfies_live_required_facts=false` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `btpc_local_fact_proxy_review` after `btpc_l2_shadow_fact_quality_review` |
+| Boundary | BTPC proxy review is not live RequiredFacts, tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_btpc_local_fact_proxy_review.py`, `tests/unit/test_strategygroup_btpc_l2_shadow_fact_quality_review.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert proxy coverage, forbidden-effect blocking, monitor integration, and no live-authority expansion |
+| Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a
