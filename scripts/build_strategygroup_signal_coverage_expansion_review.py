@@ -23,6 +23,10 @@ DEFAULT_TIER_POLICY_JSON = (
     REPO_ROOT
     / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
 )
+DEFAULT_EXPANSION_POLICY_JSON = (
+    REPO_ROOT
+    / "docs/current/strategy-group-handoffs/main-control-signal-coverage-expansion-policy.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-expansion-review.json"
 )
@@ -35,18 +39,26 @@ def build_signal_coverage_expansion_review(
     *,
     signal_coverage_packet: dict[str, Any],
     tier_policy: dict[str, Any],
+    expansion_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     broader = _as_dict(signal_coverage_packet.get("broader_observation"))
     would_enter = _dict_rows(broader.get("would_enter_signals"))
     current_tiers = _current_tiers(tier_policy)
     new_default_tiers = _new_default_tiers(tier_policy)
+    policy_groups = _as_dict(_as_dict(expansion_policy).get("strategy_groups"))
     review_rows = [
         _review_row(
             signal=row,
             current_tiers=current_tiers,
             new_default_tiers=new_default_tiers,
+            expansion_policy=_as_dict(
+                policy_groups.get(str(row.get("strategy_group_id") or ""))
+            ),
         )
         for row in would_enter
+    ]
+    actionable_review_rows = [
+        row for row in review_rows if _row_needs_priority_review(row)
     ]
     forbidden_effects = _forbidden_effects(signal_coverage_packet)
 
@@ -54,10 +66,14 @@ def build_signal_coverage_expansion_review(
         status = "blocked_forbidden_effect"
         owner_state = "needs_intervention"
         next_step = "review_signal_coverage_source_forbidden_effects"
-    elif review_rows:
+    elif actionable_review_rows:
         status = "review_needed_broader_observe_only_would_enter"
         owner_state = "coverage_review_needed"
         next_step = "review_observe_only_expansion_candidates"
+    elif review_rows:
+        status = "low_priority_observe_only_would_enter_parked"
+        owner_state = "waiting_for_opportunity"
+        next_step = "continue_mainline_and_keep_low_priority_observation_parked"
     else:
         status = "no_expansion_review_needed"
         owner_state = "waiting_for_opportunity"
@@ -81,6 +97,10 @@ def build_signal_coverage_expansion_review(
         "counts": {
             "broader_would_enter_signal_count": len(would_enter),
             "review_row_count": len(review_rows),
+            "actionable_review_row_count": len(actionable_review_rows),
+            "low_priority_or_parked_review_row_count": (
+                len(review_rows) - len(actionable_review_rows)
+            ),
             "new_strategy_group_review_count": sum(
                 1 for row in review_rows if row["source_category"] == "new_default"
             ),
@@ -91,7 +111,9 @@ def build_signal_coverage_expansion_review(
         },
         "review_rows": review_rows,
         "decision": {
-            "observation_scope_review_recommended": bool(review_rows),
+            "observation_scope_review_recommended": bool(actionable_review_rows),
+            "low_priority_observation_recorded": bool(review_rows)
+            and not actionable_review_rows,
             "real_order_scope_change_recommended": False,
             "l4_promotion_recommended": False,
             "default_next_step": next_step,
@@ -174,6 +196,7 @@ def _review_row(
     signal: dict[str, Any],
     current_tiers: dict[str, str],
     new_default_tiers: dict[str, str],
+    expansion_policy: dict[str, Any],
 ) -> dict[str, Any]:
     strategy_group_id = str(signal.get("strategy_group_id") or "unknown")
     normalized_key = _normalize_strategy_group_key(strategy_group_id)
@@ -196,6 +219,15 @@ def _review_row(
         "side": signal.get("side"),
         "confidence": signal.get("confidence"),
         "reason_codes": [str(item) for item in signal.get("reason_codes") or []],
+        "coverage_review_priority": str(
+            expansion_policy.get("coverage_review_priority") or "unknown"
+        ),
+        "policy_l2_readiness": str(
+            expansion_policy.get("l2_readiness") or "unknown"
+        ),
+        "policy_recommended_action": str(
+            expansion_policy.get("recommended_action") or "require_policy_review"
+        ),
         "suggested_scope_action": _suggested_scope_action(
             source_category=source_category,
             current_tier=current_tier,
@@ -208,6 +240,16 @@ def _review_row(
         "requires_owner_live_lane_change_for_l4": True,
         "execution_boundary": _execution_boundary(current_tier=current_tier),
     }
+
+
+def _row_needs_priority_review(row: dict[str, Any]) -> bool:
+    priority = str(row.get("coverage_review_priority") or "unknown")
+    readiness = str(row.get("policy_l2_readiness") or "unknown")
+    if priority in {"P2", "P2_low", "low"}:
+        return False
+    if readiness == "blocked_parked_negative_evidence":
+        return False
+    return True
 
 
 def _suggested_scope_action(*, source_category: str, current_tier: str) -> str:
@@ -333,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--signal-coverage-json", default=str(DEFAULT_SIGNAL_COVERAGE_JSON))
     parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
+    parser.add_argument(
+        "--expansion-policy-json",
+        default=str(DEFAULT_EXPANSION_POLICY_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
@@ -342,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.signal_coverage_json).expanduser()
         ),
         tier_policy=_load_json_object(Path(args.tier_policy_json).expanduser()),
+        expansion_policy=_load_json_object(Path(args.expansion_policy_json).expanduser()),
     )
     payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:

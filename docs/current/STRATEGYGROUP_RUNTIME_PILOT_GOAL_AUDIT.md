@@ -1452,3 +1452,20 @@ unreviewed observation-scope gap.
 | Local monitor sequence | `status=needs_refresh`, blockers empty, non-market gaps empty, remote interactions `0`; remaining refresh is monitor-cache freshness only |
 | Deployment | Not deployed; this is local monitor/reporting logic only |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-19 Priority-Aware Observation Expansion Checkpoint
+
+The signal coverage expansion review now joins broader would-enter rows with
+the current signal-coverage policy priority before deciding whether the row
+should create a P0.5 review push. This prevents low-priority parked observations
+from competing with P0/P0.5 work while still preserving the observation record.
+
+| Item | Evidence |
+| --- | --- |
+| Priority fields | `build_strategygroup_signal_coverage_expansion_review.py` adds `coverage_review_priority`, `policy_l2_readiness`, and `policy_recommended_action` to each review row |
+| Parked behavior | A `P2` / `blocked_parked_negative_evidence` would-enter row emits `low_priority_observe_only_would_enter_parked` with `observation_scope_review_recommended=false` |
+| Preserved high-priority behavior | `P0_5` / `P1` rows still emit `review_needed_broader_observe_only_would_enter` |
+| Local validation | Signal coverage expansion, L2 readiness, and local monitor sequence tests: `16 passed`; `py_compile` passed for the touched scripts |
+| Local monitor sequence | Current RBR observation is recorded as low-priority parked; blockers empty, non-market gaps empty, remote interactions `0` |
+| Deployment | Not deployed; this is local diagnostic priority classification only |
+| Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

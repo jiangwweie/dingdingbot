@@ -79,16 +79,40 @@ def _tier_policy() -> dict:
     }
 
 
+def _expansion_policy() -> dict:
+    return {
+        "strategy_groups": {
+            "BTPC-001": {
+                "coverage_review_priority": "P0_5",
+                "l2_readiness": "l2_shadow_candidate_observation_enabled",
+                "recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
+            },
+            "VCB-001": {
+                "coverage_review_priority": "P1",
+                "l2_readiness": "blocked_classifier_redesign_required",
+                "recommended_action": "keep_l1_observe_only_until_false_breakout_disable",
+            },
+            "RBR-001": {
+                "coverage_review_priority": "P2",
+                "l2_readiness": "blocked_parked_negative_evidence",
+                "recommended_action": "keep_l1_or_park_as_range_vocabulary_until_materially_new_classifier_exists",
+            },
+        }
+    }
+
+
 def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     module = _load_module()
 
     packet = module.build_signal_coverage_expansion_review(
         signal_coverage_packet=_signal_coverage(),
         tier_policy=_tier_policy(),
+        expansion_policy=_expansion_policy(),
     )
 
     assert packet["status"] == "review_needed_broader_observe_only_would_enter"
     assert packet["counts"]["broader_would_enter_signal_count"] == 2
+    assert packet["counts"]["actionable_review_row_count"] == 2
     assert packet["counts"]["new_strategy_group_review_count"] == 2
     assert packet["interaction"]["level"] == (
         "L0_local_signal_coverage_expansion_review"
@@ -101,6 +125,10 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     assert packet["decision"]["l4_promotion_recommended"] is False
     rows = {row["strategy_group_id"]: row for row in packet["review_rows"]}
     assert rows["BTPC-001"]["current_tier"] == "L1"
+    assert rows["BTPC-001"]["coverage_review_priority"] == "P0_5"
+    assert rows["BTPC-001"]["policy_l2_readiness"] == (
+        "l2_shadow_candidate_observation_enabled"
+    )
     assert rows["BTPC-001"]["suggested_next_tier"] == (
         "L2_after_handoff_review_and_dry_run"
     )
@@ -111,6 +139,42 @@ def test_expansion_review_recommends_observe_only_review_not_l4_promotion():
     assert packet["operator_command_plan"]["places_order"] is False
     assert packet["operator_command_plan"]["changes_tier_policy"] is False
     assert packet["safety_invariants"]["does_not_expand_l4_real_order_scope"] is True
+
+
+def test_expansion_review_records_p2_parked_signal_without_priority_review():
+    module = _load_module()
+    signal_coverage = _signal_coverage()
+    signal_coverage["broader_observation"]["would_enter_signals"] = [
+        {
+            "strategy_group_id": "RBR-001",
+            "symbol": "ADA/USDT:USDT",
+            "side": "short",
+            "confidence": "0.55",
+            "reason_codes": ["rbr_range_boundary_reversion"],
+        }
+    ]
+    tier_policy = _tier_policy()
+    tier_policy["new_strategy_group_defaults"]["known_new_groups"]["RBR"] = "L1"
+
+    packet = module.build_signal_coverage_expansion_review(
+        signal_coverage_packet=signal_coverage,
+        tier_policy=tier_policy,
+        expansion_policy=_expansion_policy(),
+    )
+
+    assert packet["status"] == "low_priority_observe_only_would_enter_parked"
+    assert packet["owner_state"] == "waiting_for_opportunity"
+    assert packet["counts"]["review_row_count"] == 1
+    assert packet["counts"]["actionable_review_row_count"] == 0
+    assert packet["counts"]["low_priority_or_parked_review_row_count"] == 1
+    assert packet["decision"]["observation_scope_review_recommended"] is False
+    assert packet["decision"]["low_priority_observation_recorded"] is True
+    assert packet["decision"]["real_order_scope_change_recommended"] is False
+    row = packet["review_rows"][0]
+    assert row["strategy_group_id"] == "RBR-001"
+    assert row["coverage_review_priority"] == "P2"
+    assert row["policy_l2_readiness"] == "blocked_parked_negative_evidence"
+    assert row["may_place_real_order_after_this_review"] is False
 
 
 def test_expansion_review_reports_no_review_when_no_broader_signal():

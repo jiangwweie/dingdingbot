@@ -1803,6 +1803,22 @@ re-reporting an already reviewed observation-scope item.
 | Deployment | Not deployed; this is local monitor sequence logic only |
 | Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-19 Priority-Aware Observation Expansion Checkpoint
+
+The opportunity discovery path now distinguishes actionable P0.5/P1
+would-enter observations from low-priority parked observations before they
+become roadmap pressure. This keeps the main loop focused on opportunity
+quality and replay closure, not on reviving parked vocabulary.
+
+| Item | Result |
+| --- | --- |
+| Priority join | Signal coverage expansion rows include policy priority, L2 readiness, and recommended action from `main-control-signal-coverage-expansion-policy.json` |
+| Current RBR handling | RBR would-enter is recorded as `low_priority_observe_only_would_enter_parked`, not as a P0.5 expansion push |
+| High-priority preservation | P0.5/P1 rows still trigger `review_needed_broader_observe_only_would_enter` |
+| Current local run | `output/runtime-monitor/latest-local-monitor-sequence.json`: expansion review low-priority parked, blockers empty, non-market gaps empty, remote interactions `0`, server mutation `false`, approaches real order `false` |
+| Deployment | Not deployed; local diagnostic classification only |
+| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
