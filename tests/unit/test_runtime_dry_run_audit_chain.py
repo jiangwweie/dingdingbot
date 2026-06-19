@@ -712,7 +712,6 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert tier_policy["l4_strategy_groups"] == ["MPG-001"]
     assert tier_policy["new_strategy_group_tiers"] == {
         "BRF": "L1",
-        "BTPC": "L1",
         "LSR": "L1",
         "RBR": "L1",
         "VCB": "L1",

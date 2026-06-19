@@ -89,8 +89,8 @@ checks.blockers = []
 | --- | --- | --- |
 | L0-L4 tier policy exists | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` consumed by dry-run audit | Proven |
 | first live lane limited to MPG-001 | Dry-run audit has `only_mpg_tiny_real_order_eligible_checked=true`; L4 list is `["MPG-001"]` | Proven |
-| TEQ/FBS/SOR/PMR remain non-L4 | Dry-run tier rows: `TEQ-001=L2`, `FBS-001=L3`, `SOR-001=L3`, `PMR-001=L1` | Proven |
-| new BRF/BTPC/VCB/LSR/RBR default non-L4 | Dry-run audit has `new_strategygroups_default_observe_only_checked=true` and all new groups at `L1` | Proven |
+| TEQ/BTPC/FBS/SOR/PMR remain non-L4 | Dry-run tier rows: `TEQ-001=L2`, `BTPC-001=L2`, `FBS-001=L3`, `SOR-001=L3`, `PMR-001=L1` | Proven |
+| new BRF/VCB/LSR/RBR default non-L4 | Dry-run audit has `new_strategygroups_default_observe_only_checked=true` and all default new groups at `L1` | Proven |
 | strategy handoffs cannot define custom execution pipeline | Dry-run audit has `strategy_handoff_no_execution_pipeline_fields_checked=true` and `strategygroup_adapter_boundary_checked=true` | Proven |
 
 ## Current Verification Commands

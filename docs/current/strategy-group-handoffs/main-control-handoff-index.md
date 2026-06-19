@@ -36,7 +36,7 @@ docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
 
 | StrategyGroup | Role | Default Mode | Main-Control Boundary |
 | --- | --- | --- | --- |
-| `BTPC-001` | Bear trend pullback continuation | `observe_only` | L2 handoff/dry-run intake only; not L4 real-order scope |
+| `BTPC-001` | Bear trend pullback continuation | `L2 policy: shadow_candidate; handoff: non-executing input` | May support L2 shadow-candidate observation through runtime tier policy only; not L4 real-order scope |
 
 ## Boundary
 

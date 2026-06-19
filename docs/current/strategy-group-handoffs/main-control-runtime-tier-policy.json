@@ -24,6 +24,11 @@
       "mode": "shadow_candidate",
       "reason": "Equity-like perpetual momentum may prepare candidate evidence, but should not compete with the first MPG real-order closure.",
       "tier": "L2"
+    },
+    "BTPC-001": {
+      "mode": "shadow_candidate",
+      "reason": "Passed main-control L2 intake dry-run; may prepare non-executing shadow-candidate evidence only and remains outside L4 real-order scope.",
+      "tier": "L2"
     }
   },
   "l4_real_order_requirements": [
@@ -40,7 +45,7 @@
     "budget_settlement",
     "review_capture"
   ],
-  "last_updated": "2026-06-18",
+  "last_updated": "2026-06-19",
   "legacy_compatibility_notes": {
     "tiny_real_order_eligible": "Legacy mode label retained for compatibility; it means allocated-subaccount bounded-aggressive real-order eligibility, not an instruction to reduce risk.",
     "superseded_boundary_name": "The former tiny-boundary wording is retired. Current authority is allocated_subaccount_profile_boundary."
@@ -50,7 +55,6 @@
     "default_tier": "L1",
     "known_new_groups": {
       "BRF": "L1",
-      "BTPC": "L1",
       "LSR": "L1",
       "RBR": "L1",
       "VCB": "L1"

@@ -58,8 +58,9 @@ EXPECTED_RUNTIME_TIERS = {
     "FBS-001": "L3",
     "SOR-001": "L3",
     "PMR-001": "L1",
+    "BTPC-001": "L2",
 }
-EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS = {"BRF", "BTPC", "VCB", "LSR", "RBR"}
+EXPECTED_NEW_STRATEGY_GROUP_DEFAULTS = {"BRF", "VCB", "LSR", "RBR"}
 EXPECTED_L4_REAL_ORDER_REQUIREMENTS = [
     "selected_strategygroup_scope",
     "allocated_subaccount_profile_boundary",

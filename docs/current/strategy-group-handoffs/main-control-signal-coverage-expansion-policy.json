@@ -15,15 +15,17 @@
   },
   "strategy_groups": {
     "BTPC-001": {
-      "current_main_control_tier": "L1",
+      "current_main_control_tier": "L2",
       "coverage_review_priority": "P0_5",
-      "l2_readiness": "conditional_l2_review_candidate",
-      "recommended_action": "prepare_main_control_handoff_intake_and_dry_run_before_any_l2_policy_change",
+      "l2_readiness": "l2_shadow_candidate_observation_enabled",
+      "recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
       "live_order_eligible": false,
       "l4_promotion_eligible": false,
       "positive_evidence": [
-        "main-control l2 intake handoff imported as observe-only",
+        "main-control l2 intake handoff imported as non-executing strategy input",
         "main-control RequiredFacts map now includes BTPC-001 L2 intake facts",
+        "main-control L2 intake dry-run passed",
+        "runtime tier policy promotes BTPC-001 to L2 shadow_candidate only",
         "largest current right-tail lead among reviewed expansion candidates",
         "candidate packet reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
         "supports bearish-only activation and strong-uptrend disable review"

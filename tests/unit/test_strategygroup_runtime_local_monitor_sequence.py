@@ -129,14 +129,27 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
-        else:
-            assert script == "run_strategygroup_l2_intake_dry_run.py"
+        elif script == "run_strategygroup_l2_intake_dry_run.py":
             _write_output(
                 command,
                 {
                     "status": "l2_intake_dry_run_no_candidates",
                     "interaction": {
                         "level": "L0_local_l2_intake_dry_run",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+        else:
+            assert script == "run_strategygroup_l2_tier_policy_review.py"
+            _write_output(
+                command,
+                {
+                    "status": "l2_tier_policy_review_no_candidates",
+                    "interaction": {
+                        "level": "L0_local_l2_tier_policy_review",
                         "remote_interaction_count": 0,
                         "mutates_remote_files": False,
                         "approaches_real_order": False,
@@ -162,6 +175,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         l2_readiness_review_md=tmp_path / "l2-review.md",
         l2_intake_dry_run_json=tmp_path / "l2-dry-run.json",
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
+        l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
+        l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         command_runner=fake_runner,
     )
 
@@ -174,6 +189,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_signal_coverage_expansion_review.py",
         "build_strategygroup_l2_readiness_review.py",
         "run_strategygroup_l2_intake_dry_run.py",
+        "run_strategygroup_l2_tier_policy_review.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -255,13 +271,25 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
-        assert script == "run_strategygroup_l2_intake_dry_run.py"
+        if script == "run_strategygroup_l2_intake_dry_run.py":
+            _write_output(
+                command,
+                {
+                    "status": "l2_intake_dry_run_no_candidates",
+                    "interaction": {
+                        "level": "L0_local_l2_intake_dry_run"
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
             {
-                "status": "l2_intake_dry_run_no_candidates",
+                "status": "l2_tier_policy_review_no_candidates",
                 "interaction": {
-                    "level": "L0_local_l2_intake_dry_run"
+                    "level": "L0_local_l2_tier_policy_review"
                 },
             },
         )
@@ -284,6 +312,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         l2_readiness_review_md=tmp_path / "l2-review.md",
         l2_intake_dry_run_json=tmp_path / "l2-dry-run.json",
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
+        l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
+        l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         command_runner=fake_runner,
     )
 
@@ -407,13 +437,28 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
-        assert script == "run_strategygroup_l2_intake_dry_run.py"
+        if script == "run_strategygroup_l2_intake_dry_run.py":
+            _write_output(
+                command,
+                {
+                    "status": "l2_intake_dry_run_no_candidates",
+                    "interaction": {
+                        "level": "L0_local_l2_intake_dry_run",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
             {
-                "status": "l2_intake_dry_run_no_candidates",
+                "status": "l2_tier_policy_review_no_candidates",
                 "interaction": {
-                    "level": "L0_local_l2_intake_dry_run",
+                    "level": "L0_local_l2_tier_policy_review",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -439,6 +484,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         l2_readiness_review_md=tmp_path / "l2-review.md",
         l2_intake_dry_run_json=tmp_path / "l2-dry-run.json",
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
+        l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
+        l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         command_runner=fake_runner,
     )
 
@@ -532,16 +579,34 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
-        assert script == "run_strategygroup_l2_intake_dry_run.py"
+        if script == "run_strategygroup_l2_intake_dry_run.py":
+            _write_output(
+                command,
+                {
+                    "status": "l2_intake_dry_run_passed",
+                    "decision": {
+                        "groups_ready_for_l2_policy_review": ["BTPC-001"],
+                    },
+                    "interaction": {
+                        "level": "L0_local_l2_intake_dry_run",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "run_strategygroup_l2_tier_policy_review.py"
         _write_output(
             command,
             {
-                "status": "l2_intake_dry_run_passed",
+                "status": "l2_tier_policy_review_recommended",
                 "decision": {
-                    "groups_ready_for_l2_policy_review": ["BTPC-001"],
+                    "groups_ready_to_apply_l2": ["BTPC-001"],
                 },
                 "interaction": {
-                    "level": "L0_local_l2_intake_dry_run",
+                    "level": "L0_local_l2_tier_policy_review",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -567,6 +632,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         l2_readiness_review_md=tmp_path / "l2-review.md",
         l2_intake_dry_run_json=tmp_path / "l2-dry-run.json",
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
+        l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
+        l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         command_runner=fake_runner,
     )
 
@@ -574,14 +641,146 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
     assert report["checks"]["blockers"] == []
     assert report["checks"]["non_market_gaps"] == [
         {
-            "source": "l2_intake_dry_run",
-            "requirement": "conditional L2 candidate dry-run passed and needs tier-policy review before any L2 policy change",
+            "source": "l2_tier_policy_review",
+            "requirement": "conditional L2 tier policy review recommends a local policy update before the broader opportunity is considered covered",
             "missing_or_false": [
-                "conditional_l2_tier_policy_review_ready",
+                "conditional_l2_tier_policy_update_needed",
                 "groups:BTPC-001",
             ],
         }
     ]
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["interaction"]["mutates_remote_files"] is False
+    assert report["interaction"]["approaches_real_order"] is False
+
+
+def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+
+    def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        script = Path(command[1]).name
+        if script == "run_strategygroup_runtime_daily_check.py":
+            _write_output(command, {"status": "waiting_for_market", "interaction": {}})
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "runtime_live_cutover_readiness.py":
+            _write_output(
+                command,
+                {"status": "live_cutover_waiting_for_fresh_signal", "interaction": {}},
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "run_strategygroup_runtime_goal_progress_audit.py":
+            _write_output(command, {"status": "waiting_for_market", "interaction": {}})
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "runtime_first_bounded_live_order_completion_audit.py":
+            _write_output(
+                command,
+                {
+                    "status": "not_complete_waiting_for_market",
+                    "non_market_gaps": [],
+                    "interaction": {},
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "run_strategygroup_signal_coverage_diagnostic.py":
+            _write_output(
+                command,
+                {
+                    "status": "mainline_no_signal_broader_would_enter",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_signal_coverage_expansion_review.py":
+            _write_output(
+                command,
+                {
+                    "status": "review_needed_broader_observe_only_would_enter",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage_expansion_review",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_l2_readiness_review.py":
+            _write_output(
+                command,
+                {
+                    "status": "l2_readiness_review_already_enabled",
+                    "decision": {"enabled_l2_groups": ["BTPC-001"]},
+                    "interaction": {
+                        "level": "L0_local_l2_readiness_review",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "run_strategygroup_l2_intake_dry_run.py":
+            _write_output(
+                command,
+                {
+                    "status": "l2_intake_dry_run_no_candidates",
+                    "interaction": {
+                        "level": "L0_local_l2_intake_dry_run",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "run_strategygroup_l2_tier_policy_review.py"
+        _write_output(
+            command,
+            {
+                "status": "l2_tier_policy_review_no_candidates",
+                "interaction": {
+                    "level": "L0_local_l2_tier_policy_review",
+                    "remote_interaction_count": 0,
+                    "mutates_remote_files": False,
+                    "approaches_real_order": False,
+                },
+            },
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    report = module.build_local_monitor_sequence_report(
+        daily_check_json=tmp_path / "daily.json",
+        daily_owner_progress=tmp_path / "daily.md",
+        live_cutover_json=tmp_path / "cutover.json",
+        live_cutover_md=tmp_path / "cutover.md",
+        goal_progress_json=tmp_path / "goal.json",
+        goal_progress_md=tmp_path / "goal.md",
+        completion_audit_json=tmp_path / "completion.json",
+        completion_audit_md=tmp_path / "completion.md",
+        signal_coverage_json=tmp_path / "signal-coverage.json",
+        signal_coverage_md=tmp_path / "signal-coverage.md",
+        signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
+        signal_coverage_expansion_review_md=tmp_path / "signal-expansion.md",
+        l2_readiness_review_json=tmp_path / "l2-review.json",
+        l2_readiness_review_md=tmp_path / "l2-review.md",
+        l2_intake_dry_run_json=tmp_path / "l2-dry-run.json",
+        l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
+        l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
+        l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
+        command_runner=fake_runner,
+    )
+
+    assert report["status"] == "waiting_for_market"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["non_market_gaps"] == []
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False

@@ -32,6 +32,8 @@ def test_runtime_tier_policy_keeps_only_mpg_in_current_l4_lane():
     assert current["FBS-001"]["tier"] == "L3"
     assert current["SOR-001"]["mode"] == "conditional_armed_observation"
     assert current["PMR-001"]["tier"] == "L1"
+    assert current["BTPC-001"]["tier"] == "L2"
+    assert current["BTPC-001"]["mode"] == "shadow_candidate"
 
 
 def test_runtime_tier_policy_does_not_promote_new_groups_to_l4_by_default():
@@ -41,7 +43,6 @@ def test_runtime_tier_policy_does_not_promote_new_groups_to_l4_by_default():
     assert defaults["default_mode"] == "observe_only"
     assert set(defaults["known_new_groups"]) == {
         "BRF",
-        "BTPC",
         "VCB",
         "LSR",
         "RBR",

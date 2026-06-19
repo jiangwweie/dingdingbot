@@ -1,7 +1,7 @@
 # Main-Control Runtime Tier Policy
 
 Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 
 ## Purpose
 
@@ -28,11 +28,12 @@ change, a live-profile change, or an order-sizing default.
 | `FBS-001` | `L3` | `armed_observation` | Observable with stricter derivatives facts before promotion |
 | `SOR-001` | `L3` | `conditional_armed_observation` | Armed only inside its session/structure conditions |
 | `PMR-001` | `L1` | `observe_only` | Observe-only until role/session/mark facts are consistently ready |
+| `BTPC-001` | `L2` | `shadow_candidate` | Passed main-control L2 intake dry-run; may prepare non-executing shadow-candidate evidence only and remains outside `L4` real-order scope |
 
 ## New StrategyGroup Default
 
-New or newly reviewed StrategyGroups such as `BRF`, `BTPC`, `VCB`, `LSR`, and
-`RBR` default to `L1 observe_only`.
+New or newly reviewed StrategyGroups such as `BRF`, `VCB`, `LSR`, and `RBR`
+default to `L1 observe_only`.
 
 They may move to `L2 shadow_candidate` only after reviewed handoff intake and
 dry-run audit. They must not enter `L4 tiny_real_order_eligible` until the

@@ -28,6 +28,7 @@ DEFAULT_OWNER_PROGRESS = REPO_ROOT / "output/runtime-monitor/latest-l2-readiness
 
 
 READY_OR_CONDITIONAL = {"conditional_l2_review_candidate", "l2_review_ready"}
+L2_ALREADY_ENABLED = {"l2_shadow_candidate_observation_enabled"}
 
 
 def build_l2_readiness_review(
@@ -46,10 +47,16 @@ def build_l2_readiness_review(
         for row in readiness_rows
         if row["l2_readiness"] in READY_OR_CONDITIONAL
     ]
+    enabled_rows = [
+        row
+        for row in readiness_rows
+        if row["l2_readiness"] in L2_ALREADY_ENABLED
+    ]
     blocked_rows = [
         row
         for row in readiness_rows
         if row["l2_readiness"] not in READY_OR_CONDITIONAL
+        and row["l2_readiness"] not in L2_ALREADY_ENABLED
     ]
     forbidden_effects = _forbidden_effects(expansion_review_packet, expansion_policy)
 
@@ -61,6 +68,10 @@ def build_l2_readiness_review(
         status = "l2_readiness_review_has_conditional_candidate"
         owner_state = "coverage_review_needed"
         next_step = _conditional_next_step(conditional_rows)
+    elif enabled_rows:
+        status = "l2_readiness_review_already_enabled"
+        owner_state = "coverage_policy_current"
+        next_step = "continue_l2_shadow_candidate_observation_without_l4_scope_change"
     elif readiness_rows:
         status = "l2_readiness_review_all_blocked"
         owner_state = "coverage_review_needed"
@@ -88,6 +99,7 @@ def build_l2_readiness_review(
         "counts": {
             "review_row_count": len(readiness_rows),
             "conditional_l2_candidate_count": len(conditional_rows),
+            "enabled_l2_count": len(enabled_rows),
             "blocked_count": len(blocked_rows),
             "forbidden_effect_count": len(forbidden_effects),
         },
@@ -98,6 +110,9 @@ def build_l2_readiness_review(
             "shadow_candidate_creation_recommended_now": False,
             "handoff_intake_recommended_groups": [
                 row["strategy_group_id"] for row in conditional_rows
+            ],
+            "enabled_l2_groups": [
+                row["strategy_group_id"] for row in enabled_rows
             ],
             "default_next_step": next_step,
         },
@@ -147,6 +162,7 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         f"- Status: `{packet.get('status')}`",
         f"- Owner state: `{packet.get('owner_state')}`",
         f"- Conditional L2 candidates: `{_as_dict(packet.get('counts')).get('conditional_l2_candidate_count', 0)}`",
+        f"- Enabled L2 groups: `{_as_dict(packet.get('counts')).get('enabled_l2_count', 0)}`",
         f"- Blocked rows: `{_as_dict(packet.get('counts')).get('blocked_count', 0)}`",
         "- Tier policy change: `false`",
         "- L4 scope change: `false`",
@@ -180,6 +196,7 @@ def _readiness_row(*, row: dict[str, Any], policy: dict[str, Any]) -> dict[str, 
             str(item) for item in policy.get("blocking_gaps_before_l2") or []
         ],
         "conditional_l2_review_candidate": l2_readiness in READY_OR_CONDITIONAL,
+        "l2_shadow_candidate_observation_enabled": l2_readiness in L2_ALREADY_ENABLED,
         "may_change_tier_policy_now": False,
         "may_create_shadow_candidate_now": False,
         "may_place_real_order_now": False,

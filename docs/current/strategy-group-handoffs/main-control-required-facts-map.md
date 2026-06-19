@@ -20,10 +20,12 @@ FinalGate.
 | `account` | Balance, same-symbol position, and open orders. | Block candidate prepare. |
 | `exchange` | Symbol availability, min notional, step, tick, leverage limit. | Block candidate prepare for the affected symbol. |
 
-## BTPC-001 L2 Intake Facts
+## BTPC-001 L2 Shadow-Candidate Facts
 
-`BTPC-001` is imported for observe-only L2 intake review. These facts do not
-authorize `FinalGate`, `Operation Layer`, or real orders.
+`BTPC-001` is imported for L2 non-executing shadow-candidate observation.
+These facts do not authorize `FinalGate`, `Operation Layer`, or real orders.
+They define the minimum facts required before a BTPC shadow-candidate packet can
+be prepared for review.
 
 | RequiredFact | Class | Current Main-Control Meaning | Missing Behavior |
 | --- | --- | --- | --- |

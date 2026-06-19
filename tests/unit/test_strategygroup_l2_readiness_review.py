@@ -114,6 +114,7 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     assert packet["counts"] == {
         "blocked_count": 3,
         "conditional_l2_candidate_count": 1,
+        "enabled_l2_count": 0,
         "forbidden_effect_count": 0,
         "review_row_count": 4,
     }
@@ -130,6 +131,31 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["safety_invariants"]["does_not_change_tier_policy"] is True
     assert packet["safety_invariants"]["does_not_expand_l4_real_order_scope"] is True
+
+
+def test_l2_readiness_review_recognizes_enabled_l2_group():
+    module = _load_module()
+    policy = _policy()
+    policy["strategy_groups"]["BTPC-001"]["l2_readiness"] = (
+        "l2_shadow_candidate_observation_enabled"
+    )
+    policy["strategy_groups"]["BTPC-001"]["recommended_action"] = (
+        "continue_l2_shadow_candidate_observation_without_l4_scope_change"
+    )
+    policy["strategy_groups"]["BTPC-001"]["blocking_gaps_before_l2"] = []
+
+    packet = module.build_l2_readiness_review(
+        expansion_review_packet=_expansion_review(),
+        expansion_policy=policy,
+    )
+
+    assert packet["status"] == "l2_readiness_review_already_enabled"
+    assert packet["counts"]["conditional_l2_candidate_count"] == 0
+    assert packet["counts"]["enabled_l2_count"] == 1
+    assert packet["decision"]["enabled_l2_groups"] == ["BTPC-001"]
+    rows = {row["strategy_group_id"]: row for row in packet["readiness_rows"]}
+    assert rows["BTPC-001"]["l2_shadow_candidate_observation_enabled"] is True
+    assert rows["BTPC-001"]["may_place_real_order_now"] is False
 
 
 def test_l2_readiness_review_reports_no_rows():

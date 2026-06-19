@@ -60,6 +60,12 @@ DEFAULT_L2_INTAKE_DRY_RUN_JSON = (
 DEFAULT_L2_INTAKE_DRY_RUN_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-l2-intake-dry-run.md"
 )
+DEFAULT_L2_TIER_POLICY_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-l2-tier-policy-review.json"
+)
+DEFAULT_L2_TIER_POLICY_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-l2-tier-policy-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -96,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         l2_readiness_review_md=Path(args.l2_readiness_review_md),
         l2_intake_dry_run_json=Path(args.l2_intake_dry_run_json),
         l2_intake_dry_run_md=Path(args.l2_intake_dry_run_md),
+        l2_tier_policy_review_json=Path(args.l2_tier_policy_review_json),
+        l2_tier_policy_review_md=Path(args.l2_tier_policy_review_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -135,6 +143,8 @@ def build_local_monitor_sequence_report(
     l2_readiness_review_md: Path = DEFAULT_L2_READINESS_REVIEW_MD,
     l2_intake_dry_run_json: Path = DEFAULT_L2_INTAKE_DRY_RUN_JSON,
     l2_intake_dry_run_md: Path = DEFAULT_L2_INTAKE_DRY_RUN_MD,
+    l2_tier_policy_review_json: Path = DEFAULT_L2_TIER_POLICY_REVIEW_JSON,
+    l2_tier_policy_review_md: Path = DEFAULT_L2_TIER_POLICY_REVIEW_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -267,6 +277,25 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    l2_tier_policy_review_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/run_strategygroup_l2_tier_policy_review.py"),
+        "--l2-intake-dry-run-json",
+        str(l2_intake_dry_run_json),
+        "--output-json",
+        str(l2_tier_policy_review_json),
+        "--output-owner-progress",
+        str(l2_tier_policy_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "l2_tier_policy_review",
+            l2_tier_policy_review_command,
+            l2_tier_policy_review_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -287,13 +316,20 @@ def build_local_monitor_sequence_report(
         packets["completion_audit"].get("non_market_gaps") or []
     )
     non_market_gaps = list(completion_non_market_gaps)
+    expansion_review_resolved = _expansion_review_resolved(
+        packets.get("l2_readiness_review", {}),
+        packets.get("l2_tier_policy_review", {}),
+    )
     signal_coverage_gap = _expansion_review_non_market_gap(
         packets.get("signal_coverage_expansion_review", {}),
         packets.get("l2_readiness_review", {}),
         packets.get("l2_intake_dry_run", {}),
-    ) or _signal_coverage_non_market_gap(
-        packets.get("signal_coverage", {}),
+        packets.get("l2_tier_policy_review", {}),
     )
+    if signal_coverage_gap is None and not expansion_review_resolved:
+        signal_coverage_gap = _signal_coverage_non_market_gap(
+            packets.get("signal_coverage", {}),
+        )
     if signal_coverage_gap:
         non_market_gaps.append(signal_coverage_gap)
     if completion_non_market_gaps:
@@ -340,6 +376,7 @@ def build_local_monitor_sequence_report(
             ),
             "l2_readiness_review_json": str(l2_readiness_review_json),
             "l2_intake_dry_run_json": str(l2_intake_dry_run_json),
+            "l2_tier_policy_review_json": str(l2_tier_policy_review_json),
         },
     }
 
@@ -428,32 +465,50 @@ def _sequence_status(
         return "needs_non_market_repair"
     if completion_status == "not_complete_runtime_processing":
         return "processing"
+    l2_readiness_status = _status(packets.get("l2_readiness_review"))
+    l2_tier_status = _status(packets.get("l2_tier_policy_review"))
+    l2_tier_review_clears_expansion = l2_tier_status in {
+        "l2_tier_policy_review_applied",
+    } or l2_readiness_status == "l2_readiness_review_already_enabled"
     signal_coverage_status = _status(packets.get("signal_coverage"))
     if signal_coverage_status == "mainline_runtime_signal_ready":
         return "processing"
     if signal_coverage_status in {
         "blocked_forbidden_effect",
         "broader_preview_invalid_needs_review",
-        "mainline_no_signal_broader_would_enter",
-    }:
+    } or (
+        signal_coverage_status == "mainline_no_signal_broader_would_enter"
+        and not l2_tier_review_clears_expansion
+    ):
         return "needs_non_market_repair"
     expansion_review_status = _status(packets.get("signal_coverage_expansion_review"))
     if expansion_review_status in {
         "blocked_forbidden_effect",
-        "review_needed_broader_observe_only_would_enter",
-    }:
+    } or (
+        expansion_review_status == "review_needed_broader_observe_only_would_enter"
+        and not l2_tier_review_clears_expansion
+    ):
         return "needs_non_market_repair"
-    l2_readiness_status = _status(packets.get("l2_readiness_review"))
     if l2_readiness_status in {
         "blocked_forbidden_effect",
-        "l2_readiness_review_has_conditional_candidate",
-    }:
+    } or (
+        l2_readiness_status == "l2_readiness_review_has_conditional_candidate"
+        and not l2_tier_review_clears_expansion
+    ):
         return "needs_non_market_repair"
     l2_dry_run_status = _status(packets.get("l2_intake_dry_run"))
     if l2_dry_run_status in {
         "blocked_forbidden_effect",
         "l2_intake_dry_run_failed",
-        "l2_intake_dry_run_passed",
+    } or (
+        l2_dry_run_status == "l2_intake_dry_run_passed"
+        and not l2_tier_review_clears_expansion
+    ):
+        return "needs_non_market_repair"
+    if l2_tier_status in {
+        "blocked_forbidden_effect",
+        "l2_tier_policy_review_failed",
+        "l2_tier_policy_review_recommended",
     }:
         return "needs_non_market_repair"
     if (
@@ -505,13 +560,56 @@ def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
+def _expansion_review_resolved(
+    l2_packet: dict[str, Any],
+    l2_tier_policy_packet: dict[str, Any],
+) -> bool:
+    return _status(l2_packet) == "l2_readiness_review_already_enabled" or _status(
+        l2_tier_policy_packet
+    ) == "l2_tier_policy_review_applied"
+
+
 def _expansion_review_non_market_gap(
     packet: dict[str, Any],
     l2_packet: dict[str, Any] | None = None,
     l2_dry_run_packet: dict[str, Any] | None = None,
+    l2_tier_policy_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     l2_packet = l2_packet or {}
     l2_dry_run_packet = l2_dry_run_packet or {}
+    l2_tier_policy_packet = l2_tier_policy_packet or {}
+    if _status(l2_packet) == "l2_readiness_review_already_enabled":
+        return None
+    l2_tier_status = _status(l2_tier_policy_packet)
+    if l2_tier_status == "l2_tier_policy_review_applied":
+        return None
+    if l2_tier_status == "l2_tier_policy_review_recommended":
+        decision = (
+            l2_tier_policy_packet.get("decision")
+            if isinstance(l2_tier_policy_packet.get("decision"), dict)
+            else {}
+        )
+        groups = [
+            str(item)
+            for item in decision.get("groups_ready_to_apply_l2") or []
+        ]
+        return {
+            "source": "l2_tier_policy_review",
+            "requirement": "conditional L2 tier policy review recommends a local policy update before the broader opportunity is considered covered",
+            "missing_or_false": [
+                "conditional_l2_tier_policy_update_needed",
+                f"groups:{','.join(groups) if groups else 'none'}",
+            ],
+        }
+    if l2_tier_status in {
+        "blocked_forbidden_effect",
+        "l2_tier_policy_review_failed",
+    }:
+        return {
+            "source": "l2_tier_policy_review",
+            "requirement": "conditional L2 tier policy review must pass without dangerous effects",
+            "missing_or_false": [f"l2_tier_policy_review_status:{l2_tier_status}"],
+        }
     l2_dry_run_status = _status(l2_dry_run_packet)
     if l2_dry_run_status == "l2_intake_dry_run_passed":
         decision = (
@@ -806,6 +904,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--l2-intake-dry-run-md",
         default=str(DEFAULT_L2_INTAKE_DRY_RUN_MD),
+    )
+    parser.add_argument(
+        "--l2-tier-policy-review-json",
+        default=str(DEFAULT_L2_TIER_POLICY_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--l2-tier-policy-review-md",
+        default=str(DEFAULT_L2_TIER_POLICY_REVIEW_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",
