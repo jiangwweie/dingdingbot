@@ -76,7 +76,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
-        else:
+        elif script == "runtime_first_bounded_live_order_completion_audit.py":
             _write_output(
                 command,
                 {
@@ -84,6 +84,19 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     "non_market_gaps": [],
                     "interaction": {
                         "level": "L0_local_completion_audit",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+        else:
+            _write_output(
+                command,
+                {
+                    "status": "mainline_and_broader_no_signal",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage",
                         "remote_interaction_count": 0,
                         "mutates_remote_files": False,
                         "approaches_real_order": False,
@@ -109,6 +122,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "runtime_live_cutover_readiness.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
+        "run_strategygroup_signal_coverage_diagnostic.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -137,24 +151,33 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         if script == "run_strategygroup_runtime_goal_progress_audit.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
             return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "runtime_first_bounded_live_order_completion_audit.py":
+            _write_output(
+                command,
+                {
+                    "status": "needs_non_market_repair",
+                    "non_market_gaps": [
+                        {
+                            "requirement": "P0 completion audit input sources are traceable",
+                            "missing_or_false": ["goal_progress:generated_before_daily_check"],
+                        }
+                    ],
+                    "interaction": {
+                        "level": "L0_local_completion_audit",
+                        "remote_interaction_count": 0,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 2, "", "")
 
         _write_output(
             command,
             {
-                "status": "needs_non_market_repair",
-                "non_market_gaps": [
-                    {
-                        "requirement": "P0 completion audit input sources are traceable",
-                        "missing_or_false": ["goal_progress:generated_before_daily_check"],
-                    }
-                ],
-                "interaction": {
-                    "level": "L0_local_completion_audit",
-                    "remote_interaction_count": 0,
-                },
+                "status": "mainline_and_broader_no_signal",
+                "interaction": {"level": "L0_local_signal_coverage"},
             },
         )
-        return subprocess.CompletedProcess(command, 2, "", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
 
     report = module.build_local_monitor_sequence_report(
         daily_check_json=tmp_path / "daily.json",
@@ -227,13 +250,28 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             )
             return subprocess.CompletedProcess(command, 2, "", "")
 
+        if script == "runtime_first_bounded_live_order_completion_audit.py":
+            _write_output(
+                command,
+                {
+                    "status": "not_complete_waiting_for_market",
+                    "non_market_gaps": [],
+                    "interaction": {
+                        "level": "L0_local_completion_audit",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         _write_output(
             command,
             {
-                "status": "not_complete_waiting_for_market",
-                "non_market_gaps": [],
+                "status": "mainline_and_broader_no_signal",
                 "interaction": {
-                    "level": "L0_local_completion_audit",
+                    "level": "L0_local_signal_coverage",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -259,6 +297,80 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
     assert report["owner_summary"]["owner_intervention_required"] is False
     assert report["checks"]["blockers"] == []
     assert report["checks"]["monitor_refresh_needed"] is True
+    assert report["interaction"]["remote_interaction_count"] == 0
+    assert report["interaction"]["mutates_remote_files"] is False
+    assert report["interaction"]["approaches_real_order"] is False
+
+
+def test_local_monitor_sequence_surfaces_signal_coverage_gap(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+
+    def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        script = Path(command[1]).name
+        if script == "run_strategygroup_runtime_daily_check.py":
+            _write_output(command, {"status": "waiting_for_market", "interaction": {}})
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "runtime_live_cutover_readiness.py":
+            _write_output(
+                command,
+                {"status": "live_cutover_waiting_for_fresh_signal", "interaction": {}},
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "run_strategygroup_runtime_goal_progress_audit.py":
+            _write_output(command, {"status": "waiting_for_market", "interaction": {}})
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "runtime_first_bounded_live_order_completion_audit.py":
+            _write_output(
+                command,
+                {
+                    "status": "not_complete_waiting_for_market",
+                    "non_market_gaps": [],
+                    "interaction": {},
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        _write_output(
+            command,
+            {
+                "status": "mainline_no_signal_broader_would_enter",
+                "interaction": {
+                    "level": "L0_local_signal_coverage",
+                    "remote_interaction_count": 0,
+                    "mutates_remote_files": False,
+                    "approaches_real_order": False,
+                },
+            },
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    report = module.build_local_monitor_sequence_report(
+        daily_check_json=tmp_path / "daily.json",
+        daily_owner_progress=tmp_path / "daily.md",
+        live_cutover_json=tmp_path / "cutover.json",
+        live_cutover_md=tmp_path / "cutover.md",
+        goal_progress_json=tmp_path / "goal.json",
+        goal_progress_md=tmp_path / "goal.md",
+        completion_audit_json=tmp_path / "completion.json",
+        completion_audit_md=tmp_path / "completion.md",
+        signal_coverage_json=tmp_path / "signal-coverage.json",
+        signal_coverage_md=tmp_path / "signal-coverage.md",
+        command_runner=fake_runner,
+    )
+
+    assert report["status"] == "needs_non_market_repair"
+    assert report["checks"]["blockers"] == []
+    assert report["checks"]["non_market_gaps"] == [
+        {
+            "source": "signal_coverage",
+            "requirement": "mainline runtime coverage should not miss broad observe-only opportunities silently",
+            "missing_or_false": [
+                "mainline_no_signal_but_broader_would_enter_observed"
+            ],
+        }
+    ]
     assert report["interaction"]["remote_interaction_count"] == 0
     assert report["interaction"]["mutates_remote_files"] is False
     assert report["interaction"]["approaches_real_order"] is False

@@ -36,6 +36,12 @@ DEFAULT_COMPLETION_AUDIT_JSON = (
 DEFAULT_COMPLETION_AUDIT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md"
 )
+DEFAULT_SIGNAL_COVERAGE_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.json"
+)
+DEFAULT_SIGNAL_COVERAGE_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -59,6 +65,9 @@ def main(argv: list[str] | None = None) -> int:
         goal_progress_md=Path(args.goal_progress_md),
         completion_audit_json=Path(args.completion_audit_json),
         completion_audit_md=Path(args.completion_audit_md),
+        signal_coverage_json=Path(args.signal_coverage_json),
+        signal_coverage_md=Path(args.signal_coverage_md),
+        signal_coverage_source=args.signal_coverage_source,
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -85,6 +94,9 @@ def build_local_monitor_sequence_report(
     goal_progress_md: Path = DEFAULT_GOAL_PROGRESS_MD,
     completion_audit_json: Path = DEFAULT_COMPLETION_AUDIT_JSON,
     completion_audit_md: Path = DEFAULT_COMPLETION_AUDIT_MD,
+    signal_coverage_json: Path = DEFAULT_SIGNAL_COVERAGE_JSON,
+    signal_coverage_md: Path = DEFAULT_SIGNAL_COVERAGE_MD,
+    signal_coverage_source: str = "local_sqlite_fallback",
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -138,6 +150,25 @@ def build_local_monitor_sequence_report(
         _run_step("completion_audit", completion_command, completion_audit_json, runner)
     )
 
+    signal_coverage_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/run_strategygroup_signal_coverage_diagnostic.py"),
+        "--source",
+        signal_coverage_source,
+        "--output-json",
+        str(signal_coverage_json),
+        "--output-owner-progress",
+        str(signal_coverage_md),
+    ]
+    steps.append(
+        _run_step(
+            "signal_coverage",
+            signal_coverage_command,
+            signal_coverage_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -154,8 +185,16 @@ def build_local_monitor_sequence_report(
             and _status(packets["completion_audit"]) == "needs_non_market_repair"
         )
     ]
-    non_market_gaps = list(packets["completion_audit"].get("non_market_gaps") or [])
-    if non_market_gaps:
+    completion_non_market_gaps = list(
+        packets["completion_audit"].get("non_market_gaps") or []
+    )
+    non_market_gaps = list(completion_non_market_gaps)
+    signal_coverage_gap = _signal_coverage_non_market_gap(
+        packets.get("signal_coverage", {})
+    )
+    if signal_coverage_gap:
+        non_market_gaps.append(signal_coverage_gap)
+    if completion_non_market_gaps:
         blockers.append("completion_audit:non_market_gaps")
 
     return {
@@ -193,6 +232,7 @@ def build_local_monitor_sequence_report(
             "live_cutover_json": str(live_cutover_json),
             "goal_progress_json": str(goal_progress_json),
             "completion_audit_json": str(completion_audit_json),
+            "signal_coverage_json": str(signal_coverage_json),
         },
     }
 
@@ -281,6 +321,15 @@ def _sequence_status(
         return "needs_non_market_repair"
     if completion_status == "not_complete_runtime_processing":
         return "processing"
+    signal_coverage_status = _status(packets.get("signal_coverage"))
+    if signal_coverage_status == "mainline_runtime_signal_ready":
+        return "processing"
+    if signal_coverage_status in {
+        "blocked_forbidden_effect",
+        "broader_preview_invalid_needs_review",
+        "mainline_no_signal_broader_would_enter",
+    }:
+        return "needs_non_market_repair"
     if (
         _status(packets["daily_check"]) == "waiting_for_market"
         and _status(packets["goal_progress"]) == "waiting_for_market"
@@ -303,6 +352,31 @@ def _step_returncode_is_monitor_refresh(
         and int(step.get("returncode") or 0) != 0
         and _status(packets[step["name"]]) == "needs_refresh"
     )
+
+
+def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | None:
+    status = _status(packet)
+    if status == "mainline_no_signal_broader_would_enter":
+        return {
+            "source": "signal_coverage",
+            "requirement": "mainline runtime coverage should not miss broad observe-only opportunities silently",
+            "missing_or_false": [
+                "mainline_no_signal_but_broader_would_enter_observed"
+            ],
+        }
+    if status == "broader_preview_invalid_needs_review":
+        return {
+            "source": "signal_coverage",
+            "requirement": "broader preview signals must satisfy the signal contract",
+            "missing_or_false": ["broader_preview_invalid_signal"],
+        }
+    if status == "blocked_forbidden_effect":
+        return {
+            "source": "signal_coverage",
+            "requirement": "signal coverage diagnostic must stay non-executing",
+            "missing_or_false": ["signal_coverage_forbidden_effect"],
+        }
+    return None
 
 
 def _sequence_interaction(steps: list[dict[str, Any]]) -> dict[str, Any]:
@@ -396,8 +470,8 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         "",
         "## Checks",
         "",
-        f"- Blockers: {_list_or_none([str(item) for item in checks['blockers']])}",
-        f"- Non-market gaps: {_list_or_none([str(item) for item in checks['non_market_gaps']])}",
+        f"- Blockers: {_list_or_none(checks['blockers'])}",
+        f"- Non-market gaps: {_list_or_none(checks['non_market_gaps'])}",
     ])
     return "\n".join(lines)
 
@@ -461,8 +535,16 @@ def _yes_no(value: bool) -> str:
     return "是" if value else "否"
 
 
-def _list_or_none(values: list[str]) -> str:
-    return ", ".join(values) if values else "none"
+def _list_or_none(values: list[Any]) -> str:
+    if not values:
+        return "none"
+    rendered = []
+    for value in values:
+        if isinstance(value, (dict, list)):
+            rendered.append(json.dumps(value, ensure_ascii=False, sort_keys=True))
+        else:
+            rendered.append(str(value))
+    return ", ".join(rendered)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -485,6 +567,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--goal-progress-md", default=str(DEFAULT_GOAL_PROGRESS_MD))
     parser.add_argument("--completion-audit-json", default=str(DEFAULT_COMPLETION_AUDIT_JSON))
     parser.add_argument("--completion-audit-md", default=str(DEFAULT_COMPLETION_AUDIT_MD))
+    parser.add_argument("--signal-coverage-json", default=str(DEFAULT_SIGNAL_COVERAGE_JSON))
+    parser.add_argument("--signal-coverage-md", default=str(DEFAULT_SIGNAL_COVERAGE_MD))
+    parser.add_argument(
+        "--signal-coverage-source",
+        choices=["sample", "local_sqlite_fallback", "live_market"],
+        default="local_sqlite_fallback",
+        help="Read-only broader strategy source for local signal coverage diagnostics.",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     return parser.parse_args(argv)
