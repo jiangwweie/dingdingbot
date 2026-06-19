@@ -222,6 +222,8 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert packet["status"] == "decision_loop_ready"
     assert packet["counts"]["observed_opportunity_count"] == 3
     assert packet["counts"]["replay_covered_count"] == 2
+    assert packet["counts"]["work_queue_item_count"] == 4
+    assert packet["counts"]["scheduled_work_queue_item_count"] == 3
     assert packet["counts"]["real_order_authorized_count"] == 0
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     assert rows["BTPC-001"]["decision_action"] == "continue_l2_shadow_quality_review"
@@ -232,13 +234,32 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert rows["VCB-001"]["gap_work_items"][0]["work_type"] == (
         "classifier_or_rule_work"
     )
+    assert rows["VCB-001"]["gap_work_items"][0]["owner_priority"] == "P0.5-high"
+    assert rows["VCB-001"]["gap_work_items"][0]["blocks_l2_progression"] is True
     assert rows["RBR-001"]["decision_action"] == "park_or_vocabulary_only"
+    work_items = packet["work_queue"]["items"]
+    assert packet["work_queue"]["status"] == "ready"
+    assert packet["work_queue"]["next_local_checkpoint"] == (
+        "repair_classifier_or_disable_state_gaps_for_lsr_vcb"
+    )
+    assert packet["work_queue"]["counts"]["scheduled"] == 3
+    assert packet["work_queue"]["by_work_type"]["classifier_or_rule_work"] == 1
+    assert work_items[0]["strategy_group_id"] == "VCB-001"
+    assert work_items[0]["work_type"] == "classifier_or_rule_work"
+    assert work_items[0]["scheduled"] is True
+    parked_items = [
+        item for item in work_items if item["strategy_group_id"] == "RBR-001"
+    ]
+    assert parked_items
+    assert all(item["scheduled"] is False for item in parked_items)
     for row in packet["decision_rows"]:
         assert row["real_order_authority"] is False
         assert row["l4_scope_change_recommended"] is False
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
+    assert packet["work_queue"]["safety_invariants"]["places_order"] is False
+    assert packet["work_queue"]["safety_invariants"]["calls_operation_layer"] is False
 
 
 def test_decision_loop_requires_replay_before_l2_when_missing():
@@ -266,6 +287,9 @@ def test_decision_loop_requires_replay_before_l2_when_missing():
     assert row["replay_verification"]["covered"] is False
     assert row["decision_action"] == "build_replay_corpus_before_l2"
     assert row["next_checkpoint"] == "add_group_replay_corpus_and_would_enter_case"
+    assert packet["work_queue"]["counts"]["blocked_l2_progression"] == 1
+    assert packet["work_queue"]["items"][0]["work_type"] == "replay_corpus_work"
+    assert packet["work_queue"]["items"][0]["scheduled"] is True
 
 
 def test_decision_loop_blocks_forbidden_source_effects():
@@ -322,6 +346,9 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     file_payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert stdout_payload == file_payload
     assert file_payload["scope"] == "strategygroup_opportunity_decision_loop"
+    assert file_payload["work_queue"]["status"] == "ready"
     owner_text = owner_path.read_text(encoding="utf-8")
     assert "StrategyGroup Opportunity Decision Loop" in owner_text
     assert "repair_blocking_gaps_with_replay_or_facts" in owner_text
+    assert "Work Queue" in owner_text
+    assert "classifier_or_rule_work" in owner_text

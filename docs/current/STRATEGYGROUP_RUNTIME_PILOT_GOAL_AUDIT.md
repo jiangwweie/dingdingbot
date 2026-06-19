@@ -728,6 +728,23 @@ blocking gaps, and L2 tier state into per-StrategyGroup decisions.
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` covers L2-enabled continuation, L1 replay-plus-gap repair, missing-replay-before-L2, forbidden source effects, and CLI output |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Opportunity Work Queue Checkpoint
+
+The local decision loop now emits an actionable P0.5 work queue so broader
+would-enter observations do not stop at markdown/report review. The queue turns
+each blocking gap into work type, priority, scheduled status, validation command,
+and completion signal.
+
+| Item | Evidence |
+| --- | --- |
+| Work queue output | `latest-opportunity-decision-loop.json` now includes `work_queue.status`, `next_local_checkpoint`, `by_work_type`, `by_owner_priority`, and per-item `queue_id`, `actionable_task`, `validation_command`, and `completion_signal` |
+| Current queue | Current local run reports `work_queue_item_count=19`, `scheduled_work_queue_item_count=15`, and next checkpoint `repair_classifier_or_disable_state_gaps_for_lsr_vcb` |
+| Current grouping | Current work types are classifier/rule work, economic replay work, required fact or market-data work, strategy quality review, and strategy review work |
+| Scheduling rule | `LSR-001` and `VCB-001` classifier/economic gaps are scheduled for P0.5 repair; `BTPC-001` continues L2 shadow-quality/fact review; `RBR-001` stays unscheduled/parked unless new evidence appears |
+| L4 boundary | The queue keeps `real_order_authorized=0`, `l4_scope_change_recommended=0`, `places_order=false`, `calls_finalgate=false`, `calls_operation_layer=false`, and `calls_exchange_write=false` |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts work-queue counts, priority/type grouping, parked-item scheduling behavior, missing-replay queue behavior, CLI output, and safety invariants |
+| Safety | Local work-queue generation only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

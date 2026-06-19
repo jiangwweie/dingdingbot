@@ -73,6 +73,7 @@ def build_opportunity_decision_loop(
         )
         for row in review_rows
     ]
+    work_queue = _work_queue(decision_rows)
     forbidden_effects = _forbidden_effects(
         expansion_review_packet,
         l2_readiness_packet,
@@ -115,6 +116,8 @@ def build_opportunity_decision_loop(
             "blocking_gap_group_count": sum(
                 1 for row in decision_rows if row["blocking_gaps_before_l2"]
             ),
+            "work_queue_item_count": work_queue["counts"]["total"],
+            "scheduled_work_queue_item_count": work_queue["counts"]["scheduled"],
             "l2_enabled_count": sum(
                 1
                 for row in decision_rows
@@ -126,12 +129,15 @@ def build_opportunity_decision_loop(
         },
         "action_counts": dict(sorted(action_counts.items())),
         "decision_rows": decision_rows,
+        "work_queue": work_queue,
         "decision": {
             "repeatable_loop_ready": bool(decision_rows) and not forbidden_effects,
             "real_order_scope_change_recommended": False,
             "l4_promotion_recommended": False,
             "tier_policy_change_recommended_now": False,
-            "default_next_step": _default_next_step(decision_rows, forbidden_effects),
+            "default_next_step": _default_next_step(
+                decision_rows, forbidden_effects, work_queue
+            ),
         },
         "operator_command_plan": {
             "not_executed": True,
@@ -187,6 +193,10 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "## Next",
         "",
         f"- `{_as_dict(packet.get('decision')).get('default_next_step')}`",
+        "",
+        "## Work Queue",
+        "",
+        _work_queue_table(_dict_rows(_as_dict(packet.get("work_queue")).get("items"))),
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -215,13 +225,22 @@ def _decision_row(
         )
     ]
     replay = _normalized_replay_summary(replay_summary)
-    gap_work = [_gap_work_item(gap) for gap in gaps]
     decision_action = _decision_action(
         current_tier=current_tier,
         readiness=readiness,
         replay=replay,
         gaps=gaps,
     )
+    gap_work = [
+        _gap_work_item(
+            gap,
+            strategy_group_id=strategy_group_id,
+            current_tier=current_tier,
+            readiness=readiness,
+            decision_action=decision_action,
+        )
+        for gap in gaps
+    ]
     return {
         "strategy_group_id": strategy_group_id,
         "symbol": review_row.get("symbol") or readiness_row.get("symbol"),
@@ -357,7 +376,14 @@ def _next_checkpoint(action: str) -> str:
     }.get(action, "continue_observation_review")
 
 
-def _gap_work_item(gap: str) -> dict[str, str]:
+def _gap_work_item(
+    gap: str,
+    *,
+    strategy_group_id: str,
+    current_tier: str,
+    readiness: str,
+    decision_action: str,
+) -> dict[str, Any]:
     lowered = gap.lower()
     if any(token in lowered for token in ("classifier", "rewrite", "disable")):
         work_type = "classifier_or_rule_work"
@@ -372,14 +398,309 @@ def _gap_work_item(gap: str) -> dict[str, str]:
         work_type = "strategy_quality_review"
     else:
         work_type = "strategy_review_work"
-    return {"gap": gap, "work_type": work_type}
+    owner_priority = _owner_priority(
+        decision_action=decision_action,
+        current_tier=current_tier,
+        work_type=work_type,
+    )
+    return {
+        "gap": gap,
+        "work_type": work_type,
+        "owner_priority": owner_priority,
+        "scheduled": decision_action != "park_or_vocabulary_only",
+        "blocks_l2_progression": _blocks_l2_progression(
+            decision_action=decision_action,
+            readiness=readiness,
+        ),
+        "actionable_task": _actionable_gap_task(
+            gap=gap,
+            work_type=work_type,
+            strategy_group_id=strategy_group_id,
+            decision_action=decision_action,
+        ),
+        "validation_command": _validation_command(work_type),
+        "completion_signal": _completion_signal(work_type),
+    }
 
 
-def _default_next_step(rows: list[dict[str, Any]], forbidden_effects: list[str]) -> str:
+def _work_queue(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("decision_action") in {
+            "build_replay_corpus_before_l2",
+            "add_would_enter_replay_case_before_l2",
+        }:
+            items.append(_row_level_queue_item(row))
+            continue
+        gap_items = _dict_rows(row.get("gap_work_items"))
+        if gap_items:
+            for gap_item in gap_items:
+                items.append(_queue_item(row, gap_item))
+        else:
+            items.append(_row_level_queue_item(row))
+    items.sort(key=_work_queue_sort_key)
+    by_type = Counter(str(item.get("work_type") or "unknown") for item in items)
+    by_priority = Counter(str(item.get("owner_priority") or "unknown") for item in items)
+    scheduled = [item for item in items if item.get("scheduled") is True]
+    return {
+        "status": "ready" if items else "empty",
+        "next_local_checkpoint": _next_local_work_checkpoint(scheduled),
+        "counts": {
+            "total": len(items),
+            "scheduled": len(scheduled),
+            "blocked_l2_progression": sum(
+                1 for item in items if item.get("blocks_l2_progression") is True
+            ),
+            "real_order_authorized": 0,
+            "l4_scope_change_recommended": 0,
+        },
+        "by_work_type": dict(sorted(by_type.items())),
+        "by_owner_priority": dict(sorted(by_priority.items())),
+        "items": items,
+        "safety_invariants": {
+            "local_work_queue_only": True,
+            "changes_strategy_parameters": False,
+            "changes_tier_policy": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+            "mutates_server_files": False,
+            "real_order_authorized": False,
+        },
+    }
+
+
+def _queue_item(row: dict[str, Any], gap_item: dict[str, Any]) -> dict[str, Any]:
+    strategy_group_id = str(row.get("strategy_group_id") or "unknown")
+    work_type = str(gap_item.get("work_type") or "strategy_review_work")
+    gap = str(gap_item.get("gap") or "row_level_review")
+    return {
+        "queue_id": _queue_id(strategy_group_id, work_type, gap),
+        "strategy_group_id": strategy_group_id,
+        "symbol": row.get("symbol"),
+        "side": row.get("side"),
+        "current_tier": row.get("current_tier"),
+        "decision_action": row.get("decision_action"),
+        "work_type": work_type,
+        "owner_priority": gap_item.get("owner_priority"),
+        "scheduled": gap_item.get("scheduled") is True,
+        "blocks_l2_progression": gap_item.get("blocks_l2_progression") is True,
+        "gap": gap,
+        "actionable_task": gap_item.get("actionable_task"),
+        "validation_command": gap_item.get("validation_command"),
+        "completion_signal": gap_item.get("completion_signal"),
+        "real_order_authority": False,
+        "l4_scope_change_recommended": False,
+    }
+
+
+def _row_level_queue_item(row: dict[str, Any]) -> dict[str, Any]:
+    strategy_group_id = str(row.get("strategy_group_id") or "unknown")
+    decision_action = str(row.get("decision_action") or "continue_observation_review")
+    if decision_action == "continue_l2_shadow_quality_review":
+        work_type = "strategy_quality_review"
+        actionable_task = (
+            f"{strategy_group_id}: collect L2 shadow outcome, cost, slippage, "
+            "and invalidation evidence without changing L4 scope."
+        )
+        owner_priority = "P0.5-high"
+    elif decision_action == "build_replay_corpus_before_l2":
+        work_type = "replay_corpus_work"
+        actionable_task = (
+            f"{strategy_group_id}: add non-executing replay corpus before any L2 "
+            "intake decision."
+        )
+        owner_priority = "P0.5-medium"
+    else:
+        work_type = "strategy_review_work"
+        actionable_task = f"{strategy_group_id}: continue observe-only review."
+        owner_priority = "P0.5-medium"
+    return {
+        "queue_id": _queue_id(strategy_group_id, work_type, decision_action),
+        "strategy_group_id": strategy_group_id,
+        "symbol": row.get("symbol"),
+        "side": row.get("side"),
+        "current_tier": row.get("current_tier"),
+        "decision_action": decision_action,
+        "work_type": work_type,
+        "owner_priority": owner_priority,
+        "scheduled": decision_action != "park_or_vocabulary_only",
+        "blocks_l2_progression": decision_action
+        in {"build_replay_corpus_before_l2", "add_would_enter_replay_case_before_l2"},
+        "gap": None,
+        "actionable_task": actionable_task,
+        "validation_command": _validation_command(work_type),
+        "completion_signal": _completion_signal(work_type),
+        "real_order_authority": False,
+        "l4_scope_change_recommended": False,
+    }
+
+
+def _owner_priority(*, decision_action: str, current_tier: str, work_type: str) -> str:
+    if decision_action == "park_or_vocabulary_only":
+        return "P0.5-low"
+    if decision_action == "continue_l2_shadow_quality_review":
+        return "P0.5-high" if current_tier == "L2" else "P0.5-medium"
+    if work_type in {"classifier_or_rule_work", "economic_replay_work"}:
+        return "P0.5-high"
+    if work_type == "required_fact_or_market_data_work":
+        return "P0.5-medium"
+    return "P0.5-medium"
+
+
+def _blocks_l2_progression(*, decision_action: str, readiness: str) -> bool:
+    if decision_action in {
+        "repair_blocking_gaps_with_replay_or_facts",
+        "build_replay_corpus_before_l2",
+        "add_would_enter_replay_case_before_l2",
+    }:
+        return True
+    return str(readiness).startswith("blocked_")
+
+
+def _actionable_gap_task(
+    *,
+    gap: str,
+    work_type: str,
+    strategy_group_id: str,
+    decision_action: str,
+) -> str:
+    prefix = f"{strategy_group_id}: {gap}"
+    if decision_action == "park_or_vocabulary_only":
+        return f"{prefix}; keep parked unless new evidence appears."
+    if work_type == "classifier_or_rule_work":
+        return f"{prefix}; define the runtime classifier or disable-state rule that removes the false-positive path."
+    if work_type == "required_fact_or_market_data_work":
+        return f"{prefix}; attach or model the missing required fact source for replay and readiness review."
+    if work_type == "economic_replay_work":
+        return f"{prefix}; replay with cost, slippage, funding, fill slot, and leverage survival fields."
+    if work_type == "strategy_quality_review":
+        return f"{prefix}; decide whether negative evidence means revise, park, or kill before L2."
+    return f"{prefix}; resolve in strategy review before tier promotion."
+
+
+def _validation_command(work_type: str) -> str:
+    if work_type in {"economic_replay_work", "replay_corpus_work"}:
+        return (
+            "PYTHONDONTWRITEBYTECODE=1 python3 "
+            "scripts/run_strategygroup_runtime_replay_lab.py "
+            "--output-json output/runtime-monitor/latest-runtime-replay-lab.json "
+            "--output-owner-progress output/runtime-monitor/latest-runtime-replay-lab.md"
+        )
+    if work_type in {
+        "classifier_or_rule_work",
+        "required_fact_or_market_data_work",
+        "strategy_quality_review",
+    }:
+        return (
+            "PYTHONDONTWRITEBYTECODE=1 python3 "
+            "scripts/build_strategygroup_l2_readiness_review.py "
+            "--output-json output/runtime-monitor/latest-l2-readiness-review.json "
+            "--output-owner-progress output/runtime-monitor/latest-l2-readiness-review.md"
+        )
+    return (
+        "PYTHONDONTWRITEBYTECODE=1 python3 "
+        "scripts/build_strategygroup_opportunity_decision_loop.py "
+        "--output-json output/runtime-monitor/latest-opportunity-decision-loop.json "
+        "--output-owner-progress output/runtime-monitor/latest-opportunity-decision-loop.md"
+    )
+
+
+def _completion_signal(work_type: str) -> str:
+    return {
+        "classifier_or_rule_work": "classifier gap removed or downgraded to review-only warning",
+        "required_fact_or_market_data_work": "required fact gap removed or explicit non-blocking proxy documented",
+        "economic_replay_work": "cost/slippage/funding survival fields present in replay review",
+        "strategy_quality_review": "revise/park/kill decision recorded before promotion",
+        "replay_corpus_work": "non-executing replay sample covers would-enter and no-action paths",
+    }.get(work_type, "decision loop row no longer reports the gap")
+
+
+def _queue_id(strategy_group_id: str, work_type: str, label: str) -> str:
+    return "{}:{}:{}".format(strategy_group_id, work_type, _slug(label))
+
+
+def _slug(value: str) -> str:
+    chars: list[str] = []
+    previous_dash = False
+    for char in value.lower():
+        if char.isalnum():
+            chars.append(char)
+            previous_dash = False
+        elif not previous_dash:
+            chars.append("-")
+            previous_dash = True
+    slug = "".join(chars).strip("-")
+    return slug[:80] or "item"
+
+
+def _work_queue_sort_key(item: dict[str, Any]) -> tuple[int, int, str, str]:
+    priority_rank = {"P0.5-high": 0, "P0.5-medium": 1, "P0.5-low": 2}
+    work_rank = {
+        "classifier_or_rule_work": 0,
+        "economic_replay_work": 1,
+        "required_fact_or_market_data_work": 2,
+        "strategy_quality_review": 3,
+        "strategy_review_work": 4,
+        "replay_corpus_work": 5,
+    }
+    return (
+        priority_rank.get(str(item.get("owner_priority")), 9),
+        work_rank.get(str(item.get("work_type")), 9),
+        str(item.get("strategy_group_id") or ""),
+        str(item.get("queue_id") or ""),
+    )
+
+
+def _next_local_work_checkpoint(scheduled: list[dict[str, Any]]) -> str:
+    if not scheduled:
+        return "continue_waiting_for_live_signal_and_keep_low_priority_observation"
+    work_types = {str(item.get("work_type")) for item in scheduled[:4]}
+    groups = {str(item.get("strategy_group_id")) for item in scheduled[:4]}
+    if "classifier_or_rule_work" in work_types:
+        return "repair_classifier_or_disable_state_gaps_for_lsr_vcb"
+    if "economic_replay_work" in work_types:
+        return "run_cost_slippage_funding_replay_for_observed_would_enter_rows"
+    if "required_fact_or_market_data_work" in work_types and "BTPC-001" in groups:
+        return "continue_btpc_l2_shadow_fact_quality_review"
+    return "execute_top_scheduled_p0_5_work_queue_items"
+
+
+def _work_queue_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "| Priority | StrategyGroup | Work | Scheduled | Blocks L2 |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
+    output = [
+        "| Priority | StrategyGroup | Work | Scheduled | Blocks L2 |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in rows[:8]:
+        output.append(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+                row.get("owner_priority"),
+                row.get("strategy_group_id"),
+                row.get("work_type"),
+                str(row.get("scheduled")).lower(),
+                str(row.get("blocks_l2_progression")).lower(),
+            )
+        )
+    return "\n".join(output)
+
+
+def _default_next_step(
+    rows: list[dict[str, Any]],
+    forbidden_effects: list[str],
+    work_queue: dict[str, Any],
+) -> str:
     if forbidden_effects:
         return "stop_and_repair_forbidden_source_effects"
     if not rows:
         return "continue_signal_coverage_monitoring"
+    next_checkpoint = str(work_queue.get("next_local_checkpoint") or "")
+    if next_checkpoint:
+        return next_checkpoint
     if any(row["decision_action"] == "repair_blocking_gaps_with_replay_or_facts" for row in rows):
         return "map_blocking_gaps_to_required_facts_or_classifier_tasks"
     if any(row["decision_action"] == "build_replay_corpus_before_l2" for row in rows):
