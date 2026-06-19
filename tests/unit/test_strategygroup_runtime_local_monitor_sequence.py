@@ -90,6 +90,20 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
+        elif script == "run_strategygroup_runtime_replay_lab.py":
+            _write_output(
+                command,
+                {
+                    "status": "passed",
+                    "checks": {"btpc001_l2_shadow_replay_cases_present": True},
+                    "interaction": {
+                        "level": "L0_local_replay_lab",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
         elif script == "run_strategygroup_signal_coverage_diagnostic.py":
             _write_output(
                 command,
@@ -167,6 +181,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        replay_lab_json=tmp_path / "replay.json",
+        replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
         signal_coverage_md=tmp_path / "signal-coverage.md",
         signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
@@ -185,6 +201,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "runtime_live_cutover_readiness.py",
         "run_strategygroup_runtime_goal_progress_audit.py",
         "runtime_first_bounded_live_order_completion_audit.py",
+        "run_strategygroup_runtime_replay_lab.py",
         "run_strategygroup_signal_coverage_diagnostic.py",
         "build_strategygroup_signal_coverage_expansion_review.py",
         "build_strategygroup_l2_readiness_review.py",
@@ -236,6 +253,21 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
                 },
             )
             return subprocess.CompletedProcess(command, 2, "", "")
+
+        if script == "run_strategygroup_runtime_replay_lab.py":
+            _write_output(
+                command,
+                {
+                    "status": "passed",
+                    "interaction": {
+                        "level": "L0_local_replay_lab",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
 
         if script == "run_strategygroup_signal_coverage_diagnostic.py":
             _write_output(
@@ -304,6 +336,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        replay_lab_json=tmp_path / "replay.json",
+        replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
         signal_coverage_md=tmp_path / "signal-coverage.md",
         signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
@@ -384,6 +418,36 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
                     "non_market_gaps": [],
                     "interaction": {
                         "level": "L0_local_completion_audit",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        if script == "run_strategygroup_runtime_replay_lab.py":
+            _write_output(
+                command,
+                {
+                    "status": "passed",
+                    "interaction": {
+                        "level": "L0_local_replay_lab",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        if script == "run_strategygroup_runtime_replay_lab.py":
+            _write_output(
+                command,
+                {
+                    "status": "passed",
+                    "interaction": {
+                        "level": "L0_local_replay_lab",
                         "remote_interaction_count": 0,
                         "mutates_remote_files": False,
                         "approaches_real_order": False,
@@ -476,6 +540,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        replay_lab_json=tmp_path / "replay.json",
+        replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
         signal_coverage_md=tmp_path / "signal-coverage.md",
         signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
@@ -525,6 +591,21 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
                     "status": "not_complete_waiting_for_market",
                     "non_market_gaps": [],
                     "interaction": {},
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        if script == "run_strategygroup_runtime_replay_lab.py":
+            _write_output(
+                command,
+                {
+                    "status": "passed",
+                    "interaction": {
+                        "level": "L0_local_replay_lab",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
                 },
             )
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -624,6 +705,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        replay_lab_json=tmp_path / "replay.json",
+        replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
         signal_coverage_md=tmp_path / "signal-coverage.md",
         signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
@@ -683,6 +766,22 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
                 },
             )
             return subprocess.CompletedProcess(command, 0, "", "")
+
+        if script == "run_strategygroup_runtime_replay_lab.py":
+            _write_output(
+                command,
+                {
+                    "status": "passed",
+                    "interaction": {
+                        "level": "L0_local_replay_lab",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         if script == "run_strategygroup_signal_coverage_diagnostic.py":
             _write_output(
                 command,
@@ -765,6 +864,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         goal_progress_md=tmp_path / "goal.md",
         completion_audit_json=tmp_path / "completion.json",
         completion_audit_md=tmp_path / "completion.md",
+        replay_lab_json=tmp_path / "replay.json",
+        replay_lab_md=tmp_path / "replay.md",
         signal_coverage_json=tmp_path / "signal-coverage.json",
         signal_coverage_md=tmp_path / "signal-coverage.md",
         signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",

@@ -36,6 +36,8 @@ DEFAULT_COMPLETION_AUDIT_JSON = (
 DEFAULT_COMPLETION_AUDIT_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-p0-live-order-closure-completion-audit.md"
 )
+DEFAULT_REPLAY_LAB_JSON = REPO_ROOT / "output/runtime-monitor/latest-runtime-replay-lab.json"
+DEFAULT_REPLAY_LAB_MD = REPO_ROOT / "output/runtime-monitor/latest-runtime-replay-lab.md"
 DEFAULT_SIGNAL_COVERAGE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-diagnostic.json"
 )
@@ -89,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         goal_progress_md=Path(args.goal_progress_md),
         completion_audit_json=Path(args.completion_audit_json),
         completion_audit_md=Path(args.completion_audit_md),
+        replay_lab_json=Path(args.replay_lab_json),
+        replay_lab_md=Path(args.replay_lab_md),
         signal_coverage_json=Path(args.signal_coverage_json),
         signal_coverage_md=Path(args.signal_coverage_md),
         signal_coverage_source=args.signal_coverage_source,
@@ -130,6 +134,8 @@ def build_local_monitor_sequence_report(
     goal_progress_md: Path = DEFAULT_GOAL_PROGRESS_MD,
     completion_audit_json: Path = DEFAULT_COMPLETION_AUDIT_JSON,
     completion_audit_md: Path = DEFAULT_COMPLETION_AUDIT_MD,
+    replay_lab_json: Path = DEFAULT_REPLAY_LAB_JSON,
+    replay_lab_md: Path = DEFAULT_REPLAY_LAB_MD,
     signal_coverage_json: Path = DEFAULT_SIGNAL_COVERAGE_JSON,
     signal_coverage_md: Path = DEFAULT_SIGNAL_COVERAGE_MD,
     signal_coverage_source: str = "local_sqlite_fallback",
@@ -197,6 +203,16 @@ def build_local_monitor_sequence_report(
     steps.append(
         _run_step("completion_audit", completion_command, completion_audit_json, runner)
     )
+
+    replay_lab_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/run_strategygroup_runtime_replay_lab.py"),
+        "--output-json",
+        str(replay_lab_json),
+        "--output-owner-progress",
+        str(replay_lab_md),
+    ]
+    steps.append(_run_step("replay_lab", replay_lab_command, replay_lab_json, runner))
 
     signal_coverage_command = [
         sys.executable,
@@ -370,6 +386,7 @@ def build_local_monitor_sequence_report(
             "live_cutover_json": str(live_cutover_json),
             "goal_progress_json": str(goal_progress_json),
             "completion_audit_json": str(completion_audit_json),
+            "replay_lab_json": str(replay_lab_json),
             "signal_coverage_json": str(signal_coverage_json),
             "signal_coverage_expansion_review_json": str(
                 signal_coverage_expansion_review_json
@@ -879,6 +896,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--goal-progress-md", default=str(DEFAULT_GOAL_PROGRESS_MD))
     parser.add_argument("--completion-audit-json", default=str(DEFAULT_COMPLETION_AUDIT_JSON))
     parser.add_argument("--completion-audit-md", default=str(DEFAULT_COMPLETION_AUDIT_MD))
+    parser.add_argument("--replay-lab-json", default=str(DEFAULT_REPLAY_LAB_JSON))
+    parser.add_argument("--replay-lab-md", default=str(DEFAULT_REPLAY_LAB_MD))
     parser.add_argument("--signal-coverage-json", default=str(DEFAULT_SIGNAL_COVERAGE_JSON))
     parser.add_argument("--signal-coverage-md", default=str(DEFAULT_SIGNAL_COVERAGE_MD))
     parser.add_argument(
