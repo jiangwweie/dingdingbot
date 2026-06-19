@@ -499,6 +499,35 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    opportunity_decision_loop_final_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_opportunity_decision_loop.py"),
+        "--expansion-review-json",
+        str(signal_coverage_expansion_review_json),
+        "--l2-readiness-json",
+        str(l2_readiness_review_json),
+        "--l2-intake-json",
+        str(l2_intake_dry_run_json),
+        "--replay-lab-json",
+        str(replay_lab_json),
+        "--post-revision-review-json",
+        str(post_revision_replay_review_json),
+        "--btpc-proxy-replay-quality-json",
+        str(btpc_proxy_replay_quality_review_json),
+        "--output-json",
+        str(opportunity_decision_loop_json),
+        "--output-owner-progress",
+        str(opportunity_decision_loop_md),
+    ]
+    steps.append(
+        _run_step(
+            "opportunity_decision_loop_final",
+            opportunity_decision_loop_final_command,
+            opportunity_decision_loop_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps

@@ -1,6 +1,6 @@
 # StrategyGroup Runtime Pilot Goal Audit
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 
 ## Purpose
 
@@ -946,6 +946,29 @@ conflict revision, or freshness revision.
 | Boundary | BTPC proxy replay quality review is not live RequiredFacts, tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
 | Verification | `tests/unit/test_strategygroup_btpc_proxy_replay_quality_review.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert case-level outcomes, forbidden-effect blocking, monitor integration, and no live-authority expansion |
 | Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
+
+### 2026-06-19 BTPC Proxy Replay Quality Decision Loop Rollup
+
+The P0.5 loop now feeds the BTPC proxy replay quality review back into the main
+opportunity decision loop. This closes the local chain:
+
+```text
+observation
+-> replay
+-> fact/proxy quality
+-> case-level replay quality
+-> StrategyGroup decision
+```
+
+| Item | Evidence |
+| --- | --- |
+| Decision-loop input | `scripts/build_strategygroup_opportunity_decision_loop.py` accepts `--btpc-proxy-replay-quality-json` |
+| Decision rollup | `BTPC-001` can emit `keep_l2_shadow_and_revise_fact_classifier_inputs` instead of stopping at a standalone proxy replay report |
+| Action items | The rollup carries `attach_live_derivatives_fact_sources_before_btpc_live_eligibility`, `review_btpc_strong_uptrend_conflict_disable_rule`, `review_btpc_freshness_or_classifier_stale_signal_rule`, and `continue_btpc_l2_shadow_observation_with_proxy_context` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` runs a final `opportunity_decision_loop_final` after `btpc_proxy_replay_quality_review`, overwriting `latest-opportunity-decision-loop.json` with the enriched local decision artifact |
+| Boundary | The rollup is not live RequiredFacts, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert the rollup, monitor ordering, zero remote interaction, and no live-authority expansion |
+| Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, leverage reduction, or real order |
 
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 

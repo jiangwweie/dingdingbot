@@ -464,6 +464,74 @@ def _post_revision_review() -> dict:
     }
 
 
+def _btpc_proxy_replay_quality() -> dict:
+    return {
+        "status": "btpc_proxy_replay_quality_review_ready",
+        "counts": {
+            "replay_case_count": 5,
+            "would_enter_case_count": 2,
+            "proxy_reviewable_would_enter_count": 2,
+            "proxy_resolved_missing_derivatives_context_count": 1,
+            "keep_observing_count": 2,
+            "real_order_authorized_count": 0,
+            "l4_scope_change_recommended_count": 0,
+        },
+        "decision": {
+            "proxy_replay_quality_review_ready": True,
+            "btpc_l2_shadow_observation_can_continue": True,
+            "proxy_replay_can_feed_l2_quality_review": True,
+            "proxy_replay_satisfies_live_required_facts": False,
+            "l4_scope_change_recommended": False,
+            "real_order_scope_change_recommended": False,
+            "default_next_step": "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision",
+        },
+        "case_rows": [
+            {
+                "fixture_case": "bear_pullback_would_enter",
+                "proxy_replay_quality_decision": "keep_observing_l2_shadow_with_proxy_context",
+                "real_order_authority": False,
+            },
+            {
+                "fixture_case": "no_signal_bear_trend_not_ready",
+                "proxy_replay_quality_decision": "keep_waiting_for_market_no_action_baseline",
+                "real_order_authority": False,
+            },
+            {
+                "fixture_case": "missing_derivatives_context",
+                "proxy_replay_quality_decision": "revise_live_fact_collection_but_l2_proxy_reviewable",
+                "real_order_authority": False,
+            },
+            {
+                "fixture_case": "strong_uptrend_conflict",
+                "proxy_replay_quality_decision": "revise_conflict_disable_before_l2_promotion",
+                "real_order_authority": False,
+            },
+            {
+                "fixture_case": "stale_signal",
+                "proxy_replay_quality_decision": "revise_freshness_or_classifier_before_l2_promotion",
+                "real_order_authority": False,
+            },
+        ],
+        "interaction": {
+            "level": "L0_local_btpc_proxy_replay_quality_review",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "safety_invariants": {
+            "server_files_mutated": False,
+            "final_gate_called": False,
+            "operation_layer_called": False,
+            "exchange_write_called": False,
+            "order_created": False,
+        },
+    }
+
+
 def _cost_review() -> dict:
     return {
         "fee_estimate_usdt": "0.012",
@@ -828,6 +896,87 @@ def test_decision_loop_advances_after_post_revision_replay_review_passes():
     assert packet["counts"]["l4_scope_change_recommended_count"] == 0
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["calls_finalgate"] is False
+    assert packet["interaction"]["calls_operation_layer"] is False
+    assert packet["interaction"]["calls_exchange_write"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_decision_loop_rolls_btpc_proxy_replay_quality_into_l2_decision():
+    module = _load_module()
+    expansion = {
+        **_expansion_review(),
+        "review_rows": [_expansion_review()["review_rows"][0]],
+    }
+    readiness = {
+        **_l2_readiness(),
+        "readiness_rows": [_l2_readiness()["readiness_rows"][0]],
+    }
+    intake = {
+        **_l2_intake(),
+        "source_readiness_rows": [_l2_intake()["source_readiness_rows"][0]],
+    }
+    replay = {
+        **_replay_lab(),
+        "l1_observe_replay_samples": [],
+    }
+
+    packet = module.build_opportunity_decision_loop(
+        expansion_review_packet=expansion,
+        l2_readiness_packet=readiness,
+        l2_intake_packet=intake,
+        replay_lab_packet=replay,
+        btpc_proxy_replay_quality_packet=_btpc_proxy_replay_quality(),
+    )
+
+    assert packet["status"] == "decision_loop_ready"
+    assert packet["source_status"]["btpc_proxy_replay_quality_review"] == (
+        "btpc_proxy_replay_quality_review_ready"
+    )
+    assert packet["counts"]["btpc_proxy_replay_quality_ready"] == 1
+    assert packet["counts"]["btpc_proxy_replay_quality_case_count"] == 5
+    assert packet["counts"]["btpc_proxy_replay_quality_revise_case_count"] == 3
+    assert packet["decision"]["btpc_proxy_replay_quality_ready"] is True
+    assert packet["decision"]["default_next_step"] == (
+        "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision"
+    )
+
+    quality = packet["strategy_quality_decisions"]
+    assert quality["counts"]["btpc_proxy_replay_quality_ready"] == 1
+    assert quality["counts"]["btpc_proxy_replay_quality_case"] == 5
+    assert quality["counts"]["btpc_proxy_replay_quality_revise_case"] == 3
+    assert quality["next_checkpoint"] == (
+        "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision"
+    )
+    row = quality["rows"][0]
+    assert row["strategy_group_id"] == "BTPC-001"
+    assert row["strategy_quality_decision"] == (
+        "keep_l2_shadow_and_revise_fact_classifier_inputs"
+    )
+    assert row["next_stage"] == (
+        "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision"
+    )
+    assert row["evidence"]["btpc_proxy_replay_quality_ready"] is True
+    assert row["evidence"]["btpc_proxy_replay_quality_case_count"] == 5
+    assert row["evidence"]["btpc_proxy_replay_quality_revise_case_count"] == 3
+    assert row["evidence"]["btpc_proxy_reviewable_would_enter_count"] == 2
+    assert row["btpc_proxy_replay_quality"]["ready"] is True
+    assert row["btpc_proxy_replay_quality"]["revise_case_count"] == 3
+    assert row["btpc_proxy_replay_quality"]["live_required_facts_satisfied"] is False
+    assert row["btpc_proxy_replay_quality"]["real_order_authority"] is False
+    assert row["btpc_proxy_replay_quality"]["l4_scope_change_recommended"] is False
+    assert row["btpc_proxy_replay_quality"]["action_items"] == [
+        "attach_live_derivatives_fact_sources_before_btpc_live_eligibility",
+        "review_btpc_strong_uptrend_conflict_disable_rule",
+        "review_btpc_freshness_or_classifier_stale_signal_rule",
+        "continue_btpc_l2_shadow_observation_with_proxy_context",
+    ]
+    assert row["revision_tasks"] == []
+    assert row["not_l2_promotion_authority"] is True
+    assert row["not_l4_scope_change"] is True
+    assert row["real_order_authority"] is False
+    assert row["candidate_or_finalgate_authority"] is False
+    assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["calls_operation_layer"] is False
     assert packet["interaction"]["calls_exchange_write"] is False
     assert packet["interaction"]["places_order"] is False

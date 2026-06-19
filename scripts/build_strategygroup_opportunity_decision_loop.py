@@ -51,8 +51,10 @@ def build_opportunity_decision_loop(
     l2_intake_packet: dict[str, Any],
     replay_lab_packet: dict[str, Any],
     post_revision_review_packet: dict[str, Any] | None = None,
+    btpc_proxy_replay_quality_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     post_revision_review_packet = post_revision_review_packet or {}
+    btpc_proxy_replay_quality_packet = btpc_proxy_replay_quality_packet or {}
     review_rows = _dict_rows(expansion_review_packet.get("review_rows"))
     readiness_by_group = {
         str(row.get("strategy_group_id") or "unknown"): row
@@ -82,6 +84,7 @@ def build_opportunity_decision_loop(
     strategy_quality_decisions = _strategy_quality_decisions(
         rows=decision_rows,
         work_items=_dict_rows(work_queue.get("items")),
+        btpc_proxy_replay_quality_packet=btpc_proxy_replay_quality_packet,
     )
     forbidden_effects = _forbidden_effects(
         expansion_review_packet,
@@ -89,6 +92,7 @@ def build_opportunity_decision_loop(
         l2_intake_packet,
         replay_lab_packet,
         post_revision_review_packet,
+        btpc_proxy_replay_quality_packet,
     )
     status = (
         "blocked_forbidden_effect"
@@ -108,6 +112,9 @@ def build_opportunity_decision_loop(
             "l2_intake": l2_intake_packet.get("status"),
             "replay_lab": replay_lab_packet.get("status"),
             "post_revision_replay_review": post_revision_review_packet.get("status"),
+            "btpc_proxy_replay_quality_review": (
+                btpc_proxy_replay_quality_packet.get("status")
+            ),
         },
         "interaction": {
             "level": "L0_local_opportunity_decision_loop",
@@ -151,6 +158,23 @@ def build_opportunity_decision_loop(
             "post_revision_replay_review_passed": (
                 1 if _post_revision_review_passed(post_revision_review_packet) else 0
             ),
+            "btpc_proxy_replay_quality_ready": (
+                1
+                if _btpc_proxy_replay_quality_ready(
+                    btpc_proxy_replay_quality_packet
+                )
+                else 0
+            ),
+            "btpc_proxy_replay_quality_case_count": _int(
+                _as_dict(btpc_proxy_replay_quality_packet.get("counts")).get(
+                    "replay_case_count"
+                )
+            ),
+            "btpc_proxy_replay_quality_revise_case_count": (
+                _btpc_proxy_replay_quality_revise_case_count(
+                    btpc_proxy_replay_quality_packet
+                )
+            ),
         },
         "action_counts": dict(sorted(action_counts.items())),
         "decision_rows": decision_rows,
@@ -163,6 +187,9 @@ def build_opportunity_decision_loop(
             "tier_policy_change_recommended_now": False,
             "post_revision_replay_review_passed": _post_revision_review_passed(
                 post_revision_review_packet
+            ),
+            "btpc_proxy_replay_quality_ready": _btpc_proxy_replay_quality_ready(
+                btpc_proxy_replay_quality_packet
             ),
             "default_next_step": _default_next_step(
                 decision_rows,
@@ -580,6 +607,7 @@ def _strategy_quality_decisions(
     *,
     rows: list[dict[str, Any]],
     work_items: list[dict[str, Any]],
+    btpc_proxy_replay_quality_packet: dict[str, Any],
 ) -> dict[str, Any]:
     output_rows = [
         _strategy_quality_decision_row(
@@ -589,6 +617,7 @@ def _strategy_quality_decisions(
                 for item in work_items
                 if item.get("strategy_group_id") == row.get("strategy_group_id")
             ],
+            btpc_proxy_replay_quality_packet=btpc_proxy_replay_quality_packet,
         )
         for row in rows
     ]
@@ -663,6 +692,19 @@ def _strategy_quality_decisions(
         for row in output_rows
         for task in row.get("revision_tasks") or []
     )
+    btpc_proxy_ready_count = sum(
+        1
+        for row in output_rows
+        if _as_dict(row.get("btpc_proxy_replay_quality")).get("ready") is True
+    )
+    btpc_proxy_case_count = sum(
+        _int(_as_dict(row.get("btpc_proxy_replay_quality")).get("case_count"))
+        for row in output_rows
+    )
+    btpc_proxy_revise_case_count = sum(
+        _int(_as_dict(row.get("btpc_proxy_replay_quality")).get("revise_case_count"))
+        for row in output_rows
+    )
     return {
         "status": "ready" if output_rows else "empty",
         "next_checkpoint": _strategy_quality_next_checkpoint(output_rows),
@@ -689,6 +731,9 @@ def _strategy_quality_decisions(
             "classifier_revision_executed": classifier_revision_executed_count,
             "economic_revision_executed": economic_revision_executed_count,
             "remaining_revision_execution": remaining_revision_execution_count,
+            "btpc_proxy_replay_quality_ready": btpc_proxy_ready_count,
+            "btpc_proxy_replay_quality_case": btpc_proxy_case_count,
+            "btpc_proxy_replay_quality_revise_case": btpc_proxy_revise_case_count,
             "real_order_authorized": 0,
             "l4_scope_change_recommended": 0,
         },
@@ -749,9 +794,14 @@ def _strategy_quality_decision_row(
     *,
     row: dict[str, Any],
     work_items: list[dict[str, Any]],
+    btpc_proxy_replay_quality_packet: dict[str, Any],
 ) -> dict[str, Any]:
     strategy_group_id = str(row.get("strategy_group_id") or "unknown")
     replay = _as_dict(row.get("replay_verification"))
+    btpc_proxy_quality = _btpc_proxy_replay_quality_rollup(
+        strategy_group_id=strategy_group_id,
+        packet=btpc_proxy_replay_quality_packet,
+    )
     coverage_ready_count = sum(
         1 for item in work_items if item.get("coverage_ready") is True
     )
@@ -781,12 +831,16 @@ def _strategy_quality_decision_row(
         decision = "revise_before_l2"
         reason = "coverage_ready_but_revise_or_negative_evidence_present"
     elif row.get("tier_state") == "l2_shadow_candidate_observation_enabled":
-        decision = (
-            "keep_observing_l2_shadow_with_fact_review"
-            if fact_pending_count
-            else "keep_observing_l2_shadow"
-        )
-        reason = "l2_shadow_observation_active_without_real_order_scope_change"
+        if btpc_proxy_quality.get("ready") is True:
+            decision = "keep_l2_shadow_and_revise_fact_classifier_inputs"
+            reason = "btpc_proxy_replay_quality_ready_with_review_only_revisions"
+        else:
+            decision = (
+                "keep_observing_l2_shadow_with_fact_review"
+                if fact_pending_count
+                else "keep_observing_l2_shadow"
+            )
+            reason = "l2_shadow_observation_active_without_real_order_scope_change"
     elif row.get("decision_action") == "prepare_l2_intake_review_without_tier_change":
         decision = "prepare_l2_intake_review_without_promotion"
         reason = "review_shape_ready_but_tier_change_not_authorized_here"
@@ -833,7 +887,18 @@ def _strategy_quality_decision_row(
             "strategy_decision_pending_item_count": strategy_decision_pending_count,
             "parked_item_count": parked_count,
             "blocking_gap_count": len(row.get("blocking_gaps_before_l2") or []),
+            "btpc_proxy_replay_quality_ready": btpc_proxy_quality.get("ready") is True,
+            "btpc_proxy_replay_quality_case_count": _int(
+                btpc_proxy_quality.get("case_count")
+            ),
+            "btpc_proxy_replay_quality_revise_case_count": _int(
+                btpc_proxy_quality.get("revise_case_count")
+            ),
+            "btpc_proxy_reviewable_would_enter_count": _int(
+                btpc_proxy_quality.get("proxy_reviewable_would_enter_count")
+            ),
         },
+        "btpc_proxy_replay_quality": btpc_proxy_quality,
         "revision_tasks": revision_tasks,
         "revision_task_count": len(revision_tasks),
         "revision_ready_count": revision_ready_count,
@@ -1064,6 +1129,9 @@ def _revision_stage_for_work_type(work_type: str) -> str:
 def _next_stage_for_strategy_quality_decision(decision: str) -> str:
     return {
         "revise_before_l2": "record_revise_decision_and_keep_l1_until_review_passes",
+        "keep_l2_shadow_and_revise_fact_classifier_inputs": (
+            "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision"
+        ),
         "keep_observing_l2_shadow_with_fact_review": (
             "continue_l2_shadow_and_attach_fact_sources"
         ),
@@ -1111,6 +1179,12 @@ def _strategy_quality_next_checkpoint(rows: list[dict[str, Any]]) -> str:
         )
     if any(
         row.get("strategy_quality_decision")
+        == "keep_l2_shadow_and_revise_fact_classifier_inputs"
+        for row in rows
+    ):
+        return "feed_btpc_proxy_replay_quality_into_l2_keep_revise_or_fact_source_decision"
+    if any(
+        row.get("strategy_quality_decision")
         == "keep_observing_l2_shadow_with_fact_review"
         for row in rows
     ):
@@ -1121,6 +1195,82 @@ def _strategy_quality_next_checkpoint(rows: list[dict[str, Any]]) -> str:
     ):
         return "add_missing_replay_before_strategy_quality_decision"
     return "continue_l2_shadow_and_observe_only_review"
+
+
+def _btpc_proxy_replay_quality_ready(packet: dict[str, Any]) -> bool:
+    decision = _as_dict(packet.get("decision"))
+    return (
+        _packet_status(packet) == "btpc_proxy_replay_quality_review_ready"
+        and decision.get("proxy_replay_quality_review_ready") is True
+        and decision.get("proxy_replay_satisfies_live_required_facts") is False
+    )
+
+
+def _btpc_proxy_replay_quality_revise_case_count(packet: dict[str, Any]) -> int:
+    return sum(
+        1
+        for row in _dict_rows(packet.get("case_rows"))
+        if str(row.get("proxy_replay_quality_decision") or "").startswith("revise_")
+    )
+
+
+def _btpc_proxy_replay_quality_rollup(
+    *,
+    strategy_group_id: str,
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    if strategy_group_id != "BTPC-001" or not packet:
+        return {}
+    counts = _as_dict(packet.get("counts"))
+    ready = _btpc_proxy_replay_quality_ready(packet)
+    case_rows = _dict_rows(packet.get("case_rows"))
+    decision_counts = Counter(
+        str(row.get("proxy_replay_quality_decision") or "unknown")
+        for row in case_rows
+    )
+    action_items = _btpc_proxy_quality_action_items(case_rows)
+    return {
+        "ready": ready,
+        "status": packet.get("status"),
+        "case_count": _int(counts.get("replay_case_count")) or len(case_rows),
+        "would_enter_case_count": _int(counts.get("would_enter_case_count")),
+        "proxy_reviewable_would_enter_count": _int(
+            counts.get("proxy_reviewable_would_enter_count")
+        ),
+        "missing_derivatives_proxy_reviewable_count": _int(
+            counts.get("proxy_resolved_missing_derivatives_context_count")
+        ),
+        "revise_case_count": _btpc_proxy_replay_quality_revise_case_count(packet),
+        "keep_observing_count": _int(counts.get("keep_observing_count")),
+        "decision_counts": dict(sorted(decision_counts.items())),
+        "action_items": action_items,
+        "default_next_step": _as_dict(packet.get("decision")).get(
+            "default_next_step"
+        ),
+        "live_required_facts_satisfied": False,
+        "real_order_authority": False,
+        "l4_scope_change_recommended": False,
+        "candidate_or_finalgate_authority": False,
+    }
+
+
+def _btpc_proxy_quality_action_items(case_rows: list[dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    decisions = {
+        str(row.get("proxy_replay_quality_decision") or "")
+        for row in case_rows
+    }
+    if "revise_live_fact_collection_but_l2_proxy_reviewable" in decisions:
+        actions.append(
+            "attach_live_derivatives_fact_sources_before_btpc_live_eligibility"
+        )
+    if "revise_conflict_disable_before_l2_promotion" in decisions:
+        actions.append("review_btpc_strong_uptrend_conflict_disable_rule")
+    if "revise_freshness_or_classifier_before_l2_promotion" in decisions:
+        actions.append("review_btpc_freshness_or_classifier_stale_signal_rule")
+    if "keep_observing_l2_shadow_with_proxy_context" in decisions:
+        actions.append("continue_btpc_l2_shadow_observation_with_proxy_context")
+    return actions
 
 
 def _queue_item(row: dict[str, Any], gap_item: dict[str, Any]) -> dict[str, Any]:
@@ -1657,6 +1807,11 @@ def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
         ):
             if safety.get(key) is True:
                 effects.append(f"packet_{index}.safety.{key}")
+        decision = _as_dict(packet.get("decision"))
+        if decision.get("proxy_replay_satisfies_live_required_facts") is True:
+            effects.append(
+                f"packet_{index}.decision.proxy_replay_satisfies_live_required_facts"
+            )
     return sorted(set(effects))
 
 
@@ -1751,6 +1906,10 @@ def main(argv: list[str] | None = None) -> int:
         "--post-revision-review-json",
         default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON),
     )
+    parser.add_argument(
+        "--btpc-proxy-replay-quality-json",
+        default="",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
@@ -1767,6 +1926,11 @@ def main(argv: list[str] | None = None) -> int:
         post_revision_review_packet=_load_optional_json_object(
             Path(args.post_revision_review_json).expanduser()
             if args.post_revision_review_json
+            else None
+        ),
+        btpc_proxy_replay_quality_packet=_load_optional_json_object(
+            Path(args.btpc_proxy_replay_quality_json).expanduser()
+            if args.btpc_proxy_replay_quality_json
             else None
         ),
     )

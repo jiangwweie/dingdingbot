@@ -184,6 +184,7 @@ def _write_ready_btpc_proxy_replay_quality_review(command: list[str]) -> None:
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
+    decision_loop_commands: list[list[str]] = []
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
@@ -192,6 +193,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
             _write_passed_post_revision_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_opportunity_decision_loop.py":
+            decision_loop_commands.append(command)
             _write_ready_opportunity_decision_loop(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "build_strategygroup_btpc_l2_shadow_fact_quality_review.py":
@@ -388,7 +390,14 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_btpc_l2_shadow_fact_quality_review.py",
         "build_strategygroup_btpc_local_fact_proxy_review.py",
         "build_strategygroup_btpc_proxy_replay_quality_review.py",
+        "build_strategygroup_opportunity_decision_loop.py",
     ]
+    assert len(decision_loop_commands) == 2
+    assert "--btpc-proxy-replay-quality-json" not in decision_loop_commands[0]
+    assert "--btpc-proxy-replay-quality-json" in decision_loop_commands[1]
+    assert decision_loop_commands[1][
+        decision_loop_commands[1].index("--btpc-proxy-replay-quality-json") + 1
+    ] == str(tmp_path / "btpc-proxy-replay.json")
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
     assert report["interaction"]["level"] == "L0_local_monitor_sequence"
