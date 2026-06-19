@@ -779,6 +779,24 @@ reducing Owner-selected leverage or creating execution authority.
 | Verification | `tests/unit/test_strategygroup_runtime_replay_lab.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert replay cost fields, economic specs, economic-case coverage, no real-order authority, and no L4 scope change |
 | Safety | Local replay/specification and coverage projection only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Opportunity Work Queue Coverage State Checkpoint
+
+The P0.5 opportunity work queue now distinguishes items whose local replay/spec
+coverage is ready from items still waiting on fact sources, strategy review,
+strategy-quality decisions, or parked evidence. This keeps the local loop from
+turning into more report text while also preventing covered LSR/VCB replay work
+from being misread as L2 promotion, L4 scope expansion, or real-order authority.
+
+| Item | Evidence |
+| --- | --- |
+| Queue fields | `latest-opportunity-decision-loop.json` work items now include `coverage_status`, `coverage_ready`, and `next_stage_decision` |
+| Current local run | `observed_opportunity_count=4`, `replay_covered_count=3`, `work_queue_item_count=19`, `scheduled_work_queue_item_count=15`, `coverage_ready_item_count=7`, `coverage_pending_item_count=4`, and `strategy_decision_pending_count=1` |
+| Coverage grouping | `by_coverage_status` reports `local_replay_coverage_ready=7`, `fact_source_pending=4`, `strategy_decision_pending=1`, `strategy_review_pending=3`, and `parked=4` |
+| Next stage | Covered LSR/VCB classifier/economic items emit `strategy_quality_review_before_l2_no_promotion`; BTPC missing fact items emit `attach_fact_source_before_l2_review`; RBR remains `parked` |
+| L4 boundary | Coverage-ready is not candidate authority, FinalGate authority, Operation Layer authority, L2 promotion authority, L4 scope expansion, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts LSR/VCB coverage-ready states, BTPC fact-source pending state, RBR parked state, no real-order authority, and no L4 scope change |
+| Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

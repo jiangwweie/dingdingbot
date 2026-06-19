@@ -47,6 +47,15 @@ def _expansion_review() -> dict:
                 "execution_boundary": "observe-only; no candidate/order",
             },
             {
+                "strategy_group_id": "LSR-001",
+                "symbol": "SOL/USDT:USDT",
+                "side": "short",
+                "confidence": "0.61",
+                "current_tier": "L1",
+                "reason_codes": ["lsr_short_revival_rewrite_needed"],
+                "execution_boundary": "observe-only; no candidate/order",
+            },
+            {
                 "strategy_group_id": "RBR-001",
                 "symbol": "ADA/USDT:USDT",
                 "side": "short",
@@ -139,6 +148,65 @@ def _l2_readiness() -> dict:
                 },
             },
             {
+                "strategy_group_id": "LSR-001",
+                "symbol": "SOL/USDT:USDT",
+                "side": "short",
+                "current_tier": "L1",
+                "l2_readiness": "blocked_classifier_redesign_required",
+                "l2_shadow_candidate_observation_enabled": False,
+                "positive_evidence": ["liquidity sweep vocabulary exists"],
+                "blocking_gaps_before_l2": [
+                    "lookahead_failed_proxy_requires_rewrite",
+                    "lsr_disable_classifier_state_missing_from_runtime",
+                    "cost_fill_slot_m2m_and_leverage_boundary_missing",
+                ],
+                "classifier_repair_spec": {
+                    "status": "local_repair_spec_ready",
+                    "target_classifier": "side_specific_short_revival_classifier",
+                    "blocking_gap_keys": [
+                        "lookahead_failed_proxy_requires_rewrite",
+                        "lsr_disable_classifier_state_missing_from_runtime",
+                    ],
+                    "required_entry_states": [
+                        "liquidity_sweep_confirmed",
+                        "short_revival_structure_present",
+                    ],
+                    "required_disable_states": [
+                        "long_reclaim_only_without_short_revival"
+                    ],
+                    "replay_acceptance_cases": ["short_revival_rewrite_needed"],
+                    "acceptance_signal": "LSR short revival classifier before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
+                "economic_replay_spec": {
+                    "status": "local_economic_replay_spec_ready",
+                    "blocking_gap_keys": [
+                        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+                    ],
+                    "required_cost_fields": [
+                        "fee_estimate_usdt",
+                        "slippage_estimate_usdt",
+                        "funding_impact_usdt",
+                        "min_qty_step_size_impact",
+                        "fill_slot_assumption",
+                        "leverage_survival_note",
+                        "net_edge_note",
+                        "does_not_lower_owner_selected_leverage",
+                        "not_submit_authority",
+                    ],
+                    "replay_acceptance_cases": [
+                        "liquidity_sweep_long_would_enter_current_v0",
+                        "short_revival_rewrite_needed",
+                    ],
+                    "acceptance_signal": "LSR economic replay before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
+            },
+            {
                 "strategy_group_id": "RBR-001",
                 "symbol": "ADA/USDT:USDT",
                 "side": "short",
@@ -180,6 +248,16 @@ def _l2_intake() -> dict:
                     "false_breakout_disable_state_missing_from_runtime"
                 ],
             },
+            {
+                "strategy_group_id": "LSR-001",
+                "current_tier": "L1",
+                "l2_readiness": "blocked_classifier_redesign_required",
+                "l2_shadow_candidate_observation_enabled": False,
+                "blocking_gaps_before_l2": [
+                    "lookahead_failed_proxy_requires_rewrite",
+                    "lsr_disable_classifier_state_missing_from_runtime",
+                ],
+            },
         ],
         "safety_invariants": {
             "tier_policy_changed": False,
@@ -209,6 +287,28 @@ def _replay_lab(*, include_rbr: bool = False) -> dict:
             "strategy_group_id": "VCB-001",
             "fixture_case": "false_breakout_disable_needed",
             "signal_status": "would_enter_but_disable_classifier_missing",
+            "review_recommendation": "revise",
+            "blocker_class": "review_only_warning",
+            "cost_review": _cost_review(),
+            "real_order_allowed": False,
+            "exchange_write_allowed": False,
+            "operation_layer_submit_allowed": False,
+        },
+        {
+            "strategy_group_id": "LSR-001",
+            "fixture_case": "liquidity_sweep_long_would_enter_current_v0",
+            "signal_status": "would_enter_observe_only",
+            "review_recommendation": "keep_observing",
+            "blocker_class": "review_only_warning",
+            "cost_review": _cost_review(),
+            "real_order_allowed": False,
+            "exchange_write_allowed": False,
+            "operation_layer_submit_allowed": False,
+        },
+        {
+            "strategy_group_id": "LSR-001",
+            "fixture_case": "short_revival_rewrite_needed",
+            "signal_status": "would_enter_but_rewrite_required",
             "review_recommendation": "revise",
             "blocker_class": "review_only_warning",
             "cost_review": _cost_review(),
@@ -280,10 +380,13 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     )
 
     assert packet["status"] == "decision_loop_ready"
-    assert packet["counts"]["observed_opportunity_count"] == 3
-    assert packet["counts"]["replay_covered_count"] == 2
-    assert packet["counts"]["work_queue_item_count"] == 4
-    assert packet["counts"]["scheduled_work_queue_item_count"] == 3
+    assert packet["counts"]["observed_opportunity_count"] == 4
+    assert packet["counts"]["replay_covered_count"] == 3
+    assert packet["counts"]["work_queue_item_count"] == 7
+    assert packet["counts"]["scheduled_work_queue_item_count"] == 6
+    assert packet["counts"]["coverage_ready_item_count"] == 5
+    assert packet["counts"]["coverage_pending_item_count"] == 1
+    assert packet["counts"]["strategy_decision_pending_count"] == 0
     assert packet["counts"]["real_order_authorized_count"] == 0
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     assert rows["BTPC-001"]["decision_action"] == "continue_l2_shadow_quality_review"
@@ -313,21 +416,61 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert rows["VCB-001"]["gap_work_items"][0]["completion_signal"] == (
         "disable false breakout before L2"
     )
+    assert rows["VCB-001"]["gap_work_items"][0]["coverage_ready"] is True
+    assert rows["VCB-001"]["gap_work_items"][0]["coverage_status"] == (
+        "local_replay_coverage_ready"
+    )
+    assert rows["VCB-001"]["gap_work_items"][0]["next_stage_decision"] == (
+        "strategy_quality_review_before_l2_no_promotion"
+    )
+    assert rows["LSR-001"]["decision_action"] == (
+        "repair_blocking_gaps_with_replay_or_facts"
+    )
+    assert len(rows["LSR-001"]["gap_work_items"]) == 3
     assert rows["RBR-001"]["decision_action"] == "park_or_vocabulary_only"
     work_items = packet["work_queue"]["items"]
     assert packet["work_queue"]["status"] == "ready"
     assert packet["work_queue"]["next_local_checkpoint"] == (
         "repair_classifier_or_disable_state_gaps_for_lsr_vcb"
     )
-    assert packet["work_queue"]["counts"]["scheduled"] == 3
-    assert packet["work_queue"]["by_work_type"]["classifier_or_rule_work"] == 1
-    assert work_items[0]["strategy_group_id"] == "VCB-001"
-    assert work_items[0]["work_type"] == "classifier_or_rule_work"
-    assert work_items[0]["scheduled"] is True
-    assert work_items[0]["repair_spec"]["replay_acceptance_cases"] == [
+    assert packet["work_queue"]["counts"]["scheduled"] == 6
+    assert packet["work_queue"]["counts"]["coverage_ready"] == 5
+    assert packet["work_queue"]["counts"]["coverage_pending"] == 1
+    assert packet["work_queue"]["by_work_type"]["classifier_or_rule_work"] == 3
+    assert packet["work_queue"]["by_work_type"]["economic_replay_work"] == 3
+    assert packet["work_queue"]["by_coverage_status"] == {
+        "fact_source_pending": 1,
+        "local_replay_coverage_ready": 5,
+        "parked": 1,
+    }
+    vcb_classifier_item = next(
+        item
+        for item in work_items
+        if item["strategy_group_id"] == "VCB-001"
+        and item["work_type"] == "classifier_or_rule_work"
+    )
+    assert vcb_classifier_item["scheduled"] is True
+    assert vcb_classifier_item["repair_spec"]["replay_acceptance_cases"] == [
         "false_breakout_disable_needed"
     ]
-    assert work_items[0]["repair_spec"]["replay_case_coverage"]["covered"] is True
+    assert vcb_classifier_item["repair_spec"]["replay_case_coverage"]["covered"] is True
+    covered_review_items = [
+        item
+        for item in work_items
+        if item["strategy_group_id"] in {"LSR-001", "VCB-001"}
+        and item["work_type"] in {"classifier_or_rule_work", "economic_replay_work"}
+    ]
+    assert len(covered_review_items) == 5
+    assert all(item["coverage_ready"] is True for item in covered_review_items)
+    assert all(
+        item["coverage_status"] == "local_replay_coverage_ready"
+        for item in covered_review_items
+    )
+    assert all(
+        item["next_stage_decision"]
+        == "strategy_quality_review_before_l2_no_promotion"
+        for item in covered_review_items
+    )
     economic_item = next(
         item
         for item in work_items
@@ -343,14 +486,27 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     ] == []
     assert economic_item["economic_spec"]["not_execution_authority"] is True
     assert economic_item["completion_signal"] == "VCB economic replay before L2"
+    btpc_fact_item = next(
+        item
+        for item in work_items
+        if item["strategy_group_id"] == "BTPC-001"
+        and item["work_type"] == "required_fact_or_market_data_work"
+    )
+    assert btpc_fact_item["coverage_ready"] is False
+    assert btpc_fact_item["coverage_status"] == "fact_source_pending"
+    assert btpc_fact_item["next_stage_decision"] == "attach_fact_source_before_l2_review"
     parked_items = [
         item for item in work_items if item["strategy_group_id"] == "RBR-001"
     ]
     assert parked_items
     assert all(item["scheduled"] is False for item in parked_items)
+    assert all(item["coverage_status"] == "parked" for item in parked_items)
     for row in packet["decision_rows"]:
         assert row["real_order_authority"] is False
         assert row["l4_scope_change_recommended"] is False
+    for item in packet["work_queue"]["items"]:
+        assert item["real_order_authority"] is False
+        assert item["l4_scope_change_recommended"] is False
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["interaction"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -363,13 +519,13 @@ def test_decision_loop_requires_replay_before_l2_when_missing():
     packet = module.build_opportunity_decision_loop(
         expansion_review_packet={
             **_expansion_review(),
-            "review_rows": [_expansion_review()["review_rows"][2]],
+            "review_rows": [_expansion_review()["review_rows"][-1]],
         },
         l2_readiness_packet={
             **_l2_readiness(),
             "readiness_rows": [
                 {
-                    **_l2_readiness()["readiness_rows"][2],
+                    **_l2_readiness()["readiness_rows"][-1],
                     "l2_readiness": "blocked_classifier_redesign_required",
                 }
             ],
@@ -386,6 +542,10 @@ def test_decision_loop_requires_replay_before_l2_when_missing():
     assert packet["work_queue"]["counts"]["blocked_l2_progression"] == 1
     assert packet["work_queue"]["items"][0]["work_type"] == "replay_corpus_work"
     assert packet["work_queue"]["items"][0]["scheduled"] is True
+    assert packet["work_queue"]["items"][0]["coverage_status"] == "needs_replay_or_spec"
+    assert packet["work_queue"]["items"][0]["next_stage_decision"] == (
+        "add_replay_or_spec_coverage_before_l2"
+    )
 
 
 def test_decision_loop_blocks_forbidden_source_effects():
@@ -448,3 +608,5 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     assert "repair_blocking_gaps_with_replay_or_facts" in owner_text
     assert "Work Queue" in owner_text
     assert "classifier_or_rule_work" in owner_text
+    assert "local_replay_coverage_ready" in owner_text
+    assert "strategy_quality_review_before_l2_no_promotion" in owner_text

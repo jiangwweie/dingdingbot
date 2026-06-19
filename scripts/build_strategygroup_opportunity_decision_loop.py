@@ -118,6 +118,11 @@ def build_opportunity_decision_loop(
             ),
             "work_queue_item_count": work_queue["counts"]["total"],
             "scheduled_work_queue_item_count": work_queue["counts"]["scheduled"],
+            "coverage_ready_item_count": work_queue["counts"]["coverage_ready"],
+            "coverage_pending_item_count": work_queue["counts"]["coverage_pending"],
+            "strategy_decision_pending_count": work_queue["counts"][
+                "strategy_decision_pending"
+            ],
             "l2_enabled_count": sum(
                 1
                 for row in decision_rows
@@ -453,6 +458,13 @@ def _gap_work_item(
         ),
         "repair_spec": matching_repair_spec,
         "economic_spec": matching_economic_spec,
+        **_coverage_state(
+            decision_action=decision_action,
+            work_type=work_type,
+            scheduled=decision_action != "park_or_vocabulary_only",
+            repair_spec=matching_repair_spec,
+            economic_spec=matching_economic_spec,
+        ),
     }
 
 
@@ -474,6 +486,9 @@ def _work_queue(rows: list[dict[str, Any]]) -> dict[str, Any]:
     items.sort(key=_work_queue_sort_key)
     by_type = Counter(str(item.get("work_type") or "unknown") for item in items)
     by_priority = Counter(str(item.get("owner_priority") or "unknown") for item in items)
+    by_coverage_status = Counter(
+        str(item.get("coverage_status") or "unknown") for item in items
+    )
     scheduled = [item for item in items if item.get("scheduled") is True]
     return {
         "status": "ready" if items else "empty",
@@ -486,9 +501,30 @@ def _work_queue(rows: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "real_order_authorized": 0,
             "l4_scope_change_recommended": 0,
+            "coverage_ready": sum(
+                1 for item in items if item.get("coverage_ready") is True
+            ),
+            "coverage_pending": sum(
+                1
+                for item in items
+                if item.get("scheduled") is True
+                and item.get("coverage_status")
+                in {"needs_replay_or_spec", "fact_source_pending"}
+            ),
+            "strategy_decision_pending": sum(
+                1
+                for item in items
+                if item.get("coverage_status") == "strategy_decision_pending"
+            ),
+            "strategy_review_pending": sum(
+                1
+                for item in items
+                if item.get("coverage_status") == "strategy_review_pending"
+            ),
         },
         "by_work_type": dict(sorted(by_type.items())),
         "by_owner_priority": dict(sorted(by_priority.items())),
+        "by_coverage_status": dict(sorted(by_coverage_status.items())),
         "items": items,
         "safety_invariants": {
             "local_work_queue_only": True,
@@ -527,6 +563,9 @@ def _queue_item(row: dict[str, Any], gap_item: dict[str, Any]) -> dict[str, Any]
         "completion_signal": gap_item.get("completion_signal"),
         "repair_spec": _as_dict(gap_item.get("repair_spec")),
         "economic_spec": _as_dict(gap_item.get("economic_spec")),
+        "coverage_status": gap_item.get("coverage_status"),
+        "coverage_ready": gap_item.get("coverage_ready") is True,
+        "next_stage_decision": gap_item.get("next_stage_decision"),
         "real_order_authority": False,
         "l4_scope_change_recommended": False,
     }
@@ -569,6 +608,13 @@ def _row_level_queue_item(row: dict[str, Any]) -> dict[str, Any]:
         "actionable_task": actionable_task,
         "validation_command": _validation_command(work_type),
         "completion_signal": _completion_signal(work_type),
+        **_coverage_state(
+            decision_action=decision_action,
+            work_type=work_type,
+            scheduled=decision_action != "park_or_vocabulary_only",
+            repair_spec={},
+            economic_spec={},
+        ),
         "real_order_authority": False,
         "l4_scope_change_recommended": False,
     }
@@ -673,6 +719,58 @@ def _completion_signal(
         "strategy_quality_review": "revise/park/kill decision recorded before promotion",
         "replay_corpus_work": "non-executing replay sample covers would-enter and no-action paths",
     }.get(work_type, "decision loop row no longer reports the gap")
+
+
+def _coverage_state(
+    *,
+    decision_action: str,
+    work_type: str,
+    scheduled: bool,
+    repair_spec: dict[str, Any],
+    economic_spec: dict[str, Any],
+) -> dict[str, Any]:
+    if not scheduled or decision_action == "park_or_vocabulary_only":
+        coverage_status = "parked"
+    elif work_type == "classifier_or_rule_work":
+        repair_coverage = _as_dict(repair_spec.get("replay_case_coverage"))
+        coverage_status = (
+            "local_replay_coverage_ready"
+            if repair_coverage.get("covered") is True
+            else "needs_replay_or_spec"
+        )
+    elif work_type == "economic_replay_work":
+        economic_coverage = _as_dict(economic_spec.get("economic_case_coverage"))
+        coverage_status = (
+            "local_replay_coverage_ready"
+            if economic_coverage.get("covered") is True
+            else "needs_replay_or_spec"
+        )
+    elif work_type == "required_fact_or_market_data_work":
+        coverage_status = "fact_source_pending"
+    elif work_type == "strategy_quality_review":
+        coverage_status = "strategy_decision_pending"
+    elif work_type == "strategy_review_work":
+        coverage_status = "strategy_review_pending"
+    else:
+        coverage_status = "needs_replay_or_spec"
+    return {
+        "coverage_status": coverage_status,
+        "coverage_ready": coverage_status == "local_replay_coverage_ready",
+        "next_stage_decision": _next_stage_decision_for_coverage(coverage_status),
+    }
+
+
+def _next_stage_decision_for_coverage(coverage_status: str) -> str:
+    return {
+        "local_replay_coverage_ready": (
+            "strategy_quality_review_before_l2_no_promotion"
+        ),
+        "needs_replay_or_spec": "add_replay_or_spec_coverage_before_l2",
+        "fact_source_pending": "attach_fact_source_before_l2_review",
+        "strategy_decision_pending": "record_revise_park_or_promote_decision",
+        "strategy_review_pending": "continue_observe_only_review",
+        "parked": "park_until_new_evidence",
+    }.get(coverage_status, "continue_local_review")
 
 
 def _matching_classifier_repair_spec(
@@ -865,17 +963,19 @@ def _next_local_work_checkpoint(scheduled: list[dict[str, Any]]) -> str:
 
 def _work_queue_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| Priority | StrategyGroup | Work | Scheduled | Blocks L2 |\n| --- | --- | --- | --- | --- |\n| none | - | - | - | - |"
+        return "| Priority | StrategyGroup | Work | Coverage | Next | Scheduled | Blocks L2 |\n| --- | --- | --- | --- | --- | --- | --- |\n| none | - | - | - | - | - | - |"
     output = [
-        "| Priority | StrategyGroup | Work | Scheduled | Blocks L2 |",
-        "| --- | --- | --- | --- | --- |",
+        "| Priority | StrategyGroup | Work | Coverage | Next | Scheduled | Blocks L2 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows[:8]:
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` |".format(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
                 row.get("owner_priority"),
                 row.get("strategy_group_id"),
                 row.get("work_type"),
+                row.get("coverage_status"),
+                row.get("next_stage_decision"),
                 str(row.get("scheduled")).lower(),
                 str(row.get("blocks_l2_progression")).lower(),
             )
