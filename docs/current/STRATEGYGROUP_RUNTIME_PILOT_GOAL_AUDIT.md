@@ -1487,3 +1487,21 @@ visible but keeps the system in the waiting-for-opportunity posture.
 | Local monitor sequence | `signal_coverage=mainline_no_signal_low_priority_broader_would_enter`, expansion review parked, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local diagnostic classification only |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
+### 2026-06-19 High-Priority No-Action Diagnostic Checkpoint
+
+The signal coverage diagnostic now enriches broader no-action rows with policy
+priority and L2 readiness, then emits a dedicated high-priority no-action list.
+This turns healthy no-signal periods into usable review input without treating
+no-action rows as execution authority.
+
+| Item | Evidence |
+| --- | --- |
+| No-action policy join | Broader no-action rows now carry `coverage_review_priority`, `policy_l2_readiness`, and `policy_recommended_action` |
+| High-priority list | `broader_observation.high_priority_no_action_signals` contains P0.5/P1 no-action rows for review |
+| Current artifact | Latest diagnostic reports four high-priority no-action rows: `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` |
+| Non-execution boundary | High-priority no-action rows retain `not_order=true`, `not_execution_intent=true`, `no_execution_permission=true`, and `no_runtime_start=true` |
+| Local validation | Signal coverage diagnostic, expansion review, and local monitor sequence tests: `19 passed`; `py_compile` passed |
+| Local monitor sequence | Blockers empty, non-market gaps empty, remote interactions `0`; status remains monitor-cache refresh only |
+| Deployment | Not deployed; this is local diagnostic/review enrichment only |
+| Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

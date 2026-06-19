@@ -80,8 +80,14 @@ def build_signal_coverage_diagnostic_packet(
         _with_policy(row, policy_groups)
         for row in _dict_rows(broader_preview_packet.get("would_enter_signals"))
     ]
-    broader_no_action = _dict_rows(broader_preview_packet.get("no_action_signals"))
-    broader_invalid = _dict_rows(broader_preview_packet.get("invalid_signals"))
+    broader_no_action = [
+        _with_policy(row, policy_groups)
+        for row in _dict_rows(broader_preview_packet.get("no_action_signals"))
+    ]
+    broader_invalid = [
+        _with_policy(row, policy_groups)
+        for row in _dict_rows(broader_preview_packet.get("invalid_signals"))
+    ]
     runtime_forbidden = _runtime_forbidden_effects(runtime_summary_packet)
     preview_forbidden = _preview_forbidden_effects(broader_preview_packet)
     forbidden_effects = sorted(set(runtime_forbidden + preview_forbidden))
@@ -97,6 +103,9 @@ def build_signal_coverage_diagnostic_packet(
     ]
     low_priority_broader_would_enter = [
         row for row in broader_would_enter if not _row_needs_priority_review(row)
+    ]
+    high_priority_broader_no_action = [
+        row for row in broader_no_action if _row_has_review_priority(row)
     ]
     coverage_gap = bool(actionable_broader_would_enter and not runtime_ready_rows)
 
@@ -172,6 +181,9 @@ def build_signal_coverage_diagnostic_packet(
                 low_priority_broader_would_enter
             ),
             "broader_no_action_signal_count": len(broader_no_action),
+            "broader_high_priority_no_action_signal_count": len(
+                high_priority_broader_no_action
+            ),
             "broader_invalid_signal_count": len(broader_invalid),
             "coverage_gap": coverage_gap,
             "forbidden_effects": forbidden_effects,
@@ -198,6 +210,10 @@ def build_signal_coverage_diagnostic_packet(
             "would_enter_signals": [
                 _compact_broader_signal(row) for row in broader_would_enter
             ],
+            "high_priority_no_action_signals": [
+                _compact_broader_signal(row)
+                for row in high_priority_broader_no_action[:8]
+            ],
             "no_action_sample": [
                 _compact_broader_signal(row) for row in broader_no_action[:8]
             ],
@@ -213,6 +229,9 @@ def build_signal_coverage_diagnostic_packet(
             ),
             "broader_observation_has_low_priority_would_enter": bool(
                 low_priority_broader_would_enter
+            ),
+            "broader_high_priority_no_action_review_available": bool(
+                high_priority_broader_no_action
             ),
             "broader_signals_are_observe_only": True,
             "does_not_expand_runtime_scope": True,
@@ -277,6 +296,7 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         f"- Broader would-enter signals: `{checks.get('broader_would_enter_signal_count', 0)}`",
         f"- Broader actionable would-enter signals: `{checks.get('broader_actionable_would_enter_signal_count', 0)}`",
         f"- Broader low-priority would-enter signals: `{checks.get('broader_low_priority_would_enter_signal_count', 0)}`",
+        f"- Broader high-priority no-action signals: `{checks.get('broader_high_priority_no_action_signal_count', 0)}`",
         f"- Coverage gap: `{checks.get('coverage_gap')}`",
         "",
         "## 判断",
@@ -284,6 +304,7 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         f"- Mainline runtime is waiting: `{diagnosis.get('mainline_runtime_is_waiting')}`",
         f"- Broader observe-only shelf has would-enter signals: `{diagnosis.get('broader_observation_has_would_enter')}`",
         f"- Broader actionable would-enter exists: `{diagnosis.get('broader_observation_has_actionable_would_enter')}`",
+        f"- Broader high-priority no-action review available: `{diagnosis.get('broader_high_priority_no_action_review_available')}`",
         "- 宽观察信号只用于机会面诊断，不授权 candidate/auth/FinalGate/Operation Layer。",
         "",
         "## 主线未触发原因",
@@ -293,6 +314,10 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "## 宽观察 Would-Enter 信号",
         "",
         _signal_table(broader.get("would_enter_signals") or []),
+        "",
+        "## 高优先级 No-Action 信号",
+        "",
+        _signal_table(broader.get("high_priority_no_action_signals") or []),
         "",
         "## 安全边界",
         "",
@@ -420,6 +445,11 @@ def _row_needs_priority_review(row: dict[str, Any]) -> bool:
     if readiness == "blocked_parked_negative_evidence":
         return False
     return True
+
+
+def _row_has_review_priority(row: dict[str, Any]) -> bool:
+    priority = str(row.get("coverage_review_priority") or "unknown")
+    return priority in {"P0_5", "P1"}
 
 
 def _signal_type(row: dict[str, Any]) -> str:

@@ -94,6 +94,11 @@ def _preview(*, would_enter: bool = True, forbidden: bool = False) -> dict:
             "confidence": "0.20",
             "reason_codes": ["brf_no_action_no_rejection_close"],
             "human_summary": "BRF no action",
+            "not_order": True,
+            "not_execution_intent": True,
+            "no_execution_permission": True,
+            "no_order_permission": True,
+            "no_runtime_start": True,
         }
     ]
     return {
@@ -140,6 +145,21 @@ def _expansion_policy() -> dict:
                 "l2_readiness": "l2_shadow_candidate_observation_enabled",
                 "recommended_action": "continue_l2_shadow_candidate_observation_without_l4_scope_change",
             },
+            "BRF-001": {
+                "coverage_review_priority": "P0_5",
+                "l2_readiness": "blocked_requiredfacts_and_squeeze_classifier_needed",
+                "recommended_action": "keep_l1_observe_only_until_rally_failure_context_and_short_squeeze_classifier_are_attached",
+            },
+            "LSR-001": {
+                "coverage_review_priority": "P1",
+                "l2_readiness": "blocked_rewrite_required",
+                "recommended_action": "keep_l1_observe_only_until_side_specific_rewrite_handoff_exists",
+            },
+            "VCB-001": {
+                "coverage_review_priority": "P1",
+                "l2_readiness": "blocked_classifier_redesign_required",
+                "recommended_action": "keep_l1_observe_only_until_false_breakout_disable",
+            },
             "RBR-001": {
                 "coverage_review_priority": "P2",
                 "l2_readiness": "blocked_parked_negative_evidence",
@@ -165,6 +185,7 @@ def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
     assert packet["checks"]["broader_would_enter_signal_count"] == 1
     assert packet["checks"]["broader_actionable_would_enter_signal_count"] == 1
     assert packet["checks"]["broader_low_priority_would_enter_signal_count"] == 0
+    assert packet["checks"]["broader_high_priority_no_action_signal_count"] == 1
     assert packet["checks"]["coverage_gap"] is True
     assert packet["interaction"]["level"] == "L0_local_signal_coverage"
     assert packet["interaction"]["remote_interaction_count"] == 0
@@ -179,6 +200,29 @@ def test_diagnostic_surfaces_broader_would_enter_without_execution_authority():
     assert packet["safety_invariants"][
         "broader_signals_are_not_execution_authority"
     ] is True
+
+
+def test_diagnostic_enriches_high_priority_no_action_rows_for_review():
+    module = _load_module()
+
+    packet = module.build_signal_coverage_diagnostic_packet(
+        runtime_summary_packet=_runtime_summary(),
+        broader_preview_packet=_preview(would_enter=False),
+        source_name="sample",
+        expansion_policy=_expansion_policy(),
+    )
+
+    assert packet["status"] == "mainline_and_broader_no_signal"
+    assert packet["checks"]["broader_high_priority_no_action_signal_count"] == 1
+    assert packet["diagnosis"]["broader_high_priority_no_action_review_available"] is True
+    rows = packet["broader_observation"]["high_priority_no_action_signals"]
+    assert [row["strategy_group_id"] for row in rows] == ["BRF-001"]
+    assert rows[0]["coverage_review_priority"] == "P0_5"
+    assert rows[0]["policy_l2_readiness"] == (
+        "blocked_requiredfacts_and_squeeze_classifier_needed"
+    )
+    assert rows[0]["reason_codes"] == ["brf_no_action_no_rejection_close"]
+    assert rows[0]["not_order"] is True
 
 
 def test_diagnostic_records_low_priority_broader_would_enter_without_coverage_gap():

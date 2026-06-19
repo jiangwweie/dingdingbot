@@ -1835,6 +1835,21 @@ sequence.
 | Deployment | Not deployed; local diagnostic classification only |
 | Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-19 High-Priority No-Action Diagnostic Checkpoint
+
+No-signal periods now produce useful high-priority no-action review input. The
+diagnostic does not only report whether would-enter exists; it also shows which
+P0.5/P1 StrategyGroups are visible, not triggering, and why.
+
+| Item | Result |
+| --- | --- |
+| High-priority no-action | Diagnostic emits `broader_observation.high_priority_no_action_signals` with policy priority, L2 readiness, recommended action, and reason codes |
+| Current rows | `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` are present as high-priority no-action observations |
+| Use | These rows become local review/replay input for opportunity discovery without waiting for a live signal |
+| Boundary | No-action rows remain non-executing and cannot authorize candidate/auth, FinalGate, Operation Layer, exchange write, or real order |
+| Deployment | Not deployed; local diagnostic enrichment only |
+| Safety proof | No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |
+
 ## Boundaries
 
 - Keep UI experiments outside mainline; the Owner Console source-readiness
