@@ -103,13 +103,27 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
                     },
                 },
             )
-        else:
+        elif script == "build_strategygroup_signal_coverage_expansion_review.py":
             _write_output(
                 command,
                 {
                     "status": "no_expansion_review_needed",
                     "interaction": {
                         "level": "L0_local_signal_coverage_expansion_review",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+        else:
+            assert script == "build_strategygroup_l2_readiness_review.py"
+            _write_output(
+                command,
+                {
+                    "status": "l2_readiness_review_no_rows",
+                    "interaction": {
+                        "level": "L0_local_l2_readiness_review",
                         "remote_interaction_count": 0,
                         "mutates_remote_files": False,
                         "approaches_real_order": False,
@@ -137,6 +151,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "runtime_first_bounded_live_order_completion_audit.py",
         "run_strategygroup_signal_coverage_diagnostic.py",
         "build_strategygroup_signal_coverage_expansion_review.py",
+        "build_strategygroup_l2_readiness_review.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -194,12 +209,25 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_strategygroup_signal_coverage_expansion_review.py":
+            _write_output(
+                command,
+                {
+                    "status": "no_expansion_review_needed",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage_expansion_review"
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "build_strategygroup_l2_readiness_review.py"
         _write_output(
             command,
             {
-                "status": "no_expansion_review_needed",
+                "status": "l2_readiness_review_no_rows",
                 "interaction": {
-                    "level": "L0_local_signal_coverage_expansion_review"
+                    "level": "L0_local_l2_readiness_review"
                 },
             },
         )
@@ -307,12 +335,28 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_strategygroup_signal_coverage_expansion_review.py":
+            _write_output(
+                command,
+                {
+                    "status": "no_expansion_review_needed",
+                    "interaction": {
+                        "level": "L0_local_signal_coverage_expansion_review",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "build_strategygroup_l2_readiness_review.py"
         _write_output(
             command,
             {
-                "status": "no_expansion_review_needed",
+                "status": "l2_readiness_review_no_rows",
                 "interaction": {
-                    "level": "L0_local_signal_coverage_expansion_review",
+                    "level": "L0_local_l2_readiness_review",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -388,13 +432,30 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
             )
             return subprocess.CompletedProcess(command, 0, "", "")
 
+        if script == "build_strategygroup_signal_coverage_expansion_review.py":
+            _write_output(
+                command,
+                {
+                    "status": "review_needed_broader_observe_only_would_enter",
+                    "counts": {"review_row_count": 4},
+                    "interaction": {
+                        "level": "L0_local_signal_coverage_expansion_review",
+                        "remote_interaction_count": 0,
+                        "mutates_remote_files": False,
+                        "approaches_real_order": False,
+                    },
+                },
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        assert script == "build_strategygroup_l2_readiness_review.py"
         _write_output(
             command,
             {
-                "status": "review_needed_broader_observe_only_would_enter",
-                "counts": {"review_row_count": 4},
+                "status": "l2_readiness_review_has_conditional_candidate",
+                "decision": {"handoff_intake_recommended_groups": ["BTPC-001"]},
                 "interaction": {
-                    "level": "L0_local_signal_coverage_expansion_review",
+                    "level": "L0_local_l2_readiness_review",
                     "remote_interaction_count": 0,
                     "mutates_remote_files": False,
                     "approaches_real_order": False,
@@ -416,6 +477,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         signal_coverage_md=tmp_path / "signal-coverage.md",
         signal_coverage_expansion_review_json=tmp_path / "signal-expansion.json",
         signal_coverage_expansion_review_md=tmp_path / "signal-expansion.md",
+        l2_readiness_review_json=tmp_path / "l2-review.json",
+        l2_readiness_review_md=tmp_path / "l2-review.md",
         command_runner=fake_runner,
     )
 
@@ -423,11 +486,11 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
     assert report["checks"]["blockers"] == []
     assert report["checks"]["non_market_gaps"] == [
         {
-            "source": "signal_coverage_expansion_review",
-            "requirement": "broader observe-only opportunities should be reviewed for observation-scope expansion",
+            "source": "l2_readiness_review",
+            "requirement": "conditional L2 candidates should enter handoff intake and dry-run before any tier policy change",
             "missing_or_false": [
-                "observation_scope_expansion_review_needed",
-                "review_row_count:4",
+                "conditional_l2_handoff_intake_needed",
+                "groups:BTPC-001",
             ],
         }
     ]

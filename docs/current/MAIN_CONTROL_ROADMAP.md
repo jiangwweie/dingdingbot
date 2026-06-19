@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-06-18
+last_verified: 2026-06-19
 ---
 
 # Main Control Roadmap
@@ -144,7 +144,7 @@ market-dependent first real-order proof.
 | P0 Runtime Pilot Liveness | Fresh signal can continue to candidate/auth/FinalGate/Operation Layer evidence prep without accidental watcher-side attempt burn | Main runtime window | active | Rerun fresh signal chain through standing-authorized evidence prep, action-time FinalGate, and official Operation Layer only |
 | P0 Shared Runtime Pipeline Validation | Prove that execution-chain fixes are shared by all StrategyGroups and not SOR-specific patches | Main runtime window | active | After common chain closes, run cross-StrategyGroup dry-run/admission validation for MPG / TEQ / FBS / PMR / SOR |
 | P0 Runtime Dry-Run Audit Chain | Main chain can expose evidence/endpoint/gate breakage without waiting for market opportunity | Main runtime window | deployed | Keep local and Tokyo `runtime-dry-run-audit-chain.json` covering the full non-executing close-loop shape |
-| P0.5 Signal Coverage Diagnostic | Mainline no-signal periods can be compared against the broader read-only StrategyGroup shelf and summarized for Owner review | Main runtime window | local diagnostic + monitor-sequence expansion review ready | Use `latest-signal-coverage-diagnostic.json` and `latest-signal-coverage-expansion-review.json` to decide whether the issue is market waiting, narrow scope, or strategy signal quality; the local monitor sequence now runs both packets after completion audit; do not treat broader preview signals as real-submit authority or L4 promotion authority |
+| P0.5 Signal Coverage Diagnostic | Mainline no-signal periods can be compared against the broader read-only StrategyGroup shelf and summarized for Owner review | Main runtime window | local diagnostic + monitor-sequence expansion/L2 readiness review ready | Use `latest-signal-coverage-diagnostic.json`, `latest-signal-coverage-expansion-review.json`, and `latest-l2-readiness-review.json` to decide whether the issue is market waiting, narrow scope, or strategy signal quality; the local monitor sequence now runs all three packets after completion audit; current expansion review selects `BTPC-001` for L2 handoff/dry-run intake only, keeps `LSR-001`/`RBR-001`/`VCB-001` blocked from L2, and does not treat broader preview signals as real-submit authority or L4 promotion authority |
 | P0.5 Replay Corpus | Historical market/signal windows can exercise StrategyGroup and runtime behavior without waiting for live market signals | Main runtime window + strategy research input | local corpus ready | Keep MPG-001 eight-window corpus wired into local dry-run audit; expand to broader historical windows after first live loop |
 | P0.5 Synthetic Signal Factory | Fresh/stale/wrong-scope/missing-fact/conflict signals can exercise blocker classes and Owner state | Main runtime window | local minimum ready | Keep MPG-001 synthetic fixtures wired into dry-run audit; expand fixture matrix after the first real live loop |
 | P0.5 Post-Submit Simulator | Entry acceptance, protection failure, partial fill, rejection, SL/TP closure, and still-open lifecycle branches can be rehearsed locally | Main runtime window | local matrix ready | Keep simulator matrix non-executing and link outcomes into review evidence |

@@ -1,0 +1,103 @@
+{
+  "schema": "brc.strategy_group_signal_coverage_expansion_policy.v1",
+  "status": "current_pilot_supplement",
+  "last_updated": "2026-06-19",
+  "scope": "read_only_signal_coverage_expansion_review",
+  "not_execution_authority": true,
+  "not_finalgate_input": true,
+  "not_operation_layer_input": true,
+  "not_order_sizing_default": true,
+  "does_not_expand_l4_real_order_scope": true,
+  "source_notes": {
+    "main_control_runtime_policy": "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json",
+    "research_handoff_reference": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/main-control-strategy-research-v3-handoff.md",
+    "research_requiredfacts_reference": "/Users/jiangwei/Documents/final-strategy-research/docs/strategy-research/strategy-group-requiredfacts-proposals.md"
+  },
+  "strategy_groups": {
+    "BTPC-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P0_5",
+      "l2_readiness": "conditional_l2_review_candidate",
+      "recommended_action": "prepare_main_control_handoff_intake_and_dry_run_before_any_l2_policy_change",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "largest current right-tail lead among reviewed expansion candidates",
+        "candidate packet reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
+        "supports bearish-only activation and strong-uptrend disable review"
+      ],
+      "blocking_gaps_before_l2": [
+        "main_control_handoff_not_imported",
+        "runtime_requiredfacts_map_not_defined_for_btpc",
+        "historical_open_interest_window_missing",
+        "historical_global_long_short_ratio_window_missing",
+        "top_trader_position_ratio_window_missing",
+        "real_exchange_margin_liquidation_model_missing",
+        "short_squeeze_risk_not_runtime_blocking"
+      ]
+    },
+    "LSR-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P1",
+      "l2_readiness": "blocked_rewrite_required",
+      "recommended_action": "keep_l1_observe_only_until_side_specific_rewrite_handoff_exists",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "short upper-range revival lane exists in research",
+        "best 90d rewrite window reached 133.488401 percent at 2x"
+      ],
+      "blocking_gaps_before_l2": [
+        "current_broader_preview_side_long_conflicts_with_short_upper_range_revival_lead",
+        "broad_lsr_sequence_negative",
+        "lookahead_failed_proxy_requires_rewrite",
+        "lsr_disable_classifier_state_missing_from_runtime",
+        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+      ]
+    },
+    "RBR-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P2",
+      "l2_readiness": "blocked_parked_negative_evidence",
+      "recommended_action": "keep_l1_or_park_as_range_vocabulary_until_materially_new_classifier_exists",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "range-boundary vocabulary can still help classifier design"
+      ],
+      "blocking_gaps_before_l2": [
+        "fixed_horizon_economic_result_negative",
+        "calm_range_m2m_failed",
+        "worst_90d_2x_reaches_negative_135_68_percent",
+        "trend_invalidation_and_range_quality_facts_missing"
+      ]
+    },
+    "VCB-001": {
+      "current_main_control_tier": "L1",
+      "coverage_review_priority": "P1",
+      "l2_readiness": "blocked_classifier_redesign_required",
+      "recommended_action": "keep_l1_observe_only_until_false_breakout_disable_and_pre_entry_classifier_are_redesigned",
+      "live_order_eligible": false,
+      "l4_promotion_eligible": false,
+      "positive_evidence": [
+        "true-breakout classifier/revival track exists",
+        "pre-entry volume-compression lane has a best 90d 2x window over 100 percent before stronger cost stress"
+      ],
+      "blocking_gaps_before_l2": [
+        "generic_vcb_realized_equity_weak",
+        "volume_compression_cost_m2m_full_sequence_negative",
+        "pre_entry_classifier_does_not_reproduce_post_entry_edge",
+        "false_breakout_disable_state_missing_from_runtime",
+        "slot_m2m_equity_and_leverage_ruin_state_missing"
+      ]
+    }
+  },
+  "safety_invariants": {
+    "policy_is_review_only": true,
+    "policy_does_not_change_tier_policy": true,
+    "policy_does_not_authorize_shadow_candidate": true,
+    "policy_does_not_authorize_finalgate": true,
+    "policy_does_not_authorize_operation_layer": true,
+    "policy_does_not_authorize_real_order": true
+  }
+}

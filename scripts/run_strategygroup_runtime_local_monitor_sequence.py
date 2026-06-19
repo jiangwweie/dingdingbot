@@ -48,6 +48,12 @@ DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_JSON = (
 DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-signal-coverage-expansion-review.md"
 )
+DEFAULT_L2_READINESS_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-l2-readiness-review.json"
+)
+DEFAULT_L2_READINESS_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-l2-readiness-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -80,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         signal_coverage_expansion_review_md=Path(
             args.signal_coverage_expansion_review_md
         ),
+        l2_readiness_review_json=Path(args.l2_readiness_review_json),
+        l2_readiness_review_md=Path(args.l2_readiness_review_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -115,6 +123,8 @@ def build_local_monitor_sequence_report(
     signal_coverage_expansion_review_md: Path = (
         DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_MD
     ),
+    l2_readiness_review_json: Path = DEFAULT_L2_READINESS_REVIEW_JSON,
+    l2_readiness_review_md: Path = DEFAULT_L2_READINESS_REVIEW_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -209,6 +219,25 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    l2_readiness_review_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_l2_readiness_review.py"),
+        "--expansion-review-json",
+        str(signal_coverage_expansion_review_json),
+        "--output-json",
+        str(l2_readiness_review_json),
+        "--output-owner-progress",
+        str(l2_readiness_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "l2_readiness_review",
+            l2_readiness_review_command,
+            l2_readiness_review_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -230,7 +259,8 @@ def build_local_monitor_sequence_report(
     )
     non_market_gaps = list(completion_non_market_gaps)
     signal_coverage_gap = _expansion_review_non_market_gap(
-        packets.get("signal_coverage_expansion_review", {})
+        packets.get("signal_coverage_expansion_review", {}),
+        packets.get("l2_readiness_review", {}),
     ) or _signal_coverage_non_market_gap(
         packets.get("signal_coverage", {}),
     )
@@ -278,6 +308,7 @@ def build_local_monitor_sequence_report(
             "signal_coverage_expansion_review_json": str(
                 signal_coverage_expansion_review_json
             ),
+            "l2_readiness_review_json": str(l2_readiness_review_json),
         },
     }
 
@@ -381,6 +412,12 @@ def _sequence_status(
         "review_needed_broader_observe_only_would_enter",
     }:
         return "needs_non_market_repair"
+    l2_readiness_status = _status(packets.get("l2_readiness_review"))
+    if l2_readiness_status in {
+        "blocked_forbidden_effect",
+        "l2_readiness_review_has_conditional_candidate",
+    }:
+        return "needs_non_market_repair"
     if (
         _status(packets["daily_check"]) == "waiting_for_market"
         and _status(packets["goal_progress"]) == "waiting_for_market"
@@ -430,7 +467,34 @@ def _signal_coverage_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
-def _expansion_review_non_market_gap(packet: dict[str, Any]) -> dict[str, Any] | None:
+def _expansion_review_non_market_gap(
+    packet: dict[str, Any],
+    l2_packet: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    l2_packet = l2_packet or {}
+    l2_status = _status(l2_packet)
+    if l2_status == "l2_readiness_review_has_conditional_candidate":
+        decision = (
+            l2_packet.get("decision") if isinstance(l2_packet.get("decision"), dict) else {}
+        )
+        groups = [
+            str(item)
+            for item in decision.get("handoff_intake_recommended_groups") or []
+        ]
+        return {
+            "source": "l2_readiness_review",
+            "requirement": "conditional L2 candidates should enter handoff intake and dry-run before any tier policy change",
+            "missing_or_false": [
+                "conditional_l2_handoff_intake_needed",
+                f"groups:{','.join(groups) if groups else 'none'}",
+            ],
+        }
+    if l2_status == "blocked_forbidden_effect":
+        return {
+            "source": "l2_readiness_review",
+            "requirement": "L2 readiness review must stay non-executing",
+            "missing_or_false": ["l2_readiness_review_forbidden_effect"],
+        }
     status = _status(packet)
     if status == "review_needed_broader_observe_only_would_enter":
         counts = packet.get("counts") if isinstance(packet.get("counts"), dict) else {}
@@ -648,6 +712,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--signal-coverage-expansion-review-md",
         default=str(DEFAULT_SIGNAL_COVERAGE_EXPANSION_REVIEW_MD),
+    )
+    parser.add_argument(
+        "--l2-readiness-review-json",
+        default=str(DEFAULT_L2_READINESS_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--l2-readiness-review-md",
+        default=str(DEFAULT_L2_READINESS_REVIEW_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",
