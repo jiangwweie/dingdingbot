@@ -890,6 +890,26 @@ signal.
 | Verification | `tests/unit/test_strategygroup_post_revision_replay_review.py`, `tests/unit/test_strategygroup_opportunity_decision_loop.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert review cases, next-step handoff, local monitor integration, and no live-authority expansion |
 | Safety | Local replay/review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 BTPC L2 Shadow Fact Quality Review Checkpoint
+
+The P0.5 loop now classifies the active BTPC-001 L2 shadow observation fact
+gaps instead of leaving them as a flat pending list. This keeps the opportunity
+discovery lane useful during no-signal periods while preserving the real-order
+boundary: BTPC remains L2 shadow observation only and does not become L4 or
+real-order eligible.
+
+| Item | Evidence |
+| --- | --- |
+| Review artifact | `latest-btpc-l2-shadow-fact-quality-review.json` reports `status=btpc_l2_shadow_fact_quality_review_ready`, `fact_gap_count=5`, `classified_fact_gap_count=5`, `fact_source_pending_count=4`, `strategy_review_pending_count=1`, and `forbidden_effect_count=0` |
+| L2 observation | `btpc_state.l2_shadow_observation_enabled=true`, `btpc_state.replay_covered=true`, and `decision.l2_shadow_observation_can_continue=true` |
+| Replay support | BTPC replay summary carries five fixtures, including `missing_derivatives_context`, with `would_enter_replay_count=2` |
+| Fact classification | Historical OI, global long/short ratio, and top-trader ratio gaps block promotion beyond L2 review; the exchange margin/liquidation model blocks any BTPC real-order eligibility; short-squeeze review remains strategy-review pending and not a runtime submit blocker |
+| Next checkpoint | `decision.default_next_step=attach_btpc_derivatives_fact_sources_and_margin_model_for_l2_quality_review` |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now runs `opportunity_decision_loop` and `btpc_l2_shadow_fact_quality_review` after post-revision replay review |
+| Boundary | BTPC fact-quality review is not tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_btpc_l2_shadow_fact_quality_review.py` and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert fact-gap classification, next-step handoff, monitor integration, and no live-authority expansion |
+| Safety | Local review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

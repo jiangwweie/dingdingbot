@@ -56,6 +56,65 @@ def _write_passed_post_revision_review(command: list[str]) -> None:
     )
 
 
+def _write_ready_opportunity_decision_loop(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "decision_loop_ready",
+            "decision": {"default_next_step": "continue_btpc_l2_shadow_fact_quality_review"},
+            "interaction": {
+                "level": "L0_local_opportunity_decision_loop",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
+def _write_ready_btpc_fact_quality_review(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "btpc_l2_shadow_fact_quality_review_ready",
+            "decision": {
+                "default_next_step": "attach_btpc_derivatives_fact_sources_and_margin_model_for_l2_quality_review",
+                "l2_shadow_observation_can_continue": True,
+                "l4_scope_change_recommended": False,
+                "real_order_scope_change_recommended": False,
+            },
+            "interaction": {
+                "level": "L0_local_btpc_l2_shadow_fact_quality_review",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -65,6 +124,12 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         calls.append(script)
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_opportunity_decision_loop.py":
+            _write_ready_opportunity_decision_loop(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_l2_shadow_fact_quality_review.py":
+            _write_ready_btpc_fact_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -224,6 +289,10 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         post_revision_replay_review_json=tmp_path / "post-revision-review.json",
         post_revision_replay_review_md=tmp_path / "post-revision-review.md",
+        opportunity_decision_loop_json=tmp_path / "opportunity-decision-loop.json",
+        opportunity_decision_loop_md=tmp_path / "opportunity-decision-loop.md",
+        btpc_l2_shadow_fact_quality_review_json=tmp_path / "btpc-fact-review.json",
+        btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         command_runner=fake_runner,
     )
 
@@ -239,6 +308,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "run_strategygroup_l2_intake_dry_run.py",
         "run_strategygroup_l2_tier_policy_review.py",
         "build_strategygroup_post_revision_replay_review.py",
+        "build_strategygroup_opportunity_decision_loop.py",
+        "build_strategygroup_btpc_l2_shadow_fact_quality_review.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -257,6 +328,12 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         script = Path(command[1]).name
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_opportunity_decision_loop.py":
+            _write_ready_opportunity_decision_loop(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_l2_shadow_fact_quality_review.py":
+            _write_ready_btpc_fact_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -385,6 +462,10 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         post_revision_replay_review_json=tmp_path / "post-revision-review.json",
         post_revision_replay_review_md=tmp_path / "post-revision-review.md",
+        opportunity_decision_loop_json=tmp_path / "opportunity-decision-loop.json",
+        opportunity_decision_loop_md=tmp_path / "opportunity-decision-loop.md",
+        btpc_l2_shadow_fact_quality_review_json=tmp_path / "btpc-fact-review.json",
+        btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         command_runner=fake_runner,
     )
 
@@ -404,6 +485,12 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         script = Path(command[1]).name
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_opportunity_decision_loop.py":
+            _write_ready_opportunity_decision_loop(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_l2_shadow_fact_quality_review.py":
+            _write_ready_btpc_fact_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
@@ -594,6 +681,10 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         post_revision_replay_review_json=tmp_path / "post-revision-review.json",
         post_revision_replay_review_md=tmp_path / "post-revision-review.md",
+        opportunity_decision_loop_json=tmp_path / "opportunity-decision-loop.json",
+        opportunity_decision_loop_md=tmp_path / "opportunity-decision-loop.md",
+        btpc_l2_shadow_fact_quality_review_json=tmp_path / "btpc-fact-review.json",
+        btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         command_runner=fake_runner,
     )
 
@@ -616,6 +707,12 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         script = Path(command[1]).name
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_opportunity_decision_loop.py":
+            _write_ready_opportunity_decision_loop(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_l2_shadow_fact_quality_review.py":
+            _write_ready_btpc_fact_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -764,6 +861,10 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         post_revision_replay_review_json=tmp_path / "post-revision-review.json",
         post_revision_replay_review_md=tmp_path / "post-revision-review.md",
+        opportunity_decision_loop_json=tmp_path / "opportunity-decision-loop.json",
+        opportunity_decision_loop_md=tmp_path / "opportunity-decision-loop.md",
+        btpc_l2_shadow_fact_quality_review_json=tmp_path / "btpc-fact-review.json",
+        btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         command_runner=fake_runner,
     )
 
@@ -793,6 +894,12 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         script = Path(command[1]).name
         if script == "build_strategygroup_post_revision_replay_review.py":
             _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_opportunity_decision_loop.py":
+            _write_ready_opportunity_decision_loop(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if script == "build_strategygroup_btpc_l2_shadow_fact_quality_review.py":
+            _write_ready_btpc_fact_quality_review(command)
             return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
@@ -928,6 +1035,10 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
         post_revision_replay_review_json=tmp_path / "post-revision-review.json",
         post_revision_replay_review_md=tmp_path / "post-revision-review.md",
+        opportunity_decision_loop_json=tmp_path / "opportunity-decision-loop.json",
+        opportunity_decision_loop_md=tmp_path / "opportunity-decision-loop.md",
+        btpc_l2_shadow_fact_quality_review_json=tmp_path / "btpc-fact-review.json",
+        btpc_l2_shadow_fact_quality_review_md=tmp_path / "btpc-fact-review.md",
         command_runner=fake_runner,
     )
 

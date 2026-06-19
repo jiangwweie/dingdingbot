@@ -74,6 +74,19 @@ DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON = (
 DEFAULT_POST_REVISION_REPLAY_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.md"
 )
+DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-opportunity-decision-loop.json"
+)
+DEFAULT_OPPORTUNITY_DECISION_LOOP_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-opportunity-decision-loop.md"
+)
+DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_JSON = (
+    REPO_ROOT
+    / "output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.json"
+)
+DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-btpc-l2-shadow-fact-quality-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -118,6 +131,14 @@ def main(argv: list[str] | None = None) -> int:
             args.post_revision_replay_review_json
         ),
         post_revision_replay_review_md=Path(args.post_revision_replay_review_md),
+        opportunity_decision_loop_json=Path(args.opportunity_decision_loop_json),
+        opportunity_decision_loop_md=Path(args.opportunity_decision_loop_md),
+        btpc_l2_shadow_fact_quality_review_json=Path(
+            args.btpc_l2_shadow_fact_quality_review_json
+        ),
+        btpc_l2_shadow_fact_quality_review_md=Path(
+            args.btpc_l2_shadow_fact_quality_review_md
+        ),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -165,6 +186,14 @@ def build_local_monitor_sequence_report(
         DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON
     ),
     post_revision_replay_review_md: Path = DEFAULT_POST_REVISION_REPLAY_REVIEW_MD,
+    opportunity_decision_loop_json: Path = DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON,
+    opportunity_decision_loop_md: Path = DEFAULT_OPPORTUNITY_DECISION_LOOP_MD,
+    btpc_l2_shadow_fact_quality_review_json: Path = (
+        DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_JSON
+    ),
+    btpc_l2_shadow_fact_quality_review_md: Path = (
+        DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_MD
+    ),
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -343,6 +372,59 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    opportunity_decision_loop_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_opportunity_decision_loop.py"),
+        "--expansion-review-json",
+        str(signal_coverage_expansion_review_json),
+        "--l2-readiness-json",
+        str(l2_readiness_review_json),
+        "--l2-intake-json",
+        str(l2_intake_dry_run_json),
+        "--replay-lab-json",
+        str(replay_lab_json),
+        "--post-revision-review-json",
+        str(post_revision_replay_review_json),
+        "--output-json",
+        str(opportunity_decision_loop_json),
+        "--output-owner-progress",
+        str(opportunity_decision_loop_md),
+    ]
+    steps.append(
+        _run_step(
+            "opportunity_decision_loop",
+            opportunity_decision_loop_command,
+            opportunity_decision_loop_json,
+            runner,
+        )
+    )
+
+    btpc_l2_shadow_fact_quality_review_command = [
+        sys.executable,
+        str(
+            REPO_ROOT
+            / "scripts/build_strategygroup_btpc_l2_shadow_fact_quality_review.py"
+        ),
+        "--opportunity-decision-loop-json",
+        str(opportunity_decision_loop_json),
+        "--l2-readiness-json",
+        str(l2_readiness_review_json),
+        "--replay-lab-json",
+        str(replay_lab_json),
+        "--output-json",
+        str(btpc_l2_shadow_fact_quality_review_json),
+        "--output-owner-progress",
+        str(btpc_l2_shadow_fact_quality_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "btpc_l2_shadow_fact_quality_review",
+            btpc_l2_shadow_fact_quality_review_command,
+            btpc_l2_shadow_fact_quality_review_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -427,6 +509,10 @@ def build_local_monitor_sequence_report(
             "l2_tier_policy_review_json": str(l2_tier_policy_review_json),
             "post_revision_replay_review_json": str(
                 post_revision_replay_review_json
+            ),
+            "opportunity_decision_loop_json": str(opportunity_decision_loop_json),
+            "btpc_l2_shadow_fact_quality_review_json": str(
+                btpc_l2_shadow_fact_quality_review_json
             ),
         },
     }
@@ -973,6 +1059,22 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--post-revision-replay-review-md",
         default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_MD),
+    )
+    parser.add_argument(
+        "--opportunity-decision-loop-json",
+        default=str(DEFAULT_OPPORTUNITY_DECISION_LOOP_JSON),
+    )
+    parser.add_argument(
+        "--opportunity-decision-loop-md",
+        default=str(DEFAULT_OPPORTUNITY_DECISION_LOOP_MD),
+    )
+    parser.add_argument(
+        "--btpc-l2-shadow-fact-quality-review-json",
+        default=str(DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--btpc-l2-shadow-fact-quality-review-md",
+        default=str(DEFAULT_BTPC_L2_SHADOW_FACT_QUALITY_REVIEW_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",
