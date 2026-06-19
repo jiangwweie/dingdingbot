@@ -797,6 +797,24 @@ from being misread as L2 promotion, L4 scope expansion, or real-order authority.
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts LSR/VCB coverage-ready states, BTPC fact-source pending state, RBR parked state, no real-order authority, and no L4 scope change |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Strategy Quality Decision Rollup Checkpoint
+
+The P0.5 decision loop now rolls coverage-ready queue items into a
+StrategyGroup-level quality decision. This moves the local loop from "coverage
+exists" to "what should the project do with the covered evidence" without
+promoting any group, widening L4 scope, or creating real-order authority.
+
+| Item | Evidence |
+| --- | --- |
+| Quality rollup | `latest-opportunity-decision-loop.json` now includes `strategy_quality_decisions.status=ready`, `rows`, `by_decision`, and safety invariants |
+| Current local decisions | Current local run reports `revise_before_l2=2`, `keep_observing=1`, `park=1`, `needs_replay=0`, `real_order_authorized=0`, and `l4_scope_change_recommended=0` |
+| LSR/VCB outcome | `LSR-001` and `VCB-001` roll up to `revise_before_l2` with next stage `record_revise_decision_and_keep_l1_until_review_passes` |
+| BTPC/RBR outcome | `BTPC-001` remains `keep_observing_l2_shadow_with_fact_review`; `RBR-001` remains `park_until_new_edge` |
+| Next checkpoint | `decision.default_next_step=record_lsr001_vcb001_strategy_quality_revise_before_l2`; `work_queue.next_local_checkpoint=record_strategy_quality_decisions_for_coverage_ready_items` |
+| Boundary | Strategy-quality decisions are not L2 promotion authority, L4 scope change, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts the rollup counts, LSR/VCB revise decisions, BTPC keep-observing-with-fact-review, RBR parked state, Owner progress table, and no live-authority expansion |
+| Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

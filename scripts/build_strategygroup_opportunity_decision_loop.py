@@ -74,6 +74,10 @@ def build_opportunity_decision_loop(
         for row in review_rows
     ]
     work_queue = _work_queue(decision_rows)
+    strategy_quality_decisions = _strategy_quality_decisions(
+        rows=decision_rows,
+        work_items=_dict_rows(work_queue.get("items")),
+    )
     forbidden_effects = _forbidden_effects(
         expansion_review_packet,
         l2_readiness_packet,
@@ -123,6 +127,12 @@ def build_opportunity_decision_loop(
             "strategy_decision_pending_count": work_queue["counts"][
                 "strategy_decision_pending"
             ],
+            "strategy_quality_decision_count": strategy_quality_decisions["counts"][
+                "total"
+            ],
+            "revise_before_l2_count": strategy_quality_decisions["counts"][
+                "revise_before_l2"
+            ],
             "l2_enabled_count": sum(
                 1
                 for row in decision_rows
@@ -135,13 +145,17 @@ def build_opportunity_decision_loop(
         "action_counts": dict(sorted(action_counts.items())),
         "decision_rows": decision_rows,
         "work_queue": work_queue,
+        "strategy_quality_decisions": strategy_quality_decisions,
         "decision": {
             "repeatable_loop_ready": bool(decision_rows) and not forbidden_effects,
             "real_order_scope_change_recommended": False,
             "l4_promotion_recommended": False,
             "tier_policy_change_recommended_now": False,
             "default_next_step": _default_next_step(
-                decision_rows, forbidden_effects, work_queue
+                decision_rows,
+                forbidden_effects,
+                work_queue,
+                strategy_quality_decisions,
             ),
         },
         "operator_command_plan": {
@@ -202,6 +216,12 @@ def build_owner_progress_markdown(packet: dict[str, Any]) -> str:
         "## Work Queue",
         "",
         _work_queue_table(_dict_rows(_as_dict(packet.get("work_queue")).get("items"))),
+        "",
+        "## Strategy Quality Decisions",
+        "",
+        _strategy_quality_table(
+            _dict_rows(_as_dict(packet.get("strategy_quality_decisions")).get("rows"))
+        ),
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -540,6 +560,175 @@ def _work_queue(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "real_order_authorized": False,
         },
     }
+
+
+def _strategy_quality_decisions(
+    *,
+    rows: list[dict[str, Any]],
+    work_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    output_rows = [
+        _strategy_quality_decision_row(
+            row=row,
+            work_items=[
+                item
+                for item in work_items
+                if item.get("strategy_group_id") == row.get("strategy_group_id")
+            ],
+        )
+        for row in rows
+    ]
+    decision_counts = Counter(
+        str(row.get("strategy_quality_decision") or "unknown")
+        for row in output_rows
+    )
+    return {
+        "status": "ready" if output_rows else "empty",
+        "next_checkpoint": _strategy_quality_next_checkpoint(output_rows),
+        "counts": {
+            "total": len(output_rows),
+            "revise_before_l2": decision_counts.get("revise_before_l2", 0),
+            "keep_observing": sum(
+                count
+                for decision, count in decision_counts.items()
+                if str(decision).startswith("keep_observing")
+            ),
+            "park": decision_counts.get("park_until_new_edge", 0),
+            "needs_replay": decision_counts.get(
+                "needs_replay_before_quality_decision", 0
+            ),
+            "real_order_authorized": 0,
+            "l4_scope_change_recommended": 0,
+        },
+        "by_decision": dict(sorted(decision_counts.items())),
+        "rows": output_rows,
+        "safety_invariants": {
+            "local_strategy_quality_decision_only": True,
+            "changes_strategy_parameters": False,
+            "changes_tier_policy": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+            "mutates_server_files": False,
+            "real_order_authorized": False,
+            "l4_scope_change_recommended": False,
+        },
+    }
+
+
+def _strategy_quality_decision_row(
+    *,
+    row: dict[str, Any],
+    work_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    strategy_group_id = str(row.get("strategy_group_id") or "unknown")
+    replay = _as_dict(row.get("replay_verification"))
+    coverage_ready_count = sum(
+        1 for item in work_items if item.get("coverage_ready") is True
+    )
+    fact_pending_count = sum(
+        1
+        for item in work_items
+        if item.get("coverage_status") == "fact_source_pending"
+    )
+    strategy_decision_pending_count = sum(
+        1
+        for item in work_items
+        if item.get("coverage_status") == "strategy_decision_pending"
+    )
+    parked_count = sum(
+        1 for item in work_items if item.get("coverage_status") == "parked"
+    )
+    revise_sample_count = _int(replay.get("revise_sample_count"))
+    if row.get("decision_action") == "park_or_vocabulary_only":
+        decision = "park_until_new_edge"
+        reason = "parked_negative_or_low_quality_evidence"
+    elif replay.get("covered") is not True:
+        decision = "needs_replay_before_quality_decision"
+        reason = "missing_local_replay_coverage"
+    elif coverage_ready_count and (
+        revise_sample_count > 0 or strategy_decision_pending_count > 0
+    ):
+        decision = "revise_before_l2"
+        reason = "coverage_ready_but_revise_or_negative_evidence_present"
+    elif row.get("tier_state") == "l2_shadow_candidate_observation_enabled":
+        decision = (
+            "keep_observing_l2_shadow_with_fact_review"
+            if fact_pending_count
+            else "keep_observing_l2_shadow"
+        )
+        reason = "l2_shadow_observation_active_without_real_order_scope_change"
+    elif row.get("decision_action") == "prepare_l2_intake_review_without_tier_change":
+        decision = "prepare_l2_intake_review_without_promotion"
+        reason = "review_shape_ready_but_tier_change_not_authorized_here"
+    else:
+        decision = "continue_observe_only_review"
+        reason = "insufficient_quality_decision_evidence"
+    return {
+        "strategy_group_id": strategy_group_id,
+        "current_tier": row.get("current_tier"),
+        "tier_state": row.get("tier_state"),
+        "strategy_quality_decision": decision,
+        "reason": reason,
+        "next_stage": _next_stage_for_strategy_quality_decision(decision),
+        "evidence": {
+            "replay_sample_count": _int(replay.get("sample_count")),
+            "would_enter_sample_count": _int(replay.get("would_enter_sample_count")),
+            "revise_sample_count": revise_sample_count,
+            "coverage_ready_item_count": coverage_ready_count,
+            "fact_source_pending_item_count": fact_pending_count,
+            "strategy_decision_pending_item_count": strategy_decision_pending_count,
+            "parked_item_count": parked_count,
+            "blocking_gap_count": len(row.get("blocking_gaps_before_l2") or []),
+        },
+        "not_l2_promotion_authority": True,
+        "not_l4_scope_change": True,
+        "real_order_authority": False,
+        "candidate_or_finalgate_authority": False,
+    }
+
+
+def _next_stage_for_strategy_quality_decision(decision: str) -> str:
+    return {
+        "revise_before_l2": "record_revise_decision_and_keep_l1_until_review_passes",
+        "keep_observing_l2_shadow_with_fact_review": (
+            "continue_l2_shadow_and_attach_fact_sources"
+        ),
+        "keep_observing_l2_shadow": "continue_l2_shadow_quality_review",
+        "park_until_new_edge": "park_until_new_evidence",
+        "needs_replay_before_quality_decision": "add_replay_or_spec_coverage_before_l2",
+        "prepare_l2_intake_review_without_promotion": (
+            "run_l2_handoff_intake_dry_run_without_l4_scope_change"
+        ),
+        "continue_observe_only_review": "continue_observe_only_review",
+    }.get(decision, "continue_local_review")
+
+
+def _strategy_quality_next_checkpoint(rows: list[dict[str, Any]]) -> str:
+    revise_groups = [
+        str(row.get("strategy_group_id"))
+        for row in rows
+        if row.get("strategy_quality_decision") == "revise_before_l2"
+    ]
+    if revise_groups:
+        return "record_{}_strategy_quality_revise_before_l2".format(
+            "_".join(sorted(revise_groups)).lower().replace("-", "")
+        )
+    if any(
+        row.get("strategy_quality_decision")
+        == "keep_observing_l2_shadow_with_fact_review"
+        for row in rows
+    ):
+        return "continue_btpc_l2_shadow_fact_quality_review"
+    if any(
+        row.get("strategy_quality_decision") == "needs_replay_before_quality_decision"
+        for row in rows
+    ):
+        return "add_missing_replay_before_strategy_quality_decision"
+    return "continue_l2_shadow_and_observe_only_review"
 
 
 def _queue_item(row: dict[str, Any], gap_item: dict[str, Any]) -> dict[str, Any]:
@@ -950,6 +1139,12 @@ def _work_queue_sort_key(item: dict[str, Any]) -> tuple[int, int, str, str]:
 def _next_local_work_checkpoint(scheduled: list[dict[str, Any]]) -> str:
     if not scheduled:
         return "continue_waiting_for_live_signal_and_keep_low_priority_observation"
+    if any(
+        item.get("next_stage_decision")
+        == "strategy_quality_review_before_l2_no_promotion"
+        for item in scheduled
+    ):
+        return "record_strategy_quality_decisions_for_coverage_ready_items"
     work_types = {str(item.get("work_type")) for item in scheduled[:4]}
     groups = {str(item.get("strategy_group_id")) for item in scheduled[:4]}
     if "classifier_or_rule_work" in work_types:
@@ -983,15 +1178,46 @@ def _work_queue_table(rows: list[dict[str, Any]]) -> str:
     return "\n".join(output)
 
 
+def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready |\n| --- | --- | --- | --- | ---: | ---: | ---: |\n| none | - | - | - | - | - | - |"
+    output = [
+        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        evidence = _as_dict(row.get("evidence"))
+        output.append(
+            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} |".format(
+                row.get("strategy_group_id"),
+                row.get("current_tier"),
+                row.get("strategy_quality_decision"),
+                row.get("next_stage"),
+                evidence.get("replay_sample_count", 0),
+                evidence.get("revise_sample_count", 0),
+                evidence.get("coverage_ready_item_count", 0),
+            )
+        )
+    return "\n".join(output)
+
+
 def _default_next_step(
     rows: list[dict[str, Any]],
     forbidden_effects: list[str],
     work_queue: dict[str, Any],
+    strategy_quality_decisions: dict[str, Any],
 ) -> str:
     if forbidden_effects:
         return "stop_and_repair_forbidden_source_effects"
     if not rows:
         return "continue_signal_coverage_monitoring"
+    strategy_quality_next = str(
+        strategy_quality_decisions.get("next_checkpoint") or ""
+    )
+    if strategy_quality_next and strategy_quality_next != (
+        "continue_l2_shadow_and_observe_only_review"
+    ):
+        return strategy_quality_next
     next_checkpoint = str(work_queue.get("next_local_checkpoint") or "")
     if next_checkpoint:
         return next_checkpoint

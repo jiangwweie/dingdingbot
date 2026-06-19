@@ -387,6 +387,8 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert packet["counts"]["coverage_ready_item_count"] == 5
     assert packet["counts"]["coverage_pending_item_count"] == 1
     assert packet["counts"]["strategy_decision_pending_count"] == 0
+    assert packet["counts"]["strategy_quality_decision_count"] == 4
+    assert packet["counts"]["revise_before_l2_count"] == 2
     assert packet["counts"]["real_order_authorized_count"] == 0
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     assert rows["BTPC-001"]["decision_action"] == "continue_l2_shadow_quality_review"
@@ -431,7 +433,7 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     work_items = packet["work_queue"]["items"]
     assert packet["work_queue"]["status"] == "ready"
     assert packet["work_queue"]["next_local_checkpoint"] == (
-        "repair_classifier_or_disable_state_gaps_for_lsr_vcb"
+        "record_strategy_quality_decisions_for_coverage_ready_items"
     )
     assert packet["work_queue"]["counts"]["scheduled"] == 6
     assert packet["work_queue"]["counts"]["coverage_ready"] == 5
@@ -501,6 +503,40 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert parked_items
     assert all(item["scheduled"] is False for item in parked_items)
     assert all(item["coverage_status"] == "parked" for item in parked_items)
+    quality = packet["strategy_quality_decisions"]
+    assert quality["status"] == "ready"
+    assert quality["next_checkpoint"] == (
+        "record_lsr001_vcb001_strategy_quality_revise_before_l2"
+    )
+    assert quality["counts"]["total"] == 4
+    assert quality["counts"]["revise_before_l2"] == 2
+    assert quality["counts"]["keep_observing"] == 1
+    assert quality["counts"]["park"] == 1
+    quality_rows = {row["strategy_group_id"]: row for row in quality["rows"]}
+    assert quality_rows["VCB-001"]["strategy_quality_decision"] == "revise_before_l2"
+    assert quality_rows["VCB-001"]["next_stage"] == (
+        "record_revise_decision_and_keep_l1_until_review_passes"
+    )
+    assert quality_rows["VCB-001"]["evidence"]["coverage_ready_item_count"] == 2
+    assert quality_rows["VCB-001"]["evidence"]["revise_sample_count"] == 1
+    assert quality_rows["LSR-001"]["strategy_quality_decision"] == "revise_before_l2"
+    assert quality_rows["LSR-001"]["evidence"]["coverage_ready_item_count"] == 3
+    assert quality_rows["BTPC-001"]["strategy_quality_decision"] == (
+        "keep_observing_l2_shadow_with_fact_review"
+    )
+    assert quality_rows["RBR-001"]["strategy_quality_decision"] == (
+        "park_until_new_edge"
+    )
+    for row in quality["rows"]:
+        assert row["not_l2_promotion_authority"] is True
+        assert row["not_l4_scope_change"] is True
+        assert row["real_order_authority"] is False
+        assert row["candidate_or_finalgate_authority"] is False
+    assert quality["safety_invariants"]["calls_operation_layer"] is False
+    assert quality["safety_invariants"]["places_order"] is False
+    assert packet["decision"]["default_next_step"] == (
+        "record_lsr001_vcb001_strategy_quality_revise_before_l2"
+    )
     for row in packet["decision_rows"]:
         assert row["real_order_authority"] is False
         assert row["l4_scope_change_recommended"] is False
@@ -610,3 +646,5 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     assert "classifier_or_rule_work" in owner_text
     assert "local_replay_coverage_ready" in owner_text
     assert "strategy_quality_review_before_l2_no_promotion" in owner_text
+    assert "Strategy Quality Decisions" in owner_text
+    assert "revise_before_l2" in owner_text
