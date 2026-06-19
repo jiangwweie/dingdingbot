@@ -2,7 +2,7 @@
   "schema": "brc.runtime_monitor_baseline.v1",
   "updated_at_utc": "2026-06-19T15:00:00Z",
   "purpose": "Single source for low-noise StrategyGroup runtime monitor expected deployment heads and runtime check modes.",
-  "expected_runtime_head": "e7506d4fccb302077a2361b4726f2e0b67f717a6",
+  "expected_runtime_head": "c3d58a0469572ecd992db2e3b8aa1863e1e7fe2a",
   "default_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --json",
   "heartbeat_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --heartbeat --output-json output/runtime-monitor/latest-daily-check.json --output-owner-progress output/runtime-monitor/latest-owner-progress.md",
   "routine_status_check": "python3 scripts/run_strategygroup_runtime_daily_check.py --auto-cache --owner-progress",

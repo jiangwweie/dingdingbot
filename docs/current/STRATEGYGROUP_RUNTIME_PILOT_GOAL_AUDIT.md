@@ -24,10 +24,10 @@ cleanup plan.
 | Workspace | `/Users/jiangwei/Documents/final` |
 | Branch | `codex/owner-runtime-console-v1` |
 | Branch head | moving git ref; verify with `git log --oneline -1 --decorate` before apply |
-| Latest deployed runtime head | `e7506d4fccb302077a2361b4726f2e0b67f717a6` |
+| Latest deployed runtime head | `c3d58a0469572ecd992db2e3b8aa1863e1e7fe2a` |
 | Latest Tokyo release | pending bounded deploy checkpoint for StrategyGroup Decision Ledger |
-| Latest deploy apply | pending `e7506d4f` bounded deploy checkpoint; previous applied head was `e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249` |
-| Latest postdeploy acceptance | pending `e7506d4f` postdeploy acceptance; previous accepted packet was `output/tokyo-runtime-deploy-session-e5f8c13b.json` |
+| Latest deploy apply | pending `c3d58a04` bounded deploy checkpoint; previous applied head was `e5f8c13b283d011d3c1eb8e27a0a7fe3ad873249` |
+| Latest postdeploy acceptance | pending `c3d58a04` postdeploy acceptance; previous accepted packet was `output/tokyo-runtime-deploy-session-e5f8c13b.json` |
 | Goal progress | `P0=waiting_for_market`, `P0.5=ready` |
 | Quiet monitor | `DONT_NOTIFY` |
 | Runtime blockers | none |
