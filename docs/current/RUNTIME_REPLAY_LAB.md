@@ -199,6 +199,25 @@ The would-enter and squeeze-risk cases must not reach prepare, FinalGate,
 Operation Layer, exchange write, or real order authority. They are
 replay/review evidence only.
 
+## Owner Replay Review Summary
+
+The Owner progress report must summarize replay coverage by StrategyGroup, not
+only as aggregate sample counts. This lets the Owner see whether the system is
+finding broader no-action / would-enter / revise evidence while P0 waits for a
+real fresh signal.
+
+The current table shape is:
+
+| Field | Meaning |
+| --- | --- |
+| `StrategyGroup` | The replayed strategy group |
+| `Layer` | `L4 replay baseline`, `L2 shadow`, or `L1 observe` |
+| `Samples` | Local replay windows in the report |
+| `Review signals` | Replay windows that would be reviewed as non-live signal evidence |
+| `Quiet / no-action` | Replay windows that correctly stay quiet |
+| `Revise` | Replay windows recommending classifier or facts revision |
+| `Boundary` | Why the replay row cannot authorize live execution |
+
 ## Post-Submit Simulator Matrix
 
 The local post-submit simulator matrix covers:

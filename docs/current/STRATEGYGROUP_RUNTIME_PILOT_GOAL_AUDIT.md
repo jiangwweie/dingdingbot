@@ -669,6 +669,19 @@ without promoting BRF to L2 shadow-candidate or L4 real-order scope.
 | L4 boundary | `MPG-001` remains the only L4 real-order eligible StrategyGroup; `BRF-001` remains L1 observe-only |
 | Safety | Local replay/test work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Replay-to-Review Owner Summary Checkpoint
+
+The P0.5 replay Owner progress report now includes a StrategyGroup-level review
+table. This makes broader market observation legible while P0 waits for a real
+fresh selected StrategyGroup signal.
+
+| Item | Evidence |
+| --- | --- |
+| Owner table | `scripts/run_strategygroup_runtime_replay_lab.py` emits `StrategyGroup Replay Review` with per-group layer, sample count, review-signal count, quiet/no-action count, revise count, and execution boundary |
+| Covered groups | Current table covers `MPG-001`, `BTPC-001`, `BRF-001`, `VCB-001`, and `LSR-001` |
+| Verification | `tests/unit/test_strategygroup_runtime_replay_lab.py` asserts the Owner progress rows for `BTPC-001`, `BRF-001`, `VCB-001`, and `LSR-001` |
+| Safety | Reporting work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

@@ -374,6 +374,23 @@ def test_owner_markdown_summarizes_replay_corpus_post_submit_and_cost_review() -
     assert "- Cost review skeleton: present" in text
     assert "- Exchange write: 否" in text
     assert "- 接近真实订单: 否" in text
+    assert "## StrategyGroup Replay Review" in text
+    assert (
+        "| BRF-001 | L1 observe | 5 | 2 | 1 | 3 | observe-only; no prepare chain |"
+        in text
+    )
+    assert (
+        "| VCB-001 | L1 observe | 5 | 2 | 1 | 3 | observe-only; no prepare chain |"
+        in text
+    )
+    assert (
+        "| LSR-001 | L1 observe | 5 | 2 | 1 | 3 | observe-only; no prepare chain |"
+        in text
+    )
+    assert (
+        "| BTPC-001 | L2 shadow | 5 | 2 | 1 | 3 | shadow evidence only; no Operation Layer |"
+        in text
+    )
 
 
 def test_tracked_btpc001_l2_shadow_replay_corpus_exists() -> None:

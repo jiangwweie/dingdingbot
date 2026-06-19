@@ -20,6 +20,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.domain.strategygroup_runtime_replay import (  # noqa: E402
+    ReplayReviewRecommendation,
     StrategyGroupReplayReport,
     build_mpg001_replay_lab_packet,
 )
@@ -33,10 +34,99 @@ DEFAULT_OWNER_PROGRESS = Path(
 )
 
 
+def _count_review_signals(items: list[object]) -> int:
+    return sum(
+        1
+        for item in items
+        if getattr(item, "required_facts_ready")
+        and getattr(item, "signal_status") not in {"no_signal", "stale_signal"}
+        and getattr(item, "blocker_class") != "waiting_for_market"
+    )
+
+
+def _count_quiet(items: list[object]) -> int:
+    return sum(
+        1
+        for item in items
+        if getattr(item, "signal_status") == "no_signal"
+        or getattr(item, "blocker_class") == "waiting_for_market"
+    )
+
+
+def _count_revise(items: list[object]) -> int:
+    return sum(
+        1
+        for item in items
+        if getattr(item, "review_recommendation") == ReplayReviewRecommendation.REVISE
+    )
+
+
+def _strategygroup_replay_review_rows(
+    packet: StrategyGroupReplayReport,
+) -> list[dict[str, object]]:
+    groups = [
+        (
+            "MPG-001",
+            "L4 replay baseline",
+            packet.replay_samples,
+            "dry-run only; live order still requires real fresh signal and official chain",
+        ),
+        (
+            "BTPC-001",
+            "L2 shadow",
+            packet.l2_shadow_replay_samples,
+            "shadow evidence only; no Operation Layer",
+        ),
+        (
+            "BRF-001",
+            "L1 observe",
+            [
+                item
+                for item in packet.l1_observe_replay_samples
+                if item.strategy_group_id == "BRF-001"
+            ],
+            "observe-only; no prepare chain",
+        ),
+        (
+            "VCB-001",
+            "L1 observe",
+            [
+                item
+                for item in packet.l1_observe_replay_samples
+                if item.strategy_group_id == "VCB-001"
+            ],
+            "observe-only; no prepare chain",
+        ),
+        (
+            "LSR-001",
+            "L1 observe",
+            [
+                item
+                for item in packet.l1_observe_replay_samples
+                if item.strategy_group_id == "LSR-001"
+            ],
+            "observe-only; no prepare chain",
+        ),
+    ]
+    return [
+        {
+            "strategy_group_id": strategy_group_id,
+            "layer": layer,
+            "samples": len(items),
+            "review_signals": _count_review_signals(items),
+            "quiet_no_action": _count_quiet(items),
+            "revise": _count_revise(items),
+            "boundary": boundary,
+        }
+        for strategy_group_id, layer, items, boundary in groups
+    ]
+
+
 def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
     fixture_cases = ", ".join(
         sorted(item.fixture_case for item in packet.synthetic_fixtures)
     )
+    review_rows = _strategygroup_replay_review_rows(packet)
     lines = [
         "## Runtime Replay Lab",
         "",
@@ -58,9 +148,29 @@ def _owner_markdown(packet: StrategyGroupReplayReport) -> str:
         f"- Synthetic fixtures: {fixture_cases}",
         "- Freqtrade: future sidecar research adapter only",
         "",
-        "## Checks",
+        "## StrategyGroup Replay Review",
         "",
+        "| StrategyGroup | Layer | Samples | Review signals | Quiet / no-action | Revise | Boundary |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
+    for row in review_rows:
+        lines.append(
+            "| "
+            f"{row['strategy_group_id']} | "
+            f"{row['layer']} | "
+            f"{row['samples']} | "
+            f"{row['review_signals']} | "
+            f"{row['quiet_no_action']} | "
+            f"{row['revise']} | "
+            f"{row['boundary']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Checks",
+            "",
+        ]
+    )
     for name, ok in sorted(packet.checks.items()):
         lines.append(f"- {name}: {'是' if ok else '否'}")
     lines.extend(
