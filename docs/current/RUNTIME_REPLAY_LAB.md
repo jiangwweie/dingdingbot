@@ -33,12 +33,13 @@ to iterate. It is not an execution authority.
 
 | Item | Current scope |
 | --- | --- |
-| First StrategyGroup | `MPG-001` |
+| First StrategyGroup | `MPG-001` remains the L4 live-order replay baseline |
+| L2 observation expansion | `BTPC-001` has a shadow replay corpus for no-action / would-enter diagnostics |
 | Runtime source | local domain contract and local fixture files |
 | Report runner | `scripts/run_strategygroup_runtime_replay_lab.py` |
 | Dry-run integration | `scripts/runtime_dry_run_audit_chain.py` includes replay-lab validation |
 | Output intent | local audit packet and Owner-readable local progress note |
-| Replay corpus | `MPG-001` now has eight local replay windows |
+| Replay corpus | `MPG-001` has eight local replay windows; `BTPC-001` has five L2 shadow replay windows |
 | Post-submit simulator | local matrix covers accepted, failed-protection, partial-fill, reject, closed, and still-open shapes |
 | Cost review | fee, slippage, funding, min-qty/step-size, and net-edge note fields are review inputs only |
 | Server deployment | out of scope for the P0.5 replay/simulator checkpoint |
@@ -118,6 +119,25 @@ not_submit_authority=true
 These fields support review and profitability iteration. They do not authorize
 submit.
 
+## BTPC-001 L2 Shadow Replay Corpus
+
+`BTPC-001` is not an L4 real-order StrategyGroup. Its replay corpus exists to
+make broader opportunity discovery visible while the first bounded live-order
+closure still waits on `MPG-001`.
+
+The current local corpus covers five L2 shadow windows:
+
+| Case | Purpose |
+| --- | --- |
+| `bear_pullback_would_enter` | Shows a short-side would-enter observation that may reach L2 review shape |
+| `no_signal_bear_trend_not_ready` | Proves the strategy can stay visible without producing a candidate |
+| `strong_uptrend_conflict` | Proves the short-side disable classifier blocks review promotion |
+| `missing_derivatives_context` | Proves missing derivatives facts block L2 shadow evidence |
+| `stale_signal` | Proves freshness rejection before promotion review |
+
+The would-enter case may reach local prepare/review shape, but it must not reach
+FinalGate, Operation Layer, exchange write, or real order authority.
+
 ## Post-Submit Simulator Matrix
 
 The local post-submit simulator matrix covers:
@@ -171,6 +191,7 @@ Operation Layer, protection, reconciliation, settlement, and review.
 | MPG replay sample | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-sample.json` |
 | MPG replay corpus | `docs/current/strategy-group-handoffs/MPG-001/replay/mpg-001-replay-corpus.json` |
 | MPG synthetic fixtures | `docs/current/strategy-group-handoffs/MPG-001/replay/synthetic-signal-fixtures.json` |
+| BTPC L2 shadow replay corpus | `docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json` |
 | Post-submit simulator matrix | `docs/current/strategy-group-handoffs/MPG-001/replay/post-submit-simulator-matrix.json` |
 | Unit tests | `tests/unit/test_strategygroup_runtime_replay_lab.py` |
 | Dry-run audit tests | `tests/unit/test_runtime_dry_run_audit_chain.py` |
@@ -180,13 +201,14 @@ Operation Layer, protection, reconciliation, settlement, and review.
 The current P0.5 checkpoint is accepted when:
 
 1. `MPG-001` replay corpus validates locally.
-2. The synthetic fixture set covers no-signal, fresh-pass, stale, missing-fact,
+2. `BTPC-001` L2 shadow replay corpus validates locally without L4 authority.
+3. The synthetic fixture set covers no-signal, fresh-pass, stale, missing-fact,
    conflict, protection-missing, and profile-boundary branches.
-3. Post-submit simulator matrix covers accepted, failed-protection, partial-fill,
+4. Post-submit simulator matrix covers accepted, failed-protection, partial-fill,
    reject, closed-by-SL, closed-by-TP1, and still-open shapes.
-4. Cost-review fields are present as review inputs only.
-5. Runtime dry-run audit exposes replay-lab checks in the unified packet.
-6. All replay and dry-run paths prove:
+5. Cost-review fields are present as review inputs only.
+6. Runtime dry-run audit exposes replay-lab checks in the unified packet.
+7. All replay and dry-run paths prove:
 
 ```text
 no Tokyo deploy
@@ -210,5 +232,5 @@ larger local replay/review corpus:
 | --- | --- |
 | More MPG historical windows | Better entry/exit review before live signals arrive |
 | Better cost, slippage, and funding estimates | Better estimate of whether gross edge can survive execution friction |
-| Cross-StrategyGroup replay after first live loop | Avoid expanding strategy count before the shared live path proves itself |
+| Cross-StrategyGroup replay at L2 only | Add no-action / would-enter diagnostics without expanding real-order scope |
 | Simulator-to-review scoring | Turn fill/protection/reconciliation outcomes into promote/revise/park evidence |

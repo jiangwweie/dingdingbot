@@ -30,6 +30,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "runtime_replay_lab_checked": True,
         "mpg001_replay_sample_checked": True,
         "mpg001_replay_corpus_checked": True,
+        "btpc001_l2_shadow_replay_checked": True,
         "synthetic_signal_fixture_set_checked": True,
         "post_submit_simulator_matrix_checked": True,
         "cost_review_skeleton_checked": True,
@@ -81,6 +82,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "runtime_replay_lab_checked": True,
         "mpg001_replay_sample_checked": True,
         "mpg001_replay_corpus_checked": True,
+        "btpc001_l2_shadow_replay_checked": True,
         "synthetic_signal_fixture_set_checked": True,
         "post_submit_simulator_matrix_checked": True,
         "cost_review_skeleton_checked": True,
@@ -269,10 +271,17 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert replay_lab["strategy_group_id"] == "MPG-001"
     assert replay_lab["checks"]["mpg001_replay_sample_present"] is True
     assert replay_lab["checks"]["mpg001_replay_corpus_cases_present"] is True
+    assert replay_lab["checks"]["btpc001_l2_shadow_replay_cases_present"] is True
+    assert replay_lab["checks"]["btpc001_l2_would_enter_review_shape_present"] is True
+    assert (
+        replay_lab["checks"]["btpc001_l2_blocked_cases_do_not_reach_operation_layer"]
+        is True
+    )
     assert replay_lab["checks"]["synthetic_fixture_cases_present"] is True
     assert replay_lab["checks"]["post_submit_simulator_cases_present"] is True
     assert replay_lab["checks"]["cost_review_skeleton_present"] is True
     assert replay_lab["checks"]["external_framework_sidecar_only"] is True
+    assert replay_lab["l2_shadow_replay_samples"]
     assert replay_lab["post_submit_simulator_matrix"]
     assert replay_lab["safety_invariants"]["exchange_write_called"] is False
     assert replay_lab["safety_invariants"]["real_order_created"] is False

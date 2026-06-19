@@ -38,6 +38,13 @@ EXPECTED_MPG001_REPLAY_CORPUS_CASES = {
     "active_position_conflict",
     "protection_missing",
 }
+EXPECTED_BTPC001_L2_REPLAY_CASES = {
+    "bear_pullback_would_enter",
+    "no_signal_bear_trend_not_ready",
+    "strong_uptrend_conflict",
+    "missing_derivatives_context",
+    "stale_signal",
+}
 EXPECTED_POST_SUBMIT_SIMULATOR_CASES = {
     "entry_accepted_protection_ok",
     "entry_filled_sl_creation_failed",
@@ -141,7 +148,7 @@ class StrategyGroupReplayEvent(StrategyGroupReplayModel):
         if self.event_kind == ReplayEventKind.HISTORICAL_WINDOW:
             known_historical_cases = EXPECTED_MPG001_REPLAY_CORPUS_CASES | {
                 "historical_momentum_continuation_sample",
-            }
+            } | EXPECTED_BTPC001_L2_REPLAY_CASES
             if self.fixture_case not in known_historical_cases:
                 raise ValueError("unknown historical replay case")
         return self
@@ -182,6 +189,9 @@ class StrategyGroupReplayReport(StrategyGroupReplayModel):
     generated_at_ms: int = Field(ge=0)
     strategy_group_id: Literal["MPG-001"]
     replay_samples: list[StrategyGroupReplayEvent] = Field(default_factory=list)
+    l2_shadow_replay_samples: list[StrategyGroupReplayEvent] = Field(
+        default_factory=list
+    )
     synthetic_fixtures: list[StrategyGroupReplayEvent] = Field(default_factory=list)
     post_submit_simulator_matrix: list[StrategyGroupPostSubmitSimulatorCase] = Field(
         default_factory=list
@@ -220,6 +230,7 @@ def _base_stage_results(
 
 def _event(
     *,
+    strategy_group_id: str = "MPG-001",
     event_id: str,
     fixture_case: str,
     event_kind: ReplayEventKind,
@@ -240,7 +251,7 @@ def _event(
 ) -> StrategyGroupReplayEvent:
     return StrategyGroupReplayEvent(
         event_id=event_id,
-        strategy_group_id="MPG-001",
+        strategy_group_id=strategy_group_id,
         fixture_case=fixture_case,
         event_kind=event_kind,
         symbol=symbol,
@@ -490,6 +501,152 @@ def mpg001_replay_corpus(*, observed_at_ms: int) -> list[StrategyGroupReplayEven
     ]
 
 
+def btpc001_l2_shadow_replay_corpus(
+    *, observed_at_ms: int
+) -> list[StrategyGroupReplayEvent]:
+    blocked_stage = {
+        "prepare_chain_ready": False,
+        "operation_layer_shape_reachable": False,
+    }
+    return [
+        _event(
+            strategy_group_id="BTPC-001",
+            event_id="btpc-001-l2-bear-pullback-would-enter",
+            fixture_case="bear_pullback_would_enter",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="SOLUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 10_000,
+            signal_confidence=Decimal("0.57"),
+            signal_status="would_enter_observe_only",
+            required_facts_ready=True,
+            blocker_class="review_only_warning",
+            expected_owner_state="running",
+            prepare_chain_ready=True,
+            operation_layer_shape_reachable=False,
+            simulated_exit_outcome="l2_shadow_review_only_no_submit",
+            cost_review=_cost_review(
+                fee="0.014",
+                slippage="0.041",
+                funding="0.002",
+                min_qty_step="review_only_exchange_rules_shape_present",
+                note="BTPC L2 would-enter sample expands observation coverage without L4 authority",
+            ),
+            review_recommendation=ReplayReviewRecommendation.KEEP_OBSERVING,
+            notes=[
+                "L2 shadow candidate observation only.",
+                "This can create review evidence but cannot enter FinalGate or Operation Layer.",
+            ],
+        ),
+        _event(
+            strategy_group_id="BTPC-001",
+            event_id="btpc-001-l2-no-signal-bear-trend-not-ready",
+            fixture_case="no_signal_bear_trend_not_ready",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="ETHUSDT",
+            side="none",
+            observed_at_ms=observed_at_ms + 11_000,
+            signal_confidence=Decimal("0.22"),
+            signal_status="no_signal",
+            required_facts_ready=True,
+            blocker_class="waiting_for_market",
+            expected_owner_state="waiting_for_opportunity",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_no_signal",
+                note=(
+                    "no-signal replay keeps BTPC observation visible without "
+                    "creating candidate authority"
+                ),
+            ),
+            review_recommendation=ReplayReviewRecommendation.KEEP_OBSERVING,
+            notes=["Bear trend context was not mature enough for would-enter."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BTPC-001",
+            event_id="btpc-001-l2-strong-uptrend-conflict",
+            fixture_case="strong_uptrend_conflict",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="BTCUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 12_000,
+            signal_confidence=Decimal("0.54"),
+            signal_status="signal_conflict",
+            required_facts_ready=True,
+            blocker_class="review_only_warning",
+            expected_owner_state="running",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_conflict",
+                note=(
+                    "strong-uptrend disable classifier blocks BTPC L2 review "
+                    "promotion, not P0 live readiness"
+                ),
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Short-side BTPC signal must stay blocked during strong-uptrend conflict."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BTPC-001",
+            event_id="btpc-001-l2-missing-derivatives-context",
+            fixture_case="missing_derivatives_context",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="AVAXUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms + 13_000,
+            signal_confidence=Decimal("0.56"),
+            signal_status="would_enter_missing_required_facts",
+            required_facts_ready=False,
+            blocker_class="missing_fact",
+            expected_owner_state="temporarily_unavailable",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_evaluated_missing_derivatives_context",
+                note="BTPC requires derivatives context before L2 shadow evidence can be trusted",
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Missing OI/crowding context blocks L2 review readiness."],
+            **blocked_stage,
+        ),
+        _event(
+            strategy_group_id="BTPC-001",
+            event_id="btpc-001-l2-stale-signal",
+            fixture_case="stale_signal",
+            event_kind=ReplayEventKind.HISTORICAL_WINDOW,
+            symbol="SOLUSDT",
+            side="short",
+            observed_at_ms=observed_at_ms - 300_000,
+            signal_confidence=Decimal("0.58"),
+            signal_status="stale_signal",
+            required_facts_ready=True,
+            blocker_class="missing_fact",
+            expected_owner_state="temporarily_unavailable",
+            simulated_exit_outcome="not_applicable",
+            cost_review=_cost_review(
+                fee="0",
+                slippage="0",
+                funding="0",
+                min_qty_step="not_applicable_stale_signal",
+                note="BTPC stale replay proves L2 freshness rejection before any promotion review",
+            ),
+            review_recommendation=ReplayReviewRecommendation.REVISE,
+            notes=["Stale BTPC observation cannot become shadow candidate evidence."],
+            **blocked_stage,
+        ),
+    ]
+
+
 def synthetic_signal_fixtures(*, observed_at_ms: int) -> list[StrategyGroupReplayEvent]:
     blocked_stage = {
         "prepare_chain_ready": False,
@@ -731,17 +888,46 @@ def build_mpg001_replay_lab_packet(
     *, generated_at_ms: int
 ) -> StrategyGroupReplayReport:
     replay_samples = mpg001_replay_corpus(observed_at_ms=generated_at_ms)
+    l2_shadow_samples = btpc001_l2_shadow_replay_corpus(
+        observed_at_ms=generated_at_ms
+    )
     fixtures = synthetic_signal_fixtures(observed_at_ms=generated_at_ms)
     simulator_matrix = post_submit_simulator_matrix()
     replay_cases = {item.fixture_case for item in replay_samples}
+    btpc_cases = {item.fixture_case for item in l2_shadow_samples}
     fixture_cases = {item.fixture_case for item in fixtures}
     fresh_pass = next(item for item in fixtures if item.fixture_case == "fresh_signal_pass")
     blocked_fixtures = [item for item in fixtures if item.fixture_case != "fresh_signal_pass"]
+    btpc_would_enter = next(
+        item
+        for item in l2_shadow_samples
+        if item.fixture_case == "bear_pullback_would_enter"
+    )
+    btpc_blocked = [
+        item
+        for item in l2_shadow_samples
+        if item.fixture_case != "bear_pullback_would_enter"
+    ]
 
     checks = {
         "mpg001_replay_sample_present": bool(replay_samples),
         "mpg001_replay_corpus_cases_present": (
             replay_cases == EXPECTED_MPG001_REPLAY_CORPUS_CASES
+        ),
+        "btpc001_l2_shadow_replay_cases_present": (
+            btpc_cases == EXPECTED_BTPC001_L2_REPLAY_CASES
+        ),
+        "btpc001_l2_would_enter_review_shape_present": (
+            btpc_would_enter.signal_status == "would_enter_observe_only"
+            and btpc_would_enter.required_facts_ready is True
+            and btpc_would_enter.stage_results.get("prepare_chain_ready") is True
+            and btpc_would_enter.stage_results.get("operation_layer_shape_reachable")
+            is False
+            and btpc_would_enter.real_order_allowed is False
+        ),
+        "btpc001_l2_blocked_cases_do_not_reach_operation_layer": all(
+            item.stage_results.get("operation_layer_shape_reachable") is False
+            for item in btpc_blocked
         ),
         "synthetic_fixture_cases_present": fixture_cases
         == EXPECTED_SYNTHETIC_FIXTURE_CASES,
@@ -759,7 +945,7 @@ def build_mpg001_replay_lab_packet(
             item.cost_review.not_submit_authority
             and item.cost_review.min_qty_step_size_impact
             and item.cost_review.net_edge_note
-            for item in replay_samples
+            for item in [*replay_samples, *l2_shadow_samples]
         ),
         "fresh_pass_reaches_prepare_chain": (
             fresh_pass.stage_results.get("prepare_chain_ready") is True
@@ -778,7 +964,7 @@ def build_mpg001_replay_lab_packet(
             and not item.real_order_allowed
             and not item.exchange_write_allowed
             and not item.operation_layer_submit_allowed
-            for item in [*replay_samples, *fixtures]
+            for item in [*replay_samples, *l2_shadow_samples, *fixtures]
         ),
     }
     blockers = [name for name, ok in checks.items() if ok is not True]
@@ -788,6 +974,7 @@ def build_mpg001_replay_lab_packet(
         generated_at_ms=generated_at_ms,
         strategy_group_id="MPG-001",
         replay_samples=replay_samples,
+        l2_shadow_replay_samples=l2_shadow_samples,
         synthetic_fixtures=fixtures,
         post_submit_simulator_matrix=simulator_matrix,
         checks=checks,
@@ -799,8 +986,18 @@ def build_mpg001_replay_lab_packet(
             ),
             summary_lines=[
                 "MPG-001 replay corpus is available.",
-                "Synthetic fixtures cover fresh, stale, missing fact, conflict, protection, and profile-boundary cases.",
-                "Post-submit simulator covers accepted, failed-protection, partial-fill, reject, closed, and still-open shapes.",
+                (
+                    "BTPC-001 L2 shadow replay corpus expands opportunity "
+                    "coverage without L4 authority."
+                ),
+                (
+                    "Synthetic fixtures cover fresh, stale, missing fact, "
+                    "conflict, protection, and profile-boundary cases."
+                ),
+                (
+                    "Post-submit simulator covers accepted, failed-protection, "
+                    "partial-fill, reject, closed, and still-open shapes."
+                ),
                 "Cost/slippage/funding fields are review inputs only.",
                 "Replay output is non-executing and cannot authorize a real order.",
             ],

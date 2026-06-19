@@ -3871,6 +3871,21 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
             )
             is True
         ),
+        "btpc001_l2_shadow_replay_checked": (
+            runtime_replay_lab.get("status") == "passed"
+            and runtime_replay_lab.get("checks", {}).get(
+                "btpc001_l2_shadow_replay_cases_present"
+            )
+            is True
+            and runtime_replay_lab.get("checks", {}).get(
+                "btpc001_l2_would_enter_review_shape_present"
+            )
+            is True
+            and runtime_replay_lab.get("checks", {}).get(
+                "btpc001_l2_blocked_cases_do_not_reach_operation_layer"
+            )
+            is True
+        ),
         "synthetic_signal_fixture_set_checked": (
             runtime_replay_lab.get("status") == "passed"
             and runtime_replay_lab.get("checks", {}).get(
@@ -4082,6 +4097,9 @@ def build_audit_chain(output_dir: Path) -> dict[str, Any]:
         ],
         "mpg001_replay_corpus_checked": checks[
             "mpg001_replay_corpus_checked"
+        ],
+        "btpc001_l2_shadow_replay_checked": checks[
+            "btpc001_l2_shadow_replay_checked"
         ],
         "synthetic_signal_fixture_set_checked": checks[
             "synthetic_signal_fixture_set_checked"

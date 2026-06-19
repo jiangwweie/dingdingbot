@@ -608,6 +608,22 @@ and the remaining blockers are market-dependent.
 | Verification | `94 passed` for dispatcher, systemd unit, live closure evidence, execution-chain closure, and StrategyGroup goal-status tests |
 | Safety | This checkpoint did not call Tokyo, FinalGate, Operation Layer, exchange write, OrderLifecycle, withdrawal, transfer, secrets mutation, live profile mutation, order-sizing mutation, or real order |
 
+### 2026-06-19 BTPC L2 Replay-to-Review Expansion
+
+The P0.5 replay lane now covers `BTPC-001` as an L2 shadow-candidate
+observation StrategyGroup. This expands no-action / would-enter diagnostics
+without changing the P0 L4 real-order lane.
+
+| Item | Evidence |
+| --- | --- |
+| BTPC L2 corpus | `docs/current/strategy-group-handoffs/BTPC-001/replay/btpc-001-l2-replay-corpus.json` covers `bear_pullback_would_enter`, `no_signal_bear_trend_not_ready`, `strong_uptrend_conflict`, `missing_derivatives_context`, and `stale_signal` |
+| Replay contract | `src/domain/strategygroup_runtime_replay.py` validates `BTPC-001` L2 replay events and keeps them non-executing |
+| Local runner | `scripts/run_strategygroup_runtime_replay_lab.py` now reports `L2 shadow replay samples: 5` |
+| Dry-run audit | `runtime-dry-run-audit-chain` exposes `btpc001_l2_shadow_replay_checked=true` |
+| L4 boundary | `MPG-001` remains the only L4 real-order eligible StrategyGroup; `BTPC-001` remains L2 shadow-candidate observation only |
+| Verification | `python3 -m py_compile src/domain/strategygroup_runtime_replay.py scripts/run_strategygroup_runtime_replay_lab.py scripts/runtime_dry_run_audit_chain.py`; `/opt/homebrew/bin/pytest tests/unit/test_strategygroup_runtime_replay_lab.py tests/unit/test_runtime_dry_run_audit_chain.py -q`; replay report and dry-run audit both `status=passed` |
+| Safety | Local replay/test work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

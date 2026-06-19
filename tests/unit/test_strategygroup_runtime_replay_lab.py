@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.domain.strategygroup_runtime_replay import (
+    EXPECTED_BTPC001_L2_REPLAY_CASES,
     EXPECTED_SYNTHETIC_FIXTURE_CASES,
     EXPECTED_MPG001_REPLAY_CORPUS_CASES,
     EXPECTED_POST_SUBMIT_SIMULATOR_CASES,
@@ -21,6 +22,9 @@ def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> Non
     assert packet.checks == {
         "mpg001_replay_sample_present": True,
         "mpg001_replay_corpus_cases_present": True,
+        "btpc001_l2_shadow_replay_cases_present": True,
+        "btpc001_l2_would_enter_review_shape_present": True,
+        "btpc001_l2_blocked_cases_do_not_reach_operation_layer": True,
         "synthetic_fixture_cases_present": True,
         "post_submit_simulator_cases_present": True,
         "post_submit_simulator_non_executing": True,
@@ -51,6 +55,47 @@ def test_mpg001_replay_lab_contract_is_non_executing_and_owner_readable() -> Non
     )
 
 
+def test_btpc001_l2_shadow_replay_expands_observation_without_execution() -> None:
+    packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
+
+    cases = {item.fixture_case for item in packet.l2_shadow_replay_samples}
+    assert cases == EXPECTED_BTPC001_L2_REPLAY_CASES
+    assert packet.checks["btpc001_l2_shadow_replay_cases_present"] is True
+    assert packet.checks["btpc001_l2_would_enter_review_shape_present"] is True
+    assert (
+        packet.checks["btpc001_l2_blocked_cases_do_not_reach_operation_layer"]
+        is True
+    )
+
+    would_enter = next(
+        item
+        for item in packet.l2_shadow_replay_samples
+        if item.fixture_case == "bear_pullback_would_enter"
+    )
+    assert would_enter.strategy_group_id == "BTPC-001"
+    assert would_enter.signal_status == "would_enter_observe_only"
+    assert would_enter.required_facts_ready is True
+    assert would_enter.stage_results["prepare_chain_ready"] is True
+    assert would_enter.stage_results["operation_layer_shape_reachable"] is False
+    assert would_enter.not_live_market_signal is True
+    assert would_enter.not_execution_authority is True
+    assert would_enter.operation_layer_submit_allowed is False
+    assert would_enter.exchange_write_allowed is False
+    assert would_enter.real_order_allowed is False
+
+    blocked = [
+        item
+        for item in packet.l2_shadow_replay_samples
+        if item.fixture_case != "bear_pullback_would_enter"
+    ]
+    assert blocked
+    assert all(
+        item.stage_results["operation_layer_shape_reachable"] is False
+        for item in blocked
+    )
+    assert all(item.real_order_allowed is False for item in packet.l2_shadow_replay_samples)
+
+
 def test_mpg001_replay_lab_covers_required_synthetic_fixtures() -> None:
     packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
 
@@ -72,7 +117,10 @@ def test_mpg001_replay_lab_covers_required_synthetic_fixtures() -> None:
     ]
     assert blocked
     assert all(item.stage_results["operation_layer_shape_reachable"] is False for item in blocked)
-    assert all(item.stage_results["real_submit_allowed"] is False for item in packet.synthetic_fixtures)
+    assert all(
+        item.stage_results["real_submit_allowed"] is False
+        for item in packet.synthetic_fixtures
+    )
     assert all(item.not_live_market_signal is True for item in packet.synthetic_fixtures)
 
 
@@ -183,10 +231,50 @@ def test_owner_markdown_summarizes_replay_corpus_post_submit_and_cost_review() -
     text = _owner_markdown(packet)
 
     assert "- Replay samples: 8" in text
+    assert "- L2 shadow replay samples: 5" in text
     assert "- Post-submit simulator cases: 7" in text
     assert "- Cost review skeleton: present" in text
     assert "- Exchange write: 否" in text
     assert "- 接近真实订单: 否" in text
+
+
+def test_tracked_btpc001_l2_shadow_replay_corpus_exists() -> None:
+    replay_path = Path(
+        "docs/current/strategy-group-handoffs/BTPC-001/replay/"
+        "btpc-001-l2-replay-corpus.json"
+    )
+    corpus = json.loads(replay_path.read_text(encoding="utf-8"))
+
+    assert corpus["schema_version"] == "brc.strategygroup.l2_shadow_replay_corpus.v1"
+    assert corpus["strategy_group_id"] == "BTPC-001"
+    assert corpus["scope"] == "l2_shadow_candidate_observation_only"
+    assert corpus["live_order_eligible"] is False
+    assert {item["fixture_case"] for item in corpus["replay_samples"]} == (
+        EXPECTED_BTPC001_L2_REPLAY_CASES
+    )
+    assert any(
+        item["fixture_case"] == "bear_pullback_would_enter"
+        and item["prepare_chain_ready"] is True
+        and item["operation_layer_shape_reachable"] is False
+        for item in corpus["replay_samples"]
+    )
+    assert all(item["replay_only"] is True for item in corpus["replay_samples"])
+    assert all(
+        item["not_live_market_signal"] is True for item in corpus["replay_samples"]
+    )
+    assert all(
+        item["not_execution_authority"] is True for item in corpus["replay_samples"]
+    )
+    assert all(
+        item["operation_layer_submit_allowed"] is False
+        for item in corpus["replay_samples"]
+    )
+    assert all(item["exchange_write_allowed"] is False for item in corpus["replay_samples"])
+    assert all(item["real_order_allowed"] is False for item in corpus["replay_samples"])
+    assert all(
+        item["cost_review"]["not_submit_authority"] is True
+        for item in corpus["replay_samples"]
+    )
 
 
 def test_tracked_mpg001_replay_corpus_and_post_submit_matrix_exist() -> None:
