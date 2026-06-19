@@ -871,6 +871,25 @@ authority.
 | Verification | `tests/unit/test_reference_price_action_evaluators.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert classifier execution behavior, execution rollups, Owner markdown, and no live-authority expansion |
 | Safety | Local domain/review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 LSR/VCB Post-Revision Replay Review Checkpoint
+
+The P0.5 loop now verifies the revised LSR/VCB classifiers with deterministic
+post-revision replay cases before any L2 promotion review. This closes the
+local loop from "revision executed" to "revision behavior replay-checked" while
+keeping the real P0 live path waiting for a real selected StrategyGroup fresh
+signal.
+
+| Item | Evidence |
+| --- | --- |
+| Review artifact | `latest-post-revision-replay-review.json` reports `status=passed`, `review_case_count=5`, `passed_case_count=5`, `failed_case_count=0`, `would_enter_case_count=2`, and `disable_or_no_action_case_count=3` |
+| LSR coverage | `short_revival_short_would_enter` returns `would_enter/short`; `old_long_preview_disabled` returns `no_action/none` |
+| VCB coverage | `true_breakout_with_volume_would_enter` returns `would_enter/long`; `false_breakout_reversal_disabled` and `volume_expansion_missing_disabled` return `no_action/none` |
+| Decision-loop handoff | When LSR/VCB revision rows are active, the decision loop can consume the passed review and advance to `record_lsr001_vcb001_post_revision_quality_before_l2`; the latest local queue has shifted to `continue_btpc_l2_shadow_fact_quality_review` because the current observed set is BTPC/RBR |
+| Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py` now includes `post_revision_replay_review` after L2 tier-policy review and keeps passed review cases non-blocking |
+| Boundary | Post-revision replay review is not L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_post_revision_replay_review.py`, `tests/unit/test_strategygroup_opportunity_decision_loop.py`, and `tests/unit/test_strategygroup_runtime_local_monitor_sequence.py` assert review cases, next-step handoff, local monitor integration, and no live-authority expansion |
+| Safety | Local replay/review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

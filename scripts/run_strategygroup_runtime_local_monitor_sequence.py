@@ -68,6 +68,12 @@ DEFAULT_L2_TIER_POLICY_REVIEW_JSON = (
 DEFAULT_L2_TIER_POLICY_REVIEW_MD = (
     REPO_ROOT / "output/runtime-monitor/latest-l2-tier-policy-review.md"
 )
+DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.json"
+)
+DEFAULT_POST_REVISION_REPLAY_REVIEW_MD = (
+    REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.md"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-local-monitor-sequence.json"
 )
@@ -108,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
         l2_intake_dry_run_md=Path(args.l2_intake_dry_run_md),
         l2_tier_policy_review_json=Path(args.l2_tier_policy_review_json),
         l2_tier_policy_review_md=Path(args.l2_tier_policy_review_md),
+        post_revision_replay_review_json=Path(
+            args.post_revision_replay_review_json
+        ),
+        post_revision_replay_review_md=Path(args.post_revision_replay_review_md),
     )
     owner_progress_text = _owner_progress_text(report)
     if args.output_json:
@@ -151,6 +161,10 @@ def build_local_monitor_sequence_report(
     l2_intake_dry_run_md: Path = DEFAULT_L2_INTAKE_DRY_RUN_MD,
     l2_tier_policy_review_json: Path = DEFAULT_L2_TIER_POLICY_REVIEW_JSON,
     l2_tier_policy_review_md: Path = DEFAULT_L2_TIER_POLICY_REVIEW_MD,
+    post_revision_replay_review_json: Path = (
+        DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON
+    ),
+    post_revision_replay_review_md: Path = DEFAULT_POST_REVISION_REPLAY_REVIEW_MD,
     command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     runner = command_runner or _run_command
@@ -312,6 +326,23 @@ def build_local_monitor_sequence_report(
         )
     )
 
+    post_revision_replay_review_command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/build_strategygroup_post_revision_replay_review.py"),
+        "--output-json",
+        str(post_revision_replay_review_json),
+        "--output-owner-progress",
+        str(post_revision_replay_review_md),
+    ]
+    steps.append(
+        _run_step(
+            "post_revision_replay_review",
+            post_revision_replay_review_command,
+            post_revision_replay_review_json,
+            runner,
+        )
+    )
+
     packets = {
         step["name"]: step.get("packet") if isinstance(step.get("packet"), dict) else {}
         for step in steps
@@ -394,6 +425,9 @@ def build_local_monitor_sequence_report(
             "l2_readiness_review_json": str(l2_readiness_review_json),
             "l2_intake_dry_run_json": str(l2_intake_dry_run_json),
             "l2_tier_policy_review_json": str(l2_tier_policy_review_json),
+            "post_revision_replay_review_json": str(
+                post_revision_replay_review_json
+            ),
         },
     }
 
@@ -931,6 +965,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--l2-tier-policy-review-md",
         default=str(DEFAULT_L2_TIER_POLICY_REVIEW_MD),
+    )
+    parser.add_argument(
+        "--post-revision-replay-review-json",
+        default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON),
+    )
+    parser.add_argument(
+        "--post-revision-replay-review-md",
+        default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_MD),
     )
     parser.add_argument(
         "--signal-coverage-source",

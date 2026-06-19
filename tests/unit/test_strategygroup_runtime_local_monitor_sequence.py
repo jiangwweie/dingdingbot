@@ -30,6 +30,32 @@ def _write_output(command: list[str], payload: dict) -> None:
     output_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_passed_post_revision_review(command: list[str]) -> None:
+    _write_output(
+        command,
+        {
+            "status": "passed",
+            "interaction": {
+                "level": "L0_local_post_revision_replay_review",
+                "remote_interaction_count": 0,
+                "mutates_remote_files": False,
+                "approaches_real_order": False,
+                "calls_finalgate": False,
+                "calls_operation_layer": False,
+                "calls_exchange_write": False,
+                "places_order": False,
+            },
+            "safety_invariants": {
+                "server_files_mutated": False,
+                "final_gate_called": False,
+                "operation_layer_called": False,
+                "exchange_write_called": False,
+                "order_created": False,
+            },
+        },
+    )
+
+
 def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> None:
     module = _load_module()
     calls: list[str] = []
@@ -37,6 +63,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
         calls.append(script)
+        if script == "build_strategygroup_post_revision_replay_review.py":
+            _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
                 command,
@@ -193,6 +222,8 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
         l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
+        post_revision_replay_review_json=tmp_path / "post-revision-review.json",
+        post_revision_replay_review_md=tmp_path / "post-revision-review.md",
         command_runner=fake_runner,
     )
 
@@ -207,6 +238,7 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
         "build_strategygroup_l2_readiness_review.py",
         "run_strategygroup_l2_intake_dry_run.py",
         "run_strategygroup_l2_tier_policy_review.py",
+        "build_strategygroup_post_revision_replay_review.py",
     ]
     assert report["status"] == "waiting_for_market"
     assert report["checks"]["blockers"] == []
@@ -223,6 +255,9 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        if script == "build_strategygroup_post_revision_replay_review.py":
+            _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -348,6 +383,8 @@ def test_local_monitor_sequence_surfaces_completion_non_market_gap(
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
         l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
+        post_revision_replay_review_json=tmp_path / "post-revision-review.json",
+        post_revision_replay_review_md=tmp_path / "post-revision-review.md",
         command_runner=fake_runner,
     )
 
@@ -365,6 +402,9 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        if script == "build_strategygroup_post_revision_replay_review.py":
+            _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(
                 command,
@@ -552,6 +592,8 @@ def test_local_monitor_sequence_treats_stale_cache_as_refresh_not_blocker(
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
         l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
+        post_revision_replay_review_json=tmp_path / "post-revision-review.json",
+        post_revision_replay_review_md=tmp_path / "post-revision-review.md",
         command_runner=fake_runner,
     )
 
@@ -572,6 +614,9 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        if script == "build_strategygroup_post_revision_replay_review.py":
+            _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -717,6 +762,8 @@ def test_local_monitor_sequence_surfaces_signal_coverage_gap(
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
         l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
+        post_revision_replay_review_json=tmp_path / "post-revision-review.json",
+        post_revision_replay_review_md=tmp_path / "post-revision-review.md",
         command_runner=fake_runner,
     )
 
@@ -744,6 +791,9 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
 
     def fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
         script = Path(command[1]).name
+        if script == "build_strategygroup_post_revision_replay_review.py":
+            _write_passed_post_revision_review(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if script == "run_strategygroup_runtime_daily_check.py":
             _write_output(command, {"status": "waiting_for_market", "interaction": {}})
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -876,6 +926,8 @@ def test_local_monitor_sequence_clears_signal_gap_when_l2_already_enabled(
         l2_intake_dry_run_md=tmp_path / "l2-dry-run.md",
         l2_tier_policy_review_json=tmp_path / "l2-tier-review.json",
         l2_tier_policy_review_md=tmp_path / "l2-tier-review.md",
+        post_revision_replay_review_json=tmp_path / "post-revision-review.json",
+        post_revision_replay_review_md=tmp_path / "post-revision-review.md",
         command_runner=fake_runner,
     )
 

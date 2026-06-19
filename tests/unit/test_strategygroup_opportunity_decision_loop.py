@@ -431,6 +431,39 @@ def _replay_lab(*, include_rbr: bool = False) -> dict:
     }
 
 
+def _post_revision_review() -> dict:
+    return {
+        "status": "passed",
+        "decision": {
+            "post_revision_replay_review_passed": True,
+            "l2_promotion_recommended_now": False,
+            "l4_scope_change_recommended": False,
+            "real_order_scope_change_recommended": False,
+            "default_next_step": "record_lsr001_vcb001_post_revision_quality_before_l2",
+        },
+        "interaction": {
+            "level": "L0_local_post_revision_replay_review",
+            "remote_interaction_count": 0,
+            "mutates_remote_files": False,
+            "approaches_real_order": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "safety_invariants": {
+            "server_files_mutated": False,
+            "strategy_parameters_changed": False,
+            "tier_policy_changed": False,
+            "l4_real_order_scope_expanded": False,
+            "final_gate_called": False,
+            "operation_layer_called": False,
+            "order_created": False,
+            "exchange_write_called": False,
+        },
+    }
+
+
 def _cost_review() -> dict:
     return {
         "fee_estimate_usdt": "0.012",
@@ -773,6 +806,34 @@ def test_decision_loop_requires_replay_before_l2_when_missing():
     )
 
 
+def test_decision_loop_advances_after_post_revision_replay_review_passes():
+    module = _load_module()
+
+    packet = module.build_opportunity_decision_loop(
+        expansion_review_packet=_expansion_review(),
+        l2_readiness_packet=_l2_readiness(),
+        l2_intake_packet=_l2_intake(),
+        replay_lab_packet=_replay_lab(),
+        post_revision_review_packet=_post_revision_review(),
+    )
+
+    assert packet["status"] == "decision_loop_ready"
+    assert packet["source_status"]["post_revision_replay_review"] == "passed"
+    assert packet["counts"]["post_revision_replay_review_passed"] == 1
+    assert packet["decision"]["post_revision_replay_review_passed"] is True
+    assert packet["decision"]["default_next_step"] == (
+        "record_lsr001_vcb001_post_revision_quality_before_l2"
+    )
+    assert packet["counts"]["real_order_authorized_count"] == 0
+    assert packet["counts"]["l4_scope_change_recommended_count"] == 0
+    assert packet["interaction"]["remote_interaction_count"] == 0
+    assert packet["interaction"]["calls_finalgate"] is False
+    assert packet["interaction"]["calls_operation_layer"] is False
+    assert packet["interaction"]["calls_exchange_write"] is False
+    assert packet["interaction"]["places_order"] is False
+    assert packet["safety_invariants"]["exchange_write_called"] is False
+
+
 def test_decision_loop_blocks_forbidden_source_effects():
     module = _load_module()
     readiness = _l2_readiness()
@@ -798,12 +859,14 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     readiness_path = tmp_path / "readiness.json"
     intake_path = tmp_path / "intake.json"
     replay_path = tmp_path / "replay.json"
+    post_revision_path = tmp_path / "post-revision.json"
     output_path = tmp_path / "decision-loop.json"
     owner_path = tmp_path / "decision-loop.md"
     expansion_path.write_text(json.dumps(_expansion_review()), encoding="utf-8")
     readiness_path.write_text(json.dumps(_l2_readiness()), encoding="utf-8")
     intake_path.write_text(json.dumps(_l2_intake()), encoding="utf-8")
     replay_path.write_text(json.dumps(_replay_lab()), encoding="utf-8")
+    post_revision_path.write_text(json.dumps(_post_revision_review()), encoding="utf-8")
 
     exit_code = module.main(
         [
@@ -815,6 +878,8 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
             str(intake_path),
             "--replay-lab-json",
             str(replay_path),
+            "--post-revision-review-json",
+            str(post_revision_path),
             "--output-json",
             str(output_path),
             "--output-owner-progress",
@@ -840,3 +905,6 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     assert "Revision Tasks" in owner_text
     assert "Revision Ready" in owner_text
     assert "Revision Executed" in owner_text
+    assert file_payload["decision"]["default_next_step"] == (
+        "record_lsr001_vcb001_post_revision_quality_before_l2"
+    )

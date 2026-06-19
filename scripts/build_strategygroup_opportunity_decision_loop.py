@@ -33,6 +33,9 @@ DEFAULT_L2_INTAKE_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-l2-intake-dry-run.json"
 )
 DEFAULT_REPLAY_LAB_JSON = REPO_ROOT / "output/runtime-monitor/latest-runtime-replay-lab.json"
+DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON = (
+    REPO_ROOT / "output/runtime-monitor/latest-post-revision-replay-review.json"
+)
 DEFAULT_OUTPUT_JSON = (
     REPO_ROOT / "output/runtime-monitor/latest-opportunity-decision-loop.json"
 )
@@ -47,7 +50,9 @@ def build_opportunity_decision_loop(
     l2_readiness_packet: dict[str, Any],
     l2_intake_packet: dict[str, Any],
     replay_lab_packet: dict[str, Any],
+    post_revision_review_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    post_revision_review_packet = post_revision_review_packet or {}
     review_rows = _dict_rows(expansion_review_packet.get("review_rows"))
     readiness_by_group = {
         str(row.get("strategy_group_id") or "unknown"): row
@@ -83,6 +88,7 @@ def build_opportunity_decision_loop(
         l2_readiness_packet,
         l2_intake_packet,
         replay_lab_packet,
+        post_revision_review_packet,
     )
     status = (
         "blocked_forbidden_effect"
@@ -101,6 +107,7 @@ def build_opportunity_decision_loop(
             "l2_readiness": l2_readiness_packet.get("status"),
             "l2_intake": l2_intake_packet.get("status"),
             "replay_lab": replay_lab_packet.get("status"),
+            "post_revision_replay_review": post_revision_review_packet.get("status"),
         },
         "interaction": {
             "level": "L0_local_opportunity_decision_loop",
@@ -141,6 +148,9 @@ def build_opportunity_decision_loop(
             "real_order_authorized_count": 0,
             "l4_scope_change_recommended_count": 0,
             "forbidden_effect_count": len(forbidden_effects),
+            "post_revision_replay_review_passed": (
+                1 if _post_revision_review_passed(post_revision_review_packet) else 0
+            ),
         },
         "action_counts": dict(sorted(action_counts.items())),
         "decision_rows": decision_rows,
@@ -151,11 +161,15 @@ def build_opportunity_decision_loop(
             "real_order_scope_change_recommended": False,
             "l4_promotion_recommended": False,
             "tier_policy_change_recommended_now": False,
+            "post_revision_replay_review_passed": _post_revision_review_passed(
+                post_revision_review_packet
+            ),
             "default_next_step": _default_next_step(
                 decision_rows,
                 forbidden_effects,
                 work_queue,
                 strategy_quality_decisions,
+                post_revision_review_packet,
             ),
         },
         "operator_command_plan": {
@@ -1592,6 +1606,7 @@ def _default_next_step(
     forbidden_effects: list[str],
     work_queue: dict[str, Any],
     strategy_quality_decisions: dict[str, Any],
+    post_revision_review_packet: dict[str, Any],
 ) -> str:
     if forbidden_effects:
         return "stop_and_repair_forbidden_source_effects"
@@ -1603,6 +1618,12 @@ def _default_next_step(
     if strategy_quality_next and strategy_quality_next != (
         "continue_l2_shadow_and_observe_only_review"
     ):
+        post_revision_next = _post_revision_next_step(
+            strategy_quality_next=strategy_quality_next,
+            post_revision_review_packet=post_revision_review_packet,
+        )
+        if post_revision_next:
+            return post_revision_next
         return strategy_quality_next
     next_checkpoint = str(work_queue.get("next_local_checkpoint") or "")
     if next_checkpoint:
@@ -1637,6 +1658,34 @@ def _forbidden_effects(*packets: dict[str, Any]) -> list[str]:
             if safety.get(key) is True:
                 effects.append(f"packet_{index}.safety.{key}")
     return sorted(set(effects))
+
+
+def _post_revision_next_step(
+    *,
+    strategy_quality_next: str,
+    post_revision_review_packet: dict[str, Any],
+) -> str | None:
+    if strategy_quality_next != "run_lsr001_vcb001_post_revision_replay_review_before_l2":
+        return None
+    if not post_revision_review_packet:
+        return None
+    if _post_revision_review_passed(post_revision_review_packet):
+        return "record_lsr001_vcb001_post_revision_quality_before_l2"
+    if _packet_status(post_revision_review_packet) == "blocked":
+        return "repair_lsr001_vcb001_post_revision_replay_failures"
+    return None
+
+
+def _post_revision_review_passed(packet: dict[str, Any]) -> bool:
+    decision = _as_dict(packet.get("decision"))
+    return (
+        _packet_status(packet) == "passed"
+        and decision.get("post_revision_replay_review_passed") is True
+    )
+
+
+def _packet_status(packet: dict[str, Any]) -> str:
+    return str(packet.get("status") or "") if isinstance(packet, dict) else ""
 
 
 def _decision_table(rows: list[dict[str, Any]]) -> str:
@@ -1681,6 +1730,15 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_optional_json_object(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    try:
+        return _load_json_object(path)
+    except FileNotFoundError:
+        return {}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1689,6 +1747,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--l2-readiness-json", default=str(DEFAULT_L2_READINESS_JSON))
     parser.add_argument("--l2-intake-json", default=str(DEFAULT_L2_INTAKE_JSON))
     parser.add_argument("--replay-lab-json", default=str(DEFAULT_REPLAY_LAB_JSON))
+    parser.add_argument(
+        "--post-revision-review-json",
+        default=str(DEFAULT_POST_REVISION_REPLAY_REVIEW_JSON),
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OWNER_PROGRESS))
     args = parser.parse_args(argv)
@@ -1702,6 +1764,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
         l2_intake_packet=_load_json_object(Path(args.l2_intake_json).expanduser()),
         replay_lab_packet=_load_json_object(Path(args.replay_lab_json).expanduser()),
+        post_revision_review_packet=_load_optional_json_object(
+            Path(args.post_revision_review_json).expanduser()
+            if args.post_revision_review_json
+            else None
+        ),
     )
     payload = json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output_json:
