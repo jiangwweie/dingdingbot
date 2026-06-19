@@ -833,6 +833,25 @@ repair surface to execute and verify.
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts revision-task counts, task stages, validation commands, completion signals, Owner progress table, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 Strategy Quality Revision Completion State Checkpoint
+
+The P0.5 decision loop now distinguishes revision tasks that merely exist from
+revision tasks that are locally ready to execute and verify. This moves the
+loop from "write down the LSR/VCB repair work" to "prove the repair work has
+the replay/spec/cost acceptance surface needed for the next local revision
+checkpoint."
+
+| Item | Evidence |
+| --- | --- |
+| Revision readiness fields | `strategy_quality_decisions.rows[].revision_tasks[]` now emits `revision_status`, `revision_ready`, `acceptance_case_coverage_ready`, required entry/disable/cost-field counts, and `completion_blocker` |
+| Completion rollup | `strategy_quality_decisions.revision_completion.status=local_revision_completion_ready` when all revision tasks have coverage, required states/fields, and no-authority boundaries |
+| Current local run | `revision_task=7`, `revision_ready=7`, `classifier_revision_ready=4`, `economic_revision_ready=3`, `remaining_revision_blocker=0`, `real_order_authorized=0`, and `l4_scope_change_recommended=0` |
+| Next checkpoint | `decision.default_next_step=execute_lsr001_vcb001_local_revision_tasks_before_l2` |
+| Owner progress | The local Owner markdown adds `Revision Ready` beside `Revision Tasks` so readiness is visible without reading raw packets |
+| Boundary | Revision-ready is not strategy-parameter mutation, tier-policy mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts revision readiness counts, status rollups, acceptance-case coverage, entry/disable/cost-field counts, completion blockers, Owner markdown, and no live-authority expansion |
+| Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

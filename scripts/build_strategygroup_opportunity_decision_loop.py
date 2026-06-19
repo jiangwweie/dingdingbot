@@ -585,6 +585,12 @@ def _strategy_quality_decisions(
     revision_task_count = sum(
         len(row.get("revision_tasks") or []) for row in output_rows
     )
+    revision_ready_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("revision_ready") is True
+    )
     classifier_revision_task_count = sum(
         1
         for row in output_rows
@@ -596,6 +602,26 @@ def _strategy_quality_decisions(
         for row in output_rows
         for task in row.get("revision_tasks") or []
         if task.get("work_type") == "economic_replay_work"
+    )
+    classifier_revision_ready_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("work_type") == "classifier_or_rule_work"
+        and task.get("revision_ready") is True
+    )
+    economic_revision_ready_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("work_type") == "economic_replay_work"
+        and task.get("revision_ready") is True
+    )
+    remaining_revision_blocker_count = revision_task_count - revision_ready_count
+    revision_status_counts = Counter(
+        str(task.get("revision_status") or "unknown")
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
     )
     return {
         "status": "ready" if output_rows else "empty",
@@ -613,12 +639,32 @@ def _strategy_quality_decisions(
                 "needs_replay_before_quality_decision", 0
             ),
             "revision_task": revision_task_count,
+            "revision_ready": revision_ready_count,
             "classifier_revision_task": classifier_revision_task_count,
+            "classifier_revision_ready": classifier_revision_ready_count,
             "economic_revision_task": economic_revision_task_count,
+            "economic_revision_ready": economic_revision_ready_count,
+            "remaining_revision_blocker": remaining_revision_blocker_count,
             "real_order_authorized": 0,
             "l4_scope_change_recommended": 0,
         },
         "by_decision": dict(sorted(decision_counts.items())),
+        "by_revision_status": dict(sorted(revision_status_counts.items())),
+        "revision_completion": {
+            "status": _revision_completion_status(
+                revision_task_count=revision_task_count,
+                revision_ready_count=revision_ready_count,
+            ),
+            "revision_task_count": revision_task_count,
+            "revision_ready_count": revision_ready_count,
+            "classifier_revision_ready_count": classifier_revision_ready_count,
+            "economic_revision_ready_count": economic_revision_ready_count,
+            "remaining_revision_blocker_count": remaining_revision_blocker_count,
+            "not_l2_promotion_authority": True,
+            "not_l4_scope_change": True,
+            "real_order_authority": False,
+            "candidate_or_finalgate_authority": False,
+        },
         "rows": output_rows,
         "safety_invariants": {
             "local_strategy_quality_decision_only": True,
@@ -689,6 +735,16 @@ def _strategy_quality_decision_row(
         decision=decision,
         work_items=work_items,
     )
+    revision_ready_count = sum(
+        1 for task in revision_tasks if task.get("revision_ready") is True
+    )
+    revision_blockers = sorted(
+        {
+            str(task.get("completion_blocker"))
+            for task in revision_tasks
+            if task.get("completion_blocker")
+        }
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "current_tier": row.get("current_tier"),
@@ -708,6 +764,16 @@ def _strategy_quality_decision_row(
         },
         "revision_tasks": revision_tasks,
         "revision_task_count": len(revision_tasks),
+        "revision_ready_count": revision_ready_count,
+        "revision_completion": {
+            "status": _revision_completion_status(
+                revision_task_count=len(revision_tasks),
+                revision_ready_count=revision_ready_count,
+            ),
+            "ready_count": revision_ready_count,
+            "remaining_blocker_count": len(revision_tasks) - revision_ready_count,
+            "completion_blockers": revision_blockers,
+        },
         "not_l2_promotion_authority": True,
         "not_l4_scope_change": True,
         "real_order_authority": False,
@@ -729,6 +795,7 @@ def _revision_tasks_for_quality_decision(
         work_type = str(item.get("work_type") or "")
         if work_type not in {"classifier_or_rule_work", "economic_replay_work"}:
             continue
+        revision_state = _revision_task_state(item=item, work_type=work_type)
         tasks.append(
             {
                 "queue_id": item.get("queue_id"),
@@ -739,6 +806,7 @@ def _revision_tasks_for_quality_decision(
                 "completion_signal": item.get("completion_signal"),
                 "revision_stage": _revision_stage_for_work_type(work_type),
                 "coverage_status": item.get("coverage_status"),
+                **revision_state,
                 "real_order_authority": False,
                 "not_l2_promotion_authority": True,
                 "not_l4_scope_change": True,
@@ -746,6 +814,107 @@ def _revision_tasks_for_quality_decision(
             }
         )
     return tasks
+
+
+def _revision_task_state(*, item: dict[str, Any], work_type: str) -> dict[str, Any]:
+    if work_type == "classifier_or_rule_work":
+        return _classifier_revision_task_state(_as_dict(item.get("repair_spec")))
+    if work_type == "economic_replay_work":
+        return _economic_revision_task_state(_as_dict(item.get("economic_spec")))
+    return {
+        "revision_status": "revision_spec_not_applicable",
+        "revision_ready": False,
+        "acceptance_case_coverage_ready": False,
+        "required_entry_state_count": 0,
+        "required_disable_state_count": 0,
+        "required_cost_field_count": 0,
+        "completion_blocker": "unsupported_revision_work_type",
+    }
+
+
+def _classifier_revision_task_state(repair_spec: dict[str, Any]) -> dict[str, Any]:
+    coverage = _as_dict(repair_spec.get("replay_case_coverage"))
+    entry_states = [str(item) for item in repair_spec.get("required_entry_states") or []]
+    disable_states = [
+        str(item) for item in repair_spec.get("required_disable_states") or []
+    ]
+    no_authority_boundary = (
+        repair_spec.get("not_execution_authority") is True
+        and repair_spec.get("not_l2_promotion_authority") is True
+        and repair_spec.get("not_l4_scope_change") is True
+    )
+    blocker = None
+    if not repair_spec:
+        blocker = "repair_spec_missing"
+    elif repair_spec.get("status") != "local_repair_spec_ready":
+        blocker = "repair_spec_not_ready"
+    elif coverage.get("covered") is not True:
+        blocker = "acceptance_case_coverage_missing"
+    elif not entry_states:
+        blocker = "required_entry_states_missing"
+    elif not disable_states:
+        blocker = "required_disable_states_missing"
+    elif not no_authority_boundary:
+        blocker = "authority_boundary_missing"
+    return {
+        "revision_status": (
+            "local_revision_spec_ready"
+            if blocker is None
+            else "revision_spec_incomplete"
+        ),
+        "revision_ready": blocker is None,
+        "acceptance_case_coverage_ready": coverage.get("covered") is True,
+        "required_entry_state_count": len(entry_states),
+        "required_disable_state_count": len(disable_states),
+        "required_cost_field_count": 0,
+        "completion_blocker": blocker,
+    }
+
+
+def _economic_revision_task_state(economic_spec: dict[str, Any]) -> dict[str, Any]:
+    coverage = _as_dict(economic_spec.get("economic_case_coverage"))
+    cost_fields = [str(item) for item in economic_spec.get("required_cost_fields") or []]
+    no_authority_boundary = (
+        economic_spec.get("not_execution_authority") is True
+        and economic_spec.get("not_l2_promotion_authority") is True
+        and economic_spec.get("not_l4_scope_change") is True
+    )
+    blocker = None
+    if not economic_spec:
+        blocker = "economic_spec_missing"
+    elif economic_spec.get("status") != "local_economic_replay_spec_ready":
+        blocker = "economic_spec_not_ready"
+    elif coverage.get("covered") is not True:
+        blocker = "economic_case_coverage_missing"
+    elif not cost_fields:
+        blocker = "required_cost_fields_missing"
+    elif not no_authority_boundary:
+        blocker = "authority_boundary_missing"
+    return {
+        "revision_status": (
+            "local_economic_review_ready"
+            if blocker is None
+            else "economic_review_incomplete"
+        ),
+        "revision_ready": blocker is None,
+        "acceptance_case_coverage_ready": coverage.get("covered") is True,
+        "required_entry_state_count": 0,
+        "required_disable_state_count": 0,
+        "required_cost_field_count": len(cost_fields),
+        "completion_blocker": blocker,
+    }
+
+
+def _revision_completion_status(
+    *, revision_task_count: int, revision_ready_count: int
+) -> str:
+    if revision_task_count <= 0:
+        return "no_revision_required"
+    if revision_task_count == revision_ready_count:
+        return "local_revision_completion_ready"
+    if revision_ready_count:
+        return "partial_revision_completion_ready"
+    return "revision_completion_blocked"
 
 
 def _revision_stage_for_work_type(work_type: str) -> str:
@@ -778,6 +947,17 @@ def _strategy_quality_next_checkpoint(rows: list[dict[str, Any]]) -> str:
         if row.get("strategy_quality_decision") == "revise_before_l2"
     ]
     if revise_groups:
+        ready_groups = [
+            str(row.get("strategy_group_id"))
+            for row in rows
+            if row.get("strategy_quality_decision") == "revise_before_l2"
+            and _as_dict(row.get("revision_completion")).get("status")
+            == "local_revision_completion_ready"
+        ]
+        if ready_groups and set(ready_groups) == set(revise_groups):
+            return "execute_{}_local_revision_tasks_before_l2".format(
+                "_".join(sorted(ready_groups)).lower().replace("-", "")
+            )
         return "record_{}_strategy_quality_revise_before_l2".format(
             "_".join(sorted(revise_groups)).lower().replace("-", "")
         )
@@ -1244,15 +1424,15 @@ def _work_queue_table(rows: list[dict[str, Any]]) -> str:
 
 def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks |\n| --- | --- | --- | --- | ---: | ---: | ---: | ---: |\n| none | - | - | - | - | - | - | - |"
+        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks | Revision Ready |\n| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |\n| none | - | - | - | - | - | - | - | - |"
     output = [
-        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
+        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks | Revision Ready |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         evidence = _as_dict(row.get("evidence"))
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {} |".format(
+            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {} | {} |".format(
                 row.get("strategy_group_id"),
                 row.get("current_tier"),
                 row.get("strategy_quality_decision"),
@@ -1261,6 +1441,7 @@ def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
                 evidence.get("revise_sample_count", 0),
                 evidence.get("coverage_ready_item_count", 0),
                 row.get("revision_task_count", 0),
+                row.get("revision_ready_count", 0),
             )
         )
     return "\n".join(output)

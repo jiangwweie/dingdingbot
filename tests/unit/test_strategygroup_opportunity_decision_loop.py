@@ -506,15 +506,29 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     quality = packet["strategy_quality_decisions"]
     assert quality["status"] == "ready"
     assert quality["next_checkpoint"] == (
-        "record_lsr001_vcb001_strategy_quality_revise_before_l2"
+        "execute_lsr001_vcb001_local_revision_tasks_before_l2"
     )
     assert quality["counts"]["total"] == 4
     assert quality["counts"]["revise_before_l2"] == 2
     assert quality["counts"]["keep_observing"] == 1
     assert quality["counts"]["park"] == 1
     assert quality["counts"]["revision_task"] == 5
+    assert quality["counts"]["revision_ready"] == 5
     assert quality["counts"]["classifier_revision_task"] == 3
+    assert quality["counts"]["classifier_revision_ready"] == 3
     assert quality["counts"]["economic_revision_task"] == 2
+    assert quality["counts"]["economic_revision_ready"] == 2
+    assert quality["counts"]["remaining_revision_blocker"] == 0
+    assert quality["by_revision_status"] == {
+        "local_economic_review_ready": 2,
+        "local_revision_spec_ready": 3,
+    }
+    assert quality["revision_completion"]["status"] == (
+        "local_revision_completion_ready"
+    )
+    assert quality["revision_completion"]["revision_ready_count"] == 5
+    assert quality["revision_completion"]["remaining_revision_blocker_count"] == 0
+    assert quality["revision_completion"]["real_order_authority"] is False
     quality_rows = {row["strategy_group_id"]: row for row in quality["rows"]}
     assert quality_rows["VCB-001"]["strategy_quality_decision"] == "revise_before_l2"
     assert quality_rows["VCB-001"]["next_stage"] == (
@@ -523,6 +537,13 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality_rows["VCB-001"]["evidence"]["coverage_ready_item_count"] == 2
     assert quality_rows["VCB-001"]["evidence"]["revise_sample_count"] == 1
     assert quality_rows["VCB-001"]["revision_task_count"] == 2
+    assert quality_rows["VCB-001"]["revision_ready_count"] == 2
+    assert quality_rows["VCB-001"]["revision_completion"] == {
+        "status": "local_revision_completion_ready",
+        "ready_count": 2,
+        "remaining_blocker_count": 0,
+        "completion_blockers": [],
+    }
     vcb_revision_tasks = quality_rows["VCB-001"]["revision_tasks"]
     assert {task["work_type"] for task in vcb_revision_tasks} == {
         "classifier_or_rule_work",
@@ -532,6 +553,27 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
         task["coverage_status"] == "local_replay_coverage_ready"
         for task in vcb_revision_tasks
     )
+    assert all(task["revision_ready"] is True for task in vcb_revision_tasks)
+    assert all(
+        task["acceptance_case_coverage_ready"] is True
+        for task in vcb_revision_tasks
+    )
+    assert all(task["completion_blocker"] is None for task in vcb_revision_tasks)
+    vcb_classifier_task = next(
+        task
+        for task in vcb_revision_tasks
+        if task["work_type"] == "classifier_or_rule_work"
+    )
+    assert vcb_classifier_task["revision_status"] == "local_revision_spec_ready"
+    assert vcb_classifier_task["required_entry_state_count"] == 2
+    assert vcb_classifier_task["required_disable_state_count"] == 1
+    vcb_economic_task = next(
+        task
+        for task in vcb_revision_tasks
+        if task["work_type"] == "economic_replay_work"
+    )
+    assert vcb_economic_task["revision_status"] == "local_economic_review_ready"
+    assert vcb_economic_task["required_cost_field_count"] == 9
     assert any(
         task["revision_stage"] == "classifier_disable_state_revision"
         and task["completion_signal"] == "disable false breakout before L2"
@@ -540,6 +582,10 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality_rows["LSR-001"]["strategy_quality_decision"] == "revise_before_l2"
     assert quality_rows["LSR-001"]["evidence"]["coverage_ready_item_count"] == 3
     assert quality_rows["LSR-001"]["revision_task_count"] == 3
+    assert quality_rows["LSR-001"]["revision_ready_count"] == 3
+    assert quality_rows["LSR-001"]["revision_completion"]["status"] == (
+        "local_revision_completion_ready"
+    )
     assert {
         task["revision_stage"] for task in quality_rows["LSR-001"]["revision_tasks"]
     } == {"classifier_disable_state_revision", "economic_survival_review"}
@@ -547,10 +593,16 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
         "keep_observing_l2_shadow_with_fact_review"
     )
     assert quality_rows["BTPC-001"]["revision_tasks"] == []
+    assert quality_rows["BTPC-001"]["revision_completion"]["status"] == (
+        "no_revision_required"
+    )
     assert quality_rows["RBR-001"]["strategy_quality_decision"] == (
         "park_until_new_edge"
     )
     assert quality_rows["RBR-001"]["revision_tasks"] == []
+    assert quality_rows["RBR-001"]["revision_completion"]["status"] == (
+        "no_revision_required"
+    )
     for row in quality["rows"]:
         assert row["not_l2_promotion_authority"] is True
         assert row["not_l4_scope_change"] is True
@@ -565,7 +617,7 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality["safety_invariants"]["calls_operation_layer"] is False
     assert quality["safety_invariants"]["places_order"] is False
     assert packet["decision"]["default_next_step"] == (
-        "record_lsr001_vcb001_strategy_quality_revise_before_l2"
+        "execute_lsr001_vcb001_local_revision_tasks_before_l2"
     )
     for row in packet["decision_rows"]:
         assert row["real_order_authority"] is False
@@ -679,3 +731,4 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     assert "Strategy Quality Decisions" in owner_text
     assert "revise_before_l2" in owner_text
     assert "Revision Tasks" in owner_text
+    assert "Revision Ready" in owner_text
