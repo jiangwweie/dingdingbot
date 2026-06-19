@@ -225,6 +225,7 @@ def _decision_row(
         )
     ]
     classifier_repair_spec = _as_dict(readiness_row.get("classifier_repair_spec"))
+    economic_replay_spec = _as_dict(readiness_row.get("economic_replay_spec"))
     replay = _normalized_replay_summary(replay_summary)
     decision_action = _decision_action(
         current_tier=current_tier,
@@ -240,6 +241,7 @@ def _decision_row(
             readiness=readiness,
             decision_action=decision_action,
             classifier_repair_spec=classifier_repair_spec,
+            economic_replay_spec=economic_replay_spec,
             replay=replay,
         )
         for gap in gaps
@@ -262,6 +264,7 @@ def _decision_row(
             str(item) for item in readiness_row.get("positive_evidence") or []
         ],
         "classifier_repair_spec": classifier_repair_spec,
+        "economic_replay_spec": economic_replay_spec,
         "blocking_gaps_before_l2": gaps,
         "gap_work_items": gap_work,
         "decision_action": decision_action,
@@ -320,6 +323,7 @@ def _summarize_replay_samples(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "revise_sample_count": len(revise),
         "review_shape_present": bool(would_enter),
         "non_executing_boundary_ok": boundary_ok,
+        "cost_review_fields_by_case": _cost_review_fields_by_case(rows),
         "fixture_cases": sorted(
             str(row.get("fixture_case"))
             for row in rows
@@ -337,6 +341,10 @@ def _normalized_replay_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "revise_sample_count": _int(summary.get("revise_sample_count")),
         "review_shape_present": bool(summary.get("review_shape_present")),
         "non_executing_boundary_ok": bool(summary.get("non_executing_boundary_ok")),
+        "cost_review_fields_by_case": {
+            str(key): [str(item) for item in value or []]
+            for key, value in _as_dict(summary.get("cost_review_fields_by_case")).items()
+        },
         "fixture_cases": [str(item) for item in summary.get("fixture_cases") or []],
     }
 
@@ -388,6 +396,7 @@ def _gap_work_item(
     readiness: str,
     decision_action: str,
     classifier_repair_spec: dict[str, Any],
+    economic_replay_spec: dict[str, Any],
     replay: dict[str, Any],
 ) -> dict[str, Any]:
     lowered = gap.lower()
@@ -415,6 +424,12 @@ def _gap_work_item(
         classifier_repair_spec=classifier_repair_spec,
         replay=replay,
     )
+    matching_economic_spec = _matching_economic_replay_spec(
+        gap=gap,
+        work_type=work_type,
+        economic_replay_spec=economic_replay_spec,
+        replay=replay,
+    )
     return {
         "gap": gap,
         "work_type": work_type,
@@ -430,10 +445,14 @@ def _gap_work_item(
             strategy_group_id=strategy_group_id,
             decision_action=decision_action,
             classifier_repair_spec=matching_repair_spec,
+            economic_replay_spec=matching_economic_spec,
         ),
         "validation_command": _validation_command(work_type),
-        "completion_signal": _completion_signal(work_type, matching_repair_spec),
+        "completion_signal": _completion_signal(
+            work_type, matching_repair_spec, matching_economic_spec
+        ),
         "repair_spec": matching_repair_spec,
+        "economic_spec": matching_economic_spec,
     }
 
 
@@ -507,6 +526,7 @@ def _queue_item(row: dict[str, Any], gap_item: dict[str, Any]) -> dict[str, Any]
         "validation_command": gap_item.get("validation_command"),
         "completion_signal": gap_item.get("completion_signal"),
         "repair_spec": _as_dict(gap_item.get("repair_spec")),
+        "economic_spec": _as_dict(gap_item.get("economic_spec")),
         "real_order_authority": False,
         "l4_scope_change_recommended": False,
     }
@@ -583,6 +603,7 @@ def _actionable_gap_task(
     strategy_group_id: str,
     decision_action: str,
     classifier_repair_spec: dict[str, Any],
+    economic_replay_spec: dict[str, Any],
 ) -> str:
     prefix = f"{strategy_group_id}: {gap}"
     if decision_action == "park_or_vocabulary_only":
@@ -598,6 +619,11 @@ def _actionable_gap_task(
     if work_type == "required_fact_or_market_data_work":
         return f"{prefix}; attach or model the missing required fact source for replay and readiness review."
     if work_type == "economic_replay_work":
+        if economic_replay_spec:
+            return (
+                f"{prefix}; verify required cost, fill-slot, and leverage-survival "
+                "fields against replay acceptance cases."
+            )
         return f"{prefix}; replay with cost, slippage, funding, fill slot, and leverage survival fields."
     if work_type == "strategy_quality_review":
         return f"{prefix}; decide whether negative evidence means revise, park, or kill before L2."
@@ -631,9 +657,15 @@ def _validation_command(work_type: str) -> str:
     )
 
 
-def _completion_signal(work_type: str, repair_spec: dict[str, Any] | None = None) -> str:
+def _completion_signal(
+    work_type: str,
+    repair_spec: dict[str, Any] | None = None,
+    economic_spec: dict[str, Any] | None = None,
+) -> str:
     if repair_spec and repair_spec.get("acceptance_signal"):
         return str(repair_spec["acceptance_signal"])
+    if economic_spec and economic_spec.get("acceptance_signal"):
+        return str(economic_spec["acceptance_signal"])
     return {
         "classifier_or_rule_work": "classifier gap removed or downgraded to review-only warning",
         "required_fact_or_market_data_work": "required fact gap removed or explicit non-blocking proxy documented",
@@ -697,6 +729,88 @@ def _matching_classifier_repair_spec(
         is True,
         "not_l4_scope_change": classifier_repair_spec.get("not_l4_scope_change") is True,
     }
+
+
+def _matching_economic_replay_spec(
+    *,
+    gap: str,
+    work_type: str,
+    economic_replay_spec: dict[str, Any],
+    replay: dict[str, Any],
+) -> dict[str, Any]:
+    if work_type != "economic_replay_work" or not economic_replay_spec:
+        return {}
+    gap_keys = [
+        str(item) for item in economic_replay_spec.get("blocking_gap_keys") or []
+    ]
+    if gap not in gap_keys:
+        return {}
+    replay_acceptance_cases = [
+        str(item)
+        for item in economic_replay_spec.get("replay_acceptance_cases") or []
+    ]
+    required_cost_fields = [
+        str(item) for item in economic_replay_spec.get("required_cost_fields") or []
+    ]
+    fields_by_case = _as_dict(replay.get("cost_review_fields_by_case"))
+    case_coverage: dict[str, dict[str, Any]] = {}
+    for fixture_case in replay_acceptance_cases:
+        present_fields = set(str(item) for item in fields_by_case.get(fixture_case) or [])
+        missing_fields = [
+            field for field in required_cost_fields if field not in present_fields
+        ]
+        case_coverage[fixture_case] = {
+            "covered": not missing_fields,
+            "present_fields": sorted(present_fields),
+            "missing_fields": missing_fields,
+        }
+    missing_cases = [
+        fixture_case
+        for fixture_case in replay_acceptance_cases
+        if fixture_case not in fields_by_case
+    ]
+    uncovered_cases = [
+        fixture_case
+        for fixture_case, coverage in case_coverage.items()
+        if coverage["covered"] is not True
+    ]
+    return {
+        "status": str(economic_replay_spec.get("status") or "unknown"),
+        "required_cost_fields": required_cost_fields,
+        "replay_acceptance_cases": replay_acceptance_cases,
+        "economic_case_coverage": {
+            "covered": bool(replay_acceptance_cases)
+            and not missing_cases
+            and not uncovered_cases,
+            "required_case_count": len(replay_acceptance_cases),
+            "missing_cases": missing_cases,
+            "uncovered_cases": uncovered_cases,
+            "case_coverage": case_coverage,
+        },
+        "acceptance_signal": str(economic_replay_spec.get("acceptance_signal") or ""),
+        "not_execution_authority": economic_replay_spec.get("not_execution_authority")
+        is True,
+        "not_l2_promotion_authority": economic_replay_spec.get(
+            "not_l2_promotion_authority"
+        )
+        is True,
+        "not_l4_scope_change": economic_replay_spec.get("not_l4_scope_change") is True,
+    }
+
+
+def _cost_review_fields_by_case(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    output: dict[str, list[str]] = {}
+    for row in rows:
+        fixture_case = str(row.get("fixture_case") or "")
+        if not fixture_case:
+            continue
+        cost_review = _as_dict(row.get("cost_review"))
+        output[fixture_case] = sorted(
+            str(key)
+            for key, value in cost_review.items()
+            if value is not None and str(value) != ""
+        )
+    return output
 
 
 def _queue_id(strategy_group_id: str, work_type: str, label: str) -> str:

@@ -111,7 +111,18 @@ class StrategyGroupReplayCostReview(StrategyGroupReplayModel):
     slippage_estimate_usdt: Decimal = Field(ge=Decimal("0"))
     funding_impact_usdt: Decimal
     min_qty_step_size_impact: str = Field(min_length=1, max_length=256)
+    fill_slot_assumption: str = Field(
+        default="single_slot_review_only_not_execution_authority",
+        min_length=1,
+        max_length=256,
+    )
+    leverage_survival_note: str = Field(
+        default="review_only_no_owner_profile_or_leverage_change",
+        min_length=1,
+        max_length=512,
+    )
     net_edge_note: str = Field(min_length=1, max_length=512)
+    does_not_lower_owner_selected_leverage: Literal[True] = True
     not_submit_authority: Literal[True] = True
 
 
@@ -309,12 +320,16 @@ def _cost_review(
     funding: str,
     min_qty_step: str,
     note: str,
+    fill_slot: str = "single_slot_review_only_not_execution_authority",
+    leverage_survival: str = "review_only_no_owner_profile_or_leverage_change",
 ) -> StrategyGroupReplayCostReview:
     return StrategyGroupReplayCostReview(
         fee_estimate_usdt=Decimal(fee),
         slippage_estimate_usdt=Decimal(slippage),
         funding_impact_usdt=Decimal(funding),
         min_qty_step_size_impact=min_qty_step,
+        fill_slot_assumption=fill_slot,
+        leverage_survival_note=leverage_survival,
         net_edge_note=note,
     )
 

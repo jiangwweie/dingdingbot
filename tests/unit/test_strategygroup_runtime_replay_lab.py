@@ -233,6 +233,38 @@ def test_brf001_l1_observe_replay_expands_bear_rally_failure_visibility_without_
     assert revision.stage_results["operation_layer_shape_reachable"] is False
 
 
+def test_tracked_lsr_vcb_replay_corpus_carries_economic_review_fields() -> None:
+    lsr = json.loads(
+        Path(
+            "docs/current/strategy-group-handoffs/LSR-001/replay/lsr-001-l1-observe-replay-corpus.json"
+        ).read_text(encoding="utf-8")
+    )
+    vcb = json.loads(
+        Path(
+            "docs/current/strategy-group-handoffs/VCB-001/replay/vcb-001-l1-observe-replay-corpus.json"
+        ).read_text(encoding="utf-8")
+    )
+    required_cases = {
+        "liquidity_sweep_long_would_enter_current_v0",
+        "short_revival_rewrite_needed",
+        "compression_breakout_would_enter",
+        "false_breakout_disable_needed",
+    }
+    samples = {
+        item["fixture_case"]: item
+        for item in lsr["replay_samples"] + vcb["replay_samples"]
+        if item["fixture_case"] in required_cases
+    }
+
+    assert set(samples) == required_cases
+    for sample in samples.values():
+        cost_review = sample["cost_review"]
+        assert cost_review["fill_slot_assumption"]
+        assert cost_review["leverage_survival_note"]
+        assert cost_review["does_not_lower_owner_selected_leverage"] is True
+        assert cost_review["not_submit_authority"] is True
+
+
 def test_mpg001_replay_lab_covers_required_synthetic_fixtures() -> None:
     packet = build_mpg001_replay_lab_packet(generated_at_ms=1781750000000)
 
@@ -331,7 +363,10 @@ def test_mpg001_replay_lab_covers_multi_window_replay_corpus_with_cost_review() 
         assert event.cost_review.slippage_estimate_usdt >= Decimal("0")
         assert event.cost_review.funding_impact_usdt is not None
         assert event.cost_review.min_qty_step_size_impact
+        assert event.cost_review.fill_slot_assumption
+        assert event.cost_review.leverage_survival_note
         assert event.cost_review.net_edge_note
+        assert event.cost_review.does_not_lower_owner_selected_leverage is True
         assert event.cost_review.not_submit_authority is True
 
 

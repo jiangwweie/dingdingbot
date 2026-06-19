@@ -762,6 +762,23 @@ of another report-only note.
 | Verification | `tests/unit/test_strategygroup_l2_readiness_review.py` and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert repair specs, replay-case coverage, no real-order authority, and no L4 scope change |
 | Safety | Local policy/specification and replay-coverage projection only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 LSR/VCB Economic Replay Spec Checkpoint
+
+The P0.5 work queue now also carries economic replay specs for `LSR-001` and
+`VCB-001`. The replay contract exposes cost, slippage, funding, min-qty/step,
+fill-slot, leverage-survival, net-edge, and no-submit-authority fields without
+reducing Owner-selected leverage or creating execution authority.
+
+| Item | Evidence |
+| --- | --- |
+| Replay cost contract | `StrategyGroupReplayCostReview` now includes `fill_slot_assumption`, `leverage_survival_note`, and `does_not_lower_owner_selected_leverage` |
+| Policy input | `main-control-signal-coverage-expansion-policy.json` defines `economic_replay_spec` for `LSR-001` and `VCB-001` |
+| Static corpus | LSR/VCB tracked replay corpus samples used by the economic specs carry fill-slot and leverage-survival fields |
+| Work queue coverage | Current `latest-opportunity-decision-loop.json` reports `economic_case_coverage.covered=true`, `missing_cases=[]`, and `uncovered_cases=[]` for all three LSR/VCB economic replay queue items |
+| L2 boundary | The specs are local replay review only; they are not L2 promotion authority, L4 scope expansion, FinalGate input, Operation Layer input, or real-order authority |
+| Verification | `tests/unit/test_strategygroup_runtime_replay_lab.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert replay cost fields, economic specs, economic-case coverage, no real-order authority, and no L4 scope change |
+| Safety | Local replay/specification and coverage projection only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

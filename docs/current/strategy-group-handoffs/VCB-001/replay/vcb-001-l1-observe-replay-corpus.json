@@ -26,7 +26,10 @@
         "slippage_estimate_usdt": "0.038",
         "funding_impact_usdt": "0.001",
         "min_qty_step_size_impact": "review_only_exchange_rules_shape_present",
+        "fill_slot_assumption": "single_slot_review_only_not_execution_authority",
+        "leverage_survival_note": "review_only_no_owner_profile_or_leverage_change",
         "net_edge_note": "VCB L1 would-enter sample makes compression-breakout opportunities visible without L2 or L4 authority",
+        "does_not_lower_owner_selected_leverage": true,
         "not_submit_authority": true
       },
       "replay_only": true,
@@ -82,7 +85,10 @@
         "slippage_estimate_usdt": "0.057",
         "funding_impact_usdt": "0.001",
         "min_qty_step_size_impact": "review_only_false_breakout_cost_shape",
+        "fill_slot_assumption": "single_slot_review_only_not_execution_authority",
+        "leverage_survival_note": "review_only_no_owner_profile_or_leverage_change",
         "net_edge_note": "false-breakout sample should revise VCB classifier before any L2 promotion",
+        "does_not_lower_owner_selected_leverage": true,
         "not_submit_authority": true
       },
       "replay_only": true,

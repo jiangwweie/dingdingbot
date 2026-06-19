@@ -85,6 +85,31 @@
         "not_execution_authority": true,
         "not_l2_promotion_authority": true,
         "not_l4_scope_change": true
+      },
+      "economic_replay_spec": {
+        "status": "local_economic_replay_spec_ready",
+        "blocking_gap_keys": [
+          "cost_fill_slot_m2m_and_leverage_boundary_missing"
+        ],
+        "required_cost_fields": [
+          "fee_estimate_usdt",
+          "slippage_estimate_usdt",
+          "funding_impact_usdt",
+          "min_qty_step_size_impact",
+          "fill_slot_assumption",
+          "leverage_survival_note",
+          "net_edge_note",
+          "does_not_lower_owner_selected_leverage",
+          "not_submit_authority"
+        ],
+        "replay_acceptance_cases": [
+          "liquidity_sweep_long_would_enter_current_v0",
+          "short_revival_rewrite_needed"
+        ],
+        "acceptance_signal": "LSR economic replay must expose fill-slot and leverage-survival review fields before any L2 rewrite promotion review.",
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
       }
     },
     "BRF-001": {
@@ -167,6 +192,32 @@
           "stale_signal"
         ],
         "acceptance_signal": "VCB remains L1 until the pre-entry classifier reproduces the true-breakout edge and false-breakout disable state is represented in runtime review.",
+        "not_execution_authority": true,
+        "not_l2_promotion_authority": true,
+        "not_l4_scope_change": true
+      },
+      "economic_replay_spec": {
+        "status": "local_economic_replay_spec_ready",
+        "blocking_gap_keys": [
+          "volume_compression_cost_m2m_full_sequence_negative",
+          "slot_m2m_equity_and_leverage_ruin_state_missing"
+        ],
+        "required_cost_fields": [
+          "fee_estimate_usdt",
+          "slippage_estimate_usdt",
+          "funding_impact_usdt",
+          "min_qty_step_size_impact",
+          "fill_slot_assumption",
+          "leverage_survival_note",
+          "net_edge_note",
+          "does_not_lower_owner_selected_leverage",
+          "not_submit_authority"
+        ],
+        "replay_acceptance_cases": [
+          "compression_breakout_would_enter",
+          "false_breakout_disable_needed"
+        ],
+        "acceptance_signal": "VCB economic replay must expose volume-compression cost survival, false-breakout cost drag, fill-slot, and leverage-survival review fields before any L2 classifier promotion review.",
         "not_execution_authority": true,
         "not_l2_promotion_authority": true,
         "not_l4_scope_change": true

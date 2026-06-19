@@ -107,6 +107,12 @@ def build_l2_readiness_review(
                 if _as_dict(row.get("classifier_repair_spec")).get("status")
                 == "local_repair_spec_ready"
             ),
+            "economic_replay_spec_ready_count": sum(
+                1
+                for row in readiness_rows
+                if _as_dict(row.get("economic_replay_spec")).get("status")
+                == "local_economic_replay_spec_ready"
+            ),
             "forbidden_effect_count": len(forbidden_effects),
         },
         "readiness_rows": readiness_rows,
@@ -202,6 +208,7 @@ def _readiness_row(*, row: dict[str, Any], policy: dict[str, Any]) -> dict[str, 
             str(item) for item in policy.get("blocking_gaps_before_l2") or []
         ],
         "classifier_repair_spec": _classifier_repair_spec(policy),
+        "economic_replay_spec": _economic_replay_spec(policy),
         "conditional_l2_review_candidate": l2_readiness in READY_OR_CONDITIONAL,
         "l2_shadow_candidate_observation_enabled": l2_readiness in L2_ALREADY_ENABLED,
         "may_change_tier_policy_now": False,
@@ -225,6 +232,28 @@ def _classifier_repair_spec(policy: dict[str, Any]) -> dict[str, Any]:
         ],
         "required_disable_states": [
             str(item) for item in spec.get("required_disable_states") or []
+        ],
+        "replay_acceptance_cases": [
+            str(item) for item in spec.get("replay_acceptance_cases") or []
+        ],
+        "acceptance_signal": str(spec.get("acceptance_signal") or ""),
+        "not_execution_authority": spec.get("not_execution_authority") is True,
+        "not_l2_promotion_authority": spec.get("not_l2_promotion_authority") is True,
+        "not_l4_scope_change": spec.get("not_l4_scope_change") is True,
+    }
+
+
+def _economic_replay_spec(policy: dict[str, Any]) -> dict[str, Any]:
+    spec = _as_dict(policy.get("economic_replay_spec"))
+    if not spec:
+        return {}
+    return {
+        "status": str(spec.get("status") or "unknown"),
+        "blocking_gap_keys": [
+            str(item) for item in spec.get("blocking_gap_keys") or []
+        ],
+        "required_cost_fields": [
+            str(item) for item in spec.get("required_cost_fields") or []
         ],
         "replay_acceptance_cases": [
             str(item) for item in spec.get("replay_acceptance_cases") or []

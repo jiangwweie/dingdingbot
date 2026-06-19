@@ -112,6 +112,31 @@ def _l2_readiness() -> dict:
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
                 },
+                "economic_replay_spec": {
+                    "status": "local_economic_replay_spec_ready",
+                    "blocking_gap_keys": [
+                        "volume_compression_cost_m2m_full_sequence_negative"
+                    ],
+                    "required_cost_fields": [
+                        "fee_estimate_usdt",
+                        "slippage_estimate_usdt",
+                        "funding_impact_usdt",
+                        "min_qty_step_size_impact",
+                        "fill_slot_assumption",
+                        "leverage_survival_note",
+                        "net_edge_note",
+                        "does_not_lower_owner_selected_leverage",
+                        "not_submit_authority",
+                    ],
+                    "replay_acceptance_cases": [
+                        "compression_breakout_would_enter",
+                        "false_breakout_disable_needed",
+                    ],
+                    "acceptance_signal": "VCB economic replay before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
             },
             {
                 "strategy_group_id": "RBR-001",
@@ -175,6 +200,7 @@ def _replay_lab(*, include_rbr: bool = False) -> dict:
             "signal_status": "would_enter_observe_only",
             "review_recommendation": "keep_observing",
             "blocker_class": "review_only_warning",
+            "cost_review": _cost_review(),
             "real_order_allowed": False,
             "exchange_write_allowed": False,
             "operation_layer_submit_allowed": False,
@@ -185,6 +211,7 @@ def _replay_lab(*, include_rbr: bool = False) -> dict:
             "signal_status": "would_enter_but_disable_classifier_missing",
             "review_recommendation": "revise",
             "blocker_class": "review_only_warning",
+            "cost_review": _cost_review(),
             "real_order_allowed": False,
             "exchange_write_allowed": False,
             "operation_layer_submit_allowed": False,
@@ -225,6 +252,20 @@ def _replay_lab(*, include_rbr: bool = False) -> dict:
             "order_created": False,
             "exchange_write_called": False,
         },
+    }
+
+
+def _cost_review() -> dict:
+    return {
+        "fee_estimate_usdt": "0.012",
+        "slippage_estimate_usdt": "0.038",
+        "funding_impact_usdt": "0.001",
+        "min_qty_step_size_impact": "review_only_exchange_rules_shape_present",
+        "fill_slot_assumption": "single_slot_review_only_not_execution_authority",
+        "leverage_survival_note": "review_only_no_owner_profile_or_leverage_change",
+        "net_edge_note": "review-only economic shape",
+        "does_not_lower_owner_selected_leverage": True,
+        "not_submit_authority": True,
     }
 
 
@@ -287,6 +328,21 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
         "false_breakout_disable_needed"
     ]
     assert work_items[0]["repair_spec"]["replay_case_coverage"]["covered"] is True
+    economic_item = next(
+        item
+        for item in work_items
+        if item["strategy_group_id"] == "VCB-001"
+        and item["work_type"] == "economic_replay_work"
+    )
+    assert economic_item["economic_spec"]["status"] == (
+        "local_economic_replay_spec_ready"
+    )
+    assert economic_item["economic_spec"]["economic_case_coverage"]["covered"] is True
+    assert economic_item["economic_spec"]["economic_case_coverage"][
+        "missing_cases"
+    ] == []
+    assert economic_item["economic_spec"]["not_execution_authority"] is True
+    assert economic_item["completion_signal"] == "VCB economic replay before L2"
     parked_items = [
         item for item in work_items if item["strategy_group_id"] == "RBR-001"
     ]

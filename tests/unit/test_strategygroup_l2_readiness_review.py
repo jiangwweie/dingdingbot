@@ -101,6 +101,22 @@ def _policy() -> dict:
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
                 },
+                "economic_replay_spec": {
+                    "status": "local_economic_replay_spec_ready",
+                    "blocking_gap_keys": [
+                        "cost_fill_slot_m2m_and_leverage_boundary_missing"
+                    ],
+                    "required_cost_fields": [
+                        "fee_estimate_usdt",
+                        "slippage_estimate_usdt",
+                        "fill_slot_assumption",
+                    ],
+                    "replay_acceptance_cases": ["short_revival_rewrite_needed"],
+                    "acceptance_signal": "economic replay before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
             },
             "RBR-001": {
                 "coverage_review_priority": "P2",
@@ -130,6 +146,20 @@ def _policy() -> dict:
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
                 },
+                "economic_replay_spec": {
+                    "status": "local_economic_replay_spec_ready",
+                    "blocking_gap_keys": ["cost_m2m_negative"],
+                    "required_cost_fields": [
+                        "fee_estimate_usdt",
+                        "slippage_estimate_usdt",
+                        "fill_slot_assumption",
+                    ],
+                    "replay_acceptance_cases": ["false_breakout_disable_needed"],
+                    "acceptance_signal": "cost replay before L2",
+                    "not_execution_authority": True,
+                    "not_l2_promotion_authority": True,
+                    "not_l4_scope_change": True,
+                },
             },
         },
         "safety_invariants": {"policy_is_review_only": True},
@@ -150,6 +180,7 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
         "conditional_l2_candidate_count": 1,
         "enabled_l2_count": 0,
         "classifier_repair_spec_ready_count": 2,
+        "economic_replay_spec_ready_count": 2,
         "forbidden_effect_count": 0,
         "review_row_count": 4,
     }
@@ -168,10 +199,19 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
         "side_specific_short_revival_classifier"
     )
     assert rows["LSR-001"]["classifier_repair_spec"]["not_execution_authority"] is True
+    assert rows["LSR-001"]["economic_replay_spec"]["status"] == (
+        "local_economic_replay_spec_ready"
+    )
+    assert rows["LSR-001"]["economic_replay_spec"]["not_execution_authority"] is True
     assert rows["RBR-001"]["conditional_l2_review_candidate"] is False
     assert rows["VCB-001"]["conditional_l2_review_candidate"] is False
     assert rows["VCB-001"]["classifier_repair_spec"]["required_disable_states"] == [
         "false_breakout_reversal_detected"
+    ]
+    assert rows["VCB-001"]["economic_replay_spec"]["required_cost_fields"] == [
+        "fee_estimate_usdt",
+        "slippage_estimate_usdt",
+        "fill_slot_assumption",
     ]
     assert packet["interaction"]["remote_interaction_count"] == 0
     assert packet["safety_invariants"]["does_not_change_tier_policy"] is True
