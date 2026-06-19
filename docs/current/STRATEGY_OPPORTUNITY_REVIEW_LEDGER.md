@@ -106,3 +106,22 @@ high-priority no-action rows
 The checkpoint is complete only when current `BRF-001`, `BTPC-001`, `LSR-001`,
 and `VCB-001` high-priority no-action rows produce ledger/decision rows without
 creating FinalGate, Operation Layer, exchange-write, or real-order authority.
+
+## Acceptance Constraints
+
+An opportunity-ledger implementation is not accepted unless it proves all of the
+following:
+
+| Requirement | Acceptance rule |
+| --- | --- |
+| P0 priority preserved | The implementation cannot make `waiting_for_market` look blocked when P0 is merely waiting for a fresh signal |
+| Current high-priority rows covered | `BRF-001`, `BTPC-001`, `LSR-001`, and `VCB-001` high-priority no-action rows must produce ledger rows or explicit no-row reasons |
+| Decision action present | Every ledger row must carry a `decision_action`; explanatory rows without actions are not mainline |
+| Replay status present | Every ledger row must say whether replay is matched, partial, missing, or not applicable |
+| Authority fields false | `real_order_authority`, `calls_finalgate`, `calls_operation_layer`, `calls_exchange_write`, and `places_order` must remain false |
+| Capability status explicit | Owner/developer summaries must label the result as deployed, local, planned, blocked, or market-dependent |
+| Monitor integration | The local monitor sequence must include the ledger status before the checkpoint is deploy-worthy |
+
+Rows may support future tier decisions, but the ledger itself is never tier
+promotion authority. Promotion still follows the runtime tier policy and the
+official live chain.

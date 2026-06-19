@@ -73,6 +73,31 @@ Use `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` as the current contract
 for this pre-live learning loop. It is local/read-only decision support and must
 keep real-order authority false.
 
+## P0 / P0.5 Execution Discipline
+
+P0 has priority over P0.5. P0.5 is an accelerator for opportunity discovery and
+strategy quality; it is not a substitute for the first `MPG-001`
+allocated-subaccount live closure.
+
+Agents must obey these constraints:
+
+| Constraint | Required behavior |
+| --- | --- |
+| Fresh signal preempts local work | If a real fresh selected StrategyGroup signal appears, pause P0.5 work and return to RequiredFacts -> candidate/auth -> FinalGate -> Operation Layer |
+| Local/deployed/planned split | Every status summary must distinguish deployed Tokyo capability, local committed capability, and planned work |
+| Decision-action requirement | P0.5 artifacts are useful only if they feed a `decision_action`, tier decision, gap repair, or replay/source task |
+| Replay/proxy boundary | Replay, synthetic fixtures, proxy facts, and opportunity ledger rows must never become live signal, live RequiredFacts, FinalGate input, Operation Layer evidence, or submit authority |
+| Deploy threshold | Do not deploy for isolated wording, single report fields, or one-off local artifacts; deploy only after a stage-worthy closed local checkpoint or explicit Owner request |
+| Entry-point control | Prefer extending the local monitor sequence, replay lab, opportunity decision loop, or opportunity ledger producer over adding permanent standalone scripts |
+
+New P0.5 scripts or artifacts must satisfy at least one of:
+
+- produce or consume Strategy Opportunity Review Ledger rows;
+- feed the local monitor sequence;
+- replace and reduce older entry points;
+- create a bounded one-time migration or validation artifact with no long-term
+  mainline role.
+
 Testnet is not a mainline value layer for this project. If used at all, it is a
 temporary API-shape diagnostic tool. Meaningful execution-quality evidence comes
 from the official live path with selected StrategyGroup, allocated subaccount

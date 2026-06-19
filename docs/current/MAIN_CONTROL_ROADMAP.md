@@ -52,6 +52,30 @@ live path waits
 -> stage-worthy decisions deploy once, not continuously
 ```
 
+## Current Execution Constraints
+
+The next phase is governed by six execution constraints:
+
+| Constraint | Meaning |
+| --- | --- |
+| P0 preemption | A real fresh `MPG-001`/selected StrategyGroup signal immediately interrupts lower-priority P0.5 work |
+| Capability status split | Reports must label work as `deployed`, `local`, `planned`, `blocked`, or `market-dependent` |
+| Decision-action gate | New P0.5 artifacts must create or support a concrete `decision_action` |
+| No authority leakage | Replay, proxy facts, opportunity ledger rows, and observe-only decisions never authorize FinalGate, Operation Layer, exchange write, or real orders |
+| Deploy only at milestones | Bounded deploy apply is reserved for a closed local checkpoint, fresh-signal unblock, safety repair, or explicit Owner request |
+| Entry-point compression | New scripts are temporary unless they feed the standard local monitor / replay / opportunity ledger surfaces |
+
+The deploy-worthy checkpoint for the current P0.5 phase is:
+
+```text
+high-priority no-action
+-> Strategy Opportunity Review Ledger
+-> replay-to-review matching
+-> decision_action
+-> local monitor sequence
+-> targeted tests pass
+```
+
 ## Profitability-Oriented Operating Frame
 
 The final business target is profit. The current engineering acceptance target
