@@ -60,7 +60,7 @@ def build_l2_readiness_review(
     elif conditional_rows:
         status = "l2_readiness_review_has_conditional_candidate"
         owner_state = "coverage_review_needed"
-        next_step = "prepare_conditional_l2_handoff_intake_without_tier_change"
+        next_step = _conditional_next_step(conditional_rows)
     elif readiness_rows:
         status = "l2_readiness_review_all_blocked"
         owner_state = "coverage_review_needed"
@@ -184,6 +184,16 @@ def _readiness_row(*, row: dict[str, Any], policy: dict[str, Any]) -> dict[str, 
         "may_create_shadow_candidate_now": False,
         "may_place_real_order_now": False,
     }
+
+
+def _conditional_next_step(rows: list[dict[str, Any]]) -> str:
+    missing_handoff = any(
+        "main_control_handoff_not_imported" in row.get("blocking_gaps_before_l2", [])
+        for row in rows
+    )
+    if missing_handoff:
+        return "prepare_conditional_l2_handoff_intake_without_tier_change"
+    return "run_conditional_l2_dry_run_without_tier_change"
 
 
 def _forbidden_effects(

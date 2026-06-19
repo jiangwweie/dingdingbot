@@ -1,7 +1,7 @@
 # Main-Control StrategyGroup Handoff Index
 
 Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-15
+Last updated: 2026-06-19
 
 ## Research Sync
 
@@ -31,6 +31,12 @@ docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
 | `FBS-001` | Funding / basis stress | `armed_observation` |
 | `PMR-001` | Precious-metal overlay | `observe_only` |
 | `SOR-001` | Session opening-range structure | `conditional_armed_observation` |
+
+## Expansion Intake
+
+| StrategyGroup | Role | Default Mode | Main-Control Boundary |
+| --- | --- | --- | --- |
+| `BTPC-001` | Bear trend pullback continuation | `observe_only` | L2 handoff/dry-run intake only; not L4 real-order scope |
 
 ## Boundary
 

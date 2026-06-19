@@ -50,6 +50,7 @@ RUNTIME_ID = "dry-run-runtime-mpg-001"
 FRESH_AUTHORIZATION_ID = "dry-run-fresh-auth-1"
 AUTHORIZATION_ID = FRESH_AUTHORIZATION_ID
 EXPECTED_STRATEGY_GROUPS = {"MPG-001", "TEQ-001", "FBS-001", "PMR-001", "SOR-001"}
+EXPECTED_EXPANSION_OBSERVE_ONLY_GROUPS = {"BTPC-001"}
 EXPECTED_SIGNAL_FRESHNESS_WINDOW_SECONDS = 120
 EXPECTED_RUNTIME_TIERS = {
     "MPG-001": "L4",
@@ -1223,16 +1224,25 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
     handoffs = _load_strategy_group_handoffs()
     found_groups = set(handoffs)
     missing_groups = sorted(EXPECTED_STRATEGY_GROUPS - found_groups)
-    unexpected_groups = sorted(found_groups - EXPECTED_STRATEGY_GROUPS)
+    expansion_groups = sorted(
+        group
+        for group in (found_groups - EXPECTED_STRATEGY_GROUPS)
+        if group in EXPECTED_EXPANSION_OBSERVE_ONLY_GROUPS
+        and _is_expansion_observe_only_handoff(handoffs[group]["payload"])
+    )
+    unexpected_groups = sorted(
+        found_groups - EXPECTED_STRATEGY_GROUPS - set(expansion_groups)
+    )
     rows: list[dict[str, Any]] = []
     blockers: list[str] = []
 
-    for strategy_group_id in sorted(EXPECTED_STRATEGY_GROUPS):
+    for strategy_group_id in [*sorted(EXPECTED_STRATEGY_GROUPS), *expansion_groups]:
         item = handoffs.get(strategy_group_id)
         if item is None:
             blockers.append(f"missing_strategy_group_handoff:{strategy_group_id}")
             continue
         payload = item["payload"]
+        is_expansion_observe_only = strategy_group_id in expansion_groups
         boundary = payload.get("execution_boundary")
         boundary = boundary if isinstance(boundary, dict) else {}
         required_facts = payload.get("required_facts")
@@ -1241,6 +1251,8 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
         signal_rule = signal_rule if isinstance(signal_rule, dict) else {}
         risk_defaults = payload.get("risk_defaults")
         risk_defaults = risk_defaults if isinstance(risk_defaults, dict) else {}
+        mode = payload.get("mode_recommendation")
+        mode = mode if isinstance(mode, dict) else {}
         forbidden_execution_fields_present = sorted(
             field
             for field in STRATEGY_HANDOFF_FORBIDDEN_EXECUTION_FIELDS
@@ -1259,14 +1271,30 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
                 boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
             ),
             "allocated_subaccount_profile_boundary": (
-                str(risk_defaults.get("risk_tier") or "") == "tiny"
-                and str(risk_defaults.get("max_notional_per_action_usdt") or "") == "8"
-                and str(risk_defaults.get("default_leverage") or "") == "1"
-                and str(risk_defaults.get("max_leverage") or "") == "1"
+                (
+                    str(risk_defaults.get("risk_tier") or "") == "tiny"
+                    and str(risk_defaults.get("max_notional_per_action_usdt") or "")
+                    == "8"
+                    and str(risk_defaults.get("default_leverage") or "") == "1"
+                    and str(risk_defaults.get("max_leverage") or "") == "1"
+                )
+                if not is_expansion_observe_only
+                else (
+                    str(mode.get("default") or "") == "observe_only"
+                    and boundary.get("real_submit_authorized") is False
+                    and str(risk_defaults.get("max_notional_per_action_usdt") or "")
+                    == "0"
+                    and int(risk_defaults.get("max_active_positions") or 0) == 0
+                )
             ),
             "uses_standard_signal_status": (
-                signal_rule.get("status_name")
-                == "ready_for_shadow_candidate_prepare"
+                (
+                    signal_rule.get("status_name")
+                    == "ready_for_shadow_candidate_prepare"
+                )
+                if not is_expansion_observe_only
+                else signal_rule.get("status_name")
+                in {"would_enter_observe_only", "no_action_observe_only"}
             ),
             "uses_pilot_signal_freshness_window": (
                 signal_rule.get("freshness_window_seconds")
@@ -1280,6 +1308,11 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
                 "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
                 "strategy_specific_input_fields": STRATEGY_SPECIFIC_INPUT_FIELDS,
                 "sample_input_contract": {
+                    "scope_kind": (
+                        "expansion_observe_only"
+                        if is_expansion_observe_only
+                        else "current_pilot"
+                    ),
                     "supported_symbols": payload.get("supported_symbols") or [],
                     "supported_sides": payload.get("supported_sides") or [],
                     "signal_status_name": signal_rule.get("status_name"),
@@ -1316,6 +1349,9 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
     checks = {
         "expected_strategy_groups_present": not missing_groups,
         "no_unexpected_strategy_groups": not unexpected_groups,
+        "expansion_observe_only_groups_allowed": (
+            set(expansion_groups).issubset(EXPECTED_EXPANSION_OBSERVE_ONLY_GROUPS)
+        ),
         "all_strategy_groups_use_same_shared_pipeline": all(
             row.get("shared_runtime_pipeline_stages") == SHARED_RUNTIME_PIPELINE_STAGES
             for row in rows
@@ -1337,7 +1373,8 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             for row in rows
         ),
         "common_execution_chain_reused_by_all_strategygroups": (
-            len(rows) == len(EXPECTED_STRATEGY_GROUPS)
+            len([row for row in rows if row["strategy_group_id"] in EXPECTED_STRATEGY_GROUPS])
+            == len(EXPECTED_STRATEGY_GROUPS)
             and all(
                 row.get("shared_runtime_pipeline_stages")
                 == SHARED_RUNTIME_PIPELINE_STAGES
@@ -1368,7 +1405,11 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             ),
         },
         "expected_strategy_groups": sorted(EXPECTED_STRATEGY_GROUPS),
+        "expected_expansion_observe_only_groups": sorted(
+            EXPECTED_EXPANSION_OBSERVE_ONLY_GROUPS
+        ),
         "found_strategy_groups": sorted(found_groups),
+        "expansion_observe_only_groups": expansion_groups,
         "missing_strategy_groups": missing_groups,
         "unexpected_strategy_groups": unexpected_groups,
         "shared_runtime_pipeline_stages": SHARED_RUNTIME_PIPELINE_STAGES,
@@ -1389,6 +1430,24 @@ def _shared_runtime_pipeline_validation() -> dict[str, Any]:
             "operation_layer_bypassed": False,
         },
     }
+
+
+def _is_expansion_observe_only_handoff(payload: dict[str, Any]) -> bool:
+    boundary = payload.get("execution_boundary")
+    boundary = boundary if isinstance(boundary, dict) else {}
+    mode = payload.get("mode_recommendation")
+    mode = mode if isinstance(mode, dict) else {}
+    risk_defaults = payload.get("risk_defaults")
+    risk_defaults = risk_defaults if isinstance(risk_defaults, dict) else {}
+    return (
+        str(mode.get("default") or "") == "observe_only"
+        and boundary.get("research_handoff_only") is True
+        and all(
+            boundary.get(name) is False for name in EXECUTION_BOUNDARY_FALSE_FIELDS
+        )
+        and str(risk_defaults.get("max_notional_per_action_usdt") or "") == "0"
+        and int(risk_defaults.get("max_active_positions") or 0) == 0
+    )
 
 
 def _runtime_tier_policy_validation(

@@ -22,13 +22,13 @@
       "live_order_eligible": false,
       "l4_promotion_eligible": false,
       "positive_evidence": [
+        "main-control l2 intake handoff imported as observe-only",
+        "main-control RequiredFacts map now includes BTPC-001 L2 intake facts",
         "largest current right-tail lead among reviewed expansion candidates",
         "candidate packet reports best 90d 1x 2450.61 percent and best 90d 2x 44620.79 percent",
         "supports bearish-only activation and strong-uptrend disable review"
       ],
       "blocking_gaps_before_l2": [
-        "main_control_handoff_not_imported",
-        "runtime_requiredfacts_map_not_defined_for_btpc",
         "historical_open_interest_window_missing",
         "historical_global_long_short_ratio_window_missing",
         "top_trader_position_ratio_window_missing",

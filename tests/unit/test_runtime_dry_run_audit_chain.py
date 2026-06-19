@@ -684,12 +684,15 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "budget_settlement",
     }
     assert set(shared["found_strategy_groups"]) == {
+        "BTPC-001",
         "MPG-001",
         "TEQ-001",
         "FBS-001",
         "PMR-001",
         "SOR-001",
     }
+    assert shared["expansion_observe_only_groups"] == ["BTPC-001"]
+    assert shared["unexpected_strategy_groups"] == []
     for row in shared["rows"]:
         assert row["passed"] is True
         assert row["checks"]["does_not_authorize_execution_boundary"] is True
