@@ -113,6 +113,24 @@ def build_l2_readiness_review(
                 if _as_dict(row.get("economic_replay_spec")).get("status")
                 == "local_economic_replay_spec_ready"
             ),
+            "classifier_revision_executed_count": sum(
+                1
+                for row in readiness_rows
+                if _as_dict(
+                    _as_dict(row.get("classifier_repair_spec")).get(
+                        "revision_execution"
+                    )
+                ).get("status")
+                == "local_classifier_revision_executed"
+            ),
+            "economic_replay_executed_count": sum(
+                1
+                for row in readiness_rows
+                if _as_dict(
+                    _as_dict(row.get("economic_replay_spec")).get("replay_execution")
+                ).get("status")
+                == "local_economic_replay_executed"
+            ),
             "forbidden_effect_count": len(forbidden_effects),
         },
         "readiness_rows": readiness_rows,
@@ -237,6 +255,7 @@ def _classifier_repair_spec(policy: dict[str, Any]) -> dict[str, Any]:
             str(item) for item in spec.get("replay_acceptance_cases") or []
         ],
         "acceptance_signal": str(spec.get("acceptance_signal") or ""),
+        "revision_execution": _revision_execution(spec.get("revision_execution")),
         "not_execution_authority": spec.get("not_execution_authority") is True,
         "not_l2_promotion_authority": spec.get("not_l2_promotion_authority") is True,
         "not_l4_scope_change": spec.get("not_l4_scope_change") is True,
@@ -259,9 +278,54 @@ def _economic_replay_spec(policy: dict[str, Any]) -> dict[str, Any]:
             str(item) for item in spec.get("replay_acceptance_cases") or []
         ],
         "acceptance_signal": str(spec.get("acceptance_signal") or ""),
+        "replay_execution": _replay_execution(spec.get("replay_execution")),
         "not_execution_authority": spec.get("not_execution_authority") is True,
         "not_l2_promotion_authority": spec.get("not_l2_promotion_authority") is True,
         "not_l4_scope_change": spec.get("not_l4_scope_change") is True,
+    }
+
+
+def _revision_execution(value: Any) -> dict[str, Any]:
+    execution = _as_dict(value)
+    if not execution:
+        return {}
+    return {
+        "status": str(execution.get("status") or "unknown"),
+        "implementation_ref": str(execution.get("implementation_ref") or ""),
+        "logic_version": str(execution.get("logic_version") or ""),
+        "executed_entry_states": [
+            str(item) for item in execution.get("executed_entry_states") or []
+        ],
+        "executed_disable_states": [
+            str(item) for item in execution.get("executed_disable_states") or []
+        ],
+        "validation_cases": [
+            str(item) for item in execution.get("validation_cases") or []
+        ],
+        "not_execution_authority": execution.get("not_execution_authority") is True,
+        "not_l2_promotion_authority": execution.get("not_l2_promotion_authority")
+        is True,
+        "not_l4_scope_change": execution.get("not_l4_scope_change") is True,
+    }
+
+
+def _replay_execution(value: Any) -> dict[str, Any]:
+    execution = _as_dict(value)
+    if not execution:
+        return {}
+    return {
+        "status": str(execution.get("status") or "unknown"),
+        "implementation_ref": str(execution.get("implementation_ref") or ""),
+        "covered_cost_fields": [
+            str(item) for item in execution.get("covered_cost_fields") or []
+        ],
+        "validation_cases": [
+            str(item) for item in execution.get("validation_cases") or []
+        ],
+        "not_execution_authority": execution.get("not_execution_authority") is True,
+        "not_l2_promotion_authority": execution.get("not_l2_promotion_authority")
+        is True,
+        "not_l4_scope_change": execution.get("not_l4_scope_change") is True,
     }
 
 

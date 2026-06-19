@@ -97,6 +97,19 @@ def _policy() -> dict:
                     "required_disable_states": ["range_context_missing"],
                     "replay_acceptance_cases": ["short_revival_rewrite_needed"],
                     "acceptance_signal": "rewrite before L2",
+                    "revision_execution": {
+                        "status": "local_classifier_revision_executed",
+                        "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+                        "logic_version": "lsr-001-price-action-v1",
+                        "executed_entry_states": [
+                            "short_revival_confirmation_present"
+                        ],
+                        "executed_disable_states": ["range_context_missing"],
+                        "validation_cases": ["short_revival_short_would_enter"],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -113,6 +126,19 @@ def _policy() -> dict:
                     ],
                     "replay_acceptance_cases": ["short_revival_rewrite_needed"],
                     "acceptance_signal": "economic replay before L2",
+                    "replay_execution": {
+                        "status": "local_economic_replay_executed",
+                        "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+                        "covered_cost_fields": [
+                            "fee_estimate_usdt",
+                            "slippage_estimate_usdt",
+                            "fill_slot_assumption",
+                        ],
+                        "validation_cases": ["short_revival_rewrite_needed"],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -142,6 +168,19 @@ def _policy() -> dict:
                     "required_disable_states": ["false_breakout_reversal_detected"],
                     "replay_acceptance_cases": ["false_breakout_disable_needed"],
                     "acceptance_signal": "disable false breakout before L2",
+                    "revision_execution": {
+                        "status": "local_classifier_revision_executed",
+                        "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+                        "logic_version": "vcb-001-price-action-v1",
+                        "executed_entry_states": ["breakout_close_confirmed"],
+                        "executed_disable_states": [
+                            "false_breakout_reversal_detected"
+                        ],
+                        "validation_cases": ["false_breakout_reversal_disabled"],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -156,6 +195,19 @@ def _policy() -> dict:
                     ],
                     "replay_acceptance_cases": ["false_breakout_disable_needed"],
                     "acceptance_signal": "cost replay before L2",
+                    "replay_execution": {
+                        "status": "local_economic_replay_executed",
+                        "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+                        "covered_cost_fields": [
+                            "fee_estimate_usdt",
+                            "slippage_estimate_usdt",
+                            "fill_slot_assumption",
+                        ],
+                        "validation_cases": ["false_breakout_disable_needed"],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -177,7 +229,9 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     assert packet["status"] == "l2_readiness_review_has_conditional_candidate"
     assert packet["counts"] == {
         "blocked_count": 3,
+        "classifier_revision_executed_count": 2,
         "conditional_l2_candidate_count": 1,
+        "economic_replay_executed_count": 2,
         "enabled_l2_count": 0,
         "classifier_repair_spec_ready_count": 2,
         "economic_replay_spec_ready_count": 2,
@@ -198,16 +252,28 @@ def test_l2_readiness_review_selects_btpc_as_only_conditional_candidate():
     assert rows["LSR-001"]["classifier_repair_spec"]["target_classifier"] == (
         "side_specific_short_revival_classifier"
     )
+    assert rows["LSR-001"]["classifier_repair_spec"]["revision_execution"][
+        "status"
+    ] == "local_classifier_revision_executed"
+    assert rows["LSR-001"]["classifier_repair_spec"]["revision_execution"][
+        "logic_version"
+    ] == "lsr-001-price-action-v1"
     assert rows["LSR-001"]["classifier_repair_spec"]["not_execution_authority"] is True
     assert rows["LSR-001"]["economic_replay_spec"]["status"] == (
         "local_economic_replay_spec_ready"
     )
+    assert rows["LSR-001"]["economic_replay_spec"]["replay_execution"][
+        "status"
+    ] == "local_economic_replay_executed"
     assert rows["LSR-001"]["economic_replay_spec"]["not_execution_authority"] is True
     assert rows["RBR-001"]["conditional_l2_review_candidate"] is False
     assert rows["VCB-001"]["conditional_l2_review_candidate"] is False
     assert rows["VCB-001"]["classifier_repair_spec"]["required_disable_states"] == [
         "false_breakout_reversal_detected"
     ]
+    assert rows["VCB-001"]["classifier_repair_spec"]["revision_execution"][
+        "logic_version"
+    ] == "vcb-001-price-action-v1"
     assert rows["VCB-001"]["economic_replay_spec"]["required_cost_fields"] == [
         "fee_estimate_usdt",
         "slippage_estimate_usdt",

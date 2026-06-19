@@ -618,8 +618,34 @@ def _strategy_quality_decisions(
         and task.get("revision_ready") is True
     )
     remaining_revision_blocker_count = revision_task_count - revision_ready_count
+    revision_executed_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("revision_executed") is True
+    )
+    classifier_revision_executed_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("work_type") == "classifier_or_rule_work"
+        and task.get("revision_executed") is True
+    )
+    economic_revision_executed_count = sum(
+        1
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+        if task.get("work_type") == "economic_replay_work"
+        and task.get("revision_executed") is True
+    )
+    remaining_revision_execution_count = revision_task_count - revision_executed_count
     revision_status_counts = Counter(
         str(task.get("revision_status") or "unknown")
+        for row in output_rows
+        for task in row.get("revision_tasks") or []
+    )
+    revision_execution_status_counts = Counter(
+        str(task.get("revision_execution_status") or "unknown")
         for row in output_rows
         for task in row.get("revision_tasks") or []
     )
@@ -645,11 +671,18 @@ def _strategy_quality_decisions(
             "economic_revision_task": economic_revision_task_count,
             "economic_revision_ready": economic_revision_ready_count,
             "remaining_revision_blocker": remaining_revision_blocker_count,
+            "revision_executed": revision_executed_count,
+            "classifier_revision_executed": classifier_revision_executed_count,
+            "economic_revision_executed": economic_revision_executed_count,
+            "remaining_revision_execution": remaining_revision_execution_count,
             "real_order_authorized": 0,
             "l4_scope_change_recommended": 0,
         },
         "by_decision": dict(sorted(decision_counts.items())),
         "by_revision_status": dict(sorted(revision_status_counts.items())),
+        "by_revision_execution_status": dict(
+            sorted(revision_execution_status_counts.items())
+        ),
         "revision_completion": {
             "status": _revision_completion_status(
                 revision_task_count=revision_task_count,
@@ -660,6 +693,21 @@ def _strategy_quality_decisions(
             "classifier_revision_ready_count": classifier_revision_ready_count,
             "economic_revision_ready_count": economic_revision_ready_count,
             "remaining_revision_blocker_count": remaining_revision_blocker_count,
+            "not_l2_promotion_authority": True,
+            "not_l4_scope_change": True,
+            "real_order_authority": False,
+            "candidate_or_finalgate_authority": False,
+        },
+        "revision_execution": {
+            "status": _revision_execution_status(
+                revision_task_count=revision_task_count,
+                revision_executed_count=revision_executed_count,
+            ),
+            "revision_task_count": revision_task_count,
+            "revision_executed_count": revision_executed_count,
+            "classifier_revision_executed_count": classifier_revision_executed_count,
+            "economic_revision_executed_count": economic_revision_executed_count,
+            "remaining_revision_execution_count": remaining_revision_execution_count,
             "not_l2_promotion_authority": True,
             "not_l4_scope_change": True,
             "real_order_authority": False,
@@ -745,6 +793,16 @@ def _strategy_quality_decision_row(
             if task.get("completion_blocker")
         }
     )
+    revision_executed_count = sum(
+        1 for task in revision_tasks if task.get("revision_executed") is True
+    )
+    revision_execution_blockers = sorted(
+        {
+            str(task.get("execution_blocker"))
+            for task in revision_tasks
+            if task.get("execution_blocker")
+        }
+    )
     return {
         "strategy_group_id": strategy_group_id,
         "current_tier": row.get("current_tier"),
@@ -773,6 +831,16 @@ def _strategy_quality_decision_row(
             "ready_count": revision_ready_count,
             "remaining_blocker_count": len(revision_tasks) - revision_ready_count,
             "completion_blockers": revision_blockers,
+        },
+        "revision_execution": {
+            "status": _revision_execution_status(
+                revision_task_count=len(revision_tasks),
+                revision_executed_count=revision_executed_count,
+            ),
+            "executed_count": revision_executed_count,
+            "remaining_execution_count": len(revision_tasks)
+            - revision_executed_count,
+            "execution_blockers": revision_execution_blockers,
         },
         "not_l2_promotion_authority": True,
         "not_l4_scope_change": True,
@@ -834,6 +902,7 @@ def _revision_task_state(*, item: dict[str, Any], work_type: str) -> dict[str, A
 
 def _classifier_revision_task_state(repair_spec: dict[str, Any]) -> dict[str, Any]:
     coverage = _as_dict(repair_spec.get("replay_case_coverage"))
+    execution = _as_dict(repair_spec.get("revision_execution"))
     entry_states = [str(item) for item in repair_spec.get("required_entry_states") or []]
     disable_states = [
         str(item) for item in repair_spec.get("required_disable_states") or []
@@ -856,6 +925,11 @@ def _classifier_revision_task_state(repair_spec: dict[str, Any]) -> dict[str, An
         blocker = "required_disable_states_missing"
     elif not no_authority_boundary:
         blocker = "authority_boundary_missing"
+    execution_blocker = _revision_execution_blocker(
+        execution=execution,
+        expected_status="local_classifier_revision_executed",
+        required_items=("executed_entry_states", "executed_disable_states"),
+    )
     return {
         "revision_status": (
             "local_revision_spec_ready"
@@ -868,11 +942,15 @@ def _classifier_revision_task_state(repair_spec: dict[str, Any]) -> dict[str, An
         "required_disable_state_count": len(disable_states),
         "required_cost_field_count": 0,
         "completion_blocker": blocker,
+        "revision_execution_status": str(execution.get("status") or "not_executed"),
+        "revision_executed": execution_blocker is None,
+        "execution_blocker": execution_blocker,
     }
 
 
 def _economic_revision_task_state(economic_spec: dict[str, Any]) -> dict[str, Any]:
     coverage = _as_dict(economic_spec.get("economic_case_coverage"))
+    execution = _as_dict(economic_spec.get("replay_execution"))
     cost_fields = [str(item) for item in economic_spec.get("required_cost_fields") or []]
     no_authority_boundary = (
         economic_spec.get("not_execution_authority") is True
@@ -890,6 +968,11 @@ def _economic_revision_task_state(economic_spec: dict[str, Any]) -> dict[str, An
         blocker = "required_cost_fields_missing"
     elif not no_authority_boundary:
         blocker = "authority_boundary_missing"
+    execution_blocker = _revision_execution_blocker(
+        execution=execution,
+        expected_status="local_economic_replay_executed",
+        required_items=("covered_cost_fields",),
+    )
     return {
         "revision_status": (
             "local_economic_review_ready"
@@ -902,7 +985,35 @@ def _economic_revision_task_state(economic_spec: dict[str, Any]) -> dict[str, An
         "required_disable_state_count": 0,
         "required_cost_field_count": len(cost_fields),
         "completion_blocker": blocker,
+        "revision_execution_status": str(execution.get("status") or "not_executed"),
+        "revision_executed": execution_blocker is None,
+        "execution_blocker": execution_blocker,
     }
+
+
+def _revision_execution_blocker(
+    *,
+    execution: dict[str, Any],
+    expected_status: str,
+    required_items: tuple[str, ...],
+) -> str | None:
+    no_authority_boundary = (
+        execution.get("not_execution_authority") is True
+        and execution.get("not_l2_promotion_authority") is True
+        and execution.get("not_l4_scope_change") is True
+    )
+    if not execution:
+        return "revision_execution_missing"
+    if execution.get("status") != expected_status:
+        return "revision_execution_status_not_ready"
+    for key in required_items:
+        if not execution.get(key):
+            return f"{key}_missing"
+    if not execution.get("validation_cases"):
+        return "revision_execution_validation_cases_missing"
+    if not no_authority_boundary:
+        return "revision_execution_authority_boundary_missing"
+    return None
 
 
 def _revision_completion_status(
@@ -915,6 +1026,18 @@ def _revision_completion_status(
     if revision_ready_count:
         return "partial_revision_completion_ready"
     return "revision_completion_blocked"
+
+
+def _revision_execution_status(
+    *, revision_task_count: int, revision_executed_count: int
+) -> str:
+    if revision_task_count <= 0:
+        return "no_revision_execution_required"
+    if revision_task_count == revision_executed_count:
+        return "local_revision_execution_complete"
+    if revision_executed_count:
+        return "partial_revision_execution_complete"
+    return "revision_execution_pending"
 
 
 def _revision_stage_for_work_type(work_type: str) -> str:
@@ -947,6 +1070,17 @@ def _strategy_quality_next_checkpoint(rows: list[dict[str, Any]]) -> str:
         if row.get("strategy_quality_decision") == "revise_before_l2"
     ]
     if revise_groups:
+        executed_groups = [
+            str(row.get("strategy_group_id"))
+            for row in rows
+            if row.get("strategy_quality_decision") == "revise_before_l2"
+            and _as_dict(row.get("revision_execution")).get("status")
+            == "local_revision_execution_complete"
+        ]
+        if executed_groups and set(executed_groups) == set(revise_groups):
+            return "run_{}_post_revision_replay_review_before_l2".format(
+                "_".join(sorted(executed_groups)).lower().replace("-", "")
+            )
         ready_groups = [
             str(row.get("strategy_group_id"))
             for row in rows
@@ -1252,6 +1386,9 @@ def _matching_classifier_repair_spec(
             "missing_cases": missing_cases,
         },
         "acceptance_signal": str(classifier_repair_spec.get("acceptance_signal") or ""),
+        "revision_execution": _as_dict(
+            classifier_repair_spec.get("revision_execution")
+        ),
         "not_execution_authority": classifier_repair_spec.get("not_execution_authority")
         is True,
         "not_l2_promotion_authority": classifier_repair_spec.get(
@@ -1319,6 +1456,7 @@ def _matching_economic_replay_spec(
             "case_coverage": case_coverage,
         },
         "acceptance_signal": str(economic_replay_spec.get("acceptance_signal") or ""),
+        "replay_execution": _as_dict(economic_replay_spec.get("replay_execution")),
         "not_execution_authority": economic_replay_spec.get("not_execution_authority")
         is True,
         "not_l2_promotion_authority": economic_replay_spec.get(
@@ -1424,15 +1562,16 @@ def _work_queue_table(rows: list[dict[str, Any]]) -> str:
 
 def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks | Revision Ready |\n| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |\n| none | - | - | - | - | - | - | - | - |"
+        return "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks | Revision Ready | Revision Executed |\n| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |\n| none | - | - | - | - | - | - | - | - | - |"
     output = [
-        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks | Revision Ready |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| StrategyGroup | Tier | Decision | Next | Replay | Revise | Coverage Ready | Revision Tasks | Revision Ready | Revision Executed |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         evidence = _as_dict(row.get("evidence"))
+        execution = _as_dict(row.get("revision_execution"))
         output.append(
-            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {} | {} |".format(
+            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {} | {} | {} |".format(
                 row.get("strategy_group_id"),
                 row.get("current_tier"),
                 row.get("strategy_quality_decision"),
@@ -1442,6 +1581,7 @@ def _strategy_quality_table(rows: list[dict[str, Any]]) -> str:
                 evidence.get("coverage_ready_item_count", 0),
                 row.get("revision_task_count", 0),
                 row.get("revision_ready_count", 0),
+                execution.get("executed_count", 0),
             )
         )
     return "\n".join(output)

@@ -852,6 +852,25 @@ checkpoint."
 | Verification | `tests/unit/test_strategygroup_opportunity_decision_loop.py` asserts revision readiness counts, status rollups, acceptance-case coverage, entry/disable/cost-field counts, completion blockers, Owner markdown, and no live-authority expansion |
 | Safety | Local decision-loop work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
 
+### 2026-06-19 LSR/VCB Local Revision Execution Checkpoint
+
+The P0.5 loop now executes the ready LSR/VCB local revision tasks in the local
+classifier and replay-review surfaces. This is still pre-L2 review work: it
+does not promote either StrategyGroup, expand L4 scope, or create real-order
+authority.
+
+| Item | Evidence |
+| --- | --- |
+| LSR classifier execution | `LSR001PriceActionEvaluator` now uses `lsr-001-price-action-v1`, emits `side_specific_short_revival_classifier`, disables the old long-preview conflict, and exposes entry/disable-state evidence |
+| VCB classifier execution | `VCB001PriceActionEvaluator` now uses `vcb-001-price-action-v1`, requires compression breakout plus volume expansion, disables wick-only false breakout, and exposes entry/disable-state evidence |
+| Policy execution evidence | `main-control-signal-coverage-expansion-policy.json` records `revision_execution.status=local_classifier_revision_executed` and `replay_execution.status=local_economic_replay_executed` for LSR/VCB |
+| Readiness rollup | `latest-l2-readiness-review.json` reports `classifier_revision_executed_count=2`, `economic_replay_executed_count=2`, `tier_policy_change_recommended=false`, `l4_scope_change_recommended=false`, and `shadow_candidate_creation_recommended_now=false` |
+| Decision-loop rollup | `latest-opportunity-decision-loop.json` reports `revision_executed=7`, `classifier_revision_executed=4`, `economic_revision_executed=3`, `remaining_revision_execution=0`, and `revision_execution.status=local_revision_execution_complete` |
+| Next checkpoint | `decision.default_next_step=run_lsr001_vcb001_post_revision_replay_review_before_l2` |
+| Boundary | Revision execution is not strategy-tier mutation, L2 promotion authority, L4 scope expansion, candidate authority, FinalGate authority, Operation Layer authority, exchange-write authority, or real-order authority |
+| Verification | `tests/unit/test_reference_price_action_evaluators.py`, `tests/unit/test_strategygroup_l2_readiness_review.py`, and `tests/unit/test_strategygroup_opportunity_decision_loop.py` assert classifier execution behavior, execution rollups, Owner markdown, and no live-authority expansion |
+| Safety | Local domain/review work only; no Tokyo call, deploy, FinalGate live call, Operation Layer live submit, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
+
 ### 2026-06-18 Cutover Deploy and Cache-Read Alignment Checkpoint
 
 The first bounded live-order closure target remains active and waiting for a

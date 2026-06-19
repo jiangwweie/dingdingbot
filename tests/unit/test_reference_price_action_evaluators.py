@@ -46,14 +46,22 @@ from src.domain.strategy_semantics import (
 NOW_MS = 1781000000000
 
 
-def _candle(index: int, open_: str, high: str, low: str, close: str) -> dict[str, Any]:
+def _candle(
+    index: int,
+    open_: str,
+    high: str,
+    low: str,
+    close: str,
+    *,
+    volume: str = "100",
+) -> dict[str, Any]:
     return {
         "open_time_ms": NOW_MS - (30 - index) * 3_600_000,
         "open": open_,
         "high": high,
         "low": low,
         "close": close,
-        "volume": "100",
+        "volume": volume,
     }
 
 
@@ -103,6 +111,15 @@ def _lsr_long_1h() -> list[dict[str, Any]]:
     return candles
 
 
+def _lsr_short_revival_1h() -> list[dict[str, Any]]:
+    candles = [
+        _candle(index, "104", "110", "100", "105")
+        for index in range(13)
+    ]
+    candles.append(_candle(13, "109", "112", "104", "108"))
+    return candles
+
+
 def _rbr_short_1h() -> list[dict[str, Any]]:
     candles = [
         _candle(index, "105", "110", "100", "106")
@@ -127,8 +144,20 @@ def _vcb_long_1h() -> list[dict[str, Any]]:
         _candle(10, "107.6", "108.4", "107.4", "107.8"),
         _candle(11, "107.8", "108.5", "107.5", "108.0"),
         _candle(12, "108.0", "108.6", "107.6", "108.2"),
-        _candle(13, "108.4", "111", "108.2", "110"),
+        _candle(13, "108.4", "111", "108.2", "110", volume="180"),
     ]
+
+
+def _vcb_false_breakout_1h() -> list[dict[str, Any]]:
+    candles = _vcb_long_1h()
+    candles[-1] = _candle(13, "108.4", "111", "107.9", "108.3", volume="180")
+    return candles
+
+
+def _vcb_missing_volume_expansion_1h() -> list[dict[str, Any]]:
+    candles = _vcb_long_1h()
+    candles[-1] = _candle(13, "108.4", "111", "108.2", "110", volume="100")
+    return candles
 
 
 def _signal_input(
@@ -251,9 +280,9 @@ def _runtime(family_id: str, version_id: str, side: str) -> StrategyRuntimeInsta
             "LSR-001",
             "LSR-001-v0",
             LSR001PriceActionEvaluator(),
-            _lsr_long_1h(),
+            _lsr_short_revival_1h(),
             _mixed_context_4h(),
-            SignalSide.LONG,
+            SignalSide.SHORT,
             StrategyArchetype.LIQUIDITY_SWEEP_REVERSAL,
             StrategyPayoffProfile.MEAN_REVERSION,
             ExitPlanKind.FIXED_RR_OR_RANGE_TARGETS,
@@ -336,6 +365,94 @@ def test_reference_price_action_evaluator_candidate_semantics_and_fact_check(
     assert route.order_candidate_created is False
     assert route.execution_intent_created is False
     assert route.exchange_called is False
+
+
+def test_lsr001_revision_disables_old_long_preview_conflict() -> None:
+    signal_input = _signal_input(
+        family_id="LSR-001",
+        version_id="LSR-001-v0",
+        one_hour=_lsr_long_1h(),
+        four_hour=_mixed_context_4h(),
+    )
+
+    output = LSR001PriceActionEvaluator().evaluate(signal_input)
+
+    assert output.signal_type == SignalType.NO_ACTION
+    assert output.side == SignalSide.NONE
+    assert output.reason_codes == [
+        "lsr_disable_long_preview_conflicts_with_short_revival_lead"
+    ]
+    assert output.evidence_payload["logic_version"] == "lsr-001-price-action-v1"
+    assert output.evidence_payload["classifier_revision"] == {
+        "status": "local_classifier_revision_executed",
+        "target_classifier": "side_specific_short_revival_classifier",
+        "blocks_l2_promotion": True,
+        "not_execution_authority": True,
+        "not_l2_promotion_authority": True,
+        "not_l4_scope_change": True,
+    }
+    assert output.evidence_payload["disable_states"][
+        "current_broader_preview_side_long_conflicts_with_short_revival_lead"
+    ] is True
+    assert output.evidence_payload["entry_states"][
+        "short_revival_confirmation_present"
+    ] is False
+    assert output.not_order is True
+    assert output.not_execution_intent is True
+    assert not _contains_forbidden_key(output.model_dump(mode="json"))
+
+
+def test_vcb001_revision_disables_false_breakout_and_requires_volume() -> None:
+    false_breakout_input = _signal_input(
+        family_id="VCB-001",
+        version_id="VCB-001-v0",
+        one_hour=_vcb_false_breakout_1h(),
+        four_hour=_mixed_context_4h(),
+    )
+    missing_volume_input = _signal_input(
+        family_id="VCB-001",
+        version_id="VCB-001-v0",
+        one_hour=_vcb_missing_volume_expansion_1h(),
+        four_hour=_mixed_context_4h(),
+    )
+
+    false_breakout = VCB001PriceActionEvaluator().evaluate(false_breakout_input)
+    missing_volume = VCB001PriceActionEvaluator().evaluate(missing_volume_input)
+
+    assert false_breakout.signal_type == SignalType.NO_ACTION
+    assert false_breakout.reason_codes == [
+        "vcb_disable_false_breakout_reversal_detected"
+    ]
+    assert false_breakout.evidence_payload["logic_version"] == (
+        "vcb-001-price-action-v1"
+    )
+    assert false_breakout.evidence_payload["classifier_revision"] == {
+        "status": "local_classifier_revision_executed",
+        "target_classifier": "true_breakout_pre_entry_classifier",
+        "blocks_l2_promotion": True,
+        "not_execution_authority": True,
+        "not_l2_promotion_authority": True,
+        "not_l4_scope_change": True,
+    }
+    assert false_breakout.evidence_payload["disable_states"][
+        "false_breakout_reversal_detected"
+    ] is True
+    assert false_breakout.not_order is True
+    assert false_breakout.not_execution_intent is True
+
+    assert missing_volume.signal_type == SignalType.NO_ACTION
+    assert missing_volume.reason_codes == ["vcb_no_action_volume_expansion_missing"]
+    assert missing_volume.evidence_payload["entry_states"][
+        "compression_window_present"
+    ] is True
+    assert missing_volume.evidence_payload["entry_states"][
+        "volume_expansion_confirmed"
+    ] is False
+    assert missing_volume.evidence_payload["disable_states"][
+        "false_breakout_reversal_detected"
+    ] is False
+    assert not _contains_forbidden_key(false_breakout.model_dump(mode="json"))
+    assert not _contains_forbidden_key(missing_volume.model_dump(mode="json"))
 
 
 def _contains_forbidden_key(value: Any) -> bool:

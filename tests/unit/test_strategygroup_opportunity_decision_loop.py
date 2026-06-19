@@ -117,6 +117,22 @@ def _l2_readiness() -> dict:
                     ],
                     "replay_acceptance_cases": ["false_breakout_disable_needed"],
                     "acceptance_signal": "disable false breakout before L2",
+                    "revision_execution": {
+                        "status": "local_classifier_revision_executed",
+                        "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+                        "logic_version": "vcb-001-price-action-v1",
+                        "executed_entry_states": [
+                            "breakout_close_confirmed",
+                            "volume_expansion_confirmed",
+                        ],
+                        "executed_disable_states": [
+                            "false_breakout_reversal_detected"
+                        ],
+                        "validation_cases": ["false_breakout_reversal_disabled"],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -142,6 +158,28 @@ def _l2_readiness() -> dict:
                         "false_breakout_disable_needed",
                     ],
                     "acceptance_signal": "VCB economic replay before L2",
+                    "replay_execution": {
+                        "status": "local_economic_replay_executed",
+                        "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+                        "covered_cost_fields": [
+                            "fee_estimate_usdt",
+                            "slippage_estimate_usdt",
+                            "funding_impact_usdt",
+                            "min_qty_step_size_impact",
+                            "fill_slot_assumption",
+                            "leverage_survival_note",
+                            "net_edge_note",
+                            "does_not_lower_owner_selected_leverage",
+                            "not_submit_authority",
+                        ],
+                        "validation_cases": [
+                            "compression_breakout_would_enter",
+                            "false_breakout_disable_needed",
+                        ],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -176,6 +214,22 @@ def _l2_readiness() -> dict:
                     ],
                     "replay_acceptance_cases": ["short_revival_rewrite_needed"],
                     "acceptance_signal": "LSR short revival classifier before L2",
+                    "revision_execution": {
+                        "status": "local_classifier_revision_executed",
+                        "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+                        "logic_version": "lsr-001-price-action-v1",
+                        "executed_entry_states": [
+                            "liquidity_sweep_confirmed",
+                            "short_revival_structure_present",
+                        ],
+                        "executed_disable_states": [
+                            "long_reclaim_only_without_short_revival"
+                        ],
+                        "validation_cases": ["short_revival_short_would_enter"],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -201,6 +255,28 @@ def _l2_readiness() -> dict:
                         "short_revival_rewrite_needed",
                     ],
                     "acceptance_signal": "LSR economic replay before L2",
+                    "replay_execution": {
+                        "status": "local_economic_replay_executed",
+                        "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+                        "covered_cost_fields": [
+                            "fee_estimate_usdt",
+                            "slippage_estimate_usdt",
+                            "funding_impact_usdt",
+                            "min_qty_step_size_impact",
+                            "fill_slot_assumption",
+                            "leverage_survival_note",
+                            "net_edge_note",
+                            "does_not_lower_owner_selected_leverage",
+                            "not_submit_authority",
+                        ],
+                        "validation_cases": [
+                            "liquidity_sweep_long_would_enter_current_v0",
+                            "short_revival_rewrite_needed",
+                        ],
+                        "not_execution_authority": True,
+                        "not_l2_promotion_authority": True,
+                        "not_l4_scope_change": True,
+                    },
                     "not_execution_authority": True,
                     "not_l2_promotion_authority": True,
                     "not_l4_scope_change": True,
@@ -506,7 +582,7 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     quality = packet["strategy_quality_decisions"]
     assert quality["status"] == "ready"
     assert quality["next_checkpoint"] == (
-        "execute_lsr001_vcb001_local_revision_tasks_before_l2"
+        "run_lsr001_vcb001_post_revision_replay_review_before_l2"
     )
     assert quality["counts"]["total"] == 4
     assert quality["counts"]["revise_before_l2"] == 2
@@ -519,9 +595,17 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality["counts"]["economic_revision_task"] == 2
     assert quality["counts"]["economic_revision_ready"] == 2
     assert quality["counts"]["remaining_revision_blocker"] == 0
+    assert quality["counts"]["revision_executed"] == 5
+    assert quality["counts"]["classifier_revision_executed"] == 3
+    assert quality["counts"]["economic_revision_executed"] == 2
+    assert quality["counts"]["remaining_revision_execution"] == 0
     assert quality["by_revision_status"] == {
         "local_economic_review_ready": 2,
         "local_revision_spec_ready": 3,
+    }
+    assert quality["by_revision_execution_status"] == {
+        "local_classifier_revision_executed": 3,
+        "local_economic_replay_executed": 2,
     }
     assert quality["revision_completion"]["status"] == (
         "local_revision_completion_ready"
@@ -529,6 +613,12 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality["revision_completion"]["revision_ready_count"] == 5
     assert quality["revision_completion"]["remaining_revision_blocker_count"] == 0
     assert quality["revision_completion"]["real_order_authority"] is False
+    assert quality["revision_execution"]["status"] == (
+        "local_revision_execution_complete"
+    )
+    assert quality["revision_execution"]["revision_executed_count"] == 5
+    assert quality["revision_execution"]["remaining_revision_execution_count"] == 0
+    assert quality["revision_execution"]["real_order_authority"] is False
     quality_rows = {row["strategy_group_id"]: row for row in quality["rows"]}
     assert quality_rows["VCB-001"]["strategy_quality_decision"] == "revise_before_l2"
     assert quality_rows["VCB-001"]["next_stage"] == (
@@ -544,6 +634,12 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
         "remaining_blocker_count": 0,
         "completion_blockers": [],
     }
+    assert quality_rows["VCB-001"]["revision_execution"] == {
+        "status": "local_revision_execution_complete",
+        "executed_count": 2,
+        "remaining_execution_count": 0,
+        "execution_blockers": [],
+    }
     vcb_revision_tasks = quality_rows["VCB-001"]["revision_tasks"]
     assert {task["work_type"] for task in vcb_revision_tasks} == {
         "classifier_or_rule_work",
@@ -554,17 +650,22 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
         for task in vcb_revision_tasks
     )
     assert all(task["revision_ready"] is True for task in vcb_revision_tasks)
+    assert all(task["revision_executed"] is True for task in vcb_revision_tasks)
     assert all(
         task["acceptance_case_coverage_ready"] is True
         for task in vcb_revision_tasks
     )
     assert all(task["completion_blocker"] is None for task in vcb_revision_tasks)
+    assert all(task["execution_blocker"] is None for task in vcb_revision_tasks)
     vcb_classifier_task = next(
         task
         for task in vcb_revision_tasks
         if task["work_type"] == "classifier_or_rule_work"
     )
     assert vcb_classifier_task["revision_status"] == "local_revision_spec_ready"
+    assert vcb_classifier_task["revision_execution_status"] == (
+        "local_classifier_revision_executed"
+    )
     assert vcb_classifier_task["required_entry_state_count"] == 2
     assert vcb_classifier_task["required_disable_state_count"] == 1
     vcb_economic_task = next(
@@ -573,6 +674,9 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
         if task["work_type"] == "economic_replay_work"
     )
     assert vcb_economic_task["revision_status"] == "local_economic_review_ready"
+    assert vcb_economic_task["revision_execution_status"] == (
+        "local_economic_replay_executed"
+    )
     assert vcb_economic_task["required_cost_field_count"] == 9
     assert any(
         task["revision_stage"] == "classifier_disable_state_revision"
@@ -585,6 +689,9 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality_rows["LSR-001"]["revision_ready_count"] == 3
     assert quality_rows["LSR-001"]["revision_completion"]["status"] == (
         "local_revision_completion_ready"
+    )
+    assert quality_rows["LSR-001"]["revision_execution"]["status"] == (
+        "local_revision_execution_complete"
     )
     assert {
         task["revision_stage"] for task in quality_rows["LSR-001"]["revision_tasks"]
@@ -617,7 +724,7 @@ def test_decision_loop_maps_observation_replay_gaps_and_tier_decisions():
     assert quality["safety_invariants"]["calls_operation_layer"] is False
     assert quality["safety_invariants"]["places_order"] is False
     assert packet["decision"]["default_next_step"] == (
-        "execute_lsr001_vcb001_local_revision_tasks_before_l2"
+        "run_lsr001_vcb001_post_revision_replay_review_before_l2"
     )
     for row in packet["decision_rows"]:
         assert row["real_order_authority"] is False
@@ -732,3 +839,4 @@ def test_decision_loop_cli_writes_json_and_owner_progress(tmp_path, capsys):
     assert "revise_before_l2" in owner_text
     assert "Revision Tasks" in owner_text
     assert "Revision Ready" in owner_text
+    assert "Revision Executed" in owner_text

@@ -82,6 +82,30 @@
           "stale_signal"
         ],
         "acceptance_signal": "LSR remains L1 until the short-revival rewrite produces a side-specific non-lookahead classifier and disables the current long preview conflict.",
+        "revision_execution": {
+          "status": "local_classifier_revision_executed",
+          "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+          "logic_version": "lsr-001-price-action-v1",
+          "executed_entry_states": [
+            "upper_range_liquidity_sweep_detected",
+            "reclaim_failure_or_rejection_confirmed",
+            "short_revival_confirmation_present",
+            "lookahead_proxy_absent"
+          ],
+          "executed_disable_states": [
+            "current_broader_preview_side_long_conflicts_with_short_revival_lead",
+            "range_context_missing",
+            "sweep_reclaim_missing",
+            "stale_signal"
+          ],
+          "validation_cases": [
+            "short_revival_short_would_enter",
+            "old_long_preview_disabled"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
         "not_execution_authority": true,
         "not_l2_promotion_authority": true,
         "not_l4_scope_change": true
@@ -107,6 +131,28 @@
           "short_revival_rewrite_needed"
         ],
         "acceptance_signal": "LSR economic replay must expose fill-slot and leverage-survival review fields before any L2 rewrite promotion review.",
+        "replay_execution": {
+          "status": "local_economic_replay_executed",
+          "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+          "covered_cost_fields": [
+            "fee_estimate_usdt",
+            "slippage_estimate_usdt",
+            "funding_impact_usdt",
+            "min_qty_step_size_impact",
+            "fill_slot_assumption",
+            "leverage_survival_note",
+            "net_edge_note",
+            "does_not_lower_owner_selected_leverage",
+            "not_submit_authority"
+          ],
+          "validation_cases": [
+            "liquidity_sweep_long_would_enter_current_v0",
+            "short_revival_rewrite_needed"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
         "not_execution_authority": true,
         "not_l2_promotion_authority": true,
         "not_l4_scope_change": true
@@ -192,6 +238,31 @@
           "stale_signal"
         ],
         "acceptance_signal": "VCB remains L1 until the pre-entry classifier reproduces the true-breakout edge and false-breakout disable state is represented in runtime review.",
+        "revision_execution": {
+          "status": "local_classifier_revision_executed",
+          "implementation_ref": "src/domain/reference_price_action_evaluators.py",
+          "logic_version": "vcb-001-price-action-v1",
+          "executed_entry_states": [
+            "compression_window_present",
+            "breakout_close_confirmed",
+            "volume_expansion_confirmed",
+            "post_entry_edge_proxy_reproducible_without_lookahead"
+          ],
+          "executed_disable_states": [
+            "false_breakout_reversal_detected",
+            "compression_context_missing",
+            "slot_m2m_ruin_state_triggered",
+            "stale_signal"
+          ],
+          "validation_cases": [
+            "true_breakout_with_volume_would_enter",
+            "false_breakout_reversal_disabled",
+            "volume_expansion_missing_disabled"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
         "not_execution_authority": true,
         "not_l2_promotion_authority": true,
         "not_l4_scope_change": true
@@ -218,6 +289,28 @@
           "false_breakout_disable_needed"
         ],
         "acceptance_signal": "VCB economic replay must expose volume-compression cost survival, false-breakout cost drag, fill-slot, and leverage-survival review fields before any L2 classifier promotion review.",
+        "replay_execution": {
+          "status": "local_economic_replay_executed",
+          "implementation_ref": "src/domain/strategygroup_runtime_replay.py",
+          "covered_cost_fields": [
+            "fee_estimate_usdt",
+            "slippage_estimate_usdt",
+            "funding_impact_usdt",
+            "min_qty_step_size_impact",
+            "fill_slot_assumption",
+            "leverage_survival_note",
+            "net_edge_note",
+            "does_not_lower_owner_selected_leverage",
+            "not_submit_authority"
+          ],
+          "validation_cases": [
+            "compression_breakout_would_enter",
+            "false_breakout_disable_needed"
+          ],
+          "not_execution_authority": true,
+          "not_l2_promotion_authority": true,
+          "not_l4_scope_change": true
+        },
         "not_execution_authority": true,
         "not_l2_promotion_authority": true,
         "not_l4_scope_change": true
